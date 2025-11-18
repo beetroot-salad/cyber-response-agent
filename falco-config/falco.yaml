@@ -47,7 +47,7 @@ syscall_event_drops:
   max_burst: 1000
 
 # Rules files to load
-rules_file:
+rules_files:
   - /etc/falco/falco_rules.yaml
   - /etc/falco/falco_rules.local.yaml
   - /etc/falco/rules.d

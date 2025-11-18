@@ -42,12 +42,13 @@ services:
       - /sys/kernel/debug:/sys/kernel/debug:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc:/host/proc:ro
-      - ../falco-config:/etc/falco:ro
       - falco-logs:/var/log/falco
     networks:
       - response-network
     depends_on:
       - target-endpoint
+    environment:
+      - FALCO_BPF_PROBE=""
 
 networks:
   response-network:
