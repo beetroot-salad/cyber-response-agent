@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Docker volumes and data
+postgres_data/
+wazuh_api_configuration/
+wazuh_etc/
+wazuh_logs/
+wazuh_queue/
+wazuh_var_multigroups/
+wazuh_integrations/
+wazuh_active_response/
+wazuh_agentless/
+wazuh_wodles/
+wazuh-indexer-data/
+wazuh_cluster/
+
+# Datasets (can be large)
+datasets/
+*.evtx
+*.pcap
+
+# Logs
+*.log
+logs/
+
+# Environment files with secrets
+.env
+*.key
+*.pem
+*.crt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
