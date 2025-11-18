@@ -18,42 +18,86 @@ This guide sets up a complete playground environment for prototyping the cyber r
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ Docker Compose Stack (Host Docker)                         │
-│ ├─ Wazuh Manager (SIEM API)                                │
-│ ├─ Wazuh Indexer (Elasticsearch)                           │
-│ ├─ Wazuh Dashboard (Web UI)                                │
-│ ├─ PostgreSQL + pgvector (Tickets, Case Knowledge)         │
-│ ├─ Target Endpoint (Ubuntu + Wazuh Agent + Auditd)         │
-│ │  ├─ Real processes & system activity                     │
-│ │  ├─ Auditd event capture                                 │
-│ │  ├─ Workload scripts (benign + suspicious)               │
-│ │  └─ Accessible via docker exec for investigation         │
-│ └─ Isolated Sandbox (for reproduction testing)             │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────┐   │
+│ │ Target Endpoint (Ubuntu + Workloads)                 │   │
+│ │  ├─ Real processes & system activity                 │   │
+│ │  ├─ Workload scripts (benign + suspicious)           │   │
+│ │  └─ Accessible via docker exec for investigation     │   │
+│ └────────────────────┬─────────────────────────────────┘   │
+│                      │                                       │
+│                      ▼                                       │
+│ ┌──────────────────────────────────────────────────────┐   │
+│ │ Falco (eBPF Monitoring)                              │   │
+│ │  ├─ Captures syscalls, file access, network events   │   │
+│ │  ├─ Container-native security monitoring             │   │
+│ │  └─ Outputs events as JSON                           │   │
+│ └────────────────────┬─────────────────────────────────┘   │
+│                      │                                       │
+│                      ▼                                       │
+│ ┌──────────────────────────────────────────────────────┐   │
+│ │ Wazuh Manager (SIEM)                                 │   │
+│ │  ├─ Ingests Falco events                             │   │
+│ │  ├─ Applies detection rules                          │   │
+│ │  ├─ Generates alerts                                 │   │
+│ │  └─ API for queries                                  │   │
+│ └────────────────────┬─────────────────────────────────┘   │
+│                      │                                       │
+│                      ├──────────────┐                        │
+│                      ▼              ▼                        │
+│          ┌────────────────┐  ┌─────────────────┐           │
+│          │ Wazuh Indexer  │  │ PostgreSQL      │           │
+│          │ (Elasticsearch)│  │ (Tickets only)  │           │
+│          │ - Event logs   │  │ - Tickets       │           │
+│          │ - Searchable   │  │ - Case knowledge│           │
+│          └────────────────┘  │ - Playbooks     │           │
+│                      ▲        └─────────────────┘           │
+│                      │                                       │
+│          ┌────────────────┐                                 │
+│          │ Wazuh Dashboard│                                 │
+│          │ (Web UI)       │                                 │
+│          └────────────────┘                                 │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────┐   │
+│ │ Sandbox (Isolated - for reproduction testing)        │   │
+│ └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
+
+Data Flow:
+1. Target Endpoint → Falco (syscall monitoring via eBPF)
+2. Falco → Wazuh Manager (events via HTTP/file/syslog)
+3. Wazuh Manager → Wazuh Indexer (stores all events)
+4. Wazuh Manager → PostgreSQL (creates tickets from alerts)
+5. Agent → Wazuh MCP (queries alerts) → PostgreSQL (manages tickets)
 ```
 
 ## Key Changes from v1
 
-### 1. Real EDR Simulation
-- Replaced synthetic alert generator with **real target endpoint**
-- Ubuntu container running Wazuh agent with auditd
-- Captures real process, file, and network events
-- Claude can investigate via `docker exec` (mimics EDR console access)
+### 1. Falco-based EDR Simulation (Production-Realistic)
+- Replaced synthetic alert generator with **Falco eBPF monitoring**
+- **Why Falco**: auditd doesn't work in containers (requires kernel-level access)
+- Captures real syscalls, process execution, file access, network events
+- Container-native, modern approach used in production Kubernetes environments
+- Target endpoint runs realistic workloads, monitored by Falco
 
-### 2. Existing Wazuh MCP Server
+### 2. Simplified Data Flow: Falco → Wazuh → PostgreSQL
+- **Falco** captures endpoint telemetry (replaces EDR agent)
+- **Wazuh** ingests events, applies detection rules, generates alerts (SIEM)
+- **Wazuh Indexer** stores all events (Elasticsearch for log search)
+- **PostgreSQL** stores tickets created from alerts (ticketing system)
+- Clean separation: logs in Elasticsearch, structured data in PostgreSQL
+
+### 3. Existing Wazuh MCP Server
 - Uses **socfortress/Wazuh-MCP-Server** (production-ready Python implementation)
-- No need to build custom SIEM MCP server
+- No custom SIEM integration needed
 - Supports natural language queries and alert management
 
-### 3. Refined Database Schema
+### 4. Refined Database Schema
 - Removed complex `investigations` table (context via skills instead)
 - Merged `known_false_positives` into enriched `case_knowledge` table
 - Added `closure_reason` field for human-readable explanations
 - Dynamic alert fields stored in JSONB (signature-agnostic metadata)
-
-### 4. Public Dataset Support
-- Instructions for ingesting MORDOR/EVTX-ATTACK-SAMPLES
-- Real-world Windows event logs for realistic testing
-- Ground truth labels for evaluation
+- **PostgreSQL for tickets only** - events stay in Wazuh Indexer where they belong
 
 ---
 
@@ -68,22 +112,34 @@ This guide sets up a complete playground environment for prototyping the cyber r
   - Wazuh Dashboard (Web UI)
 - **API**: REST API via existing MCP server
 
-### 2. PostgreSQL + pgvector
+### 2. Falco (eBPF Security Monitoring)
+- **Purpose**: Runtime security monitoring, syscall capture
+- **Commercial equivalent**: EDR agents (CrowdStrike, SentinelOne, Carbon Black)
+- **Implementation**: Modern eBPF driver (no kernel module installation)
+- **Key features**:
+  - Container-native monitoring (works where auditd fails)
+  - Captures process execution, file access, network connections
+  - Pre-built detection rules for suspicious behavior
+  - JSON event output for SIEM integration
+- **Why not auditd**: auditd requires kernel-level access (only one instance per kernel), incompatible with containers
+
+### 3. PostgreSQL + pgvector
 - **Purpose**: Ticket storage, case knowledge base, playbooks
 - **Commercial equivalent**: ServiceNow CMDB, Jira database
 - **Features**: Vector similarity search for semantic case matching
+- **Stores**: Tickets, case knowledge, playbooks (NOT raw events - those go to Wazuh Indexer)
 
-### 3. Target Endpoint Container
-- **Purpose**: Generate realistic endpoint telemetry
-- **Commercial equivalent**: Windows/Linux endpoint with EDR agent
-- **Implementation**: Ubuntu 22.04 with Wazuh agent + auditd
+### 4. Target Endpoint Container
+- **Purpose**: Generate realistic endpoint activity
+- **Commercial equivalent**: Production workload being monitored
+- **Implementation**: Ubuntu 22.04 with workload scripts
 - **Key features**:
   - Real system processes and activity
-  - Auditd captures process creation, file access, network connections
   - Workload scripts simulate benign and suspicious behavior
   - Agent investigates via `docker exec` (like EDR console)
+  - Monitored by Falco for security events
 
-### 4. Reproduction Sandbox
+### 5. Reproduction Sandbox
 - **Purpose**: Isolated environment for testing hypotheses
 - **Implementation**: Docker container with network isolation
 - **Use case**: Safely reproduce suspicious commands/scripts

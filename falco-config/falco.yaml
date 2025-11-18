@@ -1,0 +1,85 @@
+# Falco Configuration for Cyber Response Agent Playground
+# Modern eBPF driver configuration
+
+# Use Modern eBPF driver (bundled, no installation required)
+engine:
+  kind: modern_ebpf
+
+# JSON output for SIEM integration
+json_output: true
+json_include_output_property: true
+json_include_tags_property: true
+
+# Output to file for Wazuh ingestion
+file_output:
+  enabled: true
+  keep_alive: false
+  filename: /var/log/falco/events.json
+
+# Also output to stdout for debugging
+stdout_output:
+  enabled: true
+
+# HTTP output for direct Wazuh integration (optional)
+http_output:
+  enabled: false
+  url: "http://wazuh-manager:55000/falco"
+
+# Syslog output (alternative for Wazuh)
+syslog_output:
+  enabled: false
+
+# Buffered outputs for better performance
+buffered_outputs: true
+
+# Output format
+output_format: json
+
+# Priority of rules to load
+priority: debug
+
+# Enable syscall event drops stats
+syscall_event_drops:
+  actions:
+    - log
+    - alert
+  rate: 0.03333  # 1 drop every 30 seconds
+  max_burst: 1000
+
+# Rules files to load
+rules_file:
+  - /etc/falco/falco_rules.yaml
+  - /etc/falco/falco_rules.local.yaml
+  - /etc/falco/rules.d
+
+# Watch config file for changes
+watch_config_files: true
+
+# Logging
+log_stderr: true
+log_syslog: false
+log_level: info
+
+# gRPC output (disabled for now)
+grpc:
+  enabled: false
+
+# gRPC over Unix socket
+grpc_over_unix_socket:
+  enabled: false
+
+# Webserver for health checks
+webserver:
+  enabled: true
+  listen_port: 8765
+  k8s_healthz_endpoint: /healthz
+  ssl_enabled: false
+
+# Metrics
+metrics:
+  enabled: false
+
+# Enable advanced features
+base_syscalls:
+  custom_set: []
+  repair: false

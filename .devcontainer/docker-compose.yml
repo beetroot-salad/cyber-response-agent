@@ -14,7 +14,45 @@ services:
       - response-network
     command: ["sleep", "infinity"]
 
+  # Target Endpoint (generates realistic workload activity)
+  target-endpoint:
+    build:
+      context: ../target-endpoint
+      dockerfile: Dockerfile
+    container_name: target-endpoint
+    hostname: target-endpoint
+    restart: unless-stopped
+    volumes:
+      - ../target-endpoint/workloads:/opt/workloads
+    networks:
+      - response-network
+
+  # Falco (eBPF monitoring - replaces auditd)
+  falco:
+    image: falcosecurity/falco:latest
+    container_name: falco
+    hostname: falco
+    restart: unless-stopped
+    privileged: false
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - SYS_PTRACE
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - ../falco-config:/etc/falco:ro
+      - falco-logs:/var/log/falco
+    networks:
+      - response-network
+    depends_on:
+      - target-endpoint
+
 networks:
   response-network:
     name: response-network
     driver: bridge
+
+volumes:
+  falco-logs:

@@ -1,0 +1,131 @@
+# Custom Falco rules for Cyber Response Agent Playground
+# These rules detect suspicious patterns in the target endpoint
+
+- list: allowed_dev_files
+  items: [/dev/null, /dev/stdin, /dev/stdout, /dev/stderr, /dev/random, /dev/urandom, /dev/zero, /dev/tty]
+
+- rule: Suspicious Shell Spawned by Non-Shell Process
+  desc: Detect shells spawned by unexpected processes
+  condition: >
+    spawned_process and
+    proc.name in (sh, bash, zsh, dash) and
+    not proc.pname in (sh, bash, zsh, dash, cron, sshd, sudo, su, docker, containerd)
+  output: >
+    Suspicious shell spawned
+    (user=%user.name command=%proc.cmdline parent=%proc.pname container=%container.name image=%container.image.repository)
+  priority: WARNING
+  tags: [process, shell]
+
+- rule: Encoded Command Execution
+  desc: Detect base64 or hex encoded commands (common malware technique)
+  condition: >
+    spawned_process and
+    (proc.cmdline contains "base64" or
+     proc.cmdline contains " -enc " or
+     proc.cmdline contains " -e " or
+     proc.cmdline contains "eval")
+  output: >
+    Encoded command execution detected
+    (user=%user.name command=%proc.cmdline container=%container.name)
+  priority: WARNING
+  tags: [process, obfuscation]
+
+- rule: Suspicious File Creation in Tmp
+  desc: Detect suspicious files created in /tmp
+  condition: >
+    evt.type in (open, openat, openat2) and
+    evt.is_open_write=true and
+    fd.name pmatch (/tmp/payload*, /tmp/malware*, /tmp/backdoor*, /tmp/exploit*) and
+    not proc.name in (cron, apt, dpkg)
+  output: >
+    Suspicious file created in /tmp
+    (user=%user.name file=%fd.name process=%proc.name cmdline=%proc.cmdline container=%container.name)
+  priority: WARNING
+  tags: [filesystem, malware]
+
+- rule: Multiple Failed Authentication Attempts
+  desc: Detect brute force authentication attempts
+  condition: >
+    evt.type = execve and
+    proc.name = sudo and
+    evt.failed = true
+  output: >
+    Failed sudo attempt
+    (user=%user.name command=%proc.cmdline container=%container.name)
+  priority: NOTICE
+  tags: [authentication, bruteforce]
+
+- rule: Network Scanning Activity
+  desc: Detect port scanning or network enumeration
+  condition: >
+    evt.type = connect and
+    fd.l4proto = tcp and
+    proc.name in (nc, nmap, netcat, ncat, masscan, zmap)
+  output: >
+    Network scanning detected
+    (user=%user.name process=%proc.name dest=%fd.rip:%fd.rport container=%container.name)
+  priority: WARNING
+  tags: [network, reconnaissance]
+
+- rule: Sensitive File Read
+  desc: Detect reading of sensitive system files
+  condition: >
+    evt.type in (open, openat, openat2) and
+    evt.is_open_read=true and
+    fd.name in (/etc/shadow, /etc/sudoers, /root/.ssh/id_rsa, /root/.ssh/authorized_keys) and
+    not proc.name in (sudo, sshd, pam)
+  output: >
+    Sensitive file accessed
+    (user=%user.name file=%fd.name process=%proc.name cmdline=%proc.cmdline container=%container.name)
+  priority: ERROR
+  tags: [filesystem, credential_access]
+
+- rule: System File Modification Attempt
+  desc: Detect attempts to modify critical system files
+  condition: >
+    evt.type in (open, openat, openat2) and
+    evt.is_open_write=true and
+    fd.name pmatch (/etc/passwd, /etc/shadow, /etc/group, /etc/sudoers*) and
+    not proc.name in (passwd, chpasswd, usermod, groupmod, useradd, adduser)
+  output: >
+    System file modification attempt
+    (user=%user.name file=%fd.name process=%proc.name cmdline=%proc.cmdline container=%container.name)
+  priority: CRITICAL
+  tags: [filesystem, persistence]
+
+- rule: Unusual Network Connection to High Ports
+  desc: Detect connections to unusual high ports (common for C2)
+  condition: >
+    evt.type = connect and
+    fd.l4proto = tcp and
+    fd.sport > 32768 and
+    fd.rport in (4444, 1337, 31337, 8080) and
+    not proc.name in (curl, wget, python, python3)
+  output: >
+    Suspicious network connection to high port
+    (user=%user.name process=%proc.name dest=%fd.rip:%fd.rport container=%container.name)
+  priority: WARNING
+  tags: [network, c2]
+
+- rule: Execution from Tmp Directory
+  desc: Detect execution of files from /tmp (common malware technique)
+  condition: >
+    evt.type = execve and
+    proc.exe pmatch (/tmp/*, /var/tmp/*, /dev/shm/*)
+  output: >
+    Execution from temporary directory
+    (user=%user.name file=%proc.exe cmdline=%proc.cmdline container=%container.name)
+  priority: WARNING
+  tags: [process, malware]
+
+# Workload-specific rules for our test environment
+- rule: Workload Script Execution
+  desc: Track workload script execution for testing
+  condition: >
+    evt.type = execve and
+    proc.exe pmatch (/opt/workloads/*)
+  output: >
+    Workload script executed
+    (user=%user.name script=%proc.exe cmdline=%proc.cmdline container=%container.name)
+  priority: INFO
+  tags: [process, workload]
