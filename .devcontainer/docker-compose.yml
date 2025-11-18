@@ -1,0 +1,20 @@
+services:
+  # Pure development environment - "coding machine"
+  devcontainer:
+    build:
+      context: ../
+      dockerfile: .devcontainer/Dockerfile.dev
+    container_name: response-devcontainer
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - ../:/workspace # Mount full workspace directory
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - response-network
+    command: ["sleep", "infinity"]
+
+networks:
+  response-network:
+    name: response-network
+    driver: bridge
