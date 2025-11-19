@@ -1582,13 +1582,14 @@ ausearch -k process_execution
 1. **Target Endpoint Container** - Ubuntu 22.04 with workload scripts generating realistic activity
 2. **Falco eBPF Monitoring** - Capturing syscalls, file access, network events in JSON format
 3. **Docker Compose Environment** - Containers orchestrated and communicating
+4. **Wazuh Stack Setup** - Wazuh Manager (v4.9.2), Indexer, Dashboard deployed using Docker Compose chaining
+5. **PostgreSQL Database** - pgvector-enabled database with tickets table schema
 
 ### 🚧 In Progress
-4. **Wazuh Stack Setup** - Next: Configure Wazuh Manager, Indexer, Dashboard to ingest Falco events
+6. **Falco → Wazuh Integration** - Next: Mount falco-logs volume to Wazuh Manager and configure ingestion
 
 ### 📋 Next Steps
-5. **Falco → Wazuh Integration** - Configure Wazuh to ingest Falco JSON events via HTTP/file/syslog
-6. **PostgreSQL Ticket System** - Create integration to push Wazuh alerts → PostgreSQL tickets
+7. **PostgreSQL Ticket System** - Create integration to push Wazuh alerts → PostgreSQL tickets
 7. **Populate database with MORDOR data** - Get realistic alerts for testing
 8. **Configure Wazuh detection rules** - Map to alert signatures
 9. **Build investigation agent** - Core decision logic
