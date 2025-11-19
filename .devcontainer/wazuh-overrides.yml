@@ -1,0 +1,60 @@
+# Overrides for Wazuh stack to integrate with our environment
+# This file chains with wazuh-stack.yml to customize the official setup
+
+services:
+  wazuh.manager:
+    image: wazuh/wazuh-manager:4.9.2
+    container_name: wazuh-manager
+    networks:
+      - response-network
+    restart: unless-stopped
+    volumes:
+      # Override relative paths with absolute paths
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\root-ca-manager.pem:/etc/ssl/root-ca.pem
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\wazuh.manager.pem:/etc/ssl/filebeat.pem
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\wazuh.manager-key.pem:/etc/ssl/filebeat.key
+      # Removed custom ossec.conf mount - using default configuration for now
+
+  wazuh.indexer:
+    image: wazuh/wazuh-indexer:4.9.2
+    container_name: wazuh-indexer
+    networks:
+      - response-network
+    restart: unless-stopped
+    volumes:
+      # Override relative paths with absolute paths
+      # Mount to both expected locations
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\root-ca.pem:/usr/share/wazuh-indexer/config/certs/root-ca.pem
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\wazuh.indexer-key.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.key
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\wazuh.indexer.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.pem
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\admin.pem:/usr/share/wazuh-indexer/config/certs/admin.pem
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\admin-key.pem:/usr/share/wazuh-indexer/config/certs/admin-key.pem
+      # Mount certificates to /etc location where the default config expects them
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\wazuh.indexer.pem:/etc/wazuh-indexer/certs/indexer.pem:ro
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\wazuh.indexer-key.pem:/etc/wazuh-indexer/certs/indexer-key.pem:ro
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\admin.pem:/etc/wazuh-indexer/certs/admin.pem:ro
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\admin-key.pem:/etc/wazuh-indexer/certs/admin-key.pem:ro
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\root-ca.pem:/etc/wazuh-indexer/certs/root-ca.pem:ro
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer\wazuh.indexer.yml:/usr/share/wazuh-indexer/opensearch.yml
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer\internal_users.yml:/usr/share/wazuh-indexer/opensearch-security/internal_users.yml
+
+  wazuh.dashboard:
+    image: wazuh/wazuh-dashboard:4.9.2
+    container_name: wazuh-dashboard
+    networks:
+      - response-network
+    restart: unless-stopped
+    ports:
+      - "5601:5601"  # Change from 443 to avoid root requirement
+    volumes:
+      # Override relative paths with absolute paths
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\wazuh.dashboard.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard.pem
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard-key.pem
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_dashboard\opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_dashboard\wazuh.yml:/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+
+networks:
+  response-network:
+    name: response-network
+    driver: bridge
