@@ -1,0 +1,200 @@
+<!--
+  Wazuh Custom Rules for Falco Events
+  Maps Falco security alerts to Wazuh rule IDs with appropriate severity
+
+  Rule ID Range: 100001-100099
+  Severity Mapping:
+    - Falco Emergency/Alert/Critical → Wazuh Level 12-15 (High)
+    - Falco Error/Warning → Wazuh Level 7-10 (Medium)
+    - Falco Notice/Informational → Wazuh Level 3-6 (Low)
+-->
+
+<group name="falco,security,">
+
+  <!-- Base Falco Event Detection -->
+  <rule id="100000" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="output">\.+</field>
+    <field name="rule">\.+</field>
+    <field name="priority">\.+</field>
+    <description>Falco security event detected</description>
+    <options>no_full_log</options>
+  </rule>
+
+  <!-- Suspicious Shell Spawned (High Priority) -->
+  <rule id="100001" level="10">
+    <if_sid>100000</if_sid>
+    <field name="rule">Suspicious shell</field>
+    <description>Falco: Suspicious shell spawned by non-shell process</description>
+    <group>falco_process_anomaly,</group>
+  </rule>
+
+  <!-- Encoded Command Execution -->
+  <rule id="100002" level="12">
+    <if_sid>100000</if_sid>
+    <field name="rule">Encoded command</field>
+    <description>Falco: Encoded command execution detected (base64/hex)</description>
+    <group>falco_obfuscation,attack.execution,</group>
+  </rule>
+
+  <!-- Suspicious Files in /tmp -->
+  <rule id="100003" level="8">
+    <if_sid>100000</if_sid>
+    <field name="rule">Suspicious file</field>
+    <description>Falco: Suspicious file detected in temporary directory</description>
+    <group>falco_suspicious_files,</group>
+  </rule>
+
+  <!-- Multiple Failed Authentication Attempts -->
+  <rule id="100004" level="10">
+    <if_sid>100000</if_sid>
+    <field name="rule">Multiple failed</field>
+    <description>Falco: Multiple failed authentication attempts</description>
+    <group>falco_authentication,attack.credential_access,</group>
+  </rule>
+
+  <!-- Network Scanning Activity -->
+  <rule id="100005" level="9">
+    <if_sid>100000</if_sid>
+    <field name="rule">Network scanning</field>
+    <description>Falco: Network scanning tools detected</description>
+    <group>falco_recon,attack.discovery,</group>
+  </rule>
+
+  <!-- Sensitive File Access -->
+  <rule id="100006" level="11">
+    <if_sid>100000</if_sid>
+    <field name="rule">Sensitive file read</field>
+    <description>Falco: Unauthorized access to sensitive files</description>
+    <group>falco_credential_access,attack.credential_access,</group>
+  </rule>
+
+  <!-- System File Modification -->
+  <rule id="100007" level="12">
+    <if_sid>100000</if_sid>
+    <field name="rule">System file modification</field>
+    <description>Falco: Attempt to modify critical system files</description>
+    <group>falco_persistence,attack.persistence,</group>
+  </rule>
+
+  <!-- Unusual Network Connection -->
+  <rule id="100008" level="10">
+    <if_sid>100000</if_sid>
+    <field name="rule">Unusual network connection</field>
+    <description>Falco: Connection to suspicious ports (C2 indicators)</description>
+    <group>falco_c2,attack.command_and_control,</group>
+  </rule>
+
+  <!-- Execution from Temporary Directory -->
+  <rule id="100009" level="9">
+    <if_sid>100000</if_sid>
+    <field name="rule">Execution from temp</field>
+    <description>Falco: Binary execution from temporary directory</description>
+    <group>falco_execution,attack.execution,</group>
+  </rule>
+
+  <!-- Workload Script Detection (Testing) -->
+  <rule id="100010" level="4">
+    <if_sid>100000</if_sid>
+    <field name="rule">Workload script</field>
+    <description>Falco: Test workload script execution (benign)</description>
+    <group>falco_testing,</group>
+  </rule>
+
+  <!-- High Priority Falco Alert (Emergency/Alert/Critical) -->
+  <rule id="100020" level="14">
+    <if_sid>100000</if_sid>
+    <field name="priority">Emergency|Alert|Critical</field>
+    <description>Falco: HIGH PRIORITY security event</description>
+    <group>falco_high_priority,</group>
+  </rule>
+
+  <!-- Medium Priority Falco Alert (Error/Warning) -->
+  <rule id="100021" level="8">
+    <if_sid>100000</if_sid>
+    <field name="priority">Error|Warning</field>
+    <description>Falco: Medium priority security event</description>
+    <group>falco_medium_priority,</group>
+  </rule>
+
+  <!-- Process Injection Detection -->
+  <rule id="100030" level="13">
+    <if_sid>100000</if_sid>
+    <field name="rule">process injection</field>
+    <description>Falco: Potential process injection attempt</description>
+    <group>falco_injection,attack.defense_evasion,</group>
+  </rule>
+
+  <!-- Container Escape Attempt -->
+  <rule id="100031" level="15">
+    <if_sid>100000</if_sid>
+    <field name="rule">container escape</field>
+    <description>Falco: Container escape attempt detected</description>
+    <group>falco_container_escape,attack.privilege_escalation,</group>
+  </rule>
+
+  <!-- Privilege Escalation -->
+  <rule id="100032" level="12">
+    <if_sid>100000</if_sid>
+    <field name="rule">privilege escalation|setuid|setgid</field>
+    <description>Falco: Privilege escalation attempt</description>
+    <group>falco_privesc,attack.privilege_escalation,</group>
+  </rule>
+
+  <!-- Reverse Shell Detection -->
+  <rule id="100033" level="14">
+    <if_sid>100000</if_sid>
+    <field name="rule">reverse shell|bind shell</field>
+    <description>Falco: Reverse/bind shell connection detected</description>
+    <group>falco_reverse_shell,attack.command_and_control,</group>
+  </rule>
+
+  <!-- Cryptocurrency Mining -->
+  <rule id="100034" level="10">
+    <if_sid>100000</if_sid>
+    <field name="rule">crypto|mining</field>
+    <description>Falco: Potential cryptocurrency mining activity</description>
+    <group>falco_cryptomining,attack.impact,</group>
+  </rule>
+
+  <!-- SSH/Credential Access -->
+  <rule id="100035" level="11">
+    <if_sid>100000</if_sid>
+    <field name="rule">ssh.*key|credential</field>
+    <description>Falco: SSH key or credential access attempt</description>
+    <group>falco_credential_theft,attack.credential_access,</group>
+  </rule>
+
+  <!-- Kernel Module Loading -->
+  <rule id="100036" level="13">
+    <if_sid>100000</if_sid>
+    <field name="rule">kernel module|insmod|modprobe</field>
+    <description>Falco: Kernel module loading detected</description>
+    <group>falco_kernel_module,attack.persistence,</group>
+  </rule>
+
+  <!-- File Integrity - Critical Paths -->
+  <rule id="100037" level="11">
+    <if_sid>100000</if_sid>
+    <field name="rule">/etc/passwd|/etc/shadow|/etc/sudoers</field>
+    <description>Falco: Critical system file accessed or modified</description>
+    <group>falco_integrity,attack.persistence,</group>
+  </rule>
+
+  <!-- Data Exfiltration Indicators -->
+  <rule id="100038" level="12">
+    <if_sid>100000</if_sid>
+    <field name="rule">exfiltration|curl.*post|wget.*post</field>
+    <description>Falco: Potential data exfiltration activity</description>
+    <group>falco_exfiltration,attack.exfiltration,</group>
+  </rule>
+
+  <!-- Docker/Container Runtime Tampering -->
+  <rule id="100039" level="14">
+    <if_sid>100000</if_sid>
+    <field name="rule">docker.*socket|containerd</field>
+    <description>Falco: Docker/container runtime access detected</description>
+    <group>falco_container_runtime,attack.execution,</group>
+  </rule>
+
+</group>

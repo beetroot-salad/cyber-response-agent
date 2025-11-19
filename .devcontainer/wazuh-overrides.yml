@@ -13,7 +13,13 @@ services:
       - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\root-ca-manager.pem:/etc/ssl/root-ca.pem
       - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\wazuh.manager.pem:/etc/ssl/filebeat.pem
       - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\wazuh.manager-key.pem:/etc/ssl/filebeat.key
-      # Removed custom ossec.conf mount - using default configuration for now
+      # Falco logs integration
+      - falco-logs:/var/log/falco:ro
+      # Custom Wazuh configuration
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_cluster\wazuh_manager.conf:/wazuh-config-mount/etc/ossec.conf
+      # Custom decoders and rules
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_cluster\decoders:/var/ossec/etc/decoders
+      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_cluster\rules:/var/ossec/etc/rules
 
   wazuh.indexer:
     image: wazuh/wazuh-indexer:4.9.2
@@ -57,4 +63,9 @@ services:
 networks:
   response-network:
     name: response-network
-    driver: bridge
+    external: true
+
+volumes:
+  falco-logs:
+    external: true
+    name: cyber-response-agent_devcontainer_falco-logs

@@ -23,7 +23,7 @@ wazuh_active_response/
 wazuh_agentless/
 wazuh_wodles/
 wazuh-indexer-data/
-wazuh_cluster/
+/wazuh_cluster/
 
 # Datasets (can be large)
 datasets/

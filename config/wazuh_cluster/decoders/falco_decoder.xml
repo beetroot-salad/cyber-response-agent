@@ -1,0 +1,13 @@
+<!--
+  Falco Decoder for Wazuh
+  Parses JSON events from Falco eBPF monitoring
+-->
+
+<decoder name="falco">
+  <prematch>^{"output":</prematch>
+</decoder>
+
+<decoder name="falco-json">
+  <parent>falco</parent>
+  <plugin_decoder>JSON_Decoder</plugin_decoder>
+</decoder>

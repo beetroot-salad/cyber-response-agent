@@ -1576,6 +1576,90 @@ ausearch -k process_execution
 
 ---
 
+## Managing the Integrated Stack
+
+### Starting and Stopping Services
+
+The complete stack consists of two docker-compose files that must be managed together:
+
+```bash
+# Start the complete stack (from workspace root)
+cd /workspace/.devcontainer
+
+# Start main services (Falco, PostgreSQL, target-endpoint)
+docker compose -f docker-compose.yml up -d
+
+# Start Wazuh stack (with Falco integration)
+docker compose -p cyber-response-agent_devcontainer \
+  -f wazuh-stack.yml -f wazuh-overrides.yml up -d
+
+# Stop all services
+docker compose -p cyber-response-agent_devcontainer \
+  -f wazuh-stack.yml -f wazuh-overrides.yml down
+docker compose -f docker-compose.yml down
+```
+
+**Important:** Always use the project name `-p cyber-response-agent_devcontainer` when managing the Wazuh stack to maintain proper volume and network associations.
+
+### Monitoring Falco Events in Wazuh
+
+```bash
+# View live Falco alerts
+docker exec wazuh-manager tail -f /var/ossec/logs/alerts/alerts.json | \
+  jq -r 'select(.data.rule) | "[\(.timestamp)] \(.data.rule) - Container: \(.data.output_fields.container.name)"'
+
+# Count alerts by Falco rule
+docker exec wazuh-manager cat /var/ossec/logs/alerts/alerts.json | \
+  jq -r '.data.rule' | sort | uniq -c | sort -rn
+
+# View full alert details
+docker exec wazuh-manager tail -1 /var/ossec/logs/alerts/alerts.json | jq '.'
+
+# Check Wazuh Manager logs for errors
+docker exec wazuh-manager tail -50 /var/ossec/logs/ossec.log
+```
+
+### Triggering Test Activity
+
+```bash
+# Trigger suspicious patterns on target endpoint
+docker exec target-endpoint /opt/workloads/suspicious_patterns.sh
+
+# Trigger benign activity
+docker exec target-endpoint /opt/workloads/benign_activity.sh
+
+# View Falco raw events
+docker exec falco cat /var/log/falco/events.json | tail -20 | jq '.'
+```
+
+### Accessing Services
+
+- **Wazuh Dashboard:** http://localhost:5601 (admin/SecretPassword)
+- **PostgreSQL:** localhost:5432 (agent/agent_password)
+- **Wazuh Indexer:** https://localhost:9200 (admin/SecretPassword)
+
+### Troubleshooting
+
+**Issue: Falco events not appearing in Wazuh**
+```bash
+# Check if Wazuh can read Falco logs
+docker exec wazuh-manager ls -lh /var/log/falco/
+
+# Verify Falco is writing events
+docker exec falco ls -lh /var/log/falco/events.json
+
+# Check Wazuh configuration
+docker exec wazuh-manager grep -A 3 "Falco event ingestion" /var/ossec/etc/ossec.conf
+```
+
+**Issue: Configuration errors on Wazuh startup**
+```bash
+# Check for compatibility issues (4.9.2 vs 5.0 config)
+docker exec wazuh-manager tail -100 /var/ossec/logs/ossec.log | grep ERROR
+```
+
+---
+
 ## Implementation Status
 
 ### ✅ Completed
@@ -1584,19 +1668,26 @@ ausearch -k process_execution
 3. **Docker Compose Environment** - Containers orchestrated and communicating
 4. **Wazuh Stack Setup** - Wazuh Manager (v4.9.2), Indexer, Dashboard deployed using Docker Compose chaining
 5. **PostgreSQL Database** - pgvector-enabled database with tickets table schema
+6. **Falco → Wazuh Integration** - ✅ COMPLETE
+   - Falco logs volume mounted to Wazuh Manager (read-only)
+   - Wazuh configured to ingest `/var/log/falco/events.json` with JSON format
+   - Custom Falco decoder created for proper JSON parsing
+   - 30+ Falco detection rules active (Rule IDs 100000-100099)
+   - Configuration fixed for Wazuh 4.9.2 compatibility
+   - Verified working: Falco events appearing in Wazuh alerts with full metadata
 
 ### 🚧 In Progress
-6. **Falco → Wazuh Integration** - Next: Mount falco-logs volume to Wazuh Manager and configure ingestion
+None - Ready for next phase!
 
 ### 📋 Next Steps
 7. **PostgreSQL Ticket System** - Create integration to push Wazuh alerts → PostgreSQL tickets
-7. **Populate database with MORDOR data** - Get realistic alerts for testing
-8. **Configure Wazuh detection rules** - Map to alert signatures
-9. **Build investigation agent** - Core decision logic
-10. **Manually label subset** - Create ground truth for evaluation
-11. **Implement confidence scoring** - Decision thresholds
-12. **Add reproduction sandbox** - Test hypotheses safely
-13. **Build metrics dashboard** - Track agent performance
+8. **Populate database with MORDOR data** - Get realistic alerts for testing
+9. **Configure additional Wazuh detection rules** - Expand beyond default Falco rules
+10. **Build investigation agent** - Core decision logic
+11. **Manually label subset** - Create ground truth for evaluation
+12. **Implement confidence scoring** - Decision thresholds
+13. **Add reproduction sandbox** - Test hypotheses safely
+14. **Build metrics dashboard** - Track agent performance
 
 ---
 
