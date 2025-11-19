@@ -1576,15 +1576,26 @@ ausearch -k process_execution
 
 ---
 
-## Next Steps
+## Implementation Status
 
-1. **Populate database with MORDOR data** - Get realistic alerts
-2. **Configure Wazuh detection rules** - Map to alert signatures
-3. **Build investigation agent** - Core decision logic
-4. **Manually label subset** - Create ground truth for evaluation
-5. **Implement confidence scoring** - Decision thresholds
-6. **Add reproduction sandbox** - Test hypotheses safely
-7. **Build metrics dashboard** - Track agent performance
+### ✅ Completed
+1. **Target Endpoint Container** - Ubuntu 22.04 with workload scripts generating realistic activity
+2. **Falco eBPF Monitoring** - Capturing syscalls, file access, network events in JSON format
+3. **Docker Compose Environment** - Containers orchestrated and communicating
+
+### 🚧 In Progress
+4. **Wazuh Stack Setup** - Next: Configure Wazuh Manager, Indexer, Dashboard to ingest Falco events
+
+### 📋 Next Steps
+5. **Falco → Wazuh Integration** - Configure Wazuh to ingest Falco JSON events via HTTP/file/syslog
+6. **PostgreSQL Ticket System** - Create integration to push Wazuh alerts → PostgreSQL tickets
+7. **Populate database with MORDOR data** - Get realistic alerts for testing
+8. **Configure Wazuh detection rules** - Map to alert signatures
+9. **Build investigation agent** - Core decision logic
+10. **Manually label subset** - Create ground truth for evaluation
+11. **Implement confidence scoring** - Decision thresholds
+12. **Add reproduction sandbox** - Test hypotheses safely
+13. **Build metrics dashboard** - Track agent performance
 
 ---
 

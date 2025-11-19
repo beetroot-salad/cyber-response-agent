@@ -23,7 +23,7 @@ services:
     hostname: target-endpoint
     restart: unless-stopped
     volumes:
-      - ../target-endpoint/workloads:/opt/workloads
+      - C:\Users\naama\yotam\code\cyber-response-agent\target-endpoint\workloads:/opt/workloads
     networks:
       - response-network
 
@@ -39,9 +39,17 @@ services:
       - SYS_RESOURCE
       - SYS_PTRACE
     volumes:
+      # Kernel monitoring
       - /sys/kernel/debug:/sys/kernel/debug:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc:/host/proc:ro
+      - /dev:/host/dev:ro
+      - /boot:/host/boot:ro
+      - /lib/modules:/host/lib/modules:ro
+      - /usr:/host/usr:ro
+      - /etc:/host/etc:ro
+      # Docker socket for container metadata
+      - /var/run/docker.sock:/host/var/run/docker.sock:ro
+      # Output logs
       - falco-logs:/var/log/falco
     networks:
       - response-network
@@ -49,6 +57,16 @@ services:
       - target-endpoint
     environment:
       - FALCO_BPF_PROBE=""
+    command:
+      - /usr/bin/falco
+      - -o
+      - json_output=true
+      - -o
+      - json_include_output_property=true
+      - -o
+      - file_output.enabled=true
+      - -o
+      - file_output.filename=/var/log/falco/events.json
 
 networks:
   response-network:
