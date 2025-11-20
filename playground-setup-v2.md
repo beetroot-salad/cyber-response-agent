@@ -4,72 +4,126 @@
 
 This guide sets up a complete playground environment for prototyping the cyber response agent using open-source tools that mirror commercial SIEM/EDR/ticketing platforms. This version includes refined architecture based on realistic EDR simulation, existing Wazuh MCP integration, and improved data modeling.
 
-## Architecture
+## Three-Layer Architecture
 
+The system is organized into three distinct layers:
+
+### **Layer 1: Demo Environment** (Playground Infrastructure)
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ DevContainer (Claude Code)                                  │
-│ ├─ Existing Wazuh MCP Server (socfortress)                 │
-│ ├─ Claude Skills (Case Knowledge, Playbooks)               │
-│ ├─ Agent Code                                               │
-│ └─ Docker CLI (access to host Docker)                      │
-└─────────────────┬───────────────────────────────────────────┘
-                  │ (Docker socket mount)
-                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Docker Compose Stack (Host Docker)                         │
+│ Docker Compose Stack - Demo Environment                     │
 │                                                              │
 │ ┌──────────────────────────────────────────────────────┐   │
-│ │ Target Endpoint (Ubuntu + Workloads)                 │   │
-│ │  ├─ Real processes & system activity                 │   │
-│ │  ├─ Workload scripts (benign + suspicious)           │   │
-│ │  └─ Accessible via docker exec for investigation     │   │
+│ │ Target Endpoint (Ubuntu 22.04)                       │   │
+│ │  ├─ NO Wazuh agent (monitored externally by Falco)  │   │
+│ │  ├─ Workload scripts (benign + suspicious patterns) │   │
+│ │  └─ Investigation: docker exec (playground access)  │   │
 │ └────────────────────┬─────────────────────────────────┘   │
 │                      │                                       │
-│                      ▼                                       │
+│                      ▼ (eBPF syscall monitoring)            │
 │ ┌──────────────────────────────────────────────────────┐   │
-│ │ Falco (eBPF Monitoring)                              │   │
-│ │  ├─ Captures syscalls, file access, network events   │   │
-│ │  ├─ Container-native security monitoring             │   │
-│ │  └─ Outputs events as JSON                           │   │
+│ │ Falco (eBPF Security Monitoring)                     │   │
+│ │  ├─ Captures: syscalls, file access, network, exec  │   │
+│ │  ├─ Output: JSON events to /var/log/falco/events    │   │
+│ │  └─ Volume shared with Wazuh Manager                │   │
 │ └────────────────────┬─────────────────────────────────┘   │
 │                      │                                       │
-│                      ▼                                       │
+│                      ▼ (file-based ingestion)               │
 │ ┌──────────────────────────────────────────────────────┐   │
-│ │ Wazuh Manager (SIEM)                                 │   │
-│ │  ├─ Ingests Falco events                             │   │
-│ │  ├─ Applies detection rules                          │   │
-│ │  ├─ Generates alerts                                 │   │
-│ │  └─ API for queries                                  │   │
-│ └────────────────────┬─────────────────────────────────┘   │
-│                      │                                       │
-│                      ├──────────────┐                        │
-│                      ▼              ▼                        │
-│          ┌────────────────┐  ┌─────────────────┐           │
-│          │ Wazuh Indexer  │  │ PostgreSQL      │           │
-│          │ (Elasticsearch)│  │ (Tickets only)  │           │
-│          │ - Event logs   │  │ - Tickets       │           │
-│          │ - Searchable   │  │ - Case knowledge│           │
-│          └────────────────┘  │ - Playbooks     │           │
-│                      ▲        └─────────────────┘           │
-│                      │                                       │
-│          ┌────────────────┐                                 │
-│          │ Wazuh Dashboard│                                 │
-│          │ (Web UI)       │                                 │
-│          └────────────────┘                                 │
+│ │ Wazuh Stack (SIEM)                                   │   │
+│ │  ┌─────────────────────────────────────────────┐    │   │
+│ │  │ Wazuh Manager                               │    │   │
+│ │  │  ├─ Ingests Falco JSON events               │    │   │
+│ │  │  ├─ Applies 30+ detection rules             │    │   │
+│ │  │  ├─ Generates alerts                        │    │   │
+│ │  │  └─ API: port 55000                         │    │   │
+│ │  └─────────────────┬───────────────────────────┘    │   │
+│ │                    │                                 │   │
+│ │                    ├──────────────┐                  │   │
+│ │                    ▼              ▼                  │   │
+│ │        ┌──────────────────┐  ┌──────────────┐      │   │
+│ │        │ Wazuh Indexer    │  │ Wazuh        │      │   │
+│ │        │ (Elasticsearch)  │  │ Dashboard    │      │   │
+│ │        │ - Stores events  │  │ (Web UI)     │      │   │
+│ │        │ - Searchable logs│  │ :5601        │      │   │
+│ │        └──────────────────┘  └──────────────┘      │   │
+│ └──────────────────────────────────────────────────────┘   │
 │                                                              │
 │ ┌──────────────────────────────────────────────────────┐   │
-│ │ Sandbox (Isolated - for reproduction testing)        │   │
+│ │ PostgreSQL (pgvector)                                │   │
+│ │  ├─ Database: cyber_response                         │   │
+│ │  ├─ investigations table (alert state tracking)     │   │
+│ │  └─ case_knowledge table (past investigation results)│  │
 │ └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
-
-Data Flow:
-1. Target Endpoint → Falco (syscall monitoring via eBPF)
-2. Falco → Wazuh Manager (events via HTTP/file/syslog)
-3. Wazuh Manager → Wazuh Indexer (stores all events)
-4. Wazuh Manager → PostgreSQL (creates tickets from alerts)
-5. Agent → Wazuh MCP (queries alerts) → PostgreSQL (manages tickets)
 ```
+
+### **Layer 2: Interfaces** (Agent Integration Points)
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Interface Layer - How Agent Interacts with Environment      │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────┐   │
+│ │ Wazuh MCP Server (socfortress)                       │   │
+│ │  ├─ Port: 8000                                       │   │
+│ │  ├─ Protocol: MCP over SSE                           │   │
+│ │  ├─ Connects to: Wazuh Manager API                   │   │
+│ │  ├─ Capabilities: Query alerts, search events        │   │
+│ │  └─ Auth: wazuh-wui / MyS3cr37P450r.*-              │   │
+│ └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────┐   │
+│ │ PostgreSQL Direct Access                             │   │
+│ │  ├─ Port: 5432                                       │   │
+│ │  ├─ CRUD operations on investigations & cases        │   │
+│ │  └─ Auth: agent / agent_password                     │   │
+│ └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────┐   │
+│ │ Docker Exec (Playground Investigation)               │   │
+│ │  ├─ Command: docker exec target-endpoint <cmd>      │   │
+│ │  ├─ Capabilities: ps, netstat, ls, cat, etc.        │   │
+│ │  └─ Alternative to: Wazuh agent active response      │   │
+│ └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### **Layer 3: App** (Cyber Response Agent - To Be Built)
+```
+┌─────────────────────────────────────────────────────────────┐
+│ DevContainer (Claude Code + Agent Logic)                    │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────┐   │
+│ │ Investigation Agent Workflow                         │   │
+│ │  1. Query alerts via Wazuh MCP                       │   │
+│ │  2. Check case_knowledge in PostgreSQL               │   │
+│ │  3. Investigate via docker exec                      │   │
+│ │  4. Decide: auto-close or escalate                   │   │
+│ │  5. Store investigation in PostgreSQL                │   │
+│ └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────┐   │
+│ │ Components (To Build)                                │   │
+│ │  ├─ Main agent loop                                  │   │
+│ │  ├─ Investigation playbooks                          │   │
+│ │  ├─ Confidence scoring                               │   │
+│ │  ├─ Case knowledge matching                          │   │
+│ │  └─ Metrics & reporting                              │   │
+│ └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Data Flow
+
+**Option C: Hybrid Approach** (Implemented)
+1. Target Endpoint → Falco (eBPF syscall monitoring)
+2. Falco → Wazuh Manager (file-based JSON ingestion)
+3. Wazuh Manager → Wazuh Indexer (stores ALL alerts)
+4. **Agent queries alerts via Wazuh MCP** (real-time, no duplication)
+5. **Agent stores investigation results in PostgreSQL** (state tracking only)
+6. Agent investigates via `docker exec target-endpoint` (playground)
+
+**Key Design Decision:** Alerts stay in Wazuh (single source of truth), only investigation state goes to PostgreSQL.
 
 ## Key Changes from v1
 
@@ -1663,11 +1717,13 @@ docker exec wazuh-manager tail -100 /var/ossec/logs/ossec.log | grep ERROR
 ## Implementation Status
 
 ### ✅ Completed
+
+**Demo Environment Layer:**
 1. **Target Endpoint Container** - Ubuntu 22.04 with workload scripts generating realistic activity
 2. **Falco eBPF Monitoring** - Capturing syscalls, file access, network events in JSON format
-3. **Docker Compose Environment** - Containers orchestrated and communicating
+3. **Docker Compose Environment** - Multi-container orchestration with response-network
 4. **Wazuh Stack Setup** - Wazuh Manager (v4.9.2), Indexer, Dashboard deployed using Docker Compose chaining
-5. **PostgreSQL Database** - pgvector-enabled database with tickets table schema
+5. **PostgreSQL Database** - pgvector-enabled database with tickets table schema (Option C: hybrid approach ready)
 6. **Falco → Wazuh Integration** - ✅ COMPLETE
    - Falco logs volume mounted to Wazuh Manager (read-only)
    - Wazuh configured to ingest `/var/log/falco/events.json` with JSON format
@@ -1676,18 +1732,36 @@ docker exec wazuh-manager tail -100 /var/ossec/logs/ossec.log | grep ERROR
    - Configuration fixed for Wazuh 4.9.2 compatibility
    - Verified working: Falco events appearing in Wazuh alerts with full metadata
 
+**Interfaces Layer:**
+7. **Wazuh MCP Server** - ✅ COMPLETE
+   - Deployed socfortress/wazuh-mcp-server in container
+   - Connected to Wazuh Manager API (https://wazuh-manager:55000)
+   - Authentication working (wazuh-wui user)
+   - Healthcheck using /sse/ endpoint (307 redirect)
+   - Port 8000 exposed for MCP communication
+   - Ready for agent integration
+   - **Note:** Query-only capabilities (no Wazuh agent on target-endpoint)
+   - Active investigation via `docker exec target-endpoint` commands
+
 ### 🚧 In Progress
-None - Ready for next phase!
+None - Interfaces layer complete, ready for App layer!
 
 ### 📋 Next Steps
-7. **PostgreSQL Ticket System** - Create integration to push Wazuh alerts → PostgreSQL tickets
-8. **Populate database with MORDOR data** - Get realistic alerts for testing
-9. **Configure additional Wazuh detection rules** - Expand beyond default Falco rules
-10. **Build investigation agent** - Core decision logic
-11. **Manually label subset** - Create ground truth for evaluation
-12. **Implement confidence scoring** - Decision thresholds
-13. **Add reproduction sandbox** - Test hypotheses safely
-14. **Build metrics dashboard** - Track agent performance
+
+**App Layer (Cyber Response Agent):**
+8. **Update PostgreSQL Schema** - Implement Option C (hybrid approach):
+   - `investigations` table for alert investigation state
+   - `case_knowledge` table for learning from past cases
+   - Keep alerts in Wazuh, store investigation results in PostgreSQL
+9. **Configure MCP Client** - Set up Claude Code to use Wazuh MCP server
+10. **Build Investigation Agent** - Core decision logic:
+    - Query alerts via Wazuh MCP
+    - Investigate via docker exec
+    - Store results in PostgreSQL
+11. **Implement Confidence Scoring** - Decision thresholds for auto-closure
+12. **Add Case Knowledge Learning** - Build similarity matching for past cases
+13. **Populate with Test Data** - MORDOR dataset or synthetic alerts
+14. **Build Metrics Dashboard** - Track agent performance (optional UI)
 
 ---
 
