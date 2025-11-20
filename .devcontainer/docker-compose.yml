@@ -91,6 +91,32 @@ services:
       timeout: 5s
       retries: 5
 
+  # Wazuh MCP Server (Interface for agent to query SIEM)
+  wazuh-mcp-server:
+    build:
+      context: ./wazuh-mcp
+      dockerfile: Dockerfile
+    container_name: wazuh-mcp-server
+    hostname: wazuh-mcp-server
+    restart: unless-stopped
+    networks:
+      - response-network
+    ports:
+      - "8000:8000"
+    environment:
+      # Wazuh Manager connection
+      - WAZUH_PROD_URL=https://wazuh-manager:55000
+      - WAZUH_PROD_USERNAME=wazuh-wui
+      - WAZUH_PROD_PASSWORD=MyS3cr37P450r.*-
+      - WAZUH_PROD_SSL_VERIFY=false
+      - WAZUH_PROD_TIMEOUT=30
+      # MCP Server configuration
+      - MCP_SERVER_HOST=0.0.0.0
+      - MCP_SERVER_PORT=8000
+      - LOG_LEVEL=INFO
+    depends_on:
+      - wazuh.manager
+
 networks:
   response-network:
     name: response-network
