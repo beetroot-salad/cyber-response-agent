@@ -63,9 +63,8 @@ services:
 networks:
   response-network:
     name: response-network
-    external: true
+
 
 volumes:
   falco-logs:
-    external: true
     name: cyber-response-agent_devcontainer_falco-logs

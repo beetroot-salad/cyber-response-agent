@@ -1,6 +1,6 @@
 {
   "name": "Try out stuff",
-  "dockerComposeFile": "docker-compose.yml",
+  "dockerComposeFile": ["docker-compose.yml", "wazuh-stack.yml", "wazuh-overrides.yml"],
   "service": "devcontainer",
   "workspaceFolder": "/workspace",
 
