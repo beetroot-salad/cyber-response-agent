@@ -7,7 +7,7 @@ services:
     container_name: wazuh-manager
     networks:
       - response-network
-    restart: unless-stopped
+    restart: on-failure
     volumes:
       # Override relative paths with absolute paths
       - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs\root-ca-manager.pem:/etc/ssl/root-ca.pem
@@ -26,7 +26,7 @@ services:
     container_name: wazuh-indexer
     networks:
       - response-network
-    restart: unless-stopped
+    restart: on-failure
     volumes:
       # Override relative paths with absolute paths
       # Mount to both expected locations
@@ -49,7 +49,7 @@ services:
     container_name: wazuh-dashboard
     networks:
       - response-network
-    restart: unless-stopped
+    restart: on-failure
     ports:
       - "5601:5601"  # Change from 443 to avoid root requirement
     volumes:

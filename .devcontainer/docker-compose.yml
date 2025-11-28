@@ -21,7 +21,7 @@ services:
       dockerfile: Dockerfile
     container_name: target-endpoint
     hostname: target-endpoint
-    restart: unless-stopped
+    restart: on-failure
     volumes:
       - C:\Users\naama\yotam\code\cyber-response-agent\target-endpoint\workloads:/opt/workloads
     networks:
@@ -32,7 +32,7 @@ services:
     image: falcosecurity/falco:latest
     container_name: falco
     hostname: falco
-    restart: unless-stopped
+    restart: on-failure
     privileged: false
     cap_add:
       - SYS_ADMIN
@@ -73,7 +73,7 @@ services:
     image: pgvector/pgvector:pg16
     container_name: postgres
     hostname: postgres
-    restart: unless-stopped
+    restart: on-failure
     networks:
       - response-network
     ports:
@@ -98,7 +98,7 @@ services:
       dockerfile: Dockerfile
     container_name: wazuh-mcp-server
     hostname: wazuh-mcp-server
-    restart: unless-stopped
+    restart: on-failure
     networks:
       - response-network
     ports:
