@@ -107,20 +107,19 @@ class AgentFindings:
     Structured findings returned by the investigation agent.
 
     Fields:
-        precedent_matched: ID of the matched precedent from the signature's
-            knowledge (e.g., "prec-5710-001"). None if no match.
-        precedent_tier: Quality tier of matched precedent ("gold", "silver", "bronze").
-        conditions_met: Number of "safe_when" or "escalate_when" conditions
-            satisfied for the matched precedent.
-        conditions_total: Total conditions defined for the matched precedent.
+        matched_ticket: ID of a similar past ticket from the signature's
+            past-tickets directory (e.g., "SEC-20240115-001"). None if no match.
+        matched_tier: Quality tier from matched ticket's metadata ("gold", "silver", "bronze").
+        conditions_met: Number of conditions satisfied for the matched pattern.
+        conditions_total: Total conditions defined for the matched pattern.
         evidence_available: Whether the agent successfully gathered required
             evidence (e.g., SIEM queries returned data, files were readable).
         findings: List of observations made during investigation.
-        reasoning: Explanation of why precedent matched or didn't match.
+        reasoning: Explanation of why ticket matched or didn't match.
     """
 
-    precedent_matched: Optional[str] = None
-    precedent_tier: Optional[str] = None
+    matched_ticket: Optional[str] = None
+    matched_tier: Optional[str] = None
     conditions_met: int = 0
     conditions_total: int = 0
     evidence_available: bool = False
@@ -131,8 +130,8 @@ class AgentFindings:
     def from_json(cls, data: dict) -> "AgentFindings":
         """Parse agent JSON response into AgentFindings."""
         return cls(
-            precedent_matched=data.get("precedent_matched"),
-            precedent_tier=data.get("precedent_tier"),
+            matched_ticket=data.get("matched_ticket"),
+            matched_tier=data.get("matched_tier"),
             conditions_met=data.get("conditions_met", 0),
             conditions_total=data.get("conditions_total", 0),
             evidence_available=data.get("evidence_available", False),
@@ -142,8 +141,8 @@ class AgentFindings:
 
     def to_dict(self) -> dict:
         return {
-            "precedent_matched": self.precedent_matched,
-            "precedent_tier": self.precedent_tier,
+            "matched_ticket": self.matched_ticket,
+            "matched_tier": self.matched_tier,
             "conditions_met": self.conditions_met,
             "conditions_total": self.conditions_total,
             "evidence_available": self.evidence_available,

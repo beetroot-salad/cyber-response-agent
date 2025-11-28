@@ -80,8 +80,8 @@ def investigate(ticket_id: str, signature_id: str, alert_data: dict) -> dict:
 
     if "error" in knowledge:
         return {
-            "precedent_matched": None,
-            "precedent_tier": None,
+            "matched_ticket": None,
+            "matched_tier": None,
             "conditions_met": 0,
             "conditions_total": 0,
             "evidence_available": False,
@@ -94,8 +94,8 @@ def investigate(ticket_id: str, signature_id: str, alert_data: dict) -> dict:
     srcuser = alert_data.get("srcuser", "")
 
     findings = []
-    precedent_matched = None
-    precedent_tier = None
+    matched_ticket = None
+    matched_tier = None
     conditions_met = 0
     conditions_total = 3
 
@@ -118,41 +118,40 @@ def investigate(ticket_id: str, signature_id: str, alert_data: dict) -> dict:
     else:
         findings.append(f"Source IP {srcip} is EXTERNAL")
 
-    # Check username pattern
+    # Check username pattern against past tickets
     monitoring_usernames = ["testuser", "probe", "monitor", "healthcheck", "nagios", "zabbix"]
     if srcuser.lower() in monitoring_usernames:
         findings.append(f"Username '{srcuser}' matches monitoring pattern")
         conditions_met += 1
         if is_internal:
-            precedent_matched = "prec-5710-001"
-            precedent_tier = "gold"
+            matched_ticket = "SEC-20240115-001"  # monitoring-probe past ticket
+            matched_tier = "gold"
 
     service_patterns = ["svc-", "backup-", "cron-", "ansible-", "deploy-"]
     if any(srcuser.lower().startswith(p) for p in service_patterns):
         findings.append(f"Username '{srcuser}' matches service account pattern")
         conditions_met += 1
         if is_internal:
-            precedent_matched = "prec-5710-005"
-            precedent_tier = "gold"
+            matched_ticket = "SEC-20240120-007"  # service-account past ticket
+            matched_tier = "gold"
 
     # Evidence availability (stub: always true for now)
     evidence_available = True
     findings.append("Evidence gathered from alert data")
 
     # Build reasoning
-    if precedent_matched:
-        reasoning = f"Alert matches {precedent_matched}: {', '.join(findings)}"
+    if matched_ticket:
+        reasoning = f"Alert matches past ticket {matched_ticket}: {', '.join(findings)}"
     elif not is_internal:
         reasoning = "External IP - requires escalation for potential brute force"
-        # Check if brute force pattern
-        precedent_matched = "prec-5710-003"
-        precedent_tier = "gold"
+        matched_ticket = "SEC-20240118-003"  # brute-force past ticket
+        matched_tier = "gold"
     else:
         reasoning = f"Internal IP but no clear pattern match. Findings: {', '.join(findings)}"
 
     return {
-        "precedent_matched": precedent_matched,
-        "precedent_tier": precedent_tier,
+        "matched_ticket": matched_ticket,
+        "matched_tier": matched_tier,
         "conditions_met": conditions_met,
         "conditions_total": conditions_total,
         "evidence_available": evidence_available,

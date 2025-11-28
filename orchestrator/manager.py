@@ -18,9 +18,6 @@ Does NOT:
 
 import json
 import logging
-import subprocess
-import sys
-from pathlib import Path
 from typing import Optional
 
 from .confidence import calculate_confidence, get_decision
@@ -34,11 +31,8 @@ from .models import (
     utc_now,
 )
 
-
-# Configuration
-AGENT_SCRIPT = Path("/workspace/agent/investigation/investigate.py")
-DEFAULT_TIMEOUT_SECONDS = 600  # 10 minutes
-MAX_TIMEOUT_SECONDS = 1800  # 30 minutes
+# Import investigator directly
+from agent.investigation.investigate import investigate as run_investigation
 
 
 class InvestigationError(Exception):
@@ -79,40 +73,21 @@ def validate_alert_data(alert_data: dict) -> AlertData:
 
 def invoke_agent(
     alert: AlertData,
-    timeout: int = DEFAULT_TIMEOUT_SECONDS,
     logger: Optional[logging.Logger] = None,
-) -> str:
+) -> dict:
     """
-    Invoke investigation agent as subprocess.
+    Invoke investigation agent directly via Python import.
 
     Args:
         alert: Validated alert data
-        timeout: Maximum time in seconds
         logger: Logger for audit events
 
     Returns:
-        Agent's JSON response as string
+        Agent findings as dictionary
 
     Raises:
         InvestigationError: If agent fails
     """
-    if timeout > MAX_TIMEOUT_SECONDS:
-        timeout = MAX_TIMEOUT_SECONDS
-
-    # Pass full alert as JSON
-    alert_json = json.dumps(alert.to_dict())
-
-    cmd = [
-        sys.executable,
-        str(AGENT_SCRIPT),
-        "--ticket-id",
-        alert.ticket_id,
-        "--signature-id",
-        alert.signature_id,
-        "--alert-json",
-        alert_json,
-    ]
-
     if logger:
         log_event(
             logger,
@@ -120,16 +95,14 @@ def invoke_agent(
             message=f"Invoking investigation agent for {alert.ticket_id}",
             ticket_id=alert.ticket_id,
             signature_id=alert.signature_id,
-            data={"timeout": timeout, "alert": alert.to_dict()},
+            data={"alert": alert.to_dict()},
         )
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(AGENT_SCRIPT.parent),
+        result = run_investigation(
+            ticket_id=alert.ticket_id,
+            signature_id=alert.signature_id,
+            alert_data=alert.to_dict(),
         )
 
         if logger:
@@ -139,38 +112,30 @@ def invoke_agent(
                 message=f"Agent completed for {alert.ticket_id}",
                 ticket_id=alert.ticket_id,
                 signature_id=alert.signature_id,
-                data={
-                    "return_code": result.returncode,
-                    "stdout_length": len(result.stdout),
-                    "stderr_length": len(result.stderr),
-                },
             )
 
-        if result.returncode != 0:
-            raise InvestigationError(f"Agent failed with code {result.returncode}: {result.stderr}")
+        return result
 
-        return result.stdout
-
-    except subprocess.TimeoutExpired:
+    except Exception as e:
         if logger:
             log_event(
                 logger,
-                event="agent_timeout",
-                message=f"Agent timed out for {alert.ticket_id}",
+                event="agent_error",
+                message=f"Agent error for {alert.ticket_id}: {e}",
                 ticket_id=alert.ticket_id,
                 signature_id=alert.signature_id,
-                data={"timeout": timeout},
+                data={"error": str(e)},
                 level=logging.ERROR,
             )
-        raise InvestigationError(f"Agent timed out after {timeout} seconds")
+        raise InvestigationError(f"Agent failed: {e}")
 
 
-def parse_agent_response(response: str) -> AgentFindings:
+def parse_agent_response(response: dict) -> AgentFindings:
     """
-    Parse the agent's JSON response into AgentFindings.
+    Parse the agent's response dict into AgentFindings.
 
     Args:
-        response: JSON string from agent
+        response: Dictionary from agent
 
     Returns:
         AgentFindings dataclass
@@ -178,17 +143,13 @@ def parse_agent_response(response: str) -> AgentFindings:
     Raises:
         InvestigationError: If parsing fails
     """
-    response = response.strip()
-
-    # Handle empty response
     if not response:
         raise InvestigationError("Agent returned empty response")
 
-    try:
-        data = json.loads(response)
-        return AgentFindings.from_json(data)
-    except json.JSONDecodeError as e:
-        raise InvestigationError(f"Failed to parse agent response: {e}. Response: {response[:200]}")
+    if not isinstance(response, dict):
+        raise InvestigationError(f"Agent returned non-dict response: {type(response)}")
+
+    return AgentFindings.from_json(response)
 
 
 def determine_disposition(decision: Decision, findings: AgentFindings) -> Disposition:
@@ -209,10 +170,10 @@ def determine_disposition(decision: Decision, findings: AgentFindings) -> Dispos
         return Disposition.INCONCLUSIVE
 
     # AUTO_CLOSE - determine if benign or false positive based on findings
-    if findings.precedent_matched:
-        # Check if precedent indicates true positive or false positive
-        precedent = findings.precedent_matched.lower()
-        if "brute" in precedent or "attack" in precedent:
+    if findings.matched_ticket:
+        # Check if matched ticket indicates true positive or false positive
+        ticket = findings.matched_ticket.lower()
+        if "brute" in ticket or "attack" in ticket:
             return Disposition.TRUE_POSITIVE
         else:
             return Disposition.FALSE_POSITIVE
@@ -224,7 +185,6 @@ def process_alert(
     alert_data: dict,
     asset_criticality: str = "standard",
     reproduction_result: Optional[str] = None,
-    timeout: int = DEFAULT_TIMEOUT_SECONDS,
     logger: Optional[logging.Logger] = None,
 ) -> InvestigationSummary:
     """
@@ -236,7 +196,6 @@ def process_alert(
         alert_data: Raw alert data from SIEM (must include ticket_id, signature_id, agent)
         asset_criticality: "standard", "elevated", or "critical"
         reproduction_result: "confirmed", "refuted", or None
-        timeout: Agent timeout in seconds
         logger: Logger for audit events
 
     Returns:
@@ -271,7 +230,7 @@ def process_alert(
         )
 
         # 2. Invoke agent
-        response = invoke_agent(alert, timeout, logger)
+        response = invoke_agent(alert, logger)
 
         # 3. Parse response
         findings = parse_agent_response(response)
@@ -287,7 +246,7 @@ def process_alert(
 
         # 4. Calculate confidence
         confidence = calculate_confidence(
-            precedent_tier=findings.precedent_tier,
+            matched_tier=findings.matched_tier,
             conditions_met=findings.conditions_met,
             conditions_total=findings.conditions_total,
             evidence_available=findings.evidence_available,
@@ -305,7 +264,7 @@ def process_alert(
         )
 
         # 5. Make decision
-        decision = get_decision(confidence, findings.precedent_matched is not None)
+        decision = get_decision(confidence, findings.matched_ticket is not None)
 
         # 6. Determine disposition
         disposition = determine_disposition(decision, findings)

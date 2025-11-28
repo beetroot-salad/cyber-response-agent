@@ -2,6 +2,7 @@
   "ticket_id": "SEC-2024-002",
   "alert_id": "wazuh-5710-def456",
   "signature_id": "wazuh-rule-5710",
+  "tier": "gold",
   "timestamp": "2024-11-16T09:15:00Z",
   "status": "closed",
   "disposition": "benign",

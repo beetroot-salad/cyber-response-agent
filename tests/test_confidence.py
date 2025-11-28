@@ -13,7 +13,7 @@ class TestCalculateConfidence:
     def test_gold_tier_all_conditions_met(self):
         """Gold tier with all conditions met should give 1.0."""
         result = calculate_confidence(
-            precedent_tier="gold",
+            matched_tier="gold",
             conditions_met=4,
             conditions_total=4,
             evidence_available=True,
@@ -23,7 +23,7 @@ class TestCalculateConfidence:
     def test_gold_tier_half_conditions(self):
         """Gold tier with half conditions should give 0.90."""
         result = calculate_confidence(
-            precedent_tier="gold",
+            matched_tier="gold",
             conditions_met=2,
             conditions_total=4,
             evidence_available=True,
@@ -33,7 +33,7 @@ class TestCalculateConfidence:
     def test_gold_tier_quarter_conditions(self):
         """Gold tier with quarter conditions should give 0.85."""
         result = calculate_confidence(
-            precedent_tier="gold",
+            matched_tier="gold",
             conditions_met=1,
             conditions_total=4,
             evidence_available=True,
@@ -43,7 +43,7 @@ class TestCalculateConfidence:
     def test_gold_tier_with_reproduction_confirmed(self):
         """Reproduction confirmed should add 0.15 (clamped to 1.0)."""
         result = calculate_confidence(
-            precedent_tier="gold",
+            matched_tier="gold",
             conditions_met=4,
             conditions_total=4,
             evidence_available=True,
@@ -54,7 +54,7 @@ class TestCalculateConfidence:
     def test_gold_tier_critical_asset(self):
         """Critical asset should subtract 0.25."""
         result = calculate_confidence(
-            precedent_tier="gold",
+            matched_tier="gold",
             conditions_met=4,
             conditions_total=4,
             evidence_available=True,
@@ -65,7 +65,7 @@ class TestCalculateConfidence:
     def test_no_precedent(self):
         """No precedent should give 0.0."""
         result = calculate_confidence(
-            precedent_tier=None,
+            matched_tier=None,
             conditions_met=0,
             conditions_total=0,
             evidence_available=False,
@@ -75,7 +75,7 @@ class TestCalculateConfidence:
     def test_reproduction_refuted(self):
         """Reproduction refuted should subtract 0.30."""
         result = calculate_confidence(
-            precedent_tier="gold",
+            matched_tier="gold",
             conditions_met=4,
             conditions_total=4,
             evidence_available=True,
@@ -86,7 +86,7 @@ class TestCalculateConfidence:
     def test_silver_tier(self):
         """Silver tier base score is 0.50."""
         result = calculate_confidence(
-            precedent_tier="silver",
+            matched_tier="silver",
             conditions_met=3,
             conditions_total=4,
             evidence_available=True,
@@ -96,7 +96,7 @@ class TestCalculateConfidence:
     def test_bronze_tier(self):
         """Bronze tier base score is 0.30."""
         result = calculate_confidence(
-            precedent_tier="bronze",
+            matched_tier="bronze",
             conditions_met=4,
             conditions_total=4,
             evidence_available=True,
@@ -106,7 +106,7 @@ class TestCalculateConfidence:
     def test_no_evidence(self):
         """No evidence should not add 0.10 bonus."""
         result = calculate_confidence(
-            precedent_tier="gold",
+            matched_tier="gold",
             conditions_met=4,
             conditions_total=4,
             evidence_available=False,
@@ -116,7 +116,7 @@ class TestCalculateConfidence:
     def test_elevated_asset(self):
         """Elevated asset should subtract 0.10."""
         result = calculate_confidence(
-            precedent_tier="gold",
+            matched_tier="gold",
             conditions_met=4,
             conditions_total=4,
             evidence_available=True,
@@ -127,7 +127,7 @@ class TestCalculateConfidence:
     def test_zero_conditions_total(self):
         """Zero total conditions should not cause division error."""
         result = calculate_confidence(
-            precedent_tier="gold",
+            matched_tier="gold",
             conditions_met=0,
             conditions_total=0,
             evidence_available=True,
@@ -138,7 +138,7 @@ class TestCalculateConfidence:
         """Negative conditions_met should raise ValueError."""
         with pytest.raises(ValueError, match="conditions_met cannot be negative"):
             calculate_confidence(
-                precedent_tier="gold",
+                matched_tier="gold",
                 conditions_met=-1,
                 conditions_total=4,
                 evidence_available=True,
@@ -148,7 +148,7 @@ class TestCalculateConfidence:
         """conditions_met > conditions_total should raise ValueError."""
         with pytest.raises(ValueError, match="conditions_met cannot exceed"):
             calculate_confidence(
-                precedent_tier="gold",
+                matched_tier="gold",
                 conditions_met=5,
                 conditions_total=4,
                 evidence_available=True,
@@ -158,7 +158,7 @@ class TestCalculateConfidence:
         """Invalid asset_criticality should raise ValueError."""
         with pytest.raises(ValueError, match="Invalid asset_criticality"):
             calculate_confidence(
-                precedent_tier="gold",
+                matched_tier="gold",
                 conditions_met=4,
                 conditions_total=4,
                 evidence_available=True,
@@ -169,7 +169,7 @@ class TestCalculateConfidence:
         """Invalid reproduction_result should raise ValueError."""
         with pytest.raises(ValueError, match="Invalid reproduction_result"):
             calculate_confidence(
-                precedent_tier="gold",
+                matched_tier="gold",
                 conditions_met=4,
                 conditions_total=4,
                 evidence_available=True,

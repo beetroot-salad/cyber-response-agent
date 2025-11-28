@@ -41,7 +41,7 @@ CRITICALITY_PENALTIES: dict[str, float] = {
 
 
 def calculate_confidence(
-    precedent_tier: Optional[str],
+    matched_tier: Optional[str],
     conditions_met: int,
     conditions_total: int,
     evidence_available: bool,
@@ -52,7 +52,7 @@ def calculate_confidence(
     Calculate confidence score for auto-close decision.
 
     Args:
-        precedent_tier: "gold", "silver", "bronze", or None
+        matched_tier: "gold", "silver", "bronze", or None (from matched past ticket)
         conditions_met: Number of conditions satisfied
         conditions_total: Total number of conditions to check
         evidence_available: Whether sufficient evidence was gathered
@@ -74,8 +74,8 @@ def calculate_confidence(
     if reproduction_result is not None and reproduction_result not in REPRODUCTION_MODIFIERS:
         raise ValueError(f"Invalid reproduction_result: {reproduction_result}")
 
-    # Base score from precedent tier
-    base = TIER_SCORES.get(precedent_tier, 0.0)
+    # Base score from matched ticket tier
+    base = TIER_SCORES.get(matched_tier, 0.0)
 
     # Condition satisfaction ratio (up to 0.20)
     if conditions_total > 0:

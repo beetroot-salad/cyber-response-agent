@@ -56,3 +56,6 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# Knowledge base - past tickets (contain sensitive alert data)
+knowledge/signatures/*/past-tickets/

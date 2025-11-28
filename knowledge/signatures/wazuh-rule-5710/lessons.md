@@ -4,20 +4,15 @@
 
 ## Tips
 
-- Monitoring probes often use predictable usernames: `testuser`, `probe`, `nagios`, `zabbix`
-- User typos usually show failure → success within 30-60 seconds
-- Service accounts follow naming conventions: `svc-*`, `backup-*`, `ansible-*`, `deploy-*`
-- Check the time of day - overnight activity from internal IPs may still be suspicious
+*(No tips recorded yet. Format: "Observation text @TICKET-ID")*
 
 ## Common Pitfalls
 
-- Don't assume internal IP = safe (compromised internal hosts exist)
-- Check for multiple usernames even from internal IPs
-- A single failed attempt can still be the start of something larger
+*(No pitfalls recorded yet. Format: "Pitfall description @TICKET-ID")*
 
 ## Patterns Observed
 
-- *(Will be populated from past investigations)*
+*(No patterns recorded yet. Format: "**Pattern name**: description @TICKET-ID")*
 
 ## Environment-Specific Notes
 
