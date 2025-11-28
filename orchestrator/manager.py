@@ -1,155 +1,247 @@
 """
-Orchestrator Manager - Pure manager that invokes Claude Code agent.
+Orchestrator Manager - Pure manager that invokes investigation agent.
 
 Responsibilities:
 - Receive ticket (alert data)
-- Invoke Claude Code agent with ticket
+- Validate input
+- Invoke investigation agent subprocess
 - Parse structured JSON response
 - Calculate confidence score
 - Make routing decision
-- Log audit trail to stdout
+- Log audit trail
+
+Does NOT:
+- Build investigation prompts (agent's job)
+- Fetch context/knowledge (agent's job)
+- Query SIEM (agent's job)
 """
 
 import json
+import logging
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from .confidence import calculate_confidence, get_decision
-from .models import AgentFindings, InvestigationResult
+from .logging_config import log_event, setup_logging
+from .models import (
+    AgentFindings,
+    Decision,
+    Disposition,
+    InvestigationResult,
+    utc_now,
+)
 
 
-# Paths
-AGENT_DIR = Path("/workspace/agent/investigation")
-KNOWLEDGE_DIR = Path("/workspace/knowledge")
+# Configuration
+AGENT_SCRIPT = Path("/workspace/agent/investigation/investigate.py")
+DEFAULT_TIMEOUT_SECONDS = 600  # 10 minutes
+MAX_TIMEOUT_SECONDS = 1800  # 30 minutes
 
 
-def build_agent_prompt(alert_data: dict, signature_id: str) -> str:
+class InvestigationError(Exception):
+    """Raised when investigation fails."""
+
+    pass
+
+
+class ValidationError(Exception):
+    """Raised when input validation fails."""
+
+    pass
+
+
+def validate_ticket_id(ticket_id: str) -> str:
+    """Validate and sanitize ticket ID."""
+    if not ticket_id:
+        raise ValidationError("ticket_id is required")
+    if not isinstance(ticket_id, str):
+        raise ValidationError("ticket_id must be a string")
+    # Basic sanitization - alphanumeric, dash, underscore only
+    sanitized = "".join(c for c in ticket_id if c.isalnum() or c in "-_")
+    if len(sanitized) != len(ticket_id):
+        raise ValidationError("ticket_id contains invalid characters")
+    if len(sanitized) > 100:
+        raise ValidationError("ticket_id too long (max 100 chars)")
+    return sanitized
+
+
+def validate_signature_id(signature_id: str) -> str:
+    """Validate and sanitize signature ID."""
+    if not signature_id:
+        raise ValidationError("signature_id is required")
+    if not isinstance(signature_id, str):
+        raise ValidationError("signature_id must be a string")
+    # Basic sanitization - alphanumeric, dash, underscore only
+    sanitized = "".join(c for c in signature_id if c.isalnum() or c in "-_")
+    if len(sanitized) != len(signature_id):
+        raise ValidationError("signature_id contains invalid characters")
+    if len(sanitized) > 100:
+        raise ValidationError("signature_id too long (max 100 chars)")
+    return sanitized
+
+
+def validate_alert_data(alert_data: dict) -> dict:
+    """Validate alert data structure."""
+    if not alert_data:
+        raise ValidationError("alert_data is required")
+    if not isinstance(alert_data, dict):
+        raise ValidationError("alert_data must be a dictionary")
+
+    # Required fields for SSH alerts
+    required_fields = ["srcip", "srcuser"]
+    missing = [f for f in required_fields if f not in alert_data]
+    if missing:
+        raise ValidationError(f"alert_data missing required fields: {missing}")
+
+    return alert_data
+
+
+def invoke_agent(
+    ticket_id: str,
+    signature_id: str,
+    alert_data: dict,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    logger: logging.Logger = None,
+) -> str:
     """
-    Build the prompt to send to the investigation agent.
-
-    The agent will:
-    1. Read the signature knowledge files
-    2. Query Wazuh MCP for related events
-    3. Match against precedents
-    4. Return structured JSON findings
-    """
-    return f"""You are a security analyst investigating an alert.
-
-## Alert Data
-```json
-{json.dumps(alert_data, indent=2)}
-```
-
-## Signature ID
-{signature_id}
-
-## Instructions
-
-1. **Read the signature knowledge** from `/workspace/knowledge/signatures/{signature_id}/`:
-   - `rule.md` - Understand the rule
-   - `playbook.md` - Follow investigation steps
-   - `lessons.md` - Apply lessons learned
-   - `past-tickets/` - Reference similar past cases
-
-2. **Read common knowledge** from `/workspace/knowledge/common/`:
-   - `lessons/ip-classification.md` - For IP analysis
-   - `utilities/wazuh-queries.md` - For query patterns
-
-3. **Gather evidence** using Wazuh MCP to query:
-   - Failed attempts from same source IP (last 5 min)
-   - Successful logins from same source IP (last 60 sec)
-   - Distinct usernames attempted
-
-4. **Match against patterns** in the playbook
-
-5. **Return ONLY a JSON object** (no other text) with this structure:
-```json
-{{
-  "precedent_matched": "prec-5710-001 or null",
-  "precedent_tier": "gold or null",
-  "conditions_met": 3,
-  "conditions_total": 4,
-  "evidence_available": true,
-  "findings": ["Finding 1", "Finding 2"],
-  "reasoning": "Explanation of match/no-match"
-}}
-```
-
-Return ONLY the JSON object, no markdown code blocks, no explanation.
-"""
-
-
-def invoke_agent(prompt: str, timeout: int = 120) -> str:
-    """
-    Invoke Claude Code agent as subprocess.
+    Invoke investigation agent as subprocess.
 
     Args:
-        prompt: The investigation prompt
+        ticket_id: Ticket identifier
+        signature_id: Alert signature ID
+        alert_data: Alert data dictionary
         timeout: Maximum time in seconds
+        logger: Logger for audit events
 
     Returns:
-        Agent's response text
+        Agent's JSON response as string
+
+    Raises:
+        InvestigationError: If agent fails
     """
-    # Run claude from the agent directory so it picks up the .claude config
-    result = subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "text"],
-        cwd=str(AGENT_DIR),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    if timeout > MAX_TIMEOUT_SECONDS:
+        timeout = MAX_TIMEOUT_SECONDS
 
-    if result.returncode != 0:
-        raise RuntimeError(f"Agent failed: {result.stderr}")
+    alert_json = json.dumps(alert_data)
 
-    return result.stdout
+    cmd = [
+        sys.executable,
+        str(AGENT_SCRIPT),
+        "--ticket-id",
+        ticket_id,
+        "--signature-id",
+        signature_id,
+        "--alert-json",
+        alert_json,
+    ]
+
+    if logger:
+        log_event(
+            logger,
+            event="agent_invoked",
+            message=f"Invoking investigation agent for {ticket_id}",
+            ticket_id=ticket_id,
+            signature_id=signature_id,
+            data={"timeout": timeout, "alert_data": alert_data},
+        )
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(AGENT_SCRIPT.parent),
+        )
+
+        if logger:
+            log_event(
+                logger,
+                event="agent_completed",
+                message=f"Agent completed for {ticket_id}",
+                ticket_id=ticket_id,
+                signature_id=signature_id,
+                data={
+                    "return_code": result.returncode,
+                    "stdout_length": len(result.stdout),
+                    "stderr_length": len(result.stderr),
+                },
+            )
+
+        if result.returncode != 0:
+            raise InvestigationError(f"Agent failed with code {result.returncode}: {result.stderr}")
+
+        return result.stdout
+
+    except subprocess.TimeoutExpired:
+        if logger:
+            log_event(
+                logger,
+                event="agent_timeout",
+                message=f"Agent timed out for {ticket_id}",
+                ticket_id=ticket_id,
+                signature_id=signature_id,
+                data={"timeout": timeout},
+                level=logging.ERROR,
+            )
+        raise InvestigationError(f"Agent timed out after {timeout} seconds")
 
 
 def parse_agent_response(response: str) -> AgentFindings:
     """
     Parse the agent's JSON response into AgentFindings.
 
-    Handles cases where the agent might include extra text.
+    Args:
+        response: JSON string from agent
+
+    Returns:
+        AgentFindings dataclass
+
+    Raises:
+        InvestigationError: If parsing fails
     """
-    # Try to find JSON in the response
     response = response.strip()
 
-    # If response is wrapped in code blocks, extract it
-    if "```json" in response:
-        start = response.find("```json") + 7
-        end = response.find("```", start)
-        response = response[start:end].strip()
-    elif "```" in response:
-        start = response.find("```") + 3
-        end = response.find("```", start)
-        response = response[start:end].strip()
-
-    # Try to find JSON object
-    if response.startswith("{"):
-        # Find the matching closing brace
-        brace_count = 0
-        end_idx = 0
-        for i, char in enumerate(response):
-            if char == "{":
-                brace_count += 1
-            elif char == "}":
-                brace_count -= 1
-                if brace_count == 0:
-                    end_idx = i + 1
-                    break
-        response = response[:end_idx]
+    # Handle empty response
+    if not response:
+        raise InvestigationError("Agent returned empty response")
 
     try:
         data = json.loads(response)
         return AgentFindings.from_json(data)
     except json.JSONDecodeError as e:
-        # Return empty findings if parsing fails
-        return AgentFindings(
-            reasoning=f"Failed to parse agent response: {e}. Raw: {response[:200]}"
-        )
+        raise InvestigationError(f"Failed to parse agent response: {e}. Response: {response[:200]}")
+
+
+def determine_disposition(decision: Decision, findings: AgentFindings) -> Disposition:
+    """
+    Determine disposition based on decision and findings.
+
+    Args:
+        decision: Routing decision
+        findings: Agent findings
+
+    Returns:
+        Disposition enum value
+    """
+    if decision == Decision.ESCALATE:
+        return Disposition.ESCALATED
+
+    if decision == Decision.REPRODUCE:
+        return Disposition.INCONCLUSIVE
+
+    # AUTO_CLOSE - determine if benign or false positive based on findings
+    if findings.precedent_matched:
+        # Check if precedent indicates true positive or false positive
+        precedent = findings.precedent_matched.lower()
+        if "brute" in precedent or "attack" in precedent:
+            return Disposition.TRUE_POSITIVE
+        else:
+            return Disposition.FALSE_POSITIVE
+
+    return Disposition.BENIGN
 
 
 def process_ticket(
@@ -158,6 +250,8 @@ def process_ticket(
     alert_data: dict,
     asset_criticality: str = "standard",
     reproduction_result: Optional[str] = None,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    logger: logging.Logger = None,
 ) -> InvestigationResult:
     """
     Process a security ticket through the investigation pipeline.
@@ -170,21 +264,47 @@ def process_ticket(
         alert_data: Raw alert data from SIEM
         asset_criticality: "standard", "elevated", or "critical"
         reproduction_result: "confirmed", "refuted", or None
+        timeout: Agent timeout in seconds
+        logger: Logger for audit events
 
     Returns:
         InvestigationResult with decision and audit trail
     """
-    started_at = datetime.utcnow()
+    if logger is None:
+        logger = setup_logging()
+
+    started_at = utc_now()
+
+    # Log investigation start
+    log_event(
+        logger,
+        event="investigation_started",
+        message=f"Starting investigation for {ticket_id}",
+        ticket_id=ticket_id,
+        signature_id=signature_id,
+        data={"alert_data": alert_data, "asset_criticality": asset_criticality},
+    )
 
     try:
-        # 1. Build prompt for agent
-        prompt = build_agent_prompt(alert_data, signature_id)
+        # 1. Validate inputs
+        ticket_id = validate_ticket_id(ticket_id)
+        signature_id = validate_signature_id(signature_id)
+        alert_data = validate_alert_data(alert_data)
 
         # 2. Invoke agent
-        response = invoke_agent(prompt)
+        response = invoke_agent(ticket_id, signature_id, alert_data, timeout, logger)
 
         # 3. Parse response
         findings = parse_agent_response(response)
+
+        log_event(
+            logger,
+            event="findings_parsed",
+            message=f"Parsed findings for {ticket_id}",
+            ticket_id=ticket_id,
+            signature_id=signature_id,
+            data=findings.to_dict(),
+        )
 
         # 4. Calculate confidence
         confidence = calculate_confidence(
@@ -196,16 +316,20 @@ def process_ticket(
             asset_criticality=asset_criticality,
         )
 
+        log_event(
+            logger,
+            event="confidence_calculated",
+            message=f"Confidence for {ticket_id}: {confidence:.2f}",
+            ticket_id=ticket_id,
+            signature_id=signature_id,
+            data={"confidence": confidence, "asset_criticality": asset_criticality},
+        )
+
         # 5. Make decision
         decision = get_decision(confidence, findings.precedent_matched is not None)
 
         # 6. Determine disposition
-        if decision == "auto_close":
-            disposition = "benign"
-        elif decision == "escalate":
-            disposition = "escalated"
-        else:
-            disposition = None  # Reproduce doesn't have final disposition yet
+        disposition = determine_disposition(decision, findings)
 
         result = InvestigationResult(
             ticket_id=ticket_id,
@@ -216,121 +340,69 @@ def process_ticket(
             decision=decision,
             disposition=disposition,
             started_at=started_at,
-            completed_at=datetime.utcnow(),
+            completed_at=utc_now(),
         )
 
-    except Exception as e:
-        # Return error result
-        result = InvestigationResult(
+        log_event(
+            logger,
+            event="investigation_completed",
+            message=f"Investigation completed for {ticket_id}: {decision.value}",
+            ticket_id=ticket_id,
+            signature_id=signature_id,
+            data={
+                "decision": decision.value,
+                "disposition": disposition.value,
+                "confidence": confidence,
+                "duration_ms": int((result.completed_at - result.started_at).total_seconds() * 1000),
+            },
+        )
+
+        return result
+
+    except (ValidationError, InvestigationError) as e:
+        log_event(
+            logger,
+            event="investigation_failed",
+            message=f"Investigation failed for {ticket_id}: {e}",
+            ticket_id=ticket_id,
+            signature_id=signature_id,
+            data={"error": str(e)},
+            level=logging.ERROR,
+        )
+
+        return InvestigationResult(
             ticket_id=ticket_id,
             signature_id=signature_id,
             alert_data=alert_data,
             findings=AgentFindings(),
             confidence_score=0.0,
-            decision="escalate",
-            disposition="error",
+            decision=Decision.ESCALATE,
+            disposition=Disposition.ESCALATED,
             started_at=started_at,
-            completed_at=datetime.utcnow(),
+            completed_at=utc_now(),
             error=str(e),
         )
 
-    # 7. Log audit trail to stdout
-    print(result.to_json(), file=sys.stdout)
-
-    return result
-
-
-def process_ticket_mock(
-    ticket_id: str,
-    signature_id: str,
-    alert_data: dict,
-    mock_findings: AgentFindings,
-    asset_criticality: str = "standard",
-    reproduction_result: Optional[str] = None,
-) -> InvestigationResult:
-    """
-    Process a ticket with mock agent findings (for testing).
-
-    Same as process_ticket but skips agent invocation.
-    """
-    started_at = datetime.utcnow()
-
-    # Calculate confidence
-    confidence = calculate_confidence(
-        precedent_tier=mock_findings.precedent_tier,
-        conditions_met=mock_findings.conditions_met,
-        conditions_total=mock_findings.conditions_total,
-        evidence_available=mock_findings.evidence_available,
-        reproduction_result=reproduction_result,
-        asset_criticality=asset_criticality,
-    )
-
-    # Make decision
-    decision = get_decision(confidence, mock_findings.precedent_matched is not None)
-
-    # Determine disposition
-    if decision == "auto_close":
-        disposition = "benign"
-    elif decision == "escalate":
-        disposition = "escalated"
-    else:
-        disposition = None
-
-    result = InvestigationResult(
-        ticket_id=ticket_id,
-        signature_id=signature_id,
-        alert_data=alert_data,
-        findings=mock_findings,
-        confidence_score=confidence,
-        decision=decision,
-        disposition=disposition,
-        started_at=started_at,
-        completed_at=datetime.utcnow(),
-    )
-
-    # Log audit trail
-    print(result.to_json(), file=sys.stdout)
-
-    return result
-
-
-# Self-test when run directly
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Orchestrator Manager")
-    parser.add_argument("--test", action="store_true", help="Run mock test")
-    args = parser.parse_args()
-
-    if args.test:
-        print("Running mock test...\n")
-
-        # Test with mock findings (internal IP, monitoring probe pattern)
-        mock_findings = AgentFindings(
-            precedent_matched="prec-5710-001",
-            precedent_tier="gold",
-            conditions_met=3,
-            conditions_total=3,
-            evidence_available=True,
-            findings=[
-                "Source IP 10.0.1.50 is internal (RFC1918)",
-                "Username 'testuser' matches monitoring pattern",
-                "Single attempt, no repetition",
-            ],
-            reasoning="Matches monitoring probe precedent: internal IP, monitoring username, single attempt",
+    except Exception as e:
+        log_event(
+            logger,
+            event="investigation_error",
+            message=f"Unexpected error for {ticket_id}: {e}",
+            ticket_id=ticket_id,
+            signature_id=signature_id,
+            data={"error": str(e), "error_type": type(e).__name__},
+            level=logging.ERROR,
         )
 
-        result = process_ticket_mock(
-            ticket_id="TEST-001",
-            signature_id="wazuh-rule-5710",
-            alert_data={
-                "srcip": "10.0.1.50",
-                "srcuser": "testuser",
-                "agent": "web-server-01",
-            },
-            mock_findings=mock_findings,
+        return InvestigationResult(
+            ticket_id=ticket_id,
+            signature_id=signature_id,
+            alert_data=alert_data,
+            findings=AgentFindings(),
+            confidence_score=0.0,
+            decision=Decision.ESCALATE,
+            disposition=Disposition.ESCALATED,
+            started_at=started_at,
+            completed_at=utc_now(),
+            error=f"Unexpected error: {type(e).__name__}: {e}",
         )
-
-        print(f"\nDecision: {result.decision}")
-        print(f"Confidence: {result.confidence_score:.2f}")
-        print(f"Disposition: {result.disposition}")
