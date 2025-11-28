@@ -80,7 +80,7 @@ def validate_alert_data(alert_data: dict) -> AlertData:
 def invoke_agent(
     alert: AlertData,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
-    logger: logging.Logger = None,
+    logger: Optional[logging.Logger] = None,
 ) -> str:
     """
     Invoke investigation agent as subprocess.
@@ -225,7 +225,7 @@ def process_alert(
     asset_criticality: str = "standard",
     reproduction_result: Optional[str] = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
-    logger: logging.Logger = None,
+    logger: Optional[logging.Logger] = None,
 ) -> InvestigationSummary:
     """
     Process a security alert through the investigation pipeline.
