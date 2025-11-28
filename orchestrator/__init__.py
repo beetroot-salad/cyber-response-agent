@@ -10,14 +10,14 @@ from .logging_config import log_event, setup_logging
 from .manager import (
     InvestigationError,
     ValidationError,
-    process_ticket,
+    process_alert,
 )
 from .models import (
     AgentFindings,
     AlertData,
     Decision,
     Disposition,
-    InvestigationResult,
+    InvestigationSummary,
     PrecedentTier,
 )
 
@@ -31,12 +31,12 @@ __all__ = [
     # Manager
     "InvestigationError",
     "ValidationError",
-    "process_ticket",
+    "process_alert",
     # Models
     "AgentFindings",
     "AlertData",
     "Decision",
     "Disposition",
-    "InvestigationResult",
+    "InvestigationSummary",
     "PrecedentTier",
 ]

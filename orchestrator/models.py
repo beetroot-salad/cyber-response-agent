@@ -5,7 +5,7 @@ Data models for the orchestrator.
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 import json
 
 
@@ -41,11 +41,86 @@ def utc_now() -> datetime:
 
 
 @dataclass
+class AlertData:
+    """
+    Alert metadata from SIEM.
+
+    Core fields are explicit, incident-specific fields go in `raw`.
+    """
+
+    # Core metadata
+    ticket_id: str
+    signature_id: str
+    timestamp: datetime
+    agent: str  # Host/agent where alert originated
+
+    # Flexible incident data (srcip, srcuser, etc.)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AlertData":
+        """Parse and validate alert data from dictionary."""
+        # Required metadata fields
+        required = ["ticket_id", "signature_id", "agent"]
+        missing = [f for f in required if f not in data]
+        if missing:
+            raise ValueError(f"Missing required alert fields: {missing}")
+
+        # Parse timestamp
+        ts = data.get("timestamp")
+        if isinstance(ts, str):
+            timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        elif isinstance(ts, datetime):
+            timestamp = ts
+        else:
+            timestamp = utc_now()
+
+        # Everything except core fields goes into raw
+        core_fields = {"ticket_id", "signature_id", "timestamp", "agent"}
+        raw = {k: v for k, v in data.items() if k not in core_fields}
+
+        return cls(
+            ticket_id=str(data["ticket_id"]),
+            signature_id=str(data["signature_id"]),
+            timestamp=timestamp,
+            agent=str(data["agent"]),
+            raw=raw,
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "ticket_id": self.ticket_id,
+            "signature_id": self.signature_id,
+            "timestamp": self.timestamp.isoformat(),
+            "agent": self.agent,
+            **self.raw,  # Flatten raw into output
+        }
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a field from raw data."""
+        return self.raw.get(key, default)
+
+
+@dataclass
 class AgentFindings:
-    """Structured findings returned by the investigation agent."""
+    """
+    Structured findings returned by the investigation agent.
+
+    Fields:
+        precedent_matched: ID of the matched precedent from the signature's
+            knowledge (e.g., "prec-5710-001"). None if no match.
+        precedent_tier: Quality tier of matched precedent ("gold", "silver", "bronze").
+        conditions_met: Number of "safe_when" or "escalate_when" conditions
+            satisfied for the matched precedent.
+        conditions_total: Total conditions defined for the matched precedent.
+        evidence_available: Whether the agent successfully gathered required
+            evidence (e.g., SIEM queries returned data, files were readable).
+        findings: List of observations made during investigation.
+        reasoning: Explanation of why precedent matched or didn't match.
+    """
 
     precedent_matched: Optional[str] = None
-    precedent_tier: Optional[str] = None  # "gold", "silver", "bronze", or None
+    precedent_tier: Optional[str] = None
     conditions_met: int = 0
     conditions_total: int = 0
     evidence_available: bool = False
@@ -78,62 +153,15 @@ class AgentFindings:
 
 
 @dataclass
-class AlertData:
-    """Validated alert data from SIEM."""
+class InvestigationSummary:
+    """
+    Complete summary of an investigation, including orchestrator decision.
 
-    srcip: str
-    srcuser: str
-    agent: str
-    rule_id: int
-    timestamp: datetime
-    raw: dict = field(default_factory=dict)
+    This is the final output of the investigation pipeline.
+    """
 
-    @classmethod
-    def from_dict(cls, data: dict) -> "AlertData":
-        """Parse and validate alert data from dictionary."""
-        # Required fields
-        required = ["srcip", "srcuser", "agent", "rule_id"]
-        missing = [f for f in required if f not in data]
-        if missing:
-            raise ValueError(f"Missing required alert fields: {missing}")
-
-        # Parse timestamp
-        ts = data.get("timestamp")
-        if isinstance(ts, str):
-            timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        elif isinstance(ts, datetime):
-            timestamp = ts
-        else:
-            timestamp = utc_now()
-
-        return cls(
-            srcip=str(data["srcip"]),
-            srcuser=str(data["srcuser"]),
-            agent=str(data["agent"]),
-            rule_id=int(data["rule_id"]),
-            timestamp=timestamp,
-            raw=data,
-        )
-
-    def to_dict(self) -> dict:
-        return {
-            "srcip": self.srcip,
-            "srcuser": self.srcuser,
-            "agent": self.agent,
-            "rule_id": self.rule_id,
-            "timestamp": self.timestamp.isoformat(),
-            "raw": self.raw,
-        }
-
-
-@dataclass
-class InvestigationResult:
-    """Complete result of an investigation, including orchestrator decision."""
-
-    # Input
-    ticket_id: str
-    signature_id: str
-    alert_data: dict
+    # Input alert
+    alert: AlertData
 
     # Agent findings
     findings: AgentFindings
@@ -143,27 +171,45 @@ class InvestigationResult:
     decision: Decision
     disposition: Optional[Disposition] = None
 
-    # Metadata
+    # Timing
     started_at: datetime = field(default_factory=utc_now)
     completed_at: Optional[datetime] = None
+
+    # Error (if any)
     error: Optional[str] = None
+
+    @property
+    def ticket_id(self) -> str:
+        return self.alert.ticket_id
+
+    @property
+    def signature_id(self) -> str:
+        return self.alert.signature_id
+
+    @property
+    def duration_ms(self) -> Optional[int]:
+        if self.completed_at:
+            return int((self.completed_at - self.started_at).total_seconds() * 1000)
+        return None
 
     def to_audit_dict(self) -> dict:
         """Format as audit log entry."""
         return {
             "timestamp": utc_now().isoformat(),
-            "event": "investigation_complete",
+            "event": "investigation_summary",
             "ticket_id": self.ticket_id,
             "signature_id": self.signature_id,
-            "alert_data": self.alert_data,
+            "alert": self.alert.to_dict(),
             "findings": self.findings.to_dict(),
             "confidence_score": self.confidence_score,
             "decision": self.decision.value if isinstance(self.decision, Decision) else self.decision,
             "disposition": self.disposition.value if isinstance(self.disposition, Disposition) else self.disposition,
-            "duration_ms": int((self.completed_at - self.started_at).total_seconds() * 1000) if self.completed_at else None,
+            "duration_ms": self.duration_ms,
             "error": self.error,
         }
 
     def to_json(self) -> str:
         """Serialize to JSON string."""
         return json.dumps(self.to_audit_dict(), indent=2)
+
+

@@ -2,7 +2,7 @@
 Orchestrator Manager - Pure manager that invokes investigation agent.
 
 Responsibilities:
-- Receive ticket (alert data)
+- Receive alert data
 - Validate input
 - Invoke investigation agent subprocess
 - Parse structured JSON response
@@ -27,9 +27,10 @@ from .confidence import calculate_confidence, get_decision
 from .logging_config import log_event, setup_logging
 from .models import (
     AgentFindings,
+    AlertData,
     Decision,
     Disposition,
-    InvestigationResult,
+    InvestigationSummary,
     utc_now,
 )
 
@@ -52,56 +53,32 @@ class ValidationError(Exception):
     pass
 
 
-def validate_ticket_id(ticket_id: str) -> str:
-    """Validate and sanitize ticket ID."""
-    if not ticket_id:
-        raise ValidationError("ticket_id is required")
-    if not isinstance(ticket_id, str):
-        raise ValidationError("ticket_id must be a string")
-    # Basic sanitization - alphanumeric, dash, underscore only
-    sanitized = "".join(c for c in ticket_id if c.isalnum() or c in "-_")
-    if len(sanitized) != len(ticket_id):
-        raise ValidationError("ticket_id contains invalid characters")
-    if len(sanitized) > 100:
-        raise ValidationError("ticket_id too long (max 100 chars)")
-    return sanitized
+def validate_alert_data(alert_data: dict) -> AlertData:
+    """
+    Validate and parse alert data into AlertData.
 
+    Args:
+        alert_data: Raw alert dictionary
 
-def validate_signature_id(signature_id: str) -> str:
-    """Validate and sanitize signature ID."""
-    if not signature_id:
-        raise ValidationError("signature_id is required")
-    if not isinstance(signature_id, str):
-        raise ValidationError("signature_id must be a string")
-    # Basic sanitization - alphanumeric, dash, underscore only
-    sanitized = "".join(c for c in signature_id if c.isalnum() or c in "-_")
-    if len(sanitized) != len(signature_id):
-        raise ValidationError("signature_id contains invalid characters")
-    if len(sanitized) > 100:
-        raise ValidationError("signature_id too long (max 100 chars)")
-    return sanitized
+    Returns:
+        Validated AlertData instance
 
-
-def validate_alert_data(alert_data: dict) -> dict:
-    """Validate alert data structure."""
+    Raises:
+        ValidationError: If validation fails
+    """
     if not alert_data:
         raise ValidationError("alert_data is required")
     if not isinstance(alert_data, dict):
         raise ValidationError("alert_data must be a dictionary")
 
-    # Required fields for SSH alerts
-    required_fields = ["srcip", "srcuser"]
-    missing = [f for f in required_fields if f not in alert_data]
-    if missing:
-        raise ValidationError(f"alert_data missing required fields: {missing}")
-
-    return alert_data
+    try:
+        return AlertData.from_dict(alert_data)
+    except ValueError as e:
+        raise ValidationError(str(e))
 
 
 def invoke_agent(
-    ticket_id: str,
-    signature_id: str,
-    alert_data: dict,
+    alert: AlertData,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     logger: logging.Logger = None,
 ) -> str:
@@ -109,9 +86,7 @@ def invoke_agent(
     Invoke investigation agent as subprocess.
 
     Args:
-        ticket_id: Ticket identifier
-        signature_id: Alert signature ID
-        alert_data: Alert data dictionary
+        alert: Validated alert data
         timeout: Maximum time in seconds
         logger: Logger for audit events
 
@@ -124,15 +99,16 @@ def invoke_agent(
     if timeout > MAX_TIMEOUT_SECONDS:
         timeout = MAX_TIMEOUT_SECONDS
 
-    alert_json = json.dumps(alert_data)
+    # Pass full alert as JSON
+    alert_json = json.dumps(alert.to_dict())
 
     cmd = [
         sys.executable,
         str(AGENT_SCRIPT),
         "--ticket-id",
-        ticket_id,
+        alert.ticket_id,
         "--signature-id",
-        signature_id,
+        alert.signature_id,
         "--alert-json",
         alert_json,
     ]
@@ -141,10 +117,10 @@ def invoke_agent(
         log_event(
             logger,
             event="agent_invoked",
-            message=f"Invoking investigation agent for {ticket_id}",
-            ticket_id=ticket_id,
-            signature_id=signature_id,
-            data={"timeout": timeout, "alert_data": alert_data},
+            message=f"Invoking investigation agent for {alert.ticket_id}",
+            ticket_id=alert.ticket_id,
+            signature_id=alert.signature_id,
+            data={"timeout": timeout, "alert": alert.to_dict()},
         )
 
     try:
@@ -160,9 +136,9 @@ def invoke_agent(
             log_event(
                 logger,
                 event="agent_completed",
-                message=f"Agent completed for {ticket_id}",
-                ticket_id=ticket_id,
-                signature_id=signature_id,
+                message=f"Agent completed for {alert.ticket_id}",
+                ticket_id=alert.ticket_id,
+                signature_id=alert.signature_id,
                 data={
                     "return_code": result.returncode,
                     "stdout_length": len(result.stdout),
@@ -180,9 +156,9 @@ def invoke_agent(
             log_event(
                 logger,
                 event="agent_timeout",
-                message=f"Agent timed out for {ticket_id}",
-                ticket_id=ticket_id,
-                signature_id=signature_id,
+                message=f"Agent timed out for {alert.ticket_id}",
+                ticket_id=alert.ticket_id,
+                signature_id=alert.signature_id,
                 data={"timeout": timeout},
                 level=logging.ERROR,
             )
@@ -244,55 +220,58 @@ def determine_disposition(decision: Decision, findings: AgentFindings) -> Dispos
     return Disposition.BENIGN
 
 
-def process_ticket(
-    ticket_id: str,
-    signature_id: str,
+def process_alert(
     alert_data: dict,
     asset_criticality: str = "standard",
     reproduction_result: Optional[str] = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     logger: logging.Logger = None,
-) -> InvestigationResult:
+) -> InvestigationSummary:
     """
-    Process a security ticket through the investigation pipeline.
+    Process a security alert through the investigation pipeline.
 
     This is the main entry point for the orchestrator.
 
     Args:
-        ticket_id: Unique ticket identifier
-        signature_id: The alert signature (e.g., "wazuh-rule-5710")
-        alert_data: Raw alert data from SIEM
+        alert_data: Raw alert data from SIEM (must include ticket_id, signature_id, agent)
         asset_criticality: "standard", "elevated", or "critical"
         reproduction_result: "confirmed", "refuted", or None
         timeout: Agent timeout in seconds
         logger: Logger for audit events
 
     Returns:
-        InvestigationResult with decision and audit trail
+        InvestigationSummary with decision and audit trail
     """
     if logger is None:
         logger = setup_logging()
 
     started_at = utc_now()
 
-    # Log investigation start
-    log_event(
-        logger,
-        event="investigation_started",
-        message=f"Starting investigation for {ticket_id}",
-        ticket_id=ticket_id,
-        signature_id=signature_id,
-        data={"alert_data": alert_data, "asset_criticality": asset_criticality},
+    # Placeholder alert for error cases
+    error_alert = AlertData(
+        ticket_id=alert_data.get("ticket_id", "UNKNOWN"),
+        signature_id=alert_data.get("signature_id", "UNKNOWN"),
+        timestamp=utc_now(),
+        agent=alert_data.get("agent", "UNKNOWN"),
+        raw=alert_data,
     )
 
     try:
-        # 1. Validate inputs
-        ticket_id = validate_ticket_id(ticket_id)
-        signature_id = validate_signature_id(signature_id)
-        alert_data = validate_alert_data(alert_data)
+        # 1. Validate and parse alert
+        alert = validate_alert_data(alert_data)
+
+        # Log investigation start
+        log_event(
+            logger,
+            event="investigation_started",
+            message=f"Starting investigation for {alert.ticket_id}",
+            ticket_id=alert.ticket_id,
+            signature_id=alert.signature_id,
+            data={"alert": alert.to_dict(), "asset_criticality": asset_criticality},
+        )
 
         # 2. Invoke agent
-        response = invoke_agent(ticket_id, signature_id, alert_data, timeout, logger)
+        response = invoke_agent(alert, timeout, logger)
 
         # 3. Parse response
         findings = parse_agent_response(response)
@@ -300,9 +279,9 @@ def process_ticket(
         log_event(
             logger,
             event="findings_parsed",
-            message=f"Parsed findings for {ticket_id}",
-            ticket_id=ticket_id,
-            signature_id=signature_id,
+            message=f"Parsed findings for {alert.ticket_id}",
+            ticket_id=alert.ticket_id,
+            signature_id=alert.signature_id,
             data=findings.to_dict(),
         )
 
@@ -319,9 +298,9 @@ def process_ticket(
         log_event(
             logger,
             event="confidence_calculated",
-            message=f"Confidence for {ticket_id}: {confidence:.2f}",
-            ticket_id=ticket_id,
-            signature_id=signature_id,
+            message=f"Confidence for {alert.ticket_id}: {confidence:.2f}",
+            ticket_id=alert.ticket_id,
+            signature_id=alert.signature_id,
             data={"confidence": confidence, "asset_criticality": asset_criticality},
         )
 
@@ -331,10 +310,8 @@ def process_ticket(
         # 6. Determine disposition
         disposition = determine_disposition(decision, findings)
 
-        result = InvestigationResult(
-            ticket_id=ticket_id,
-            signature_id=signature_id,
-            alert_data=alert_data,
+        summary = InvestigationSummary(
+            alert=alert,
             findings=findings,
             confidence_score=confidence,
             decision=decision,
@@ -346,34 +323,54 @@ def process_ticket(
         log_event(
             logger,
             event="investigation_completed",
-            message=f"Investigation completed for {ticket_id}: {decision.value}",
-            ticket_id=ticket_id,
-            signature_id=signature_id,
+            message=f"Investigation completed for {alert.ticket_id}: {decision.value}",
+            ticket_id=alert.ticket_id,
+            signature_id=alert.signature_id,
             data={
                 "decision": decision.value,
                 "disposition": disposition.value,
                 "confidence": confidence,
-                "duration_ms": int((result.completed_at - result.started_at).total_seconds() * 1000),
+                "duration_ms": summary.duration_ms,
             },
         )
 
-        return result
+        return summary
 
-    except (ValidationError, InvestigationError) as e:
+    except ValidationError as e:
         log_event(
             logger,
-            event="investigation_failed",
-            message=f"Investigation failed for {ticket_id}: {e}",
-            ticket_id=ticket_id,
-            signature_id=signature_id,
+            event="validation_failed",
+            message=f"Validation failed: {e}",
+            ticket_id=error_alert.ticket_id,
+            signature_id=error_alert.signature_id,
             data={"error": str(e)},
             level=logging.ERROR,
         )
 
-        return InvestigationResult(
-            ticket_id=ticket_id,
-            signature_id=signature_id,
-            alert_data=alert_data,
+        return InvestigationSummary(
+            alert=error_alert,
+            findings=AgentFindings(),
+            confidence_score=0.0,
+            decision=Decision.ESCALATE,
+            disposition=Disposition.ESCALATED,
+            started_at=started_at,
+            completed_at=utc_now(),
+            error=f"Validation error: {e}",
+        )
+
+    except InvestigationError as e:
+        log_event(
+            logger,
+            event="investigation_failed",
+            message=f"Investigation failed for {error_alert.ticket_id}: {e}",
+            ticket_id=error_alert.ticket_id,
+            signature_id=error_alert.signature_id,
+            data={"error": str(e)},
+            level=logging.ERROR,
+        )
+
+        return InvestigationSummary(
+            alert=error_alert,
             findings=AgentFindings(),
             confidence_score=0.0,
             decision=Decision.ESCALATE,
@@ -387,17 +384,15 @@ def process_ticket(
         log_event(
             logger,
             event="investigation_error",
-            message=f"Unexpected error for {ticket_id}: {e}",
-            ticket_id=ticket_id,
-            signature_id=signature_id,
+            message=f"Unexpected error for {error_alert.ticket_id}: {e}",
+            ticket_id=error_alert.ticket_id,
+            signature_id=error_alert.signature_id,
             data={"error": str(e), "error_type": type(e).__name__},
             level=logging.ERROR,
         )
 
-        return InvestigationResult(
-            ticket_id=ticket_id,
-            signature_id=signature_id,
-            alert_data=alert_data,
+        return InvestigationSummary(
+            alert=error_alert,
             findings=AgentFindings(),
             confidence_score=0.0,
             decision=Decision.ESCALATE,
