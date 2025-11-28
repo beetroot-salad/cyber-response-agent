@@ -154,11 +154,11 @@ def parse_agent_response(response: dict) -> AgentFindings:
 
 def determine_disposition(decision: Decision, findings: AgentFindings) -> Disposition:
     """
-    Determine disposition based on decision and findings.
+    Determine disposition based on decision and agent's recommendation.
 
     Args:
-        decision: Routing decision
-        findings: Agent findings
+        decision: Orchestrator's routing decision
+        findings: Agent findings including recommendation
 
     Returns:
         Disposition enum value
@@ -169,16 +169,17 @@ def determine_disposition(decision: Decision, findings: AgentFindings) -> Dispos
     if decision == Decision.REPRODUCE:
         return Disposition.INCONCLUSIVE
 
-    # AUTO_CLOSE - determine if benign or false positive based on findings
-    if findings.matched_ticket:
-        # Check if matched ticket indicates true positive or false positive
-        ticket = findings.matched_ticket.lower()
-        if "brute" in ticket or "attack" in ticket:
-            return Disposition.TRUE_POSITIVE
-        else:
-            return Disposition.FALSE_POSITIVE
-
-    return Disposition.BENIGN
+    # AUTO_CLOSE - use agent's recommendation
+    recommendation = findings.recommendation.lower()
+    if recommendation == "true_positive":
+        return Disposition.TRUE_POSITIVE
+    elif recommendation == "false_positive":
+        return Disposition.FALSE_POSITIVE
+    elif recommendation == "benign":
+        return Disposition.BENIGN
+    else:
+        # Fallback - shouldn't happen if agent is well-behaved
+        return Disposition.BENIGN
 
 
 def process_alert(
@@ -247,9 +248,6 @@ def process_alert(
         # 4. Calculate confidence
         confidence = calculate_confidence(
             matched_tier=findings.matched_tier,
-            conditions_met=findings.conditions_met,
-            conditions_total=findings.conditions_total,
-            evidence_available=findings.evidence_available,
             reproduction_result=reproduction_result,
             asset_criticality=asset_criticality,
         )

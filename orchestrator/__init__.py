@@ -18,7 +18,6 @@ from .models import (
     Decision,
     Disposition,
     InvestigationSummary,
-    PrecedentTier,
 )
 
 __all__ = [
@@ -38,5 +37,4 @@ __all__ = [
     "Decision",
     "Disposition",
     "InvestigationSummary",
-    "PrecedentTier",
 ]

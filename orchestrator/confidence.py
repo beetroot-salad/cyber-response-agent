@@ -1,61 +1,53 @@
 """
 Confidence scoring formula.
 
-Deterministic calculation based on:
-- Precedent tier (base score)
-- Conditions met ratio
-- Evidence availability
-- Reproduction result (if any)
-- Asset criticality
+Simplified calculation based on:
+- Matched ticket tier (base score from precedent quality)
+- Reproduction result (if run)
+- Asset criticality (penalty for critical assets)
+
+The agent provides the recommendation; the orchestrator calculates confidence
+to decide whether to trust it (auto-close), verify it (reproduce), or escalate.
 """
 
 from typing import Optional
 
-from .models import Decision, PrecedentTier
+from .models import Decision
 
 
-# Base scores by precedent tier
+# Base scores by matched ticket tier
 TIER_SCORES: dict[Optional[str], float] = {
-    PrecedentTier.GOLD.value: 0.70,
-    PrecedentTier.SILVER.value: 0.50,
-    PrecedentTier.BRONZE.value: 0.30,
-    "gold": 0.70,
-    "silver": 0.50,
-    "bronze": 0.30,
-    None: 0.0,
+    "gold": 0.90,    # High confidence - well-documented pattern
+    "silver": 0.75,  # Medium confidence - known pattern, less documentation
+    "bronze": 0.60,  # Low confidence - observed before but sparse data
+    None: 0.0,       # No precedent - must escalate
 }
 
 # Reproduction result modifiers
 REPRODUCTION_MODIFIERS: dict[Optional[str], float] = {
-    "confirmed": 0.15,
-    "refuted": -0.30,
+    "confirmed": 0.10,   # Reproduction confirmed agent's finding
+    "refuted": -0.30,    # Reproduction contradicted agent's finding
     None: 0.0,
 }
 
-# Asset criticality penalties
+# Asset criticality penalties (more caution for critical assets)
 CRITICALITY_PENALTIES: dict[str, float] = {
     "standard": 0.0,
-    "elevated": -0.10,
-    "critical": -0.25,
+    "elevated": -0.05,
+    "critical": -0.15,
 }
 
 
 def calculate_confidence(
     matched_tier: Optional[str],
-    conditions_met: int,
-    conditions_total: int,
-    evidence_available: bool,
     reproduction_result: Optional[str] = None,
     asset_criticality: str = "standard",
 ) -> float:
     """
-    Calculate confidence score for auto-close decision.
+    Calculate confidence score for the agent's recommendation.
 
     Args:
         matched_tier: "gold", "silver", "bronze", or None (from matched past ticket)
-        conditions_met: Number of conditions satisfied
-        conditions_total: Total number of conditions to check
-        evidence_available: Whether sufficient evidence was gathered
         reproduction_result: "confirmed", "refuted", or None
         asset_criticality: "standard", "elevated", or "critical"
 
@@ -63,12 +55,6 @@ def calculate_confidence(
         Confidence score between 0.0 and 1.0
     """
     # Input validation
-    if conditions_met < 0:
-        raise ValueError("conditions_met cannot be negative")
-    if conditions_total < 0:
-        raise ValueError("conditions_total cannot be negative")
-    if conditions_met > conditions_total and conditions_total > 0:
-        raise ValueError("conditions_met cannot exceed conditions_total")
     if asset_criticality not in CRITICALITY_PENALTIES:
         raise ValueError(f"Invalid asset_criticality: {asset_criticality}")
     if reproduction_result is not None and reproduction_result not in REPRODUCTION_MODIFIERS:
@@ -77,15 +63,6 @@ def calculate_confidence(
     # Base score from matched ticket tier
     base = TIER_SCORES.get(matched_tier, 0.0)
 
-    # Condition satisfaction ratio (up to 0.20)
-    if conditions_total > 0:
-        condition_score = 0.20 * (conditions_met / conditions_total)
-    else:
-        condition_score = 0.0
-
-    # Evidence availability bonus
-    evidence_score = 0.10 if evidence_available else 0.0
-
     # Reproduction modifier
     repro_modifier = REPRODUCTION_MODIFIERS.get(reproduction_result, 0.0)
 
@@ -93,7 +70,7 @@ def calculate_confidence(
     asset_penalty = CRITICALITY_PENALTIES.get(asset_criticality, 0.0)
 
     # Calculate total and clamp to [0.0, 1.0]
-    total = base + condition_score + evidence_score + repro_modifier + asset_penalty
+    total = base + repro_modifier + asset_penalty
     return max(0.0, min(1.0, total))
 
 

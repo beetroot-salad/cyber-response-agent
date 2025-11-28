@@ -4,3 +4,5 @@ build investigation agent resources
 
 enumrate dispostions from common knowledge
 build app config class
+
+make investigation agent call sub agent for actual invetigation and lower level judgement? maybe use claude code task feature (how to trigger reliably?)

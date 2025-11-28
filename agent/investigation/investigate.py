@@ -80,24 +80,21 @@ def investigate(ticket_id: str, signature_id: str, alert_data: dict) -> dict:
 
     if "error" in knowledge:
         return {
+            "recommendation": "escalate",
             "matched_ticket": None,
             "matched_tier": None,
-            "conditions_met": 0,
-            "conditions_total": 0,
-            "evidence_available": False,
-            "findings": [knowledge["error"]],
             "reasoning": f"Cannot investigate: {knowledge['error']}",
+            "evidence": {},
         }
 
     # Stub: Simple pattern matching for demonstration
     srcip = alert_data.get("srcip", "")
     srcuser = alert_data.get("srcuser", "")
 
-    findings = []
+    evidence = {}
     matched_ticket = None
     matched_tier = None
-    conditions_met = 0
-    conditions_total = 3
+    recommendation = "escalate"  # Default safe
 
     # Check if IP is internal (RFC1918)
     is_internal = (
@@ -113,50 +110,58 @@ def investigate(ticket_id: str, signature_id: str, alert_data: dict) -> dict:
     )
 
     if is_internal:
-        findings.append(f"Source IP {srcip} is internal (RFC1918)")
-        conditions_met += 1
+        evidence["ip_class"] = "internal:rfc1918"
     else:
-        findings.append(f"Source IP {srcip} is EXTERNAL")
+        evidence["ip_class"] = "external"
 
     # Check username pattern against past tickets
     monitoring_usernames = ["testuser", "probe", "monitor", "healthcheck", "nagios", "zabbix"]
-    if srcuser.lower() in monitoring_usernames:
-        findings.append(f"Username '{srcuser}' matches monitoring pattern")
-        conditions_met += 1
-        if is_internal:
-            matched_ticket = "SEC-20240115-001"  # monitoring-probe past ticket
-            matched_tier = "gold"
-
     service_patterns = ["svc-", "backup-", "cron-", "ansible-", "deploy-"]
-    if any(srcuser.lower().startswith(p) for p in service_patterns):
-        findings.append(f"Username '{srcuser}' matches service account pattern")
-        conditions_met += 1
-        if is_internal:
-            matched_ticket = "SEC-20240120-007"  # service-account past ticket
-            matched_tier = "gold"
 
-    # Evidence availability (stub: always true for now)
-    evidence_available = True
-    findings.append("Evidence gathered from alert data")
-
-    # Build reasoning
-    if matched_ticket:
-        reasoning = f"Alert matches past ticket {matched_ticket}: {', '.join(findings)}"
-    elif not is_internal:
-        reasoning = "External IP - requires escalation for potential brute force"
-        matched_ticket = "SEC-20240118-003"  # brute-force past ticket
+    if srcuser.lower() in monitoring_usernames and is_internal:
+        matched_ticket = "SEC-2024-001"
         matched_tier = "gold"
+        recommendation = "benign"
+        evidence["username_pattern"] = "monitoring_probe"
+        reasoning = (
+            f"Benign - monitoring probe activity. "
+            f"Internal IP ({srcip}), monitoring username ({srcuser}). "
+            f"Matches pattern from {matched_ticket}."
+        )
+    elif any(srcuser.lower().startswith(p) for p in service_patterns) and is_internal:
+        matched_ticket = "SEC-2024-004"
+        matched_tier = "silver"
+        recommendation = "benign"
+        evidence["username_pattern"] = "service_account"
+        reasoning = (
+            f"Benign - service account activity. "
+            f"Internal IP ({srcip}), service account ({srcuser}). "
+            f"Matches pattern from {matched_ticket}."
+        )
+    elif not is_internal:
+        matched_ticket = "SEC-2024-003"
+        matched_tier = "gold"
+        recommendation = "escalate"
+        evidence["threat_indicator"] = "external_ssh_attempt"
+        reasoning = (
+            f"Escalate - external IP attempting SSH. "
+            f"Source {srcip} is external, username '{srcuser}'. "
+            f"Similar to brute force pattern in {matched_ticket}."
+        )
     else:
-        reasoning = f"Internal IP but no clear pattern match. Findings: {', '.join(findings)}"
+        # Internal but no clear pattern
+        recommendation = "escalate"
+        reasoning = (
+            f"Escalate - no matching pattern. "
+            f"Internal IP ({srcip}), username ({srcuser}) does not match known benign patterns."
+        )
 
     return {
+        "recommendation": recommendation,
         "matched_ticket": matched_ticket,
         "matched_tier": matched_tier,
-        "conditions_met": conditions_met,
-        "conditions_total": conditions_total,
-        "evidence_available": evidence_available,
-        "findings": findings,
         "reasoning": reasoning,
+        "evidence": evidence,
     }
 
 

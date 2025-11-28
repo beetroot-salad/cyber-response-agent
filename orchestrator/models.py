@@ -27,14 +27,6 @@ class Decision(Enum):
     ESCALATE = "escalate"  # Escalate to human
 
 
-class PrecedentTier(Enum):
-    """Quality tiers for precedents."""
-
-    GOLD = "gold"
-    SILVER = "silver"
-    BRONZE = "bronze"
-
-
 def utc_now() -> datetime:
     """Get current UTC time as timezone-aware datetime."""
     return datetime.now(timezone.utc)
@@ -106,48 +98,52 @@ class AgentFindings:
     """
     Structured findings returned by the investigation agent.
 
+    The agent synthesizes evidence and provides a recommendation.
+    The orchestrator performs sanity checks and handles engineering concerns
+    (logging, error handling, reproduction triggers).
+
     Fields:
-        matched_ticket: ID of a similar past ticket from the signature's
-            past-tickets directory (e.g., "SEC-20240115-001"). None if no match.
-        matched_tier: Quality tier from matched ticket's metadata ("gold", "silver", "bronze").
-        conditions_met: Number of conditions satisfied for the matched pattern.
-        conditions_total: Total conditions defined for the matched pattern.
-        evidence_available: Whether the agent successfully gathered required
-            evidence (e.g., SIEM queries returned data, files were readable).
-        findings: List of observations made during investigation.
-        reasoning: Explanation of why ticket matched or didn't match.
+        recommendation: Agent's recommended disposition ("benign", "false_positive",
+            "true_positive", "escalate"). The orchestrator may override this.
+        matched_ticket: ID of a similar past ticket that informed the recommendation
+            (e.g., "SEC-2024-001"). None if no precedent found.
+        matched_tier: Quality tier from matched ticket ("gold", "silver", "bronze").
+            Used by orchestrator for confidence calculation.
+        reasoning: Free-form explanation of the verdict. Should include:
+            - Why this disposition was chosen
+            - What evidence supports it
+            - Reference to matched ticket if applicable
+            Example: "False positive - maintenance job. Recurring weekly pattern
+            matching SEC-2024-001. Same signature, user (svc-backup), and srcip (10.0.3.25)."
+        evidence: Dict mapping evidence type to pointer/reference. Encourages reuse
+            of utilities. Keys are evidence types, values are references.
+            Example: {"auth_logs": "wazuh:5710:last_24h", "ip_class": "internal:rfc1918"}
     """
 
+    recommendation: str = "escalate"  # Default safe: escalate if unsure
     matched_ticket: Optional[str] = None
     matched_tier: Optional[str] = None
-    conditions_met: int = 0
-    conditions_total: int = 0
-    evidence_available: bool = False
-    findings: list[str] = field(default_factory=list)
     reasoning: str = ""
+    evidence: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_json(cls, data: dict) -> "AgentFindings":
         """Parse agent JSON response into AgentFindings."""
         return cls(
+            recommendation=data.get("recommendation", "escalate"),
             matched_ticket=data.get("matched_ticket"),
             matched_tier=data.get("matched_tier"),
-            conditions_met=data.get("conditions_met", 0),
-            conditions_total=data.get("conditions_total", 0),
-            evidence_available=data.get("evidence_available", False),
-            findings=data.get("findings", []),
             reasoning=data.get("reasoning", ""),
+            evidence=data.get("evidence", {}),
         )
 
     def to_dict(self) -> dict:
         return {
+            "recommendation": self.recommendation,
             "matched_ticket": self.matched_ticket,
             "matched_tier": self.matched_tier,
-            "conditions_met": self.conditions_met,
-            "conditions_total": self.conditions_total,
-            "evidence_available": self.evidence_available,
-            "findings": self.findings,
             "reasoning": self.reasoning,
+            "evidence": self.evidence,
         }
 
 

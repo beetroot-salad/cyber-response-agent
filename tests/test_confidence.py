@@ -10,158 +10,88 @@ from orchestrator.models import Decision
 class TestCalculateConfidence:
     """Tests for calculate_confidence function."""
 
-    def test_gold_tier_all_conditions_met(self):
-        """Gold tier with all conditions met should give 1.0."""
-        result = calculate_confidence(
-            matched_tier="gold",
-            conditions_met=4,
-            conditions_total=4,
-            evidence_available=True,
-        )
-        assert result == pytest.approx(1.0)
-
-    def test_gold_tier_half_conditions(self):
-        """Gold tier with half conditions should give 0.90."""
-        result = calculate_confidence(
-            matched_tier="gold",
-            conditions_met=2,
-            conditions_total=4,
-            evidence_available=True,
-        )
+    def test_gold_tier(self):
+        """Gold tier should give 0.90 base score."""
+        result = calculate_confidence(matched_tier="gold")
         assert result == pytest.approx(0.90)
 
-    def test_gold_tier_quarter_conditions(self):
-        """Gold tier with quarter conditions should give 0.85."""
-        result = calculate_confidence(
-            matched_tier="gold",
-            conditions_met=1,
-            conditions_total=4,
-            evidence_available=True,
-        )
-        assert result == pytest.approx(0.85)
+    def test_silver_tier(self):
+        """Silver tier should give 0.75 base score."""
+        result = calculate_confidence(matched_tier="silver")
+        assert result == pytest.approx(0.75)
 
-    def test_gold_tier_with_reproduction_confirmed(self):
-        """Reproduction confirmed should add 0.15 (clamped to 1.0)."""
+    def test_bronze_tier(self):
+        """Bronze tier should give 0.60 base score."""
+        result = calculate_confidence(matched_tier="bronze")
+        assert result == pytest.approx(0.60)
+
+    def test_no_match(self):
+        """No matched tier should give 0.0."""
+        result = calculate_confidence(matched_tier=None)
+        assert result == pytest.approx(0.0)
+
+    def test_gold_with_reproduction_confirmed(self):
+        """Reproduction confirmed adds 0.10 (clamped to 1.0)."""
         result = calculate_confidence(
             matched_tier="gold",
-            conditions_met=4,
-            conditions_total=4,
-            evidence_available=True,
             reproduction_result="confirmed",
         )
         assert result == pytest.approx(1.0)
 
-    def test_gold_tier_critical_asset(self):
-        """Critical asset should subtract 0.25."""
+    def test_gold_with_reproduction_refuted(self):
+        """Reproduction refuted subtracts 0.30."""
         result = calculate_confidence(
             matched_tier="gold",
-            conditions_met=4,
-            conditions_total=4,
-            evidence_available=True,
+            reproduction_result="refuted",
+        )
+        assert result == pytest.approx(0.60)
+
+    def test_silver_with_reproduction_confirmed(self):
+        """Silver + confirmed = 0.85."""
+        result = calculate_confidence(
+            matched_tier="silver",
+            reproduction_result="confirmed",
+        )
+        assert result == pytest.approx(0.85)
+
+    def test_gold_critical_asset(self):
+        """Critical asset subtracts 0.15."""
+        result = calculate_confidence(
+            matched_tier="gold",
             asset_criticality="critical",
         )
         assert result == pytest.approx(0.75)
 
-    def test_no_precedent(self):
-        """No precedent should give 0.0."""
-        result = calculate_confidence(
-            matched_tier=None,
-            conditions_met=0,
-            conditions_total=0,
-            evidence_available=False,
-        )
-        assert result == pytest.approx(0.0)
-
-    def test_reproduction_refuted(self):
-        """Reproduction refuted should subtract 0.30."""
+    def test_gold_elevated_asset(self):
+        """Elevated asset subtracts 0.05."""
         result = calculate_confidence(
             matched_tier="gold",
-            conditions_met=4,
-            conditions_total=4,
-            evidence_available=True,
-            reproduction_result="refuted",
+            asset_criticality="elevated",
         )
-        assert result == pytest.approx(0.70)
+        assert result == pytest.approx(0.85)
 
-    def test_silver_tier(self):
-        """Silver tier base score is 0.50."""
+    def test_silver_critical_asset(self):
+        """Silver + critical = 0.60."""
         result = calculate_confidence(
             matched_tier="silver",
-            conditions_met=3,
-            conditions_total=4,
-            evidence_available=True,
-        )
-        assert result == pytest.approx(0.75)
-
-    def test_bronze_tier(self):
-        """Bronze tier base score is 0.30."""
-        result = calculate_confidence(
-            matched_tier="bronze",
-            conditions_met=4,
-            conditions_total=4,
-            evidence_available=True,
+            asset_criticality="critical",
         )
         assert result == pytest.approx(0.60)
 
-    def test_no_evidence(self):
-        """No evidence should not add 0.10 bonus."""
+    def test_bronze_confirmed_critical(self):
+        """Bronze + confirmed + critical = 0.55."""
         result = calculate_confidence(
-            matched_tier="gold",
-            conditions_met=4,
-            conditions_total=4,
-            evidence_available=False,
+            matched_tier="bronze",
+            reproduction_result="confirmed",
+            asset_criticality="critical",
         )
-        assert result == pytest.approx(0.90)
-
-    def test_elevated_asset(self):
-        """Elevated asset should subtract 0.10."""
-        result = calculate_confidence(
-            matched_tier="gold",
-            conditions_met=4,
-            conditions_total=4,
-            evidence_available=True,
-            asset_criticality="elevated",
-        )
-        assert result == pytest.approx(0.90)
-
-    def test_zero_conditions_total(self):
-        """Zero total conditions should not cause division error."""
-        result = calculate_confidence(
-            matched_tier="gold",
-            conditions_met=0,
-            conditions_total=0,
-            evidence_available=True,
-        )
-        assert result == pytest.approx(0.80)  # gold (0.70) + evidence (0.10)
-
-    def test_invalid_negative_conditions_met(self):
-        """Negative conditions_met should raise ValueError."""
-        with pytest.raises(ValueError, match="conditions_met cannot be negative"):
-            calculate_confidence(
-                matched_tier="gold",
-                conditions_met=-1,
-                conditions_total=4,
-                evidence_available=True,
-            )
-
-    def test_invalid_conditions_exceed_total(self):
-        """conditions_met > conditions_total should raise ValueError."""
-        with pytest.raises(ValueError, match="conditions_met cannot exceed"):
-            calculate_confidence(
-                matched_tier="gold",
-                conditions_met=5,
-                conditions_total=4,
-                evidence_available=True,
-            )
+        assert result == pytest.approx(0.55)
 
     def test_invalid_asset_criticality(self):
         """Invalid asset_criticality should raise ValueError."""
         with pytest.raises(ValueError, match="Invalid asset_criticality"):
             calculate_confidence(
                 matched_tier="gold",
-                conditions_met=4,
-                conditions_total=4,
-                evidence_available=True,
                 asset_criticality="invalid",
             )
 
@@ -170,11 +100,26 @@ class TestCalculateConfidence:
         with pytest.raises(ValueError, match="Invalid reproduction_result"):
             calculate_confidence(
                 matched_tier="gold",
-                conditions_met=4,
-                conditions_total=4,
-                evidence_available=True,
                 reproduction_result="invalid",
             )
+
+    def test_clamp_to_zero(self):
+        """Score should not go below 0.0."""
+        result = calculate_confidence(
+            matched_tier="bronze",
+            reproduction_result="refuted",
+            asset_criticality="critical",
+        )
+        # 0.60 - 0.30 - 0.15 = 0.15
+        assert result == pytest.approx(0.15)
+
+    def test_no_tier_refuted(self):
+        """No tier + refuted should be 0.0 (clamped)."""
+        result = calculate_confidence(
+            matched_tier=None,
+            reproduction_result="refuted",
+        )
+        assert result == pytest.approx(0.0)
 
 
 class TestGetDecision:
