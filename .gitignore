@@ -62,3 +62,6 @@ knowledge/signatures/*/past-tickets/
 
 # Agent scratchpad (runtime working directory)
 app/agent/investigation/scratchpad/
+
+# Runtime investigation directories (created per-ticket)
+app/agent/investigation/runs/
