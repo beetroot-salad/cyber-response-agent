@@ -1,0 +1,26 @@
+# Permissions for Wazuh Rule 5710: SSH Invalid User
+#
+# PLAYGROUND CONFIG - Permissive settings for testing
+# In production, consider adding escalation patterns for external IPs
+
+schema_version: "1.0"
+
+allowed_dispositions:
+  - benign
+  - false_positive
+  - true_positive
+
+allowed_capabilities:
+  - query_siem
+  - read_knowledge
+
+auto_close:
+  enabled: true
+
+# No escalation patterns - allow agent to make all decisions for testing
+escalation_patterns: {}
+
+reproduction:
+  enabled: false
+
+log_level: verbose
