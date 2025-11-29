@@ -1,149 +1,207 @@
 """
-Tests for confidence scoring formula.
+Tests for confidence scoring and decision matrix.
 """
 
 import pytest
-from orchestrator.confidence import calculate_confidence, get_decision
-from orchestrator.models import Decision
+from app.orchestrator.confidence import calculate_confidence, get_decision
+from app.orchestrator.models import Decision
 
 
 class TestCalculateConfidence:
-    """Tests for calculate_confidence function."""
+    """Tests for calculate_confidence function (audit logging)."""
 
-    def test_gold_tier(self):
-        """Gold tier should give 0.90 base score."""
-        result = calculate_confidence(matched_tier="gold")
-        assert result == pytest.approx(0.90)
+    def test_high_agent_confidence(self):
+        """High agent confidence should give base 0.85."""
+        result = calculate_confidence(agent_confidence="high")
+        # 0.85 - 0.15 (no tier) = 0.70
+        assert result == pytest.approx(0.70)
 
-    def test_silver_tier(self):
-        """Silver tier should give 0.75 base score."""
-        result = calculate_confidence(matched_tier="silver")
-        assert result == pytest.approx(0.75)
+    def test_medium_agent_confidence(self):
+        """Medium agent confidence should give base 0.60."""
+        result = calculate_confidence(agent_confidence="medium")
+        # 0.60 - 0.15 (no tier) = 0.45
+        assert result == pytest.approx(0.45)
 
-    def test_bronze_tier(self):
-        """Bronze tier should give 0.60 base score."""
-        result = calculate_confidence(matched_tier="bronze")
-        assert result == pytest.approx(0.60)
+    def test_low_agent_confidence(self):
+        """Low agent confidence should give base 0.30."""
+        result = calculate_confidence(agent_confidence="low")
+        # 0.30 - 0.15 (no tier) = 0.15
+        assert result == pytest.approx(0.15)
 
-    def test_no_match(self):
-        """No matched tier should give 0.0."""
-        result = calculate_confidence(matched_tier=None)
-        assert result == pytest.approx(0.0)
+    def test_high_confidence_gold_tier(self):
+        """High confidence + gold tier = 0.95."""
+        result = calculate_confidence(agent_confidence="high", matched_tier="gold")
+        # 0.85 + 0.10 = 0.95
+        assert result == pytest.approx(0.95)
 
-    def test_gold_with_reproduction_confirmed(self):
-        """Reproduction confirmed adds 0.10 (clamped to 1.0)."""
+    def test_medium_confidence_silver_tier(self):
+        """Medium confidence + silver tier = 0.65."""
+        result = calculate_confidence(agent_confidence="medium", matched_tier="silver")
+        # 0.60 + 0.05 = 0.65
+        assert result == pytest.approx(0.65)
+
+    def test_reproduction_confirmed(self):
+        """Reproduction confirmed adds 0.15."""
         result = calculate_confidence(
+            agent_confidence="medium",
+            matched_tier="silver",
+            reproduction_result="confirmed",
+        )
+        # 0.60 + 0.05 + 0.15 = 0.80
+        assert result == pytest.approx(0.80)
+
+    def test_reproduction_refuted(self):
+        """Reproduction refuted subtracts 0.30."""
+        result = calculate_confidence(
+            agent_confidence="high",
+            matched_tier="gold",
+            reproduction_result="refuted",
+        )
+        # 0.85 + 0.10 - 0.30 = 0.65
+        assert result == pytest.approx(0.65)
+
+    def test_critical_asset_penalty(self):
+        """Critical asset subtracts 0.15."""
+        result = calculate_confidence(
+            agent_confidence="high",
+            matched_tier="gold",
+            asset_criticality="critical",
+        )
+        # 0.85 + 0.10 - 0.15 = 0.80
+        assert result == pytest.approx(0.80)
+
+    def test_clamp_to_bounds(self):
+        """Score should be clamped to [0.0, 1.0]."""
+        # High everything should clamp to 1.0
+        result = calculate_confidence(
+            agent_confidence="high",
             matched_tier="gold",
             reproduction_result="confirmed",
         )
         assert result == pytest.approx(1.0)
 
-    def test_gold_with_reproduction_refuted(self):
-        """Reproduction refuted subtracts 0.30."""
+        # Low everything should be >= 0.0
         result = calculate_confidence(
-            matched_tier="gold",
-            reproduction_result="refuted",
-        )
-        assert result == pytest.approx(0.60)
-
-    def test_silver_with_reproduction_confirmed(self):
-        """Silver + confirmed = 0.85."""
-        result = calculate_confidence(
-            matched_tier="silver",
-            reproduction_result="confirmed",
-        )
-        assert result == pytest.approx(0.85)
-
-    def test_gold_critical_asset(self):
-        """Critical asset subtracts 0.15."""
-        result = calculate_confidence(
-            matched_tier="gold",
-            asset_criticality="critical",
-        )
-        assert result == pytest.approx(0.75)
-
-    def test_gold_elevated_asset(self):
-        """Elevated asset subtracts 0.05."""
-        result = calculate_confidence(
-            matched_tier="gold",
-            asset_criticality="elevated",
-        )
-        assert result == pytest.approx(0.85)
-
-    def test_silver_critical_asset(self):
-        """Silver + critical = 0.60."""
-        result = calculate_confidence(
-            matched_tier="silver",
-            asset_criticality="critical",
-        )
-        assert result == pytest.approx(0.60)
-
-    def test_bronze_confirmed_critical(self):
-        """Bronze + confirmed + critical = 0.55."""
-        result = calculate_confidence(
-            matched_tier="bronze",
-            reproduction_result="confirmed",
-            asset_criticality="critical",
-        )
-        assert result == pytest.approx(0.55)
-
-    def test_invalid_asset_criticality(self):
-        """Invalid asset_criticality should raise ValueError."""
-        with pytest.raises(ValueError, match="Invalid asset_criticality"):
-            calculate_confidence(
-                matched_tier="gold",
-                asset_criticality="invalid",
-            )
-
-    def test_invalid_reproduction_result(self):
-        """Invalid reproduction_result should raise ValueError."""
-        with pytest.raises(ValueError, match="Invalid reproduction_result"):
-            calculate_confidence(
-                matched_tier="gold",
-                reproduction_result="invalid",
-            )
-
-    def test_clamp_to_zero(self):
-        """Score should not go below 0.0."""
-        result = calculate_confidence(
-            matched_tier="bronze",
-            reproduction_result="refuted",
-            asset_criticality="critical",
-        )
-        # 0.60 - 0.30 - 0.15 = 0.15
-        assert result == pytest.approx(0.15)
-
-    def test_no_tier_refuted(self):
-        """No tier + refuted should be 0.0 (clamped)."""
-        result = calculate_confidence(
+            agent_confidence="low",
             matched_tier=None,
             reproduction_result="refuted",
+            asset_criticality="critical",
         )
-        assert result == pytest.approx(0.0)
+        assert result >= 0.0
+
+    def test_defaults(self):
+        """Default values should work."""
+        result = calculate_confidence()
+        # low confidence (0.30) + no tier (-0.15) = 0.15
+        assert result == pytest.approx(0.15)
+
+    def test_invalid_confidence_defaults_to_low(self):
+        """Invalid agent confidence should default to low."""
+        result = calculate_confidence(agent_confidence="invalid")
+        assert result == pytest.approx(0.15)
 
 
 class TestGetDecision:
-    """Tests for get_decision function."""
-
-    def test_high_confidence_auto_close(self):
-        """Confidence >= 0.90 should return AUTO_CLOSE."""
-        assert get_decision(0.90, has_precedent=True) == Decision.AUTO_CLOSE
-        assert get_decision(1.0, has_precedent=True) == Decision.AUTO_CLOSE
-
-    def test_medium_confidence_reproduce(self):
-        """Confidence 0.70-0.89 should return REPRODUCE."""
-        assert get_decision(0.70, has_precedent=True) == Decision.REPRODUCE
-        assert get_decision(0.85, has_precedent=True) == Decision.REPRODUCE
-        assert get_decision(0.89, has_precedent=True) == Decision.REPRODUCE
-
-    def test_low_confidence_escalate(self):
-        """Confidence < 0.70 should return ESCALATE."""
-        assert get_decision(0.69, has_precedent=True) == Decision.ESCALATE
-        assert get_decision(0.50, has_precedent=True) == Decision.ESCALATE
-        assert get_decision(0.0, has_precedent=True) == Decision.ESCALATE
+    """Tests for get_decision function (decision matrix)."""
 
     def test_no_precedent_always_escalate(self):
-        """No precedent should always return ESCALATE regardless of confidence."""
-        assert get_decision(1.0, has_precedent=False) == Decision.ESCALATE
-        assert get_decision(0.90, has_precedent=False) == Decision.ESCALATE
-        assert get_decision(0.0, has_precedent=False) == Decision.ESCALATE
+        """No precedent should always return ESCALATE."""
+        assert get_decision(agent_confidence="high", has_precedent=False) == Decision.ESCALATE
+        assert get_decision(agent_confidence="medium", has_precedent=False) == Decision.ESCALATE
+        assert get_decision(agent_confidence="low", has_precedent=False) == Decision.ESCALATE
+
+    def test_reproduction_refuted_escalates(self):
+        """Reproduction refuted should always escalate."""
+        assert get_decision(
+            agent_confidence="high",
+            has_precedent=True,
+            reproduction_result="refuted",
+        ) == Decision.ESCALATE
+
+    def test_reproduction_confirmed_auto_closes(self):
+        """Reproduction confirmed + medium+ confidence should auto-close."""
+        assert get_decision(
+            agent_confidence="high",
+            has_precedent=True,
+            reproduction_result="confirmed",
+        ) == Decision.AUTO_CLOSE
+        assert get_decision(
+            agent_confidence="medium",
+            has_precedent=True,
+            reproduction_result="confirmed",
+        ) == Decision.AUTO_CLOSE
+
+    def test_standard_asset_high_confidence(self):
+        """Standard asset + high confidence + precedent should auto-close."""
+        assert get_decision(
+            agent_confidence="high",
+            has_precedent=True,
+            asset_criticality="standard",
+            signature_severity="medium",
+        ) == Decision.AUTO_CLOSE
+
+    def test_standard_asset_medium_confidence(self):
+        """Standard asset + medium confidence should reproduce."""
+        assert get_decision(
+            agent_confidence="medium",
+            has_precedent=True,
+            asset_criticality="standard",
+            signature_severity="medium",
+        ) == Decision.REPRODUCE
+
+    def test_standard_asset_low_confidence(self):
+        """Standard asset + low confidence should escalate."""
+        assert get_decision(
+            agent_confidence="low",
+            has_precedent=True,
+            asset_criticality="standard",
+            signature_severity="medium",
+        ) == Decision.ESCALATE
+
+    def test_critical_asset_escalates(self):
+        """Critical asset should escalate even with high confidence."""
+        assert get_decision(
+            agent_confidence="high",
+            has_precedent=True,
+            asset_criticality="critical",
+            signature_severity="high",
+        ) == Decision.ESCALATE
+
+    def test_critical_severity_needs_high_confidence(self):
+        """Critical severity with medium confidence should escalate."""
+        assert get_decision(
+            agent_confidence="medium",
+            has_precedent=True,
+            asset_criticality="standard",
+            signature_severity="critical",
+        ) == Decision.ESCALATE
+
+    def test_defaults_to_medium_severity(self):
+        """Missing severity should default to medium."""
+        result = get_decision(
+            agent_confidence="high",
+            has_precedent=True,
+            asset_criticality="standard",
+            signature_severity=None,
+        )
+        assert result == Decision.AUTO_CLOSE
+
+    def test_defaults_to_standard_criticality(self):
+        """Missing criticality should default to standard."""
+        result = get_decision(
+            agent_confidence="high",
+            has_precedent=True,
+            asset_criticality=None,
+            signature_severity="medium",
+        )
+        assert result == Decision.AUTO_CLOSE
+
+    def test_low_severity_medium_confidence_auto_closes(self):
+        """Low severity + medium confidence on standard asset should auto-close."""
+        result = get_decision(
+            agent_confidence="medium",
+            has_precedent=True,
+            asset_criticality="standard",
+            signature_severity="low",
+        )
+        assert result == Decision.AUTO_CLOSE

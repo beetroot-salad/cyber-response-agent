@@ -1,5 +1,15 @@
 """Investigation agent module."""
 
-from .investigate import investigate, load_signature_knowledge
+from .runner import (
+    InvestigationConfig,
+    InvestigationResult,
+    InvestigationRunner,
+    investigate,
+)
 
-__all__ = ["investigate", "load_signature_knowledge"]
+__all__ = [
+    "InvestigationConfig",
+    "InvestigationResult",
+    "InvestigationRunner",
+    "investigate",
+]

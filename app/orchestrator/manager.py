@@ -31,8 +31,8 @@ from .models import (
     utc_now,
 )
 
-# Import investigator directly
-from app.agent.investigation.investigate import investigate as run_investigation
+# Import investigation runner
+from app.agent.investigation import investigate as run_investigation
 
 
 class InvestigationError(Exception):
@@ -245,8 +245,9 @@ def process_alert(
             data=findings.to_dict(),
         )
 
-        # 4. Calculate confidence
+        # 4. Calculate confidence (for logging)
         confidence = calculate_confidence(
+            agent_confidence=findings.confidence,
             matched_tier=findings.matched_tier,
             reproduction_result=reproduction_result,
             asset_criticality=asset_criticality,
@@ -258,11 +259,21 @@ def process_alert(
             message=f"Confidence for {alert.ticket_id}: {confidence:.2f}",
             ticket_id=alert.ticket_id,
             signature_id=alert.signature_id,
-            data={"confidence": confidence, "asset_criticality": asset_criticality},
+            data={
+                "confidence": confidence,
+                "agent_confidence": findings.confidence,
+                "asset_criticality": asset_criticality,
+            },
         )
 
-        # 5. Make decision
-        decision = get_decision(confidence, findings.matched_ticket is not None)
+        # 5. Make decision using decision matrix
+        decision = get_decision(
+            agent_confidence=findings.confidence,
+            has_precedent=findings.matched_ticket is not None,
+            asset_criticality=asset_criticality,
+            signature_severity=alert.raw.get("severity", "medium"),
+            reproduction_result=reproduction_result,
+        )
 
         # 6. Determine disposition
         disposition = determine_disposition(decision, findings)
