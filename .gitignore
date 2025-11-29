@@ -59,3 +59,6 @@ temp/
 
 # Knowledge base - past tickets (contain sensitive alert data)
 knowledge/signatures/*/past-tickets/
+
+# Agent scratchpad (runtime working directory)
+app/agent/investigation/scratchpad/
