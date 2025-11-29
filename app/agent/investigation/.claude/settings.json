@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 /workspace/app/agent/investigation/hooks/post_mortem.py",
+        "timeout": 90
+      }
+    ]
+  }
+}

@@ -177,6 +177,12 @@ class InvestigationRunner:
         if mcp_source.exists():
             shutil.copy(mcp_source, mcp_dest)
 
+        # Copy settings (includes hooks)
+        settings_source = INVESTIGATION_DIR / ".claude" / "settings.json"
+        settings_dest = self.run_dir / ".claude" / "settings.json"
+        if settings_source.exists():
+            shutil.copy(settings_source, settings_dest)
+
         # Copy system prompt
         claude_md_source = INVESTIGATION_DIR / "CLAUDE.md"
         claude_md_dest = self.run_dir / "CLAUDE.md"
@@ -240,12 +246,19 @@ Provide your Investigation Report as specified in CLAUDE.md:
             "-p", prompt,
         ]
 
+        # Environment for hooks
+        env = os.environ.copy()
+        env["INVESTIGATION_RUN_DIR"] = str(self.run_dir)
+        env["SIGNATURE_ID"] = self.signature_id
+        env["TICKET_ID"] = self.ticket_id
+
         # Run process
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
+                env=env,
                 timeout=self.timeout_seconds,
                 cwd=str(self.run_dir),
             )

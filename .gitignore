@@ -43,7 +43,7 @@ logs/
 # IDE
 .vscode/
 .idea/
-.claude/
+/.claude/
 *.swp
 *.swo
 *~
