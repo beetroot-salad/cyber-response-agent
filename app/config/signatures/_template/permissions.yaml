@@ -40,40 +40,23 @@ allowed_capabilities:
 
 auto_close:
   enabled: true
-  min_confidence: 0.90
-  require_precedent: true
 
 # -----------------------------------------------------------------------------
-# ESCALATION TRIGGERS
+# ESCALATION PATTERNS
 # -----------------------------------------------------------------------------
-# Conditions that force escalation regardless of confidence.
-# These are evaluated by the orchestrator after the agent returns findings.
+# Field patterns that force escalation regardless of confidence.
+# If any pattern matches the alert data, escalate immediately.
 #
-# Available triggers:
-#   external_ip        - Source IP is not RFC1918/internal
-#   critical_asset     - Target asset has critical classification
-#   multiple_usernames - More than 1 distinct username in related events
-#   high_volume        - More than N events in time window (see thresholds)
-#   no_precedent       - No matching past ticket found
-#   privileged_account - Target is admin/root/service account
+# Format: field_name: [list of regex patterns]
+# Field names match alert data keys (srcip, srcuser, agent, etc.)
 
-escalation_triggers:
-  - external_ip
-  - critical_asset
-  - no_precedent
-
-# Thresholds for triggers that need them
-escalation_thresholds:
-  high_volume_count: 10
-  high_volume_window_minutes: 5
-
-# Blocked patterns - always escalate if matched (regex supported)
-blocked_patterns:
-  usernames:
+escalation_patterns:
+  srcuser:
     - "^admin$"
     - "^root$"
     - "^administrator$"
-  # source_ips: []
+  # srcip:
+  #   - "^(?!10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.).*"  # External IPs
 
 # -----------------------------------------------------------------------------
 # REPRODUCTION
@@ -81,7 +64,6 @@ blocked_patterns:
 
 reproduction:
   enabled: false
-  # allowed_scenarios: []
 
 # -----------------------------------------------------------------------------
 # LOGGING

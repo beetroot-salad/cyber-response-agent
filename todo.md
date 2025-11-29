@@ -6,3 +6,10 @@ enumrate dispostions from common knowledge
 build app config class
 
 make investigation agent call sub agent for actual invetigation and lower level judgement? maybe use claude code task feature (how to trigger reliably? and can you provide relevant task context?)
+
+## Backlog Ideas
+
+### Analytics Suite
+- High-volume alert detection: track alert frequency per signature over time windows
+- Should this live at SIEM level or application level? Probably SIEM correlation rules
+- Consider: alert fatigue metrics, auto-close rate tracking, escalation patterns
