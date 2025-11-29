@@ -21,7 +21,7 @@ import logging
 from typing import Optional
 
 from .confidence import calculate_confidence, get_decision
-from .logging_config import log_event, setup_logging
+from app.config.logging_config import log_event, setup_logging
 from .models import (
     AgentFindings,
     AlertData,
@@ -32,7 +32,7 @@ from .models import (
 )
 
 # Import investigator directly
-from agent.investigation.investigate import investigate as run_investigation
+from app.agent.investigation.investigate import investigate as run_investigation
 
 
 class InvestigationError(Exception):

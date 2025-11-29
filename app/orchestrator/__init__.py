@@ -6,7 +6,7 @@ Does NOT fetch context - that's the agent's job.
 """
 
 from .confidence import calculate_confidence, get_decision
-from .logging_config import log_event, setup_logging
+from app.config.logging_config import log_event, setup_logging
 from .manager import (
     InvestigationError,
     ValidationError,

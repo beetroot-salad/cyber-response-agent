@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 # Knowledge base paths
-KNOWLEDGE_DIR = Path("/workspace/knowledge")
+KNOWLEDGE_DIR = Path("/workspace/app/knowledge")
 
 
 def load_signature_knowledge(signature_id: str) -> dict:

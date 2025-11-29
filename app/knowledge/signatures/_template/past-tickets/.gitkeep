@@ -1,0 +1,16 @@
+# Past tickets directory
+
+Store resolved ticket JSON files here for pattern matching.
+
+Example filename: SEC-2024-001.json
+
+Required fields in each ticket:
+- ticket_id: Unique identifier (e.g., "SEC-2024-001")
+- signature_id: Must match this signature directory
+- tier: "gold", "silver", or "bronze"
+- disposition: "benign", "false_positive", "true_positive", "escalated"
+- alert_data: Original alert fields
+- investigation: Investigation findings
+- investigation_notes: Human-readable summary
+
+See /workspace/knowledge/signatures/wazuh-rule-5710/past-tickets/ for examples.

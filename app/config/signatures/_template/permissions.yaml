@@ -1,0 +1,95 @@
+# Signature Permissions Configuration
+#
+# Defines what the investigation agent can do for this signature.
+# Validated at load time by the orchestrator (see: app/orchestrator/permissions.py)
+# Invalid values will raise ValidationError before investigation starts.
+
+schema_version: "1.0"
+
+# -----------------------------------------------------------------------------
+# DISPOSITIONS
+# -----------------------------------------------------------------------------
+# Which dispositions can the agent recommend that may result in auto-close?
+# Valid values: benign, false_positive, true_positive
+# 'escalate' is always implicitly allowed (fail-safe)
+
+allowed_dispositions:
+  - benign
+  - false_positive
+
+# -----------------------------------------------------------------------------
+# CAPABILITIES
+# -----------------------------------------------------------------------------
+# What the agent can do during investigation.
+# These map to MCP servers and tool restrictions enforced by hooks.
+#
+# Available capabilities:
+#   query_siem        - Query Wazuh for events (mcp__wazuh__*)
+#   read_knowledge    - Read files from /workspace/app/knowledge/
+#   query_assets      - Look up asset criticality (future: mcp__assets__*)
+#   query_identity    - Look up user context (future: mcp__identity__*)
+#   query_threat_intel - External threat intelligence (future: mcp__ti__*)
+
+allowed_capabilities:
+  - query_siem
+  - read_knowledge
+
+# -----------------------------------------------------------------------------
+# AUTO-CLOSE
+# -----------------------------------------------------------------------------
+
+auto_close:
+  enabled: true
+  min_confidence: 0.90
+  require_precedent: true
+
+# -----------------------------------------------------------------------------
+# ESCALATION TRIGGERS
+# -----------------------------------------------------------------------------
+# Conditions that force escalation regardless of confidence.
+# These are evaluated by the orchestrator after the agent returns findings.
+#
+# Available triggers:
+#   external_ip        - Source IP is not RFC1918/internal
+#   critical_asset     - Target asset has critical classification
+#   multiple_usernames - More than 1 distinct username in related events
+#   high_volume        - More than N events in time window (see thresholds)
+#   no_precedent       - No matching past ticket found
+#   privileged_account - Target is admin/root/service account
+
+escalation_triggers:
+  - external_ip
+  - critical_asset
+  - no_precedent
+
+# Thresholds for triggers that need them
+escalation_thresholds:
+  high_volume_count: 10
+  high_volume_window_minutes: 5
+
+# Blocked patterns - always escalate if matched (regex supported)
+blocked_patterns:
+  usernames:
+    - "^admin$"
+    - "^root$"
+    - "^administrator$"
+  # source_ips: []
+
+# -----------------------------------------------------------------------------
+# REPRODUCTION
+# -----------------------------------------------------------------------------
+
+reproduction:
+  enabled: false
+  # allowed_scenarios: []
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+# Log level for this signature's investigations
+# Levels:
+#   minimal  - Final action only (ticket_id, timestamp, disposition)
+#   standard - + tool calls and key evidence
+#   verbose  - + full reasoning and internal tokens
+
+log_level: standard
