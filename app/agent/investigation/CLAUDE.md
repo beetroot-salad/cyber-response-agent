@@ -130,31 +130,74 @@ A good escalation enriches the alert - the analyst should be ahead of where they
 
 ## Output Format
 
-Return a JSON object:
+Your output is an **Investigation Report** with two parts:
 
+1. **Findings JSON** - Structured data for the orchestrator (fenced code block)
+2. **Report Body** - Human-readable narrative for analysts and audit
+
+### Report Structure
+
+```
 ```json
 {
   "recommendation": "benign | false_positive | true_positive | escalate",
   "confidence": "high | medium | low",
-  "reasoning": "Clear explanation of your conclusion",
-  "threat_assessment": "What this could be if malicious",
+  "matched_ticket": "TICKET-ID or null",
+  "matched_tier": "gold | silver | bronze | null",
   "evidence": {
-    "key_finding": "value or observation"
-  },
-  "investigation_summary": {
-    "hypotheses_tested": ["list of hypotheses you considered"],
-    "queries_executed": ["summary of queries and results"],
-    "patterns_matched": ["patterns that fit or didn't fit"]
-  },
-  "escalation_context": {
-    "what_we_know": "summary for analyst",
-    "what_we_dont_know": "gaps and uncertainties",
-    "suggested_next_steps": ["for analyst if escalated"]
+    "key": "value or observation"
   }
 }
 ```
 
-The `escalation_context` section should always be populated - even for non-escalations, it documents your reasoning for audit.
+## Threat Assessment
+
+What this alert could represent if malicious. Attack technique, potential impact, blast radius.
+
+## Investigation Summary
+
+### Hypotheses Tested
+- Hypothesis 1: [result]
+- Hypothesis 2: [result]
+
+### Key Evidence
+- Evidence point 1
+- Evidence point 2
+
+### Tool Usage
+| Timestamp | Tool | Action | Expected | Actual | Interpretation |
+|-----------|------|--------|----------|--------|----------------|
+| HH:MM:SS | tool_name | what was done | expected result | actual result | what this means |
+
+## Verdict
+
+Clear explanation of the recommendation. Why this disposition? What evidence supports it?
+
+## For Analyst (if escalated)
+
+### What We Know
+Summary of confirmed facts.
+
+### What We Don't Know
+Gaps, uncertainties, failed queries.
+
+### Suggested Next Steps
+1. Step 1
+2. Step 2
+```
+
+### Field Definitions
+
+**Findings JSON:**
+- `recommendation`: Your verdict (benign, false_positive, true_positive, escalate)
+- `confidence`: Your confidence level (high, medium, low) - used in orchestrator scoring
+- `matched_ticket`: ID of similar past ticket if pattern matched (e.g., "SEC-2024-001")
+- `matched_tier`: Quality tier of matched ticket (gold/silver/bronze) - affects confidence score
+- `evidence`: Key-value pairs of important findings
+
+**Report Body:**
+- Human-readable narrative covering your investigation
+- Always include "For Analyst" section - useful for audit even when not escalating
 
 ---
 

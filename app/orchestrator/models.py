@@ -98,53 +98,107 @@ class AgentFindings:
     """
     Structured findings returned by the investigation agent.
 
-    The agent synthesizes evidence and provides a recommendation.
-    The orchestrator performs sanity checks and handles engineering concerns
-    (logging, error handling, reproduction triggers).
+    The agent outputs an Investigation Report with:
+    1. JSON findings block (parsed into this dataclass)
+    2. Human-readable report body (stored in report_body)
 
     Fields:
         recommendation: Agent's recommended disposition ("benign", "false_positive",
             "true_positive", "escalate"). The orchestrator may override this.
+        confidence: Agent's self-reported confidence ("high", "medium", "low").
+            Used by orchestrator in deterministic confidence calculation.
         matched_ticket: ID of a similar past ticket that informed the recommendation
             (e.g., "SEC-2024-001"). None if no precedent found.
         matched_tier: Quality tier from matched ticket ("gold", "silver", "bronze").
             Used by orchestrator for confidence calculation.
-        reasoning: Free-form explanation of the verdict. Should include:
-            - Why this disposition was chosen
-            - What evidence supports it
-            - Reference to matched ticket if applicable
-            Example: "False positive - maintenance job. Recurring weekly pattern
-            matching SEC-2024-001. Same signature, user (svc-backup), and srcip (10.0.3.25)."
-        evidence: Dict mapping evidence type to pointer/reference. Encourages reuse
-            of utilities. Keys are evidence types, values are references.
-            Example: {"auth_logs": "wazuh:5710:last_24h", "ip_class": "internal:rfc1918"}
+        evidence: Dict mapping evidence type to value/observation.
+            Example: {"ip_class": "internal:rfc1918", "attempt_count": "3"}
+        report_body: Human-readable investigation narrative (markdown).
+            Includes threat assessment, investigation summary, verdict, and
+            analyst context. Used for audit and escalation handoff.
     """
 
     recommendation: str = "escalate"  # Default safe: escalate if unsure
+    confidence: str = "low"  # Default conservative
     matched_ticket: Optional[str] = None
     matched_tier: Optional[str] = None
-    reasoning: str = ""
-    evidence: dict[str, str] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
+    report_body: str = ""  # Human-readable markdown report
 
     @classmethod
     def from_json(cls, data: dict) -> "AgentFindings":
         """Parse agent JSON response into AgentFindings."""
         return cls(
             recommendation=data.get("recommendation", "escalate"),
+            confidence=data.get("confidence", "low"),
             matched_ticket=data.get("matched_ticket"),
             matched_tier=data.get("matched_tier"),
-            reasoning=data.get("reasoning", ""),
             evidence=data.get("evidence", {}),
+            report_body="",  # Set separately via from_report()
+        )
+
+    @classmethod
+    def from_report(cls, report: str) -> "AgentFindings":
+        """
+        Parse agent's Investigation Report into AgentFindings.
+
+        Report format:
+        ```json
+        { ... findings JSON ... }
+        ```
+
+        ## Threat Assessment
+        ... human readable content ...
+        """
+        import re
+
+        # Extract JSON block from report
+        json_match = re.search(r"```json\s*\n(.*?)\n```", report, re.DOTALL)
+        if not json_match:
+            # No JSON found - return default with full report as body
+            return cls(
+                recommendation="escalate",
+                confidence="low",
+                report_body=report,
+            )
+
+        try:
+            findings_json = json.loads(json_match.group(1))
+        except json.JSONDecodeError:
+            # Invalid JSON - return default with full report as body
+            return cls(
+                recommendation="escalate",
+                confidence="low",
+                report_body=report,
+            )
+
+        # Extract report body (everything after the JSON block)
+        json_end = json_match.end()
+        report_body = report[json_end:].strip()
+
+        return cls(
+            recommendation=findings_json.get("recommendation", "escalate"),
+            confidence=findings_json.get("confidence", "low"),
+            matched_ticket=findings_json.get("matched_ticket"),
+            matched_tier=findings_json.get("matched_tier"),
+            evidence=findings_json.get("evidence", {}),
+            report_body=report_body,
         )
 
     def to_dict(self) -> dict:
         return {
             "recommendation": self.recommendation,
+            "confidence": self.confidence,
             "matched_ticket": self.matched_ticket,
             "matched_tier": self.matched_tier,
-            "reasoning": self.reasoning,
             "evidence": self.evidence,
         }
+
+    def to_full_dict(self) -> dict:
+        """Include report_body for full serialization."""
+        d = self.to_dict()
+        d["report_body"] = self.report_body
+        return d
 
 
 @dataclass
