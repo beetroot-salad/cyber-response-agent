@@ -91,6 +91,21 @@ services:
       timeout: 5s
       retries: 5
 
+  # Private Docker Registry (for reproduction agent image management)
+  registry:
+    image: registry:2
+    container_name: registry
+    hostname: registry
+    restart: on-failure
+    networks:
+      - response-network
+    ports:
+      - "5000:5000"
+    volumes:
+      - registry_data:/var/lib/registry
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+
   # Wazuh MCP Server (Interface for agent to query SIEM)
   wazuh-mcp-server:
     build:
@@ -125,3 +140,4 @@ networks:
 volumes:
   falco-logs:
   postgres_data:
+  registry_data:
