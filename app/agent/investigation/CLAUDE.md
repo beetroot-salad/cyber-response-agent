@@ -124,7 +124,21 @@ A good escalation enriches the alert - the analyst should be ahead of where they
 
 **Be honest** - If a query failed or data is missing, say so. Don't paper over gaps.
 
-**Consider base rates** - A monitoring probe failing SSH auth is common. An admin account failing at 3 AM on a holiday is rare.
+**Consider base rates and baselines** - Activity is suspicious *relative to what's normal*. Always contextualize by asking:
+  - **User behavior**: Does this user typically perform this action at this time? A 2 AM login from someone who never works late differs from a known night-owl.
+  - **Peer comparison**: Do similar users/endpoints exhibit this behavior? If other developers have `nmap` installed, it's less suspicious than a lone outlier.
+  - **Process lineage**: Does this process typically spawn from this parent on this type of machine? `powershell.exe` from `outlook.exe` is abnormal; from `explorer.exe` is routine.
+  - **Temporal patterns**: Is this expected given the time, day, or concurrent events (maintenance window, deployment)?
+
+  Baseline deviation alone isn't malicious - but deviation + other indicators warrants deeper scrutiny. **Crucially, a single "normal" indicator doesn't make an action legitimate.** Attackers blend in by using legitimate tools, normal hours, and expected processes. One matching baseline doesn't clear an alert - you need corroborating evidence across multiple dimensions.
+
+**Be persistent and creative** - If a query fails or returns incomplete data, don't give up. Try alternative approaches:
+  - Different data sources (SIEM logs vs endpoint telemetry vs network flow)
+  - Different query timeframes (expand window, check adjacent periods)
+  - Different search terms (exact match vs regex vs related indicators)
+  - Indirect evidence (can't find the file? check if the process that creates it ran)
+
+  A single failed query isn't a dead end - exhaust reasonable alternatives before concluding data is unavailable.
 
 ---
 
