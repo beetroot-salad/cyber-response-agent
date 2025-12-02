@@ -220,6 +220,20 @@ class InvestigationRunner:
         """Build the investigation prompt for Claude Code."""
         alert_summary = json.dumps(self.alert_data, indent=2)
 
+        # Add reproduction capability notice if enabled
+        reproduction_notice = ""
+        if self.config.reproduction_enabled:
+            reproduction_notice = f"""
+## Reproduction Capability
+
+**Reproduction is ENABLED** for this signature. If you reach medium confidence (60-85%)
+on a reproducible hypothesis, you can invoke the reproduction agent to validate it.
+See CLAUDE.md for details on when and how to use reproduction.
+
+- Max timeout: {self.config.reproduction_max_timeout} seconds
+- Run directory: {self.run_dir}
+"""
+
         return f"""Investigate security alert {self.ticket_id}.
 
 ## Alert Details
@@ -229,7 +243,7 @@ class InvestigationRunner:
 ```json
 {alert_summary}
 ```
-
+{reproduction_notice}
 ## Instructions
 1. Read the alert data from `alert.json`
 2. Use your skills to understand this signature and known patterns
@@ -252,13 +266,21 @@ Provide your Investigation Report as specified in CLAUDE.md:
         """
         prompt = self.build_prompt()
 
-        # Build command
+        # Build command with allowed tools
         cmd = [
             "claude",
             "--print",  # Non-interactive, print response
             "--cwd", str(self.run_dir),
-            "-p", prompt,
         ]
+
+        # Add reproduction tool permission if enabled
+        if self.config.reproduction_enabled:
+            cmd.extend([
+                "--allowedTools",
+                "Bash(python /workspace/app/agent/reproduction/runner.py:*)",
+            ])
+
+        cmd.extend(["-p", prompt])
 
         # Environment for hooks
         env = os.environ.copy()

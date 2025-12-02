@@ -160,6 +160,11 @@ Your output is an **Investigation Report** with two parts:
   "matched_tier": "gold | silver | bronze | null",
   "evidence": {
     "key": "value or observation"
+  },
+  "reproduction_request": {
+    "hypothesis": "Clear, testable hypothesis for reproduction",
+    "environment_hint": "e.g., target-endpoint container",
+    "timeout_seconds": 120
   }
 }
 ```
@@ -208,10 +213,83 @@ Gaps, uncertainties, failed queries.
 - `matched_ticket`: ID of similar past ticket if pattern matched (e.g., "SEC-2024-001")
 - `matched_tier`: Quality tier of matched ticket (gold/silver/bronze) - affects confidence score
 - `evidence`: Key-value pairs of important findings
+- `reproduction_request`: (optional) Request for the orchestrator to run reproduction validation
+  - Include when you have a **testable hypothesis** that could be validated by reproduction
+  - Omit when: hypothesis is not reproducible, or confidence is already high/low enough
+  - `hypothesis`: Clear description of what to test (e.g., "Running /opt/scripts/backup.sh creates /tmp/backup-*.tar.gz files")
+  - `environment_hint`: Where the behavior originates (e.g., "target-endpoint container")
+  - `timeout_seconds`: Suggested timeout (will be capped by config)
 
 **Report Body:**
 - Human-readable narrative covering your investigation
 - Always include "For Analyst" section - useful for audit even when not escalating
+
+---
+
+## Reproduction Capability
+
+When enabled for this signature, you can invoke the **Reproduction Agent** to validate hypotheses by recreating conditions in an isolated sandbox.
+
+### When to Use Reproduction
+
+Use reproduction when:
+- You have **medium confidence** (60-85%) in a benign/false_positive hypothesis
+- The hypothesis is **reproducible** (scheduled task, automated script, config-driven behavior)
+- Reproduction could **increase confidence** enough to auto-close
+
+Do NOT use reproduction when:
+- Confidence is already high (>85%) - just recommend disposition
+- Confidence is low (<60%) - escalate instead
+- Hypothesis involves user actions, malware, or non-deterministic behavior
+- You've already exhausted your investigation and remain uncertain
+
+### How to Invoke Reproduction
+
+Run the reproduction agent via bash command, passing the hypothesis as JSON:
+
+```bash
+python /workspace/app/agent/reproduction/runner.py \
+  --ticket-id "TICKET-ID" \
+  --hypothesis "Clear description of what to test" \
+  --signature-id "signature-id" \
+  --context-url "/path/to/your/run/dir" \
+  --timeout 120
+```
+
+**Parameters:**
+- `--ticket-id` (required): The ticket ID you're investigating
+- `--hypothesis` (required): What behavior to reproduce and validate
+- `--signature-id` (optional): Signature ID for knowledge lookup
+- `--context-url` (optional): Path to your investigation run directory
+- `--environment-hint` (optional): Hint about source environment (e.g., "target-endpoint container")
+- `--timeout` (optional): Timeout in seconds (default: 300, capped by config)
+
+### Interpreting Reproduction Results
+
+The reproduction agent returns JSON with:
+- `result`: "confirmed" | "refuted" | "inconclusive"
+- `observations`: List of what was observed
+- `not_reproducible_reason`: Why it couldn't be tested (if applicable)
+
+**Adjust your recommendation based on result:**
+- `confirmed` → Increase confidence, likely safe to recommend benign/false_positive
+- `refuted` → Your hypothesis was wrong, escalate or investigate further
+- `inconclusive` → No additional signal, decide based on original evidence
+
+### Example Flow
+
+```
+1. Investigation finds: Alert triggered by /tmp/backup.tar.gz creation
+2. Hypothesis: "Scheduled cron job /etc/cron.d/backup creates this file"
+3. Confidence: Medium (70%) - cron exists, timing matches, but not 100% certain
+4. Invoke reproduction:
+   python /workspace/app/agent/reproduction/runner.py \
+     --ticket-id "SEC-2024-001" \
+     --hypothesis "Running /opt/scripts/backup.sh creates /tmp/backup.tar.gz" \
+     --signature-id "wazuh-rule-5710"
+5. Result: confirmed - backup.sh creates matching file
+6. Final recommendation: benign with high confidence
+```
 
 ---
 
@@ -220,3 +298,4 @@ Gaps, uncertainties, failed queries.
 - **No remediation** - You investigate and recommend only. No blocking, no account changes.
 - **No assumptions** - If you don't have evidence, you don't know. Say so.
 - **Fail safe** - Errors, timeouts, missing data → escalate with context about what failed.
+- **Reproduction is optional** - Only use when enabled and beneficial. Most alerts don't need it.
