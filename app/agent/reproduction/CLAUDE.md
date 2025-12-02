@@ -104,33 +104,58 @@ You MUST return a JSON object with this structure:
 ```json
 {
   "result": "confirmed | refuted | inconclusive",
-  "confidence_modifier": 0.15 | -0.30 | 0.0,
+  "hypothesis_tested": "description of what was tested",
   "observations": [
     "Description of what was observed",
     "Another observation"
   ],
-  "pattern_matches": [
-    {
-      "expected": "pattern or file or behavior expected",
-      "observed": "what was actually seen",
-      "matched": true | false
-    }
-  ],
-  "execution_log": {
-    "commands_run": ["cmd1", "cmd2"],
-    "exit_codes": [0, 0],
-    "duration_seconds": 12.5,
-    "files_created": ["/tmp/output.log"],
-    "files_modified": []
-  },
-  "environment_info": {
-    "base_image": "ubuntu:22.04",
-    "packages_installed": ["cron", "rsync"],
-    "config_files_mounted": ["/etc/cron.d/backup"]
-  },
-  "reasoning": "Explanation of why this result was determined"
+  "not_reproducible_reason": null | "explanation if hypothesis cannot be reproduced"
 }
 ```
+
+### Reproduction Report
+
+In addition to the JSON result, you MUST write a detailed reproduction report to `./output/reproduction-report.md`. This report serves as the audit trail and should be appended to as you work (not written all at once at the end).
+
+The report structure:
+
+```markdown
+# Reproduction Report
+
+## Hypothesis
+What you understood from the investigation and are testing.
+
+## Environment Setup
+- Source image used
+- Container configuration
+- Files copied or mounted
+
+## Execution Log
+Append each command and its output as you run them:
+
+### Command 1: [description]
+\`\`\`bash
+$ command here
+[output]
+\`\`\`
+
+### Command 2: [description]
+...
+
+## Pattern Comparison
+| Expected | Observed | Match |
+|----------|----------|-------|
+| pattern  | actual   | ✓/✗   |
+
+## Conclusion
+Why you reached this result.
+```
+
+This file-based approach provides:
+- Real-time logging (append as you go)
+- Full audit trail for compliance
+- Human-readable format for review
+- Easy attachment to ticket resolution
 
 ---
 
@@ -151,25 +176,6 @@ You MUST return a JSON object with this structure:
 - Respect resource limits
 - Fail safely on any isolation breach detection
 - Clean up environment after completion
-
----
-
-## Available Tools
-
-### Environment Discovery (Read-Only)
-- `discover_environment(agent_name)`: Fetch configuration from the source environment
-  - Returns: OS info, installed packages, running services, relevant config files
-  - Scope: Read-only, filtered to relevant files only
-
-### Sandbox Execution
-- `execute_in_sandbox(commands, timeout)`: Run commands in isolated container
-  - Isolation: No network, tmpfs filesystem, resource limits
-  - Returns: stdout, stderr, exit code, execution time
-
-### Pattern Matching
-- `match_patterns(expected, observed)`: Compare expected vs observed outputs
-  - Supports: regex, glob, exact match
-  - Returns: Match results with details
 
 ---
 
