@@ -1,248 +1,297 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-This is a **Cyber Response Agent** prototype - an automated security alert triage system designed to reduce SOC analyst workload by automatically investigating and resolving false positives, duplicates, and routine security alerts. The system leverages Claude Code with a playground environment that simulates real SIEM/EDR infrastructure using open-source tools.
+**Cyber Response Agent** - An automated security alert triage system that reduces SOC analyst workload by investigating alerts and resolving false positives, duplicates, and routine issues. Uses Claude Code with isolated reproduction environments to validate findings before auto-closure.
 
-**Key Goal**: Zero false negatives (never auto-close real threats), high precision auto-closure (>95%) of benign alerts, mean time to resolution of 1-3 minutes.
+**Key Goal**: Zero false negatives (never auto-close real threats), high precision auto-closure (>95% correct), mean time to resolution of 1-3 minutes.
 
 ## Architecture
 
-### Multi-Container Docker Environment
-
-The project runs entirely in Docker containers orchestrated via Docker Compose (`.devcontainer/docker-compose.yml`):
-
-1. **devcontainer** - Development environment where Claude Code runs
-   - Has access to host Docker via socket mount (`/var/run/docker.sock`)
-   - Working directory: `/workspace`
-   - All code development happens here
-
-2. **target-endpoint** - Ubuntu 22.04 container simulating a monitored endpoint
-   - Runs scheduled workloads (benign and suspicious activity)
-   - Generates realistic system events for monitoring
-   - Location: `target-endpoint/`
-
-3. **falco** - eBPF-based security monitoring (EDR simulation)
-   - Monitors syscalls, file access, network activity from all containers
-   - Outputs events in JSON format to `/var/log/falco/events.json`
-   - Replaces auditd (which doesn't work in containers)
-
-4. **postgres** - PostgreSQL + pgvector database
-   - Stores tickets (security alerts) from Wazuh/Falco
-   - Database: `cyber_response`, User: `agent`, Password: `agent_password`
-   - Schema: `init-db.sql` (simple tickets table with JSONB for flexibility)
-   - Port: 5432
-
-5. **wazuh-manager**, **wazuh-indexer**, **wazuh-dashboard** - SIEM stack
-   - Manager: Alert correlation and API (port 55000)
-   - Indexer: Elasticsearch for event storage (port 9200)
-   - Dashboard: Web UI (port 5601)
-   - Credentials: admin/SecretPassword, API: wazuh-api/MyS3cr37P450r.*-
-
-### Data Flow
+### Core Components
 
 ```
-Target Endpoint → Falco (eBPF monitoring) → Wazuh Manager → Wazuh Indexer (events)
-                                                          ↘ PostgreSQL (tickets)
+┌────────────────────────────────────────────────────────────────────────────┐
+│                            ORCHESTRATOR                                    │
+│  app/orchestrator/                                                         │
+│  - Receives alert data from SIEM                                           │
+│  - Validates input, invokes investigation agent                            │
+│  - Calculates confidence score (deterministic formula)                     │
+│  - Makes routing decision: auto_close | reproduce | escalate               │
+│  - Logs audit trail                                                        │
+└────────────────────────────┬───────────────────────────┬───────────────────┘
+                             │                           │
+                             ▼                           ▼
+┌────────────────────────────────────────┐  ┌────────────────────────────────┐
+│       INVESTIGATION AGENT              │  │       REPRODUCTION AGENT       │
+│  app/agent/investigation/              │  │  app/agent/reproduction/       │
+│                                        │  │                                │
+│  Claude Code subagent that:            │  │  Claude Code subagent that:    │
+│  - Reads alert and knowledge base      │  │  - Builds isolated sandbox     │
+│  - Queries SIEM (Wazuh MCP)            │  │  - Executes hypothesis test    │
+│  - Matches against past tickets        │  │  - Compares observed vs expected│
+│  - Outputs structured findings + report│  │  - Returns confirmed/refuted   │
+│                                        │  │                                │
+│  Isolation: Process + runtime dir      │  │  Isolation: Docker (--network  │
+│  Timeout: 5 minutes                    │  │  none), ephemeral filesystem   │
+└────────────────────────────────────────┘  └────────────────────────────────┘
 ```
 
-Agent investigates alerts via:
-- Wazuh MCP Server (query SIEM alerts)
-- PostgreSQL (manage tickets, case knowledge)
-- Docker exec (investigate target endpoint directly)
+### Decision Flow
 
-## Database Commands
+```
+Alert → Validate → Investigate → Calculate Confidence → Route
+                                        │
+                        ┌───────────────┼───────────────┐
+                        ▼               ▼               ▼
+                   ≥90%: AUTO_CLOSE  70-89%: REPRODUCE  <70%: ESCALATE
+                        │               │               │
+                        ▼               ▼               ▼
+                   Close ticket    Sandbox test    Human analyst
+                   Update KB       → re-evaluate   queue
+```
 
-### PostgreSQL Access
+### File-Based Knowledge System
+
+Past investigations and playbooks are stored as files in `app/knowledge/`:
+
+```
+app/knowledge/
+├── common/                     # Shared utilities and lessons
+│   ├── SKILL.md               # Common skills definition
+│   ├── lessons/               # Learned patterns
+│   └── utilities/             # Wazuh queries, etc.
+└── signatures/                # Per-signature knowledge
+    ├── _template/             # Template for new signatures
+    │   ├── SKILL.md
+    │   ├── playbook.md
+    │   ├── rule.md
+    │   └── past-tickets/
+    └── wazuh-rule-5710/       # Example: SSH brute force
+        ├── SKILL.md
+        ├── playbook.md
+        ├── rule.md
+        ├── lessons.md
+        └── past-tickets/      # JSON files with case history
+```
+
+## Project Structure
+
+```
+/workspace/
+├── app/                        # Main application code
+│   ├── agent/
+│   │   ├── investigation/     # Investigation agent runner + CLAUDE.md
+│   │   └── reproduction/      # Reproduction agent runner + CLAUDE.md
+│   ├── orchestrator/          # Manager, confidence scoring, models
+│   ├── config/                # App config, signature permissions
+│   ├── knowledge/             # Playbooks, past tickets, lessons
+│   └── tools/                 # Utility scripts (run analyzer)
+│
+├── config/                    # Infrastructure configuration
+│   ├── wazuh_cluster/         # Wazuh manager config, Falco rules
+│   ├── wazuh_indexer/         # Elasticsearch config
+│   └── wazuh_indexer_ssl_certs/
+│
+├── docs/                      # Documentation
+│   ├── design-v1.md           # Initial design document
+│   ├── design-v2.md           # Updated design
+│   ├── design-alternative.md  # Alternative approaches
+│   ├── playground-setup.md    # Full setup guide
+│   ├── agent-execution-architecture.md
+│   └── reproduction-agent-design.md
+│
+├── .devcontainer/             # Docker environment
+│   ├── docker-compose.yml     # Main services
+│   ├── wazuh-stack.yml        # Wazuh SIEM stack
+│   └── wazuh-overrides.yml    # Local customizations
+│
+├── target-endpoint/           # Monitored endpoint container
+│   ├── Dockerfile
+│   └── workloads/             # Benign/suspicious activity scripts
+│
+├── falco-config/              # eBPF security monitoring
+│
+└── tests/                     # Test suite
+    ├── unit/
+    └── integration/
+```
+
+## Docker Environment
+
+Multi-container stack (`.devcontainer/docker-compose.yml`):
+
+| Service | Purpose |
+|---------|---------|
+| **devcontainer** | Development environment with Docker socket access |
+| **target-endpoint** | Ubuntu container generating workload activity |
+| **falco** | eBPF syscall monitoring → JSON events |
+| **registry** | Private Docker registry for reproduction images |
+| **wazuh-mcp-server** | MCP interface to Wazuh API |
+| **wazuh.manager** | SIEM alert correlation (separate stack) |
+| **wazuh.indexer** | Elasticsearch for events |
+| **wazuh.dashboard** | Web UI |
+
+### Common Commands
+
 ```bash
-# Connect to database (from devcontainer)
-docker exec -it postgres psql -U agent -d cyber_response
+# Start all containers
+cd .devcontainer && docker compose up -d
 
-# Quick query examples
-docker exec postgres psql -U agent -d cyber_response -c "SELECT COUNT(*) FROM tickets;"
-docker exec postgres psql -U agent -d cyber_response -c "SELECT alert_signature, severity, status FROM tickets LIMIT 10;"
-```
+# Start Wazuh stack
+docker compose -p cyber-response-agent_devcontainer -f wazuh-stack.yml -f wazuh-overrides.yml up -d
 
-### Schema
-- **tickets** table: Core alert storage with JSONB for raw alerts
-- Schema defined in `init-db.sql`
-- Supports: alert metadata, investigation context, disposition tracking
-
-## Container Management
-
-### Start/Stop Stack
-```bash
-# Start all containers (from workspace root, on host Docker)
-docker-compose -f .devcontainer/docker-compose.yml up -d
-
-# Stop all containers
-docker-compose -f .devcontainer/docker-compose.yml down
-
-# View logs
-docker logs target-endpoint
-docker logs falco --tail 50
-docker logs wazuh-manager
-```
-
-### Investigate Target Endpoint
-```bash
-# Access the monitored endpoint (simulates EDR console access)
-docker exec -it target-endpoint bash
-
-# Inside container - check running processes
-ps aux
-
-# Check workload logs
-tail -f /var/log/workload.log
-
-# View cron schedule
-cat /etc/cron.d/workload
-```
-
-### Monitor Falco Events
-```bash
-# View real-time Falco alerts (JSON format)
+# View Falco events
 docker logs falco --follow
 
-# Access Falco event log file
-docker exec falco cat /var/log/falco/events.json | jq .
+# Investigate target endpoint
+docker exec -it target-endpoint bash
+
+# Trigger test activity
+docker exec target-endpoint /opt/workloads/suspicious_patterns.sh
+```
+
+## Running the Agent
+
+### Investigation
+
+```bash
+# Via Python module
+python -m app.agent.investigation.runner \
+  --ticket-id "SEC-001" \
+  --signature-id "wazuh-rule-5710" \
+  --alert-json '{"srcip": "10.0.1.50", "srcuser": "admin", ...}'
+
+# Or programmatically
+from app.agent.investigation.runner import InvestigationRunner
+
+runner = InvestigationRunner(
+    ticket_id="SEC-001",
+    signature_id="wazuh-rule-5710",
+    alert_data={"srcip": "10.0.1.50", ...}
+)
+result = runner.run()
+```
+
+### Reproduction
+
+```bash
+python -m app.agent.reproduction.runner \
+  --ticket-id "SEC-001" \
+  --hypothesis "backup.sh creates /tmp/backup.tar.gz" \
+  --signature-id "wazuh-rule-5710" \
+  --timeout 120
+```
+
+### Tests
+
+```bash
+# Run all tests
+pytest tests/
+
+# Unit tests only
+pytest tests/unit/
+
+# Integration tests
+pytest tests/integration/
+
+# Specific test
+pytest tests/test_confidence.py -v
 ```
 
 ## Key Design Patterns
 
-### Conservative Investigation Approach
-- **Never auto-close on uncertainty** - when confidence < 95%, escalate to human
-- Multi-layer validation before any auto-closure decision
-- Full audit trail for compliance and review
-- Dispositions: `true_positive`, `false_positive`, `benign`, `escalated`, `inconclusive`
+### Conservative by Default
+- When confidence < threshold, escalate to human
+- Multiple validation layers before auto-closure
+- Reproduction validates medium-confidence findings
 
-### Ticket-Based Workflow
-1. Alerts ingested from Wazuh → PostgreSQL tickets table
-2. Agent investigates using multiple data sources (SIEM, TI, past cases)
-3. Confidence scoring determines disposition (auto-close vs escalate)
-4. Investigation context stored in JSONB for learning and audit
+### Deterministic Orchestration
+- Confidence scoring is a formula, not LLM judgment
+- Routing decisions based on thresholds
+- Agent provides structured findings, orchestrator decides
 
-### Isolation for Reproduction
-- Reproduction agent runs in isolated sandbox (separate container)
-- No network access, ephemeral storage, resource limits
-- Used for medium-confidence alerts (80-95%) to validate hypothesis
-- Designed in `cyber-response-agent-design.md` (not yet implemented)
+### Isolation
+- Investigation: Process + runtime directory
+- Reproduction: Docker with `--network none`, dropped capabilities, ephemeral filesystem
 
-## Important Files
+### Auditability
+- Every investigation creates a run directory
+- Reports stored in `app/agent/*/runs/{run_id}/`
+- JSON findings + markdown narrative for each run
 
-### Documentation
-- `playground-setup-v2.md` - Complete setup guide and implementation roadmap
-- `cyber-response-agent-design.md` - System architecture, goals, flow diagrams
-- `init-db.sql` - PostgreSQL schema for ticket system
+## Configuration
 
-### Configuration
-- `.devcontainer/docker-compose.yml` - Multi-container orchestration
-- `target-endpoint/Dockerfile` - Monitored endpoint container build
-- `target-endpoint/entrypoint.sh` - Endpoint initialization script
-- `target-endpoint/workloads/*.sh` - Benign and suspicious activity scripts
+### Signature Permissions (`app/config/signatures/{signature_id}/permissions.yaml`)
 
-### Implementation Status (from playground-setup-v2.md)
-✅ **Completed**:
-- Target endpoint with workload generation
-- Falco eBPF monitoring with JSON output
-- Docker Compose multi-container stack
-- Wazuh SIEM stack (Manager v4.9.2, Indexer, Dashboard)
-- PostgreSQL database with tickets table
-
-🚧 **In Progress**:
-- Falco → Wazuh integration (mount falco-logs volume to Wazuh)
-
-📋 **Next Steps**:
-- PostgreSQL ticket ingestion from Wazuh alerts
-- MORDOR dataset ingestion for realistic attack data
-- Investigation agent implementation
-- Reproduction sandbox
-
-## Development Workflow
-
-### Accessing Services
-```bash
-# Wazuh Dashboard: http://localhost:5601 (admin/SecretPassword)
-# PostgreSQL: localhost:5432 (agent/agent_password)
-
-# Wazuh API (from devcontainer - note: currently not accessible from localhost)
-curl -k -u wazuh-api:MyS3cr37P450r.*- https://wazuh-manager:55000/
+```yaml
+allowed_dispositions:
+  - benign
+  - false_positive
+auto_close:
+  enabled: true
+reproduction:
+  enabled: true
+  max_timeout_seconds: 300
+escalation_patterns:
+  critical_assets: ["domain-controller", "pci-server"]
 ```
 
-### Testing the Environment
+### MCP Servers
+
+Wazuh MCP Server runs at `wazuh-mcp-server:8000` for SIEM queries.
+
+## Credentials (Development Only)
+
+| Service | Username | Password |
+|---------|----------|----------|
+| Wazuh Dashboard | admin | SecretPassword |
+| Wazuh API | wazuh-wui | MyS3cr37P450r.*- |
+
+## Development Guidelines
+
+### Adding a New Signature
+
+1. Create directory: `app/knowledge/signatures/{signature-id}/`
+2. Copy template: `cp -r app/knowledge/signatures/_template/* app/knowledge/signatures/{signature-id}/`
+3. Edit `rule.md` with detection rule details
+4. Edit `playbook.md` with investigation steps
+5. Add past tickets to `past-tickets/`
+6. Create `app/config/signatures/{signature-id}/permissions.yaml`
+
+### Agent Development
+
+Agent instructions are in `app/agent/*/CLAUDE.md`. Edit these to change agent behavior.
+
+Key files:
+- `app/agent/investigation/CLAUDE.md` - Investigation methodology
+- `app/agent/reproduction/CLAUDE.md` - Reproduction constraints and format
+- `app/agent/models.py` - Shared data models
+
+### Testing Changes
+
 ```bash
-# 1. Verify target endpoint is generating activity
-docker logs target-endpoint --tail 20
+# Run confidence scoring tests
+pytest tests/test_confidence.py -v
 
-# 2. Verify Falco is capturing events
-docker logs falco --tail 50 | grep -i "critical\|warning"
+# Test investigation runner
+pytest tests/unit/test_investigation_runner.py -v
 
-# 3. Check database connectivity
-docker exec postgres psql -U agent -d cyber_response -c "SELECT version();"
-
-# 4. Manually trigger suspicious activity on target
-docker exec target-endpoint /opt/workloads/suspicious_patterns.sh
+# Test reproduction runner
+pytest tests/unit/test_reproduction_runner.py -v
 ```
-
-### Adding New Workload Scripts
-Place executable scripts in `target-endpoint/workloads/`:
-- `benign_activity.sh` - Runs every 5 minutes (normal user behavior)
-- `suspicious_patterns.sh` - Runs every 15 minutes (30% chance of suspicious activity)
-
-Edit cron schedule in `target-endpoint/Dockerfile` if needed.
-
-## Security Considerations
-
-### Network Isolation
-- All containers are on `response-network` bridge network
-- Devcontainer can access Docker host via socket mount
-- Target endpoint is isolated but accessible via `docker exec`
-
-### Credentials in Code
-- Hardcoded credentials are for playground/development ONLY
-- PostgreSQL: `agent/agent_password`
-- Wazuh API: `wazuh-api/MyS3cr37P450r.*-`
-- Wazuh Dashboard: `admin/SecretPassword`
-
-### Reproduction Sandbox
-When implementing, ensure:
-- No outbound network access (`network_mode: none`)
-- Drop all capabilities (`cap_drop: ALL`)
-- Read-only filesystem where possible
-- Time and resource limits enforced
-
-## Future MCP Servers (Planned)
-
-Per `playground-setup-v2.md`, planned MCP servers to implement:
-
-1. **Wazuh MCP Server** - Query SIEM alerts (use existing socfortress/Wazuh-MCP-Server)
-2. **Ticketing MCP Server** - Close tickets, update status, add case knowledge (PostgreSQL)
-3. **Threat Intel MCP Server** - IOC lookups with caching (PostgreSQL)
-
-MCP config location: `.claude/mcp_config.json` (not yet created)
 
 ## Known Issues
 
-- Wazuh API is not accessible from `localhost:55000` in devcontainer (connection refused)
-  - Use `wazuh-manager:55000` from within the Docker network instead
-- Falco generates many alerts for normal healthcheck operations (e.g., pg_isready reading /etc/shadow)
-  - Expected behavior - can tune Falco rules if needed
-- PostgreSQL healthcheck runs every 10s and generates Falco alerts
-  - Benign - part of Docker Compose health monitoring
+- Wazuh API not accessible from localhost (use `wazuh-manager:55000` from within Docker network)
+- Falco generates alerts for healthcheck operations (expected behavior)
 
-## Agent Design Principles (from cyber-response-agent-design.md)
+## Documentation
 
-1. **Conservative by Default** - Escalate when uncertain, multiple validation layers
-2. **Isolation & Security** - Minimal privileges, structured outputs, no credentials in LLM context
-3. **Transparency & Auditability** - Every decision logged with full justification
-4. **Continuous Learning** - Knowledge base evolves from successful investigations
-5. **Fail-Safe Architecture** - Circuit breakers, graceful degradation, manual override always available
-
-## Performance Targets
-
-- **Fast Triage**: <10s for exact duplicates and known false positives (60-70% of alerts)
-- **Main Investigation**: 15-30s for hypothesis generation with SIEM/TI queries
-- **Reproduction**: 30-90s for isolated environment validation
-- **Overall Mean TTR**: 45-90 seconds (weighted average across all alert types)
+Detailed documentation in `docs/`:
+- `playground-setup.md` - Complete environment setup guide
+- `design-v2.md` - System architecture and design decisions
+- `agent-execution-architecture.md` - Agent lifecycle details
+- `reproduction-agent-design.md` - Reproduction sandbox design
