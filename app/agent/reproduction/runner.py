@@ -54,14 +54,12 @@ class ReproductionRunner:
         investigation_context: Optional[dict[str, Any]] = None,
         signature_id: str = "unknown",
         timeout_seconds: int = 300,
-        cleanup: bool = False,
     ):
         self.hypothesis = hypothesis
         self.source_container = source_container
         self.investigation_context = investigation_context or {}
         self.signature_id = signature_id
         self.timeout_seconds = timeout_seconds
-        self.cleanup = cleanup
 
         # Generate unique run ID
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -249,11 +247,6 @@ Provide your result as specified in CLAUDE.md:
             # Best effort cleanup - don't fail the run
             pass
 
-    def teardown(self) -> None:
-        """Clean up runtime directory if configured."""
-        if self.cleanup and self.run_dir.exists():
-            shutil.rmtree(self.run_dir)
-
     def run(self) -> dict[str, Any]:
         """
         Execute the full reproduction lifecycle.
@@ -308,9 +301,6 @@ Provide your result as specified in CLAUDE.md:
             # Always attempt container cleanup
             self.cleanup_containers()
 
-            if self.cleanup:
-                self.teardown()
-
 
 def reproduce(hypothesis: str, source_container: str, context: Optional[dict] = None) -> dict:
     """
@@ -341,7 +331,6 @@ if __name__ == "__main__":
     parser.add_argument("--context-json", help="Investigation context as JSON string")
     parser.add_argument("--signature-id", default="unknown", help="Signature ID")
     parser.add_argument("--timeout", type=int, default=300, help="Timeout in seconds")
-    parser.add_argument("--cleanup", action="store_true", help="Remove runtime dir after completion")
 
     args = parser.parse_args()
 
@@ -359,7 +348,6 @@ if __name__ == "__main__":
         investigation_context=context,
         signature_id=args.signature_id,
         timeout_seconds=args.timeout,
-        cleanup=args.cleanup,
     )
 
     result = runner.run()

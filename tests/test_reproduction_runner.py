@@ -62,7 +62,6 @@ Expected behavior:
             "observed_file": "/tmp/backup-20241202-120000.tar.gz",
         },
         timeout_seconds=300,
-        cleanup=False,  # Keep run dir for inspection
     )
 
     print(f"\nRun ID: {runner.run_id}")

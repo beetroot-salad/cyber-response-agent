@@ -9,6 +9,15 @@ make investigation agent call sub agent for actual invetigation and lower level 
 
 ## Backlog Ideas
 
+### Retention Policy
+
+- Implement retention script for reproduction run data (`app/agent/reproduction/runs/`)
+- Policy-driven cleanup with audit logging (not per-run cleanup)
+- Consider `REPRODUCTION_RETAIN_DAYS` env var for configurable retention period
+- Add disk usage monitoring/alerting for runs directory
+
+
+
 ### Analytics Suite
 
 - High-volume alert detection: track alert frequency per signature over time windows
