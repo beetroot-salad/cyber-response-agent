@@ -68,29 +68,6 @@ services:
       - -o
       - file_output.filename=/var/log/falco/events.json
 
-  # PostgreSQL Database (Tickets + Case Knowledge for our cyber response agent)
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: postgres
-    hostname: postgres
-    restart: on-failure
-    networks:
-      - response-network
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_DB: cyber_response
-      POSTGRES_USER: agent
-      POSTGRES_PASSWORD: agent_password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ../init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agent -d cyber_response"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # Private Docker Registry (for reproduction agent image management)
   registry:
     image: registry:2
@@ -139,5 +116,4 @@ networks:
 
 volumes:
   falco-logs:
-  postgres_data:
   registry_data:
