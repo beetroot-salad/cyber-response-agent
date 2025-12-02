@@ -53,6 +53,7 @@ class InvestigationConfig:
     auto_close_enabled: bool = True
     escalation_patterns: dict[str, list[str]] = field(default_factory=dict)
     reproduction_enabled: bool = False
+    reproduction_max_timeout: int = 300
     log_level: str = "standard"
 
     @classmethod
@@ -71,12 +72,15 @@ class InvestigationConfig:
         with open(config_path) as f:
             data = yaml.safe_load(f)
 
+        reproduction_config = data.get("reproduction", {})
+
         return cls(
             allowed_dispositions=data.get("allowed_dispositions", ["benign", "false_positive"]),
             allowed_capabilities=data.get("allowed_capabilities", ["query_siem", "read_knowledge"]),
             auto_close_enabled=data.get("auto_close", {}).get("enabled", True),
             escalation_patterns=data.get("escalation_patterns", {}),
-            reproduction_enabled=data.get("reproduction", {}).get("enabled", False),
+            reproduction_enabled=reproduction_config.get("enabled", False),
+            reproduction_max_timeout=reproduction_config.get("max_timeout_seconds", 300),
             log_level=data.get("log_level", "standard"),
         )
 
@@ -332,6 +336,7 @@ Provide your Investigation Report as specified in CLAUDE.md:
         self,
         result: InvestigationResult,
         hypothesis: Optional[str] = None,
+        timeout_seconds: Optional[int] = None,
     ) -> Optional[ReproductionRequest]:
         """
         Create a ReproductionRequest from investigation result.
@@ -339,6 +344,7 @@ Provide your Investigation Report as specified in CLAUDE.md:
         Args:
             result: The investigation result
             hypothesis: Override hypothesis (uses result.hypothesis if not provided)
+            timeout_seconds: Requested timeout (capped to config max_timeout)
 
         Returns:
             ReproductionRequest if reproduction is enabled, None otherwise
@@ -361,11 +367,16 @@ Provide your Investigation Report as specified in CLAUDE.md:
         if not final_hypothesis:
             return None
 
+        # Enforce max timeout from config
+        max_timeout = self.config.reproduction_max_timeout
+        effective_timeout = min(timeout_seconds, max_timeout) if timeout_seconds else max_timeout
+
         return ReproductionRequest(
             ticket_id=self.ticket_id,
             hypothesis=final_hypothesis,
             signature_id=self.signature_id,
             context_url=str(self.run_dir),
+            timeout_seconds=effective_timeout,
         )
 
     def teardown(self) -> None:

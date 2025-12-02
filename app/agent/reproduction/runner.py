@@ -38,14 +38,40 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import yaml
+
 from app.agent.models import ReproductionRequest, ReproductionResult
 
 
 # Base paths
 APP_DIR = Path("/workspace/app")
+CONFIG_DIR = APP_DIR / "config"
 KNOWLEDGE_DIR = APP_DIR / "knowledge"
 REPRODUCTION_DIR = APP_DIR / "agent" / "reproduction"
 RUNS_DIR = REPRODUCTION_DIR / "runs"
+
+# Default max timeout (used when no config is available)
+DEFAULT_MAX_TIMEOUT = 300
+
+
+def _load_max_timeout(signature_id: Optional[str]) -> int:
+    """Load max_timeout_seconds from signature config."""
+    if not signature_id:
+        return DEFAULT_MAX_TIMEOUT
+
+    config_path = CONFIG_DIR / "signatures" / signature_id / "permissions.yaml"
+    if not config_path.exists():
+        config_path = CONFIG_DIR / "signatures" / "_template" / "permissions.yaml"
+
+    if not config_path.exists():
+        return DEFAULT_MAX_TIMEOUT
+
+    try:
+        with open(config_path) as f:
+            data = yaml.safe_load(f)
+        return data.get("reproduction", {}).get("max_timeout_seconds", DEFAULT_MAX_TIMEOUT)
+    except Exception:
+        return DEFAULT_MAX_TIMEOUT
 
 
 class ReproductionRunner:
@@ -73,7 +99,10 @@ class ReproductionRunner:
         self.signature_id = signature_id
         self.context_url = context_url
         self.environment_hint = environment_hint
-        self.timeout_seconds = timeout_seconds
+
+        # Enforce max timeout from signature config
+        max_timeout = _load_max_timeout(signature_id)
+        self.timeout_seconds = min(timeout_seconds, max_timeout)
 
         # Generate unique run ID
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

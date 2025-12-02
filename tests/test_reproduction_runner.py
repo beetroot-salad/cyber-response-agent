@@ -31,7 +31,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.agent.models import ReproductionRequest
-from app.agent.reproduction.runner import ReproductionRunner
+from app.agent.reproduction.runner import ReproductionRunner, _load_max_timeout
 
 
 def test_backup_script_reproduction():
@@ -135,6 +135,50 @@ def test_runner_setup_only():
     print(f"  Created: {runner.run_dir}")
 
     return True
+
+
+def test_max_timeout_enforcement():
+    """Test that timeout is capped to config max_timeout."""
+    # With known signature that has max_timeout_seconds: 300
+    runner = ReproductionRunner(
+        ticket_id="TEST-TIMEOUT-001",
+        hypothesis="Test timeout enforcement",
+        signature_id="wazuh-rule-5710",
+        timeout_seconds=600,  # Request more than max
+    )
+    assert runner.timeout_seconds == 300  # Should be capped
+
+    # Without signature (uses default)
+    runner = ReproductionRunner(
+        ticket_id="TEST-TIMEOUT-002",
+        hypothesis="Test timeout enforcement",
+        timeout_seconds=600,
+    )
+    assert runner.timeout_seconds == 300  # Default max
+
+    # Under max should be preserved
+    runner = ReproductionRunner(
+        ticket_id="TEST-TIMEOUT-003",
+        hypothesis="Test timeout enforcement",
+        signature_id="wazuh-rule-5710",
+        timeout_seconds=60,
+    )
+    assert runner.timeout_seconds == 60
+
+
+def test_load_max_timeout():
+    """Test _load_max_timeout helper function."""
+    # Known signature
+    timeout = _load_max_timeout("wazuh-rule-5710")
+    assert timeout == 300
+
+    # Unknown signature falls back to template
+    timeout = _load_max_timeout("unknown-sig")
+    assert timeout == 300
+
+    # None signature uses default
+    timeout = _load_max_timeout(None)
+    assert timeout == 300
 
 
 if __name__ == "__main__":

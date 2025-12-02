@@ -61,9 +61,15 @@ escalation_patterns:
 # -----------------------------------------------------------------------------
 # REPRODUCTION
 # -----------------------------------------------------------------------------
+# Settings for hypothesis validation via reproduction agent.
+#
+# max_timeout_seconds: Maximum time allowed for reproduction (default: 300)
+#   - Enforced as hard limit on reproduction agent execution
+#   - Request timeout_seconds is capped to this value
 
 reproduction:
   enabled: false
+  max_timeout_seconds: 300
 
 # -----------------------------------------------------------------------------
 # LOGGING

@@ -293,3 +293,35 @@ class TestReproductionRequestCreation:
         assert request is not None
         assert "TEST-REPRO-001" in request.hypothesis
         assert "benign" in request.hypothesis
+
+    def test_create_reproduction_request_enforces_max_timeout(
+        self, runner_with_reproduction
+    ):
+        """Should cap timeout to config max_timeout."""
+        runner_with_reproduction.config.reproduction_enabled = True
+        runner_with_reproduction.config.reproduction_max_timeout = 120
+
+        result = InvestigationResult(
+            success=True,
+            recommendation="benign",
+            hypothesis="Test hypothesis",
+        )
+
+        # Request timeout exceeds max - should be capped
+        request = runner_with_reproduction.create_reproduction_request(
+            result, timeout_seconds=600
+        )
+        assert request is not None
+        assert request.timeout_seconds == 120
+
+        # Request timeout under max - should be used as-is
+        request = runner_with_reproduction.create_reproduction_request(
+            result, timeout_seconds=60
+        )
+        assert request is not None
+        assert request.timeout_seconds == 60
+
+        # No timeout specified - should use max
+        request = runner_with_reproduction.create_reproduction_request(result)
+        assert request is not None
+        assert request.timeout_seconds == 120

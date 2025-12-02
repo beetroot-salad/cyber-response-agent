@@ -22,5 +22,6 @@ escalation_patterns: {}
 
 reproduction:
   enabled: false
+  max_timeout_seconds: 300
 
 log_level: verbose
