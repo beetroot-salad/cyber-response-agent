@@ -65,3 +65,4 @@ app/agent/investigation/scratchpad/
 
 # Runtime investigation directories (created per-ticket)
 app/agent/investigation/runs/
+app/agent/reproduction/runs/
