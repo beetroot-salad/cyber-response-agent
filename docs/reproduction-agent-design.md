@@ -11,12 +11,14 @@
 The Reproduction Agent validates medium-confidence findings from the Investigation Agent by recreating suspected activity in isolated, ephemeral containers. It compares observed behavior (logs, artifacts, state) against expected patterns to confirm or refute the investigation's hypothesis.
 
 **Key Value Proposition:**
+
 - Reduces hallucinations by requiring empirical validation
 - Provides deterministic evidence for auto-close decisions
 - Creates audit trail with reproducible steps
 - Handles medium-confidence cases (0.70-0.90) that would otherwise require human review
 
 **Design Philosophy (Phase 1):**
+
 - Minimize engineering overhead - get a working POC first
 - Agent does the thinking, orchestrator does the plumbing
 - Unstructured inputs, structured outputs
@@ -26,13 +28,13 @@ The Reproduction Agent validates medium-confidence findings from the Investigati
 
 ## 2. Requirements Recap
 
-| Requirement | Target | Phase 1 Approach |
-|-------------|--------|------------------|
-| Multi-environment support | Cloud, VMs, containers | Containers only (Docker) |
-| Perfect isolation | No egress, no cross-contamination | `--network=none`, ephemeral fs |
-| Scale | Enterprise alert volume | Single-threaded, defer to Phase 3 |
-| Latency | < 5 minutes total | Accept cold starts, rely on Docker cache |
-| Output | Structured report | JSON block + markdown narrative |
+| Requirement               | Target                            | Phase 1 Approach                         |
+| ------------------------- | --------------------------------- | ---------------------------------------- |
+| Multi-environment support | Cloud, VMs, containers            | Containers only (Docker)                 |
+| Perfect isolation         | No egress, no cross-contamination | `--network=none`, ephemeral fs           |
+| Scale                     | Enterprise alert volume           | Single-threaded, defer to Phase 3        |
+| Latency                   | < 5 minutes total                 | Accept cold starts, rely on Docker cache |
+| Output                    | Structured report                 | JSON block + markdown narrative          |
 
 ---
 
@@ -40,7 +42,7 @@ The Reproduction Agent validates medium-confidence findings from the Investigati
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              INVESTIGATION AGENT                             │
+│                              INVESTIGATION AGENT                            │
 │                                                                             │
 │  Outputs:                                                                   │
 │  • Investigation report (markdown + JSON findings)                          │
@@ -50,41 +52,41 @@ The Reproduction Agent validates medium-confidence findings from the Investigati
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         REPRODUCTION RUNNER                                  │
-│                         (Python orchestrator)                                │
+│                         REPRODUCTION RUNNER                                 │
+│                         (Python orchestrator)                               │
 │                                                                             │
 │  Responsibilities:                                                          │
-│  • Create isolated runtime directory                                         │
-│  • Copy investigation outputs + signature skills                             │
-│  • Spawn Claude Code subprocess                                              │
-│  • Enforce timeout (via subprocess timeout + hooks)                          │
-│  • Parse output, extract result                                              │
-│  • Clean up sandbox containers                                               │
+│  • Create isolated runtime directory                                        │
+│  • Copy investigation outputs + signature skills                            │
+│  • Spawn Claude Code subprocess                                             │
+│  • Enforce timeout (via subprocess timeout + hooks)                         │
+│  • Parse output, extract result                                             │
+│  • Clean up sandbox containers                                              │
 │                                                                             │
 │  Does NOT:                                                                  │
-│  • Interpret the investigation                                               │
-│  • Decide what to reproduce                                                  │
-│  • Formulate reproduction steps                                              │
+│  • Interpret the investigation                                              │
+│  • Decide what to reproduce                                                 │
+│  • Formulate reproduction steps                                             │
 └─────────────────────────────────┬───────────────────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         REPRODUCTION AGENT                                   │
-│                     (Claude Code subagent)                                   │
+│                         REPRODUCTION AGENT                                  │
+│                     (Claude Code subagent)                                  │
 │                                                                             │
 │  Responsibilities:                                                          │
-│  • Read investigation report + scratchpad                                    │
-│  • Identify/infer the hypothesis to test                                     │
-│  • Determine what environment is needed                                      │
-│  • Create sandbox container (via Bash + Docker)                              │
-│  • Execute reproduction steps in sandbox                                     │
-│  • Compare observed vs expected behavior                                     │
-│  • Output structured result                                                  │
+│  • Read investigation report + scratchpad                                   │
+│  • Identify/infer the hypothesis to test                                    │
+│  • Determine what environment is needed                                     │
+│  • Create sandbox container (via Bash + Docker)                             │
+│  • Execute reproduction steps in sandbox                                    │
+│  • Compare observed vs expected behavior                                    │
+│  • Output structured result                                                 │
 │                                                                             │
 │  Has access to:                                                             │
-│  • Bash (can run docker commands)                                            │
-│  • File read/write (in run directory)                                        │
-│  • Investigation context (copied files)                                      │
+│  • Bash (can run docker commands)                                           │
+│  • File read/write (in run directory)                                       │
+│  • Investigation context (copied files)                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -95,6 +97,7 @@ The Reproduction Agent validates medium-confidence findings from the Investigati
 ### 4.1 Orchestrator = Plumbing, Agent = Thinking
 
 **Orchestrator (ReproductionRunner):**
+
 ```python
 # Pseudo-code - what the orchestrator does
 def run():
@@ -118,6 +121,7 @@ def run():
 ```
 
 **Agent (Claude Code):**
+
 - Reads the investigation report
 - Identifies what hypothesis needs validation
 - Figures out what environment to create
@@ -129,6 +133,7 @@ def run():
 ### 4.2 Unstructured Input, Structured Output
 
 **Input (files in run directory):**
+
 ```
 runs/{run_id}/
 ├── CLAUDE.md                    # Agent instructions
@@ -146,7 +151,8 @@ runs/{run_id}/
 ```
 
 **Output (agent writes):**
-```markdown
+
+````markdown
 ```json
 {
   "result": "confirmed | refuted | inconclusive",
@@ -158,24 +164,31 @@ runs/{run_id}/
   ]
 }
 ```
+````
 
 ## Reproduction Report
 
 ### Hypothesis Identification
+
 What I understood from the investigation...
 
 ### Environment Setup
+
 What container I created and why...
 
 ### Execution Log
+
 Commands run, outputs observed...
 
 ### Comparison
+
 Expected vs observed behavior...
 
 ### Conclusion
+
 Why I reached this result...
-```
+
+````
 
 ### 4.3 Docker, Not Podman (For Now)
 
@@ -228,17 +241,17 @@ docker run \
   --rm \                        # Auto-remove on exit
   {image} \
   {command}
-```
+````
 
 ### 5.2 What Isolation Guarantees
 
-| Threat | Mitigation |
-|--------|------------|
-| Network exfiltration | `--network none` |
-| Host filesystem access | `--read-only`, no volume mounts to host |
-| Privilege escalation | `--cap-drop ALL`, `--security-opt no-new-privileges` |
-| Resource exhaustion | `--memory`, `--cpus`, `--pids-limit` |
-| Persistent state | `--rm`, tmpfs mounts |
+| Threat                 | Mitigation                                           |
+| ---------------------- | ---------------------------------------------------- |
+| Network exfiltration   | `--network none`                                     |
+| Host filesystem access | `--read-only`, no volume mounts to host              |
+| Privilege escalation   | `--cap-drop ALL`, `--security-opt no-new-privileges` |
+| Resource exhaustion    | `--memory`, `--cpus`, `--pids-limit`                 |
+| Persistent state       | `--rm`, tmpfs mounts                                 |
 
 ### 5.3 What Agent CAN Do
 
@@ -264,6 +277,7 @@ The existing CLAUDE.md already covers the core principles. Key additions for imp
 ### 6.1 Hypothesis Extraction
 
 The agent should:
+
 1. Read investigation report and scratchpad
 2. Identify the primary hypothesis (explicit or inferred)
 3. Determine if it's reproducible (see categories below)
@@ -272,12 +286,14 @@ The agent should:
 ### 6.2 Reproducible vs Non-Reproducible
 
 **Reproducible:**
+
 - "Alert caused by scheduled task/cron job"
 - "File created by legitimate software X"
 - "Process spawned by known automation tool"
 - "Log pattern from expected service behavior"
 
 **Not Reproducible:**
+
 - "User performed action X" (requires user context)
 - "Malware execution" (safety risk)
 - "Multi-step attack chain" (too complex)
@@ -342,11 +358,11 @@ docker rm repro-{run_id}
 
 ### 7.2 Confidence Modifiers
 
-| Result | Modifier | When |
-|--------|----------|------|
-| `confirmed` | +0.15 | All expected patterns observed, no contradictions |
-| `refuted` | -0.30 | Expected behavior not observed, contradictions found |
-| `inconclusive` | 0.0 | Partial match, environment issues, not reproducible |
+| Result         | Modifier | When                                                 |
+| -------------- | -------- | ---------------------------------------------------- |
+| `confirmed`    | +0.15    | All expected patterns observed, no contradictions    |
+| `refuted`      | -0.30    | Expected behavior not observed, contradictions found |
+| `inconclusive` | 0.0      | Partial match, environment issues, not reproducible  |
 
 ---
 
@@ -500,6 +516,7 @@ docker run -d --name repro-{run_id} \
 ```
 
 **Why this works:**
+
 - Same base OS, same packages, same scripts
 - No version mismatch issues
 - No manual environment specification needed
@@ -508,6 +525,7 @@ docker run -d --name repro-{run_id} \
 ### 9.4 Private Registry
 
 A private Docker registry is available at `registry:5000` for:
+
 - Caching pulled images
 - Storing environment snapshots if needed
 - Managing reproduction-specific images
@@ -540,6 +558,7 @@ docker exec target-endpoint systemctl list-units --type=service --state=running
 ```
 
 **Guidelines for on-demand discovery:**
+
 - Read-only operations only
 - Query source environment, not production databases
 - Cache results in scratchpad for audit trail
@@ -547,20 +566,21 @@ docker exec target-endpoint systemctl list-units --type=service --state=running
 
 ### 9.6 What Can vs Cannot Be Reproduced
 
-| Scenario | Environment Needs | Reproducible? |
-|----------|-------------------|---------------|
-| File creation by script | Script + dependencies | Yes |
-| Log pattern from process | Process + logging config | Yes |
-| Process spawning chain | Parent process exists | Yes |
-| Scheduled task execution | Cron config + script | Yes |
-| Auth failure logging | PAM/sshd config | Partially (no network in sandbox) |
-| Network connection | Network stack | No (Phase 2 - requires mocking) |
-| API call to service | Service endpoint | No (Phase 2 - requires mocking) |
-| Database query | Database connection | No (Phase 2 - requires mocking) |
+| Scenario                 | Environment Needs        | Reproducible?                     |
+| ------------------------ | ------------------------ | --------------------------------- |
+| File creation by script  | Script + dependencies    | Yes                               |
+| Log pattern from process | Process + logging config | Yes                               |
+| Process spawning chain   | Parent process exists    | Yes                               |
+| Scheduled task execution | Cron config + script     | Yes                               |
+| Auth failure logging     | PAM/sshd config          | Partially (no network in sandbox) |
+| Network connection       | Network stack            | No (Phase 2 - requires mocking)   |
+| API call to service      | Service endpoint         | No (Phase 2 - requires mocking)   |
+| Database query           | Database connection      | No (Phase 2 - requires mocking)   |
 
 ### 9.7 Network-Dependent Scenarios (Phase 2)
 
 Deferred to Phase 2. When encountered, agent returns `inconclusive` with:
+
 ```json
 {
   "result": "inconclusive",
@@ -574,16 +594,19 @@ Deferred to Phase 2. When encountered, agent returns `inconclusive` with:
 ## 10. Future Considerations (Not Phase 1)
 
 ### 10.1 Scaling (Phase 3)
+
 - Kubernetes workers
 - Queue-based distribution
 - gVisor/Kata for stricter isolation
 
 ### 10.2 Alternative Runtimes
+
 - Podman for rootless execution
 - Firecracker for VM-level isolation
 - Cloud sandboxes for cloud-native alerts
 
 ### 10.3 Feedback Loop
+
 - Track confirmation rates per precedent
 - Upgrade/downgrade precedent tiers based on reproduction success
 - Learn optimal reproduction strategies
@@ -593,15 +616,18 @@ Deferred to Phase 2. When encountered, agent returns `inconclusive` with:
 ## 11. Open Questions
 
 1. **Should investigation agent explicitly state hypothesis?**
+
    - Pro: Clearer handoff, easier to validate
    - Con: Adds structure/constraints to investigation output
    - **Decision:** Reproduction agent infers from scratchpad. May revisit if inference proves unreliable.
 
 2. **How to handle partial reproduction?**
+
    - Some patterns match, others don't
    - **Decision:** Return `inconclusive` with detailed observations
 
 3. **Environment discovery depth?**
+
    - **Decision:** Use source container image directly (Layer 1), supplement with scratchpad (Layer 2), query source on-demand (Layer 3), signature knowledge as fallback (Layer 4)
 
 4. **Network-dependent scenarios?**
@@ -631,6 +657,7 @@ Accessible at `registry:5000` from within the Docker network.
 ### 12.2 Investigation Agent Access
 
 Investigation agent can query source containers via `docker exec` for:
+
 - Config files
 - Package versions
 - OS information
@@ -640,4 +667,4 @@ Results should be captured in scratchpad for reproduction agent to use.
 
 ---
 
-*Document revised based on feedback. Focus on minimal POC that validates the core concept.*
+_Document revised based on feedback. Focus on minimal POC that validates the core concept._
