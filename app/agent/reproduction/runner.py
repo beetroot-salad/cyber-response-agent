@@ -9,11 +9,21 @@ Manages the lifecycle of a Claude Code reproduction test:
 4. Cleans up sandbox containers
 
 Usage:
-    from runner import ReproductionRunner
+    from app.agent.reproduction.runner import ReproductionRunner
+    from app.agent.models import ReproductionRequest
 
+    # Using ReproductionRequest (preferred)
+    request = ReproductionRequest(
+        ticket_id="SEC-2024-001",
+        hypothesis="On target-endpoint, benign_activity.sh creates /tmp/backup-*.tar.gz",
+    )
+    runner = ReproductionRunner.from_request(request)
+    result = runner.run()
+
+    # Direct instantiation (legacy)
     runner = ReproductionRunner(
+        ticket_id="SEC-2024-001",
         hypothesis="File /tmp/backup.tar.gz was created by backup.sh",
-        source_container="target-endpoint",
     )
     result = runner.run()
 """
@@ -27,6 +37,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+from app.agent.models import ReproductionRequest, ReproductionResult
 
 
 # Base paths
@@ -49,25 +61,39 @@ class ReproductionRunner:
 
     def __init__(
         self,
+        ticket_id: str,
         hypothesis: str,
-        source_container: str,
-        investigation_context: Optional[dict[str, Any]] = None,
-        signature_id: str = "unknown",
+        signature_id: Optional[str] = None,
+        context_url: Optional[str] = None,
+        environment_hint: Optional[str] = None,
         timeout_seconds: int = 300,
     ):
+        self.ticket_id = ticket_id
         self.hypothesis = hypothesis
-        self.source_container = source_container
-        self.investigation_context = investigation_context or {}
         self.signature_id = signature_id
+        self.context_url = context_url
+        self.environment_hint = environment_hint
         self.timeout_seconds = timeout_seconds
 
         # Generate unique run ID
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         short_uuid = uuid.uuid4().hex[:8]
-        self.run_id = f"{source_container}_{timestamp}_{short_uuid}"
+        self.run_id = f"{ticket_id}_{timestamp}_{short_uuid}"
 
         # Runtime directory
         self.run_dir = RUNS_DIR / self.run_id
+
+    @classmethod
+    def from_request(cls, request: ReproductionRequest) -> "ReproductionRunner":
+        """Create a ReproductionRunner from a ReproductionRequest."""
+        return cls(
+            ticket_id=request.ticket_id,
+            hypothesis=request.hypothesis,
+            signature_id=request.signature_id,
+            context_url=request.context_url,
+            environment_hint=request.environment_hint,
+            timeout_seconds=request.timeout_seconds,
+        )
 
     def setup(self) -> None:
         """Create runtime directory and copy resources."""
@@ -81,9 +107,10 @@ class ReproductionRunner:
         skills_dir.mkdir(parents=True, exist_ok=True)
 
         # Copy signature knowledge as skill (if exists)
-        sig_knowledge = KNOWLEDGE_DIR / "signatures" / self.signature_id
-        if sig_knowledge.exists():
-            shutil.copytree(sig_knowledge, skills_dir / self.signature_id)
+        if self.signature_id:
+            sig_knowledge = KNOWLEDGE_DIR / "signatures" / self.signature_id
+            if sig_knowledge.exists():
+                shutil.copytree(sig_knowledge, skills_dir / self.signature_id)
 
         # Copy common knowledge as skill (if exists)
         common_knowledge = KNOWLEDGE_DIR / "common"
@@ -100,39 +127,48 @@ class ReproductionRunner:
         hypothesis_file = self.run_dir / "hypothesis.json"
         with open(hypothesis_file, "w") as f:
             json.dump({
+                "ticket_id": self.ticket_id,
                 "hypothesis": self.hypothesis,
-                "source_container": self.source_container,
+                "signature_id": self.signature_id,
+                "context_url": self.context_url,
+                "environment_hint": self.environment_hint,
                 "run_id": self.run_id,
-                "investigation_context": self.investigation_context,
             }, f, indent=2)
 
     def build_prompt(self) -> str:
-        """Build the reproduction prompt for Claude Code."""
-        return f"""Test this reproduction hypothesis.
+        """Build the reproduction prompt for Claude Code.
 
-## Hypothesis
+        Provides task-specific context only. General methodology, output format,
+        and safety constraints are defined in CLAUDE.md.
+        """
+        context_section = ""
+        if self.context_url:
+            context_section = f"\n- **Investigation Context**: {self.context_url}"
+
+        env_section = ""
+        if self.environment_hint:
+            env_section = f"\n- **Environment Hint**: {self.environment_hint}"
+
+        return f"""## Hypothesis to Test
+
 {self.hypothesis}
 
-## Source Environment
-- **Container**: {self.source_container}
-- **Run ID**: {self.run_id}
+## Runtime Context
 
-## Instructions
-1. Read the hypothesis context from `hypothesis.json`
-2. Discover the source environment using `docker inspect` and `docker exec`
-3. Create an isolated sandbox container with the required isolation flags
-4. Execute the reproduction steps in the sandbox
-5. Compare observed behavior to expected patterns
-6. Write your detailed report to `output/reproduction-report.md`
-7. Output your JSON result block
+- **Ticket ID**: {self.ticket_id}
+- **Signature**: {self.signature_id or "unknown"}
+- **Run ID**: {self.run_id}{context_section}{env_section}
 
-## Container Naming
-When creating sandbox containers, use names starting with `repro-{self.run_id}-` so they can be cleaned up.
+## Input Files
 
-## Output
-Provide your result as specified in CLAUDE.md:
-- JSON result block with result, hypothesis_tested, observations
-- Detailed report in output/reproduction-report.md
+- `hypothesis.json` - Full hypothesis context and metadata
+- `.claude/skills/` - Relevant signature knowledge (if available)
+
+## Task
+
+Follow the reproduction framework to validate this hypothesis. Discover the source environment, build an isolated sandbox, execute the test, and compare observed behavior against expected patterns.
+
+Write your findings to `output/reproduction-report.md` as you work, then return your JSON result block.
 """
 
     def run_claude_code(self) -> tuple[str, str, int]:
@@ -163,7 +199,11 @@ Provide your result as specified in CLAUDE.md:
         env = os.environ.copy()
         env["REPRODUCTION_RUN_DIR"] = str(self.run_dir)
         env["REPRODUCTION_RUN_ID"] = self.run_id
-        env["SOURCE_CONTAINER"] = self.source_container
+        env["TICKET_ID"] = self.ticket_id
+        if self.signature_id:
+            env["SIGNATURE_ID"] = self.signature_id
+        if self.environment_hint:
+            env["ENVIRONMENT_HINT"] = self.environment_hint
 
         # Run process
         try:
@@ -181,47 +221,47 @@ Provide your result as specified in CLAUDE.md:
         except FileNotFoundError:
             return "", "Claude Code CLI not found. Is it installed?", -1
 
-    def parse_output(self, stdout: str) -> dict[str, Any]:
-        """Parse Claude Code output into result dict."""
-        result = {
-            "success": False,
-            "result": "inconclusive",
-            "hypothesis_tested": self.hypothesis,
-            "observations": [],
-            "not_reproducible_reason": None,
-            "report_path": None,
-            "run_id": self.run_id,
-            "run_dir": str(self.run_dir),
-            "duration_seconds": 0.0,
-            "error": None,
-        }
+    def parse_output(self, stdout: str) -> ReproductionResult:
+        """Parse Claude Code output into ReproductionResult."""
+        # Check for report file
+        report_path = self.run_dir / "output" / "reproduction-report.md"
+        report_url = str(report_path) if report_path.exists() else None
 
         # Try to extract JSON block
         json_match = re.search(r"```json\s*\n(.*?)\n```", stdout, re.DOTALL)
 
         if not json_match:
-            result["error"] = "No JSON result block in output"
-            return result
+            return ReproductionResult(
+                success=False,
+                hypothesis_tested=self.hypothesis,
+                run_id=self.run_id,
+                run_url=str(self.run_dir),
+                report_url=report_url,
+                error="No JSON result block in output",
+            )
 
         try:
             findings = json.loads(json_match.group(1))
         except json.JSONDecodeError as e:
-            result["error"] = f"Invalid JSON in result block: {e}"
-            return result
+            return ReproductionResult(
+                success=False,
+                hypothesis_tested=self.hypothesis,
+                run_id=self.run_id,
+                run_url=str(self.run_dir),
+                report_url=report_url,
+                error=f"Invalid JSON in result block: {e}",
+            )
 
-        # Update result with findings
-        result["success"] = True
-        result["result"] = findings.get("result", "inconclusive")
-        result["hypothesis_tested"] = findings.get("hypothesis_tested", self.hypothesis)
-        result["observations"] = findings.get("observations", [])
-        result["not_reproducible_reason"] = findings.get("not_reproducible_reason")
-
-        # Check for report file
-        report_path = self.run_dir / "output" / "reproduction-report.md"
-        if report_path.exists():
-            result["report_path"] = str(report_path)
-
-        return result
+        return ReproductionResult(
+            success=True,
+            result=findings.get("result", "inconclusive"),
+            hypothesis_tested=findings.get("hypothesis_tested", self.hypothesis),
+            observations=findings.get("observations", []),
+            not_reproducible_reason=findings.get("not_reproducible_reason"),
+            report_url=report_url,
+            run_id=self.run_id,
+            run_url=str(self.run_dir),
+        )
 
     def cleanup_containers(self) -> None:
         """Remove any sandbox containers created during this run."""
@@ -247,12 +287,12 @@ Provide your result as specified in CLAUDE.md:
             # Best effort cleanup - don't fail the run
             pass
 
-    def run(self) -> dict[str, Any]:
+    def run(self) -> ReproductionResult:
         """
         Execute the full reproduction lifecycle.
 
         Returns:
-            Dict with reproduction results or error
+            ReproductionResult with findings or error
         """
         start_time = datetime.now(timezone.utc)
 
@@ -264,61 +304,47 @@ Provide your result as specified in CLAUDE.md:
             stdout, stderr, returncode = self.run_claude_code()
 
             if returncode != 0:
-                return {
-                    "success": False,
-                    "result": "inconclusive",
-                    "hypothesis_tested": self.hypothesis,
-                    "observations": [],
-                    "not_reproducible_reason": None,
-                    "report_path": None,
-                    "run_id": self.run_id,
-                    "run_dir": str(self.run_dir),
-                    "duration_seconds": (datetime.now(timezone.utc) - start_time).total_seconds(),
-                    "error": f"Claude Code exited with code {returncode}: {stderr}",
-                }
+                return ReproductionResult(
+                    success=False,
+                    hypothesis_tested=self.hypothesis,
+                    run_id=self.run_id,
+                    run_url=str(self.run_dir),
+                    duration_seconds=(datetime.now(timezone.utc) - start_time).total_seconds(),
+                    error=f"Claude Code exited with code {returncode}: {stderr}",
+                )
 
             # Parse output
             result = self.parse_output(stdout)
-            result["duration_seconds"] = (datetime.now(timezone.utc) - start_time).total_seconds()
+            result.duration_seconds = (datetime.now(timezone.utc) - start_time).total_seconds()
 
             return result
 
         except Exception as e:
-            return {
-                "success": False,
-                "result": "inconclusive",
-                "hypothesis_tested": self.hypothesis,
-                "observations": [],
-                "not_reproducible_reason": None,
-                "report_path": None,
-                "run_id": self.run_id,
-                "run_dir": str(self.run_dir),
-                "duration_seconds": (datetime.now(timezone.utc) - start_time).total_seconds(),
-                "error": f"Reproduction failed: {type(e).__name__}: {e}",
-            }
+            return ReproductionResult(
+                success=False,
+                hypothesis_tested=self.hypothesis,
+                run_id=self.run_id,
+                run_url=str(self.run_dir),
+                duration_seconds=(datetime.now(timezone.utc) - start_time).total_seconds(),
+                error=f"Reproduction failed: {type(e).__name__}: {e}",
+            )
 
         finally:
             # Always attempt container cleanup
             self.cleanup_containers()
 
 
-def reproduce(hypothesis: str, source_container: str, context: Optional[dict] = None) -> dict:
+def reproduce(request: ReproductionRequest) -> ReproductionResult:
     """
-    Convenience function for simple reproduction tests.
+    Convenience function for reproduction tests.
 
     Args:
-        hypothesis: What to test/reproduce
-        source_container: Container name to use as reference environment
-        context: Optional investigation context
+        request: ReproductionRequest with hypothesis and context
 
     Returns:
-        Dict with reproduction results
+        ReproductionResult with findings or error
     """
-    runner = ReproductionRunner(
-        hypothesis=hypothesis,
-        source_container=source_container,
-        investigation_context=context,
-    )
+    runner = ReproductionRunner.from_request(request)
     return runner.run()
 
 
@@ -326,29 +352,24 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Reproduction Runner")
+    parser.add_argument("--ticket-id", required=True, help="Ticket ID")
     parser.add_argument("--hypothesis", required=True, help="Hypothesis to test")
-    parser.add_argument("--source-container", required=True, help="Source container name")
-    parser.add_argument("--context-json", help="Investigation context as JSON string")
-    parser.add_argument("--signature-id", default="unknown", help="Signature ID")
+    parser.add_argument("--signature-id", help="Signature ID")
+    parser.add_argument("--context-url", help="URL/path to investigation artifacts")
+    parser.add_argument("--environment-hint", help="Environment hint (container, VM, etc.)")
     parser.add_argument("--timeout", type=int, default=300, help="Timeout in seconds")
 
     args = parser.parse_args()
 
-    context = {}
-    if args.context_json:
-        try:
-            context = json.loads(args.context_json)
-        except json.JSONDecodeError as e:
-            print(json.dumps({"error": f"Invalid context JSON: {e}"}))
-            exit(1)
-
-    runner = ReproductionRunner(
+    request = ReproductionRequest(
+        ticket_id=args.ticket_id,
         hypothesis=args.hypothesis,
-        source_container=args.source_container,
-        investigation_context=context,
         signature_id=args.signature_id,
+        context_url=args.context_url,
+        environment_hint=args.environment_hint,
         timeout_seconds=args.timeout,
     )
 
+    runner = ReproductionRunner.from_request(request)
     result = runner.run()
-    print(json.dumps(result, indent=2))
+    print(json.dumps(result.to_dict(), indent=2))

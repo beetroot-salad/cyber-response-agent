@@ -35,6 +35,14 @@ Your execution environment has these hard constraints:
 - **Time**: Hard kill after 120 seconds
 - **Capabilities**: All dropped - no privileged operations
 
+### Container Naming Convention
+
+When creating sandbox containers, use the naming pattern:
+```
+repro-{RUN_ID}-<purpose>
+```
+Where `{RUN_ID}` is provided in your runtime context (e.g., `repro-SEC-001_20240115_abc123-sandbox`). This naming convention enables automated cleanup of containers after the reproduction run completes.
+
 ---
 
 ## Reproduction Framework

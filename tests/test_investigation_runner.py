@@ -200,8 +200,10 @@ class TestInvestigationResult:
             matched_tier="gold",
             evidence={"key": "value"},
             report_body="Report text",
+            ticket_id="TEST-001",
+            signature_id="test-sig",
             run_id="test-123",
-            run_dir=Path("/tmp/test"),
+            run_url="/tmp/test",
             duration_seconds=1.5,
         )
 
@@ -211,7 +213,10 @@ class TestInvestigationResult:
         assert d["recommendation"] == "benign"
         assert d["confidence"] == "high"
         assert d["matched_ticket"] == "SEC-001"
+        assert d["ticket_id"] == "TEST-001"
+        assert d["signature_id"] == "test-sig"
         assert d["run_id"] == "test-123"
+        assert d["run_url"] == "/tmp/test"
         assert d["duration_seconds"] == 1.5
 
     def test_error_result(self):
@@ -224,3 +229,67 @@ class TestInvestigationResult:
         assert result.success is False
         assert result.error == "Something went wrong"
         assert result.recommendation == "escalate"  # Default
+
+
+class TestReproductionRequestCreation:
+    """Tests for creating ReproductionRequest from investigation results."""
+
+    @pytest.fixture
+    def runner_with_reproduction(self):
+        """Create a runner with reproduction enabled."""
+        # We need to use a signature with reproduction enabled
+        # For now, test the method directly
+        return InvestigationRunner(
+            ticket_id="TEST-REPRO-001",
+            signature_id="wazuh-rule-5710",
+            alert_data={"srcip": "10.0.1.50"},
+        )
+
+    def test_create_reproduction_request_when_disabled(self, runner_with_reproduction):
+        """Should return None when reproduction is disabled."""
+        # wazuh-rule-5710 has reproduction.enabled: false
+        result = InvestigationResult(
+            success=True,
+            recommendation="benign",
+            hypothesis="Test hypothesis",
+        )
+
+        request = runner_with_reproduction.create_reproduction_request(result)
+        assert request is None  # Reproduction disabled for this signature
+
+    def test_create_reproduction_request_with_hypothesis(self, runner_with_reproduction):
+        """Should create request when hypothesis is provided."""
+        # Force reproduction enabled for testing
+        runner_with_reproduction.config.reproduction_enabled = True
+
+        result = InvestigationResult(
+            success=True,
+            recommendation="benign",
+            hypothesis="Backup script creates /tmp/backup.tar.gz",
+        )
+
+        request = runner_with_reproduction.create_reproduction_request(result)
+
+        assert request is not None
+        assert request.ticket_id == "TEST-REPRO-001"
+        assert request.hypothesis == "Backup script creates /tmp/backup.tar.gz"
+        assert request.signature_id == "wazuh-rule-5710"
+        assert request.context_url is not None
+
+    def test_create_reproduction_request_generates_hypothesis_from_evidence(
+        self, runner_with_reproduction
+    ):
+        """Should generate hypothesis from evidence if not provided."""
+        runner_with_reproduction.config.reproduction_enabled = True
+
+        result = InvestigationResult(
+            success=True,
+            recommendation="benign",
+            evidence={"source": "cron", "file": "/tmp/backup.tar.gz"},
+        )
+
+        request = runner_with_reproduction.create_reproduction_request(result)
+
+        assert request is not None
+        assert "TEST-REPRO-001" in request.hypothesis
+        assert "benign" in request.hypothesis

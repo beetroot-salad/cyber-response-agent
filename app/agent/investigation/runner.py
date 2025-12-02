@@ -32,6 +32,8 @@ from typing import Any, Optional
 
 import yaml
 
+from app.agent.models import ReproductionRequest
+
 
 # Base paths
 APP_DIR = Path("/workspace/app")
@@ -91,9 +93,14 @@ class InvestigationResult:
     evidence: dict[str, Any] = field(default_factory=dict)
     report_body: str = ""
 
+    # For reproduction handoff
+    hypothesis: Optional[str] = None
+
     # Metadata
+    ticket_id: str = ""
+    signature_id: str = ""
     run_id: str = ""
-    run_dir: Optional[Path] = None
+    run_url: Optional[str] = None
     duration_seconds: float = 0.0
     error: Optional[str] = None
 
@@ -106,8 +113,11 @@ class InvestigationResult:
             "matched_tier": self.matched_tier,
             "evidence": self.evidence,
             "report_body": self.report_body,
+            "hypothesis": self.hypothesis,
+            "ticket_id": self.ticket_id,
+            "signature_id": self.signature_id,
             "run_id": self.run_id,
-            "run_dir": str(self.run_dir) if self.run_dir else None,
+            "run_url": self.run_url,
             "duration_seconds": self.duration_seconds,
             "error": self.error,
         }
@@ -278,8 +288,10 @@ Provide your Investigation Report as specified in CLAUDE.md:
         if not json_match:
             return InvestigationResult(
                 success=False,
+                ticket_id=self.ticket_id,
+                signature_id=self.signature_id,
                 run_id=self.run_id,
-                run_dir=self.run_dir,
+                run_url=str(self.run_dir),
                 error="No JSON findings block in output",
                 report_body=stdout,
             )
@@ -289,8 +301,10 @@ Provide your Investigation Report as specified in CLAUDE.md:
         except json.JSONDecodeError as e:
             return InvestigationResult(
                 success=False,
+                ticket_id=self.ticket_id,
+                signature_id=self.signature_id,
                 run_id=self.run_id,
-                run_dir=self.run_dir,
+                run_url=str(self.run_dir),
                 error=f"Invalid JSON in findings block: {e}",
                 report_body=stdout,
             )
@@ -307,8 +321,51 @@ Provide your Investigation Report as specified in CLAUDE.md:
             matched_tier=findings.get("matched_tier"),
             evidence=findings.get("evidence", {}),
             report_body=report_body,
+            hypothesis=findings.get("hypothesis"),
+            ticket_id=self.ticket_id,
+            signature_id=self.signature_id,
             run_id=self.run_id,
-            run_dir=self.run_dir,
+            run_url=str(self.run_dir),
+        )
+
+    def create_reproduction_request(
+        self,
+        result: InvestigationResult,
+        hypothesis: Optional[str] = None,
+    ) -> Optional[ReproductionRequest]:
+        """
+        Create a ReproductionRequest from investigation result.
+
+        Args:
+            result: The investigation result
+            hypothesis: Override hypothesis (uses result.hypothesis if not provided)
+
+        Returns:
+            ReproductionRequest if reproduction is enabled, None otherwise
+        """
+        if not self.config.reproduction_enabled:
+            return None
+
+        # Use provided hypothesis, or from result, or generate from evidence
+        final_hypothesis = hypothesis or result.hypothesis
+        if not final_hypothesis and result.evidence:
+            # Generate a basic hypothesis from evidence
+            evidence_summary = ", ".join(
+                f"{k}: {v}" for k, v in list(result.evidence.items())[:3]
+            )
+            final_hypothesis = (
+                f"Alert {self.ticket_id} ({self.signature_id}) "
+                f"is {result.recommendation} based on: {evidence_summary}"
+            )
+
+        if not final_hypothesis:
+            return None
+
+        return ReproductionRequest(
+            ticket_id=self.ticket_id,
+            hypothesis=final_hypothesis,
+            signature_id=self.signature_id,
+            context_url=str(self.run_dir),
         )
 
     def teardown(self) -> None:
@@ -335,8 +392,10 @@ Provide your Investigation Report as specified in CLAUDE.md:
             if returncode != 0:
                 return InvestigationResult(
                     success=False,
+                    ticket_id=self.ticket_id,
+                    signature_id=self.signature_id,
                     run_id=self.run_id,
-                    run_dir=self.run_dir,
+                    run_url=str(self.run_dir),
                     error=f"Claude Code exited with code {returncode}: {stderr}",
                     duration_seconds=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
@@ -350,8 +409,10 @@ Provide your Investigation Report as specified in CLAUDE.md:
         except Exception as e:
             return InvestigationResult(
                 success=False,
+                ticket_id=self.ticket_id,
+                signature_id=self.signature_id,
                 run_id=self.run_id,
-                run_dir=self.run_dir,
+                run_url=str(self.run_dir),
                 error=f"Investigation failed: {type(e).__name__}: {e}",
                 duration_seconds=(datetime.now(timezone.utc) - start_time).total_seconds(),
             )
