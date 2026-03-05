@@ -3,7 +3,6 @@ services:
   wazuh.manager:
     image: wazuh/wazuh-manager:5.0.0
     hostname: wazuh.manager
-    restart: on-failure
     ulimits:
       memlock:
         soft: -1
@@ -44,7 +43,6 @@ services:
   wazuh.indexer:
     image: wazuh/wazuh-indexer:5.0.0
     hostname: wazuh.indexer
-    restart: on-failure
     ports:
       - "9200:9200"
     environment:
@@ -69,7 +67,6 @@ services:
   wazuh.dashboard:
     image: wazuh/wazuh-dashboard:5.0.0
     hostname: wazuh.dashboard
-    restart: on-failure
     ports:
       - 443:5601
     environment:

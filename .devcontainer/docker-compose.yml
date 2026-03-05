@@ -21,7 +21,6 @@ services:
       dockerfile: Dockerfile
     container_name: target-endpoint
     hostname: target-endpoint
-    restart: on-failure
     volumes:
       - C:\Users\naama\yotam\code\cyber-response-agent\target-endpoint\workloads:/opt/workloads
     networks:
@@ -32,7 +31,6 @@ services:
     image: falcosecurity/falco:latest
     container_name: falco
     hostname: falco
-    restart: on-failure
     privileged: false
     cap_add:
       - SYS_ADMIN
@@ -73,7 +71,6 @@ services:
     image: registry:2
     container_name: registry
     hostname: registry
-    restart: on-failure
     networks:
       - response-network
     ports:
@@ -90,7 +87,6 @@ services:
       dockerfile: Dockerfile
     container_name: wazuh-mcp-server
     hostname: wazuh-mcp-server
-    restart: on-failure
     networks:
       - response-network
     ports:
