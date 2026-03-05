@@ -52,7 +52,8 @@
       "nodeGithubRepo": "nodejs/node",
       "version": "22"
     },
-    "ghcr.io/anthropics/devcontainer-features/claude-code:latest": {}
+    "ghcr.io/anthropics/devcontainer-features/claude-code:latest": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
 
   "mounts": [
