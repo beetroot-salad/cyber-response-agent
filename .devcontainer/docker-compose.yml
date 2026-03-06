@@ -17,12 +17,12 @@ services:
   # Target Endpoint (generates realistic workload activity)
   target-endpoint:
     build:
-      context: ../target-endpoint
+      context: ../playground/target-endpoint
       dockerfile: Dockerfile
     container_name: target-endpoint
     hostname: target-endpoint
     volumes:
-      - C:\Users\naama\yotam\code\cyber-response-agent\target-endpoint\workloads:/opt/workloads
+      - ../playground/target-endpoint/workloads:/opt/workloads
     networks:
       - response-network
 

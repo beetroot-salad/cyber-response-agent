@@ -2,7 +2,7 @@
 # Download Wazuh single-node configuration files and certificates
 
 BASE_URL="https://raw.githubusercontent.com/wazuh/wazuh-docker/master/single-node"
-CONFIG_DIR="/workspace/config"
+CONFIG_DIR="/workspace/playground/config"
 
 echo "Creating config directory structure..."
 mkdir -p "$CONFIG_DIR/wazuh_cluster"

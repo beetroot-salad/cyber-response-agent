@@ -6,5 +6,5 @@ services:
     environment:
       - CERT_TOOL_VERSION=4.14
     volumes:
-      - C:\Users\naama\yotam\code\cyber-response-agent\config\wazuh_indexer_ssl_certs:/certificates/
-      - C:\Users\naama\yotam\code\cyber-response-agent\config\certs.yml:/config/certs.yml
+      - ../playground/config/wazuh_indexer_ssl_certs:/certificates/
+      - ../playground/config/certs.yml:/config/certs.yml

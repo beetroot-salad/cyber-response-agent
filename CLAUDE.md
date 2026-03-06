@@ -88,12 +88,21 @@ app/knowledge/
 │   ├── orchestrator/          # Manager, confidence scoring, models
 │   ├── config/                # App config, signature permissions
 │   ├── knowledge/             # Playbooks, past tickets, lessons
-│   └── tools/                 # Utility scripts (run analyzer)
+│   ├── tools/                 # Utility scripts (run analyzer)
+│   └── tests/                 # Test suite
+│       ├── unit/
+│       └── integration/
 │
-├── config/                    # Infrastructure configuration
-│   ├── wazuh_cluster/         # Wazuh manager config, Falco rules
-│   ├── wazuh_indexer/         # Elasticsearch config
-│   └── wazuh_indexer_ssl_certs/
+├── playground/                 # Container setup for testing/simulation
+│   ├── config/                # Infrastructure configuration
+│   │   ├── wazuh_cluster/     # Wazuh manager config, Falco rules
+│   │   ├── wazuh_indexer/     # Elasticsearch config
+│   │   └── wazuh_indexer_ssl_certs/
+│   ├── falco-config/          # eBPF security monitoring
+│   ├── target-endpoint/       # Monitored endpoint container
+│   │   ├── Dockerfile
+│   │   └── workloads/         # Benign/suspicious activity scripts
+│   └── scripts/               # Setup and utility scripts
 │
 ├── docs/                      # Documentation
 │   ├── design-v1.md           # Initial design document
@@ -103,20 +112,10 @@ app/knowledge/
 │   ├── agent-execution-architecture.md
 │   └── reproduction-agent-design.md
 │
-├── .devcontainer/             # Docker environment
-│   ├── docker-compose.yml     # Main services
-│   ├── wazuh-stack.yml        # Wazuh SIEM stack
-│   └── wazuh-overrides.yml    # Local customizations
-│
-├── target-endpoint/           # Monitored endpoint container
-│   ├── Dockerfile
-│   └── workloads/             # Benign/suspicious activity scripts
-│
-├── falco-config/              # eBPF security monitoring
-│
-└── tests/                     # Test suite
-    ├── unit/
-    └── integration/
+└── .devcontainer/             # Docker environment
+    ├── docker-compose.yml     # Main services
+    ├── wazuh-stack.yml        # Wazuh SIEM stack
+    └── wazuh-overrides.yml    # Local customizations
 ```
 
 ## Docker Environment
@@ -189,16 +188,16 @@ python -m app.agent.reproduction.runner \
 
 ```bash
 # Run all tests
-pytest tests/
+pytest app/tests/
 
 # Unit tests only
-pytest tests/unit/
+pytest app/tests/unit/
 
 # Integration tests
-pytest tests/integration/
+pytest app/tests/integration/
 
 # Specific test
-pytest tests/test_confidence.py -v
+pytest app/tests/test_confidence.py -v
 ```
 
 ## Key Design Patterns
@@ -274,13 +273,13 @@ Key files:
 
 ```bash
 # Run confidence scoring tests
-pytest tests/test_confidence.py -v
+pytest app/tests/test_confidence.py -v
 
 # Test investigation runner
-pytest tests/unit/test_investigation_runner.py -v
+pytest app/tests/unit/test_investigation_runner.py -v
 
 # Test reproduction runner
-pytest tests/unit/test_reproduction_runner.py -v
+pytest app/tests/unit/test_reproduction_runner.py -v
 ```
 
 ## Known Issues

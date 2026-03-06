@@ -7,13 +7,13 @@ They are separated from unit tests to allow fast test suite execution.
 
 Usage:
     # Run integration tests explicitly
-    pytest tests/integration/test_reproduction_integration.py -v
+    pytest app/tests/integration/test_reproduction_integration.py -v
 
     # Direct execution
-    python tests/integration/test_reproduction_integration.py
+    python app/tests/integration/test_reproduction_integration.py
 
     # Custom hypothesis
-    python tests/integration/test_reproduction_integration.py --hypothesis "Your hypothesis"
+    python app/tests/integration/test_reproduction_integration.py --hypothesis "Your hypothesis"
 """
 
 import json
@@ -22,7 +22,7 @@ from pathlib import Path
 
 # Add workspace to path if running directly
 if __name__ == "__main__":
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 import pytest
 
