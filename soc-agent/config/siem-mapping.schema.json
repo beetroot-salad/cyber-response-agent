@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SIEM Mapping Configuration",
+  "description": "Maps abstract SIEM operations to concrete MCP tool calls. Users configure this to connect their SIEM.",
+  "type": "object",
+  "required": ["siem_name", "operations"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "siem_name": {
+      "type": "string",
+      "description": "Name of the SIEM system (e.g., wazuh, splunk, elastic)"
+    },
+    "description": {
+      "type": "string"
+    },
+    "operations": {
+      "type": "object",
+      "required": ["search_events", "get_agent_info"],
+      "properties": {
+        "search_events": { "$ref": "#/$defs/operation" },
+        "get_agent_info": { "$ref": "#/$defs/operation" },
+        "count_events": { "$ref": "#/$defs/operation" },
+        "get_rule_info": { "$ref": "#/$defs/operation" },
+        "list_alerts": { "$ref": "#/$defs/operation" }
+      },
+      "additionalProperties": { "$ref": "#/$defs/operation" }
+    }
+  },
+  "$defs": {
+    "operation": {
+      "type": "object",
+      "required": ["tool", "description", "param_mapping"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "MCP tool name (e.g., mcp__wazuh__search)"
+        },
+        "description": {
+          "type": "string",
+          "description": "What this operation does"
+        },
+        "param_mapping": {
+          "type": "object",
+          "description": "Maps abstract param names to tool-specific param names",
+          "additionalProperties": { "type": "string" }
+        },
+        "response_mapping": {
+          "type": "object",
+          "description": "Maps abstract response fields to tool-specific fields",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  }
+}

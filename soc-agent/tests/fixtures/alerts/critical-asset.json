@@ -1,0 +1,9 @@
+{
+  "ticket_id": "SEC-TEST-004",
+  "signature_id": "wazuh-rule-5710",
+  "agent": "domain-controller",
+  "timestamp": "2024-11-19T08:00:00Z",
+  "srcip": "10.0.1.100",
+  "srcuser": "svc-monitor",
+  "severity": "medium"
+}

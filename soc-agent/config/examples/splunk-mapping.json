@@ -1,0 +1,44 @@
+{
+  "$schema": "../siem-mapping.schema.json",
+  "siem_name": "splunk",
+  "description": "Example SIEM mapping for Splunk via MCP server",
+  "operations": {
+    "search_events": {
+      "tool": "mcp__splunk__search",
+      "description": "Run a Splunk search query",
+      "param_mapping": {
+        "query": "search_query",
+        "time_range_start": "earliest_time",
+        "time_range_end": "latest_time",
+        "max_results": "max_count"
+      },
+      "response_mapping": {
+        "events": "results",
+        "total_count": "result_count"
+      }
+    },
+    "get_agent_info": {
+      "tool": "mcp__splunk__search",
+      "description": "Get host info via Splunk search",
+      "param_mapping": {
+        "agent_name": "host",
+        "agent_id": "host"
+      },
+      "response_mapping": {
+        "agent": "results[0]"
+      }
+    },
+    "count_events": {
+      "tool": "mcp__splunk__search",
+      "description": "Count events via Splunk stats",
+      "param_mapping": {
+        "query": "search_query",
+        "time_range_start": "earliest_time",
+        "time_range_end": "latest_time"
+      },
+      "response_mapping": {
+        "count": "result_count"
+      }
+    }
+  }
+}

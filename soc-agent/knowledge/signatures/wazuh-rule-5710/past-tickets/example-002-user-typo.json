@@ -1,0 +1,30 @@
+{
+  "ticket_id": "SEC-2024-002",
+  "alert_id": "wazuh-5710-def456",
+  "signature_id": "wazuh-rule-5710",
+  "tier": "gold",
+  "timestamp": "2024-11-16T09:15:00Z",
+  "status": "closed",
+  "disposition": "benign",
+  "confidence_score": 0.92,
+  "alert_data": {
+    "srcip": "10.0.2.100",
+    "srcuser": "jsmtih",
+    "agent": "dev-server-02",
+    "rule_id": 5710,
+    "rule_description": "sshd: Attempt to login using a non-existent user"
+  },
+  "investigation": {
+    "ip_classification": "internal",
+    "failed_attempts_5min": 1,
+    "distinct_usernames": ["jsmtih"],
+    "successful_login_after": true,
+    "successful_login_user": "jsmith",
+    "successful_login_delay_seconds": 12,
+    "pattern_matched": "user_typo"
+  },
+  "investigation_notes": "Internal IP. Single failed attempt with username 'jsmtih'. Successful login as 'jsmith' from same IP 12 seconds later. Clear typo pattern - user corrected mistake.",
+  "resolution": "Closed as benign - user typo followed by successful login",
+  "analyst": "system",
+  "closed_at": "2024-11-16T09:15:30Z"
+}

@@ -1,0 +1,28 @@
+{
+  "ticket_id": "SEC-2024-001",
+  "alert_id": "wazuh-5710-abc123",
+  "signature_id": "wazuh-rule-5710",
+  "tier": "gold",
+  "timestamp": "2024-11-15T02:30:00Z",
+  "status": "closed",
+  "disposition": "benign",
+  "confidence_score": 0.95,
+  "alert_data": {
+    "srcip": "10.0.1.50",
+    "srcuser": "testuser",
+    "agent": "web-server-01",
+    "rule_id": 5710,
+    "rule_description": "sshd: Attempt to login using a non-existent user"
+  },
+  "investigation": {
+    "ip_classification": "internal",
+    "failed_attempts_5min": 1,
+    "distinct_usernames": ["testuser"],
+    "successful_login_after": false,
+    "pattern_matched": "monitoring_probe"
+  },
+  "investigation_notes": "Internal IP from known monitoring subnet. Username 'testuser' matches monitoring probe pattern. Single attempt only, no repetition. Matches monitoring probe scenario.",
+  "resolution": "Closed as benign - monitoring probe activity from internal system",
+  "analyst": "system",
+  "closed_at": "2024-11-15T02:30:45Z"
+}
