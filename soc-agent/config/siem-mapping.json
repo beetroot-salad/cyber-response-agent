@@ -1,0 +1,71 @@
+{
+  "$schema": "./siem-mapping.schema.json",
+  "siem_name": "wazuh",
+  "description": "Default SIEM mapping for Wazuh via MCP server",
+  "operations": {
+    "search_events": {
+      "tool": "mcp__wazuh__search",
+      "description": "Search for events matching a query",
+      "param_mapping": {
+        "query": "query",
+        "time_range_start": "from",
+        "time_range_end": "to",
+        "max_results": "limit"
+      },
+      "response_mapping": {
+        "events": "hits",
+        "total_count": "total"
+      }
+    },
+    "get_agent_info": {
+      "tool": "mcp__wazuh__get_agent",
+      "description": "Get information about a monitored agent/host",
+      "param_mapping": {
+        "agent_name": "name",
+        "agent_id": "id"
+      },
+      "response_mapping": {
+        "agent": "data"
+      }
+    },
+    "count_events": {
+      "tool": "mcp__wazuh__search",
+      "description": "Count events matching a query",
+      "param_mapping": {
+        "query": "query",
+        "time_range_start": "from",
+        "time_range_end": "to",
+        "count_only": "true"
+      },
+      "response_mapping": {
+        "count": "total"
+      }
+    },
+    "get_rule_info": {
+      "tool": "mcp__wazuh__get_rule",
+      "description": "Get details about a detection rule",
+      "param_mapping": {
+        "rule_id": "id"
+      },
+      "response_mapping": {
+        "rule": "data"
+      }
+    },
+    "list_alerts": {
+      "tool": "mcp__wazuh__list_alerts",
+      "description": "List recent alerts with optional filters",
+      "param_mapping": {
+        "rule_id": "rule_id",
+        "agent_name": "agent",
+        "severity_min": "level",
+        "time_range_start": "from",
+        "time_range_end": "to",
+        "max_results": "limit"
+      },
+      "response_mapping": {
+        "alerts": "data",
+        "total_count": "totalItems"
+      }
+    }
+  }
+}

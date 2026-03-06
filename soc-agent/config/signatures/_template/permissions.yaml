@@ -1,0 +1,83 @@
+# Signature Permissions Configuration
+#
+# Defines what the investigation agent can do for this signature.
+# Validated at load time by the orchestrator (see: app/orchestrator/permissions.py)
+# Invalid values will raise ValidationError before investigation starts.
+
+schema_version: "1.0"
+
+# -----------------------------------------------------------------------------
+# DISPOSITIONS
+# -----------------------------------------------------------------------------
+# Which dispositions can the agent recommend that may result in auto-close?
+# Valid values: benign, false_positive, true_positive
+# 'escalate' is always implicitly allowed (fail-safe)
+
+allowed_dispositions:
+  - benign
+  - false_positive
+
+# -----------------------------------------------------------------------------
+# CAPABILITIES
+# -----------------------------------------------------------------------------
+# What the agent can do during investigation.
+# These map to MCP servers and tool restrictions enforced by hooks.
+#
+# Available capabilities:
+#   query_siem        - Query Wazuh for events (mcp__wazuh__*)
+#   read_knowledge    - Read files from /workspace/app/knowledge/
+#   query_assets      - Look up asset criticality (future: mcp__assets__*)
+#   query_identity    - Look up user context (future: mcp__identity__*)
+#   query_threat_intel - External threat intelligence (future: mcp__ti__*)
+
+allowed_capabilities:
+  - query_siem
+  - read_knowledge
+
+# -----------------------------------------------------------------------------
+# AUTO-CLOSE
+# -----------------------------------------------------------------------------
+
+auto_close:
+  enabled: true
+
+# -----------------------------------------------------------------------------
+# ESCALATION PATTERNS
+# -----------------------------------------------------------------------------
+# Field patterns that force escalation regardless of confidence.
+# If any pattern matches the alert data, escalate immediately.
+#
+# Format: field_name: [list of regex patterns]
+# Field names match alert data keys (srcip, srcuser, agent, etc.)
+
+escalation_patterns:
+  srcuser:
+    - "^admin$"
+    - "^root$"
+    - "^administrator$"
+  # srcip:
+  #   - "^(?!10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.).*"  # External IPs
+
+# -----------------------------------------------------------------------------
+# REPRODUCTION
+# -----------------------------------------------------------------------------
+# Settings for hypothesis validation via reproduction agent.
+#
+# max_timeout_seconds: Maximum time allowed for reproduction (default: 300)
+#   - Enforced as hard limit on reproduction agent execution
+#   - Request timeout_seconds is capped to this value
+
+reproduction:
+  enabled: false
+  max_timeout_seconds: 300
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+# Log level for this signature's investigations
+# Levels:
+#   minimal  - Final action only (ticket_id, timestamp, disposition)
+#   standard - + tool calls and key evidence
+#   verbose  - + full reasoning and internal tokens
+
+log_level: standard
