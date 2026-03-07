@@ -57,12 +57,6 @@ tmp/
 temp/
 *.tmp
 
-# Knowledge base - past tickets (contain sensitive alert data)
-knowledge/signatures/*/past-tickets/
-
-# Agent scratchpad (runtime working directory)
-app/agent/investigation/scratchpad/
-
-# Runtime investigation directories (created per-ticket)
-app/agent/investigation/runs/
-app/agent/reproduction/runs/
+# Runtime investigation/triage runs (contain sensitive alert data)
+runs/*
+!runs/.gitkeep
