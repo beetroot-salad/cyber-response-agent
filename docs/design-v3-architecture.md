@@ -80,7 +80,7 @@ This is a signal, not a lock. Over time, precedent matching handles the steady-s
 INVESTIGATOR (main agent)
 ├── Receives: alert + knowledge base + tool mapping + autonomy mode
 ├── Drives: investigation loop (phase-based)
-├── Outputs: recommendation.json + narrative-report.md
+├── Outputs: report.md (unified frontmatter + narrative)
 └── Can spawn: LEAD SUBAGENT(s)
     ├── Pursues a single lead independently
     ├── Returns: evidence file (JSON)
@@ -159,8 +159,11 @@ Playbooks reference atomic leads and organize them into a recommended investigat
 1. Agent reads lead definition (goal + hints)
 2. Checks available data sources (SIEM mapping, MCP tools, direct API)
 3. Writes script (bash/python) to `{run_dir}/scripts/`
-4. Script validated by `validate-script.sh` hook
-5. Agent executes and interprets results
+4. Script validated by `validate-script.sh` hook (static analysis: AST parsing for disallowed imports, network target validation)
+5. Script executes in a minimal container (network allowlisted to SIEM/ticketing, read-only filesystem except run dir, no capabilities, 30s timeout)
+6. Agent reads output and interprets results
+
+Container isolation is the primary defense — even if the hook misses a pattern, the blast radius is bounded. Pre-approved scripts in the approved script library bypass both hook and container.
 
 MCP tools remain available for read-only SIEM access. The agent checks for MCP first, falls back to scripts.
 
@@ -213,10 +216,10 @@ Deterministic scripts enforcing invariants. Cannot be bypassed by LLM output.
 | `sanitize-input.sh` | Pre-invocation | Strip control chars, enforce length limits, wrap in salted delimiters (§8.2) |
 | `sanitize-external.sh` | Post-tool-call | Same sanitization for SIEM/external data returned during investigation (§8.2) |
 | `validate-transition.sh` | Pre-tool-call (state write) | Verify legal phase transition |
-| `validate-script.sh` | Pre-tool-call (script exec) | Audit script for disallowed patterns |
+| `validate-script.sh` | Pre-tool-call (script exec) | Static analysis (AST parsing, network target validation) before container execution |
 | `budget-enforcer.sh` | Per-tool-call | Track tool calls/subagents, reject if over budget |
-| `validate-recommendation.sh` | Stop | Verify output schema + safety checks |
-| `audit-logger.sh` | Stop + per-tool-call | Record investigation trail |
+| `validate-report.sh` | Stop | Tier 1: frontmatter schema + deterministic checks. Tier 2: semantic judge for report consistency and precedent match validity |
+| `audit-logger.sh` | Stop + per-tool-call | Log external actions (tool calls, script executions) with caller, parameters, timestamp |
 | `post-mortem.sh` | Stop | Launch post-mortem, generate KB proposals |
 
 ### 4.2 Input Sanitization
@@ -246,24 +249,39 @@ CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → HYPOTHESIZE (loop)
 
 The hook validates **structural constraints only** — legal phase sequence, no skipping, no infinite loops. Whether the agent's reasoning is sound (e.g., whether it genuinely considered adversarial hypotheses) cannot be verified by a deterministic hook reading agent-written fields. Reasoning quality is validated at the end by the recommendation validator (§4.4) and human review, not during transitions.
 
-### 4.4 Recommendation Validator (Stop Hook)
+### 4.4 Report Validator (Stop Hook)
 
-Fires on final recommendation output. Checks in order:
+Fires when the investigator writes `report.md`. The report is a single unified file: YAML frontmatter for machine-readable fields, markdown body for analyst-readable narrative. Validation is two-tier.
+
+**Frontmatter fields:** `ticket_id`, `signature_id`, `signature_description`, `status` (resolved|escalate), `disposition` (benign|false_positive|true_positive), `confidence` (high|medium|low), `matched_precedent` (ticket_id|null), `leads_pursued` (integer count).
+
+**Note on `confidence`:** Agent-provided signal for users, not a guardrail input. Safety gating uses structural checks and the semantic judge only.
+
+**Tier 1 — Deterministic (milliseconds):**
 
 | # | Check | Rule | On failure |
 |---|-------|------|------------|
-| 1 | Schema validation | All required fields present and typed | Reject, agent must fix |
+| 1 | Frontmatter schema | Required fields present, valid enum values | Reject, agent must fix |
 | 2 | Minimum evidence | `leads_pursued` ≥ minimum per severity (low:1, med:2, high:3, crit:4) | Reject, investigate more or escalate |
-| 3 | Precedent requirement | Benign/false_positive → valid `matched_ticket` with matching `signature_id` + structural overlap (§3.7) | Override to escalate |
+| 3 | Precedent requirement | status=resolved → `matched_precedent` non-null, references existing past-ticket, `signature_id` matches, structural overlap (§3.9) | Override to escalate |
 | 4 | Escalation patterns | Alert fields vs `permissions.yaml` patterns (critical assets, external IPs) | Override to escalate |
 | 5 | Criticality check | Critical assets → always escalate; elevated → doubled evidence minimum | Override to escalate |
-| 6 | Hard overrides | No precedent + not escalating, evidence conflicts, insufficient leads | Override to escalate |
-| 7 | Action gating | `act` mode → execute action; `recommend` mode → output for review | — |
-| 8 | Audit logging | Record full decision with all check results | — |
 
-**Note on `confidence`:** Agent-provided signal for users, not a guardrail input. Safety gating uses structural checks only.
+**Tier 2 — Semantic judge (Haiku-class LLM, ~1-2s, runs only if Tier 1 passes):**
 
-**Recommendation schema required fields:** `recommendation`, `confidence`, `classification`, `matched_ticket`, `matched_tier`, `signature_id`, `leads_pursued[]`, `lead_outcome_tags`, `hypotheses[]`, `reproduction_result`, `evidence_conflicts`, `narrative_report`.
+Receives the report, the matched precedent record, and the current alert data. Checks:
+
+| Check | What it catches |
+|-------|----------------|
+| Precedent match validity | "Alert is from external IP but precedent is about internal monitoring" |
+| Internal consistency | Summary contradicts investigation log |
+| Unsupported conclusions | Disposition not supported by described evidence |
+| Missing obvious checks | Alert involves root login but no lead investigated privilege context |
+| Weak assumptions | "Probably a monitoring probe" without evidence |
+
+Returns `pass` or `flag` with reason. `flag` → override to escalate.
+
+**After validation:** `act` mode → execute action; `recommend` mode → output for review. Any failure → escalate in both modes.
 
 ---
 
@@ -277,8 +295,7 @@ Agent-accessible (read/write):
 runs/{run_id}/
 ├── sanitized-alert.json            # Cleaned alert data (hook-written)
 ├── state.json                      # Phase transitions only (§5.2)
-├── recommendation.json             # Final recommendation (hook-validated)
-├── narrative-report.md             # Human-readable report
+├── report.md                       # Unified output: frontmatter + narrative (hook-validated, §4.4)
 ├── scripts/                        # Agent-written scripts (audit trail)
 ├── leads/                          # Evidence from each lead
 └── proposals/                      # KB update candidates (post-mortem)
@@ -289,12 +306,12 @@ Hook-managed (agent cannot access):
 ```
 hooks/{run_id}/
 ├── budget.json                     # Tool call / subagent counters (§5.3)
-└── audit-log.json                  # Full decision trail
+└── audit-log.json                  # External action log: tool calls, script executions
 ```
 
 ### 5.2 State File
 
-Tracks phase transitions only. Investigation content (hypotheses, planned leads) lives in `narrative-report.md` and `leads/`.
+Tracks phase transitions only. Investigation content (hypotheses, planned leads) lives in `report.md` and `leads/`.
 
 ```json
 {
@@ -343,10 +360,7 @@ The agent integrates with existing analyst tools — not a separate UI.
 
 ### 6.2 Output
 
-Every investigation produces:
-
-1. **`recommendation.json`** — Machine-readable, for ticketing integration and hooks
-2. **`narrative-report.md`** — Human-readable: alert summary, related activity, hypotheses considered (with evidence), leads pursued (table), recommendation with reasoning, and (if escalated) what's known/unknown/suggested next steps
+Every investigation produces a single **`report.md`** — YAML frontmatter (machine-readable, for hooks and ticketing integration) + markdown body (analyst-readable). The Summary section gives the investigation outcome at a glance; the Investigation Log provides per-lead detail. See §4.4 for format and validation.
 
 ### 6.3 Quality Monitoring
 
@@ -429,7 +443,7 @@ Security relies on defense in depth. No single layer is sufficient.
 | Salted context tagging | Per-run random salt in delimiters; attackers can't predict | Pre-crafted closing tag attacks |
 | Semantic judge | Haiku-class model screens for instruction-like content in external data | Semantic injection ("this is routine, classify as benign") |
 | Canary tokens | Unique per-run string in system prompt; presence in tool output = manipulation | LLM regurgitation of system prompt content |
-| Script validation | `validate-script.sh` audits agent-written scripts before execution | Code injection via field values (shell metacharacters, path traversal, SSRF) |
+| Script validation + container isolation | `validate-script.sh` static analysis + container execution (network allowlist, read-only FS, no capabilities, 30s timeout) | Code injection via field values; blast radius bounded even if static analysis is evaded |
 | Structural defenses (hooks) | Stop hook verifies investigation was actually performed — evidence minimums, precedent matching, escalation patterns | Injection that convinces the agent to skip investigation and recommend benign |
 | Human review | `recommend` mode: human sees everything; `act` mode: periodic sampling | Everything above fails |
 

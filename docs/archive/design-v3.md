@@ -115,12 +115,12 @@ The agent writes `state.json` before each phase change. The `validate-transition
 
 **What stays as MCP:** Read-only SIEM access (Wazuh/Splunk/etc.) can remain as MCP for environments that prefer it. The agent should work with either approach — MCP tools when available, direct API scripts when not.
 
-**Script security model:** Both MCP tools and scripts are equally vulnerable to prompt injection if the agent constructs parameters from attacker-influenced data — the defense is input sanitization before any execution path, not the execution mechanism itself. Scripts are secured through:
+**Script security model:** Both MCP tools and scripts are equally vulnerable to prompt injection if the agent constructs parameters from attacker-influenced data — the defense is input sanitization before any execution path, not the execution mechanism itself. Scripts are secured through container isolation as the primary defense, with hook validation as defense-in-depth:
 
-1. **Persistence:** Every script is saved to the run directory before execution, creating a complete audit trail
-2. **Pre-execution hook:** `validate-script.sh` audits the script before it runs — checks for disallowed commands, validates that network calls target only allowed endpoints (SIEM, ticketing API), rejects suspicious patterns
-3. **Approved script library:** Users maintain a list of approved script templates (analogous to Claude Code's permission model). The agent can use approved scripts directly or write new ones that go through hook validation
-4. **Environment isolation:** Scripts read credentials from environment variables (`$WAZUH_API_TOKEN`), never from LLM context. Network access is restricted to configured SIEM/ticketing endpoints
+1. **Container isolation (primary defense):** Every agent-generated script executes in a minimal container with: network allowlisted to SIEM/ticketing endpoints only, filesystem read-only except the run directory, no capabilities or elevated privileges, per-script timeout (30s default). Credentials are injected via environment variables (`$WAZUH_API_TOKEN`), never in LLM context. Even if the hook misses a malicious pattern, the container bounds the blast radius.
+2. **Pre-execution hook (defense-in-depth):** `validate-script.sh` performs static analysis before the container runs — Python AST parsing for disallowed imports (`subprocess`, `os.system`, `eval`, `exec`, `importlib`, `ctypes`), network target validation against allowed endpoints, suspicious pattern detection. Static analysis is not sufficient alone (LLM-generated code can evade pattern matching), but it catches the common cases cheaply.
+3. **Persistence:** Every script is saved to `{run_dir}/scripts/` before execution, creating a complete audit trail.
+4. **Approved script library:** Users maintain pre-approved parameterized scripts (analogous to Claude Code's permission model). Approved scripts bypass hook validation and can run without container overhead. The agent can use approved scripts directly or write new ones that go through the hook + container pipeline.
 
 ### 2.4 Reproduction: Deferred
 
@@ -620,9 +620,9 @@ The agent writes and runs scripts to pursue leads. This is more flexible than de
 1. Agent reads the lead definition (goal + hints)
 2. Agent checks what's available (SIEM mapping, MCP tools, direct API access)
 3. Agent writes a script (bash/python) to query the relevant data source
-4. Script is saved to `{run_dir}/scripts/` and validated by `validate-script.sh` hook
-5. Agent executes the script and reads the output
-6. Agent interprets the results
+4. Script is saved to `{run_dir}/scripts/` and validated by `validate-script.sh` hook (static analysis)
+5. Script executes in a minimal container (network restricted to SIEM/ticketing, read-only filesystem except run dir, 30s timeout)
+6. Agent reads the output and interprets the results
 
 **Example:** For the "authentication history" lead, the agent might:
 
@@ -729,8 +729,8 @@ Hooks are deterministic scripts that enforce invariants. They fire at specific p
 | `validate-transition.sh` | Pre-tool-call (on state write) | Verify phase transition is legal |
 | `validate-script.sh` | Pre-tool-call (on script execution) | Audit script for disallowed patterns, validate target endpoints |
 | `budget-enforcer.sh` | Per-tool-call | Track tool calls and subagent spawns, reject if over budget |
-| `validate-recommendation.sh` | Stop | Verify output schema, safety checks |
-| `audit-logger.sh` | Stop + per-tool-call | Record investigation trail |
+| `validate-report.sh` | Stop | Tier 1: frontmatter schema + deterministic checks. Tier 2: semantic judge (LLM) for report consistency and precedent match validity |
+| `audit-logger.sh` | Stop + per-tool-call | Log external actions (tool calls, script executions) with caller, parameters, and timestamp |
 | `post-mortem.sh` | Stop | Launch post-mortem analysis, generate KB update proposals |
 
 ### 6.2 Input Sanitization
@@ -815,78 +815,59 @@ CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → HYPOTHESIZE (loop)
 
 Forbidden transition → hook rejects the state write, agent must correct course.
 
-### 6.4 Recommendation Validator (Stop Hook)
+### 6.4 Report Validator (Stop Hook)
 
-The primary guardrail. Fires when the investigator outputs its final recommendation. Reads the recommendation file from the run directory and performs checks in order:
+The primary guardrail. Fires when the investigator outputs its final report (`report.md`). The report is a single unified file: YAML frontmatter for machine-readable fields, markdown body for analyst-readable narrative. Validation is two-tier: deterministic checks on frontmatter, then semantic review of the full report.
 
-**Check 1: Schema validation**
+**Report format:**
 
-The recommendation file must contain:
+```markdown
+---
+ticket_id: "SEC-001"
+signature_id: "wazuh-rule-5710"
+signature_description: "sshd: Attempt to login using a non-existent user"
+status: "resolved"                    # resolved | escalate
+disposition: "benign"                 # benign | false_positive | true_positive
+confidence: "high"                    # high | medium | low
+matched_precedent: "SEC-2024-001"     # ticket_id | null
+leads_pursued: 3
+---
 
-```json
-{
-  "recommendation": "benign | false_positive | true_positive | escalate",
-  "confidence": "high | medium | low",
-  "classification": "monitoring_probe | brute_force | ...",
-  "matched_ticket": "TICKET-ID | null",
-  "matched_tier": "gold | silver | bronze | null",
-  "signature_id": "wazuh-rule-XXXX",
-  "leads_pursued": [
-    {
-      "lead": "lead name/goal",
-      "result_summary": "what was found",
-      "outcome_tags": ["tag1", "tag2"],
-      "evidence_file": "path to detailed evidence JSON"
-    }
-  ],
-  "lead_outcome_tags": {
-    "lead-name": ["tag1", "tag2"]
-  },
-  "hypotheses": [
-    {
-      "label": "monitoring_probe",
-      "description": "...",
-      "status": "supported | refuted | inconclusive",
-      "supporting_evidence": ["..."],
-      "contradicting_evidence": ["..."]
-    }
-  ],
-  "reproduction_result": "confirmed | refuted | inconclusive | null",
-  "evidence_conflicts": false,
-  "narrative_report": "path to markdown report"
-}
+# Investigation Report: SEC-001
+
+## Summary
+
+[Executive summary: leads pursued, evidence gathered, reasoning behind
+the recommendation. Should be a paragraph that lets an analyst understand
+the investigation outcome at a glance.]
+
+**Recommendation: [Disposition — classification (confidence)]**
+
+## Investigation Log
+
+### Lead 1: [Lead Name]
+[What was checked, what was found, what it means]
+
+### Lead 2: [Lead Name]
+...
 ```
 
-Schema validation is strict: missing required fields → hook rejects, agent must fix.
+**Note on `confidence`:** This field is an **agent-provided signal for users**, not a guardrail input. It communicates the agent's self-assessed certainty to the analyst ("I'm not sure about this one"). The actual safety gating is performed by the deterministic checks and semantic judge below.
 
-**Note on `confidence`:** This field is an **agent-provided signal for users**, not a guardrail input. It communicates the agent's self-assessed certainty to the analyst ("I'm not sure about this one"). Writing it down also helps the agent be more calibrated in its reasoning. The actual safety gating is performed by the hard checks below, which operate on structural signals only.
+**Why a single file:** The previous design had separate `recommendation.json` and `narrative-report.md`. In practice, most JSON fields duplicated what the prose said (hypotheses array, lead outcome tags, evidence lists), and the hook couldn't meaningfully validate agent-written free-text fields anyway. A unified report eliminates this redundancy. The frontmatter contains only fields the hook can actually verify; everything else lives in the narrative where it serves the analyst.
 
-**Check 2: Minimum evidence**
+**Tier 1: Deterministic checks (milliseconds)**
 
-`leads_pursued` count must meet minimum per signature severity:
+| # | Check | Source | Failure action |
+|---|-------|--------|----------------|
+| 1 | Frontmatter schema valid (required fields, valid enum values) | Frontmatter | Reject |
+| 2 | `leads_pursued` >= minimum for severity (low:1, med:2, high:3, crit:4) | Frontmatter | Reject |
+| 3 | `matched_precedent` non-null if status=resolved | Frontmatter | Override → escalate |
+| 4 | Referenced precedent exists, `signature_id` matches, structural overlap with alert | Precedent file + alert data | Override → escalate |
+| 5 | Escalation pattern match on alert fields | Alert data + `permissions.yaml` | Override → escalate |
+| 6 | Critical asset check | Alert data + asset inventory | Override → escalate |
 
-| Severity | Minimum leads |
-|----------|--------------|
-| low | 1 |
-| medium | 2 |
-| high | 3 |
-| critical | 4 |
-
-Below minimum → hook rejects, agent must investigate more or escalate.
-
-**Check 3: Precedent requirement**
-
-If `recommendation` is `benign` or `false_positive`:
-- `matched_ticket` must be non-null
-- `matched_ticket` must reference an existing past-ticket file
-- The referenced ticket's `signature_id` must match the current alert's signature
-- **Structural overlap check:** At least one key alert field must overlap with the precedent's `alert_sample` (same subnet, same username pattern, same target host class). If the precedent has `lead_outcome_tags`, at least one must match the current investigation's tags. See §5.8 for details.
-
-No valid precedent or insufficient structural overlap → hook overrides to escalate (safety-critical).
-
-**Check 4: Escalation patterns**
-
-Alert fields checked against patterns from `config/signatures/{id}/permissions.yaml`:
+Escalation patterns from `config/signatures/{id}/permissions.yaml`:
 
 ```yaml
 escalation_patterns:
@@ -897,25 +878,25 @@ escalation_patterns:
     - "^(?!10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.).*"  # external IPs
 ```
 
-Pattern match → hook overrides to escalate (safety-critical).
+Asset criticality: critical assets → always escalate. Elevated assets → minimum leads doubled.
 
-**Check 5: Criticality check**
+**Tier 2: Semantic judge (lightweight LLM, ~1-2s)**
 
-Asset criticality looked up from the alert data or asset inventory:
-- Critical assets → always escalate, regardless of recommendation
-- Elevated assets → minimum leads requirement doubled
+Runs only if Tier 1 passes. A Haiku-class model receives the report, the matched precedent record, and the current alert data. It performs:
 
-**Check 6: Hard overrides**
+| Check | What it catches |
+|-------|----------------|
+| Precedent match validity | "Alert is from external IP but precedent is about internal monitoring" |
+| Internal consistency | Summary claims "no successful logins" but investigation log says "3 successful logins" |
+| Unsupported conclusions | "Benign" conclusion but described evidence doesn't support it |
+| Missing obvious checks | Alert involves root login but no lead investigated privilege context |
+| Weak assumptions | "Probably a monitoring probe" without evidence for the "probably" |
 
-Deterministic rules that force escalation regardless of other signals:
+The judge sees the **report and the alert**, not raw SIEM data. It cannot verify that the agent's claims about SIEM results are true — but it catches the agent contradicting itself or making logical leaps.
 
-```
-matched_ticket == null AND recommendation != escalate → escalate
-evidence_conflicts == true → escalate
-leads_pursued < minimum → escalate
-```
+The judge returns `pass` or `flag` with a reason. `flag` → override to escalate.
 
-**Check 7: Action gating**
+**After validation:**
 
 If all checks pass and `autonomy == act`:
 - Execute the recommended action (close ticket, add annotation)
@@ -924,10 +905,10 @@ If all checks pass and `autonomy == act`:
 If all checks pass and `autonomy == recommend`:
 - Output recommendation for analyst review
 
-If any safety-critical check fails:
+If any check fails:
 - Override to escalate in both modes
 
-**Check 8: Audit logging**
+**Audit logging:**
 
 Record the full decision with all check results:
 
@@ -939,16 +920,18 @@ Record the full decision with all check results:
   "confidence": "high",
   "autonomy_mode": "act",
   "action_taken": "closed",
-  "hook_checks": {
+  "tier1_checks": {
     "schema_valid": true,
     "min_evidence_met": true,
     "precedent_valid": true,
     "escalation_pattern_match": false,
-    "criticality_ok": true,
-    "hard_override_triggered": false
+    "criticality_ok": true
+  },
+  "tier2_checks": {
+    "semantic_judge": "pass",
+    "flags": []
   },
   "leads_pursued": 3,
-  "hypotheses_considered": ["monitoring_probe", "brute_force"],
   "budget_used": {"tool_calls": 12, "subagents": 2},
   "duration_ms": 45000,
   "timestamp": "2026-03-09T14:23:00Z"
@@ -957,16 +940,31 @@ Record the full decision with all check results:
 
 ### 6.5 What Hooks Verify (Summary)
 
+**Tier 1 — Deterministic (stop hook):**
+
 | Check | What's verified | How |
 |-------|----------------|-----|
-| Output schema | All required fields present and typed correctly | JSON schema validation |
-| Precedent exists | `matched_ticket` references a real past-ticket file | File existence check |
+| Frontmatter schema | Required fields present, valid enum values | YAML schema validation |
+| Precedent exists | `matched_precedent` references a real past-ticket file | File existence check |
 | Precedent relevance | Referenced ticket's `signature_id` matches alert | String comparison |
-| Precedent structural overlap | At least one key field + outcome tag overlaps with precedent | Field comparison (§5.8) |
-| Evidence minimum | Enough leads pursued for the severity level | Count comparison |
+| Precedent structural overlap | At least one key field overlaps with precedent | Field comparison (§5.8) |
+| Evidence minimum | `leads_pursued` meets minimum for severity level | Count comparison |
 | Escalation patterns | Alert fields don't match force-escalate patterns | Regex matching |
 | Asset criticality | Asset criticality level allows the recommended action | Lookup + threshold |
-| Evidence conflicts | Agent hasn't self-reported contradictory evidence | Boolean check |
+
+**Tier 2 — Semantic judge (lightweight LLM, runs only if Tier 1 passes):**
+
+| Check | What's verified | How |
+|-------|----------------|-----|
+| Precedent match validity | Current alert genuinely matches the precedent pattern | LLM judgment on report + precedent + alert |
+| Internal consistency | Summary doesn't contradict investigation log | LLM review of report |
+| Conclusion support | Disposition is supported by described evidence | LLM review of report + alert |
+| Completeness | No obviously missing checks for the alert type | LLM review of report + alert |
+
+**Other hooks (not stop-hook specific):**
+
+| Check | What's verified | How |
+|-------|----------------|-----|
 | State transitions | No forbidden phase transitions occurred | Transition table check |
 | Adversarial hypothesis | Agent maintained ≥1 threat hypothesis until refuted | State file check during HYPOTHESIZE |
 | Script safety | Scripts target allowed endpoints, no disallowed patterns | Pattern matching + allowlist |
@@ -985,9 +983,7 @@ All inter-agent communication is via structured JSON files in the run directory.
 runs/{run_id}/
 ├── sanitized-alert.json            # Input: cleaned alert data
 ├── state.json                      # Current investigation phase + transition history
-├── budget.json                     # Tool call / subagent counters
-├── recommendation.json             # Output: final recommendation (validated by hook)
-├── narrative-report.md             # Output: human-readable investigation report
+├── report.md                       # Output: unified report (frontmatter + narrative, validated by hook)
 ├── audit-log.json                  # Audit: full decision trail
 │
 ├── scripts/                        # All scripts written by agent (audit trail)
@@ -1005,13 +1001,15 @@ runs/{run_id}/
     └── proposed-lesson.md
 ```
 
+Note: `budget.json` lives in `hooks/{run_id}/` (agent-inaccessible, see §2.2 in schema review).
+
 ### 7.2 Schema Enforcement
 
 Every file written by an agent is validated before it's read by another agent or the hooks:
 
 1. Investigator writes `state.json` → transition hook validates phase change
 2. Investigator writes script → script validation hook audits before execution
-3. Investigator writes `recommendation.json` → stop hook validates schema before processing
+3. Investigator writes `report.md` → stop hook validates frontmatter (Tier 1) then runs semantic judge (Tier 2)
 4. Lead subagent writes evidence JSON → investigator validates before incorporating
 
 Schema definitions live in `config/schemas/` as JSON Schema files. Hooks reference them.
@@ -1089,40 +1087,17 @@ The agent integrates with the analyst's existing tools. It is NOT a separate UI.
 
 ### 9.2 Output for Analysts
 
-Every investigation produces two outputs:
+Every investigation produces a single unified report (`report.md`). YAML frontmatter provides machine-readable fields for hooks and ticketing integration. The markdown body provides the analyst-readable narrative.
 
-**Structured recommendation** (`recommendation.json`): Machine-readable, for ticketing system integration and hooks.
+The analyst should be able to read the first half of the report (Summary section) and understand the investigation outcome. The Investigation Log provides the detailed evidence trail for deeper review.
 
-**Narrative report** (`narrative-report.md`): Human-readable, for analyst review. Follows this structure:
+**Report structure:**
 
-```markdown
-# Investigation Report: SEC-001
+- **Frontmatter** — `ticket_id`, `signature_id`, `signature_description`, `status`, `disposition`, `confidence`, `matched_precedent`, `leads_pursued`. Parsed by stop hook and ticketing integration.
+- **Summary** — Executive paragraph: leads pursued, evidence gathered, reasoning. Ends with a bolded recommendation line. Reviewed by the semantic judge for consistency and logical soundness.
+- **Investigation Log** — Per-lead detail: what was checked, what was found, what it means. Full audit trail for analysts who want to dig deeper.
 
-## Alert Summary
-[What triggered, when, where, who]
-
-## Related Activity
-[Recent alerts/tickets for the same entities — from alert context enrichment]
-
-## Hypotheses Considered
-1. **Monitoring probe** (supported) — evidence: [list]
-2. **Brute force** (refuted) — evidence: [list]
-
-## Leads Pursued
-| # | Lead | Result | Interpretation |
-|---|------|--------|----------------|
-| 1 | Authentication history | 47 events, 5-min intervals, single user | Consistent with monitoring |
-| 2 | Source reputation | Internal IP, monitoring subnet | Known monitoring infrastructure |
-| 3 | Recent alert correlation | 3 similar alerts closed as benign today | Consistent pattern |
-
-## Recommendation
-[Disposition + reasoning + confidence level]
-
-## For Analyst (if escalated)
-### What We Know
-### What We Don't Know
-### Suggested Next Steps
-```
+See §6.4 for the full report format and validation process.
 
 ### 9.3 Quality Monitoring
 
@@ -1297,7 +1272,7 @@ The investigation system does NOT reimplement these. It relies on Claude Code's 
 
 1. **Lead library scope** — How many common leads do we need before the first signatures are viable? Estimate: 8-12 cover the major investigative dimensions (auth, network, process, file, reputation, asset, identity, temporal).
 
-2. **Script execution sandboxing** — Investigation scripts (SIEM queries) run with network access. Should they run in a lighter sandbox than reproduction scripts? Probably: allow network to SIEM only, restrict filesystem.
+2. ~~**Script execution sandboxing**~~ → Container isolation with network allowlisted to SIEM/ticketing, read-only filesystem except run dir, no capabilities, 30s timeout. Hook validation (`validate-script.sh`) as defense-in-depth. Approved script library bypasses both. (§2.3)
 
 3. **Autonomy defaults per signature** — Should `permissions.yaml` include a default autonomy level? Probably yes: well-understood signatures default to `act`, novel ones to `recommend`.
 
