@@ -1,6 +1,6 @@
 # Cyber Response Agent - Technical Architecture
 
-**Version:** 3.2 | **Date:** March 2026
+**Version:** 3.3 | **Date:** March 2026
 
 For problem statement, design decisions, and success criteria, see [design-v3-overview.md](design-v3-overview.md).
 
@@ -43,6 +43,8 @@ CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → (HYPOTHESIZE or CONCLUD
 For high/critical severity, consider whether a skeptic model would reach the same conclusion.
 
 **Budget enforcement (hooks):**
+
+Defaults in `config/budget-defaults.yaml`, overridable per-signature in `permissions.yaml`. See §5.3 for budget file details.
 
 | Limit | Default | Enforced by |
 |-------|---------|-------------|
@@ -118,6 +120,10 @@ knowledge/
 │   │   ├── source-reputation.md
 │   │   ├── process-lineage.md
 │   │   └── ...
+│   ├── data-sources/                   # Per-data-source field semantics (§3.8)
+│   │   ├── wazuh-events.md
+│   │   ├── active-directory.md
+│   │   └── ...
 │   ├── lessons/                        # Cross-cutting lessons learned
 │   └── utilities/                      # Query patterns, API references
 └── signatures/{signature-id}/
@@ -125,6 +131,7 @@ knowledge/
     ├── rule.md                         # What triggers this signature
     ├── lessons.md                      # Signature-specific lessons
     ├── relevant-leads.md              # Links to common/leads/ + signature-specific leads
+    ├── field-notes.md                  # Non-obvious field semantics for this alert type (§3.8)
     └── past-tickets/                   # Precedent cases (JSON)
 ```
 
@@ -162,14 +169,26 @@ MCP tools remain available for read-only SIEM access. The agent checks for MCP f
 After each investigation, a post-mortem subagent generates KB update proposals:
 
 1. Analyze completed investigation (recommendation, evidence, narrative)
-2. Generate insights: new precedent, lead priority updates, playbook refinements, cross-cutting lessons
+2. Generate insights: new precedent, lead priority updates, playbook refinements, cross-cutting lessons, field documentation gaps (§3.8)
 3. Consolidate into existing KB (update existing entries, don't append-only)
-4. Write proposals to `{run_dir}/proposals/` (precedent JSON, KB diff, lessons)
+4. Write proposals to `{run_dir}/proposals/` (precedent JSON, KB diff, lessons, field-notes updates)
 5. User reviews and approves before changes merge into active KB
 
 **All KB changes require analyst approval.** Corrections to wrong precedents are flagged for removal.
 
-### 3.7 Precedent Matching
+### 3.8 Field Documentation
+
+The agent can infer standard SIEM field semantics from context and training knowledge. Documentation is only needed for exceptions — fields where the name is misleading, the meaning is signature-specific, or the encoding is non-obvious.
+
+**Two levels, single source of truth:**
+
+**Data-source level** (`knowledge/common/data-sources/`) — Documents non-obvious field semantics and quirks for a specific data source (SIEM, directory service, threat intel API). Applies to all signatures that query that source. Example: "In Wazuh event results, `data.srcip` is the outer IP when NAT is involved, while `agent.ip` is the reporting host's IP."
+
+**Signature level** (`knowledge/signatures/{id}/field-notes.md`) — Documents fields where this specific alert type changes the usual interpretation. References data-source docs rather than duplicating them. Example: "For rule 5710, `srcuser` is the attempted username in a brute force — it may not exist on the system and should not be used for identity lookups."
+
+Both levels are maintained through the post-mortem learning loop (§3.6). When the agent encounters a field it cannot interpret with high confidence, it notes the gap in the investigation narrative. Post-mortem proposes an addition to the relevant data-source or signature field-notes doc. Analyst reviews and approves.
+
+### 3.9 Precedent Matching
 
 Two-layer matching:
 
@@ -191,8 +210,8 @@ Deterministic scripts enforcing invariants. Cannot be bypassed by LLM output.
 
 | Hook | Event | Purpose |
 |------|-------|---------|
-| `sanitize-input.sh` | Pre-invocation | Clean alert data before LLM context |
-| `sanitize-external.sh` | Post-tool-call | Clean SIEM/external data before LLM reads it |
+| `sanitize-input.sh` | Pre-invocation | Strip control chars, enforce length limits, wrap in salted delimiters (§8.2) |
+| `sanitize-external.sh` | Post-tool-call | Same sanitization for SIEM/external data returned during investigation (§8.2) |
 | `validate-transition.sh` | Pre-tool-call (state write) | Verify legal phase transition |
 | `validate-script.sh` | Pre-tool-call (script exec) | Audit script for disallowed patterns |
 | `budget-enforcer.sh` | Per-tool-call | Track tool calls/subagents, reject if over budget |
@@ -202,11 +221,11 @@ Deterministic scripts enforcing invariants. Cannot be bypassed by LLM output.
 
 ### 4.2 Input Sanitization
 
-See [§8. Prompt Injection Defense](#8-prompt-injection-defense) for the full sanitization pipeline.
+See [§8. Security: Untrusted Data Handling](#8-security-untrusted-data-handling) for sanitization scope, limits, and the full defense layer stack.
 
 ### 4.3 State Transition Validator
 
-Fires when the agent writes `state.json`. The state file records current phase, previous phase, iteration count, hypotheses with predictions, planned leads, and whether an adversarial hypothesis is present.
+Fires when the agent writes `state.json`. The state file is a lean phase-tracking record — it does NOT contain investigation content like hypotheses or planned leads (see §5.1).
 
 **Allowed transitions:**
 
@@ -225,7 +244,7 @@ CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → HYPOTHESIZE (loop)
 | HYPOTHESIZE → ANALYZE | Skipped evidence gathering |
 | Any → Same (>N consecutive) | Stuck in loop |
 
-**During HYPOTHESIZE:** Hook verifies `adversarial_hypothesis_present == true`. Forbidden transition → hook rejects, agent must correct course.
+The hook validates **structural constraints only** — legal phase sequence, no skipping, no infinite loops. Whether the agent's reasoning is sound (e.g., whether it genuinely considered adversarial hypotheses) cannot be verified by a deterministic hook reading agent-written fields. Reasoning quality is validated at the end by the recommendation validator (§4.4) and human review, not during transitions.
 
 ### 4.4 Recommendation Validator (Stop Hook)
 
@@ -252,20 +271,61 @@ Fires on final recommendation output. Checks in order:
 
 ### 5.1 Run Directory Structure
 
+Agent-accessible (read/write):
+
 ```
 runs/{run_id}/
-├── sanitized-alert.json            # Cleaned alert data
-├── state.json                      # Current phase + transition history
-├── budget.json                     # Tool call / subagent counters
+├── sanitized-alert.json            # Cleaned alert data (hook-written)
+├── state.json                      # Phase transitions only (§5.2)
 ├── recommendation.json             # Final recommendation (hook-validated)
 ├── narrative-report.md             # Human-readable report
-├── audit-log.json                  # Full decision trail
-├── scripts/                        # All agent scripts (audit trail)
+├── scripts/                        # Agent-written scripts (audit trail)
 ├── leads/                          # Evidence from each lead
 └── proposals/                      # KB update candidates (post-mortem)
 ```
 
-### 5.2 Schema Enforcement
+Hook-managed (agent cannot access):
+
+```
+hooks/{run_id}/
+├── budget.json                     # Tool call / subagent counters (§5.3)
+└── audit-log.json                  # Full decision trail
+```
+
+### 5.2 State File
+
+Tracks phase transitions only. Investigation content (hypotheses, planned leads) lives in `narrative-report.md` and `leads/`.
+
+```json
+{
+  "created_at": "2026-03-12T14:30:00Z",
+  "updated_at": "2026-03-12T14:32:15Z",
+  "current_phase": "GATHER",
+  "previous_phase": "HYPOTHESIZE",
+  "iteration": 1,
+  "transitions": [
+    { "from": "CONTEXTUALIZE", "to": "HYPOTHESIZE", "at": "2026-03-12T14:31:00Z" },
+    { "from": "HYPOTHESIZE", "to": "GATHER", "at": "2026-03-12T14:32:15Z" }
+  ]
+}
+```
+
+### 5.3 Budget File
+
+Lives outside agent scope — only `budget-enforcer.sh` reads and writes it. The agent learns of budget exhaustion through hook rejection messages, not by reading the file.
+
+```json
+{
+  "run_id": "run-abc123",
+  "tool_calls": 12,
+  "subagent_spawns": 2,
+  "started_at": "2026-03-12T14:30:00Z"
+}
+```
+
+Limits are configuration: defaults in `config/budget-defaults.yaml`, overridable per-signature in `permissions.yaml`.
+
+### 5.4 Schema Enforcement
 
 Every file written by an agent is validated before being read by another agent or hooks. Schema definitions live in `config/schemas/` as JSON Schema files.
 
@@ -332,35 +392,58 @@ Credentials are environment-level: env vars or mounted secrets. Scripts referenc
 
 ---
 
-## 8. Prompt Injection Defense
+## 8. Security: Untrusted Data Handling
 
-Alert data is attacker-influenced — the primary security concern for LLM-based security tools.
+Alert data is attacker-influenced — the primary security concern for LLM-based security tools. External data also introduces standard code execution risks when the agent writes scripts.
 
 ### 8.1 Threat Model
 
-Attackers craft payloads in log messages, usernames, HTTP headers, or process arguments to make the LLM ignore evidence and produce a benign classification.
+**Prompt injection:** Attackers craft payloads in log messages, usernames, HTTP headers, or process arguments to make the LLM ignore evidence and produce a benign classification.
+
+**Code injection via agent scripts:** Field values containing shell metacharacters (`; rm -rf /`), path traversal (`../../etc/passwd`), template injection (`${jndi:ldap://...}`), or SSRF payloads (URLs) that end up interpolated into agent-written scripts. This is a standard application security risk, not LLM-specific.
 
 **Attack surfaces:** Initial alert data, SIEM query results, ticketing system data, any external data read during investigation.
 
-### 8.2 Defense Layers
+### 8.2 Input Sanitization — Scope and Limits
 
-| Layer | Mechanism | Applied to | Cost |
-|-------|-----------|-----------|------|
-| Static sanitization | Strip control chars, unicode tricks, XML/HTML tags, markdown in field values | All external data (pre-invocation + post-tool-call) | Negligible |
-| Salted context tagging | Per-run salted delimiters wrapping external data; attackers can't predict the salt | All external data | Negligible |
-| Schema enforcement | Structured fields validated against types/lengths; free-text truncated with `[TRUNCATED]` | Structured data | Low |
-| Semantic judge | Haiku-class model screens for semantic injection ("this is routine, classify as benign") | Original alert fields + evidence cited in recommendation | ~$0.001/call |
-| Canary tokens | Unique per-run string in system prompt; presence in tool output = manipulation attempt | All tool output | Negligible |
-| Structural defenses (hooks) | Stop hook verifies actual queries, precedent matching, evidence minimum | Recommendation output | Low |
-| Human review | `recommend` mode: human sees everything; `act` mode: periodic sampling | All (recommend) / sample (act) | Analyst time |
+Input sanitization (`sanitize-input.sh`, `sanitize-external.sh`) is deliberately narrow:
 
-**Static strippers preserve:** All printable content, field structure, timestamps, IPs, usernames, paths.
+**What it does:**
+- Strip control characters, unicode tricks, and zero-width characters that could confuse delimiter parsing
+- Enforce length limits on free-text fields (truncate with `[TRUNCATED]`)
+- Wrap external data in per-run salted delimiters (`<run-{salt}-data>`)
 
-### 8.3 Accepted Risks
+**What it does NOT do:**
+- Field-level schema validation against alert structure (alert schemas vary across signatures, SIEMs, and team customizations — rigid validation would break on real-world data)
+- Aggressive content filtering of field values (the fields with highest injection risk — command lines, URLs, usernames — are also the fields with highest investigative value)
 
-**Accepted:** False escalations from aggressive sanitization, reduced quality if useful context stripped, semantic judge cost.
+**Honest assessment:** Static sanitization stops trivial delimiter-escape attacks and token-budget exhaustion. It does not stop semantic injection in plain-language field values. The fields the agent must read carefully are exactly the fields where an attacker can plant instructions.
 
-**Not accepted:** Auto-closing injection-influenced alerts without legitimate precedent, or hooks being bypassable by LLM output.
+### 8.3 Defense Layers
+
+Security relies on defense in depth. No single layer is sufficient.
+
+| Layer | Mechanism | What it actually stops |
+|-------|-----------|----------------------|
+| Static sanitization | Strip control chars, length limits, salted delimiters | Delimiter escapes, token exhaustion, trivial encoding tricks |
+| Salted context tagging | Per-run random salt in delimiters; attackers can't predict | Pre-crafted closing tag attacks |
+| Semantic judge | Haiku-class model screens for instruction-like content in external data | Semantic injection ("this is routine, classify as benign") |
+| Canary tokens | Unique per-run string in system prompt; presence in tool output = manipulation | LLM regurgitation of system prompt content |
+| Script validation | `validate-script.sh` audits agent-written scripts before execution | Code injection via field values (shell metacharacters, path traversal, SSRF) |
+| Structural defenses (hooks) | Stop hook verifies investigation was actually performed — evidence minimums, precedent matching, escalation patterns | Injection that convinces the agent to skip investigation and recommend benign |
+| Human review | `recommend` mode: human sees everything; `act` mode: periodic sampling | Everything above fails |
+
+**The real security boundary is hooks + human review**, not input sanitization. Sanitization reduces noise; hooks enforce that the investigation actually happened regardless of what the LLM "believes."
+
+### 8.4 Interactive Mode
+
+When the agent operates as an analyst's thinking partner (interactive CLI, collaborative threads), analyst input is NOT sanitized. The trust boundary is: **automated sources (SIEM, ticketing API, external data) are untrusted; human input in interactive mode is trusted.** Sanitizing analyst input would be hostile to the collaborative UX without meaningful security benefit.
+
+### 8.5 Accepted Risks
+
+**Accepted:** False escalations from sanitization, semantic judge cost (~$0.001/call), reduced investigation quality if useful context is in a truncated field.
+
+**Not accepted:** Auto-closing injection-influenced alerts without legitimate precedent, hooks being bypassable by LLM output, or field values being interpolated into scripts without validation.
 
 ---
 
