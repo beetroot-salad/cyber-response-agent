@@ -509,19 +509,52 @@ Five sections in order, with security bracketing:
 
 ---
 
-## 8. UI / Integration Outputs — TODO
+## 8. Interface and Integrations — TODO
 
-### Ticketing System
-- **Read:** ticket metadata, alert fields, investigation history (per-ticket + batch)
-- **Write:** status + comments (investigation started, recommendation, disposition)
+### 8.1 Primary Interface: Claude Code
 
-### Chat (Slack/Teams)
-- Auto-close notifications
-- Escalation alerts with report links
+The system is a **Claude Code plugin**. Claude Code is the runtime — the agent runs inside it, and all external access happens through tools the user configures. This is a core strength: no custom UI to build or maintain, and users bring whichever integrations fit their environment.
 
-### Triage Summary (written to ticket)
+**Tool connectivity:** MCP servers, scripts (+ API keys), or any combination. The agent doesn't care how data arrives — it works with whatever tools are available at runtime, resolved via `siem-mapping.json` and MCP server configuration.
 
-The report.md frontmatter (§2.4) serves as the triage summary. No separate JSON — the ticketing integration reads the frontmatter fields (`ticket_id`, `signature_id`, `status`, `disposition`, `confidence`, `matched_precedent`, `leads_pursued`) and posts the markdown body as a comment.
+**Modes:**
+
+| Mode | Behavior |
+|------|----------|
+| `recommend` | Agent investigates and outputs report. Human reviews and acts. |
+| `act` | Agent investigates and executes actions (close ticket, post comment, tag). Validated by hooks. |
+
+### 8.2 Recommended Integrations
+
+These make the system effective. Without them, the agent can still investigate but with reduced capability.
+
+| Integration | Access | Why it matters |
+|-------------|--------|----------------|
+| **Ticketing system** (Jira, TheHive, ServiceNow, etc.) | Read: ticket metadata, alert fields, investigation history (per-ticket + batch). Write (`act` mode): status, comments, disposition. | Core input/output — the agent reads alerts from tickets and writes results back. Batch read enables recent alert context (§1.4). |
+| **SIEM** (Wazuh, Splunk, Elastic, etc.) | Read: events, rules, agent info. | Evidence gathering — most leads query the SIEM for log data. |
+| **Git host** (GitHub, GitLab, or any git server) | Read/write: branches, PRs. | Powers the learning loop (§3.7) — post-mortem agent commits KB updates and opens PRs for analyst review. Without this, KB updates require manual file management. |
+
+### 8.3 Optional Integrations
+
+Nice to have, not required. Each adds capability for specific investigation types.
+
+| Integration | Value |
+|-------------|-------|
+| **Chat** (Slack, Teams) | Auto-close notifications, escalation alerts with report links, collaborative investigation threads. |
+| **EDR** (CrowdStrike, Defender, etc.) | Process trees, endpoint context, containment actions. |
+| **DLP** | Data exfiltration context for relevant alert types. |
+| **Firewall / network tools** | Connection logs, block actions. |
+| **Threat intelligence** | IP/domain/hash reputation lookups. |
+| **Identity provider** (AD, Okta, etc.) | User roles, normal behavior patterns, service account identification. |
+| **Asset inventory** (CMDB, etc.) | Asset criticality, owner, purpose — feeds escalation decisions. |
+
+The agent discovers available tools at runtime. Playbooks reference leads by goal ("check source reputation"), not by tool — the agent resolves to whatever's available.
+
+### 8.4 Investigation Output
+
+Every investigation produces a single `report.md` — YAML frontmatter (machine-readable) + markdown body (analyst-readable). See §2.4 for format and validation.
+
+**Ticketing integration:** Reads frontmatter fields (`ticket_id`, `signature_id`, `status`, `disposition`, `confidence`, `matched_precedent`, `leads_pursued`) for structured updates and posts the markdown body as a ticket comment. No separate triage summary format needed.
 
 ---
 

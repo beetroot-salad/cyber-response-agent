@@ -476,56 +476,66 @@ Every file written by an agent is validated before being read by another agent o
 
 ---
 
-## 6. User Interface and Integration
+## 6. Interface and Integrations
 
-### 6.1 Primary Interface
+### 6.1 Primary Interface: Claude Code
 
-The agent integrates with existing analyst tools — not a separate UI.
+The system is a **Claude Code plugin**. Claude Code is the runtime — the agent runs inside it, and all external access happens through tools the user configures: MCP servers, scripts (+ API keys), or any combination. No custom UI to build or maintain.
 
-- **Ticketing system** (Jira, ServiceNow, TheHive): Read ticket → investigate → comment with recommendation (`recommend`) or resolve with disposition (`act`)
-- **Chat** (Slack, Teams): Notifications for auto-close, escalation alerts with report links, collaborative threads
-- **CLI** (Claude Code): Interactive investigations via `/investigate`
+The agent discovers available tools at runtime. Playbooks reference leads by goal, not by tool — the agent resolves to whatever's available via `siem-mapping.json` and MCP server configuration.
 
-### 6.2 Output
+**Modes:** `recommend` (output report, human acts) or `act` (execute actions, validated by hooks).
 
-Every investigation produces a single **`report.md`** — YAML frontmatter (machine-readable, for hooks and ticketing integration) + markdown body (analyst-readable). The Summary section gives the investigation outcome at a glance; the Investigation Log provides per-lead detail. See §4.4 for format and validation.
+### 6.2 Recommended Integrations
 
-### 6.3 Quality Monitoring
+| Integration | Access | Why it matters |
+|-------------|--------|----------------|
+| **Ticketing system** (Jira, TheHive, ServiceNow, etc.) | Read: ticket metadata, alert fields, investigation history (per-ticket + batch). Write (`act` mode): status, comments, disposition. | Core input/output — reads alerts, writes results. Batch read enables recent alert context (§1.4). |
+| **SIEM** (Wazuh, Splunk, Elastic, etc.) | Read: events, rules, agent info. | Evidence gathering — most leads query the SIEM. |
+| **Git host** (GitHub, GitLab, or any git server) | Read/write: branches, PRs. | Powers the learning loop (§3.7) — post-mortem commits KB updates and opens PRs. Without this, KB updates require manual file management. |
+
+### 6.3 Optional Integrations
+
+| Integration | Value |
+|-------------|-------|
+| **Chat** (Slack, Teams) | Auto-close notifications, escalation alerts, collaborative threads. |
+| **EDR** (CrowdStrike, Defender, etc.) | Process trees, endpoint context, containment actions. |
+| **DLP** | Data exfiltration context. |
+| **Firewall / network tools** | Connection logs, block actions. |
+| **Threat intelligence** | IP/domain/hash reputation. |
+| **Identity provider** (AD, Okta) | User roles, service accounts. |
+| **Asset inventory** (CMDB) | Asset criticality, owner — feeds escalation decisions. |
+
+### 6.4 Output
+
+Every investigation produces a single **`report.md`** — YAML frontmatter (machine-readable, for hooks and ticketing integration) + markdown body (analyst-readable). See §4.4 for format and validation. Ticketing integration reads frontmatter fields for structured updates and posts the markdown body as a comment.
+
+### 6.5 Quality Monitoring
 
 - **Auto-closure sampling:** 10% of auto-closed alerts flagged for analyst spot-check. Override rates feed signature-level tracking.
 - **Systematic error detection:** If override rate for a signature exceeds 2%, autonomy auto-downgrades to `recommend` until investigated.
 
 ---
 
-## 7. Onboarding and System Integration
+## 7. Onboarding
 
-### 7.1 Requirements
-
-| Need | Purpose | How Provided |
-|------|---------|-------------|
-| SIEM read access | Query logs/events/alerts | MCP server or API credentials |
-| Ticketing access | Read alerts, write comments, close tickets, batch query | Scoped API token |
-| Asset inventory | Criticality, owner, purpose | API, CSV, or static file |
-| Identity context | Roles, normal behavior, service accounts | API or directory |
-| Network context | Subnet maps, infrastructure | Static config file |
-| Organizational context | Business hours, maintenance windows | KB files |
-
-### 7.2 Credential Management
+### 7.1 Credential Management
 
 Credentials are environment-level: env vars or mounted secrets. Scripts reference `$WAZUH_API_TOKEN`; MCP servers handle auth internally. The LLM never sees credentials.
 
-### 7.3 Onboarding Workflow
+### 7.2 Onboarding Workflow
 
 1. Configure SIEM access (MCP server or API endpoint + credentials)
 2. Configure ticketing (scoped API token)
-3. Populate `config/siem-mapping.json` with available data sources
-4. Create initial KB (playbooks + precedents for highest-volume signatures)
-5. Set `permissions.yaml` per signature
-6. Seed approved script library with common query patterns
-7. Test with `recommend` mode on historical alerts
-8. Graduate to `act` mode for signatures with consistent accuracy
+3. Configure git host for learning loop (optional but recommended)
+4. Populate `config/siem-mapping.json` with available data sources
+5. Create initial KB (playbooks + precedents for highest-volume signatures)
+6. Set `permissions.yaml` per signature
+7. Seed approved script library with common query patterns
+8. Test with `recommend` mode on historical alerts
+9. Graduate to `act` mode for signatures with consistent accuracy
 
-### 7.4 Enterprise Considerations
+### 7.3 Enterprise Considerations
 
 - **SSO/SAML:** Agent's service account uses same IAM as analysts, scoped permissions
 - **Secrets management:** Vault/AWS Secrets Manager, injected at runtime
