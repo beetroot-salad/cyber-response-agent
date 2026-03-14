@@ -1,6 +1,6 @@
 # Cyber Response Agent - Technical Architecture
 
-**Version:** 3.4 | **Date:** March 2026
+**Version:** 3.5 | **Date:** March 2026
 
 For problem statement, design decisions, and success criteria, see [design-v3-overview.md](design-v3-overview.md).
 
@@ -10,11 +10,13 @@ For problem statement, design decisions, and success criteria, see [design-v3-ov
 
 ### 1.1 Definitions
 
-**Lead** — An investigative goal: a question the agent wants answered. Has a *goal* and *motivation*, does NOT specify the method. Example: `"Determine whether the source IP has authenticated to this server before"`.
+Investigations operate in two dimensions: the **hypothesis space** (logic — what could be happening) and the **evidence space** (reality — what we observe). Each investigation step transforms between them: logic→reality (choosing what to check based on predictions) and reality→logic (updating hypotheses based on observations).
 
-**Evidence** — The result of pursuing a lead: raw result, interpretation, discriminating power, confidence in the evidence itself.
+**Hypothesis** — A candidate explanation for the alert. Can be simple (`"monitoring probe"`) or a causal chain. Each hypothesis **predicts** what evidence should and should not exist — these predictions are what make leads diagnostic. Multiple hypotheses compete; investigation eliminates or confirms them. Written with `?` prefix for searchability: `?monitoring-probe`, `?brute-force`.
 
-**Hypothesis** — A candidate explanation for the alert. Can be simple (`"monitoring probe"`) or a causal chain. Each predicts what evidence should and should not exist. Multiple hypotheses compete.
+**Lead** — An investigative goal: a question the agent wants answered. Has a *goal* and *motivation*, does NOT specify the method. A lead's value is its **diagnosticity** — how well its possible outcomes discriminate between surviving hypotheses. Example: `"Determine whether the source IP has authenticated to this server before"` discriminates `?monitoring-probe` (predicts regular pattern) from `?brute-force` (predicts high-frequency diverse attempts).
+
+**Evidence** — The result of pursuing a lead: raw observation, plus an **assessment** of what it means for each hypothesis (supports/contradicts/neutral). The assessment is the reality→logic transform — it connects what was seen to what it means.
 
 ### 1.2 Investigation Loop
 
@@ -23,9 +25,9 @@ CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → (HYPOTHESIZE or CONCLUD
 ```
 
 - **CONTEXTUALIZE** — Load sanitized alert, signature knowledge, recent related alerts, precedent scan, concurrent investigations. One-time entry.
-- **HYPOTHESIZE** — Form/update hypotheses with predictions. Must include ≥1 adversarial (threat) hypothesis. Select leads with maximum discriminating power.
+- **HYPOTHESIZE** — Form/update hypotheses with predictions (logic dimension). Must include ≥1 adversarial (threat) hypothesis. Select leads with maximum discriminating power — a lead is diagnostic when different hypotheses predict different outcomes for it.
 - **GATHER** — Execute leads via scripts, MCP, or subagents. Can parallelize independent leads.
-- **ANALYZE** — Interpret results against predictions. Update belief distribution. Sufficient evidence → CONCLUDE; otherwise → HYPOTHESIZE.
+- **ANALYZE** — Interpret results against predictions (reality→logic transform). Assess each piece of evidence against each surviving hypothesis. Update belief distribution. Sufficient evidence → CONCLUDE; otherwise → HYPOTHESIZE from the updated logical position.
 - **CONCLUDE** — Output recommendation. Only reachable after ≥1 full HYPOTHESIZE→GATHER→ANALYZE cycle.
 
 **Simple case:** CONTEXTUALIZE → one iteration → CONCLUDE. **Complex case:** Multiple iterations, hypotheses evolve.
@@ -103,7 +105,7 @@ Primary value: **context isolation** — SIEM responses can be thousands of line
 
 **Input:** `{ lead, motivation, context, available_tools }`
 
-**Output:** `{ lead, method_used, raw_result_summary, interpretation, supports_hypothesis, contradicts_hypothesis, confidence_in_evidence, new_leads_suggested }`
+**Output:** `{ lead, why, method_used, observed, assessment: {hypothesis: weight, ...}, confidence_in_evidence, new_leads_suggested }`
 
 ---
 
@@ -196,7 +198,13 @@ Playbooks reference atomic leads (from `common/leads/`) and organize them into a
 
 **Mandatory:**
 
-- **Investigation** — Sequenced leads with priorities, decision points, branching logic. Each entry references an atomic lead, explains why it matters for this signature, and defines what outcomes mean. Lead priority scores are data-driven: the post-mortem agent grades each lead after every investigation and the cumulative score updates. *(Investigation flow language design is deferred — see schema-review.md §6.)*
+- **Investigation** — Two-layer structure reflecting the hypothesis and evidence dimensions:
+
+  **Hypothesis catalog:** Pre-populated competing explanations for this alert type, each with predictions (what evidence each hypothesis expects). Gives the agent a starting differential before evidence is gathered. Written with `?` prefix for searchability.
+
+  **Lead sequence:** Prioritized leads ranked by diagnosticity — how well they discriminate between the hypotheses in the catalog. Each lead entry specifies: the goal, which hypotheses it discriminates, what each hypothesis predicts for this lead, and what outcomes mean. Priority scores are data-driven: the post-mortem agent grades each lead after every investigation and the cumulative score updates.
+
+  See schema-review.md §6.5 for the full investigation flow language specification, including the trace line format for sequential searchability.
 
 - **Escalation Criteria** — When to stop investigating and escalate. Both positive triggers (explicit conditions like critical assets, privileged accounts, external IPs with successful logins) and negative triggers (exhausted investigation without resolution, no precedent match, low confidence on high severity).
 
@@ -225,7 +233,9 @@ Not every investigation becomes a precedent. The post-mortem agent proposes new 
 | `ticket_id` | mandatory | Reference back to ticketing system |
 | `signature_id` | mandatory | For initial filtering |
 | `disposition` | mandatory | benign / false_positive / true_positive |
-| `flow` | mandatory | Investigation fingerprint — `[{lead, outcome, detail}]` |
+| `hypotheses` | mandatory | Hypotheses considered and their final status |
+| `flow` | mandatory | Investigation evidence — `[{lead, observed, assessment}]` per cycle |
+| `trace` | mandatory | One-line sequential summary for grep (see below) |
 | `reasoning` | mandatory | Conditions, refutations, confidence notes (see below) |
 | `key_indicators` | recommended | Specific observations that distinguish this case |
 | `leads_that_resolved` | recommended | Which leads provided discriminating evidence |
@@ -249,21 +259,49 @@ reasoning:
     - "If interval is regular but source is unknown, investigate further before matching"
 ```
 
-**The `flow` field** is a structured description of how the investigation went — a sequence of `(lead, outcome)` pairs:
+**The `hypotheses` field** records which hypotheses were considered and their final status:
+
+```yaml
+hypotheses:
+  - id: "?monitoring-probe"
+    status: confirmed          # confirmed | eliminated | inconclusive
+  - id: "?brute-force"
+    status: eliminated
+  - id: "?credential-stuffing"
+    status: eliminated
+```
+
+**The `flow` field** records each investigation cycle — evidence gathered and its assessment against hypotheses:
 
 ```yaml
 flow:
   - lead: authentication-history
-    outcome: regular-pattern
-    detail: "5-min intervals, single username, 47 events over 7 days"
+    why: "discriminates ?monitoring-probe (regular interval) from ?brute-force (high-frequency diverse)"
+    observed: "5-min intervals, single username, 47 events over 7 days"
+    assessment:
+      "?monitoring-probe": "++"    # strongly supports
+      "?brute-force": "--"         # strongly contradicts
+      "?credential-stuffing": "--"
   - lead: source-reputation
-    outcome: known-internal
-    detail: "10.0.1.50 in monitoring subnet, known Nagios host"
+    why: "discriminates ?monitoring-probe (known internal) from external threat"
+    observed: "10.0.1.50 in monitoring subnet, known Nagios host"
+    assessment:
+      "?monitoring-probe": "++"
 ```
 
-The `outcome` vocabulary emerges from usage and is normalized by post-mortem consolidation over time. The same `(lead, outcome)` language is used in playbooks (as a plan), precedents (as a record), and reports (as a log).
+Assessment weights: `++` strongly supports, `+` weakly supports, `~` neutral, `-` weakly contradicts, `--` strongly contradicts.
 
-**No `classification` field.** Free-text classification (e.g., "monitoring-probe") is deferred — the investigation flow + known FP patterns in `context.md` serve the same purpose without the maintenance burden of a controlled vocabulary. May revisit if the investigation flow language doesn't cover this need.
+**The `trace` field** is a one-line sequential summary optimized for grep across many precedent files:
+
+```
+alert → authentication-history[regular-pattern ∴ ?monitoring-probe] → source-reputation[known-internal ∴ ?monitoring-probe] → benign
+```
+
+Grammar: `step ( → step )* → disposition`. Each step: `lead-name[observation ∴ hypothesis-conclusion]`. The `∴` ("therefore") separates what was seen from what it meant. Because the entire path is one line, grep returns complete sequences, not fragments. See schema-review.md §6.5 for searchability patterns.
+
+The `outcome` vocabulary (used in observations) emerges from usage and is normalized by post-mortem consolidation over time. Hypothesis names (`?name`) provide the classification that was previously missing — `grep "?monitoring-probe"` across precedents finds every case where this hypothesis was considered, regardless of which leads were used.
+
+**No separate `classification` field needed.** Hypothesis names serve as searchable classifications. `grep "status: confirmed"` + `grep "?monitoring-probe"` replaces a controlled vocabulary without the maintenance burden.
 
 ### 3.5 Ticket Data Model
 
@@ -324,13 +362,22 @@ Both levels are maintained through the post-mortem learning loop (§3.7). When t
 
 ### 3.9 Precedent Matching
 
-Two-layer matching based on investigation flow:
+Two-layer matching based on hypothesis outcomes and investigation flow:
 
-**Layer 1 — Structural search (deterministic):** Query by `signature_id` (required) + overlapping `(lead, outcome)` pairs from the investigation flow + key indicators. Returns 3-10 candidates.
+**Layer 1 — Structural search (deterministic):** Query by `signature_id` (required) + overlapping hypothesis names and lead assessments from the investigation flow + key indicators. The `trace` field enables fast initial filtering — grep for matching hypothesis conclusions or observation patterns across all precedent files. Returns 3-10 candidates.
 
 **Layer 2 — Reasoning judgment (LLM):** Agent reads each candidate's `reasoning.conditions` and `reasoning.refutes` and verifies against current evidence. This enables mid-investigation matching — "I've verified 3 of 4 conditions, none of the refutes have triggered."
 
-**Stop hook verification:** The hook independently checks structural overlap — `signature_id` match, at least one flow step overlap, reasoning conditions addressed in the report. Prevents matching against unrelated precedents.
+**Sequential searchability:** Because the `trace` field encodes the full investigation path in a single greppable line, the agent (or analyst) can search for any element and get the complete sequence:
+
+| Search goal | Grep pattern |
+|---|---|
+| Cases where this hypothesis was confirmed | `grep "∴ ?monitoring-probe.*→ benign"` |
+| Cases that used this lead | `grep "authentication-history\["` |
+| What happened after observing this pattern | `grep "regular-pattern"` (context shows next step) |
+| Cases that escalated from this hypothesis | `grep "?brute-force.*→ escalate"` |
+
+**Stop hook verification:** The hook independently checks structural overlap — `signature_id` match, at least one hypothesis overlap, at least one flow step overlap, reasoning conditions addressed in the report. Prevents matching against unrelated precedents.
 
 ---
 
