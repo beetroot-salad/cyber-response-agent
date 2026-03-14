@@ -88,9 +88,14 @@ CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → HYPOTHESIZE (loop)
 
 ### 2.3 `leads/{lead-name}.json` — Evidence from Each Lead — DONE
 
+Leads come in two types: **diagnostic** (discriminate between hypotheses) and **scoping** (assess impact, blast radius, timeline, or gather context). Both produce evidence files with the same base fields but different type-specific fields.
+
+**Diagnostic lead:**
+
 ```json
 {
   "lead": "authentication-history",
+  "type": "diagnostic",
   "why": "discriminates ?monitoring-probe (regular interval) from ?brute-force (high-frequency diverse)",
   "method_used": "Wazuh search_events for srcip auth logs",
   "observed": "5-min intervals, single username 'testuser', 47 events over 7 days",
@@ -104,14 +109,38 @@ CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → HYPOTHESIZE (loop)
 }
 ```
 
-This is both the **lead subagent output** and what gets persisted. The `why` field captures the logic→reality transform (why this lead was chosen); the `assessment` field captures the reality→logic transform (what it means for each hypothesis).
+**Scoping lead:**
+
+```json
+{
+  "lead": "data-access-audit",
+  "type": "scoping",
+  "purpose": "impact",
+  "why": "determine what sensitive data the unauthorized session accessed",
+  "method_used": "Wazuh search_events for session file access logs",
+  "observed": "session accessed 3 files: /data/reports/q4-financials.xlsx, /data/hr/salary-bands.csv, /data/config/db-credentials.env",
+  "findings": {
+    "affected_assets": ["q4-financials.xlsx", "salary-bands.csv", "db-credentials.env"],
+    "severity_factors": ["credentials file accessed", "PII in salary data"],
+    "timeline": "14:31:02Z - 14:33:47Z (2m45s)",
+    "blast_radius": "financial data + HR PII + database credentials"
+  },
+  "confidence_in_evidence": "high",
+  "new_leads_suggested": ["credential-rotation-status"]
+}
+```
+
+This is both the **lead subagent output** and what gets persisted. For diagnostic leads, the `why` field captures the logic→reality transform (why this lead was chosen); the `assessment` field captures the reality→logic transform (what it means for each hypothesis). For scoping leads, `why` captures purpose and `findings` captures structured impact information.
 
 **Review decisions:**
-- Replaced `supports_hypothesis`/`contradicts_hypothesis` (single hypothesis each) with `assessment` map (all surviving hypotheses, ACH-style weights)
-- Added `why` field — records which hypotheses this lead discriminates and what it predicts, making the reasoning chain explicit
-- Renamed `raw_result_summary` + `interpretation` to `observed` — the interpretation is captured in the per-hypothesis assessment, not a separate field
+- Two lead types: `diagnostic` (hypothesis discrimination) and `scoping` (impact/context assessment)
+- Diagnostic: replaced `supports_hypothesis`/`contradicts_hypothesis` (single hypothesis each) with `assessment` map (all surviving hypotheses, ACH-style weights)
+- Scoping: `purpose` field (impact | timeline | blast-radius | context) + `findings` object with structured results. No hypothesis assessments — these leads inform the response, not the diagnosis
+- Added `why` field to both types — records reasoning for why this lead was chosen
+- Renamed `raw_result_summary` + `interpretation` to `observed` — the interpretation is captured in type-specific fields
 - `method_used` retained for audit trail (what tool/query was actually used)
-- `confidence_in_evidence` retained — confidence in the evidence itself, separate from what the evidence means for hypotheses
+- `confidence_in_evidence` retained — confidence in the evidence itself
+- Scoping leads often trigger after a hypothesis is confirmed — the investigation shifts from "what happened?" to "how bad is it?"
 
 ### 2.4 `report.md` — Unified Investigation Output — DONE
 
@@ -156,6 +185,15 @@ Queried Wazuh auth events for 10.0.1.50 → web-server-01, last 7 days.
 
 ### Lead 3: Recent Alert Correlation
 ...
+
+## Suggestions
+
+- **Rule tuning**: Exclude srcip 10.0.1.0/24 + srcuser "testuser" from rule 5710.
+  This monitoring probe pattern has triggered 23 times in the past 30 days.
+  → Detection engineering backlog
+- **Visibility**: Health check service on 10.0.1.50 should use a dedicated
+  service account (e.g., svc-nagios) instead of "testuser" to reduce ambiguity.
+  → Infrastructure backlog
 ```
 
 **Review decisions:**
@@ -163,6 +201,7 @@ Queried Wazuh auth events for 10.0.1.50 → web-server-01, last 7 days.
 - Dropped `classification`, `lead_outcome_tags`, `hypotheses` array, `reproduction_result`, `evidence_conflicts` from structured fields — these either belong in the precedent record (post-mortem) or can't be meaningfully validated by hooks
 - Kept `leads_pursued` as integer count for minimum evidence enforcement
 - `confidence` remains an agent signal for analysts, not a guardrail input
+- Added Suggestions section — backlog items for other teams (rule tuning, infra hardening, visibility gaps). Written to ticket; in `act` mode, optionally created as backlog tickets. NOT stored in `knowledge/`
 
 **Stop hook validation is two-tier:**
 
@@ -245,14 +284,41 @@ Every script the agent generates is saved to `{run_dir}/scripts/` before executi
 - The container is lightweight (not the reproduction sandbox) — minimal Python/bash runtime, no OS simulation needed
 - Approved script library provides a fast path for common queries without container overhead
 
-### 2.7 Post-Mortem KB Updates (Git-Native) — DONE
+### 2.7 Post-Mortem Output — DONE
 
-The `proposals/` directory is eliminated. Post-mortem updates the KB directly using git: edits files in-place on a branch, commits, pushes, and opens a PR. Analyst reviews the diff and merges. See architecture doc §3.7.
+The post-mortem subagent produces two types of output:
+
+**KB updates (git-native):** The `proposals/` directory is eliminated. Post-mortem updates the KB directly using git: edits files in-place on a branch, commits, pushes, and opens a PR. Analyst reviews the diff and merges. See architecture doc §3.7.
+
+**Suggestions (backlog items):** Actionable recommendations that don't belong in the KB — rule tuning, infrastructure hardening, visibility gaps. Written to the investigation ticket as a recommendations section. In `act` mode, optionally created as new tickets in the appropriate backlog (detection engineering, security engineering, etc.).
+
+```json
+{
+  "suggestions": [
+    {
+      "type": "rule-tuning",
+      "description": "Exclude srcip 10.0.1.0/24 + srcuser 'testuser' from rule 5710",
+      "rationale": "Monitoring probe pattern triggered 23 times in 30 days",
+      "destination": "detection-engineering"
+    },
+    {
+      "type": "hardening",
+      "description": "Health check on 10.0.1.50 should use dedicated service account",
+      "rationale": "Generic username 'testuser' creates investigation ambiguity",
+      "destination": "infrastructure"
+    }
+  ]
+}
+```
+
+Suggestion types: `rule-tuning` | `rule-suppression` | `hardening` | `visibility-gap` | `playbook-gap`. The `destination` field maps to a team/backlog for routing.
 
 **Review decisions:**
 - Git-native replaces the proposals directory — PRs are the approval workflow
 - New files (precedents, lessons) never conflict; edits to shared files (playbooks, context) go through PR review
 - No custom proposal format or review UI needed — the PR diff is the review artifact
+- Suggestions are NOT stored in `knowledge/` — they're backlog items forwarded to other teams. The KB captures investigation patterns; suggestions capture what to fix
+- Post-mortem generates suggestions by comparing investigation against KB: recurring FP without rule exclusion, scoping leads that found unmonitored assets, detection gaps encountered during investigation
 
 ---
 
@@ -398,6 +464,16 @@ auto_close_rate: 0.84
   Predictions:
     isolated → single alert, no related activity
     campaign → cluster of alerts from same source or targeting same dest
+
+### Scoping Leads
+
+- **session-activity-audit** (purpose: impact)
+  When: after ?brute-force or ?credential-stuffing confirmed with successful login
+  Goal: determine what the authenticated session accessed or modified
+
+- **lateral-movement-check** (purpose: blast-radius)
+  When: after any threat hypothesis confirmed
+  Goal: identify other systems the source IP contacted
 
 ## Escalation Criteria
 
@@ -563,22 +639,51 @@ leads:
 
 This layer lives in the **playbook** — it's reusable across investigations for the same signature. The agent selects the most diagnostic lead for the surviving hypotheses.
 
+Playbooks also specify **scoping leads** — these don't discriminate hypotheses but assess impact, blast radius, or gather context:
+
+```yaml
+scoping_leads:
+  - lead: data-access-audit
+    purpose: impact
+    when: "after ?unauthorized-access confirmed"
+    goal: "determine what sensitive data the session accessed"
+  - lead: lateral-movement-check
+    purpose: blast-radius
+    when: "after any threat hypothesis confirmed"
+    goal: "identify other systems the actor touched"
+```
+
+Scoping leads are conditional — they trigger after specific hypotheses are confirmed, when the investigation shifts from "what happened?" to "how bad is it?"
+
 **Layer 3: Evidence with assessments** (reality → logic transform)
 
-Each piece of evidence records what was observed and what it means for each hypothesis. Assessment weights: `++` strongly supports, `+` weakly supports, `~` neutral, `-` weakly contradicts, `--` strongly contradicts.
+For diagnostic leads, each piece of evidence records what was observed and what it means for each hypothesis. Assessment weights: `++` strongly supports, `+` weakly supports, `~` neutral, `-` weakly contradicts, `--` strongly contradicts.
 
 ```yaml
 evidence:
+  # Diagnostic lead — per-hypothesis assessment
   - lead: authentication-history
+    type: diagnostic
     why: "discriminates ?monitoring-probe (regular interval) from ?brute-force (high-frequency diverse)"
     observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
     assessment:
       "?monitoring-probe": "++"    # regular interval, single user — textbook
       "?brute-force": "--"         # not high-frequency, not diverse
       "?credential-stuffing": "--" # not bursty, not known-leaked names
+
+  # Scoping lead — structured findings, no hypothesis assessment
+  - lead: data-access-audit
+    type: scoping
+    purpose: impact
+    why: "determine what sensitive data was accessed"
+    observed: "session accessed 3 files in /data/"
+    findings:
+      affected_assets: ["q4-financials.xlsx", "salary-bands.csv", "db-credentials.env"]
+      severity_factors: ["credentials file accessed", "PII in salary data"]
+      blast_radius: "financial data + HR PII + database credentials"
 ```
 
-This layer lives in **precedents** (compact) and **reports** (detailed with reasoning after each assessment).
+This layer lives in **precedents** (compact) and **reports** (detailed with reasoning). Scoping lead findings feed the report's impact assessment and may trigger suggestions (§3.7).
 
 #### The Trace Line: Sequential Searchability
 
@@ -714,9 +819,11 @@ Surviving: ?legitimate-build (confirmed)
 | Layer | Playbook (plan) | Precedent (record) | Report (output) |
 |---|---|---|---|
 | Hypotheses + predictions | Pre-populated catalog for this signature | Which were considered + final status | Full set + status at each cycle |
-| Leads + diagnosticity | Ranked by discrimination power | Which were used + why chosen | Full detail with per-step reasoning |
-| Evidence + assessments | — | Compact `(observed, assessment)` | Detailed with reasoning per weight |
+| Diagnostic leads | Ranked by diagnosticity | Which were used + why chosen | Full detail with per-step reasoning |
+| Scoping leads | Listed with trigger conditions | Which were used + findings | Detailed findings feeding impact assessment |
+| Evidence + assessments | — | Compact `(observed, assessment/findings)` | Detailed with reasoning per weight |
 | Trace line | — | One-line sequential summary | Included in frontmatter or footer |
+| Suggestions | — | — | Backlog items for other teams (§3.7) |
 
 #### Vocabulary Management
 

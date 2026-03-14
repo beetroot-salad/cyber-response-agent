@@ -14,9 +14,15 @@ Investigations operate in two dimensions: the **hypothesis space** (logic — wh
 
 **Hypothesis** — A candidate explanation for the alert. Can be simple (`"monitoring probe"`) or a causal chain. Each hypothesis **predicts** what evidence should and should not exist — these predictions are what make leads diagnostic. Multiple hypotheses compete; investigation eliminates or confirms them. Written with `?` prefix for searchability: `?monitoring-probe`, `?brute-force`.
 
-**Lead** — An investigative goal: a question the agent wants answered. Has a *goal* and *motivation*, does NOT specify the method. A lead's value is its **diagnosticity** — how well its possible outcomes discriminate between surviving hypotheses. Example: `"Determine whether the source IP has authenticated to this server before"` discriminates `?monitoring-probe` (predicts regular pattern) from `?brute-force` (predicts high-frequency diverse attempts).
+**Lead** — An investigative goal: a question the agent wants answered. Has a *goal* and *motivation*, does NOT specify the method. Leads come in two types:
 
-**Evidence** — The result of pursuing a lead: raw observation, plus an **assessment** of what it means for each hypothesis (supports/contradicts/neutral). The assessment is the reality→logic transform — it connects what was seen to what it means.
+- **Diagnostic leads** — Discriminate between hypotheses. Value measured by **diagnosticity**: how well possible outcomes distinguish surviving hypotheses. Example: `"Check authentication history"` discriminates `?monitoring-probe` (predicts regular pattern) from `?brute-force` (predicts high-frequency diverse attempts). These carry per-hypothesis predictions and assessments.
+
+- **Scoping leads** — Assess impact, blast radius, timeline, or gather context that informs the response rather than the diagnosis. Example: `"Determine what data was accessed"` or `"Identify lateral movement to other systems"`. These have a *purpose* (impact | timeline | blast-radius | context) and *findings*, but no hypothesis assessments. Scoping leads often become critical after a hypothesis is confirmed — the investigation shifts from "what happened?" to "how bad is it?"
+
+Both types produce evidence and appear in the investigation flow. Playbooks specify which leads are diagnostic vs scoping.
+
+**Evidence** — The result of pursuing a lead. For diagnostic leads: raw observation plus an **assessment** of what it means for each hypothesis (supports/contradicts/neutral). For scoping leads: raw observation plus **findings** that inform the response (severity, affected assets, timeline bounds). Both types feed into the report and precedent record.
 
 ### 1.2 Investigation Loop
 
@@ -327,7 +333,9 @@ Container isolation is the primary defense — even if the hook misses a pattern
 
 ### 3.7 Knowledge Base Learning Loop (Git-Native)
 
-After each investigation, a post-mortem subagent updates the KB directly using git:
+After each investigation, a post-mortem subagent produces two types of output:
+
+**1. KB updates** — proposed changes to investigation knowledge, committed via git:
 
 1. Analyze completed investigation (report, evidence, narrative)
 2. Generate updates: new precedent, lead priority updates, playbook refinements, context additions, cross-cutting lessons, known FP abstractions
@@ -335,8 +343,6 @@ After each investigation, a post-mortem subagent updates the KB directly using g
 4. Commit, push, and open a PR for analyst review
 
 **All KB changes require analyst approval via PR merge.** The PR diff is the review artifact — analysts see exactly what changed. Corrections to wrong precedents are proposed as removals/edits in PRs.
-
-**Update types and git workflow:**
 
 | Update type | Git operation | Conflict risk |
 |-------------|--------------|---------------|
@@ -347,6 +353,20 @@ After each investigation, a post-mortem subagent updates the KB directly using g
 | Playbook structural change | Edit `playbook.md` | High |
 
 High-frequency updates (new precedents, new lessons) are new files and never conflict. Edits to shared files (playbooks, context) are rarer and benefit from PR review.
+
+**2. Suggestions** — actionable recommendations that don't belong in the KB:
+
+| Suggestion type | Example | Destination |
+|-----------------|---------|-------------|
+| Rule tuning | "Exclude monitoring subnet 10.0.1.0/24 from rule 5710" | Detection engineering backlog |
+| Rule suppression | "Suppress rule 5710 for srcuser=nagios during 02-04 UTC" | Detection engineering backlog |
+| Infrastructure hardening | "Enable MFA on server web-server-01" | Security engineering backlog |
+| Visibility gap | "No process-level logging on database servers" | Observability backlog |
+| Playbook gap | "No playbook exists for rule 5712, which co-occurs with 5710" | SOC backlog |
+
+Suggestions are **backlog items for other teams**, not investigation knowledge. They are written to the investigation ticket as a recommendations section and, in `act` mode, optionally created as new tickets in the backlog. They are NOT stored in `knowledge/` — the KB captures how to investigate; suggestions capture what to fix.
+
+The post-mortem agent generates suggestions by comparing the investigation against the knowledge base: if the agent had to work around a detection gap, or the same FP pattern has triggered N times without a rule exclusion, or scoping leads revealed unmonitored assets, those become suggestions.
 
 ### 3.8 Field Documentation
 
@@ -396,7 +416,7 @@ Deterministic scripts enforcing invariants. Cannot be bypassed by LLM output.
 | `budget-enforcer.sh` | Per-tool-call | Track tool calls/subagents, reject if over budget |
 | `validate-report.sh` | Stop | Tier 1: frontmatter schema + deterministic checks. Tier 2: semantic judge for report consistency and precedent match validity |
 | `audit-logger.sh` | Stop + per-tool-call | Log external actions (tool calls, script executions) with caller, parameters, timestamp |
-| `post-mortem.sh` | Stop | Launch post-mortem, commit KB updates to branch, open PR |
+| `post-mortem.sh` | Stop | Launch post-mortem, commit KB updates to branch, open PR, write suggestions to ticket |
 
 ### 4.2 Input Sanitization
 
