@@ -1,6 +1,6 @@
 # Cyber Response Agent - Technical Architecture
 
-**Version:** 3.3 | **Date:** March 2026
+**Version:** 3.4 | **Date:** March 2026
 
 For problem statement, design decisions, and success criteria, see [design-v3-overview.md](design-v3-overview.md).
 
@@ -124,26 +124,148 @@ knowledge/
 │   │   ├── wazuh-events.md
 │   │   ├── active-directory.md
 │   │   └── ...
-│   ├── lessons/                        # Cross-cutting lessons learned
-│   └── utilities/                      # Query patterns, API references
+│   └── lessons/                        # Cross-cutting lessons learned
 └── signatures/{signature-id}/
-    ├── playbook.md                     # Recommended sequence with decision points
-    ├── rule.md                         # What triggers this signature
-    ├── lessons.md                      # Signature-specific lessons
-    ├── relevant-leads.md              # Links to common/leads/ + signature-specific leads
-    ├── field-notes.md                  # Non-obvious field semantics for this alert type (§3.8)
-    └── past-tickets/                   # Precedent cases (JSON)
+    ├── SKILL.md                        # Loads this signature's KB as Claude Code skill
+    ├── context.md                      # Rule context + field notes + operational notes (§3.2)
+    ├── playbook.md                     # Lead sequence, priorities, decision points (§3.3)
+    └── precedents/                     # Curated investigation patterns (§3.4)
+        └── {slug}.json
 ```
 
-### 3.2 Atomic Lead Definitions
+### 3.2 Signature Context (`context.md`)
 
-Leads in `knowledge/common/leads/` define a single investigative goal — independent of any signature. Each contains: **Goal** (what to determine), **Key Questions** (what to ask), **What This Tells You** (interpretation guide), **Hints** (data source recommendations without mandating tools). See `knowledge/common/leads/_template.md` for the format.
+The complete signature reference the agent needs. The SIEM is the source of truth for the rule definition (query, severity, fields); `context.md` stores only what the SIEM doesn't provide. During CONTEXTUALIZE, the system fetches the rule definition from the SIEM API and assembles it with `context.md` into a complete picture.
 
-### 3.3 Playbooks as Recommended Sequences
+**Frontmatter (YAML, structured):**
 
-Playbooks reference atomic leads and organize them into a recommended investigation flow with **decision points**. They are guidance, not execution graphs — the agent follows them unless evidence tells it to deviate. Each playbook includes: ordered steps referencing common leads, decision points for branching, signature-specific leads inline, and edge cases.
+| Field | Required | Source | Notes |
+|-------|----------|--------|-------|
+| `signature_id` | mandatory | SIEM | Unique identifier |
+| `name` | mandatory | SIEM | Human-readable name |
+| `severity` | mandatory | SIEM | low / medium / high / critical |
+| `data_sources` | mandatory | SIEM or human | What log sources feed this rule |
+| `created_at` | recommended | SIEM or human | When the rule was created |
+| `updated_at` | recommended | SIEM or human | Last modification |
+| `mitre` | recommended | Human | `{tactics: [...], techniques: [...]}` |
+| `references` | recommended | Human | CVEs, advisories, attack write-ups |
+| `related_signatures` | optional | Human | Rules that commonly co-occur or chain |
+| `base_rate` | optional | Post-mortem | `{benign_pct: 92, sample_size: 50}` — calibrates prior |
 
-### 3.4 Ticket Data Model
+**Body sections:**
+
+**Mandatory:**
+
+- **Signature Logic** — The raw detection query + plain-language explanation of what events trigger this rule. If the SIEM API provides the query, this section adds the explanation layer: what the rule *actually* detects, which is often subtly different from what its name suggests.
+- **Threat & Motivation** — What threat/behavior this detects and why it matters. What adversary goal it maps to, when it's relevant (e.g., external-facing SSH, weak password policies).
+
+**Highly recommended:**
+
+- **Known False Positives** — Structured patterns with references to specific precedents that established them:
+  ```
+  - **Monitoring probes**: Source in monitoring subnet, single username, regular interval.
+    Precedents: SEC-2024-001, SEC-2024-015, SEC-2024-023.
+  - **Service account rotation**: srcuser matches svc-*, burst of 2-3 attempts then success.
+    Precedents: SEC-2024-008, SEC-2024-031.
+  ```
+  Known FPs are abstractions derived from precedents. When multiple precedents show the same pattern, the post-mortem agent proposes a known FP entry referencing them. Gives the agent fast-path heuristics before investigation starts.
+
+- **Impact** — What happens if this is a true positive. Frames stakes and calibrates escalation urgency.
+- **Field Notes** — Non-obvious field semantics for this alert type. References `common/data-sources/` where relevant.
+
+**Optional (grows over time):**
+
+- **Operational Notes** — Tribal knowledge that doesn't fit elsewhere. Environmental patterns, timing quirks, analyst experience.
+- **Tuning Guidance** — How to reduce noise without losing detection.
+- **Detection Gaps** — What this rule does NOT catch. Helps agent know when to investigate further.
+
+### 3.3 Playbooks
+
+Playbooks reference atomic leads (from `common/leads/`) and organize them into a prioritized investigation flow with **decision points**. They are guidance, not execution graphs — the agent follows them unless evidence tells it to deviate.
+
+**Frontmatter:**
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `signature_id` | mandatory | Links to context.md |
+| `last_updated` | mandatory | When playbook was last revised |
+| `total_investigations` | recommended | Running count, updated by post-mortem |
+| `auto_close_rate` | optional | % resulting in auto-close |
+
+**Body sections:**
+
+**Mandatory:**
+
+- **Investigation** — Sequenced leads with priorities, decision points, branching logic. Each entry references an atomic lead, explains why it matters for this signature, and defines what outcomes mean. Lead priority scores are data-driven: the post-mortem agent grades each lead after every investigation and the cumulative score updates. *(Investigation flow language design is deferred — see schema-review.md §6.)*
+
+- **Escalation Criteria** — When to stop investigating and escalate. Both positive triggers (explicit conditions like critical assets, privileged accounts, external IPs with successful logins) and negative triggers (exhausted investigation without resolution, no precedent match, low confidence on high severity).
+
+**Highly recommended:**
+
+- **Auto-Close Criteria** — Explicit conditions under which the agent can recommend closure. What the stop hook validates against. E.g.: matches a known FP pattern OR a precedent, all adversarial hypotheses investigated and refuted, no escalation criteria triggered.
+
+- **Scope** — What's in and out of scope for automated investigation. Prevents the agent from going down rabbit holes.
+
+**Optional:**
+
+- **Response Actions** — What to do after investigation in `act` mode (close ticket, add comment, tag).
+
+**Tool decoupling:** Playbooks reference leads by goal, not by tool. The lead says what *data* it needs; the agent resolves to available tools at runtime via system-level config (`siem-mapping.json`, MCP servers). Tool documentation lives with lead definitions and data-source configs, not in signature directories.
+
+### 3.4 Precedents (`precedents/`)
+
+A precedent is a **curated, human-approved investigation pattern** — not raw ticket data. The ticketing system is the source of truth for ticket details; precedents capture the investigation flow and reasoning that the ticketing system doesn't store.
+
+Not every investigation becomes a precedent. The post-mortem agent proposes new precedents for cases that are novel or instructive. Analyst approves via PR.
+
+**Schema:**
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `ticket_id` | mandatory | Reference back to ticketing system |
+| `signature_id` | mandatory | For initial filtering |
+| `disposition` | mandatory | benign / false_positive / true_positive |
+| `flow` | mandatory | Investigation fingerprint — `[{lead, outcome, detail}]` |
+| `reasoning` | mandatory | Conditions, refutations, confidence notes (see below) |
+| `key_indicators` | recommended | Specific observations that distinguish this case |
+| `leads_that_resolved` | recommended | Which leads provided discriminating evidence |
+| `created_at` | mandatory | When this precedent was created |
+
+**The `reasoning` field** captures the logic behind the disposition — explicit conditions for matching and invalidation:
+
+```yaml
+reasoning:
+  conditions:        # ALL must hold for this precedent to apply
+    - "Source IP is internal (RFC1918)"
+    - "Attempts follow regular interval (variance <15%)"
+    - "Single username across all attempts"
+    - "No successful login following failures within 30 min"
+  refutes:           # ANY of these invalidates the match
+    - "Successful login within 30 minutes of failures"
+    - "Multiple distinct usernames (>2)"
+    - "Source IP is external"
+    - "Attempt frequency exceeds 20/hour"
+  confidence_note:   # When the match is ambiguous
+    - "If interval is regular but source is unknown, investigate further before matching"
+```
+
+**The `flow` field** is a structured description of how the investigation went — a sequence of `(lead, outcome)` pairs:
+
+```yaml
+flow:
+  - lead: authentication-history
+    outcome: regular-pattern
+    detail: "5-min intervals, single username, 47 events over 7 days"
+  - lead: source-reputation
+    outcome: known-internal
+    detail: "10.0.1.50 in monitoring subnet, known Nagios host"
+```
+
+The `outcome` vocabulary emerges from usage and is normalized by post-mortem consolidation over time. The same `(lead, outcome)` language is used in playbooks (as a plan), precedents (as a record), and reports (as a log).
+
+**No `classification` field.** Free-text classification (e.g., "monitoring-probe") is deferred — the investigation flow + known FP patterns in `context.md` serve the same purpose without the maintenance burden of a controlled vocabulary. May revisit if the investigation flow language doesn't cover this need.
+
+### 3.5 Ticket Data Model
 
 | Field | Access Pattern |
 |-------|---------------|
@@ -152,12 +274,12 @@ Playbooks reference atomic leads and organize them into a recommended investigat
 | Investigation history (comments, status changes, reports) | Read: per-ticket, Read: batch (recent) |
 | Investigation summary (agent recommendation + narrative) | Write: per-ticket |
 
-**Precedent records** in `past-tickets/` capture the *pattern* from past investigations: disposition, classification, quality tier (`gold/silver/bronze`), key indicators, leads that resolved the case, and lead outcome tags. The `leads_that_resolved` field references lead definitions (not methods), and `lead_outcome_tags` capture investigation outcomes for future searchability.
+The ticketing system is the source of truth for ticket data. Precedent records reference tickets by ID but do not duplicate ticket content.
 
-### 3.5 Scripts as Actions
+### 3.6 Scripts as Actions
 
-1. Agent reads lead definition (goal + hints)
-2. Checks available data sources (SIEM mapping, MCP tools, direct API)
+1. Agent reads lead definition (goal + data needs)
+2. Checks available tools (MCP first, then SIEM mapping, then direct API)
 3. Writes script (bash/python) to `{run_dir}/scripts/`
 4. Script validated by `validate-script.sh` hook (static analysis: AST parsing for disallowed imports, network target validation)
 5. Script executes in a minimal container (network allowlisted to SIEM/ticketing, read-only filesystem except run dir, no capabilities, 30s timeout)
@@ -165,43 +287,50 @@ Playbooks reference atomic leads and organize them into a recommended investigat
 
 Container isolation is the primary defense — even if the hook misses a pattern, the blast radius is bounded. Pre-approved scripts in the approved script library bypass both hook and container.
 
-MCP tools remain available for read-only SIEM access. The agent checks for MCP first, falls back to scripts.
+### 3.7 Knowledge Base Learning Loop (Git-Native)
 
-### 3.6 Knowledge Base Learning Loop
+After each investigation, a post-mortem subagent updates the KB directly using git:
 
-After each investigation, a post-mortem subagent generates KB update proposals:
+1. Analyze completed investigation (report, evidence, narrative)
+2. Generate updates: new precedent, lead priority updates, playbook refinements, context additions, cross-cutting lessons, known FP abstractions
+3. Update KB files in-place on a branch, consolidating with existing content
+4. Commit, push, and open a PR for analyst review
 
-1. Analyze completed investigation (recommendation, evidence, narrative)
-2. Generate insights: new precedent, lead priority updates, playbook refinements, cross-cutting lessons, field documentation gaps (§3.8)
-3. Consolidate into existing KB (update existing entries, don't append-only)
-4. Write proposals to `{run_dir}/proposals/` (precedent JSON, KB diff, lessons, field-notes updates)
-5. User reviews and approves before changes merge into active KB
+**All KB changes require analyst approval via PR merge.** The PR diff is the review artifact — analysts see exactly what changed. Corrections to wrong precedents are proposed as removals/edits in PRs.
 
-**All KB changes require analyst approval.** Corrections to wrong precedents are flagged for removal.
+**Update types and git workflow:**
+
+| Update type | Git operation | Conflict risk |
+|-------------|--------------|---------------|
+| New precedent (`precedents/{slug}.json`) | New file | None |
+| New cross-cutting lesson (`common/lessons/{slug}.md`) | New file | None |
+| Playbook priority scores | Edit `playbook.md` | Medium |
+| New known FP pattern in `context.md` | Edit `context.md` | Low |
+| Playbook structural change | Edit `playbook.md` | High |
+
+High-frequency updates (new precedents, new lessons) are new files and never conflict. Edits to shared files (playbooks, context) are rarer and benefit from PR review.
 
 ### 3.8 Field Documentation
 
 The agent can infer standard SIEM field semantics from context and training knowledge. Documentation is only needed for exceptions — fields where the name is misleading, the meaning is signature-specific, or the encoding is non-obvious.
 
-**Two levels, single source of truth:**
+**Two levels:**
 
-**Data-source level** (`knowledge/common/data-sources/`) — Documents non-obvious field semantics and quirks for a specific data source (SIEM, directory service, threat intel API). Applies to all signatures that query that source. Example: "In Wazuh event results, `data.srcip` is the outer IP when NAT is involved, while `agent.ip` is the reporting host's IP."
+**Data-source level** (`knowledge/common/data-sources/`) — Non-obvious field semantics and quirks for a specific data source. Applies to all signatures that query that source. Example: "In Wazuh event results, `data.srcip` is the outer IP when NAT is involved."
 
-**Signature level** (`knowledge/signatures/{id}/field-notes.md`) — Documents fields where this specific alert type changes the usual interpretation. References data-source docs rather than duplicating them. Example: "For rule 5710, `srcuser` is the attempted username in a brute force — it may not exist on the system and should not be used for identity lookups."
+**Signature level** (Field Notes section in `context.md`) — Fields where this specific alert type changes the usual interpretation. References data-source docs rather than duplicating. Example: "For rule 5710, `srcuser` is the attempted username — may not exist on the system."
 
-Both levels are maintained through the post-mortem learning loop (§3.6). When the agent encounters a field it cannot interpret with high confidence, it notes the gap in the investigation narrative. Post-mortem proposes an addition to the relevant data-source or signature field-notes doc. Analyst reviews and approves.
+Both levels are maintained through the post-mortem learning loop (§3.7). When the agent encounters a field it cannot interpret with high confidence, it notes the gap in the investigation narrative. Post-mortem proposes an update via PR.
 
 ### 3.9 Precedent Matching
 
-Two-layer matching:
+Two-layer matching based on investigation flow:
 
-**Layer 1 — Structural search (deterministic):** Query by `signature_id` (required) + overlapping key fields (subnet, username pattern, target service) + classification + lead outcome tags. Returns 3-10 candidates.
+**Layer 1 — Structural search (deterministic):** Query by `signature_id` (required) + overlapping `(lead, outcome)` pairs from the investigation flow + key indicators. Returns 3-10 candidates.
 
-**Layer 2 — Pattern judgment (LLM):** Agent reads each candidate's `key_indicators` and judges genuine match. Recognizes subnet membership, naming conventions, etc.
+**Layer 2 — Reasoning judgment (LLM):** Agent reads each candidate's `reasoning.conditions` and `reasoning.refutes` and verifies against current evidence. This enables mid-investigation matching — "I've verified 3 of 4 conditions, none of the refutes have triggered."
 
-**Stop hook verification:** The hook independently checks structural overlap — `signature_id` match, at least one key field overlap, at least one lead outcome tag match. Prevents matching against unrelated precedents.
-
-**Structured tagging:** Throughout investigation, the agent tags evidence with searchable labels (`outcome_tags`, `supports`, `contradicts`). Tags flow into precedent records via post-mortem. Tag vocabulary emerges from usage and is normalized by post-mortem consolidation over time.
+**Stop hook verification:** The hook independently checks structural overlap — `signature_id` match, at least one flow step overlap, reasoning conditions addressed in the report. Prevents matching against unrelated precedents.
 
 ---
 
@@ -220,7 +349,7 @@ Deterministic scripts enforcing invariants. Cannot be bypassed by LLM output.
 | `budget-enforcer.sh` | Per-tool-call | Track tool calls/subagents, reject if over budget |
 | `validate-report.sh` | Stop | Tier 1: frontmatter schema + deterministic checks. Tier 2: semantic judge for report consistency and precedent match validity |
 | `audit-logger.sh` | Stop + per-tool-call | Log external actions (tool calls, script executions) with caller, parameters, timestamp |
-| `post-mortem.sh` | Stop | Launch post-mortem, generate KB proposals |
+| `post-mortem.sh` | Stop | Launch post-mortem, commit KB updates to branch, open PR |
 
 ### 4.2 Input Sanitization
 
@@ -263,7 +392,7 @@ Fires when the investigator writes `report.md`. The report is a single unified f
 |---|-------|------|------------|
 | 1 | Frontmatter schema | Required fields present, valid enum values | Reject, agent must fix |
 | 2 | Minimum evidence | `leads_pursued` ≥ minimum per severity (low:1, med:2, high:3, crit:4) | Reject, investigate more or escalate |
-| 3 | Precedent requirement | status=resolved → `matched_precedent` non-null, references existing past-ticket, `signature_id` matches, structural overlap (§3.9) | Override to escalate |
+| 3 | Precedent requirement | status=resolved → `matched_precedent` non-null, references existing precedent, `signature_id` matches, flow overlap (§3.9) | Override to escalate |
 | 4 | Escalation patterns | Alert fields vs `permissions.yaml` patterns (critical assets, external IPs) | Override to escalate |
 | 5 | Criticality check | Critical assets → always escalate; elevated → doubled evidence minimum | Override to escalate |
 
@@ -297,8 +426,7 @@ runs/{run_id}/
 ├── state.json                      # Phase transitions only (§5.2)
 ├── report.md                       # Unified output: frontmatter + narrative (hook-validated, §4.4)
 ├── scripts/                        # Agent-written scripts (audit trail)
-├── leads/                          # Evidence from each lead
-└── proposals/                      # KB update candidates (post-mortem)
+└── leads/                          # Evidence from each lead
 ```
 
 Hook-managed (agent cannot access):
@@ -491,7 +619,7 @@ Claude Code provides LLM retry/recovery, process lifecycle, hook execution infra
 | Section | Content | Security Role |
 |---------|---------|--------------|
 | **1. System Instructions** | Role, methodology, constraints, safety rules, tool usage | Pre-data safety bracketing |
-| **2. Signature Context** | Playbook, relevant leads, patterns, lessons (loaded as Claude Code skill) | Primes strategy before attacker data |
+| **2. Signature Context** | Context + playbook + precedents (loaded as Claude Code skill) | Primes strategy before attacker data |
 | **3. Recent Alert Context** | Table of recent alerts (max ~30 rows) + 3 recent investigation summaries | Hypothesis priming (not evidence) |
 | **4. Alert Data** | Sanitized alert JSON in `<run-{salt}-alert-data>` tags | Untrusted data, clearly marked |
 | **5. Key Reminders** | Rephrased safety points from §1 + canary token | Post-data safety bracketing |
