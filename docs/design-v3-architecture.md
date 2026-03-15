@@ -18,7 +18,7 @@ Investigations operate in two dimensions: the **hypothesis space** (logic — wh
 
 - **Diagnostic leads** — Discriminate between hypotheses. Value measured by **diagnosticity**: how well possible outcomes distinguish surviving hypotheses. Example: `"Check authentication history"` discriminates `?monitoring-probe` (predicts regular pattern) from `?brute-force` (predicts high-frequency diverse attempts). These carry per-hypothesis predictions and assessments.
 
-- **Scoping leads** — Assess impact, blast radius, timeline, or gather context that informs the response rather than the diagnosis. Example: `"Determine what data was accessed"` or `"Identify lateral movement to other systems"`. These have a *purpose* (impact | timeline | blast-radius | context) and *findings*, but no hypothesis assessments. Scoping leads often become critical after a hypothesis is confirmed — the investigation shifts from "what happened?" to "how bad is it?"
+- **Scoping leads** — Assess impact, blast radius, timeline, or gather context that informs the response rather than the diagnosis. Example: `"Determine what data was accessed"` or `"Identify lateral movement to other systems"`. These have *findings* but no hypothesis assessments. Scoping leads often become critical after a hypothesis is confirmed — the investigation shifts from "what happened?" to "how bad is it?"
 
 Both types produce evidence and appear in the investigation flow. Playbooks specify which leads are diagnostic vs scoping.
 
@@ -392,7 +392,7 @@ Not every investigation becomes a precedent. The post-mortem agent proposes new 
 | `signature_id` | mandatory | For initial filtering |
 | `disposition` | mandatory | benign / false_positive / true_positive |
 | `hypotheses` | mandatory | Hypotheses considered and their final status |
-| `flow` | mandatory | Investigation evidence — `[{lead, observed, assessment}]` per cycle |
+| `flow` | mandatory | Investigation evidence — diagnostic entries `{lead, observed, assessment}` and scoping entries `{lead, observed, findings}` per cycle |
 | `trace` | mandatory | One-line sequential summary for grep (see below) |
 | `reasoning` | mandatory | Conditions, refutations, confidence notes (see below) |
 | `key_indicators` | recommended | Specific observations that distinguish this case |
@@ -429,25 +429,36 @@ hypotheses:
     status: eliminated
 ```
 
-**The `flow` field** records each investigation cycle — evidence gathered and its assessment against hypotheses:
+**The `flow` field** records each investigation cycle — evidence gathered and its interpretation. Diagnostic and scoping leads have different shapes:
 
 ```yaml
 flow:
+  # Diagnostic lead — assessed against hypotheses
   - lead: authentication-history
+    type: diagnostic
     why: "discriminates ?monitoring-probe (regular interval) from ?brute-force (high-frequency diverse)"
     observed: "5-min intervals, single username, 47 events over 7 days"
     assessment:
       "?monitoring-probe": "++"    # strongly supports
       "?brute-force": "--"         # strongly contradicts
       "?credential-stuffing": "--"
-  - lead: source-reputation
-    why: "discriminates ?monitoring-probe (known internal) from external threat"
-    observed: "10.0.1.50 in monitoring subnet, known Nagios host"
-    assessment:
-      "?monitoring-probe": "++"
+
+  # Scoping lead — assessed for impact, not against hypotheses
+  - lead: data-access-audit
+    type: scoping
+    why: "determine what sensitive data the confirmed session accessed"
+    observed: "session accessed 3 files in /sensitive/hr/"
+    findings:
+      affected_assets: ["q4-financials.xlsx", "salary-bands.csv", "db-credentials.env"]
+      severity_factors: ["credentials file accessed", "PII in salary data"]
+      blast_radius: "financial data + HR PII + database credentials"
 ```
 
-Assessment weights: `++` strongly supports, `+` weakly supports, `~` neutral, `-` weakly contradicts, `--` strongly contradicts.
+**Diagnostic entries** carry `assessment` — a per-hypothesis map with weights: `++` strongly supports, `+` weakly supports, `~` neutral, `-` weakly contradicts, `--` strongly contradicts.
+
+**Scoping entries** carry `findings` — structured observations about impact, affected assets, timeline bounds, or context. Scoping entries typically appear after a threat hypothesis is confirmed, when the investigation shifts from "what happened?" to "how bad is it?"
+
+Both entry types share `lead`, `type`, `why`, and `observed`. The `type` field (`diagnostic` | `scoping`) determines which interpretation field is present — `assessment` or `findings`.
 
 **The `trace` field** is a one-line sequential summary optimized for grep across many precedent files:
 
@@ -455,7 +466,7 @@ Assessment weights: `++` strongly supports, `+` weakly supports, `~` neutral, `-
 alert → authentication-history[regular-pattern ∴ ?monitoring-probe] → source-reputation[known-internal ∴ ?monitoring-probe] → benign
 ```
 
-Grammar: `step ( → step )* → disposition`. Each step: `lead-name[observation ∴ hypothesis-conclusion]`. The `∴` ("therefore") separates what was seen from what it meant. Because the entire path is one line, grep returns complete sequences, not fragments. See schema-review.md §6.5 for searchability patterns.
+Grammar: `step ( → step )* → disposition`. Diagnostic steps: `lead-name[observation ∴ hypothesis-conclusion]`. Scoping steps: `lead-name[observation]` (no `∴` — scoping leads inform the response, not the diagnosis). The `∴` ("therefore") separates what was seen from what it meant for hypothesis elimination. Because the entire path is one line, grep returns complete sequences, not fragments. See schema-review.md §6.5 for searchability patterns.
 
 The `outcome` vocabulary (used in observations) emerges from usage and is normalized by post-mortem consolidation over time. Hypothesis names (`?name`) provide the classification that was previously missing — `grep "?monitoring-probe"` across precedents finds every case where this hypothesis was considered, regardless of which leads were used.
 
@@ -536,7 +547,7 @@ Both KB levels are maintained through the post-mortem learning loop (§3.7). Whe
 
 Two-layer matching based on hypothesis outcomes and investigation flow:
 
-**Layer 1 — Structural search (deterministic):** Query by `signature_id` (required) + overlapping hypothesis names and lead assessments from the investigation flow + key indicators. The `trace` field enables fast initial filtering — grep for matching hypothesis conclusions or observation patterns across all precedent files. Returns 3-10 candidates.
+**Layer 1 — Structural search (deterministic):** Query by `signature_id` (required) + overlapping hypothesis names and lead assessments from the investigation flow + key indicators. The `trace` field enables fast initial filtering — grep for matching hypothesis conclusions or observation patterns across all precedent files. Returns 3-10 candidates. Because ANALYZE sections in `investigation.md` use structured YAML entries (§5.2a) with the same schema as precedent `flow` entries, the matching algorithm can programmatically compare the current investigation's assessments against precedent flow entries — no prose parsing required.
 
 **Layer 2 — Reasoning judgment (LLM):** Agent reads each candidate's `reasoning.conditions` and `reasoning.refutes` and verifies against current evidence. This enables mid-investigation matching — "I've verified 3 of 4 conditions, none of the refutes have triggered."
 
@@ -679,6 +690,8 @@ Tracks phase transitions only. Investigation content (hypotheses, planned leads,
 
 The investigator's working document, written chronologically using the investigation flow language (§3.3 playbooks, §3.4 precedents, schema-review §6.5). Phase headers mirror the state machine; content uses the same hypothesis/lead/assessment vocabulary used in playbooks and precedents.
 
+**ANALYZE sections use structured YAML blocks**, not free-form prose. This serves two purposes: (1) the post-mortem agent can extract flow entries directly to build precedent records without parsing prose, and (2) mid-investigation precedent matching can programmatically compare the current assessment state against precedent flow entries. The YAML structure mirrors the precedent `flow` schema (§3.4) — same fields, same assessment weights.
+
 ```markdown
 ## CONTEXTUALIZE
 
@@ -705,11 +718,14 @@ Selected lead: authentication-history (diagnosticity: 9.2)
 
 ## ANALYZE (cycle 1)
 
-authentication-history:
+- lead: authentication-history
+  type: diagnostic
+  why: "discriminates ?monitoring-probe vs ?brute-force vs ?credential-stuffing"
   observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
-  ?monitoring-probe  ++  regular interval, single user — textbook
-  ?brute-force       --  not high-frequency, not diverse
-  ?credential-stuffing -- not bursty, single username
+  assessment:
+    "?monitoring-probe": "++"   # regular interval, single user — textbook
+    "?brute-force": "--"        # not high-frequency, not diverse
+    "?credential-stuffing": "--" # not bursty, single username
 
 surviving: [?monitoring-probe]
 
@@ -726,9 +742,12 @@ Confirming lead: source-reputation (diagnosticity: 8.7)
 
 ## ANALYZE (cycle 2)
 
-source-reputation:
+- lead: source-reputation
+  type: diagnostic
+  why: "confirms ?monitoring-probe (known internal) vs external threat"
   observed: "10.0.1.50 in monitoring subnet, known Nagios host"
-  ?monitoring-probe  ++  known internal monitoring host
+  assessment:
+    "?monitoring-probe": "++"   # known internal monitoring host
 
 surviving: [?monitoring-probe (confirmed)]
 
@@ -743,7 +762,7 @@ matched_precedent: SEC-2024-001
 
 - **Phase headers** (`## PHASE`) mirror state transitions — the log and state file are consistent views of the same progression
 - **GATHER sections are thin** — just a pointer to the raw subagent return in `leads/`. The subagent's observations are interpreted by the investigator in the ANALYZE section that follows
-- **ANALYZE sections do the reality→logic transform** — the investigator reads subagent output, assesses against hypotheses, updates surviving set. This is where diagnostic vs. scoping interpretation happens, not in the subagent
+- **ANALYZE sections are structured YAML** — each entry mirrors the precedent `flow` schema (§3.4), with `type`, `why`, `observed`, and either `assessment` (diagnostic) or `findings` (scoping). This makes the investigation log machine-readable: the post-mortem agent extracts flow entries directly, and mid-investigation precedent matching compares structured assessments programmatically. The investigator reads subagent output (from `leads/`), writes the structured entry, and updates the surviving hypothesis set
 - **The trace line** at CONCLUDE is generated from the log, compressing the full investigation path into one greppable line
 - **Subagents read this file** for context when spawned — later subagents see richer context because the log has grown. No separate context serialization needed
 
@@ -779,6 +798,33 @@ The system is a **Claude Code plugin**. Claude Code is the runtime — the agent
 The agent discovers available tools at runtime. Playbooks reference leads by goal, not by tool — the agent resolves to whatever's available via `siem-mapping.json` and MCP server configuration.
 
 **Modes:** `recommend` (output report, human acts) or `act` (execute actions, validated by hooks).
+
+**Invocation:** Initially, the agent is invoked by the analyst — tagging Claude in a ticket, instructing it in chat, or running it from the CLI. The specific trigger mechanism depends on the user's environment and is supported by Claude Code's ecosystem (chat integrations, CLI, IDE). As trust builds through consistent accuracy on a signature, the user may configure automatic invocation on new tickets. The system does not prescribe the trigger — it accepts alert data and produces a report.
+
+### 6.1a Execution Environment
+
+**The agent runs wherever the user deploys Claude Code.** This is a deliberate architectural choice: we distribute a plugin, not a hosted service. The user controls where it runs, what tools it can reach, and what credentials it holds. This aligns with the "connect your tools" model and avoids the infrastructure overhead and trust assumptions of a managed platform.
+
+**Recommended deployment: a dedicated container or VM** with network access scoped to the systems the agent needs (SIEM, ticketing, git host). This bounds blast radius from two threat vectors:
+
+| Threat | Bare workstation | Dedicated container |
+|--------|-----------------|-------------------|
+| Script injection (§8.1) | Agent-written scripts execute with analyst's permissions and network access | Scripts execute in a container with allowlisted network, read-only FS, no capabilities (§3.6) |
+| Prompt injection → tool misuse | Agent has access to everything the analyst does — email, chat, other systems | Agent can only reach configured integrations; no lateral access |
+| Resource exhaustion | Competes with analyst's work | Isolated resources, budget enforcement (§1.3) still applies |
+
+The container recommendation is consistent with the existing script isolation model (§3.6) — it extends the same principle from individual scripts to the agent process itself. Users who accept higher risk can run directly on a workstation; the validation hooks (§4) and budget enforcement (§1.3) still provide defense in depth.
+
+**Security model transparency:** The system should clearly communicate its security posture to users at deployment time. The `recommend` vs `act` mode choice, the budget limits, the hook inventory, and the isolation level are all user-visible configuration — not hidden defaults. Users make informed tradeoffs:
+
+| Configuration | Lower risk | Higher capability |
+|---------------|-----------|-------------------|
+| Mode | `recommend` — human reviews all actions | `act` — agent closes tickets, updates status |
+| Isolation | Dedicated container, scoped network | Analyst workstation, full network |
+| Autonomy | Manual invocation per ticket | Automatic invocation on new alerts |
+| Budget | Conservative limits (fewer tool calls) | Generous limits (deeper investigation) |
+
+Each axis is independently configurable per signature via `permissions.yaml`. A mature, high-volume, well-understood signature (e.g., monitoring probe alerts with 95%+ benign rate) might run in `act` mode with automatic invocation, while a new or high-severity signature stays in `recommend` mode with manual invocation.
 
 ### 6.2 Recommended Integrations
 
@@ -819,15 +865,16 @@ Credentials are environment-level: env vars or mounted secrets. Scripts referenc
 
 ### 7.2 Onboarding Workflow
 
-1. Configure SIEM access (MCP server or API endpoint + credentials)
-2. Configure ticketing (scoped API token)
-3. Configure git host for learning loop (optional but recommended)
-4. Populate `config/siem-mapping.json` with available data sources
-5. Create initial KB (playbooks + precedents for highest-volume signatures)
-6. Set `permissions.yaml` per signature
-7. Seed approved script library with common query patterns
-8. Test with `recommend` mode on historical alerts
-9. Graduate to `act` mode for signatures with consistent accuracy
+1. Set up execution environment — dedicated container recommended (§6.1a), with network scoped to SIEM, ticketing, and git host
+2. Configure SIEM access (MCP server or API endpoint + credentials)
+3. Configure ticketing (scoped API token)
+4. Configure git host for learning loop (optional but recommended)
+5. Populate `config/siem-mapping.json` with available data sources
+6. Create initial KB (playbooks + precedents for highest-volume signatures)
+7. Set `permissions.yaml` per signature — mode, budget, autonomy level (§6.1a)
+8. Seed approved script library with common query patterns
+9. Test with `recommend` mode on historical alerts
+10. Graduate to `act` mode for signatures with consistent accuracy
 
 ### 7.3 Enterprise Considerations
 
@@ -879,7 +926,7 @@ Security relies on defense in depth. No single layer is sufficient.
 | Structural defenses (hooks) | Stop hook verifies investigation was actually performed — evidence minimums, precedent matching, escalation patterns | Injection that convinces the agent to skip investigation and recommend benign |
 | Human review | `recommend` mode: human sees everything; `act` mode: periodic sampling | Everything above fails |
 
-**The real security boundary is hooks + human review**, not input sanitization. Sanitization reduces noise; hooks enforce that the investigation actually happened regardless of what the LLM "believes."
+**The real security boundary is hooks + human review**, not input sanitization. Sanitization reduces noise; hooks enforce that the investigation actually happened regardless of what the LLM "believes." Execution environment isolation (§6.1a) provides an additional outer boundary — even if all software layers fail, the agent's blast radius is limited to the systems it can reach.
 
 ### 8.4 Interactive Mode
 

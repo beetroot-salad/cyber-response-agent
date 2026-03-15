@@ -539,11 +539,11 @@ auto_close_rate: 0.84
 
 ### Scoping Leads
 
-- **session-activity-audit** (purpose: impact)
+- **session-activity-audit**
   When: after ?brute-force or ?credential-stuffing confirmed with successful login
   Goal: determine what the authenticated session accessed or modified
 
-- **lateral-movement-check** (purpose: blast-radius)
+- **lateral-movement-check**
   When: after any threat hypothesis confirmed
   Goal: identify other systems the source IP contacted
 
@@ -599,6 +599,7 @@ Curated, human-approved investigation patterns. Not raw ticket data — the tick
   "flow": [
     {
       "lead": "authentication-history",
+      "type": "diagnostic",
       "why": "discriminates ?monitoring-probe (regular interval) from ?brute-force (high-frequency diverse)",
       "observed": "5-min intervals, single username, 47 events over 7 days",
       "assessment": {
@@ -609,6 +610,7 @@ Curated, human-approved investigation patterns. Not raw ticket data — the tick
     },
     {
       "lead": "source-reputation",
+      "type": "diagnostic",
       "why": "confirms ?monitoring-probe (known internal) vs external threat",
       "observed": "10.0.1.50 in monitoring subnet, known Nagios host",
       "assessment": {
@@ -720,12 +722,10 @@ Playbooks also specify **scoping leads** — these don't discriminate hypotheses
 scoping_leads:
   - lead: data-access-audit           # defined in common/leads/
     data_tags: [file-events]          # → data-sources/file-events.md
-    purpose: impact
     when: "after ?unauthorized-access confirmed"
     goal: "determine what sensitive data the session accessed"
   - lead: lateral-movement-check
     data_tags: [network-events]       # → data-sources/network-events.md
-    purpose: blast-radius
     when: "after any threat hypothesis confirmed"
     goal: "identify other systems the actor touched"
 ```
@@ -741,6 +741,8 @@ For diagnostic leads, the investigator assesses against hypotheses:
 ```yaml
 # In investigation.md ANALYZE section / precedent flow field
 - lead: authentication-history
+  type: diagnostic
+  why: "discriminates ?monitoring-probe vs ?brute-force vs ?credential-stuffing"
   observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
   assessment:
     "?monitoring-probe": "++"    # regular interval, single user — textbook
@@ -753,6 +755,8 @@ For scoping leads (after a hypothesis is confirmed), the investigator records im
 ```yaml
 # In investigation.md ANALYZE section / precedent flow field
 - lead: data-access-audit
+  type: scoping
+  why: "determine what sensitive data the confirmed session accessed"
   observed: "session accessed 3 files in /data/"
   findings:
     affected_assets: ["q4-financials.xlsx", "salary-bands.csv", "db-credentials.env"]
@@ -760,7 +764,7 @@ For scoping leads (after a hypothesis is confirmed), the investigator records im
     blast_radius: "financial data + HR PII + database credentials"
 ```
 
-Note: in both cases, the `observed` value comes from the subagent's return (`leads/*.json`). The `assessment`/`findings` are added by the investigator. The diagnostic/scoping distinction exists at this layer (the investigator's interpretation), not at the subagent layer (which has a single schema for all leads).
+Both entry types share `lead`, `type`, `why`, and `observed`. The `type` field (`diagnostic` | `scoping`) determines which interpretation field is present — `assessment` or `findings`. The `observed` value comes from the subagent's return (`leads/*.json`). The `assessment`/`findings` are added by the investigator. The diagnostic/scoping distinction exists at this layer (the investigator's interpretation), not at the subagent layer (which has a single schema for all leads).
 
 This layer lives in **investigation logs** (detailed, chronological), **precedents** (compact), and **reports** (narrative summary). Scoping lead findings feed the report's impact assessment and may trigger suggestions (§3.7).
 
@@ -845,6 +849,7 @@ hypotheses:
 
 flow:
   - lead: parent-child-identity
+    type: diagnostic
     why: "discriminates ?fork-bomb/?parallel-job/?malware-spawn"
     observed: "parent=/usr/bin/make, children=gcc(x47), burst within 3s"
     assessment:
@@ -855,6 +860,7 @@ flow:
     refine: "?parallel-job splits into ?legitimate-build vs ?supply-chain"
 
   - lead: execution-context
+    type: diagnostic
     why: "discriminates ?legitimate-build/?supply-chain"
     observed: "user=jenkins, cwd=/var/lib/jenkins/workspace/proj-x, 02:00 nightly"
     assessment:
@@ -895,12 +901,15 @@ Selected lead: parent-child-identity (diagnosticity: 9.4)
 
 ## ANALYZE (cycle 1)
 
-parent-child-identity:
+- lead: parent-child-identity
+  type: diagnostic
+  why: "discriminates ?fork-bomb vs ?parallel-job vs ?malware-spawn vs ?orchestration"
   observed: "parent=/usr/bin/make, children=gcc(×47), burst within 3s"
-  ?fork-bomb     --  make→gcc is not self-replication
-  ?parallel-job  ++  textbook parallel compilation
-  ?malware-spawn --  gcc is a known compiler
-  ?orchestration -   make is not management tooling
+  assessment:
+    "?fork-bomb": "--"       # make→gcc is not self-replication
+    "?parallel-job": "++"    # textbook parallel compilation
+    "?malware-spawn": "--"   # gcc is a known compiler
+    "?orchestration": "-"    # make is not management tooling
 
 surviving: [?parallel-job (strong)]
 Refine: ?parallel-job → ?legitimate-build vs ?supply-chain
@@ -919,10 +928,13 @@ Selected lead: execution-context (diagnosticity: 8.1)
 
 ## ANALYZE (cycle 2)
 
-execution-context:
+- lead: execution-context
+  type: diagnostic
+  why: "discriminates ?legitimate-build vs ?supply-chain"
   observed: "user=jenkins, cwd=/var/lib/jenkins/workspace/proj-x, 02:00 nightly"
-  ?legitimate-build ++  CI user, build directory, expected schedule
-  ?supply-chain     --  everything matches expected pattern
+  assessment:
+    "?legitimate-build": "++"  # CI user, build directory, expected schedule
+    "?supply-chain": "--"      # everything matches expected pattern
 
 surviving: [?legitimate-build (confirmed)]
 
@@ -932,7 +944,7 @@ trace: alert → parent-child-identity[make→gcc(x47) ∴ ?parallel-job] → ex
 disposition: benign
 ```
 
-Note how GATHER sections are thin pointers to `leads/`. The ANALYZE sections are where the investigator reads the subagent's raw observations and does the reality→logic transform. The subagent (in `leads/parent-child-identity.json`) returned: "parent=/usr/bin/make, children=gcc(×47), burst within 3s" — it did not assess what this means for hypotheses.
+Note how GATHER sections are thin pointers to `leads/`. ANALYZE sections use structured YAML entries that mirror the precedent `flow` schema — the post-mortem agent can extract them directly to build precedent records. The subagent (in `leads/parent-child-identity.json`) returned the raw observation; the investigator added `type`, `why`, and `assessment`.
 
 #### Where Each Layer Lives
 
@@ -941,7 +953,7 @@ Note how GATHER sections are thin pointers to `leads/`. The ANALYZE sections are
 | Hypotheses + predictions | Pre-populated catalog | Full set at each HYPOTHESIZE phase | Which were considered + final status | Summary of key hypotheses |
 | Leads + predictions | Ranked by diagnosticity | Selected lead + predictions per HYPOTHESIZE | Which were used + why chosen | Key leads in narrative form |
 | Raw observations | — | Pointer to `leads/*.json` (GATHER) | Compact `observed` per step | Summarized in narrative |
-| Evidence assessments | — | Investigator's interpretation (ANALYZE) | Compact `assessment` per step | Reasoning per key finding |
+| Evidence assessments | — | Structured YAML in ANALYZE: `assessment` (diagnostic) or `findings` (scoping) | Same schema — extracted directly by post-mortem | Reasoning per key finding |
 | Trace line | — | Generated at CONCLUDE | One-line sequential summary | Included in frontmatter or footer |
 | Suggestions | — | — | — | Backlog items for other teams (§3.7) |
 
