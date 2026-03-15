@@ -86,65 +86,122 @@ CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → HYPOTHESIZE (loop)
 - Agent learns of exhaustion through hook rejection messages, not by reading the file
 - Wall-clock checked by hook comparing `now - started_at` against config
 
-### 2.3 `leads/{lead-name}.json` — Evidence from Each Lead — DONE
+### 2.2a `investigation.md` — Working Investigation Log — DONE
 
-Leads come in two types: **diagnostic** (discriminate between hypotheses) and **scoping** (assess impact, blast radius, timeline, or gather context). Both produce evidence files with the same base fields but different type-specific fields.
+The investigator's chronological working document, written in the investigation flow language (§6.5). Phase headers mirror the state machine. Content uses the same hypothesis/lead/assessment vocabulary as playbooks and precedents.
 
-**Diagnostic lead:**
+```markdown
+## CONTEXTUALIZE
+
+Alert: SSH failed auth from 10.0.1.50 → web-server-01, user "testuser" (wazuh-rule-5710)
+Precedent scan: SEC-2024-001 (?monitoring-probe, 92% base rate benign)
+
+## HYPOTHESIZE (cycle 1)
+
+hypotheses:
+  - "?monitoring-probe": automated health check generating auth failures
+  - "?brute-force": credential guessing attack
+  - "?credential-stuffing": leaked credential replay
+
+Selected lead: authentication-history (diagnosticity: 9.2)
+  discriminates: ?monitoring-probe vs ?brute-force vs ?credential-stuffing
+  predictions:
+    ?monitoring-probe → regular interval, single username, bounded count
+    ?brute-force → high frequency, diverse usernames, increasing
+    ?credential-stuffing → burst, known-leaked names, external source
+
+## GATHER → authentication-history
+
+[→ leads/authentication-history.json]
+
+## ANALYZE (cycle 1)
+
+authentication-history:
+  observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
+  ?monitoring-probe  ++  regular interval, single user — textbook
+  ?brute-force       --  not high-frequency, not diverse
+  ?credential-stuffing -- not bursty, single username
+
+surviving: [?monitoring-probe]
+
+## CONCLUDE
+
+trace: alert → authentication-history[regular-pattern ∴ ?monitoring-probe] → source-reputation[known-internal ∴ ?monitoring-probe] → benign
+disposition: benign
+matched_precedent: SEC-2024-001
+```
+
+**Serves three audiences at different times:**
+
+1. **Lead subagents** (during GATHER) — read the log for investigation context instead of receiving a serialized context blob. The `goal` and `notes` in the subagent input steer attention; the log provides the full picture
+2. **The investigator itself** (during ANALYZE) — the log is the working memory across cycles. Hypotheses, predictions, and prior assessments are all in one place
+3. **The report** (at CONCLUDE) — `report.md` is a summary-first transformation of this log for analysts and hooks. The investigation log is the detailed record; the report is the polished output
+
+**Relationship to other files:**
+
+| File | Written by | When | Purpose |
+|------|-----------|------|---------|
+| `investigation.md` | Investigator | During investigation, appended each phase | Working log, subagent context, investigation record |
+| `leads/*.json` | Lead subagents | During GATHER | Raw observations + method (reality dimension) |
+| `report.md` | Investigator | At CONCLUDE | Analyst-facing output, hook-validated |
+| `state.json` | Investigator | Each phase transition | Structural phase tracking (hook-validated) |
+
+**Review decisions:**
+- New file — previously investigation content was split between `report.md` and `leads/`. Now the log is the single chronological record, `leads/` stores raw subagent returns, and the report is a CONCLUDE-time summary
+- Uses the flow language (§6.5) — same vocabulary as playbooks and precedents, making the log, precedents, and playbooks mutually readable
+- GATHER sections are thin (just a pointer to the lead file) — the ANALYZE section that follows is where the investigator interprets subagent output against hypotheses. This makes the separation of concerns between subagent (reality) and investigator (logic) visible in the document structure
+- Precedent records (§6.3) are curated projections of this log, not a separate format — the post-mortem agent extracts and compacts the relevant parts
+
+### 2.3 `leads/{lead-name}.json` — Raw Subagent Returns — DONE
+
+Each file is the raw output from a lead subagent — what was found and how. These are observation records, not analytical conclusions. The investigator interprets subagent returns against hypotheses in the ANALYZE phase and records that interpretation in `investigation.md`.
+
+One schema for all leads. The diagnostic/scoping distinction is the investigator's concern (how it *interprets* the observations), not the subagent's.
 
 ```json
 {
   "lead": "authentication-history",
-  "type": "diagnostic",
-  "why": "discriminates ?monitoring-probe (regular interval) from ?brute-force (high-frequency diverse)",
-  "method_used": "Wazuh search_events for srcip auth logs",
-  "observed": "5-min intervals, single username 'testuser', 47 events over 7 days",
-  "assessment": {
-    "?monitoring-probe": "++",
-    "?brute-force": "--",
-    "?credential-stuffing": "--"
+  "observed": "47 failed auth events over 7 days for srcip 10.0.1.50 → web-server-01. All attempts use username 'testuser'. Interval between attempts: 5 minutes (±3 seconds). No successful logins from this IP in the same period. Most recent: 2026-03-15T02:30:00Z. Earliest: 2026-03-08T02:25:00Z.",
+  "method": {
+    "tool": "wazuh_search_events",
+    "query": "srcip:10.0.1.50 AND rule.id:5710",
+    "time_range": "7d",
+    "result_count": 47
   },
-  "confidence_in_evidence": "high",
-  "new_leads_suggested": []
+  "evidence_quality": "high",
+  "quality_notes": "Complete dataset, no truncation, consistent timestamps"
 }
 ```
 
-**Scoping lead:**
+Another example — what would previously have been a "scoping" lead:
 
 ```json
 {
   "lead": "data-access-audit",
-  "type": "scoping",
-  "purpose": "impact",
-  "why": "determine what sensitive data the unauthorized session accessed",
-  "method_used": "Wazuh search_events for session file access logs",
-  "observed": "session accessed 3 files: /data/reports/q4-financials.xlsx, /data/hr/salary-bands.csv, /data/config/db-credentials.env",
-  "findings": {
-    "affected_assets": ["q4-financials.xlsx", "salary-bands.csv", "db-credentials.env"],
-    "severity_factors": ["credentials file accessed", "PII in salary data"],
-    "timeline": "14:31:02Z - 14:33:47Z (2m45s)",
-    "blast_radius": "financial data + HR PII + database credentials"
+  "observed": "Session accessed 3 files: /data/reports/q4-financials.xlsx, /data/hr/salary-bands.csv, /data/config/db-credentials.env. Access window: 14:31:02Z - 14:33:47Z (2m45s). All read operations, no writes detected.",
+  "method": {
+    "tool": "wazuh_search_events",
+    "query": "session_id:sess-abc123 AND data.type:file_access",
+    "time_range": "1h",
+    "result_count": 3
   },
-  "confidence_in_evidence": "high",
-  "new_leads_suggested": ["credential-rotation-status"]
+  "evidence_quality": "high",
+  "quality_notes": "File access audit logging confirmed enabled on this host"
 }
 ```
 
-This is both the **lead subagent output** and what gets persisted. For diagnostic leads, the `why` field captures the logic→reality transform (why this lead was chosen); the `assessment` field captures the reality→logic transform (what it means for each hypothesis). For scoping leads, `why` captures purpose and `findings` captures structured impact information.
+The subagent reports *what it found* and *how it found it*. It does not assess what the findings mean for hypotheses, suggest new leads, or categorize itself as diagnostic vs. scoping. The investigator does all of that in `investigation.md`.
 
 **Review decisions:**
-- Two lead types: `diagnostic` (hypothesis discrimination) and `scoping` (impact/context assessment)
-- Diagnostic: replaced `supports_hypothesis`/`contradicts_hypothesis` (single hypothesis each) with `assessment` map (all surviving hypotheses, ACH-style weights)
-- Scoping: `purpose` field (impact | timeline | blast-radius | context) + `findings` object with structured results. No hypothesis assessments — these leads inform the response, not the diagnosis
-- Added `why` field to both types — records reasoning for why this lead was chosen
-- Renamed `raw_result_summary` + `interpretation` to `observed` — the interpretation is captured in type-specific fields
-- `method_used` retained for audit trail (what tool/query was actually used)
-- `confidence_in_evidence` retained — confidence in the evidence itself
-- Scoping leads often trigger after a hypothesis is confirmed — the investigation shifts from "what happened?" to "how bad is it?"
+- **Single schema for all leads** — removed the diagnostic/scoping type split. The subagent's job is evidence gathering (reality dimension); the investigator handles interpretation (logic dimension). Whether observations are used for hypothesis discrimination or impact assessment is determined by the investigator in ANALYZE
+- **Removed from subagent output:** `type`, `why`, `assessment`, `findings`, `purpose`, `new_leads_suggested` — all of these are investigator-level concerns. `why` is already in the investigation log (HYPOTHESIZE section). Assessments are in the investigation log (ANALYZE section). Lead suggestions are the investigator's job
+- **`method` is structured** — tool name, query, parameters, result count. Supports audit trail and helps the investigator judge reliability (direct SIEM query vs. cached data vs. inferred)
+- **`evidence_quality`** replaces `confidence_in_evidence` — clarifies this is about data quality (completeness, freshness, truncation), not interpretive confidence
+- **`quality_notes`** is optional — only needed when there are caveats (truncated results, stale data, partial coverage)
 
 ### 2.4 `report.md` — Unified Investigation Output — DONE
 
-Single file replaces the previous `recommendation.json` + `narrative-report.md` split. YAML frontmatter for hook validation, markdown body for analysts.
+Final analyst-facing output, written at CONCLUDE. YAML frontmatter for hook validation, markdown body for analysts. Summary-first structure (unlike the chronological `investigation.md`). References or imports from the investigation log — the report is the polished view, the log is the detailed record.
 
 ```markdown
 ---
@@ -202,6 +259,7 @@ Queried Wazuh auth events for 10.0.1.50 → web-server-01, last 7 days.
 - Kept `leads_pursued` as integer count for minimum evidence enforcement
 - `confidence` remains an agent signal for analysts, not a guardrail input
 - Added Suggestions section — backlog items for other teams (rule tuning, infra hardening, visibility gaps). Written to ticket; in `act` mode, optionally created as backlog tickets. NOT stored in `knowledge/`
+- The Investigation Log section is a summary drawn from `investigation.md` — the report does not duplicate the full log, it presents the key findings in analyst-friendly narrative form
 
 **Stop hook validation is two-tier:**
 
@@ -322,21 +380,35 @@ Suggestion types: `rule-tuning` | `rule-suppression` | `hardening` | `visibility
 
 ---
 
-## 3. Agent-to-Agent Interfaces — TODO
+## 3. Agent-to-Agent Interfaces — DONE
 
 ### 3.1 Investigator → Lead Subagent
 
+The interface is designed for LLM-to-LLM communication — it's guidance and context, not an API contract. Both sides understand natural language, so the schema is minimal and the investigation log carries the contextual weight.
+
+**Separation of concerns:** The investigator owns the logic dimension (hypotheses, predictions, lead selection, assessment). The subagent owns the reality dimension (figuring out how to get the data, executing queries, returning observations). The subagent does not assess evidence against hypotheses or suggest new leads.
+
 **Input:**
+
 ```json
 {
   "lead": "source-reputation",
-  "motivation": "Determine if source IP is known malicious",
-  "context": { "srcip": "10.0.1.50", "signature_id": "wazuh-rule-5710" },
-  "available_tools": ["search_events", "get_agent_info"]
+  "goal": "Determine if source IP 10.0.1.50 is a known internal asset or external/malicious",
+  "investigation_log": "runs/run-abc123/investigation.md",
+  "notes": "Auth pattern already confirmed as regular 5-min interval — focus on IP identity"
 }
 ```
 
-**Output:** The lead evidence JSON (§2.3 above) — includes `observed`, per-hypothesis `assessment`, and `confidence_in_evidence`.
+| Field | Required | Purpose |
+|-------|----------|---------|
+| `lead` | mandatory | Lead name — references `knowledge/common/leads/` for method guidance |
+| `goal` | mandatory | Natural language description of what data is needed *this time*. The lead name is a KB reference; the goal is what the investigator actually wants |
+| `investigation_log` | mandatory | Path to `investigation.md`. The subagent reads this for context — what the alert is, what's been checked, what's known so far. Later subagents get richer context because the log has grown |
+| `notes` | optional | Investigator's steering for this specific pursuit — what to pay attention to, what's already established. This replaces structured context fields (`key_entities`, `alert_summary`) with natural language the investigator writes knowing *why* it's sending this subagent |
+
+**Output:** The lead evidence JSON (§2.3) — `observed`, `method`, `evidence_quality`, and optional `quality_notes`. No hypothesis assessments, no lead suggestions, no type markers.
+
+**How context flows:** The subagent opens `investigation.md` and reads it. From the CONTEXTUALIZE section it gets the alert details. From HYPOTHESIZE sections it understands what the investigator is looking for (without needing to do hypothesis reasoning itself). From prior ANALYZE sections it knows what's already established. The `goal` and `notes` fields steer attention to what matters for this specific lead. No separate context serialization needed.
 
 ### 3.2 Investigator → Reproduction Agent — Deferred
 
@@ -344,7 +416,7 @@ See [design-v3-reproduction.md](design-v3-reproduction.md).
 
 ### 3.3 Cross-Agent Read-Only Access
 
-Agents can **read** (never write) other agents' `state.json` and `leads/` directories for concurrent investigation awareness.
+Agents can **read** (never write) other agents' `state.json`, `investigation.md`, and `leads/` directories for concurrent investigation awareness.
 
 ---
 
@@ -445,21 +517,21 @@ auto_close_rate: 0.84
 
 ### Leads
 
-- **authentication-history** (diagnosticity: 9.2)
+- **authentication-history** [auth-events] (diagnosticity: 9.2)
   Discriminates: ?monitoring-probe vs ?brute-force vs ?credential-stuffing
   Predictions:
     ?monitoring-probe → regular interval, single username, bounded count
     ?brute-force → high frequency, diverse usernames, increasing
     ?credential-stuffing → burst, known-leaked names, external source
 
-- **source-reputation** (diagnosticity: 8.7)
+- **source-reputation** [asset-info, threat-intel] (diagnosticity: 8.7)
   Discriminates: ?monitoring-probe vs external threat hypotheses
   Predictions:
     ?monitoring-probe → known internal, monitoring subnet
     ?brute-force → unknown or known-malicious external
     ?credential-stuffing → external, possibly proxy/VPN
 
-- **recent-alert-correlation** (diagnosticity: 6.1)
+- **recent-alert-correlation** [auth-events] (diagnosticity: 6.1)
   Discriminates: isolated incident vs campaign
   Predictions:
     isolated → single alert, no related activity
@@ -503,7 +575,7 @@ Out of scope: full forensic analysis, malware detonation, user interviews.
 
 **Review decisions:**
 - Absorbs old `relevant-leads.md` — lead references live in the investigation section
-- Tool-decoupled: references leads by goal, not by tool
+- Tool-decoupled: references leads by goal, not by tool. Data tags in brackets (e.g., `[auth-events]`) connect leads to data-sources/ files for subagent tool resolution
 - Two-layer investigation section: hypothesis catalog (what could be happening) + lead sequence (what to check and why)
 - Each lead specifies diagnosticity score (data-driven, updated by post-mortem) and per-hypothesis predictions
 - Agent picks the most diagnostic lead for surviving hypotheses, not a fixed step sequence
@@ -624,12 +696,13 @@ The hypothesis set for a signature is pre-populated in the playbook and refined 
 
 **Layer 2: Leads with predictions** (logic → reality transform)
 
-Each lead specifies which hypotheses it discriminates and what each hypothesis predicts. This is the diagnosticity — WHY this lead is being checked.
+Each lead specifies which hypotheses it discriminates and what each hypothesis predicts. This is the diagnosticity — WHY this lead is being checked. Data tags in brackets connect to `data-sources/` files for subagent tool resolution.
 
 ```yaml
 leads:
-  - lead: authentication-history
-    diagnosticity: 9.2               # data-driven score, updated by post-mortem
+  - lead: authentication-history      # defined in common/leads/
+    data_tags: [auth-events]          # → data-sources/authentication-events.md
+    diagnosticity: 9.2                # data-driven score, updated by post-mortem
     discriminates: "?monitoring-probe vs ?brute-force vs ?credential-stuffing"
     predictions:
       "?monitoring-probe": "regular interval, single username, bounded count"
@@ -637,17 +710,21 @@ leads:
       "?credential-stuffing": "burst of attempts, known-leaked usernames"
 ```
 
-This layer lives in the **playbook** — it's reusable across investigations for the same signature. The agent selects the most diagnostic lead for the surviving hypotheses.
+This layer lives in the **playbook** — it's reusable across investigations for the same signature. The agent selects the most diagnostic lead for the surviving hypotheses. The lead definition (`common/leads/`) provides the methodology (what to characterize, pitfalls); the playbook adds the hypothesis-specific layer (what each hypothesis predicts for this lead).
+
+**Subagent tool resolution:** The subagent reads the lead's `data_tags`, finds the matching `data-sources/` file (e.g., `data-sources/authentication-events.md`), which lists available systems with coverage, priority, and pipeline notes. Two deterministic hops — no exploratory tool-space search.
 
 Playbooks also specify **scoping leads** — these don't discriminate hypotheses but assess impact, blast radius, or gather context:
 
 ```yaml
 scoping_leads:
-  - lead: data-access-audit
+  - lead: data-access-audit           # defined in common/leads/
+    data_tags: [file-events]          # → data-sources/file-events.md
     purpose: impact
     when: "after ?unauthorized-access confirmed"
     goal: "determine what sensitive data the session accessed"
   - lead: lateral-movement-check
+    data_tags: [network-events]       # → data-sources/network-events.md
     purpose: blast-radius
     when: "after any threat hypothesis confirmed"
     goal: "identify other systems the actor touched"
@@ -657,33 +734,35 @@ Scoping leads are conditional — they trigger after specific hypotheses are con
 
 **Layer 3: Evidence with assessments** (reality → logic transform)
 
-For diagnostic leads, each piece of evidence records what was observed and what it means for each hypothesis. Assessment weights: `++` strongly supports, `+` weakly supports, `~` neutral, `-` weakly contradicts, `--` strongly contradicts.
+This is the **investigator's** interpretation of subagent observations, written in `investigation.md` ANALYZE sections. The subagent returns raw observations (§2.3); the investigator records what those observations mean for each hypothesis. Assessment weights: `++` strongly supports, `+` weakly supports, `~` neutral, `-` weakly contradicts, `--` strongly contradicts.
+
+For diagnostic leads, the investigator assesses against hypotheses:
 
 ```yaml
-evidence:
-  # Diagnostic lead — per-hypothesis assessment
-  - lead: authentication-history
-    type: diagnostic
-    why: "discriminates ?monitoring-probe (regular interval) from ?brute-force (high-frequency diverse)"
-    observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
-    assessment:
-      "?monitoring-probe": "++"    # regular interval, single user — textbook
-      "?brute-force": "--"         # not high-frequency, not diverse
-      "?credential-stuffing": "--" # not bursty, not known-leaked names
-
-  # Scoping lead — structured findings, no hypothesis assessment
-  - lead: data-access-audit
-    type: scoping
-    purpose: impact
-    why: "determine what sensitive data was accessed"
-    observed: "session accessed 3 files in /data/"
-    findings:
-      affected_assets: ["q4-financials.xlsx", "salary-bands.csv", "db-credentials.env"]
-      severity_factors: ["credentials file accessed", "PII in salary data"]
-      blast_radius: "financial data + HR PII + database credentials"
+# In investigation.md ANALYZE section / precedent flow field
+- lead: authentication-history
+  observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
+  assessment:
+    "?monitoring-probe": "++"    # regular interval, single user — textbook
+    "?brute-force": "--"         # not high-frequency, not diverse
+    "?credential-stuffing": "--" # not bursty, not known-leaked names
 ```
 
-This layer lives in **precedents** (compact) and **reports** (detailed with reasoning). Scoping lead findings feed the report's impact assessment and may trigger suggestions (§3.7).
+For scoping leads (after a hypothesis is confirmed), the investigator records impact findings:
+
+```yaml
+# In investigation.md ANALYZE section / precedent flow field
+- lead: data-access-audit
+  observed: "session accessed 3 files in /data/"
+  findings:
+    affected_assets: ["q4-financials.xlsx", "salary-bands.csv", "db-credentials.env"]
+    severity_factors: ["credentials file accessed", "PII in salary data"]
+    blast_radius: "financial data + HR PII + database credentials"
+```
+
+Note: in both cases, the `observed` value comes from the subagent's return (`leads/*.json`). The `assessment`/`findings` are added by the investigator. The diagnostic/scoping distinction exists at this layer (the investigator's interpretation), not at the subagent layer (which has a single schema for all leads).
+
+This layer lives in **investigation logs** (detailed, chronological), **precedents** (compact), and **reports** (narrative summary). Scoping lead findings feed the report's impact assessment and may trigger suggestions (§3.7).
 
 #### The Trace Line: Sequential Searchability
 
@@ -786,50 +865,193 @@ flow:
 trace: "alert → parent-child-identity[make→gcc(x47) ∴ ?parallel-job] → execution-context[jenkins,nightly ∴ ?legitimate-build] → benign"
 ```
 
-**Report layer (log)** — same structure as precedent flow, but with full reasoning after each assessment:
+**Investigation log layer** (`investigation.md`) — the investigator's working document, using phase headers and the flow language:
 
 ```markdown
-## Cycle 1
+## CONTEXTUALIZE
 
-### Lead: parent-child-identity
-Path: alert → parent-child-identity
-Why: maximally discriminates ?fork-bomb/?parallel-job/?malware-spawn
-Observed: parent=/usr/bin/make, children=gcc(×47), burst within 3s
-  ?fork-bomb     -- make→gcc is not self-replication
-  ?parallel-job  ++ textbook parallel compilation
-  ?malware-spawn -- gcc is a known compiler
-  ?orchestration -  make is not management tooling
+Alert: unusual parent-child process relationship on build-server-03 (wazuh-rule-5920)
+Parent=/usr/bin/make spawned 47 children in 3s
 
-Surviving: ?parallel-job (strong). Refine: ?parallel-job → ?legitimate-build vs ?supply-chain
+## HYPOTHESIZE (cycle 1)
 
-## Cycle 2
+hypotheses:
+  - "?fork-bomb": resource exhaustion via exponential process spawning
+  - "?parallel-job": legitimate parallel compilation or batch work
+  - "?malware-spawn": malware spawning worker processes
+  - "?orchestration": system management tool behavior
 
-### Lead: execution-context
-Path: alert → parent-child-identity[?parallel-job] → execution-context
-Why: discriminates ?legitimate-build/?supply-chain
-Observed: user=jenkins, cwd=/var/lib/jenkins/workspace/proj-x, 02:00 nightly
-  ?legitimate-build ++ CI user, build directory, expected schedule
-  ?supply-chain     -- everything matches expected pattern
+Selected lead: parent-child-identity (diagnosticity: 9.4)
+  discriminates: ?fork-bomb vs ?parallel-job vs ?malware-spawn
+  predictions:
+    ?fork-bomb → same binary as parent, exponential growth
+    ?parallel-job → build tools (make/gcc/xargs), bounded count
+    ?malware-spawn → unknown or renamed binary, steady spawning
+    ?orchestration → known management tool (ansible, salt, systemd)
 
-Surviving: ?legitimate-build (confirmed)
+## GATHER → parent-child-identity
+
+[→ leads/parent-child-identity.json]
+
+## ANALYZE (cycle 1)
+
+parent-child-identity:
+  observed: "parent=/usr/bin/make, children=gcc(×47), burst within 3s"
+  ?fork-bomb     --  make→gcc is not self-replication
+  ?parallel-job  ++  textbook parallel compilation
+  ?malware-spawn --  gcc is a known compiler
+  ?orchestration -   make is not management tooling
+
+surviving: [?parallel-job (strong)]
+Refine: ?parallel-job → ?legitimate-build vs ?supply-chain
+
+## HYPOTHESIZE (cycle 2)
+
+Remaining: ?legitimate-build vs ?supply-chain
+Selected lead: execution-context (diagnosticity: 8.1)
+  predictions:
+    ?legitimate-build → CI user, build directory, expected schedule
+    ?supply-chain → unexpected user, unusual directory or timing
+
+## GATHER → execution-context
+
+[→ leads/execution-context.json]
+
+## ANALYZE (cycle 2)
+
+execution-context:
+  observed: "user=jenkins, cwd=/var/lib/jenkins/workspace/proj-x, 02:00 nightly"
+  ?legitimate-build ++  CI user, build directory, expected schedule
+  ?supply-chain     --  everything matches expected pattern
+
+surviving: [?legitimate-build (confirmed)]
+
+## CONCLUDE
+
+trace: alert → parent-child-identity[make→gcc(x47) ∴ ?parallel-job] → execution-context[jenkins,nightly ∴ ?legitimate-build] → benign
+disposition: benign
 ```
+
+Note how GATHER sections are thin pointers to `leads/`. The ANALYZE sections are where the investigator reads the subagent's raw observations and does the reality→logic transform. The subagent (in `leads/parent-child-identity.json`) returned: "parent=/usr/bin/make, children=gcc(×47), burst within 3s" — it did not assess what this means for hypotheses.
 
 #### Where Each Layer Lives
 
-| Layer | Playbook (plan) | Precedent (record) | Report (output) |
-|---|---|---|---|
-| Hypotheses + predictions | Pre-populated catalog for this signature | Which were considered + final status | Full set + status at each cycle |
-| Diagnostic leads | Ranked by diagnosticity | Which were used + why chosen | Full detail with per-step reasoning |
-| Scoping leads | Listed with trigger conditions | Which were used + findings | Detailed findings feeding impact assessment |
-| Evidence + assessments | — | Compact `(observed, assessment/findings)` | Detailed with reasoning per weight |
-| Trace line | — | One-line sequential summary | Included in frontmatter or footer |
-| Suggestions | — | — | Backlog items for other teams (§3.7) |
+| Layer | Playbook (plan) | Investigation log (working) | Precedent (record) | Report (output) |
+|---|---|---|---|---|
+| Hypotheses + predictions | Pre-populated catalog | Full set at each HYPOTHESIZE phase | Which were considered + final status | Summary of key hypotheses |
+| Leads + predictions | Ranked by diagnosticity | Selected lead + predictions per HYPOTHESIZE | Which were used + why chosen | Key leads in narrative form |
+| Raw observations | — | Pointer to `leads/*.json` (GATHER) | Compact `observed` per step | Summarized in narrative |
+| Evidence assessments | — | Investigator's interpretation (ANALYZE) | Compact `assessment` per step | Reasoning per key finding |
+| Trace line | — | Generated at CONCLUDE | One-line sequential summary | Included in frontmatter or footer |
+| Suggestions | — | — | — | Backlog items for other teams (§3.7) |
 
 #### Vocabulary Management
 
 - **Hypothesis names** (`?name`): Emerge from usage, normalized by post-mortem. The `?` prefix makes them greppable everywhere — playbooks, precedents, reports, ticket comments.
 - **Outcome vocabulary** (observations): Free-text, normalized by post-mortem consolidation. No controlled vocabulary — the post-mortem agent detects drift and proposes normalization via PR.
 - **Assessment weights** (`++/+/~/−/−−`): Fixed five-level scale, inspired by ACH. Simple enough to write in a ticket comment, structured enough to grep.
+
+### 6.5a Common Knowledge Base — DONE
+
+The `common/` directory serves both the investigator and subagents. See architecture doc §3.1a-c for the full structure and rationale. This section documents the schemas and review decisions.
+
+#### Lead Definitions (`common/leads/`)
+
+```markdown
+---
+name: authentication-history
+data_tags: [auth-events]
+---
+
+## Goal
+
+Retrieve and characterize authentication patterns for a given entity
+(IP, user, or host) over a time window.
+
+## What to Characterize
+
+- **Timing pattern**: Classify as periodic (regular intervals — note
+  interval and variance), burst (clustered in short window — note
+  window and count), or irregular (no clear pattern).
+- **Username diversity**: Single username, small set (<5), or many
+  distinct usernames. Note if any match known patterns from
+  context/identity.md (service accounts, admin accounts).
+- **Success/failure sequence**: All failures, all successes, or
+  mixed. If mixed, note the temporal relationship.
+- **Volume and rate**: Total event count, events per hour, and
+  whether rate is constant or changing.
+- **Source context**: Cross-reference source IP against
+  context/network.md. Note if internal/external, known subnet.
+
+## Common Pitfalls
+
+- NAT can collapse multiple sources into one IP. Check if srcip
+  is a known NAT gateway (see context/network.md).
+- Failed auth for non-existent users vs existing users are different
+  signals (different SIEM rules).
+- Cached/stale credentials cause periodic failures after password
+  rotation — looks like low-frequency brute force but isn't.
+
+## Data Sources
+
+See data-sources/authentication-events.md for available systems
+and pipeline notes.
+```
+
+**Review decisions:**
+- Leads are the shared vocabulary between investigator and subagents. Investigator reads them when selecting leads (knows what they reveal). Subagent reads them when executing (knows what to characterize)
+- `data_tags` frontmatter connects leads to data-sources/ files — the subagent's tool resolution path. Small fixed vocabulary: `auth-events`, `process-events`, `network-events`, `file-events`, `identity-info`, `asset-info`, `threat-intel`
+- "What to Characterize" section guides the subagent on observation, not interpretation. The test: "can this conclusion be wrong if a different hypothesis is true?" If yes, it's interpretation → investigator's job
+- No tool names, no query syntax, no hypothesis predictions in lead definitions. Tools are the tool layer's concern; predictions are the playbook's concern
+- Cross-references context/ files where relevant (network.md for IP classification, identity.md for account patterns)
+
+#### Data Source Mapping (`common/data-sources/`)
+
+Organized by data need (matching data tags), not by vendor.
+
+```markdown
+---
+name: authentication-events
+provides: [auth-events]
+---
+
+## Available Systems
+
+| System | Coverage | Access | Priority |
+|--------|----------|--------|----------|
+| Wazuh (SIEM) | All SSH (rules 5710-5720), most Windows auth | siem-mapping `search_events` | Primary |
+| Active Directory | All domain auth (4624/4625) | AD MCP server | When SIEM gaps |
+| Endpoint (auth.log) | Per-host SSH only | Direct agent access | Fallback |
+
+## Pipeline Notes
+
+- Wazuh normalizes AD events: original `EventID` in `data.win.eventID`,
+  `TargetUserName` becomes `data.dstuser` (not `srcuser`).
+- Cloud auth (Okta) NOT in Wazuh — query Okta MCP directly.
+- Retention: Wazuh 90 days, AD logs on DCs 30 days.
+
+## Known Gaps
+
+- No auth event forwarding from database servers (db-01, db-02).
+- Cloud workloads not forwarding to Wazuh.
+```
+
+**Review decisions:**
+- Organized by data need (matching `data_tags`), not by vendor — a file per tag, listing all systems that provide that data type in this org
+- Priority/fallback order gives the subagent a resolution strategy: try primary first, fall back if gaps exist. Addresses SIEM → local fallback pattern
+- Pipeline notes capture org-specific transformation quirks (field renaming, normalization). Universal vendor field semantics live with the vendor's skill/MCP server
+- Known gaps are critical — they prevent the subagent from assuming complete coverage and guide fallback decisions
+- Maintained by humans (initial) + post-mortem proposals (ongoing). When investigations reveal undocumented coverage gaps, post-mortem proposes updates via PR
+
+#### Organizational Context (`common/context/`)
+
+Human-maintained, not schema-enforced. Free-form markdown files organized by domain. See architecture doc §3.1b for the file inventory and example content.
+
+**Review decisions:**
+- Four files covering the key domains: network topology, identity model, known infrastructure, business rhythms. Can grow but should stay small — each file is a curated reference, not a comprehensive inventory
+- Initial population during onboarding. Ongoing updates via post-mortem proposals when investigations reveal undocumented organizational knowledge
+- Referenced by subagents for observation context (e.g., "Is this IP internal?" → check network.md) and by the investigator for interpretation
+- Does NOT sync with authoritative systems (CMDB, AD) automatically. The context files are a curated investigation-optimized view. They reference authoritative systems ("for current group membership, query AD") rather than duplicating them
 
 ### 6.6 Permissions (`config/signatures/{id}/permissions.yaml`)
 
@@ -851,11 +1073,12 @@ log_level: standard
 
 ### 6.7 SIEM Mapping (`config/siem-mapping.json`)
 
-Maps abstract operations to concrete MCP tool calls:
+Maps abstract operations to concrete MCP tool calls. Includes `provides` tags to connect to the data tag system — the subagent can verify that a system provides the data type it needs.
 
 ```json
 {
   "siem_name": "wazuh",
+  "provides": ["auth-events", "network-events", "file-events", "process-events"],
   "operations": {
     "search_events": {
       "tool": "wazuh_search_events",
@@ -868,6 +1091,8 @@ Maps abstract operations to concrete MCP tool calls:
   }
 }
 ```
+
+**Tag resolution chain:** Lead `data_tags` → `data-sources/` file (lists systems + coverage + priority) → system's tool config (siem-mapping, MCP server) → concrete tool call. The subagent follows this chain; it doesn't explore the tool space.
 
 ---
 
@@ -928,9 +1153,9 @@ The agent discovers available tools at runtime. Playbooks reference leads by goa
 
 ### 8.4 Investigation Output
 
-Every investigation produces a single `report.md` — YAML frontmatter (machine-readable) + markdown body (analyst-readable). See §2.4 for format and validation.
+Every investigation produces `investigation.md` (working log) and `report.md` (analyst-facing output). See §2.2a and §2.4 for formats.
 
-**Ticketing integration:** Reads frontmatter fields (`ticket_id`, `signature_id`, `status`, `disposition`, `confidence`, `matched_precedent`, `leads_pursued`) for structured updates and posts the markdown body as a ticket comment. No separate triage summary format needed.
+**Ticketing integration:** Reads `report.md` frontmatter fields (`ticket_id`, `signature_id`, `status`, `disposition`, `confidence`, `matched_precedent`, `leads_pursued`) for structured updates and posts the markdown body as a ticket comment. The investigation log and raw lead files remain in the run directory for audit.
 
 ---
 
@@ -939,10 +1164,12 @@ Every investigation produces a single `report.md` — YAML frontmatter (machine-
 ```
 Alert JSON
   → sanitize-input.sh → sanitized-alert.json
-  → Agent (state.json transitions validated by validate-transition.sh)
-  → Lead subagents (input/output JSON, budget tracked)
+  → Investigator (state.json transitions validated by validate-transition.sh)
+  → investigation.md written in flow language (CONTEXTUALIZE → HYPOTHESIZE → ...)
+  → Lead subagents read investigation.md for context, return observations to leads/
+  → Investigator interprets observations in ANALYZE, appends to investigation.md
   → Scripts (validated by validate-script.sh, sanitized by sanitize-external.sh)
-  → report.md (Tier 1: frontmatter validated by validate-report.sh)
+  → report.md generated at CONCLUDE (Tier 1: frontmatter validated by validate-report.sh)
   → report.md (Tier 2: semantic judge reviews summary + precedent match)
   → Action: close ticket / escalate
   → post-mortem.sh → KB branch + PR (updates for analyst review)

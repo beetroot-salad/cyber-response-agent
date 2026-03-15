@@ -74,7 +74,7 @@ Before forming hypotheses, the agent queries for recent related activity:
 **Concurrent investigation handling:**
 
 1. **Ticketing system as coordination layer** — Agent writes "investigation started" comment. Other agents see this and can wait, proceed independently, or inherit results.
-2. **Read-only cross-agent access** — Agents can read (never write) other agents' `state.json` and `leads/` directories.
+2. **Read-only cross-agent access** — Agents can read (never write) other agents' `state.json`, `investigation.md`, and `leads/` directories.
 
 This is a signal, not a lock. Over time, precedent matching handles the steady-state case.
 
@@ -88,10 +88,11 @@ This is a signal, not a lock. Over time, precedent matching handles the steady-s
 INVESTIGATOR (main agent)
 ├── Receives: alert + knowledge base + tool mapping + autonomy mode
 ├── Drives: investigation loop (phase-based)
-├── Outputs: report.md (unified frontmatter + narrative)
+├── Writes: investigation.md (working log in flow language, §5.1)
+├── Outputs: report.md (unified frontmatter + narrative, references investigation.md)
 └── Can spawn: LEAD SUBAGENT(s)
-    ├── Pursues a single lead independently
-    ├── Returns: evidence file (JSON)
+    ├── Receives: lead + goal + path to investigation.md + optional notes
+    ├── Returns: observations + method + evidence quality (JSON)
     └── Purpose: context isolation (keeps verbose output out of main agent)
 ```
 
@@ -109,9 +110,24 @@ Primary value: **context isolation** — SIEM responses can be thousands of line
 
 **Use inline instead** for simple, single-query leads where the response is small.
 
-**Input:** `{ lead, motivation, context, available_tools }`
+**Separation of concerns:** The investigator owns the logic dimension — hypotheses, predictions, lead selection, assessment. The subagent owns the reality dimension — figuring out *how* to get the requested information and returning what it found. The subagent does not assess evidence against hypotheses; it reports observations and the method used to obtain them. The investigator interprets observations in the ANALYZE phase.
 
-**Output:** `{ lead, why, method_used, observed, assessment: {hypothesis: weight, ...}, confidence_in_evidence, new_leads_suggested }`
+**Input:** `{ lead, goal, investigation_log, notes? }`
+
+- `lead` — Lead name (references `knowledge/common/leads/`)
+- `goal` — Natural language description of what data is needed *this time*
+- `investigation_log` — Path to `investigation.md` for the subagent to read for context
+- `notes` — Optional steering from the investigator ("source is in monitoring subnet — pay attention to timing regularity")
+
+**Output:** `{ lead, observed, method, evidence_quality, quality_notes? }`
+
+- `lead` — Lead name (echo back)
+- `observed` — What was found, natural language
+- `method` — What tool/query was used (for reliability and audit)
+- `evidence_quality` — Subagent's assessment of data quality: high | medium | low
+- `quality_notes` — Optional notes on data completeness, truncation, caveats
+
+The subagent does not return hypothesis assessments, lead suggestions, or diagnostic/scoping type markers. These are the investigator's concerns. The `leads/` directory stores raw subagent returns; `investigation.md` stores the investigator's interpretation.
 
 ---
 
@@ -122,17 +138,23 @@ Primary value: **context isolation** — SIEM responses can be thousands of line
 ```
 knowledge/
 ├── common/
-│   ├── SKILL.md                        # Common investigation skills
-│   ├── leads/                          # Atomic investigation units (reusable)
-│   │   ├── authentication-history.md
+│   ├── SKILL.md                        # Loads common KB as Claude Code skill
+│   ├── leads/                          # Investigation methodology (§3.1a)
+│   │   ├── authentication-history.md   #   What to characterize, pitfalls, data tags
 │   │   ├── source-reputation.md
 │   │   ├── process-lineage.md
 │   │   └── ...
-│   ├── data-sources/                   # Per-data-source field semantics (§3.8)
-│   │   ├── wazuh-events.md
-│   │   ├── active-directory.md
+│   ├── context/                        # Organizational knowledge (§3.1b)
+│   │   ├── network.md                  #   Topology, subnets, NAT, known IPs
+│   │   ├── identity.md                 #   Account conventions, service accounts, admin groups
+│   │   ├── infrastructure.md           #   Known systems: monitoring, CI/CD, scanners
+│   │   └── business-rhythms.md         #   Schedules, change windows, batch jobs
+│   ├── data-sources/                   # Data pipeline: where data lives (§3.1c)
+│   │   ├── authentication-events.md    #   Organized by data need, not vendor
+│   │   ├── process-events.md
+│   │   ├── network-events.md
 │   │   └── ...
-│   └── lessons/                        # Cross-cutting lessons learned
+│   └── lessons/                        # Cross-cutting lessons from investigations
 └── signatures/{signature-id}/
     ├── SKILL.md                        # Loads this signature's KB as Claude Code skill
     ├── context.md                      # Rule context + field notes + operational notes (§3.2)
@@ -140,6 +162,136 @@ knowledge/
     └── precedents/                     # Curated investigation patterns (§3.4)
         └── {slug}.json
 ```
+
+Three kinds of knowledge in `common/`, at different levels of portability:
+
+| Directory | What it captures | Who maintains it | Portability |
+|-----------|-----------------|------------------|-------------|
+| `leads/` | Investigation methodology — what to characterize, pitfalls, data tags | Post-mortem + humans | Portable across orgs |
+| `context/` | Organizational baseline — what's normal here | Humans + post-mortem proposals | Org-specific |
+| `data-sources/` | Data pipeline — where data types live, coverage, quirks | Humans + post-mortem proposals | Org-specific |
+| `lessons/` | Cross-cutting lessons from past investigations | Post-mortem proposals | Mostly portable |
+
+**Tool knowledge** (how to query a specific system, API syntax, vendor field semantics) does NOT live in the KB. It belongs with the tool: MCP server descriptions, vendor skills, approved script library. The KB boundary is: "what does this data mean and where is it?" is KB. "How do I query this system?" is tool layer.
+
+#### 3.1a Lead Definitions (`common/leads/`)
+
+Leads are the **shared investigation vocabulary** between the investigator and subagents. The investigator reads lead definitions when selecting leads (it knows what authentication-history can reveal). The subagent reads them when executing leads (it knows what to characterize and what pitfalls to avoid). Playbooks add the hypothesis-specific layer on top.
+
+Each lead definition specifies **data tags** — a lightweight vocabulary connecting leads to data sources. The subagent uses tags to find relevant systems without exploring the tool space:
+
+```
+lead: authentication-history     data-sources/authentication-events.md
+  data_tags: [auth-events]   →    provides: [auth-events]
+                                   systems: wazuh (rules 5710-5720), AD, endpoint/auth.log
+```
+
+**Lead definition format:**
+
+```markdown
+---
+name: authentication-history
+data_tags: [auth-events]
+---
+
+## Goal
+
+Retrieve and characterize authentication patterns for a given entity
+(IP, user, or host) over a time window.
+
+## What to Characterize
+
+- **Timing pattern**: Classify as periodic (regular intervals — note
+  interval and variance), burst (clustered in short window — note
+  window and count), or irregular (no clear pattern).
+- **Username diversity**: Single username, small set (<5), or many
+  distinct usernames. Note if any match known patterns from
+  context/identity.md (service accounts, admin accounts).
+- **Success/failure sequence**: All failures, all successes, or
+  mixed. If mixed, note the temporal relationship.
+- **Volume and rate**: Total event count, events per hour, and
+  whether rate is constant or changing.
+- **Source context**: Cross-reference source IP against
+  context/network.md. Note if internal/external, known subnet.
+
+## Common Pitfalls
+
+- NAT can collapse multiple sources into one IP. Check if srcip
+  is a known NAT gateway (see context/network.md).
+- Failed auth for non-existent users vs existing users are different
+  signals (different SIEM rules).
+- Cached/stale credentials cause periodic failures after password
+  rotation — looks like low-frequency brute force but isn't.
+
+## Data Sources
+
+See data-sources/authentication-events.md for available systems
+and pipeline notes.
+```
+
+Note what's absent from lead definitions: no tool names, no query syntax (that's the tool layer), no hypothesis predictions (that's the playbook). The lead captures methodology — what to characterize and what to watch out for.
+
+The subagent's job is to **characterize observations**, not **interpret them**. "Timing is periodic, 5min ±3s" is characterization. "This is a benign monitoring probe" is interpretation — that's the investigator's job in ANALYZE. The discriminating test: **can the conclusion be wrong if a different hypothesis is true?** If yes, it's interpretation and belongs to the investigator.
+
+#### 3.1b Organizational Context (`common/context/`)
+
+Human-maintained knowledge about what's normal in this environment. Both the investigator and subagents reference this for interpretation.
+
+| File | Contents | Example |
+|------|----------|---------|
+| `network.md` | Internal ranges, subnets, NAT gateways, DMZ, VPN pools, known external IPs | "10.0.1.0/24 is the monitoring subnet" |
+| `identity.md` | Service account patterns, admin account conventions, vendor accounts | "Service accounts: svc-{service}-{purpose}" |
+| `infrastructure.md` | Known systems: monitoring, CI/CD, backup, vulnerability scanners | "Nagios on 10.0.1.50 probes all servers every 5 min" |
+| `business-rhythms.md` | Change windows, deployment schedules, batch job timing | "Weekly vuln scan: Sundays 02-04 UTC" |
+
+**Maintenance:** Initial population during onboarding (§7.2). Ongoing updates via post-mortem proposals — when an investigation reveals undocumented organizational knowledge ("this IP turned out to be a new backup server"), the post-mortem proposes an update to `context/` via PR. The system works with incomplete context; gaps lead to more cautious conclusions (escalation, not auto-close).
+
+#### 3.1c Data Sources (`common/data-sources/`)
+
+Documents where data types live in this organization's infrastructure, organized by **data need** (not by vendor). Each file maps a data tag to available systems, coverage, pipeline quirks, and fallback order.
+
+```markdown
+---
+name: authentication-events
+provides: [auth-events]
+---
+
+## Available Systems
+
+| System | Coverage | Access | Priority |
+|--------|----------|--------|----------|
+| Wazuh (SIEM) | All SSH (rules 5710-5720), most Windows auth | siem-mapping `search_events` | Primary |
+| Active Directory | All domain auth (4624/4625) | AD MCP server | When SIEM gaps exist |
+| Endpoint (auth.log) | Per-host SSH only | Direct agent access | Fallback |
+
+## Pipeline Notes
+
+- Wazuh normalizes AD events: original `EventID` in `data.win.eventID`,
+  `TargetUserName` becomes `data.dstuser` (not `srcuser`).
+- Cloud auth (Okta) NOT in Wazuh — query Okta MCP directly.
+- Retention: Wazuh 90 days, AD logs on DCs 30 days.
+
+## Known Gaps
+
+- No auth event forwarding from database servers (db-01, db-02).
+- Cloud workloads not forwarding to Wazuh.
+```
+
+Vendor-specific field semantics (what CrowdStrike's `ParentProcessId` means, how Wazuh's `data.srcip` works in general) live with the vendor's skill/MCP server. `data-sources/` only captures org-specific pipeline behavior.
+
+**The data tag vocabulary** is small and grows slowly:
+
+| Tag | Covers |
+|-----|--------|
+| `auth-events` | Authentication successes, failures, lockouts |
+| `process-events` | Process creation, parent-child, command lines |
+| `network-events` | Connections, flows, DNS queries |
+| `file-events` | File access, modification, creation |
+| `identity-info` | User roles, group membership, account metadata |
+| `asset-info` | Host details, OS, services, criticality |
+| `threat-intel` | IP/domain/hash reputation |
+
+Tags are a scoping mechanism, not a taxonomy. They tell the subagent which `data-sources/` file to read and which systems to check. New tags are added by post-mortem when leads can't find the data they need.
 
 ### 3.2 Signature Context (`context.md`)
 
@@ -224,7 +376,7 @@ Playbooks reference atomic leads (from `common/leads/`) and organize them into a
 
 - **Response Actions** — What to do after investigation in `act` mode (close ticket, add comment, tag).
 
-**Tool decoupling:** Playbooks reference leads by goal, not by tool. The lead says what *data* it needs; the agent resolves to available tools at runtime via system-level config (`siem-mapping.json`, MCP servers). Tool documentation lives with lead definitions and data-source configs, not in signature directories.
+**Tool decoupling:** Playbooks reference leads by goal, not by tool. Each lead carries `data_tags` (§3.1a) that connect it to `data-sources/` files, which map to available systems. The subagent's resolution path: read lead → follow data tags → check data-sources/ for available systems → use that system's skill/MCP server. Tool documentation lives with the tool (MCP server, vendor skill), not in the KB.
 
 ### 3.4 Precedents (`precedents/`)
 
@@ -370,15 +522,15 @@ The post-mortem agent generates suggestions by comparing the investigation again
 
 ### 3.8 Field Documentation
 
-The agent can infer standard SIEM field semantics from context and training knowledge. Documentation is only needed for exceptions — fields where the name is misleading, the meaning is signature-specific, or the encoding is non-obvious.
+Field semantics are documented at three levels, following the principle that knowledge lives where it's maintained:
 
-**Two levels:**
+**Vendor level** (tool skill / MCP server) — Universal field semantics for a product. "In CrowdStrike, `ParentProcessId` is the PID at spawn time." This ships with the vendor integration — the agent reads it from the tool's skill/description. Not stored in the KB.
 
-**Data-source level** (`knowledge/common/data-sources/`) — Non-obvious field semantics and quirks for a specific data source. Applies to all signatures that query that source. Example: "In Wazuh event results, `data.srcip` is the outer IP when NAT is involved."
+**Data pipeline level** (`knowledge/common/data-sources/`) — Org-specific pipeline behavior: how data is normalized, what's lost in translation, field name mappings between systems. Example: "Wazuh normalizes AD events: `TargetUserName` becomes `data.dstuser`." See §3.1c.
 
 **Signature level** (Field Notes section in `context.md`) — Fields where this specific alert type changes the usual interpretation. References data-source docs rather than duplicating. Example: "For rule 5710, `srcuser` is the attempted username — may not exist on the system."
 
-Both levels are maintained through the post-mortem learning loop (§3.7). When the agent encounters a field it cannot interpret with high confidence, it notes the gap in the investigation narrative. Post-mortem proposes an update via PR.
+Both KB levels are maintained through the post-mortem learning loop (§3.7). When the agent encounters a field it cannot interpret with high confidence, it notes the gap in the investigation narrative. Post-mortem proposes an update via PR.
 
 ### 3.9 Precedent Matching
 
@@ -491,9 +643,10 @@ Agent-accessible (read/write):
 runs/{run_id}/
 ├── sanitized-alert.json            # Cleaned alert data (hook-written)
 ├── state.json                      # Phase transitions only (§5.2)
-├── report.md                       # Unified output: frontmatter + narrative (hook-validated, §4.4)
+├── investigation.md                # Working log in flow language (§5.2a)
+├── report.md                       # Final output: frontmatter + narrative (hook-validated, §4.4)
 ├── scripts/                        # Agent-written scripts (audit trail)
-└── leads/                          # Evidence from each lead
+└── leads/                          # Raw subagent returns (JSON)
 ```
 
 Hook-managed (agent cannot access):
@@ -506,7 +659,7 @@ hooks/{run_id}/
 
 ### 5.2 State File
 
-Tracks phase transitions only. Investigation content (hypotheses, planned leads) lives in `report.md` and `leads/`.
+Tracks phase transitions only. Investigation content (hypotheses, planned leads, evidence interpretation) lives in `investigation.md` (working log) and `report.md` (final output).
 
 ```json
 {
@@ -521,6 +674,80 @@ Tracks phase transitions only. Investigation content (hypotheses, planned leads)
   ]
 }
 ```
+
+### 5.2a Investigation Log (`investigation.md`)
+
+The investigator's working document, written chronologically using the investigation flow language (§3.3 playbooks, §3.4 precedents, schema-review §6.5). Phase headers mirror the state machine; content uses the same hypothesis/lead/assessment vocabulary used in playbooks and precedents.
+
+```markdown
+## CONTEXTUALIZE
+
+Alert: SSH failed auth from 10.0.1.50 → web-server-01, user "testuser" (wazuh-rule-5710)
+Precedent scan: SEC-2024-001 (?monitoring-probe, 92% base rate benign)
+
+## HYPOTHESIZE (cycle 1)
+
+hypotheses:
+  - "?monitoring-probe": automated health check generating auth failures
+  - "?brute-force": credential guessing attack
+  - "?credential-stuffing": leaked credential replay
+
+Selected lead: authentication-history (diagnosticity: 9.2)
+  discriminates: ?monitoring-probe vs ?brute-force vs ?credential-stuffing
+  predictions:
+    ?monitoring-probe → regular interval, single username, bounded count
+    ?brute-force → high frequency, diverse usernames, increasing
+    ?credential-stuffing → burst, known-leaked names, external source
+
+## GATHER → authentication-history
+
+[→ leads/authentication-history.json]
+
+## ANALYZE (cycle 1)
+
+authentication-history:
+  observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
+  ?monitoring-probe  ++  regular interval, single user — textbook
+  ?brute-force       --  not high-frequency, not diverse
+  ?credential-stuffing -- not bursty, single username
+
+surviving: [?monitoring-probe]
+
+## HYPOTHESIZE (cycle 2)
+
+Remaining: ?monitoring-probe (strong)
+Confirming lead: source-reputation (diagnosticity: 8.7)
+  predictions:
+    ?monitoring-probe → known internal, monitoring subnet
+
+## GATHER → source-reputation
+
+[→ leads/source-reputation.json]
+
+## ANALYZE (cycle 2)
+
+source-reputation:
+  observed: "10.0.1.50 in monitoring subnet, known Nagios host"
+  ?monitoring-probe  ++  known internal monitoring host
+
+surviving: [?monitoring-probe (confirmed)]
+
+## CONCLUDE
+
+trace: alert → authentication-history[regular-pattern ∴ ?monitoring-probe] → source-reputation[known-internal ∴ ?monitoring-probe] → benign
+disposition: benign
+matched_precedent: SEC-2024-001
+```
+
+**Key properties:**
+
+- **Phase headers** (`## PHASE`) mirror state transitions — the log and state file are consistent views of the same progression
+- **GATHER sections are thin** — just a pointer to the raw subagent return in `leads/`. The subagent's observations are interpreted by the investigator in the ANALYZE section that follows
+- **ANALYZE sections do the reality→logic transform** — the investigator reads subagent output, assesses against hypotheses, updates surviving set. This is where diagnostic vs. scoping interpretation happens, not in the subagent
+- **The trace line** at CONCLUDE is generated from the log, compressing the full investigation path into one greppable line
+- **Subagents read this file** for context when spawned — later subagents see richer context because the log has grown. No separate context serialization needed
+
+The relationship between files: `investigation.md` is written *during* the investigation for the investigator and subagents. `report.md` is written at CONCLUDE for analysts and hooks — summary-first, referencing or importing from the investigation log. `leads/` stores raw subagent returns. Precedent records (§3.4) are curated projections of the investigation log, not a separate format.
 
 ### 5.3 Budget File
 
