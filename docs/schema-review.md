@@ -103,7 +103,7 @@ hypotheses:
   - "?brute-force": credential guessing attack
   - "?credential-stuffing": leaked credential replay
 
-Selected lead: authentication-history (diagnosticity: 9.2)
+Selected lead: authentication-history
   discriminates: ?monitoring-probe vs ?brute-force vs ?credential-stuffing
   predictions:
     ?monitoring-probe → regular interval, single username, bounded count
@@ -116,11 +116,12 @@ Selected lead: authentication-history (diagnosticity: 9.2)
 
 ## ANALYZE (cycle 1)
 
-authentication-history:
+- lead: authentication-history
   observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
-  ?monitoring-probe  ++  regular interval, single user — textbook
-  ?brute-force       --  not high-frequency, not diverse
-  ?credential-stuffing -- not bursty, single username
+  assessment:
+    "?monitoring-probe": "++"   # regular interval, single user — textbook
+    "?brute-force": "--"        # not high-frequency, not diverse
+    "?credential-stuffing": "--" # not bursty, single username
 
 surviving: [?monitoring-probe]
 
@@ -151,6 +152,7 @@ matched_precedent: SEC-2024-001
 - Uses the flow language (§6.5) — same vocabulary as playbooks and precedents, making the log, precedents, and playbooks mutually readable
 - GATHER sections are thin (just a pointer to the lead file) — the ANALYZE section that follows is where the investigator interprets subagent output against hypotheses. This makes the separation of concerns between subagent (reality) and investigator (logic) visible in the document structure
 - Precedent records (§6.3) are curated projections of this log, not a separate format — the post-mortem agent extracts and compacts the relevant parts
+- ANALYZE entries in the investigation log omit `type` and `why` — the preceding HYPOTHESIZE section provides that context. Precedent records retain these fields because they stand alone
 
 ### 2.3 `leads/{lead-name}.json` — Raw Subagent Returns — DONE
 
@@ -517,35 +519,35 @@ auto_close_rate: 0.84
 
 ### Leads
 
-- **authentication-history** [auth-events] (diagnosticity: 9.2)
+Start with **authentication-history** — it discriminates the most common hypotheses in a single query and is almost always the fastest path to eliminating ?brute-force or confirming ?monitoring-probe.
+
+- **authentication-history** [auth-events]
   Discriminates: ?monitoring-probe vs ?brute-force vs ?credential-stuffing
   Predictions:
     ?monitoring-probe → regular interval, single username, bounded count
     ?brute-force → high frequency, diverse usernames, increasing
     ?credential-stuffing → burst, known-leaked names, external source
 
-- **source-reputation** [asset-info, threat-intel] (diagnosticity: 8.7)
+- **source-reputation** [asset-info, threat-intel]
   Discriminates: ?monitoring-probe vs external threat hypotheses
   Predictions:
     ?monitoring-probe → known internal, monitoring subnet
     ?brute-force → unknown or known-malicious external
     ?credential-stuffing → external, possibly proxy/VPN
 
-- **recent-alert-correlation** [auth-events] (diagnosticity: 6.1)
+- **recent-alert-correlation** [auth-events]
   Discriminates: isolated incident vs campaign
   Predictions:
     isolated → single alert, no related activity
     campaign → cluster of alerts from same source or targeting same dest
 
-### Scoping Leads
+- **session-activity-audit** [file-events]
+  Discriminates: (scoping — does not discriminate hypotheses)
+  Scoping: after ?brute-force or ?credential-stuffing confirmed with successful login, determine what the authenticated session accessed or modified
 
-- **session-activity-audit**
-  When: after ?brute-force or ?credential-stuffing confirmed with successful login
-  Goal: determine what the authenticated session accessed or modified
-
-- **lateral-movement-check**
-  When: after any threat hypothesis confirmed
-  Goal: identify other systems the source IP contacted
+- **lateral-movement-check** [network-events]
+  Discriminates: (scoping — does not discriminate hypotheses)
+  Scoping: after any threat hypothesis confirmed, identify other systems the source IP contacted
 
 ## Escalation Criteria
 
@@ -577,7 +579,8 @@ Out of scope: full forensic analysis, malware detonation, user interviews.
 - Absorbs old `relevant-leads.md` — lead references live in the investigation section
 - Tool-decoupled: references leads by goal, not by tool. Data tags in brackets (e.g., `[auth-events]`) connect leads to data-sources/ files for subagent tool resolution
 - Two-layer investigation section: hypothesis catalog (what could be happening) + lead sequence (what to check and why)
-- Each lead specifies diagnosticity score (data-driven, updated by post-mortem) and per-hypothesis predictions
+- Replaced numeric diagnosticity scores with prose priority guidance ("Start with...") — the agent reasons about lead selection better from natural language rationale than from a numeric score. Each lead retains `discriminates` and `predictions` which carry the real information
+- Merged diagnostic and scoping leads into a single `### Leads` section — the diagnostic/scoping distinction is per-use, not per-lead. Scoping leads include a `Scoping:` note with the conditional trigger (replacing the old `when:` field)
 - Agent picks the most diagnostic lead for surviving hypotheses, not a fixed step sequence
 - Investigation flow language fully specified in §6.5
 
@@ -606,7 +609,8 @@ Curated, human-approved investigation patterns. Not raw ticket data — the tick
         "?monitoring-probe": "++",
         "?brute-force": "--",
         "?credential-stuffing": "--"
-      }
+      },
+      "surviving": ["?monitoring-probe"]
     },
     {
       "lead": "source-reputation",
@@ -615,7 +619,8 @@ Curated, human-approved investigation patterns. Not raw ticket data — the tick
       "observed": "10.0.1.50 in monitoring subnet, known Nagios host",
       "assessment": {
         "?monitoring-probe": "++"
-      }
+      },
+      "surviving": ["?monitoring-probe"]
     }
   ],
   "trace": "alert → authentication-history[regular-pattern ∴ ?monitoring-probe] → source-reputation[known-internal ∴ ?monitoring-probe] → benign",
@@ -650,7 +655,8 @@ Curated, human-approved investigation patterns. Not raw ticket data — the tick
 - No separate `classification` field — hypothesis names (`?monitoring-probe`) serve as searchable classifications without a controlled vocabulary to maintain
 - No raw ticket data — `ticket_id` is a reference; query the ticketing system for details
 - `hypotheses` records which competing explanations were considered and their final status — enables hypothesis-based search across precedents
-- `flow` captures both dimensions: evidence (what was observed) and logic (why it was checked, what it meant for each hypothesis). Assessment weights (`++/+/~/−/−−`) follow the ACH convention.
+- `flow` captures both dimensions: evidence (what was observed) and logic (why it was checked, what it meant for each hypothesis). Assessment weights (`++/+/−/−−`) follow a four-level ACH convention; omission means neutral.
+- `surviving` field in each flow entry records which hypotheses remained after that step — enables mid-investigation state matching where an agent can match on intermediate hypothesis state, not just the final outcome
 - `trace` is a one-line sequential summary for grep — returns complete investigation paths, not fragments. Grammar: `step ( → step )* → disposition`
 - `reasoning` captures explicit iff-conditions and refutation criteria — enables mid-investigation matching and stop hook validation
 - Matching uses hypothesis overlap + flow overlap (§3.9): structural search on `signature_id` + hypothesis names + lead assessments, then LLM verifies `reasoning.conditions` against current evidence
@@ -704,45 +710,34 @@ Each lead specifies which hypotheses it discriminates and what each hypothesis p
 leads:
   - lead: authentication-history      # defined in common/leads/
     data_tags: [auth-events]          # → data-sources/authentication-events.md
-    diagnosticity: 9.2                # data-driven score, updated by post-mortem
     discriminates: "?monitoring-probe vs ?brute-force vs ?credential-stuffing"
     predictions:
       "?monitoring-probe": "regular interval, single username, bounded count"
       "?brute-force": "high frequency, diverse usernames, increasing over time"
       "?credential-stuffing": "burst of attempts, known-leaked usernames"
+  - lead: data-access-audit           # defined in common/leads/
+    data_tags: [file-events]          # → data-sources/file-events.md
+    discriminates: "(scoping)"
+    scoping: "after ?unauthorized-access confirmed — determine what sensitive data the session accessed"
 ```
+
+The playbook uses prose priority guidance (e.g., "Start with authentication-history") rather than numeric diagnosticity scores — the agent reasons about lead selection better from natural language rationale than from a number. Each lead retains `discriminates` and `predictions` which carry the real information about what the lead reveals.
+
+Diagnostic and scoping leads live in a single list. The diagnostic/scoping distinction is per-use, not per-lead — the same lead could be used diagnostically in one investigation and for scoping in another. Scoping entries include a `scoping:` note with conditional triggers (when the lead becomes relevant).
 
 This layer lives in the **playbook** — it's reusable across investigations for the same signature. The agent selects the most diagnostic lead for the surviving hypotheses. The lead definition (`common/leads/`) provides the methodology (what to characterize, pitfalls); the playbook adds the hypothesis-specific layer (what each hypothesis predicts for this lead).
 
 **Subagent tool resolution:** The subagent reads the lead's `data_tags`, finds the matching `data-sources/` file (e.g., `data-sources/authentication-events.md`), which lists available systems with coverage, priority, and pipeline notes. Two deterministic hops — no exploratory tool-space search.
 
-Playbooks also specify **scoping leads** — these don't discriminate hypotheses but assess impact, blast radius, or gather context:
-
-```yaml
-scoping_leads:
-  - lead: data-access-audit           # defined in common/leads/
-    data_tags: [file-events]          # → data-sources/file-events.md
-    when: "after ?unauthorized-access confirmed"
-    goal: "determine what sensitive data the session accessed"
-  - lead: lateral-movement-check
-    data_tags: [network-events]       # → data-sources/network-events.md
-    when: "after any threat hypothesis confirmed"
-    goal: "identify other systems the actor touched"
-```
-
-Scoping leads are conditional — they trigger after specific hypotheses are confirmed, when the investigation shifts from "what happened?" to "how bad is it?"
-
 **Layer 3: Evidence with assessments** (reality → logic transform)
 
-This is the **investigator's** interpretation of subagent observations, written in `investigation.md` ANALYZE sections. The subagent returns raw observations (§2.3); the investigator records what those observations mean for each hypothesis. Assessment weights: `++` strongly supports, `+` weakly supports, `~` neutral, `-` weakly contradicts, `--` strongly contradicts.
+This is the **investigator's** interpretation of subagent observations, written in `investigation.md` ANALYZE sections. The subagent returns raw observations (§2.3); the investigator records what those observations mean for each hypothesis. Assessment weights: `++` strongly supports, `+` weakly supports, `-` weakly contradicts, `--` strongly contradicts. Omission means neutral — if a hypothesis isn't listed in the assessment, the evidence was neutral for it.
 
-For diagnostic leads, the investigator assesses against hypotheses:
+In the **investigation log** (ANALYZE sections), entries omit `type` and `why` because the preceding HYPOTHESIZE section already documents the rationale:
 
 ```yaml
-# In investigation.md ANALYZE section / precedent flow field
+# In investigation.md ANALYZE section
 - lead: authentication-history
-  type: diagnostic
-  why: "discriminates ?monitoring-probe vs ?brute-force vs ?credential-stuffing"
   observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
   assessment:
     "?monitoring-probe": "++"    # regular interval, single user — textbook
@@ -753,10 +748,8 @@ For diagnostic leads, the investigator assesses against hypotheses:
 For scoping leads (after a hypothesis is confirmed), the investigator records impact findings:
 
 ```yaml
-# In investigation.md ANALYZE section / precedent flow field
+# In investigation.md ANALYZE section
 - lead: data-access-audit
-  type: scoping
-  why: "determine what sensitive data the confirmed session accessed"
   observed: "session accessed 3 files in /data/"
   findings:
     affected_assets: ["q4-financials.xlsx", "salary-bands.csv", "db-credentials.env"]
@@ -764,9 +757,24 @@ For scoping leads (after a hypothesis is confirmed), the investigator records im
     blast_radius: "financial data + HR PII + database credentials"
 ```
 
-Both entry types share `lead`, `type`, `why`, and `observed`. The `type` field (`diagnostic` | `scoping`) determines which interpretation field is present — `assessment` or `findings`. The `observed` value comes from the subagent's return (`leads/*.json`). The `assessment`/`findings` are added by the investigator. The diagnostic/scoping distinction exists at this layer (the investigator's interpretation), not at the subagent layer (which has a single schema for all leads).
+In **precedent records**, flow entries retain `type` and `why` because they stand alone without surrounding phase context:
 
-This layer lives in **investigation logs** (detailed, chronological), **precedents** (compact), and **reports** (narrative summary). Scoping lead findings feed the report's impact assessment and may trigger suggestions (§3.7).
+```yaml
+# In precedent flow field
+- lead: authentication-history
+  type: diagnostic
+  why: "discriminates ?monitoring-probe vs ?brute-force vs ?credential-stuffing"
+  observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
+  assessment:
+    "?monitoring-probe": "++"
+    "?brute-force": "--"
+    "?credential-stuffing": "--"
+  surviving: ["?monitoring-probe"]
+```
+
+Investigation log entries share `lead` and `observed`. The `observed` value comes from the subagent's return (`leads/*.json`). The `assessment`/`findings` are added by the investigator. Whether the entry uses `assessment` (diagnostic) or `findings` (scoping) is self-describing — no `type` marker needed. The diagnostic/scoping distinction exists at this layer (the investigator's interpretation), not at the subagent layer (which has a single schema for all leads).
+
+This layer lives in **investigation logs** (detailed, chronological), **precedents** (compact, with `type`/`why`/`surviving`), and **reports** (narrative summary). Scoping lead findings feed the report's impact assessment and may trigger suggestions (§3.7).
 
 #### The Trace Line: Sequential Searchability
 
@@ -815,9 +823,10 @@ hypotheses:
   - "?malware-spawn": malware spawning worker processes
   - "?orchestration": system management tool behavior
 
+# Start with parent-child-identity — the parent binary and child pattern
+# discriminate the three most common hypotheses in a single check.
 leads:
   - lead: parent-child-identity
-    diagnosticity: 9.4
     discriminates: "?fork-bomb vs ?parallel-job vs ?malware-spawn"
     predictions:
       "?fork-bomb": "same binary as parent, exponential growth"
@@ -826,7 +835,6 @@ leads:
       "?orchestration": "known management tool (ansible, salt, systemd)"
 
   - lead: execution-context
-    diagnosticity: 8.1
     discriminates: "?legitimate-build vs ?supply-chain (after ?parallel-job confirmed)"
     predictions:
       "?legitimate-build": "CI user, build directory, expected schedule"
@@ -887,7 +895,7 @@ hypotheses:
   - "?malware-spawn": malware spawning worker processes
   - "?orchestration": system management tool behavior
 
-Selected lead: parent-child-identity (diagnosticity: 9.4)
+Selected lead: parent-child-identity
   discriminates: ?fork-bomb vs ?parallel-job vs ?malware-spawn
   predictions:
     ?fork-bomb → same binary as parent, exponential growth
@@ -902,14 +910,12 @@ Selected lead: parent-child-identity (diagnosticity: 9.4)
 ## ANALYZE (cycle 1)
 
 - lead: parent-child-identity
-  type: diagnostic
-  why: "discriminates ?fork-bomb vs ?parallel-job vs ?malware-spawn vs ?orchestration"
   observed: "parent=/usr/bin/make, children=gcc(×47), burst within 3s"
   assessment:
     "?fork-bomb": "--"       # make→gcc is not self-replication
     "?parallel-job": "++"    # textbook parallel compilation
     "?malware-spawn": "--"   # gcc is a known compiler
-    "?orchestration": "-"    # make is not management tooling
+    "?orchestration": "--"   # make is not management tooling
 
 surviving: [?parallel-job (strong)]
 Refine: ?parallel-job → ?legitimate-build vs ?supply-chain
@@ -917,7 +923,7 @@ Refine: ?parallel-job → ?legitimate-build vs ?supply-chain
 ## HYPOTHESIZE (cycle 2)
 
 Remaining: ?legitimate-build vs ?supply-chain
-Selected lead: execution-context (diagnosticity: 8.1)
+Selected lead: execution-context
   predictions:
     ?legitimate-build → CI user, build directory, expected schedule
     ?supply-chain → unexpected user, unusual directory or timing
@@ -929,8 +935,6 @@ Selected lead: execution-context (diagnosticity: 8.1)
 ## ANALYZE (cycle 2)
 
 - lead: execution-context
-  type: diagnostic
-  why: "discriminates ?legitimate-build vs ?supply-chain"
   observed: "user=jenkins, cwd=/var/lib/jenkins/workspace/proj-x, 02:00 nightly"
   assessment:
     "?legitimate-build": "++"  # CI user, build directory, expected schedule
@@ -944,16 +948,16 @@ trace: alert → parent-child-identity[make→gcc(x47) ∴ ?parallel-job] → ex
 disposition: benign
 ```
 
-Note how GATHER sections are thin pointers to `leads/`. ANALYZE sections use structured YAML entries that mirror the precedent `flow` schema — the post-mortem agent can extract them directly to build precedent records. The subagent (in `leads/parent-child-identity.json`) returned the raw observation; the investigator added `type`, `why`, and `assessment`.
+Note how GATHER sections are thin pointers to `leads/`. ANALYZE sections use structured YAML — `lead`, `observed`, and `assessment` (or `findings` for scoping). The subagent (in `leads/parent-child-identity.json`) returned the raw observation; the investigator added the `assessment`. The post-mortem agent enriches these entries with `type`, `why`, and `surviving` when extracting them into precedent records.
 
 #### Where Each Layer Lives
 
 | Layer | Playbook (plan) | Investigation log (working) | Precedent (record) | Report (output) |
 |---|---|---|---|---|
 | Hypotheses + predictions | Pre-populated catalog | Full set at each HYPOTHESIZE phase | Which were considered + final status | Summary of key hypotheses |
-| Leads + predictions | Ranked by diagnosticity | Selected lead + predictions per HYPOTHESIZE | Which were used + why chosen | Key leads in narrative form |
+| Leads + predictions | Prioritized with prose guidance | Selected lead + predictions per HYPOTHESIZE | Which were used + `type`/`why` for standalone context | Key leads in narrative form |
 | Raw observations | — | Pointer to `leads/*.json` (GATHER) | Compact `observed` per step | Summarized in narrative |
-| Evidence assessments | — | Structured YAML in ANALYZE: `assessment` (diagnostic) or `findings` (scoping) | Same schema — extracted directly by post-mortem | Reasoning per key finding |
+| Evidence assessments | — | Compact tabular in ANALYZE (no `type`/`why` — context from HYPOTHESIZE) | `assessment`/`findings` + `type`/`why`/`surviving` — enriched by post-mortem | Reasoning per key finding |
 | Trace line | — | Generated at CONCLUDE | One-line sequential summary | Included in frontmatter or footer |
 | Suggestions | — | — | — | Backlog items for other teams (§3.7) |
 
@@ -961,7 +965,15 @@ Note how GATHER sections are thin pointers to `leads/`. ANALYZE sections use str
 
 - **Hypothesis names** (`?name`): Emerge from usage, normalized by post-mortem. The `?` prefix makes them greppable everywhere — playbooks, precedents, reports, ticket comments.
 - **Outcome vocabulary** (observations): Free-text, normalized by post-mortem consolidation. No controlled vocabulary — the post-mortem agent detects drift and proposes normalization via PR.
-- **Assessment weights** (`++/+/~/−/−−`): Fixed five-level scale, inspired by ACH. Simple enough to write in a ticket comment, structured enough to grep.
+- **Assessment weights** (`++/+/−/−−`): Fixed four-level scale, inspired by ACH. Omission means neutral — if a hypothesis isn't listed in an assessment, the evidence was neutral for it. Simple enough to write in a ticket comment, structured enough to grep.
+- **Observation normalization**: The post-mortem agent normalizes observation phrasing when creating precedent records, but no strict controlled vocabulary is enforced because the primary searcher (the LLM) handles semantic similarity natively.
+
+**Review decisions (flow language refinements):**
+- **Dropped `type`/`why` from investigation log ANALYZE entries** — these fields were redundant with the HYPOTHESIZE section that immediately precedes ANALYZE. The `assessment` vs `findings` distinction is self-describing for diagnostic vs scoping. Precedent records retain `type`/`why` because they stand alone without surrounding phase context
+- **Assessment weights reduced from five to four levels** (`++/+/−/−−`) — the neutral marker (`~`) was noise. If evidence is neutral for a hypothesis, simply omit it from the assessment. This is cleaner and reduces clutter in assessments where most hypotheses are unaffected
+- **Replaced numeric diagnosticity scores with prose priority guidance** — the agent reasons about lead selection better from "Start with X because it discriminates the most common hypotheses in a single query" than from `diagnosticity: 9.2`. Each lead retains `discriminates` and `predictions` which carry the actual information. Numeric scores implied false precision and required post-mortem maintenance
+- **Merged diagnostic and scoping leads in playbooks** — the diagnostic/scoping distinction is per-use, not per-lead. The same lead (e.g., session-activity-audit) could be used diagnostically in one investigation and for scoping in another. Unified lead entries document both what the lead can discriminate and when it's used for scoping, with conditional notes replacing the old `when:` triggers
+- **Added `surviving` to precedent flow entries** — records which hypotheses remained after each step. Enables mid-investigation state matching: an agent can match on intermediate hypothesis state (e.g., "at this point ?parallel-job was the only survivor"), not just the final outcome
 
 ### 6.5a Common Knowledge Base — DONE
 

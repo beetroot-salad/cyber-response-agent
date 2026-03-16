@@ -14,15 +14,17 @@ Investigations operate in two dimensions: the **hypothesis space** (logic — wh
 
 **Hypothesis** — A candidate explanation for the alert. Can be simple (`"monitoring probe"`) or a causal chain. Each hypothesis **predicts** what evidence should and should not exist — these predictions are what make leads diagnostic. Multiple hypotheses compete; investigation eliminates or confirms them. Written with `?` prefix for searchability: `?monitoring-probe`, `?brute-force`.
 
-**Lead** — An investigative goal: a question the agent wants answered. Has a *goal* and *motivation*, does NOT specify the method. Leads come in two types:
+**Lead** — An investigative goal: a question the agent wants answered. Has a *goal* and *motivation*, does NOT specify the method. A lead is not inherently diagnostic or scoping — those are **uses** of a lead determined by the investigator's intent in a given cycle:
 
-- **Diagnostic leads** — Discriminate between hypotheses. Value measured by **diagnosticity**: how well possible outcomes distinguish surviving hypotheses. Example: `"Check authentication history"` discriminates `?monitoring-probe` (predicts regular pattern) from `?brute-force` (predicts high-frequency diverse attempts). These carry per-hypothesis predictions and assessments.
+- **Diagnostic use** — The lead discriminates between hypotheses. Value measured by **diagnosticity**: how well possible outcomes distinguish surviving hypotheses. Example: `"Check authentication history"` discriminates `?monitoring-probe` (predicts regular pattern) from `?brute-force` (predicts high-frequency diverse attempts). When used diagnostically, leads carry per-hypothesis predictions and assessments.
 
-- **Scoping leads** — Assess impact, blast radius, timeline, or gather context that informs the response rather than the diagnosis. Example: `"Determine what data was accessed"` or `"Identify lateral movement to other systems"`. These have *findings* but no hypothesis assessments. Scoping leads often become critical after a hypothesis is confirmed — the investigation shifts from "what happened?" to "how bad is it?"
+- **Scoping use** — The lead assesses impact, blast radius, timeline, or gathers context that informs the response rather than the diagnosis. Example: `"Determine what data was accessed"` or `"Identify lateral movement to other systems"`. When used for scoping, leads have *findings* but no hypothesis assessments. Scoping use often becomes critical after a hypothesis is confirmed — the investigation shifts from "what happened?" to "how bad is it?"
 
-Both types produce evidence and appear in the investigation flow. Playbooks specify which leads are diagnostic vs scoping.
+The same lead can serve both purposes in different cycles. A lead like `process-lineage` can be diagnostic in one cycle (discriminating `?lolbins` vs `?custom-tools`) and scoping in another (assessing what processes were spawned). The investigator's intent — which hypotheses to test or what impact to assess — determines the use.
 
-**Evidence** — The result of pursuing a lead. For diagnostic leads: raw observation plus an **assessment** of what it means for each hypothesis (supports/contradicts/neutral). For scoping leads: raw observation plus **findings** that inform the response (severity, affected assets, timeline bounds). Both types feed into the report and precedent record.
+Both uses produce evidence and appear in the investigation flow.
+
+**Evidence** — The result of pursuing a lead. For diagnostic use: raw observation plus an **assessment** of what it means for each hypothesis (supports/contradicts/neutral). For scoping use: raw observation plus **findings** that inform the response (severity, affected assets, timeline bounds). Both feed into the report and precedent record.
 
 ### 1.2 Investigation Loop
 
@@ -360,7 +362,7 @@ Playbooks reference atomic leads (from `common/leads/`) and organize them into a
 
   **Hypothesis catalog:** Pre-populated competing explanations for this alert type, each with predictions (what evidence each hypothesis expects). Gives the agent a starting differential before evidence is gathered. Written with `?` prefix for searchability.
 
-  **Lead sequence:** Prioritized leads ranked by diagnosticity — how well they discriminate between the hypotheses in the catalog. Each lead entry specifies: the goal, which hypotheses it discriminates, what each hypothesis predicts for this lead, and what outcomes mean. Priority scores are data-driven: the post-mortem agent grades each lead after every investigation and the cumulative score updates.
+  **Lead list:** A unified list of leads, each documenting both its diagnostic uses (which hypotheses it discriminates, with per-hypothesis predictions) and its scoping uses (what impact or context it can assess). Leads are not separated into diagnostic and scoping categories — a single lead can serve both purposes depending on the investigator's intent in a given cycle. Each lead entry specifies: the goal, which hypotheses it discriminates, what each hypothesis predicts, what outcomes mean, and any scoping value it provides. A "Start with" recommendation in prose identifies the highest-value lead for initial triage. Priority guidance is updated by the post-mortem agent based on cumulative investigation experience.
 
   See schema-review.md §6.5 for the full investigation flow language specification, including the trace line format for sequential searchability.
 
@@ -392,7 +394,7 @@ Not every investigation becomes a precedent. The post-mortem agent proposes new 
 | `signature_id` | mandatory | For initial filtering |
 | `disposition` | mandatory | benign / false_positive / true_positive |
 | `hypotheses` | mandatory | Hypotheses considered and their final status |
-| `flow` | mandatory | Investigation evidence — diagnostic entries `{lead, observed, assessment}` and scoping entries `{lead, observed, findings}` per cycle |
+| `flow` | mandatory | Investigation evidence per cycle. Each entry carries `surviving` (hypotheses remaining after that step) for intermediate state matching. Diagnostic entries: `{lead, type, why, observed, assessment, surviving}`. Scoping entries: `{lead, type, why, observed, findings, surviving}`. `type` and `why` are present in precedent records (which stand alone) but omitted from investigation log ANALYZE entries (§5.2a), where the surrounding HYPOTHESIZE section provides context |
 | `trace` | mandatory | One-line sequential summary for grep (see below) |
 | `reasoning` | mandatory | Conditions, refutations, confidence notes (see below) |
 | `key_indicators` | recommended | Specific observations that distinguish this case |
@@ -429,7 +431,7 @@ hypotheses:
     status: eliminated
 ```
 
-**The `flow` field** records each investigation cycle — evidence gathered and its interpretation. Diagnostic and scoping leads have different shapes:
+**The `flow` field** records each investigation cycle — evidence gathered and its interpretation. Diagnostic and scoping entries have different shapes:
 
 ```yaml
 flow:
@@ -442,6 +444,7 @@ flow:
       "?monitoring-probe": "++"    # strongly supports
       "?brute-force": "--"         # strongly contradicts
       "?credential-stuffing": "--"
+    surviving: ["?monitoring-probe"]
 
   # Scoping lead — assessed for impact, not against hypotheses
   - lead: data-access-audit
@@ -452,13 +455,14 @@ flow:
       affected_assets: ["q4-financials.xlsx", "salary-bands.csv", "db-credentials.env"]
       severity_factors: ["credentials file accessed", "PII in salary data"]
       blast_radius: "financial data + HR PII + database credentials"
+    surviving: ["?data-exfiltration"]
 ```
 
-**Diagnostic entries** carry `assessment` — a per-hypothesis map with weights: `++` strongly supports, `+` weakly supports, `~` neutral, `-` weakly contradicts, `--` strongly contradicts.
+**Diagnostic entries** carry `assessment` — a per-hypothesis map with weights: `++` strongly supports, `+` weakly supports, `−` weakly contradicts, `−−` strongly contradicts. Omission means neutral — only hypotheses with a non-neutral assessment need to appear.
 
 **Scoping entries** carry `findings` — structured observations about impact, affected assets, timeline bounds, or context. Scoping entries typically appear after a threat hypothesis is confirmed, when the investigation shifts from "what happened?" to "how bad is it?"
 
-Both entry types share `lead`, `type`, `why`, and `observed`. The `type` field (`diagnostic` | `scoping`) determines which interpretation field is present — `assessment` or `findings`.
+Both entry types share `lead`, `type`, `why`, `observed`, and `surviving`. The `type` field (`diagnostic` | `scoping`) determines which interpretation field is present — `assessment` or `findings`. The `surviving` field lists which hypotheses remained after that step, enabling mid-investigation state matching against precedents.
 
 **The `trace` field** is a one-line sequential summary optimized for grep across many precedent files:
 
@@ -501,7 +505,7 @@ After each investigation, a post-mortem subagent produces two types of output:
 **1. KB updates** — proposed changes to investigation knowledge, committed via git:
 
 1. Analyze completed investigation (report, evidence, narrative)
-2. Generate updates: new precedent, lead priority updates, playbook refinements, context additions, cross-cutting lessons, known FP abstractions
+2. Generate updates: new precedent, lead priority guidance updates, playbook refinements, context additions, cross-cutting lessons, known FP abstractions
 3. Update KB files in-place on a branch, consolidating with existing content
 4. Commit, push, and open a PR for analyst review
 
@@ -511,7 +515,7 @@ After each investigation, a post-mortem subagent produces two types of output:
 |-------------|--------------|---------------|
 | New precedent (`precedents/{slug}.json`) | New file | None |
 | New cross-cutting lesson (`common/lessons/{slug}.md`) | New file | None |
-| Playbook priority scores | Edit `playbook.md` | Medium |
+| Playbook priority guidance | Edit `playbook.md` | Medium |
 | New known FP pattern in `context.md` | Edit `context.md` | Low |
 | Playbook structural change | Edit `playbook.md` | High |
 
@@ -547,7 +551,7 @@ Both KB levels are maintained through the post-mortem learning loop (§3.7). Whe
 
 Two-layer matching based on hypothesis outcomes and investigation flow:
 
-**Layer 1 — Structural search (deterministic):** Query by `signature_id` (required) + overlapping hypothesis names and lead assessments from the investigation flow + key indicators. The `trace` field enables fast initial filtering — grep for matching hypothesis conclusions or observation patterns across all precedent files. Returns 3-10 candidates. Because ANALYZE sections in `investigation.md` use structured YAML entries (§5.2a) with the same schema as precedent `flow` entries, the matching algorithm can programmatically compare the current investigation's assessments against precedent flow entries — no prose parsing required.
+**Layer 1 — Structural search (deterministic):** Query by `signature_id` (required) + overlapping hypothesis names and lead assessments from the investigation flow + key indicators. The `trace` field enables fast initial filtering — grep for matching hypothesis conclusions or observation patterns across all precedent files. Returns 3-10 candidates. Because ANALYZE sections in `investigation.md` use structured YAML entries (§5.2a) with the same assessment weights as precedent `flow` entries, the matching algorithm can programmatically compare the current investigation's assessments against precedent flow entries — no prose parsing required.
 
 **Layer 2 — Reasoning judgment (LLM):** Agent reads each candidate's `reasoning.conditions` and `reasoning.refutes` and verifies against current evidence. This enables mid-investigation matching — "I've verified 3 of 4 conditions, none of the refutes have triggered."
 
@@ -559,6 +563,8 @@ Two-layer matching based on hypothesis outcomes and investigation flow:
 | Cases that used this lead | `grep "authentication-history\["` |
 | What happened after observing this pattern | `grep "regular-pattern"` (context shows next step) |
 | Cases that escalated from this hypothesis | `grep "?brute-force.*→ escalate"` |
+
+**Mid-investigation matching via `surviving`:** Each flow entry in a precedent carries a `surviving` field listing which hypotheses remained after that step. This enables agents to match on intermediate hypothesis state during investigation — not just the final outcome. For example, after two cycles that have narrowed to `[?monitoring-probe]`, the agent can find precedents where the same hypothesis set survived at the same point in the flow, even if the precedent pursued different leads afterward.
 
 **Stop hook verification:** The hook independently checks structural overlap — `signature_id` match, at least one hypothesis overlap, at least one flow step overlap, reasoning conditions addressed in the report. Prevents matching against unrelated precedents.
 
@@ -690,7 +696,7 @@ Tracks phase transitions only. Investigation content (hypotheses, planned leads,
 
 The investigator's working document, written chronologically using the investigation flow language (§3.3 playbooks, §3.4 precedents, schema-review §6.5). Phase headers mirror the state machine; content uses the same hypothesis/lead/assessment vocabulary used in playbooks and precedents.
 
-**ANALYZE sections use structured YAML blocks**, not free-form prose. This serves two purposes: (1) the post-mortem agent can extract flow entries directly to build precedent records without parsing prose, and (2) mid-investigation precedent matching can programmatically compare the current assessment state against precedent flow entries. The YAML structure mirrors the precedent `flow` schema (§3.4) — same fields, same assessment weights.
+**ANALYZE sections use structured YAML blocks**, not free-form prose. This serves two purposes: (1) the post-mortem agent can extract flow entries directly to build precedent records without parsing prose, and (2) mid-investigation precedent matching can programmatically compare the current assessment state against precedent flow entries. The YAML structure mirrors the precedent `flow` schema (§3.4) — same assessment weights — though ANALYZE entries omit `type` and `why` (the preceding HYPOTHESIZE section provides that context).
 
 ```markdown
 ## CONTEXTUALIZE
@@ -705,7 +711,7 @@ hypotheses:
   - "?brute-force": credential guessing attack
   - "?credential-stuffing": leaked credential replay
 
-Selected lead: authentication-history (diagnosticity: 9.2)
+Selected lead: authentication-history
   discriminates: ?monitoring-probe vs ?brute-force vs ?credential-stuffing
   predictions:
     ?monitoring-probe → regular interval, single username, bounded count
@@ -719,8 +725,6 @@ Selected lead: authentication-history (diagnosticity: 9.2)
 ## ANALYZE (cycle 1)
 
 - lead: authentication-history
-  type: diagnostic
-  why: "discriminates ?monitoring-probe vs ?brute-force vs ?credential-stuffing"
   observed: "5-min intervals, single username 'testuser', 47 events over 7 days"
   assessment:
     "?monitoring-probe": "++"   # regular interval, single user — textbook
@@ -732,7 +736,7 @@ surviving: [?monitoring-probe]
 ## HYPOTHESIZE (cycle 2)
 
 Remaining: ?monitoring-probe (strong)
-Confirming lead: source-reputation (diagnosticity: 8.7)
+Confirming lead: source-reputation
   predictions:
     ?monitoring-probe → known internal, monitoring subnet
 
@@ -743,8 +747,6 @@ Confirming lead: source-reputation (diagnosticity: 8.7)
 ## ANALYZE (cycle 2)
 
 - lead: source-reputation
-  type: diagnostic
-  why: "confirms ?monitoring-probe (known internal) vs external threat"
   observed: "10.0.1.50 in monitoring subnet, known Nagios host"
   assessment:
     "?monitoring-probe": "++"   # known internal monitoring host
@@ -762,7 +764,7 @@ matched_precedent: SEC-2024-001
 
 - **Phase headers** (`## PHASE`) mirror state transitions — the log and state file are consistent views of the same progression
 - **GATHER sections are thin** — just a pointer to the raw subagent return in `leads/`. The subagent's observations are interpreted by the investigator in the ANALYZE section that follows
-- **ANALYZE sections are structured YAML** — each entry mirrors the precedent `flow` schema (§3.4), with `type`, `why`, `observed`, and either `assessment` (diagnostic) or `findings` (scoping). This makes the investigation log machine-readable: the post-mortem agent extracts flow entries directly, and mid-investigation precedent matching compares structured assessments programmatically. The investigator reads subagent output (from `leads/`), writes the structured entry, and updates the surviving hypothesis set
+- **ANALYZE sections are structured YAML** — each entry carries `lead`, `observed`, and either `assessment` (diagnostic use) or `findings` (scoping use). The preceding HYPOTHESIZE section already documents rationale (which hypotheses are targeted and why this lead was selected), and `assessment` vs `findings` is self-describing, so `type` and `why` are omitted here (they appear in precedent `flow` entries (§3.4), which stand alone without surrounding context). This makes the investigation log machine-readable: the post-mortem agent extracts flow entries directly, and mid-investigation precedent matching compares structured assessments programmatically. The investigator reads subagent output (from `leads/`), writes the structured entry, and updates the surviving hypothesis set
 - **The trace line** at CONCLUDE is generated from the log, compressing the full investigation path into one greppable line
 - **Subagents read this file** for context when spawned — later subagents see richer context because the log has grown. No separate context serialization needed
 
