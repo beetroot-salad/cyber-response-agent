@@ -1,9 +1,0 @@
-{
-  "ticket_id": "SEC-TEST-005",
-  "signature_id": "wazuh-rule-5710",
-  "agent": "web-server-01",
-  "timestamp": "2024-11-17T03:45:00Z",
-  "srcip": "10.0.1.50",
-  "srcuser": "admin",
-  "severity": "medium"
-}

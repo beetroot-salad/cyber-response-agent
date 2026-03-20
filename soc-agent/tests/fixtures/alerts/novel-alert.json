@@ -1,9 +1,0 @@
-{
-  "ticket_id": "SEC-TEST-002",
-  "signature_id": "unknown-rule-9999",
-  "agent": "mystery-host",
-  "timestamp": "2024-11-20T14:00:00Z",
-  "srcip": "192.168.5.99",
-  "srcuser": "unusual_process",
-  "severity": "high"
-}
