@@ -1,0 +1,12 @@
+{
+  "ticket_id": "TEST-002",
+  "signature_id": "wazuh-rule-5710",
+  "alert_data": {
+    "srcip": "203.0.113.50",
+    "srcuser": "admin",
+    "agent": "web-server-01",
+    "rule_id": 5710,
+    "rule_description": "sshd: Attempt to login using a non-existent user",
+    "timestamp": "2024-11-17T03:45:00Z"
+  }
+}
