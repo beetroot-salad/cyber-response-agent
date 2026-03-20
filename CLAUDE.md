@@ -4,119 +4,155 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-**Cyber Response Agent** - An automated security alert triage system that reduces SOC analyst workload by investigating alerts and resolving false positives, duplicates, and routine issues. Uses Claude Code with isolated reproduction environments to validate findings before auto-closure.
+**Cyber Response Agent (v3)** — A hypothesis-driven security alert triage system. Reduces SOC analyst workload by investigating alerts through iterative hypothesis elimination, validating findings against precedents, and recommending disposition.
 
-**Key Goal**: Zero false negatives (never auto-close real threats), high precision auto-closure (>95% correct), mean time to resolution of 1-3 minutes.
+**Key Goal**: Zero false negatives (never auto-close real threats), high precision recommendations, mean time to resolution of 1-3 minutes.
+
+**Approach**: Claude Code plugin with a hypothesis-driven investigation loop. The agent forms hypotheses, gathers evidence from SIEM, eliminates candidates with structured assessments, and stops when confident. Hooks enforce structural safety. MVP is `recommend`-only.
 
 ## Architecture
 
+### Investigation Loop
+
+```
+Alert → Triage Skill → Investigator Agent → Report
+                           │
+              CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE
+                                   ↑                    │
+                                   └────── loop ────────┘
+                                                        │
+                                                   CONCLUDE → report.md
+```
+
 ### Core Components
 
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                            ORCHESTRATOR                                    │
-│  app/orchestrator/                                                         │
-│  - Receives alert data from SIEM                                           │
-│  - Validates input, invokes investigation agent                            │
-│  - Calculates confidence score (deterministic formula)                     │
-│  - Makes routing decision: auto_close | reproduce | escalate               │
-│  - Logs audit trail                                                        │
-└────────────────────────────┬───────────────────────────┬───────────────────┘
-                             │                           │
-                             ▼                           ▼
-┌────────────────────────────────────────┐  ┌────────────────────────────────┐
-│       INVESTIGATION AGENT              │  │       REPRODUCTION AGENT       │
-│  app/agent/investigation/              │  │  app/agent/reproduction/       │
-│                                        │  │                                │
-│  Claude Code subagent that:            │  │  Claude Code subagent that:    │
-│  - Reads alert and knowledge base      │  │  - Builds isolated sandbox     │
-│  - Queries SIEM (Wazuh MCP)            │  │  - Executes hypothesis test    │
-│  - Matches against past tickets        │  │  - Compares observed vs expected│
-│  - Outputs structured findings + report│  │  - Returns confirmed/refuted   │
-│                                        │  │                                │
-│  Isolation: Process + runtime dir      │  │  Isolation: Docker (--network  │
-│  Timeout: 5 minutes                    │  │  none), ephemeral filesystem   │
-└────────────────────────────────────────┘  └────────────────────────────────┘
-```
+| Component | Path | Purpose |
+|-----------|------|---------|
+| **Triage Skill** | `soc-agent/skills/triage/SKILL.md` | Entry point: validate alert, load permissions, spawn investigator |
+| **Investigator Agent** | `soc-agent/agents/investigator.md` | Hypothesis-driven investigation loop |
+| **Validate Report Hook** | `soc-agent/hooks/scripts/validate_report.py` | Stop hook: Tier 1 report validation (safety gate) |
+| **Write State Script** | `soc-agent/hooks/scripts/write_state.py` | State machine enforcement |
+| **Audit Logger Hook** | `soc-agent/hooks/scripts/audit_logger.py` | JSONL audit trail |
 
-### Decision Flow
+### Safety Architecture
 
-```
-Alert → Validate → Investigate → Calculate Confidence → Route
-                                        │
-                        ┌───────────────┼───────────────┐
-                        ▼               ▼               ▼
-                   ≥90%: AUTO_CLOSE  70-89%: REPRODUCE  <70%: ESCALATE
-                        │               │               │
-                        ▼               ▼               ▼
-                   Close ticket    Sandbox test    Human analyst
-                   Update KB       → re-evaluate   queue
-```
-
-### File-Based Knowledge System
-
-Past investigations and playbooks are stored as files in `app/knowledge/`:
-
-```
-app/knowledge/
-├── common/                     # Shared utilities and lessons
-│   ├── SKILL.md               # Common skills definition
-│   ├── lessons/               # Learned patterns
-│   └── utilities/             # Wazuh queries, etc.
-└── signatures/                # Per-signature knowledge
-    ├── _template/             # Template for new signatures
-    │   ├── SKILL.md
-    │   ├── playbook.md
-    │   ├── rule.md
-    │   └── past-tickets/
-    └── wazuh-rule-5710/       # Example: SSH brute force
-        ├── SKILL.md
-        ├── playbook.md
-        ├── rule.md
-        ├── lessons.md
-        └── past-tickets/      # JSON files with case history
-```
+- **Hook validation** replaces deterministic scoring — the `validate_report.py` Stop hook enforces that investigations actually happened (leads pursued, precedent match required for resolution)
+- **State machine** (`write_state.py`) prevents phase skipping — agent must follow CONTEXTUALIZE→HYPOTHESIZE→GATHER→ANALYZE→(loop|CONCLUDE)
+- **Precedent requirement** — `status=resolved` requires `matched_precedent` pointing to an existing file
+- **Adversarial hypothesis** — agent must maintain at least one threat hypothesis until explicitly refuted
 
 ## Project Structure
 
 ```
 /workspace/
-├── app/                        # Main application code
-│   ├── agent/
-│   │   ├── investigation/     # Investigation agent runner + CLAUDE.md
-│   │   └── reproduction/      # Reproduction agent runner + CLAUDE.md
-│   ├── orchestrator/          # Manager, confidence scoring, models
-│   ├── config/                # App config, signature permissions
-│   ├── knowledge/             # Playbooks, past tickets, lessons
-│   ├── tools/                 # Utility scripts (run analyzer)
-│   └── tests/                 # Test suite
-│       ├── unit/
-│       └── integration/
+├── soc-agent/                     # Claude Code plugin (all agent content)
+│   ├── .claude-plugin/
+│   │   └── plugin.json            # Plugin manifest
+│   ├── agents/
+│   │   └── investigator.md        # Hypothesis-driven investigation agent
+│   ├── skills/
+│   │   └── triage/
+│   │       └── SKILL.md           # Entry point: triage an alert
+│   ├── hooks/
+│   │   └── scripts/
+│   │       ├── validate_report.py # Stop hook: report validation
+│   │       ├── write_state.py     # State machine enforcement
+│   │       └── audit_logger.py    # JSONL audit trail
+│   ├── knowledge/
+│   │   ├── common/
+│   │   │   ├── SKILL.md           # Common investigation knowledge
+│   │   │   ├── lessons/           # IP classification, etc.
+│   │   │   └── utilities/         # Wazuh query patterns
+│   │   └── signatures/
+│   │       ├── _template/         # Template for new signatures
+│   │       └── wazuh-rule-5710/   # SSH Invalid User
+│   │           ├── SKILL.md
+│   │           ├── context.md     # Signature reference + threat model
+│   │           ├── playbook.md    # Hypothesis catalog + leads
+│   │           └── precedents/    # Past resolved investigations
+│   ├── config/
+│   │   ├── schemas/               # Python dataclass validators
+│   │   │   ├── report_frontmatter.py
+│   │   │   ├── state.py
+│   │   │   └── precedent.py
+│   │   ├── siem-mapping.json      # Abstract SIEM ops → MCP tools
+│   │   └── signatures/
+│   │       └── wazuh-rule-5710/
+│   │           └── permissions.yaml
+│   ├── tests/                     # pytest test suite
+│   │   ├── test_validate_report.py
+│   │   ├── test_state_transitions.py
+│   │   ├── test_kb_schema.py
+│   │   ├── test_siem_mapping.py
+│   │   ├── test_e2e_mock.py
+│   │   ├── test_e2e_live.py
+│   │   └── fixtures/
+│   └── runs/                      # Investigation run directories
 │
-├── playground/                 # Container setup for testing/simulation
-│   ├── config/                # Infrastructure configuration
-│   │   ├── wazuh_cluster/     # Wazuh manager config, Falco rules
-│   │   ├── wazuh_indexer/     # Elasticsearch config
-│   │   └── wazuh_indexer_ssl_certs/
-│   ├── falco-config/          # eBPF security monitoring
-│   ├── target-endpoint/       # Monitored endpoint container
-│   │   ├── Dockerfile
-│   │   └── workloads/         # Benign/suspicious activity scripts
-│   └── scripts/               # Setup and utility scripts
+├── .claude/
+│   ├── settings.json              # Hook registration (Stop event)
+│   └── settings.local.json        # Dev permissions
 │
-├── docs/                      # Documentation
-│   ├── design-v1.md           # Initial design document
-│   ├── design-v2.md           # Updated design
-│   ├── design-alternative.md  # Alternative approaches
-│   ├── playground-setup.md    # Full setup guide
-│   ├── agent-execution-architecture.md
-│   └── reproduction-agent-design.md
-│
-└── .devcontainer/             # Docker environment
-    ├── docker-compose.yml     # Main services
-    ├── wazuh-stack.yml        # Wazuh SIEM stack
-    └── wazuh-overrides.yml    # Local customizations
+├── docs/                          # Design documentation
+├── playground/                    # Container setup for testing
+└── .devcontainer/                 # Docker environment
 ```
+
+## Running Tests
+
+```bash
+# All unit tests (no LLM required)
+pytest soc-agent/tests/ -v
+
+# Specific test suites
+pytest soc-agent/tests/test_validate_report.py -v    # Report validation
+pytest soc-agent/tests/test_state_transitions.py -v   # State machine
+pytest soc-agent/tests/test_kb_schema.py -v           # Knowledge base
+pytest soc-agent/tests/test_siem_mapping.py -v        # SIEM config
+
+# Integration tests (require LLM)
+pytest soc-agent/tests/test_e2e_mock.py -m llm        # Mock SIEM
+pytest soc-agent/tests/test_e2e_live.py -m "llm and live"  # Live Wazuh
+```
+
+## Investigation Flow Language
+
+The agent uses a structured vocabulary for investigations:
+
+- **Hypotheses** prefixed with `?` — e.g., `?monitoring-probe`, `?brute-force`
+- **Leads** — evidence-gathering actions that discriminate between hypotheses
+- **Assessments** — `++` (strongly supports), `+` (weakly supports), `-` (weakly refutes), `--` (strongly refutes)
+- **Trace** — compressed investigation path: `lead1(result)→lead2(result)→disposition:hypothesis`
+
+## Key Design Patterns
+
+### Hypothesis-Driven Investigation
+- Agent forms candidate explanations, makes predictions, gathers evidence
+- Must maintain adversarial hypothesis until explicitly refuted
+- Structured assessments (++/+/-/--) replace subjective confidence
+
+### Hook-Enforced Safety
+- Python hooks validate report structure (no LLM judgment in safety checks)
+- State machine prevents phase skipping
+- Precedent match required for non-escalation resolution
+
+### Conservative by Default
+- When uncertain, escalate to human
+- MVP is recommend-only (no auto-close actions)
+- Missing data or errors → escalate with context
+
+### Auditability
+- Every investigation creates: alert.json, investigation.md, state.json, report.md
+- JSONL audit trail in runs/audit.jsonl
+- Full phase-by-phase investigation log
+
+## Adding a New Signature
+
+1. Copy template: `cp -r soc-agent/knowledge/signatures/_template soc-agent/knowledge/signatures/{signature-id}`
+2. Edit `context.md` — signature logic, threat model, known false positives
+3. Edit `playbook.md` — hypothesis catalog, lead list with predictions
+4. Add precedents to `precedents/` as investigations resolve
+5. Create `soc-agent/config/signatures/{signature-id}/permissions.yaml`
 
 ## Docker Environment
 
@@ -126,10 +162,9 @@ Multi-container stack (`.devcontainer/docker-compose.yml`):
 |---------|---------|
 | **devcontainer** | Development environment with Docker socket access |
 | **target-endpoint** | Ubuntu container generating workload activity |
-| **falco** | eBPF syscall monitoring → JSON events |
-| **registry** | Private Docker registry for reproduction images |
+| **falco** | eBPF syscall monitoring |
 | **wazuh-mcp-server** | MCP interface to Wazuh API |
-| **wazuh.manager** | SIEM alert correlation (separate stack) |
+| **wazuh.manager** | SIEM alert correlation |
 | **wazuh.indexer** | Elasticsearch for events |
 | **wazuh.dashboard** | Web UI |
 
@@ -144,103 +179,7 @@ docker compose -p cyber-response-agent_devcontainer -f wazuh-stack.yml -f wazuh-
 
 # View Falco events
 docker logs falco --follow
-
-# Investigate target endpoint
-docker exec -it target-endpoint bash
-
-# Trigger test activity
-docker exec target-endpoint /opt/workloads/suspicious_patterns.sh
 ```
-
-## Running the Agent
-
-### Investigation
-
-```bash
-# Via Python module
-python -m app.agent.investigation.runner \
-  --ticket-id "SEC-001" \
-  --signature-id "wazuh-rule-5710" \
-  --alert-json '{"srcip": "10.0.1.50", "srcuser": "admin", ...}'
-
-# Or programmatically
-from app.agent.investigation.runner import InvestigationRunner
-
-runner = InvestigationRunner(
-    ticket_id="SEC-001",
-    signature_id="wazuh-rule-5710",
-    alert_data={"srcip": "10.0.1.50", ...}
-)
-result = runner.run()
-```
-
-### Reproduction
-
-```bash
-python -m app.agent.reproduction.runner \
-  --ticket-id "SEC-001" \
-  --hypothesis "backup.sh creates /tmp/backup.tar.gz" \
-  --signature-id "wazuh-rule-5710" \
-  --timeout 120
-```
-
-### Tests
-
-```bash
-# Run all tests
-pytest app/tests/
-
-# Unit tests only
-pytest app/tests/unit/
-
-# Integration tests
-pytest app/tests/integration/
-
-# Specific test
-pytest app/tests/test_confidence.py -v
-```
-
-## Key Design Patterns
-
-### Conservative by Default
-- When confidence < threshold, escalate to human
-- Multiple validation layers before auto-closure
-- Reproduction validates medium-confidence findings
-
-### Deterministic Orchestration
-- Confidence scoring is a formula, not LLM judgment
-- Routing decisions based on thresholds
-- Agent provides structured findings, orchestrator decides
-
-### Isolation
-- Investigation: Process + runtime directory
-- Reproduction: Docker with `--network none`, dropped capabilities, ephemeral filesystem
-
-### Auditability
-- Every investigation creates a run directory
-- Reports stored in `app/agent/*/runs/{run_id}/`
-- JSON findings + markdown narrative for each run
-
-## Configuration
-
-### Signature Permissions (`app/config/signatures/{signature_id}/permissions.yaml`)
-
-```yaml
-allowed_dispositions:
-  - benign
-  - false_positive
-auto_close:
-  enabled: true
-reproduction:
-  enabled: true
-  max_timeout_seconds: 300
-escalation_patterns:
-  critical_assets: ["domain-controller", "pci-server"]
-```
-
-### MCP Servers
-
-Wazuh MCP Server runs at `wazuh-mcp-server:8000` for SIEM queries.
 
 ## Credentials (Development Only)
 
@@ -249,48 +188,16 @@ Wazuh MCP Server runs at `wazuh-mcp-server:8000` for SIEM queries.
 | Wazuh Dashboard | admin | SecretPassword |
 | Wazuh API | wazuh-wui | MyS3cr37P450r.*- |
 
-## Development Guidelines
-
-### Adding a New Signature
-
-1. Create directory: `app/knowledge/signatures/{signature-id}/`
-2. Copy template: `cp -r app/knowledge/signatures/_template/* app/knowledge/signatures/{signature-id}/`
-3. Edit `rule.md` with detection rule details
-4. Edit `playbook.md` with investigation steps
-5. Add past tickets to `past-tickets/`
-6. Create `app/config/signatures/{signature-id}/permissions.yaml`
-
-### Agent Development
-
-Agent instructions are in `app/agent/*/CLAUDE.md`. Edit these to change agent behavior.
-
-Key files:
-- `app/agent/investigation/CLAUDE.md` - Investigation methodology
-- `app/agent/reproduction/CLAUDE.md` - Reproduction constraints and format
-- `app/agent/models.py` - Shared data models
-
-### Testing Changes
-
-```bash
-# Run confidence scoring tests
-pytest app/tests/test_confidence.py -v
-
-# Test investigation runner
-pytest app/tests/unit/test_investigation_runner.py -v
-
-# Test reproduction runner
-pytest app/tests/unit/test_reproduction_runner.py -v
-```
-
 ## Known Issues
 
 - Wazuh API not accessible from localhost (use `wazuh-manager:55000` from within Docker network)
 - Falco generates alerts for healthcheck operations (expected behavior)
+- `act` mode not yet implemented (MVP is recommend-only)
 
 ## Documentation
 
 Detailed documentation in `docs/`:
-- `playground-setup.md` - Complete environment setup guide
-- `design-v2.md` - System architecture and design decisions
-- `agent-execution-architecture.md` - Agent lifecycle details
-- `reproduction-agent-design.md` - Reproduction sandbox design
+- `playground-setup.md` — Complete environment setup guide
+- `design-v2.md` — System architecture and design decisions
+- `agent-execution-architecture.md` — Agent lifecycle details
+- `reproduction-agent-design.md` — Reproduction sandbox design

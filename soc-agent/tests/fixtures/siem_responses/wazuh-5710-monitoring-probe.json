@@ -1,0 +1,62 @@
+{
+  "description": "Pre-canned SIEM response for monitoring probe scenario (wazuh-rule-5710)",
+  "queries": {
+    "failed_logins_5min": {
+      "query": "rule.id:5710 AND data.srcip:10.0.1.50",
+      "response": {
+        "total": 1,
+        "hits": [
+          {
+            "timestamp": "2024-11-15T02:30:00Z",
+            "rule": {"id": "5710", "description": "sshd: Attempt to login using a non-existent user"},
+            "data": {"srcip": "10.0.1.50", "srcuser": "testuser"},
+            "agent": {"name": "web-server-01", "id": "001"}
+          }
+        ]
+      }
+    },
+    "successful_logins_60s": {
+      "query": "(rule.id:5501 OR rule.id:5715) AND data.srcip:10.0.1.50",
+      "response": {
+        "total": 0,
+        "hits": []
+      }
+    },
+    "all_ssh_from_source": {
+      "query": "rule.groups:sshd AND data.srcip:10.0.1.50",
+      "response": {
+        "total": 1,
+        "hits": [
+          {
+            "timestamp": "2024-11-15T02:30:00Z",
+            "rule": {"id": "5710"},
+            "data": {"srcip": "10.0.1.50", "srcuser": "testuser"}
+          }
+        ]
+      }
+    },
+    "recent_alerts_agent": {
+      "query": "agent.name:web-server-01",
+      "response": {
+        "total": 3,
+        "hits": [
+          {
+            "timestamp": "2024-11-15T02:30:00Z",
+            "rule": {"id": "5710"},
+            "data": {"srcip": "10.0.1.50"}
+          },
+          {
+            "timestamp": "2024-11-15T01:30:00Z",
+            "rule": {"id": "5710"},
+            "data": {"srcip": "10.0.1.50"}
+          },
+          {
+            "timestamp": "2024-11-15T00:30:00Z",
+            "rule": {"id": "5710"},
+            "data": {"srcip": "10.0.1.50"}
+          }
+        ]
+      }
+    }
+  }
+}

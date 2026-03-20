@@ -1,0 +1,49 @@
+{
+  "description": "Pre-canned SIEM response for brute force scenario (wazuh-rule-5710)",
+  "queries": {
+    "failed_logins_5min": {
+      "query": "rule.id:5710 AND data.srcip:203.0.113.50",
+      "response": {
+        "total": 47,
+        "hits": [
+          {
+            "timestamp": "2024-11-17T03:45:00Z",
+            "rule": {"id": "5710"},
+            "data": {"srcip": "203.0.113.50", "srcuser": "admin"},
+            "agent": {"name": "web-server-01"}
+          },
+          {
+            "timestamp": "2024-11-17T03:44:55Z",
+            "rule": {"id": "5710"},
+            "data": {"srcip": "203.0.113.50", "srcuser": "root"}
+          },
+          {
+            "timestamp": "2024-11-17T03:44:50Z",
+            "rule": {"id": "5710"},
+            "data": {"srcip": "203.0.113.50", "srcuser": "user"}
+          }
+        ]
+      }
+    },
+    "successful_logins_60s": {
+      "query": "(rule.id:5501 OR rule.id:5715) AND data.srcip:203.0.113.50",
+      "response": {
+        "total": 0,
+        "hits": []
+      }
+    },
+    "recent_alerts_agent": {
+      "query": "agent.name:web-server-01",
+      "response": {
+        "total": 50,
+        "hits": [
+          {
+            "timestamp": "2024-11-17T03:45:10Z",
+            "rule": {"id": "5712", "description": "SSH brute force attack"},
+            "data": {"srcip": "203.0.113.50"}
+          }
+        ]
+      }
+    }
+  }
+}
