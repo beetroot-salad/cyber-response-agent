@@ -4,7 +4,7 @@
 
 - [x] Delete v2 pipeline (shell hooks, bash scoring, old tests)
 - [x] Python schemas: report_frontmatter, state machine, precedent (dataclass validators)
-- [x] Hooks: validate_report.py (Stop hook safety gate), write_state.py (state machine), audit_logger.py (JSONL)
+- [x] Hooks: validate_report.py (Stop hook safety gate), write_state.py (state machine), investigation_summary.py (JSONL outcomes), audit_tool_calls.py (PostToolUse JSONL)
 - [x] Hook registration in .claude/settings.json
 - [x] Knowledge base migrated: context.md, playbook.md (hypothesis catalog + leads), precedents/ (v3 schema)
 - [x] Signature template updated for v3 vocabulary

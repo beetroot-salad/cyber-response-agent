@@ -10,7 +10,18 @@
           },
           {
             "type": "command",
-            "command": "cd soc-agent && python3 hooks/scripts/audit_logger.py"
+            "command": "cd soc-agent && python3 hooks/scripts/investigation_summary.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd soc-agent && python3 hooks/scripts/audit_tool_calls.py"
           }
         ]
       }
