@@ -100,7 +100,7 @@ Escalate immediately if ANY:
 - Multiple distinct usernames from same external IP
 - No hypothesis reaches `++` after pursuing all leads
 - Evidence contradicts all hypotheses
-- Critical asset involved (check permissions.yaml escalation_patterns)
+- Critical asset involved (check signature context and organizational knowledge)
 - Successful login follows from external IP (potential compromise)
 
 ## Scope

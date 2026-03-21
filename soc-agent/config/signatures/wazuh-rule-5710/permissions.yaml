@@ -1,25 +1,49 @@
 # Permissions for Wazuh Rule 5710: SSH Invalid User
 #
-# PLAYGROUND CONFIG - Permissive settings for testing
-# In production, consider adding escalation patterns for external IPs
+# PLAYGROUND CONFIG — Permissive settings for testing.
+# In production, tighten mitigation actions and set mode to appropriate level.
 
-schema_version: "1.0"
+schema_version: "2.0"
 
-allowed_dispositions:
-  - benign
-  - false_positive
-  - true_positive
+# Operating mode
+#   recommend — agent investigates and outputs a recommendation (MVP)
+#   act       — agent can execute mitigation actions via mitigation skill
+mode:
+  allowed: [recommend]
+  default: recommend
 
-allowed_capabilities:
-  - query_siem
-  - read_knowledge
+# Mitigation actions (enforced by the mitigation skill, not the investigation agent)
+#
+# The investigation agent has full read/query access and is not restricted here.
+# Only *actions* (mitigations) are gated per-signature.
+#
+# Per action:
+#   auto    — execute without human approval (requires mode: act)
+#   approve — execute only after human approval via Claude Code permission prompt (requires mode: act)
+# Unlisted actions are denied. Denied actions return a structured response to
+# the agent so it can adapt (e.g., escalate or investigate from a different angle).
+mitigation:
+  actions:
+    block_ip: auto
+    disable_user: approve
 
-mode: recommend
-
-auto_close:
-  enabled: true
-
-# No escalation patterns - allow agent to make all decisions for testing
-escalation_patterns: {}
+# TODO: Budget enforcement (not yet implemented)
+#
+# v3 design (§1.3, §5.3) specifies resource limits enforced by a budget-enforcer
+# hook that tracks counters in {run_dir}/budget.json:
+#
+#   | Limit               | Default | Enforced by          |
+#   |---------------------|---------|----------------------|
+#   | Max tool calls      | 50      | budget-enforcer hook |
+#   | Max subagent spawns | 5       | budget-enforcer hook |
+#   | Wall-clock timeout  | 5 min   | Process-level        |
+#
+# Defaults live in config/budget-defaults.yaml (does not exist yet),
+# overridable per-signature here. Budget exhaustion forces the agent to
+# recommend with current evidence or escalate.
+#
+# Design note: denied mitigation responses could count against budget
+# differently (e.g., 3x weight) to surface agents that are stuck or
+# repeatedly requesting actions outside their permissions.
 
 log_level: verbose

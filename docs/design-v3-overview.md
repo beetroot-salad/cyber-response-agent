@@ -163,7 +163,7 @@ Forbidden transitions and enforcement details are in [architecture §4.3](design
 
 1. **Lead library scope** — How many common leads before first signatures are viable? Estimate: 8-12.
 2. **Script execution sandboxing** — Should investigation scripts run in a lighter sandbox? Probably: allow network to SIEM only, restrict filesystem.
-3. **Autonomy defaults per signature** — Should `permissions.yaml` include default autonomy level? Probably yes.
+3. ~~**Autonomy defaults per signature**~~ → Resolved: `permissions.yaml` v2.0 uses `mode.allowed` + `mode.default` per signature, with mitigation actions gated individually.
 4. **Multi-SIEM support** — Multiple entries in siem-mapping.json; agent picks per lead.
 5. **Knowledge base cold-start** — Training mode for bootstrapping from historical alerts?
 6. **Skeptic model for high-severity** — Separate model receives raw evidence without narrative?

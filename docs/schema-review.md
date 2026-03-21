@@ -502,7 +502,7 @@ exfiltration, persistence.
 signature_id: wazuh-rule-5710
 last_updated: 2026-03-10
 total_investigations: 50
-auto_close_rate: 0.84
+resolution_rate: 0.84
 ---
 
 ## Investigation
@@ -1080,19 +1080,23 @@ Human-maintained, not schema-enforced. Free-form markdown files organized by dom
 ### 6.6 Permissions (`config/signatures/{id}/permissions.yaml`)
 
 ```yaml
-schema_version: "1.0"
-allowed_dispositions: [benign, false_positive, true_positive]
-allowed_capabilities: [query_siem, read_knowledge, query_assets, query_identity, query_threat_intel]
-auto_close:
-  enabled: true
-escalation_patterns:
-  srcuser: ["^root$", "^admin$"]
-  srcip: ["^(?!10\\.|192\\.168\\.)"]    # external IPs
-  agent: ["domain-controller", "pci-server"]
-reproduction:
-  enabled: true
-  max_timeout_seconds: 300
-log_level: standard
+schema_version: "2.0"
+
+# Operating mode
+mode:
+  allowed: [recommend]       # recommend | act (act enables mitigation skill)
+  default: recommend
+
+# Mitigation actions (enforced by mitigation skill, not investigation agent)
+# Investigation agent has full read/query access — only actions are gated.
+# Per action: auto (execute immediately) | approve (require human approval)
+# Unlisted actions are denied with structured response to the agent.
+mitigation:
+  actions:
+    block_ip: auto
+    disable_user: approve
+
+log_level: verbose
 ```
 
 ### 6.7 SIEM Mapping (`config/siem-mapping.json`)
