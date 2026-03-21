@@ -8,7 +8,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 **Key Goal**: Zero false negatives (never auto-close real threats), high precision recommendations, mean time to resolution of 1-3 minutes.
 
-**Approach**: Claude Code plugin with a hypothesis-driven investigation loop. The agent forms hypotheses, gathers evidence from SIEM, eliminates candidates with structured assessments, and stops when confident. Hooks enforce structural safety. MVP is `recommend`-only.
+**Approach**: Claude Code plugin with a hypothesis-driven investigation loop. The agent forms hypotheses, gathers evidence from whatever SIEM/query tools are available via MCP, eliminates candidates with structured assessments, and stops when confident. Hooks enforce structural safety. MVP is `recommend`-only. The plugin is **vendor-neutral** — it works with any SIEM that exposes tools via MCP. Wazuh signatures are included as working examples.
 
 ## Architecture
 
@@ -61,11 +61,12 @@ Alert → Triage Skill → Investigator Agent → Report
 │   ├── knowledge/
 │   │   ├── common/
 │   │   │   ├── SKILL.md           # Common investigation knowledge
+│   │   │   ├── checklist.md       # Investigation self-check guide
 │   │   │   ├── lessons/           # IP classification, etc.
-│   │   │   └── utilities/         # Wazuh query patterns
+│   │   │   └── utilities/         # Example query patterns (Wazuh)
 │   │   └── signatures/
 │   │       ├── _template/         # Template for new signatures
-│   │       └── wazuh-rule-5710/   # SSH Invalid User
+│   │       └── wazuh-rule-5710/   # SSH Invalid User (example signature)
 │   │           ├── SKILL.md
 │   │           ├── context.md     # Signature reference + threat model
 │   │           ├── playbook.md    # Hypothesis catalog + leads
@@ -75,7 +76,6 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │   │   ├── report_frontmatter.py
 │   │   │   ├── state.py
 │   │   │   └── precedent.py
-│   │   ├── siem-mapping.json      # Abstract SIEM ops → MCP tools
 │   │   └── signatures/
 │   │       └── wazuh-rule-5710/
 │   │           └── permissions.yaml
@@ -83,7 +83,6 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │   ├── test_validate_report.py
 │   │   ├── test_state_transitions.py
 │   │   ├── test_kb_schema.py
-│   │   ├── test_siem_mapping.py
 │   │   ├── test_e2e_mock.py
 │   │   ├── test_e2e_live.py
 │   │   └── fixtures/
@@ -108,7 +107,6 @@ pytest soc-agent/tests/ -v
 pytest soc-agent/tests/test_validate_report.py -v    # Report validation
 pytest soc-agent/tests/test_state_transitions.py -v   # State machine
 pytest soc-agent/tests/test_kb_schema.py -v           # Knowledge base
-pytest soc-agent/tests/test_siem_mapping.py -v        # SIEM config
 
 # Integration tests (require LLM)
 pytest soc-agent/tests/test_e2e_mock.py -m llm        # Mock SIEM

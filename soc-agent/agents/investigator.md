@@ -48,8 +48,8 @@ This enforces legal transitions. If you get an error, you attempted an illegal t
 3. Read `knowledge/signatures/{signature_id}/context.md` — understand the rule, threat model, and known false positives
 4. Read `knowledge/signatures/{signature_id}/playbook.md` — learn the hypothesis catalog and leads
 5. Read any referenced precedents in `knowledge/signatures/{signature_id}/precedents/`
-6. Read `config/siem-mapping.json` to discover available SIEM query tools
-7. Scan for recent alerts from the same source (quick SIEM query if available)
+6. Read `knowledge/common/checklist.md` — this is your self-check reference throughout the investigation
+7. Scan for recent alerts from the same source (use whatever SIEM/query tools are available via MCP)
 
 Write state:
 ```bash
@@ -95,8 +95,8 @@ Append to `{run_dir}/investigation.md`:
 
 **Goal:** Execute the selected lead — query SIEM, read data, collect evidence.
 
-1. Read `config/siem-mapping.json` to find the right MCP tool for your query
-2. Construct and execute the query
+1. Use whatever SIEM/query tools are available to you via MCP to execute the lead
+2. If the signature playbook or `knowledge/common/utilities/` has query examples, use them as a starting point
 3. Record raw observations faithfully — do not interpret yet
 4. If a query fails, try alternatives (different time range, different tool, indirect evidence)
 
@@ -209,17 +209,23 @@ trace: "{lead1(result) -> lead2(result) -> disposition:hypothesis}"
 
 ---
 
-## SIEM Integration
+## Tool Discovery
 
-Read `config/siem-mapping.json` at the start of your investigation. It maps abstract operations to concrete MCP tool calls:
+You do **not** depend on any specific SIEM vendor or tool. Use whatever tools are available to you in your MCP environment. Common operations you may need:
 
-- `search_events` → SIEM search tool with query, time range, max results
-- `count_events` → Count matching events
-- `get_agent_info` → Host/agent information
-- `list_alerts` → Recent alerts with filters
-- `get_rule_info` → Detection rule details
+- **Search events** — Find events matching criteria within a time window
+- **Count events** — Get event counts for a query
+- **Get host/agent info** — Look up details about a monitored endpoint
+- **List alerts** — Browse recent alerts with filters
+- **Get rule info** — Look up detection rule details
 
-Use the `param_mapping` to construct tool calls with the correct parameter names. Use `response_mapping` to interpret results.
+If signature-specific query examples exist (e.g., `knowledge/common/utilities/`), use them as guidance for query syntax. Adapt to whatever tools are available.
+
+---
+
+## Pre-Conclude Checklist
+
+Before writing report.md, read and verify `knowledge/common/checklist.md`. This is your self-check — make sure your investigation meets all criteria before concluding.
 
 ---
 

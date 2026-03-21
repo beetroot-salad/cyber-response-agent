@@ -1,4 +1,6 @@
-# Common Wazuh Query Patterns
+# Example: Wazuh Query Patterns
+
+> **Example queries for the Wazuh SIEM.** Adapt these patterns to your own SIEM and query tools. The query syntax and field names are Wazuh-specific.
 
 Query templates for Wazuh SIEM investigations.
 

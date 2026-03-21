@@ -1,9 +1,11 @@
 ---
 name: wazuh-rule-5710
-description: Investigate SSH invalid user alerts (Wazuh rule 5710). Hypothesis-driven triage for failed SSH login attempts with non-existent usernames. Covers monitoring probes, brute force, credential stuffing, and service account rotation.
+description: "Investigate SSH invalid user alerts (Wazuh rule 5710). Hypothesis-driven triage for failed SSH login attempts with non-existent usernames. Covers monitoring probes, brute force, credential stuffing, and service account rotation. NOTE: This is an example signature for the Wazuh SIEM — use as a reference when building signatures for your own SIEM and detection rules."
 ---
 
 # Wazuh Rule 5710: SSH Invalid User
+
+> **Example signature.** This signature is provided as a working reference for the Wazuh SIEM. Use it as a template and testing fixture when building signatures for your own environment and detection tools.
 
 This skill provides context for investigating SSH invalid user alerts using hypothesis-driven methodology.
 
