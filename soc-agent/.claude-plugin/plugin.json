@@ -1,17 +1,13 @@
 {
   "name": "soc-agent",
-  "version": "0.1.0",
-  "description": "Automated SOC alert triage agent. Investigates security alerts, calculates confidence scores, and routes decisions (auto-close, reproduce, or escalate) with zero false negatives.",
+  "version": "3.0.0",
+  "description": "Hypothesis-driven security alert triage agent. Investigates alerts through iterative hypothesis elimination, validates findings against precedents, and recommends disposition.",
   "skills": [
-    "skills/triage/SKILL.md",
-    "skills/investigate/SKILL.md",
-    "skills/reproduce/SKILL.md"
+    "skills/triage/SKILL.md"
   ],
   "agents": [
-    "agents/investigator.md",
-    "agents/reproducer.md"
+    "agents/investigator.md"
   ],
-  "hooks": "hooks/hooks.json",
   "knowledge": [
     "knowledge/common/SKILL.md",
     "knowledge/signatures/*/SKILL.md"

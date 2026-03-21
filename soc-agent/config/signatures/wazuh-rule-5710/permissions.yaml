@@ -14,14 +14,12 @@ allowed_capabilities:
   - query_siem
   - read_knowledge
 
+mode: recommend
+
 auto_close:
   enabled: true
 
 # No escalation patterns - allow agent to make all decisions for testing
 escalation_patterns: {}
-
-reproduction:
-  enabled: false
-  max_timeout_seconds: 300
 
 log_level: verbose

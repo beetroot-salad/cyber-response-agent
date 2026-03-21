@@ -1,9 +1,0 @@
-{
-  "hooks": [
-    {
-      "event": "Stop",
-      "script": "hooks/scripts/post-mortem.sh",
-      "description": "Run post-mortem analysis after investigation completes"
-    }
-  ]
-}

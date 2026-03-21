@@ -1,53 +1,54 @@
-# Investigation Playbook: [SIGNATURE-ID]
+# Investigation Playbook: SIGNATURE-ID
 
-> Replace this template with actual playbook
+## Hypothesis Catalog
 
-## Quick Reference
+### ?hypothesis-1
+Description of the first candidate explanation.
 
-| Pattern | Disposition | Confidence |
-|---------|-------------|------------|
-| [Pattern 1] | benign | high |
-| [Pattern 2] | escalate | low |
+**Typical profile:** Key indicators that characterize this hypothesis.
 
-## Investigation Steps
+### ?hypothesis-2
+Description of the second candidate explanation (must include at least one adversarial hypothesis).
 
-### Phase 1: Initial Triage
-1. Check source IP classification (internal vs external)
-2. Review username pattern
-3. Check time of day
+**Typical profile:** Key indicators.
 
-### Phase 2: Context Gathering
-1. Query SIEM for related events (same IP, same user)
-2. Check for successful logins before/after
-3. Review historical patterns
+---
 
-### Phase 3: Pattern Matching
-Compare against known patterns from past tickets.
+## Lead List
 
-## Approved Auto-Close Conditions
+### lead-name-1
+**Query:** What to search for.
 
-The following conditions, when ALL met, allow automatic closure:
+**Discriminates:** Which hypotheses this lead helps distinguish.
 
-1. [Condition 1]
-2. [Condition 2]
-3. [Condition 3]
+| Hypothesis | Prediction |
+|------------|------------|
+| ?hypothesis-1 | Expected observation if hypothesis-1 is true |
+| ?hypothesis-2 | Expected observation if hypothesis-2 is true |
+
+---
+
+## Start With
+
+Recommend which lead to pursue first and why.
+
+---
+
+## Auto-Close Criteria
+
+All must be true:
+1. Exactly one hypothesis remains with `++` support
+2. All adversarial hypotheses have `--` refutation
+3. A matching precedent exists
+4. No escalation triggers present
+5. Confidence is high
 
 ## Escalation Criteria
 
-Escalate immediately if ANY of:
+Escalate immediately if ANY:
+- [Condition 1]
+- [Condition 2]
 
-- [ ] [Escalation condition 1]
-- [ ] [Escalation condition 2]
-- [ ] [Escalation condition 3]
+## Scope
 
-## SIEM Queries
-
-### Related Events Query
-```
-[Query to find related events]
-```
-
-### Historical Pattern Query
-```
-[Query to check historical occurrences]
-```
+Define the investigation boundary.

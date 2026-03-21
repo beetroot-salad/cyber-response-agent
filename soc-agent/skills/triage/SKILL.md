@@ -1,110 +1,92 @@
 ---
 name: triage
-description: Main entry point for SOC alert triage. Validates alert, investigates, calculates deterministic confidence score, and routes to auto-close, reproduce, or escalate.
+description: Triage a security alert through hypothesis-driven investigation. Validates alert, loads permissions, creates run directory, and spawns investigator subagent.
 arguments:
   - name: alert_json
-    description: JSON string with alert data (required fields: ticket_id, signature_id, agent)
+    description: "JSON string with alert data. Required fields: ticket_id, signature_id, agent. Alert-specific fields (srcip, srcuser, etc.) go in alert_data."
     required: true
-  - name: asset_criticality
-    description: Asset criticality level - "standard", "elevated", or "critical" (default: "standard")
+  - name: mode
+    description: "'recommend' (default) or 'act'. MVP only supports recommend."
     required: false
 ---
 
 # SOC Alert Triage
 
+Entry point for hypothesis-driven security alert investigation.
+
 ## Orchestration Flow
 
-This skill ties together investigation, scoring, and routing. It replaces the Python orchestrator with deterministic bash scoring and Claude Code native primitives.
+### Step 1: Parse and Validate Alert
 
-### Step 1: Validate Alert
+Parse the `alert_json` argument. Required top-level fields:
+- `ticket_id` — Unique ticket identifier
+- `signature_id` — Detection signature ID (e.g., `wazuh-rule-5710`)
 
-Parse the alert JSON. Required fields:
-- `ticket_id` - Unique ticket identifier
-- `signature_id` - Detection signature ID
-- `agent` - Host/agent where alert originated
+The alert should also contain `alert_data` with signature-specific fields.
 
-If validation fails, immediately escalate (fail-safe).
+If validation fails, output an error and stop. Do not investigate invalid input.
 
-### Step 2: Load Permissions
+### Step 2: Check Mode
 
-Read `config/signatures/{signature_id}/permissions.yaml`. If not found, use conservative defaults (escalate everything).
+Read the `mode` argument (default: `recommend`). If `mode=act`, output a warning that act mode is not yet implemented and proceed with recommend.
 
-### Step 3: Check Escalation Patterns
+### Step 3: Load Permissions
 
-Before investigating, check if the alert matches any escalation patterns from permissions. If matched, skip investigation and escalate immediately with the reason.
+Read `config/signatures/{signature_id}/permissions.yaml`. If not found, log a warning and use conservative defaults:
+- Assume `mode: recommend`
+- Assume no auto-close
+- Assume all dispositions allowed
 
-To check, run the decision router:
+### Step 4: Pre-Investigation Escalation Check
+
+Before investigating, check if the alert matches any `escalation_patterns` from permissions. If matched, skip investigation and output an immediate escalation recommendation with the reason.
+
+### Step 5: Create Run Directory
+
+Create a unique run directory:
 ```bash
-echo '{"scorer_output":{"confidence_score":0,"decision":"escalate"},"alert_data":{...},"permissions_file":"config/signatures/{id}/permissions.yaml"}' | hooks/scripts/decision-router.sh
+mkdir -p runs/{ticket_id}-$(date +%Y%m%d-%H%M%S)
 ```
 
-### Step 4: Investigate
+Store the run directory path for use by the investigator.
 
-Invoke `/soc-agent:investigate` with the alert data. This returns structured findings JSON with recommendation, confidence, matched_ticket, matched_tier, and evidence.
+### Step 6: Save Alert Data
 
-### Step 5: Score (Deterministic)
+Write the alert JSON to `{run_dir}/alert.json` for audit trail.
 
-Run the confidence scorer via Bash, piping the investigation findings:
+### Step 7: Spawn Investigator
 
-```bash
-echo '{
-  "agent_confidence": "{findings.confidence}",
-  "matched_tier": "{findings.matched_tier}",
-  "has_precedent": {findings.matched_ticket != null},
-  "asset_criticality": "{asset_criticality}",
-  "signature_severity": "{alert.severity}",
-  "reproduction_result": null
-}' | hooks/scripts/confidence-scorer.sh
+Invoke the `investigator` subagent with:
+- The alert data (ticket_id, signature_id, alert_data fields)
+- The run directory path
+- Instructions to follow the hypothesis-driven investigation loop
+
+The investigator will:
+1. Write `investigation.md` with phase-by-phase notes
+2. Write `state.json` via `hooks/scripts/write_state.py` at each transition
+3. Write `report.md` with YAML frontmatter at conclusion
+
+### Step 8: Output Summary
+
+After the investigator completes, read `{run_dir}/report.md` and output a summary:
+
+```
+## Triage Result: {ticket_id}
+
+**Status:** {resolved|escalate}
+**Disposition:** {disposition}
+**Confidence:** {confidence}
+**Leads Pursued:** {count}
+**Trace:** {trace line}
+
+{2-3 sentence summary from report}
 ```
 
-This outputs `{"confidence_score": X.XX, "decision": "auto_close|reproduce|escalate"}`.
+If the report is missing or fails validation, output an error indicating the investigation may have failed.
 
-### Step 6: Route
+## Key Principles
 
-Run the decision router with scorer output, alert data, and permissions:
-
-```bash
-echo '{
-  "scorer_output": {scorer_output},
-  "alert_data": {alert},
-  "signature_id": "{signature_id}",
-  "permissions_file": "config/signatures/{id}/permissions.yaml",
-  "recommendation": "{findings.recommendation}"
-}' | hooks/scripts/decision-router.sh
-```
-
-### Step 7: Act on Decision
-
-**If AUTO_CLOSE** (and enabled in permissions):
-- Write audit entry via: `echo '{...}' | hooks/scripts/audit-logger.sh`
-- Output closure summary with disposition, confidence score, and key evidence
-
-**If REPRODUCE** (and enabled in permissions, and hypothesis available):
-- Invoke `/soc-agent:reproduce` with the hypothesis from findings
-- Re-run scorer with `reproduction_result` set to the outcome
-- Re-run router with updated scorer output
-- If now AUTO_CLOSE -> close; if ESCALATE -> escalate
-
-**If ESCALATE**:
-- Write enriched escalation report with all gathered context
-- Write audit entry
-- Output escalation summary with what was investigated and why escalation is needed
-
-### Step 8: Write Summary
-
-Write `investigation-summary.json` to the run directory:
-```json
-{
-  "ticket_id": "...",
-  "signature_id": "...",
-  "decision": "auto_close|reproduce|escalate",
-  "disposition": "benign|false_positive|true_positive|escalated|inconclusive",
-  "confidence_score": 0.95,
-  "findings": {...},
-  "timestamp": "..."
-}
-```
-
-## Key Design Principle
-
-**Scoring is NEVER done by LLM judgment.** The confidence score and routing decision come from `confidence-scorer.sh` and `decision-router.sh` - deterministic bash scripts. The LLM (investigation subagent) provides structured findings; the scripts make the math-based decision. This ensures zero false negatives are preserved regardless of LLM behavior.
+- **MVP is recommend-only** — No auto-close actions, no ticket updates. Output recommendations for human review.
+- **The investigator decides** — This skill orchestrates; the investigator subagent does the analytical work.
+- **Audit trail** — Every run produces alert.json, investigation.md, state.json, and report.md in the run directory.
+- **Fail safe** — If anything goes wrong, output what was gathered and recommend escalation.

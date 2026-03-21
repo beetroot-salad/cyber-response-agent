@@ -1,0 +1,54 @@
+{
+  "ticket_id": "SEC-2024-001",
+  "signature_id": "wazuh-rule-5710",
+  "disposition": "benign",
+  "hypotheses": [
+    {
+      "id": "monitoring-probe",
+      "status": "confirmed",
+      "reasoning": "Internal IP from monitoring subnet, username 'testuser' matches monitoring probe pattern, single attempt with no repetition"
+    },
+    {
+      "id": "brute-force",
+      "status": "refuted",
+      "reasoning": "Internal IP (not external), single attempt (not multiple), single username (not wordlist)"
+    },
+    {
+      "id": "service-account-rotation",
+      "status": "refuted",
+      "reasoning": "Username 'testuser' does not match service account pattern (svc-*, backup-*, cron-*)"
+    }
+  ],
+  "flow": [
+    {
+      "lead": "authentication-history",
+      "observation": "1 failed attempt from 10.0.1.50 in last 5 min, username 'testuser', no successful login after",
+      "assessment": "++ monitoring-probe, -- brute-force (single attempt), - service-account-rotation (username pattern mismatch)"
+    },
+    {
+      "lead": "source-reputation",
+      "observation": "10.0.1.50 is internal (RFC1918 10.0.0.0/8), known monitoring subnet, other monitoring-related alerts from same IP",
+      "assessment": "++ monitoring-probe (known monitoring source), -- brute-force (internal IP), -- credential-stuffing (internal IP)"
+    }
+  ],
+  "trace": "authentication-history(1 fail, testuser, no success) -> source-reputation(internal, monitoring subnet) -> benign:monitoring-probe",
+  "reasoning": {
+    "conditions": [
+      "Internal IP from monitoring subnet (10.0.1.x)",
+      "Username 'testuser' matches monitoring probe pattern",
+      "Single attempt only, no repetition",
+      "No successful login attempt (not a typo scenario)"
+    ],
+    "refutes": [
+      "Not external IP -> refutes brute-force, credential-stuffing",
+      "Single attempt -> refutes brute-force",
+      "Not service account pattern -> refutes service-account-rotation"
+    ]
+  },
+  "key_indicators": [
+    "srcip:10.0.1.50 (internal, monitoring subnet)",
+    "srcuser:testuser (monitoring probe pattern)",
+    "attempt_count:1",
+    "successful_login_after:false"
+  ]
+}
