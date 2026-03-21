@@ -18,7 +18,7 @@ from pathlib import Path
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from config.schemas.state import (
+from schemas.state import (
     MAX_LOOPS,
     count_loops,
     make_state,

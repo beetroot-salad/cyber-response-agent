@@ -13,7 +13,7 @@ import pytest
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from config.schemas.state import (
+from schemas.state import (
     MAX_LOOPS,
     TRANSITIONS,
     Phase,

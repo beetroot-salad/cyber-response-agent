@@ -1,7 +1,7 @@
 ---
 ticket_id: SEC-2024-011
 signature_id: wazuh-rule-5710
-status: escalate
+status: escalated
 disposition: true_positive
 confidence: medium
 matched_precedent: null

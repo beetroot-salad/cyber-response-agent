@@ -13,7 +13,7 @@ import pytest
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from config.schemas.precedent import parse_precedent
+from schemas.precedent import parse_precedent
 from hooks.scripts.validate_report import parse_yaml_frontmatter
 
 KNOWLEDGE_DIR = SOC_AGENT_ROOT / "knowledge"
@@ -61,6 +61,7 @@ class TestPrecedentSchema:
         path = SIGNATURES_DIR / "wazuh-rule-5710" / "precedents" / "monitoring-probe-001.json"
         data = json.loads(path.read_text())
 
+        assert data["status"] == "resolved"
         assert data["disposition"] == "benign"
         assert data["signature_id"] == "wazuh-rule-5710"
         assert any(h["id"] == "monitoring-probe" and h["status"] == "confirmed" for h in data["hypotheses"])
@@ -73,7 +74,8 @@ class TestPrecedentSchema:
         path = SIGNATURES_DIR / "wazuh-rule-5710" / "precedents" / "brute-force-001.json"
         data = json.loads(path.read_text())
 
-        assert data["disposition"] == "escalated"
+        assert data["status"] == "escalated"
+        assert data["disposition"] == "true_positive"
         assert data["signature_id"] == "wazuh-rule-5710"
         assert any(h["id"] == "brute-force" and h["status"] == "confirmed" for h in data["hypotheses"])
         assert len(data["flow"]) >= 3
@@ -142,6 +144,7 @@ class TestPrecedentEdgeCases:
         data = {
             "ticket_id": "SEC-001",
             "signature_id": "test",
+            "status": "resolved",
             "disposition": "unknown",
             "hypotheses": [{"id": "h1", "status": "confirmed", "reasoning": "r"}],
             "flow": [{"lead": "l1", "observation": "o1", "assessment": "a1"}],
@@ -152,11 +155,28 @@ class TestPrecedentEdgeCases:
         _, errors = parse_precedent(data)
         assert any("disposition" in e for e in errors)
 
-    def test_non_escalated_needs_confirmed(self):
-        """Non-escalated precedents must have at least one confirmed hypothesis."""
+    def test_invalid_status(self):
+        """Invalid status value should produce an error."""
         data = {
             "ticket_id": "SEC-001",
             "signature_id": "test",
+            "status": "closed",
+            "disposition": "benign",
+            "hypotheses": [{"id": "h1", "status": "confirmed", "reasoning": "r"}],
+            "flow": [{"lead": "l1", "observation": "o1", "assessment": "a1"}],
+            "trace": "t",
+            "reasoning": {"conditions": [], "refutes": []},
+            "key_indicators": ["k1"],
+        }
+        _, errors = parse_precedent(data)
+        assert any("status" in e for e in errors)
+
+    def test_resolved_needs_confirmed(self):
+        """Resolved precedents must have at least one confirmed hypothesis."""
+        data = {
+            "ticket_id": "SEC-001",
+            "signature_id": "test",
+            "status": "resolved",
             "disposition": "benign",
             "hypotheses": [{"id": "h1", "status": "refuted", "reasoning": "r"}],
             "flow": [{"lead": "l1", "observation": "o1", "assessment": "a1"}],
@@ -172,7 +192,8 @@ class TestPrecedentEdgeCases:
         data = {
             "ticket_id": "SEC-001",
             "signature_id": "test",
-            "disposition": "escalated",
+            "status": "escalated",
+            "disposition": "inconclusive",
             "hypotheses": [{"id": "h1", "status": "refuted", "reasoning": "r"}],
             "flow": [{"lead": "l1", "observation": "o1", "assessment": "a1"}],
             "trace": "t",
@@ -181,3 +202,19 @@ class TestPrecedentEdgeCases:
         }
         _, errors = parse_precedent(data)
         assert not any("confirmed hypothesis" in e for e in errors)
+
+    def test_active_hypothesis_status(self):
+        """Hypothesis with 'active' status should validate."""
+        data = {
+            "ticket_id": "SEC-001",
+            "signature_id": "test",
+            "status": "escalated",
+            "disposition": "inconclusive",
+            "hypotheses": [{"id": "h1", "status": "active", "reasoning": "still investigating"}],
+            "flow": [{"lead": "l1", "observation": "o1", "assessment": "a1"}],
+            "trace": "t",
+            "reasoning": {"conditions": [], "refutes": []},
+            "key_indicators": ["k1"],
+        }
+        _, errors = parse_precedent(data)
+        assert not any("hypothesis status" in e for e in errors)

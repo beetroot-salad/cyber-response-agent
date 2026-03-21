@@ -71,11 +71,11 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │           ├── context.md     # Signature reference + threat model
 │   │           ├── playbook.md    # Hypothesis catalog + leads
 │   │           └── precedents/    # Past resolved investigations
+│   ├── schemas/                   # Python dataclass validators (system contracts)
+│   │   ├── report_frontmatter.py
+│   │   ├── state.py
+│   │   └── precedent.py
 │   ├── config/
-│   │   ├── schemas/               # Python dataclass validators
-│   │   │   ├── report_frontmatter.py
-│   │   │   ├── state.py
-│   │   │   └── precedent.py
 │   │   └── signatures/
 │   │       └── wazuh-rule-5710/
 │   │           └── permissions.yaml
@@ -86,7 +86,7 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │   ├── test_e2e_mock.py
 │   │   ├── test_e2e_live.py
 │   │   └── fixtures/
-│   └── runs/                      # Investigation run directories
+│   └── runs/                      # Investigation run dirs (configurable via SOC_AGENT_RUNS_DIR)
 │
 ├── .claude/
 │   ├── settings.json              # Hook registration (Stop event)

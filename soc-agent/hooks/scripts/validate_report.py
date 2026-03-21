@@ -18,7 +18,7 @@ from pathlib import Path
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from config.schemas.report_frontmatter import (
+from schemas.report_frontmatter import (
     MIN_LEADS_BY_SEVERITY,
     parse_frontmatter,
 )
@@ -56,9 +56,14 @@ def parse_yaml_frontmatter(text: str) -> dict:
     return fields
 
 
+def get_runs_dir() -> Path:
+    """Get the runs directory. Configurable via SOC_AGENT_RUNS_DIR env var."""
+    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
+
+
 def find_report_in_runs() -> Path | None:
     """Find the most recent report.md in runs/."""
-    runs_dir = SOC_AGENT_ROOT / "runs"
+    runs_dir = get_runs_dir()
     if not runs_dir.exists():
         return None
 
