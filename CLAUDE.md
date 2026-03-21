@@ -77,6 +77,8 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │   └── precedent.py
 │   ├── config/
 │   │   └── signatures/
+│   │       ├── _template/
+│   │       │   └── permissions.yaml  # Template for new signatures
 │   │       └── wazuh-rule-5710/
 │   │           └── permissions.yaml
 │   ├── tests/                     # pytest test suite

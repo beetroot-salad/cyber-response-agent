@@ -1,0 +1,44 @@
+# Permissions for {SIGNATURE_ID}
+#
+# Copy this file to config/signatures/{signature-id}/permissions.yaml
+# and customize for the signature.
+
+schema_version: "2.0"
+
+# Operating mode
+#   recommend — agent investigates and outputs a recommendation (default)
+#   act       — agent can execute mitigation actions via mitigation skill
+mode:
+  allowed: [recommend]
+  default: recommend
+
+# Mitigation actions (enforced by the mitigation skill, not the investigation agent)
+#
+# The investigation agent has full read/query access and is not restricted here.
+# Only *actions* (mitigations) are gated per-signature.
+#
+# Per action:
+#   auto    — execute without human approval (requires mode: act)
+#   approve — execute only after human approval via Claude Code permission prompt
+# Unlisted actions are denied. Denied actions return a structured response to
+# the agent so it can adapt (e.g., escalate or investigate from a different angle).
+#
+# Common actions: block_ip, disable_user, isolate_host, revoke_session, kill_process
+mitigation:
+  actions: {}
+  # Examples:
+  #   block_ip: auto
+  #   disable_user: approve
+  #   isolate_host: approve
+
+# TODO: Budget overrides (not yet implemented)
+#
+# Per-signature overrides for defaults in config/budget-defaults.yaml.
+# See v3 design §1.3, §5.3 for budget enforcement details.
+#
+# budget:
+#   max_tool_calls: 50
+#   max_subagent_spawns: 5
+#   wall_clock_timeout: 300  # seconds
+
+log_level: standard
