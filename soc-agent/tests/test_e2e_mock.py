@@ -22,8 +22,8 @@ import pytest
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from config.schemas.state import Phase, validate_transition
-from config.schemas.report_frontmatter import parse_frontmatter
+from schemas.state import Phase, validate_transition
+from schemas.report_frontmatter import parse_frontmatter
 from hooks.scripts.validate_report import parse_yaml_frontmatter, validate
 
 
@@ -322,10 +322,9 @@ class TestLLMInvestigation:
         for field in required:
             assert field in fields, f"Missing field in report: {field}"
 
-        # Validate via the schema
+        # Validate via the schema — all errors, not just structural ones
         report, errors = parse_frontmatter(fields)
-        structural_errors = [e for e in errors if "missing required field" in e]
-        assert not structural_errors, f"Structural errors: {structural_errors}"
+        assert not errors, f"Report validation errors: {errors}"
 
     def test_investigation_produces_investigation_md(self, llm_investigation_run):
         """investigation.md must have phase headers and hypothesis references."""
@@ -372,11 +371,7 @@ class TestLLMInvestigation:
             pytest.skip("report.md not created")
 
         passed, errors = validate(report_file)
-        if not passed:
-            structural = [e for e in errors if any(
-                k in e for k in ["missing required", "must be one of", "is required"]
-            )]
-            assert not structural, f"Structural validation errors: {structural}"
+        assert passed, f"Report validation errors: {errors}"
 
     def test_no_hallucinated_tools(self, llm_investigation_run):
         """Investigation should not reference non-existent tools or files."""

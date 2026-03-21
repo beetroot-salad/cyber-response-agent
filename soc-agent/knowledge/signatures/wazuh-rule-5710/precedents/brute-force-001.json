@@ -1,7 +1,8 @@
 {
   "ticket_id": "SEC-2024-003",
   "signature_id": "wazuh-rule-5710",
-  "disposition": "escalated",
+  "status": "escalated",
+  "disposition": "true_positive",
   "hypotheses": [
     {
       "id": "brute-force",

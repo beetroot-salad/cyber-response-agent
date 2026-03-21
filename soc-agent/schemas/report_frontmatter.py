@@ -7,10 +7,7 @@ Used by hooks/scripts/validate_report.py to enforce structural safety.
 from dataclasses import dataclass
 from typing import Optional
 
-
-VALID_STATUSES = ("resolved", "escalate")
-VALID_DISPOSITIONS = ("benign", "false_positive", "true_positive")
-VALID_CONFIDENCES = ("high", "medium", "low")
+from schemas.enums import VALID_CONFIDENCES, VALID_DISPOSITIONS, VALID_STATUSES
 
 # Minimum leads_pursued per severity level
 MIN_LEADS_BY_SEVERITY = {
@@ -27,8 +24,8 @@ class ReportFrontmatter:
 
     ticket_id: str
     signature_id: str
-    status: str  # resolved | escalate
-    disposition: str  # benign | false_positive | true_positive
+    status: str  # resolved | escalated
+    disposition: str  # benign | false_positive | true_positive | inconclusive
     confidence: str  # high | medium | low
     matched_precedent: Optional[str]  # precedent filename or null
     leads_pursued: int

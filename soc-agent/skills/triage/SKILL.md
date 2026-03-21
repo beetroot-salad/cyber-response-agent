@@ -43,9 +43,9 @@ Before investigating, check if the alert matches any `escalation_patterns` from 
 
 ### Step 5: Create Run Directory
 
-Create a unique run directory:
+Create a unique run directory. The base path is configurable via `SOC_AGENT_RUNS_DIR` env var (defaults to `runs/` within the plugin directory):
 ```bash
-mkdir -p runs/{ticket_id}-$(date +%Y%m%d-%H%M%S)
+mkdir -p ${SOC_AGENT_RUNS_DIR:-runs}/{ticket_id}-$(date +%Y%m%d-%H%M%S)
 ```
 
 Store the run directory path for use by the investigator.
@@ -73,7 +73,7 @@ After the investigator completes, read `{run_dir}/report.md` and output a summar
 ```
 ## Triage Result: {ticket_id}
 
-**Status:** {resolved|escalate}
+**Status:** {resolved|escalated}
 **Disposition:** {disposition}
 **Confidence:** {confidence}
 **Leads Pursued:** {count}

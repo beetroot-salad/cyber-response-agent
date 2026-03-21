@@ -7,16 +7,18 @@ Precedents are past resolved investigations used for pattern matching.
 from dataclasses import dataclass
 from typing import Optional
 
-
-VALID_DISPOSITIONS = ("benign", "false_positive", "true_positive", "escalated")
-VALID_HYPOTHESIS_STATUSES = ("confirmed", "refuted", "untested")
+from schemas.enums import (
+    VALID_DISPOSITIONS,
+    VALID_HYPOTHESIS_STATUSES,
+    VALID_STATUSES,
+)
 
 
 @dataclass
 class Hypothesis:
     """A hypothesis that was tested during the investigation."""
     id: str
-    status: str  # confirmed | refuted | untested
+    status: str  # active | confirmed | refuted | untested
     reasoning: str
 
     def validate(self) -> list[str]:
@@ -52,7 +54,8 @@ class Precedent:
     """A past investigation used as a reference for future triage."""
     ticket_id: str
     signature_id: str
-    disposition: str
+    status: str  # resolved | escalated
+    disposition: str  # benign | false_positive | true_positive | inconclusive
     hypotheses: list[Hypothesis]
     flow: list[FlowStep]
     trace: str
@@ -67,6 +70,10 @@ class Precedent:
             errors.append("ticket_id is required")
         if not self.signature_id:
             errors.append("signature_id is required")
+        if self.status not in VALID_STATUSES:
+            errors.append(
+                f"status must be one of {VALID_STATUSES}, got '{self.status}'"
+            )
         if self.disposition not in VALID_DISPOSITIONS:
             errors.append(
                 f"disposition must be one of {VALID_DISPOSITIONS}, got '{self.disposition}'"
@@ -96,11 +103,11 @@ class Precedent:
             if "refutes" not in self.reasoning:
                 errors.append("reasoning must have 'refutes' key")
 
-        if self.disposition != "escalated":
+        if self.status == "resolved":
             confirmed = [h for h in self.hypotheses if h.status == "confirmed"]
             if not confirmed:
                 errors.append(
-                    "non-escalated precedent must have at least one confirmed hypothesis"
+                    "resolved precedent must have at least one confirmed hypothesis"
                 )
 
         return errors
@@ -110,7 +117,7 @@ def parse_precedent(data: dict) -> tuple[Optional[Precedent], list[str]]:
     """Parse a dict into a Precedent. Returns (precedent, errors)."""
     errors = []
 
-    required = ["ticket_id", "signature_id", "disposition", "hypotheses", "flow", "trace", "reasoning", "key_indicators"]
+    required = ["ticket_id", "signature_id", "status", "disposition", "hypotheses", "flow", "trace", "reasoning", "key_indicators"]
     for f in required:
         if f not in data:
             errors.append(f"missing required field: {f}")
@@ -139,6 +146,7 @@ def parse_precedent(data: dict) -> tuple[Optional[Precedent], list[str]]:
     precedent = Precedent(
         ticket_id=data["ticket_id"],
         signature_id=data["signature_id"],
+        status=data["status"],
         disposition=data["disposition"],
         hypotheses=hypotheses,
         flow=flow_steps,

@@ -37,7 +37,7 @@ This is your self-check — not a rigid schema, but a guide to ensure your inves
 - [ ] `leads_pursued` count meets minimum for the signature severity (low:1, medium:2, high:3, critical:4)
 - [ ] Confidence is `high`
 
-### Escalation (status=escalate)
+### Escalation (status=escalated)
 - [ ] Clear explanation of why you can't resolve — what's uncertain or threatening
 - [ ] "What We Know" section has concrete evidence gathered
 - [ ] "What We Don't Know" section identifies the gaps
@@ -47,8 +47,8 @@ This is your self-check — not a rigid schema, but a guide to ensure your inves
 ### Report Structure
 - [ ] YAML frontmatter between `---` delimiters at start of report.md
 - [ ] All required fields present: `ticket_id`, `signature_id`, `status`, `disposition`, `confidence`, `matched_precedent`, `leads_pursued`
-- [ ] `status` is `resolved` or `escalate` (not "closed", "open", etc.)
-- [ ] `disposition` is `benign`, `false_positive`, or `true_positive`
+- [ ] `status` is `resolved` or `escalated` (not "closed", "open", etc.)
+- [ ] `disposition` is `benign`, `false_positive`, `true_positive`, or `inconclusive`
 - [ ] `confidence` is `high`, `medium`, or `low`
 - [ ] `trace` line summarizes the full investigation path
 

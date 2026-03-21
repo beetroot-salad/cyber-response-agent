@@ -1,6 +1,7 @@
 {
   "ticket_id": "SEC-2024-001",
   "signature_id": "wazuh-rule-5710",
+  "status": "resolved",
   "disposition": "benign",
   "hypotheses": [
     {

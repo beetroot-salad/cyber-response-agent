@@ -160,9 +160,10 @@ hypotheses:
 **Goal:** Write the final report with structured frontmatter.
 
 1. Generate a trace line summarizing the investigation path
-2. Determine status: `resolved` (confident, precedent match) or `escalate` (uncertain or adversarial)
-3. If `resolved`: identify the matching precedent file
-4. Write `{run_dir}/report.md` with YAML frontmatter
+2. Determine status: `resolved` (confident, precedent match) or `escalated` (uncertain, adversarial, or insufficient evidence)
+3. Determine disposition: `benign` (correct detection, harmless), `false_positive` (rule misfired), `true_positive` (confirmed threat), or `inconclusive` (can't determine)
+4. If `resolved`: identify the matching precedent file
+5. Write `{run_dir}/report.md` with YAML frontmatter
 
 Write state:
 ```bash
@@ -174,8 +175,8 @@ Write `{run_dir}/report.md`:
 ---
 ticket_id: {ticket_id}
 signature_id: {signature_id}
-status: {resolved|escalate}
-disposition: {benign|false_positive|true_positive}
+status: {resolved|escalated}
+disposition: {benign|false_positive|true_positive|inconclusive}
 confidence: {high|medium|low}
 matched_precedent: {filename.json|null}
 leads_pursued: {count}
@@ -191,8 +192,8 @@ trace: "{lead1(result) -> lead2(result) -> disposition:hypothesis}"
 {trace line}
 
 ## Hypothesis Outcomes
-- ?hypothesis-1: {confirmed|refuted} — {one-line reasoning}
-- ?hypothesis-2: {confirmed|refuted} — {one-line reasoning}
+- ?hypothesis-1: {active|confirmed|refuted} — {one-line reasoning}
+- ?hypothesis-2: {active|confirmed|refuted} — {one-line reasoning}
 
 ## Key Evidence
 - {evidence point 1}
