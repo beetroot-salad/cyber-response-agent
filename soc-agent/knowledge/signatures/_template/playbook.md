@@ -1,3 +1,10 @@
+---
+signature_id: SIGNATURE-ID
+last_updated: YYYY-MM-DD
+total_investigations: 0
+resolution_rate: null
+---
+
 # Investigation Playbook: SIGNATURE-ID
 
 ## Hypothesis Catalog

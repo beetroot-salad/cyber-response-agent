@@ -1,3 +1,10 @@
+---
+signature_id: wazuh-rule-5710
+last_updated: 2026-03-23
+total_investigations: 0
+resolution_rate: null
+---
+
 # Investigation Playbook: SSH Invalid User (5710)
 
 ## Hypothesis Catalog

@@ -114,13 +114,14 @@ class TestContextFrontmatter:
         ],
     )
     def test_context_has_required_frontmatter(self, context_file):
-        """Context files must have signature_id, name, and severity."""
+        """Context files must have signature_id, name, severity, and data_sources."""
         content = context_file.read_text()
         fm = parse_yaml_frontmatter(content)
         assert fm, f"No frontmatter in {context_file}"
         assert "signature_id" in fm, f"Missing signature_id in {context_file}"
         assert "name" in fm, f"Missing name in {context_file}"
         assert "severity" in fm, f"Missing severity in {context_file}"
+        assert "data_sources" in fm, f"Missing data_sources in {context_file}"
 
     def test_wazuh_5710_context(self):
         """Specific check: wazuh-rule-5710 context.md."""
@@ -128,6 +129,8 @@ class TestContextFrontmatter:
         fm = parse_yaml_frontmatter(path.read_text())
         assert fm["signature_id"] == "wazuh-rule-5710"
         assert fm["severity"] == "medium"
+        assert fm["mitre_tactics"] == "Initial Access"
+        assert fm["mitre_techniques"] == "T1110"
 
 
 # --- Precedent schema edge cases ---
@@ -218,3 +221,62 @@ class TestPrecedentEdgeCases:
         }
         _, errors = parse_precedent(data)
         assert not any("hypothesis status" in e for e in errors)
+
+
+# --- Playbook frontmatter ---
+
+
+class TestPlaybookFrontmatter:
+    """Playbook files must have valid frontmatter."""
+
+    @staticmethod
+    def _get_playbook_files():
+        files = []
+        for sig_dir in SIGNATURES_DIR.iterdir():
+            if sig_dir.name.startswith("_"):
+                continue
+            playbook = sig_dir / "playbook.md"
+            if playbook.exists():
+                files.append(playbook)
+        return files
+
+    def test_playbook_files_exist(self):
+        files = self._get_playbook_files()
+        assert len(files) > 0, "No playbook files found"
+
+    @pytest.mark.parametrize(
+        "playbook_file",
+        [
+            pytest.param(f, id=f.parent.name)
+            for f in [
+                d / "playbook.md"
+                for d in SIGNATURES_DIR.iterdir()
+                if not d.name.startswith("_") and (d / "playbook.md").exists()
+            ]
+        ],
+    )
+    def test_playbook_has_required_frontmatter(self, playbook_file):
+        """Playbook files must have signature_id and last_updated."""
+        content = playbook_file.read_text()
+        fm = parse_yaml_frontmatter(content)
+        assert fm, f"No frontmatter in {playbook_file}"
+        assert "signature_id" in fm, f"Missing signature_id in {playbook_file}"
+        assert "last_updated" in fm, f"Missing last_updated in {playbook_file}"
+
+
+# --- Precedent template ---
+
+
+class TestPrecedentTemplate:
+    """The precedent template must exist and have all required fields."""
+
+    def test_precedent_template_exists(self):
+        template = SIGNATURES_DIR / "_template" / "precedents" / "_template.json"
+        assert template.exists(), "Precedent template missing"
+        data = json.loads(template.read_text())
+        required = [
+            "ticket_id", "signature_id", "status", "disposition",
+            "hypotheses", "flow", "trace", "reasoning", "key_indicators",
+        ]
+        for field in required:
+            assert field in data, f"Template missing required field: {field}"
