@@ -67,9 +67,8 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │   │   ├── lessons/           # IP classification, etc.
 │   │   │   └── utilities/         # Example query patterns (Wazuh)
 │   │   └── signatures/
-│   │       ├── _template/         # Template for new signatures
+│   │       ├── _template/         # Skeleton + onboarding guide for new signatures
 │   │       └── wazuh-rule-5710/   # SSH Invalid User (example signature)
-│   │           ├── SKILL.md
 │   │           ├── context.md     # Signature reference + threat model
 │   │           ├── playbook.md    # Hypothesis catalog + leads
 │   │           └── precedents/    # Past resolved investigations
@@ -154,11 +153,15 @@ The agent uses a structured vocabulary for investigations:
 
 ## Adding a New Signature
 
+See `soc-agent/knowledge/signatures/_template/README.md` for the full onboarding workflow. Summary:
+
 1. Copy template: `cp -r soc-agent/knowledge/signatures/_template soc-agent/knowledge/signatures/{signature-id}`
-2. Edit `context.md` — signature logic, threat model, known false positives
-3. Edit `playbook.md` — hypothesis catalog, lead list with predictions
-4. Add precedents to `precedents/` as investigations resolve
-5. Create `soc-agent/config/signatures/{signature-id}/permissions.yaml`
+2. Remove `README.md` from the copy
+3. Research past tickets for this signature — pull alerts, review closed tickets, identify outcome clusters
+4. Fill in `context.md` — signature logic, threat model, known false positives (grounded in real data)
+5. Fill in `playbook.md` — hypothesis catalog, leads with predictions (from actual investigation patterns)
+6. Add precedents from representative tickets to `precedents/`
+7. Create `soc-agent/config/signatures/{signature-id}/permissions.yaml`
 
 ## Docker Environment
 
