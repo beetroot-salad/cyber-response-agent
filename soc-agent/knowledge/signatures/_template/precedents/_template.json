@@ -1,0 +1,37 @@
+{
+  "ticket_id": "SEC-YYYY-NNN",
+  "signature_id": "SIGNATURE-ID",
+  "status": "resolved",
+  "disposition": "benign",
+  "hypotheses": [
+    {
+      "id": "hypothesis-name",
+      "status": "confirmed",
+      "reasoning": "Why this hypothesis was confirmed — cite specific evidence"
+    },
+    {
+      "id": "adversarial-hypothesis",
+      "status": "refuted",
+      "reasoning": "Why this threat hypothesis was ruled out — cite specific evidence"
+    }
+  ],
+  "flow": [
+    {
+      "lead": "lead-name",
+      "observation": "What was found — be specific with numbers, IPs, usernames",
+      "assessment": "++ hypothesis-name, -- adversarial-hypothesis"
+    }
+  ],
+  "trace": "lead-name(key observation) -> disposition:hypothesis-name",
+  "reasoning": {
+    "conditions": [
+      "Condition that must hold for this precedent to match a future alert"
+    ],
+    "refutes": [
+      "Observation that would invalidate this precedent match"
+    ]
+  },
+  "key_indicators": [
+    "field:value (context that makes this indicator diagnostic)"
+  ]
+}

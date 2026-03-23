@@ -15,38 +15,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(SOC_AGENT_ROOT))
+
+from hooks.scripts.frontmatter import parse_yaml_frontmatter  # noqa: E402, F401
 
 
 def get_runs_dir() -> Path:
     """Get the runs directory. Configurable via SOC_AGENT_RUNS_DIR env var."""
     return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
-
-
-def parse_yaml_frontmatter(text: str) -> dict:
-    """Parse simple YAML frontmatter from markdown."""
-    lines = text.strip().split("\n")
-    if not lines or lines[0].strip() != "---":
-        return {}
-
-    fields = {}
-    for line in lines[1:]:
-        stripped = line.strip()
-        if stripped == "---":
-            break
-        if ":" in stripped:
-            key, _, value = stripped.partition(":")
-            key = key.strip()
-            value = value.strip()
-            if value.lower() in ("null", "~", ""):
-                value = None
-            elif value.isdigit():
-                value = int(value)
-            elif value.startswith('"') and value.endswith('"'):
-                value = value[1:-1]
-            elif value.startswith("'") and value.endswith("'"):
-                value = value[1:-1]
-            fields[key] = value
-    return fields
 
 
 def find_latest_run() -> Path | None:

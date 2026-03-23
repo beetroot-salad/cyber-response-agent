@@ -18,54 +18,10 @@ from schemas.report_frontmatter import (
 )
 from hooks.scripts.validate_report import (
     check_precedent_exists,
-    parse_yaml_frontmatter,
     validate,
 )
 
 FIXTURES = SOC_AGENT_ROOT / "tests" / "fixtures" / "reports"
-
-
-# --- YAML frontmatter parsing ---
-
-
-class TestParseYamlFrontmatter:
-    def test_valid_frontmatter(self):
-        text = """---
-ticket_id: SEC-001
-status: resolved
-leads_pursued: 3
----
-# Body"""
-        fields = parse_yaml_frontmatter(text)
-        assert fields["ticket_id"] == "SEC-001"
-        assert fields["status"] == "resolved"
-        assert fields["leads_pursued"] == 3
-
-    def test_null_values(self):
-        text = """---
-matched_precedent: null
-other: ~
-empty:
----"""
-        fields = parse_yaml_frontmatter(text)
-        assert fields["matched_precedent"] is None
-        assert fields["other"] is None
-        assert fields["empty"] is None
-
-    def test_quoted_values(self):
-        text = """---
-trace: "a -> b -> c"
-name: 'single quoted'
----"""
-        fields = parse_yaml_frontmatter(text)
-        assert fields["trace"] == "a -> b -> c"
-        assert fields["name"] == "single quoted"
-
-    def test_no_frontmatter(self):
-        assert parse_yaml_frontmatter("# Just a heading") == {}
-
-    def test_empty_string(self):
-        assert parse_yaml_frontmatter("") == {}
 
 
 # --- ReportFrontmatter validation ---
