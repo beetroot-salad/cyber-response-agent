@@ -18,94 +18,11 @@ from pathlib import Path
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
+from hooks.scripts.frontmatter import parse_yaml_frontmatter  # noqa: F401 — re-exported
 from schemas.report_frontmatter import (
     MIN_LEADS_BY_SEVERITY,
     parse_frontmatter,
 )
-
-
-def _parse_scalar(value: str):
-    """Parse a single YAML scalar value."""
-    if value.lower() in ("null", "~", ""):
-        return None
-    if value.isdigit():
-        return int(value)
-    if value.startswith('"') and value.endswith('"'):
-        return value[1:-1]
-    if value.startswith("'") and value.endswith("'"):
-        return value[1:-1]
-    return value
-
-
-def _parse_inline_list(value: str) -> list:
-    """Parse an inline YAML list like [a, b, c]."""
-    inner = value[1:-1].strip()
-    if not inner:
-        return []
-    return [_parse_scalar(item.strip()) for item in inner.split(",")]
-
-
-def parse_yaml_frontmatter(text: str) -> dict:
-    """Parse YAML frontmatter from a markdown file.
-
-    Expects content between --- delimiters at the start of the file.
-    No external YAML library needed. Supports:
-    - Scalar values: strings, integers, null/~, quoted strings
-    - Inline lists: [a, b, c]
-    - Block lists: indented ``- item`` lines
-    - One level of nesting: indented ``key: value`` under a parent
-    """
-    lines = text.strip().split("\n")
-    if not lines or lines[0].strip() != "---":
-        return {}
-
-    # Extract frontmatter lines between --- delimiters.
-    fm_lines = []
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        fm_lines.append(line)
-
-    fields = {}
-    current_key = None  # Tracks parent key for indented content
-    for line in fm_lines:
-        indent = len(line) - len(line.lstrip())
-        stripped = line.strip()
-
-        if not stripped:
-            continue
-
-        # Indented line — belongs to current_key (list item or nested key).
-        if indent > 0 and current_key is not None:
-            if stripped.startswith("- "):
-                item = _parse_scalar(stripped[2:].strip())
-                if not isinstance(fields[current_key], list):
-                    fields[current_key] = []
-                fields[current_key].append(item)
-            elif ":" in stripped:
-                sub_key, _, sub_value = stripped.partition(":")
-                if not isinstance(fields[current_key], dict):
-                    fields[current_key] = {}
-                fields[current_key][sub_key.strip()] = _parse_scalar(sub_value.strip())
-            continue
-
-        # Top-level key: value line.
-        if ":" in stripped:
-            key, _, value = stripped.partition(":")
-            key = key.strip()
-            value = value.strip()
-
-            if value.startswith("[") and value.endswith("]"):
-                fields[key] = _parse_inline_list(value)
-                current_key = key
-            elif value.lower() in ("null", "~", ""):
-                fields[key] = None
-                current_key = key
-            else:
-                fields[key] = _parse_scalar(value)
-                current_key = key
-
-    return fields
 
 
 def get_runs_dir() -> Path:

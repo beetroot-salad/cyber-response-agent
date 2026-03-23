@@ -14,7 +14,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from schemas.precedent import parse_precedent
-from hooks.scripts.validate_report import parse_yaml_frontmatter
+from hooks.scripts.frontmatter import parse_yaml_frontmatter
 
 KNOWLEDGE_DIR = SOC_AGENT_ROOT / "knowledge"
 SIGNATURES_DIR = KNOWLEDGE_DIR / "signatures"

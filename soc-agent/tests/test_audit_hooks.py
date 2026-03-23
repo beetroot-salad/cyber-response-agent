@@ -20,10 +20,8 @@ from hooks.scripts.audit_tool_calls import (
     sanitize_tool_input,
     truncate,
 )
-from hooks.scripts.investigation_summary import (
-    find_latest_run,
-    parse_yaml_frontmatter,
-)
+from hooks.scripts.frontmatter import parse_yaml_frontmatter
+from hooks.scripts.investigation_summary import find_latest_run
 
 
 # --- truncate ---
