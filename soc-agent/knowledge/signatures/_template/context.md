@@ -5,12 +5,14 @@ severity: low|medium|high|critical
 data_sources: []
 created_at: YYYY-MM-DD
 updated_at: YYYY-MM-DD
-mitre_tactics: null
-mitre_techniques: null
+mitre:
+  tactics: null
+  techniques: null
 references: null
-related_signatures: null
-base_rate_benign_pct: null
-base_rate_sample_size: null
+related_signatures: []
+base_rate:
+  benign_pct: null
+  sample_size: null
 ---
 
 # Rule: SIGNATURE-ID

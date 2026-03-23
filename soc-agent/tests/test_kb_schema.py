@@ -129,8 +129,11 @@ class TestContextFrontmatter:
         fm = parse_yaml_frontmatter(path.read_text())
         assert fm["signature_id"] == "wazuh-rule-5710"
         assert fm["severity"] == "medium"
-        assert fm["mitre_tactics"] == "Initial Access"
-        assert fm["mitre_techniques"] == "T1110"
+        assert isinstance(fm["mitre"], dict)
+        assert fm["mitre"]["tactics"] == "Initial Access"
+        assert fm["mitre"]["techniques"] == "T1110"
+        assert isinstance(fm["data_sources"], list)
+        assert "sshd" in fm["data_sources"]
 
 
 # --- Precedent schema edge cases ---

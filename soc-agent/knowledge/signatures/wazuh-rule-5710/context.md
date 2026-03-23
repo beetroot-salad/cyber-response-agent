@@ -8,12 +8,15 @@ data_sources:
   - /var/log/secure
 created_at: 2024-11-15
 updated_at: 2026-03-23
-mitre_tactics: Initial Access
-mitre_techniques: T1110
+mitre:
+  tactics: Initial Access
+  techniques: T1110
 references: null
-related_signatures: wazuh-rule-5712
-base_rate_benign_pct: null
-base_rate_sample_size: null
+related_signatures:
+  - wazuh-rule-5712
+base_rate:
+  benign_pct: null
+  sample_size: null
 ---
 
 # Wazuh Rule 5710: SSH Invalid User

@@ -67,6 +67,66 @@ name: 'single quoted'
     def test_empty_string(self):
         assert parse_yaml_frontmatter("") == {}
 
+    def test_block_list(self):
+        text = """---
+items:
+  - alpha
+  - bravo
+  - charlie
+---"""
+        fields = parse_yaml_frontmatter(text)
+        assert fields["items"] == ["alpha", "bravo", "charlie"]
+
+    def test_inline_list(self):
+        text = """---
+tags: [one, two, three]
+empty: []
+---"""
+        fields = parse_yaml_frontmatter(text)
+        assert fields["tags"] == ["one", "two", "three"]
+        assert fields["empty"] == []
+
+    def test_nested_dict(self):
+        text = """---
+mitre:
+  tactics: Initial Access
+  techniques: T1110
+---"""
+        fields = parse_yaml_frontmatter(text)
+        assert isinstance(fields["mitre"], dict)
+        assert fields["mitre"]["tactics"] == "Initial Access"
+        assert fields["mitre"]["techniques"] == "T1110"
+
+    def test_nested_dict_with_null(self):
+        text = """---
+base_rate:
+  benign_pct: null
+  sample_size: null
+---"""
+        fields = parse_yaml_frontmatter(text)
+        assert isinstance(fields["base_rate"], dict)
+        assert fields["base_rate"]["benign_pct"] is None
+        assert fields["base_rate"]["sample_size"] is None
+
+    def test_mixed_types(self):
+        """Flat scalars, lists, and nested dicts in the same frontmatter."""
+        text = """---
+name: test
+severity: medium
+data_sources:
+  - sshd
+  - auth.log
+mitre:
+  tactics: Persistence
+count: 5
+---"""
+        fields = parse_yaml_frontmatter(text)
+        assert fields["name"] == "test"
+        assert fields["severity"] == "medium"
+        assert fields["data_sources"] == ["sshd", "auth.log"]
+        assert fields["mitre"] == {"tactics": "Persistence"}
+        assert fields["count"] == 5
+
 
 # --- ReportFrontmatter validation ---
 

@@ -22,30 +22,84 @@ def get_runs_dir() -> Path:
     return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
 
 
+def _parse_scalar(value: str):
+    """Parse a single YAML scalar value."""
+    if value.lower() in ("null", "~", ""):
+        return None
+    if value.isdigit():
+        return int(value)
+    if value.startswith('"') and value.endswith('"'):
+        return value[1:-1]
+    if value.startswith("'") and value.endswith("'"):
+        return value[1:-1]
+    return value
+
+
+def _parse_inline_list(value: str) -> list:
+    """Parse an inline YAML list like [a, b, c]."""
+    inner = value[1:-1].strip()
+    if not inner:
+        return []
+    return [_parse_scalar(item.strip()) for item in inner.split(",")]
+
+
 def parse_yaml_frontmatter(text: str) -> dict:
-    """Parse simple YAML frontmatter from markdown."""
+    """Parse YAML frontmatter from a markdown file.
+
+    Expects content between --- delimiters at the start of the file.
+    No external YAML library needed. Supports:
+    - Scalar values: strings, integers, null/~, quoted strings
+    - Inline lists: [a, b, c]
+    - Block lists: indented ``- item`` lines
+    - One level of nesting: indented ``key: value`` under a parent
+    """
     lines = text.strip().split("\n")
     if not lines or lines[0].strip() != "---":
         return {}
 
-    fields = {}
+    fm_lines = []
     for line in lines[1:]:
-        stripped = line.strip()
-        if stripped == "---":
+        if line.strip() == "---":
             break
+        fm_lines.append(line)
+
+    fields = {}
+    current_key = None
+    for line in fm_lines:
+        indent = len(line) - len(line.lstrip())
+        stripped = line.strip()
+
+        if not stripped:
+            continue
+
+        if indent > 0 and current_key is not None:
+            if stripped.startswith("- "):
+                item = _parse_scalar(stripped[2:].strip())
+                if not isinstance(fields[current_key], list):
+                    fields[current_key] = []
+                fields[current_key].append(item)
+            elif ":" in stripped:
+                sub_key, _, sub_value = stripped.partition(":")
+                if not isinstance(fields[current_key], dict):
+                    fields[current_key] = {}
+                fields[current_key][sub_key.strip()] = _parse_scalar(sub_value.strip())
+            continue
+
         if ":" in stripped:
             key, _, value = stripped.partition(":")
             key = key.strip()
             value = value.strip()
-            if value.lower() in ("null", "~", ""):
-                value = None
-            elif value.isdigit():
-                value = int(value)
-            elif value.startswith('"') and value.endswith('"'):
-                value = value[1:-1]
-            elif value.startswith("'") and value.endswith("'"):
-                value = value[1:-1]
-            fields[key] = value
+
+            if value.startswith("[") and value.endswith("]"):
+                fields[key] = _parse_inline_list(value)
+                current_key = key
+            elif value.lower() in ("null", "~", ""):
+                fields[key] = None
+                current_key = key
+            else:
+                fields[key] = _parse_scalar(value)
+                current_key = key
+
     return fields
 
 
