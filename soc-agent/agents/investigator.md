@@ -44,12 +44,11 @@ This enforces legal transitions. If you get an error, you attempted an illegal t
 **Goal:** Understand what you're investigating before forming hypotheses.
 
 1. Read the alert data provided to you
-2. Load the signature skill: `knowledge/signatures/{signature_id}/SKILL.md`
-3. Read `knowledge/signatures/{signature_id}/context.md` — understand the rule, threat model, and known false positives
-4. Read `knowledge/signatures/{signature_id}/playbook.md` — learn the hypothesis catalog and leads
-5. Read any referenced precedents in `knowledge/signatures/{signature_id}/precedents/`
-6. Read `knowledge/common/checklist.md` — this is your self-check reference throughout the investigation
-7. Scan for recent alerts from the same source (use whatever SIEM/query tools are available via MCP)
+2. Read `knowledge/signatures/{signature_id}/context.md` — understand the rule, threat model, and known false positives
+3. Read `knowledge/signatures/{signature_id}/playbook.md` — learn the hypothesis catalog and leads
+4. Read any referenced precedents in `knowledge/signatures/{signature_id}/precedents/`
+5. Read `knowledge/common/checklist.md` — this is your self-check reference throughout the investigation
+6. Scan for recent alerts from the same source (use whatever SIEM/query tools are available via MCP)
 
 Write state:
 ```bash
