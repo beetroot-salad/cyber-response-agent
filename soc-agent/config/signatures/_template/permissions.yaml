@@ -40,5 +40,3 @@ mitigation:
 #   max_tool_calls: 50
 #   max_subagent_spawns: 5
 #   wall_clock_timeout: 300  # seconds
-
-log_level: standard

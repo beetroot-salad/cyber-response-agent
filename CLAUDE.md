@@ -33,7 +33,7 @@ Alert → Triage Skill → Investigator Agent → Report
 | **Validate Report Hook** | `soc-agent/hooks/scripts/validate_report.py` | Stop hook: Tier 1 report validation (safety gate) |
 | **Write State Script** | `soc-agent/hooks/scripts/write_state.py` | State machine enforcement |
 | **Investigation Summary Hook** | `soc-agent/hooks/scripts/investigation_summary.py` | JSONL outcome log per completed investigation |
-| **Tool Call Audit Hook** | `soc-agent/hooks/scripts/audit_tool_calls.py` | PostToolUse JSONL audit trail |
+| **Tool Call Audit Hook** | `soc-agent/hooks/scripts/audit_tool_calls.py` | PostToolUse: audit + trace JSONL split |
 
 ### Safety Architecture
 
@@ -59,7 +59,7 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │       ├── validate_report.py      # Stop hook: report validation
 │   │       ├── write_state.py          # State machine enforcement
 │   │       ├── investigation_summary.py # Stop hook: JSONL outcome log
-│   │       └── audit_tool_calls.py     # PostToolUse: JSONL tool audit trail
+│   │       └── audit_tool_calls.py     # PostToolUse: audit + trace JSONL split
 │   ├── knowledge/
 │   │   ├── common/
 │   │   │   ├── SKILL.md           # Common investigation knowledge
@@ -148,7 +148,8 @@ The agent uses a structured vocabulary for investigations:
 ### Auditability
 - Every investigation creates: alert.json, investigation.md, state.json, report.md
 - JSONL investigation outcomes in runs/audit.jsonl
-- JSONL tool call audit trail in runs/tool_audit.jsonl
+- JSONL tool call audit trail in runs/tool_audit.jsonl (state-changing tools)
+- JSONL tool call trace in runs/tool_trace.jsonl (read-only tools, for debugging)
 - Full phase-by-phase investigation log
 
 ## Adding a New Signature
