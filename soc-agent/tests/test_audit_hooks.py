@@ -16,6 +16,7 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.audit_tool_calls import (
     MAX_FIELD_LEN,
+    TRACE_TOOLS,
     sanitize_tool_input,
     truncate,
 )
@@ -111,8 +112,8 @@ class TestAuditToolCallsMain:
     def test_includes_subagent_fields(self, tmp_path):
         hook_input = {
             "session_id": "sess-456",
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/tmp/test.py"},
+            "tool_name": "Bash",
+            "tool_input": {"command": "whoami"},
             "tool_use_id": "toolu_def",
             "agent_id": "agent-789",
             "agent_type": "Explore",
@@ -129,6 +130,47 @@ class TestAuditToolCallsMain:
         )
         assert entry["agent_id"] == "agent-789"
         assert entry["agent_type"] == "Explore"
+
+    def test_read_tool_goes_to_trace(self, tmp_path):
+        hook_input = {
+            "session_id": "sess-789",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/tmp/test.py"},
+            "tool_use_id": "toolu_ghi",
+        }
+
+        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
+            with patch("sys.stdin", StringIO(json.dumps(hook_input))):
+                with pytest.raises(SystemExit):
+                    from hooks.scripts.audit_tool_calls import main
+                    main()
+
+        assert not (tmp_path / "tool_audit.jsonl").exists()
+        trace_file = tmp_path / "tool_trace.jsonl"
+        assert trace_file.exists()
+        entry = json.loads(trace_file.read_text().strip())
+        assert entry["tool_name"] == "Read"
+
+    def test_glob_and_grep_go_to_trace(self, tmp_path):
+        for tool in ["Glob", "Grep"]:
+            hook_input = {
+                "session_id": "sess-trace",
+                "tool_name": tool,
+                "tool_input": {"pattern": "*.py"},
+                "tool_use_id": f"toolu_{tool.lower()}",
+            }
+            with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
+                with patch("sys.stdin", StringIO(json.dumps(hook_input))):
+                    with pytest.raises(SystemExit):
+                        from hooks.scripts.audit_tool_calls import main
+                        main()
+
+        lines = (tmp_path / "tool_trace.jsonl").read_text().strip().split("\n")
+        assert len(lines) == 2
+        assert not (tmp_path / "tool_audit.jsonl").exists()
+
+    def test_trace_tools_constant(self):
+        assert TRACE_TOOLS == {"Read", "Glob", "Grep"}
 
     def test_invalid_stdin_exits_zero(self, tmp_path):
         with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):

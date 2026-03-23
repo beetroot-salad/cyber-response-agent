@@ -58,5 +58,5 @@ temp/
 *.tmp
 
 # Runtime investigation/triage runs (contain sensitive alert data)
-runs/*
-!runs/.gitkeep
+**/runs/*
+!**/runs/.gitkeep

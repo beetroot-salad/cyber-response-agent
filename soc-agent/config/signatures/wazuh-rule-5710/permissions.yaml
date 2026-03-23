@@ -45,5 +45,3 @@ mitigation:
 # Design note: denied mitigation responses could count against budget
 # differently (e.g., 3x weight) to surface agents that are stuck or
 # repeatedly requesting actions outside their permissions.
-
-log_level: verbose

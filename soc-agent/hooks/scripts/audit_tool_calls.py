@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""PostToolUse hook: Log every tool call to an audit trail.
+"""PostToolUse hook: Log tool calls to audit and trace files.
 
-Records what tools were invoked, with what inputs, by whom, and when.
-Writes JSONL entries to runs/tool_audit.jsonl.
+Writes to two global JSONL files based on tool classification:
+  - tool_audit.jsonl  — state-changing / external tools (Bash, Write, Edit, Agent, MCP)
+  - tool_trace.jsonl  — read-only navigation tools (Read, Glob, Grep)
+
+Both files are always written. The split supports different retention policies:
+audit is the compliance/security record, trace is for post-mortem debugging.
 
 Exit codes:
-    0 - Always (audit logging should never block the agent)
+    0 - Always (logging should never block the agent)
 """
 
 import json
@@ -19,6 +23,9 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 # Maximum length for any single field value in the audit entry.
 # Prevents multi-MB Write/Edit content from bloating the log.
 MAX_FIELD_LEN = 2000
+
+# Read-only tools go to tool_trace.jsonl; everything else to tool_audit.jsonl.
+TRACE_TOOLS = {"Read", "Glob", "Grep"}
 
 
 def get_runs_dir() -> Path:
@@ -69,10 +76,12 @@ def main():
         entry["agent_id"] = hook_data["agent_id"]
         entry["agent_type"] = hook_data.get("agent_type")
 
-    audit_path = get_runs_dir() / "tool_audit.jsonl"
-    audit_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(audit_path, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    tool_name = hook_data.get("tool_name", "")
+    filename = "tool_trace.jsonl" if tool_name in TRACE_TOOLS else "tool_audit.jsonl"
+    out_path = get_runs_dir() / filename
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     sys.exit(0)
 
