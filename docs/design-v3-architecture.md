@@ -352,7 +352,7 @@ Playbooks reference atomic leads (from `common/leads/`) and organize them into a
 | `signature_id` | mandatory | Links to context.md |
 | `last_updated` | mandatory | When playbook was last revised |
 | `total_investigations` | recommended | Running count, updated by post-mortem |
-| `auto_close_rate` | optional | % resulting in auto-close |
+| `resolution_rate` | optional | % resulting in resolution (non-escalation) |
 
 **Body sections:**
 
@@ -629,7 +629,7 @@ Fires when the investigator writes `report.md`. The report is a single unified f
 | 1 | Frontmatter schema | Required fields present, valid enum values | Reject, agent must fix |
 | 2 | Minimum evidence | `leads_pursued` ≥ minimum per severity (low:1, med:2, high:3, crit:4) | Reject, investigate more or escalate |
 | 3 | Precedent requirement | status=resolved → `matched_precedent` non-null, references existing precedent, `signature_id` matches, flow overlap (§3.9) | Override to escalate |
-| 4 | Escalation patterns | Alert fields vs `permissions.yaml` patterns (critical assets, external IPs) | Override to escalate |
+| 4 | Criticality heuristics | Critical assets, external IPs — based on signature context and organizational knowledge | Override to escalate |
 | 5 | Criticality check | Critical assets → always escalate; elevated → doubled evidence minimum | Override to escalate |
 
 **Tier 2 — Semantic judge (Haiku-class LLM, ~1-2s, runs only if Tier 1 passes):**
@@ -826,7 +826,7 @@ The container recommendation is consistent with the existing script isolation mo
 | Autonomy | Manual invocation per ticket | Automatic invocation on new alerts |
 | Budget | Conservative limits (fewer tool calls) | Generous limits (deeper investigation) |
 
-Each axis is independently configurable per signature via `permissions.yaml`. A mature, high-volume, well-understood signature (e.g., monitoring probe alerts with 95%+ benign rate) might run in `act` mode with automatic invocation, while a new or high-severity signature stays in `recommend` mode with manual invocation.
+Each axis is independently configurable per signature via `permissions.yaml`. Mode and mitigation actions are gated per-signature; the investigation agent always has full read/query access. A mature, high-volume, well-understood signature (e.g., monitoring probe alerts with 95%+ benign rate) might run in `act` mode with broad mitigation permissions, while a new or high-severity signature stays in `recommend` mode with no allowed actions.
 
 ### 6.2 Recommended Integrations
 
@@ -873,7 +873,7 @@ Credentials are environment-level: env vars or mounted secrets. Scripts referenc
 4. Configure git host for learning loop (optional but recommended)
 5. Populate `config/siem-mapping.json` with available data sources
 6. Create initial KB (playbooks + precedents for highest-volume signatures)
-7. Set `permissions.yaml` per signature — mode, budget, autonomy level (§6.1a)
+7. Set `permissions.yaml` per signature — mode, mitigation actions, budget overrides (§6.1a)
 8. Seed approved script library with common query patterns
 9. Test with `recommend` mode on historical alerts
 10. Graduate to `act` mode for signatures with consistent accuracy

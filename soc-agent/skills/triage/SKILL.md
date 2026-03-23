@@ -34,12 +34,11 @@ Read the `mode` argument (default: `recommend`). If `mode=act`, output a warning
 
 Read `config/signatures/{signature_id}/permissions.yaml`. If not found, log a warning and use conservative defaults:
 - Assume `mode: recommend`
-- Assume no auto-close
-- Assume all dispositions allowed
+- Assume no mitigation actions allowed
 
-### Step 4: Pre-Investigation Escalation Check
+### Step 4: Pass Permissions to Investigator
 
-Before investigating, check if the alert matches any `escalation_patterns` from permissions. If matched, skip investigation and output an immediate escalation recommendation with the reason.
+Include the loaded permissions (mode + mitigation actions) in the investigator context. The investigation agent has full read/query access regardless of permissions — only mitigation actions are gated per-signature via the mitigation skill.
 
 ### Step 5: Create Run Directory
 

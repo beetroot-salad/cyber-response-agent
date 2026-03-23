@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Stop hook: Append run summary to audit log.
+"""Stop hook: Append investigation outcome summary to runs/audit.jsonl.
 
-Reads the most recent completed run and appends a JSONL entry to runs/audit.jsonl.
+Reads the most recent completed run and appends a JSONL entry with the
+investigation verdict (status, disposition, confidence, precedent match).
 
 Exit codes:
-    0 - Always (audit logging should never block the agent)
+    0 - Always (summary logging should never block the agent)
 """
 
 import json

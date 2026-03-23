@@ -32,7 +32,8 @@ Alert → Triage Skill → Investigator Agent → Report
 | **Investigator Agent** | `soc-agent/agents/investigator.md` | Hypothesis-driven investigation loop |
 | **Validate Report Hook** | `soc-agent/hooks/scripts/validate_report.py` | Stop hook: Tier 1 report validation (safety gate) |
 | **Write State Script** | `soc-agent/hooks/scripts/write_state.py` | State machine enforcement |
-| **Audit Logger Hook** | `soc-agent/hooks/scripts/audit_logger.py` | JSONL audit trail |
+| **Investigation Summary Hook** | `soc-agent/hooks/scripts/investigation_summary.py` | JSONL outcome log per completed investigation |
+| **Tool Call Audit Hook** | `soc-agent/hooks/scripts/audit_tool_calls.py` | PostToolUse JSONL audit trail |
 
 ### Safety Architecture
 
@@ -55,9 +56,10 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │       └── SKILL.md           # Entry point: triage an alert
 │   ├── hooks/
 │   │   └── scripts/
-│   │       ├── validate_report.py # Stop hook: report validation
-│   │       ├── write_state.py     # State machine enforcement
-│   │       └── audit_logger.py    # JSONL audit trail
+│   │       ├── validate_report.py      # Stop hook: report validation
+│   │       ├── write_state.py          # State machine enforcement
+│   │       ├── investigation_summary.py # Stop hook: JSONL outcome log
+│   │       └── audit_tool_calls.py     # PostToolUse: JSONL tool audit trail
 │   ├── knowledge/
 │   │   ├── common/
 │   │   │   ├── SKILL.md           # Common investigation knowledge
@@ -77,12 +79,15 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │   └── precedent.py
 │   ├── config/
 │   │   └── signatures/
+│   │       ├── _template/
+│   │       │   └── permissions.yaml  # Template for new signatures
 │   │       └── wazuh-rule-5710/
 │   │           └── permissions.yaml
 │   ├── tests/                     # pytest test suite
 │   │   ├── test_validate_report.py
 │   │   ├── test_state_transitions.py
 │   │   ├── test_kb_schema.py
+│   │   ├── test_audit_hooks.py
 │   │   ├── test_e2e_mock.py
 │   │   ├── test_e2e_live.py
 │   │   └── fixtures/
@@ -107,6 +112,7 @@ pytest soc-agent/tests/ -v
 pytest soc-agent/tests/test_validate_report.py -v    # Report validation
 pytest soc-agent/tests/test_state_transitions.py -v   # State machine
 pytest soc-agent/tests/test_kb_schema.py -v           # Knowledge base
+pytest soc-agent/tests/test_audit_hooks.py -v         # Audit hooks
 
 # Integration tests (require LLM)
 pytest soc-agent/tests/test_e2e_mock.py -m llm        # Mock SIEM
@@ -141,7 +147,8 @@ The agent uses a structured vocabulary for investigations:
 
 ### Auditability
 - Every investigation creates: alert.json, investigation.md, state.json, report.md
-- JSONL audit trail in runs/audit.jsonl
+- JSONL investigation outcomes in runs/audit.jsonl
+- JSONL tool call audit trail in runs/tool_audit.jsonl
 - Full phase-by-phase investigation log
 
 ## Adding a New Signature
