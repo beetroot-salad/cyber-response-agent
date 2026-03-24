@@ -2,7 +2,7 @@
 
 Two test tiers:
 1. Structural tests (no LLM) — validate artifacts, state machine, fixture well-formedness
-2. LLM integration tests (@pytest.mark.llm) — invoke the actual investigator via claude CLI
+2. LLM integration tests (@pytest.mark.llm) — invoke the investigate skill via claude CLI
    and validate the output structure
 
 Run structural tests: pytest soc-agent/tests/test_e2e_mock.py -v
@@ -185,12 +185,13 @@ class TestWriteStateIntegration:
 
 
 def _run_investigator(run_dir: Path, alert: dict, timeout: int = 300) -> str:
-    """Invoke the investigator agent via claude CLI.
+    """Invoke the investigate skill via claude CLI.
 
-    Simulates the triage skill flow:
+    Simulates the skill flow:
     1. Writes alert.json to run_dir
-    2. Invokes claude with investigator prompt + mock SIEM data
-    3. Returns the raw output
+    2. Resolves signature knowledge via resolve_imports.py
+    3. Invokes claude with skill prompt + mock SIEM data
+    4. Returns the raw output
     """
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -202,8 +203,18 @@ def _run_investigator(run_dir: Path, alert: dict, timeout: int = 300) -> str:
     siem_fixture = FIXTURES / "siem_responses" / "wazuh-5710-monitoring-probe.json"
     siem_data = json.loads(siem_fixture.read_text()) if siem_fixture.exists() else {}
 
-    # Build the prompt that the triage skill would send to the investigator
-    prompt = f"""You are running an investigation. Your working directory is the soc-agent plugin root.
+    # Resolve signature knowledge (simulates !command preprocessing)
+    resolve_result = subprocess.run(
+        [sys.executable, str(SOC_AGENT_ROOT / "scripts" / "resolve_imports.py"), sig_id],
+        capture_output=True, text=True, cwd=str(SOC_AGENT_ROOT),
+    )
+    resolved_knowledge = resolve_result.stdout if resolve_result.returncode == 0 else ""
+
+    # Build the prompt that simulates the investigate skill
+    prompt = f"""You are running a security alert investigation. Your working directory is the soc-agent plugin root.
+
+SIGNATURE KNOWLEDGE (resolved at skill load time):
+{resolved_knowledge}
 
 ALERT DATA:
 ```json
@@ -218,12 +229,12 @@ MOCK SIEM DATA (use this instead of querying live SIEM — no MCP tools are avai
 ```
 
 INSTRUCTIONS:
-1. Read the investigator agent instructions from agents/investigator.md
-2. Read the checklist from knowledge/common/checklist.md
-3. Read the signature knowledge from knowledge/signatures/{sig_id}/
-4. Follow the investigation loop: CONTEXTUALIZE -> HYPOTHESIZE -> GATHER -> ANALYZE -> CONCLUDE
-5. At each phase, call write_state.py: python3 hooks/scripts/write_state.py {run_dir} <PHASE> {alert['ticket_id']} {sig_id}
-6. For the GATHER phase, use the MOCK SIEM DATA above instead of querying live tools
+1. Read the investigate skill instructions from skills/investigate/SKILL.md
+2. The signature knowledge above is already resolved — do not re-read context.md, playbook.md, or checklist.md
+3. Follow the investigation loop: CONTEXTUALIZE -> HYPOTHESIZE -> GATHER -> ANALYZE -> CONCLUDE
+4. At each phase, call write_state.py: python3 hooks/scripts/write_state.py {run_dir} <PHASE> {alert['ticket_id']} {sig_id}
+5. For the GATHER phase, use the MOCK SIEM DATA above instead of querying live tools
+6. Skip the Explore subagent for precedents in this test — use the mock data
 7. Write investigation.md and report.md to {run_dir}/
 8. The report.md MUST have YAML frontmatter with all required fields
 
