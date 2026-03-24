@@ -24,7 +24,7 @@ Description of the second candidate explanation (must include at least one adver
 ## Lead List
 
 ### lead-name-1
-**Query:** What to search for.
+**Query:** What to search for. <!-- Reference common knowledge with @import:name, e.g. @import:ip-classification or @import:wazuh-queries. The resolver loads referenced files automatically. -->
 
 **Discriminates:** Which hypotheses this lead helps distinguish.
 
