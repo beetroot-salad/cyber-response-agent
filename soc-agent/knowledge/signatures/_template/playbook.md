@@ -26,6 +26,8 @@ Description of the second candidate explanation (must include at least one adver
 ### lead-name-1
 **Query:** What to search for.
 
+> **Tip:** Reference common knowledge inline with `@import:name` — e.g., `@import:ip-classification` or `@import:wazuh-queries`. The resolver loads referenced files automatically at skill load time.
+
 **Discriminates:** Which hypotheses this lead helps distinguish.
 
 | Hypothesis | Prediction |

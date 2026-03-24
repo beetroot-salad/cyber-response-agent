@@ -1,0 +1,277 @@
+"""Tests for the resolve_imports.py script.
+
+Validates that the resolver correctly:
+- Outputs context.md, playbook.md, checklist.md for valid signatures
+- Extracts and resolves @import:name references from playbook body
+- Handles missing imports gracefully (warning, not failure)
+- Fails on missing signature directory
+- Rejects path traversal attempts
+- Produces correct end-to-end concatenated output
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
+SCRIPT = SOC_AGENT_ROOT / "scripts" / "resolve_imports.py"
+
+sys.path.insert(0, str(SOC_AGENT_ROOT / "scripts"))
+from resolve_imports import extract_imports, resolve_import
+
+
+def run_resolver(signature_id: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), signature_id],
+        capture_output=True,
+        text=True,
+        cwd=str(SOC_AGENT_ROOT),
+    )
+
+
+@pytest.fixture(scope="module")
+def wazuh_5710_result():
+    """Run resolver once for wazuh-rule-5710, share across tests."""
+    return run_resolver("wazuh-rule-5710")
+
+
+class TestResolverHappyPath:
+    """Tests with the real wazuh-rule-5710 signature."""
+
+    def test_exit_code_zero(self, wazuh_5710_result):
+        assert wazuh_5710_result.returncode == 0, f"stderr: {wazuh_5710_result.stderr}"
+
+    def test_contains_context(self, wazuh_5710_result):
+        assert "<!-- source: knowledge/signatures/wazuh-rule-5710/context.md -->" in wazuh_5710_result.stdout
+        assert "SSH Invalid User" in wazuh_5710_result.stdout
+
+    def test_contains_playbook(self, wazuh_5710_result):
+        assert "<!-- source: knowledge/signatures/wazuh-rule-5710/playbook.md -->" in wazuh_5710_result.stdout
+        assert "Hypothesis Catalog" in wazuh_5710_result.stdout
+
+    def test_contains_checklist(self, wazuh_5710_result):
+        assert "<!-- source: knowledge/common/checklist.md -->" in wazuh_5710_result.stdout
+        assert "Investigation Checklist" in wazuh_5710_result.stdout
+
+    def test_output_order(self, wazuh_5710_result):
+        """Context before playbook before checklist."""
+        out = wazuh_5710_result.stdout
+        ctx_pos = out.index("context.md -->")
+        pb_pos = out.index("playbook.md -->")
+        cl_pos = out.index("checklist.md -->")
+        assert ctx_pos < pb_pos < cl_pos
+
+
+class TestResolverImports:
+    """Tests for @import:name resolution."""
+
+    def test_resolves_imports_from_playbook(self, wazuh_5710_result):
+        """@import: refs in wazuh-rule-5710 playbook should resolve."""
+        out = wazuh_5710_result.stdout
+        assert "ip-classification.md -->" in out
+        assert "IP Classification" in out
+        assert "wazuh-queries.md -->" in out
+        assert "Wazuh Query Patterns" in out
+
+    def test_deduplicates_imports(self, wazuh_5710_result):
+        """Same @import referenced twice should only appear once in output."""
+        out = wazuh_5710_result.stdout
+        assert out.count("ip-classification.md -->") == 1
+        assert out.count("wazuh-queries.md -->") == 1
+
+    def test_imports_after_checklist(self, wazuh_5710_result):
+        """Imported atoms appear after the checklist."""
+        out = wazuh_5710_result.stdout
+        cl_pos = out.index("checklist.md -->")
+        ip_pos = out.index("ip-classification.md -->")
+        assert cl_pos < ip_pos
+
+
+class TestResolverErrors:
+    """Tests for error handling."""
+
+    def test_missing_signature_fails(self):
+        result = run_resolver("nonexistent-sig-99999")
+        assert result.returncode == 1
+        assert "not found" in result.stderr
+
+    def test_no_args_fails(self):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert "Usage" in result.stderr
+
+    def test_path_traversal_rejected(self):
+        """Signature IDs with path traversal must be rejected."""
+        result = run_resolver("../../.claude/settings")
+        assert result.returncode == 1
+        assert "traversal" in result.stderr.lower() or "not found" in result.stderr.lower()
+
+    def test_path_traversal_with_existing_dir(self):
+        """Even paths that resolve to existing dirs outside signatures/ must fail."""
+        result = run_resolver("../common")
+        assert result.returncode == 1
+
+
+class TestExtractImports:
+    """Unit tests for the import extraction logic."""
+
+    def test_extract_imports(self):
+        text = """
+### source-reputation
+See @import:ip-classification for classification rules.
+
+### authentication-history
+Query patterns: @import:wazuh-queries
+"""
+        imports = extract_imports(text)
+        assert imports == ["ip-classification", "wazuh-queries"]
+
+    def test_extract_deduplicates(self):
+        text = "@import:foo and @import:bar and @import:foo again"
+        imports = extract_imports(text)
+        assert imports == ["foo", "bar"]
+
+    def test_extract_empty(self):
+        text = "No imports here."
+        imports = extract_imports(text)
+        assert imports == []
+
+    def test_resolve_import_lessons(self):
+        path = resolve_import("ip-classification")
+        assert path is not None
+        assert path.name == "ip-classification.md"
+        assert "lessons" in str(path)
+
+    def test_resolve_import_utilities(self):
+        path = resolve_import("wazuh-queries")
+        assert path is not None
+        assert path.name == "wazuh-queries.md"
+        assert "utilities" in str(path)
+
+    def test_resolve_import_missing(self):
+        path = resolve_import("nonexistent-atom-xyz")
+        assert path is None
+
+
+class TestEndToEndResolve:
+    """End-to-end tests verifying the full resolve pipeline produces correct output."""
+
+    def test_output_contains_actual_file_contents(self, wazuh_5710_result):
+        """Resolved output must contain actual content from each source file, not just headers."""
+        out = wazuh_5710_result.stdout
+
+        # context.md content
+        assert "Triggers when sshd logs an attempt to login using a non-existent user" in out
+        assert "data.srcip" in out
+
+        # playbook.md content
+        assert "?monitoring-probe" in out
+        assert "?brute-force" in out
+        assert "authentication-history" in out
+
+        # checklist.md content
+        assert "adversarial hypothesis" in out.lower()
+        assert "Common Mistakes" in out
+
+        # ip-classification.md content (via @import)
+        assert "RFC1918 Private Ranges" in out
+        assert "10.0.0.0/8" in out
+
+        # wazuh-queries.md content (via @import)
+        assert "rule.id:5710" in out
+        assert "data.srcip:{srcip}" in out
+
+    def test_output_has_all_source_markers(self, wazuh_5710_result):
+        """Each included file must have a source comment marker."""
+        out = wazuh_5710_result.stdout
+        expected_markers = [
+            "knowledge/signatures/wazuh-rule-5710/context.md",
+            "knowledge/signatures/wazuh-rule-5710/playbook.md",
+            "knowledge/common/checklist.md",
+            "knowledge/common/utilities/wazuh-queries.md",
+            "knowledge/common/lessons/ip-classification.md",
+        ]
+        for marker in expected_markers:
+            assert f"<!-- source: {marker} -->" in out, f"Missing source marker: {marker}"
+
+    def test_output_is_valid_markdown(self, wazuh_5710_result):
+        """Output should have markdown headers from each included file."""
+        out = wazuh_5710_result.stdout
+        # Each source file starts with a heading
+        assert "# Wazuh Rule 5710" in out
+        assert "# Investigation Playbook" in out
+        assert "# Investigation Checklist" in out
+        assert "# IP Classification" in out
+        assert "# Example: Wazuh Query Patterns" in out
+
+    def test_synthetic_playbook_with_imports(self, tmp_path):
+        """Create a minimal signature with @import refs and verify resolver output."""
+        # Create a synthetic signature directory
+        sig_dir = SOC_AGENT_ROOT / "knowledge" / "signatures" / "_test-synthetic"
+        sig_dir.mkdir(exist_ok=True)
+
+        try:
+            (sig_dir / "context.md").write_text(
+                "---\nsignature_id: _test-synthetic\nname: Test\nseverity: low\n"
+                "data_sources: [test]\n---\n# Test Context\nSynthetic test signature.\n"
+            )
+            (sig_dir / "playbook.md").write_text(
+                "---\nsignature_id: _test-synthetic\nlast_updated: 2026-01-01\n"
+                "total_investigations: 0\nresolution_rate: null\n---\n"
+                "# Test Playbook\n\n"
+                "### lead-1\nSee @import:ip-classification for IP ranges.\n\n"
+                "### lead-2\nSee @import:wazuh-queries for query syntax.\n"
+            )
+
+            result = run_resolver("_test-synthetic")
+            assert result.returncode == 0, f"stderr: {result.stderr}"
+
+            out = result.stdout
+            # Verify all expected files present
+            assert "# Test Context" in out
+            assert "# Test Playbook" in out
+            assert "# Investigation Checklist" in out
+            assert "# IP Classification" in out
+            assert "# Example: Wazuh Query Patterns" in out
+
+            # Verify correct ordering
+            ctx_pos = out.index("Test Context")
+            pb_pos = out.index("Test Playbook")
+            cl_pos = out.index("Investigation Checklist")
+            ip_pos = out.index("IP Classification")
+            wq_pos = out.index("Wazuh Query Patterns")
+            assert ctx_pos < pb_pos < cl_pos < ip_pos
+            assert cl_pos < wq_pos
+        finally:
+            # Clean up synthetic signature
+            import shutil
+            shutil.rmtree(sig_dir, ignore_errors=True)
+
+    def test_unresolvable_import_warns(self, tmp_path):
+        """An @import that can't be resolved should produce a warning comment, not a failure."""
+        sig_dir = SOC_AGENT_ROOT / "knowledge" / "signatures" / "_test-bad-import"
+        sig_dir.mkdir(exist_ok=True)
+
+        try:
+            (sig_dir / "context.md").write_text(
+                "---\nsignature_id: _test-bad-import\nname: Test\nseverity: low\n"
+                "data_sources: [test]\n---\n# Test\n"
+            )
+            (sig_dir / "playbook.md").write_text(
+                "---\nsignature_id: _test-bad-import\nlast_updated: 2026-01-01\n"
+                "total_investigations: 0\nresolution_rate: null\n---\n"
+                "# Playbook\nSee @import:nonexistent-atom-xyz\n"
+            )
+
+            result = run_resolver("_test-bad-import")
+            assert result.returncode == 0  # Partial success, not failure
+            assert "<!-- warning: @import:nonexistent-atom-xyz could not be resolved -->" in result.stdout
+        finally:
+            import shutil
+            shutil.rmtree(sig_dir, ignore_errors=True)
