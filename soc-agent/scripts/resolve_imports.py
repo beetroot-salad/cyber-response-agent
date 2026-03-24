@@ -71,7 +71,12 @@ def main() -> int:
         return 1
 
     signature_id = sys.argv[1]
-    sig_dir = SIGNATURES_DIR / signature_id
+    sig_dir = (SIGNATURES_DIR / signature_id).resolve()
+
+    # Prevent path traversal — signature_id must resolve under SIGNATURES_DIR
+    if not sig_dir.is_relative_to(SIGNATURES_DIR.resolve()):
+        print("Error: invalid signature_id (path traversal)", file=sys.stderr)
+        return 1
 
     if not sig_dir.is_dir():
         print(f"Error: signature directory not found: {sig_dir}", file=sys.stderr)
@@ -86,6 +91,9 @@ def main() -> int:
             print(f"Error: required file missing: {required}", file=sys.stderr)
             return 1
 
+    # Read playbook once — used for both output and import extraction
+    playbook_text = playbook_path.read_text()
+
     # 1. Signature context
     emit_file(context_path)
 
@@ -99,7 +107,6 @@ def main() -> int:
         print(f"\n<!-- warning: checklist not found at {checklist_path} -->")
 
     # 4. Resolve inline imports from playbook body
-    playbook_text = playbook_path.read_text()
     imports = extract_imports(playbook_text)
 
     for name in imports:

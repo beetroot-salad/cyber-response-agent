@@ -1,6 +1,8 @@
 ---
 name: investigate
 description: Hypothesis-driven security alert investigation. Loads signature knowledge via preprocessing, validates alert, creates run artifacts, and investigates through iterative hypothesis elimination.
+model: sonnet
+allowed-tools: Read, Glob, Grep, Bash, Agent
 arguments:
   - name: signature_id
     description: "Detection signature ID (e.g., wazuh-rule-5710). Used to load signature-specific knowledge."
@@ -16,7 +18,7 @@ arguments:
 
 The following signature context, playbook, checklist, and referenced knowledge atoms were resolved at skill load time.
 
-!`cd soc-agent && python3 scripts/resolve_imports.py $0`
+!`cd ${CLAUDE_SKILL_DIR}/../.. && python3 scripts/resolve_imports.py $0`
 
 ---
 

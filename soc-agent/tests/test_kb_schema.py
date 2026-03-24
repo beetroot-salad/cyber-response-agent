@@ -5,7 +5,6 @@ context.md frontmatter structure.
 """
 
 import json
-import re
 import sys
 from pathlib import Path
 
