@@ -33,9 +33,12 @@
 
 ### Knowledge Expansion
 - [ ] Second signature — validate cross-signature generalization (e.g., Falco rule or different Wazuh rule)
-- [ ] `common/leads/` — reusable lead definitions across signatures
-- [ ] `common/data-sources/` — data source documentation
-- [ ] `common/context/` — organizational context (asset inventory, team structure)
+- [x] `common/leads/` — reusable lead definitions across signatures (directory scaffolded)
+- [x] `environment/data-sources/` — data mapping: what data exists where (state + events)
+- [x] `environment/context/` — classification heuristics (ip-ranges, identity-patterns, criticality, data-classification)
+- [x] `environment/systems/` — system-specific implementation knowledge (wazuh/ migrated from common/utilities/)
+- [ ] Populate lead definitions in `common/leads/` (authentication-history, source-reputation, etc.)
+- [ ] Populate environment files with real org data (currently example/template content)
 
 ### Operations
 - [ ] `act` mode — auto-close for mature signatures with high-confidence precedent matches
