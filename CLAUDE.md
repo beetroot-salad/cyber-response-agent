@@ -15,21 +15,24 @@ This file provides guidance to Claude Code when working with this repository.
 ### Investigation Loop
 
 ```
-Alert → Triage Skill → Investigator Agent → Report
-                           │
-              CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE
-                                   ↑                    │
-                                   └────── loop ────────┘
-                                                        │
-                                                   CONCLUDE → report.md
+/investigate $signature_id $alert_json
+        │
+        ├── !command: resolve_imports.py bakes knowledge into prompt
+        │   (context.md + playbook.md + checklist.md + @import: atoms)
+        │
+        └── CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE
+                                 ↑                    │
+                                 └────── loop ────────┘
+                                                      │
+                                                 CONCLUDE → report.md
 ```
 
 ### Core Components
 
 | Component | Path | Purpose |
 |-----------|------|---------|
-| **Triage Skill** | `soc-agent/skills/triage/SKILL.md` | Entry point: validate alert, load permissions, spawn investigator |
-| **Investigator Agent** | `soc-agent/agents/investigator.md` | Hypothesis-driven investigation loop |
+| **Investigate Skill** | `soc-agent/skills/investigate/SKILL.md` | Entry point + investigation loop (merged skill) |
+| **Import Resolver** | `soc-agent/scripts/resolve_imports.py` | `!command` preprocessing: resolves signature knowledge |
 | **Validate Report Hook** | `soc-agent/hooks/scripts/validate_report.py` | Stop hook: Tier 1 report validation (safety gate) |
 | **Write State Script** | `soc-agent/hooks/scripts/write_state.py` | State machine enforcement |
 | **Investigation Summary Hook** | `soc-agent/hooks/scripts/investigation_summary.py` | JSONL outcome log per completed investigation |
@@ -49,11 +52,11 @@ Alert → Triage Skill → Investigator Agent → Report
 ├── soc-agent/                     # Claude Code plugin (all agent content)
 │   ├── .claude-plugin/
 │   │   └── plugin.json            # Plugin manifest
-│   ├── agents/
-│   │   └── investigator.md        # Hypothesis-driven investigation agent
 │   ├── skills/
-│   │   └── triage/
-│   │       └── SKILL.md           # Entry point: triage an alert
+│   │   └── investigate/
+│   │       └── SKILL.md           # Merged investigation skill (entry point + loop)
+│   ├── scripts/
+│   │   └── resolve_imports.py     # !command resolver: signature knowledge → stdout
 │   ├── hooks/
 │   │   └── scripts/
 │   │       ├── validate_report.py      # Stop hook: report validation
@@ -64,13 +67,13 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │   ├── common/
 │   │   │   ├── SKILL.md           # Common investigation knowledge
 │   │   │   ├── checklist.md       # Investigation self-check guide
-│   │   │   ├── lessons/           # IP classification, etc.
+│   │   │   ├── lessons/           # Atomic knowledge (IP classification, etc.)
 │   │   │   └── utilities/         # Example query patterns (Wazuh)
 │   │   └── signatures/
 │   │       ├── _template/         # Skeleton + onboarding guide for new signatures
 │   │       └── wazuh-rule-5710/   # SSH Invalid User (example signature)
 │   │           ├── context.md     # Signature reference + threat model
-│   │           ├── playbook.md    # Hypothesis catalog + leads
+│   │           ├── playbook.md    # Hypothesis catalog + leads + @import: refs
 │   │           └── precedents/    # Past resolved investigations
 │   ├── schemas/                   # Python dataclass validators (system contracts)
 │   │   ├── report_frontmatter.py
@@ -86,6 +89,7 @@ Alert → Triage Skill → Investigator Agent → Report
 │   │   ├── test_validate_report.py
 │   │   ├── test_state_transitions.py
 │   │   ├── test_kb_schema.py
+│   │   ├── test_resolve_imports.py
 │   │   ├── test_audit_hooks.py
 │   │   ├── test_e2e_mock.py
 │   │   ├── test_e2e_live.py
@@ -160,6 +164,8 @@ See `soc-agent/knowledge/signatures/_template/README.md` for the full onboarding
 3. Research past tickets for this signature — pull alerts, review closed tickets, identify outcome clusters
 4. Fill in `context.md` — signature logic, threat model, known false positives (grounded in real data)
 5. Fill in `playbook.md` — hypothesis catalog, leads with predictions (from actual investigation patterns)
+   - Use `@import:name` inline in leads to reference common knowledge atoms (e.g., `@import:ip-classification`, `@import:wazuh-queries`)
+   - The resolver (`scripts/resolve_imports.py`) loads referenced atoms automatically at skill load time
 6. Add precedents from representative tickets to `precedents/`
 7. Create `soc-agent/config/signatures/{signature-id}/permissions.yaml`
 
