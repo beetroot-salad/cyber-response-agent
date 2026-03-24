@@ -5,6 +5,7 @@ context.md frontmatter structure.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -12,9 +13,11 @@ import pytest
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
+sys.path.insert(0, str(SOC_AGENT_ROOT / "scripts"))
 
 from schemas.precedent import parse_precedent
 from hooks.scripts.frontmatter import parse_yaml_frontmatter
+from resolve_imports import IMPORT_PATTERN, resolve_import
 
 KNOWLEDGE_DIR = SOC_AGENT_ROOT / "knowledge"
 SIGNATURES_DIR = KNOWLEDGE_DIR / "signatures"
@@ -265,6 +268,54 @@ class TestPlaybookFrontmatter:
         assert fm, f"No frontmatter in {playbook_file}"
         assert "signature_id" in fm, f"Missing signature_id in {playbook_file}"
         assert "last_updated" in fm, f"Missing last_updated in {playbook_file}"
+
+
+# --- @import: resolution ---
+
+
+class TestPlaybookImports:
+    """All @import:name references in playbooks must resolve to real files."""
+
+    @staticmethod
+    def _get_imports_by_playbook():
+        """Return list of (playbook_path, import_name) tuples for parametrize."""
+        pairs = []
+        for sig_dir in SIGNATURES_DIR.iterdir():
+            if sig_dir.name.startswith("_"):
+                continue
+            playbook = sig_dir / "playbook.md"
+            if playbook.exists():
+                text = playbook.read_text()
+                for match in IMPORT_PATTERN.finditer(text):
+                    pairs.append((playbook, match.group(1)))
+        return pairs
+
+    def test_at_least_one_import_exists(self):
+        """At least one signature playbook should have @import: refs."""
+        pairs = self._get_imports_by_playbook()
+        assert len(pairs) > 0, "No @import: references found in any playbook"
+
+    @pytest.mark.parametrize(
+        "playbook_file, import_name",
+        [
+            pytest.param(pb, name, id=f"{pb.parent.name}/{name}")
+            for pb, name in [
+                (pb, name)
+                for sig_dir in SIGNATURES_DIR.iterdir()
+                if not sig_dir.name.startswith("_") and (sig_dir / "playbook.md").exists()
+                for pb in [sig_dir / "playbook.md"]
+                for name in [m.group(1) for m in IMPORT_PATTERN.finditer(pb.read_text())]
+            ]
+        ],
+    )
+    def test_import_resolves(self, playbook_file, import_name):
+        """Each @import:name must resolve to a file in lessons/ or utilities/."""
+        resolved = resolve_import(import_name)
+        assert resolved is not None, (
+            f"@import:{import_name} in {playbook_file.parent.name}/playbook.md "
+            f"does not resolve to any file in lessons/ or utilities/"
+        )
+        assert resolved.exists()
 
 
 # --- Precedent template ---
