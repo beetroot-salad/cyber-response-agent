@@ -13,7 +13,7 @@ Output order:
 3. knowledge/common/checklist.md (always — safety artifact)
 4. Each unique @import:name found in playbook body
 
-Resolution: @import:name looks in lessons/{name}.md then utilities/{name}.md.
+Resolution: @import:name looks in lessons/{name}.md.
 
 Exit codes:
   0 — success (partial success if some imports unresolvable)
@@ -33,7 +33,6 @@ IMPORT_PATTERN = re.compile(r"@import:([a-zA-Z0-9_-]+)")
 
 SEARCH_DIRS = [
     COMMON_DIR / "lessons",
-    COMMON_DIR / "utilities",
 ]
 
 
