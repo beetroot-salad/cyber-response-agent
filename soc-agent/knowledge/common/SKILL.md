@@ -17,7 +17,7 @@ Portable methodology for hypothesis-driven security alert investigation.
 - Common mistakes to avoid
 
 ### leads/
-Shared investigation vocabulary — reusable lead definitions that specify what to characterize, pitfalls to avoid, and data tags connecting to data sources.
+Shared investigation vocabulary — reusable lead definitions. Each specifies what to characterize, pitfalls to avoid, and `data_tags` connecting to `knowledge/environment/data-sources/`. Browse the directory for available leads.
 
 ### lessons/
 Cross-cutting lessons from past investigations.
