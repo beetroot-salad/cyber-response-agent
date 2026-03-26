@@ -64,16 +64,21 @@ This file provides guidance to Claude Code when working with this repository.
 │   │       ├── investigation_summary.py # Stop hook: JSONL outcome log
 │   │       └── audit_tool_calls.py     # PostToolUse: audit + trace JSONL split
 │   ├── knowledge/
-│   │   ├── common/
+│   │   ├── common/                # Portable investigation methodology
 │   │   │   ├── SKILL.md           # Common investigation knowledge
 │   │   │   ├── checklist.md       # Investigation self-check guide
-│   │   │   ├── lessons/           # Atomic knowledge (IP classification, etc.)
-│   │   │   └── utilities/         # Example query patterns (Wazuh)
+│   │   │   ├── leads/             # Reusable lead definitions (methodology)
+│   │   │   └── lessons/           # Cross-cutting investigation lessons
+│   │   ├── environment/           # Org-specific deployment knowledge
+│   │   │   ├── context/           # Classification heuristics (IP ranges, identity patterns, etc.)
+│   │   │   ├── data-sources/      # Data mapping: what data exists where (state + events)
+│   │   │   └── systems/           # System-specific implementation knowledge (queries, quirks)
+│   │   │       └── wazuh/         # Wazuh SIEM query patterns and field mappings
 │   │   └── signatures/
 │   │       ├── _template/         # Skeleton + onboarding guide for new signatures
 │   │       └── wazuh-rule-5710/   # SSH Invalid User (example signature)
 │   │           ├── context.md     # Signature reference + threat model
-│   │           ├── playbook.md    # Hypothesis catalog + leads + @import: refs
+│   │           ├── playbook.md    # Hypothesis catalog + leads
 │   │           └── precedents/    # Past resolved investigations
 │   ├── schemas/                   # Python dataclass validators (system contracts)
 │   │   ├── report_frontmatter.py
@@ -164,7 +169,7 @@ See `soc-agent/knowledge/signatures/_template/README.md` for the full onboarding
 3. Research past tickets for this signature — pull alerts, review closed tickets, identify outcome clusters
 4. Fill in `context.md` — signature logic, threat model, known false positives (grounded in real data)
 5. Fill in `playbook.md` — hypothesis catalog, leads with predictions (from actual investigation patterns)
-   - Use `@import:name` inline in leads to reference common knowledge atoms (e.g., `@import:ip-classification`, `@import:wazuh-queries`)
+   - Optionally use `@import:name` inline to reference common lessons from `knowledge/common/lessons/`
    - The resolver (`scripts/resolve_imports.py`) loads referenced atoms automatically at skill load time
 6. Add precedents from representative tickets to `precedents/`
 7. Create `soc-agent/config/signatures/{signature-id}/permissions.yaml`

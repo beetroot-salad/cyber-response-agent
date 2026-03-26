@@ -67,26 +67,12 @@ class TestResolverHappyPath:
 class TestResolverImports:
     """Tests for @import:name resolution."""
 
-    def test_resolves_imports_from_playbook(self, wazuh_5710_result):
-        """@import: refs in wazuh-rule-5710 playbook should resolve."""
+    def test_no_imports_in_playbook(self, wazuh_5710_result):
+        """wazuh-rule-5710 playbook has no @import: refs after migration."""
         out = wazuh_5710_result.stdout
-        assert "ip-classification.md -->" in out
-        assert "IP Classification" in out
-        assert "wazuh-queries.md -->" in out
-        assert "Wazuh Query Patterns" in out
-
-    def test_deduplicates_imports(self, wazuh_5710_result):
-        """Same @import referenced twice should only appear once in output."""
-        out = wazuh_5710_result.stdout
-        assert out.count("ip-classification.md -->") == 1
-        assert out.count("wazuh-queries.md -->") == 1
-
-    def test_imports_after_checklist(self, wazuh_5710_result):
-        """Imported atoms appear after the checklist."""
-        out = wazuh_5710_result.stdout
-        cl_pos = out.index("checklist.md -->")
-        ip_pos = out.index("ip-classification.md -->")
-        assert cl_pos < ip_pos
+        # No import source markers should appear after checklist
+        assert "ip-classification.md -->" not in out
+        assert "wazuh-queries.md -->" not in out
 
 
 class TestResolverErrors:
@@ -142,17 +128,10 @@ Query patterns: @import:wazuh-queries
         imports = extract_imports(text)
         assert imports == []
 
-    def test_resolve_import_lessons(self):
+    def test_moved_import_no_longer_resolves(self):
+        """ip-classification was moved to environment/context/, no longer importable."""
         path = resolve_import("ip-classification")
-        assert path is not None
-        assert path.name == "ip-classification.md"
-        assert "lessons" in str(path)
-
-    def test_resolve_import_utilities(self):
-        path = resolve_import("wazuh-queries")
-        assert path is not None
-        assert path.name == "wazuh-queries.md"
-        assert "utilities" in str(path)
+        assert path is None
 
     def test_resolve_import_missing(self):
         path = resolve_import("nonexistent-atom-xyz")
@@ -179,14 +158,6 @@ class TestEndToEndResolve:
         assert "adversarial hypothesis" in out.lower()
         assert "Common Mistakes" in out
 
-        # ip-classification.md content (via @import)
-        assert "RFC1918 Private Ranges" in out
-        assert "10.0.0.0/8" in out
-
-        # wazuh-queries.md content (via @import)
-        assert "rule.id:5710" in out
-        assert "data.srcip:{srcip}" in out
-
     def test_output_has_all_source_markers(self, wazuh_5710_result):
         """Each included file must have a source comment marker."""
         out = wazuh_5710_result.stdout
@@ -194,8 +165,6 @@ class TestEndToEndResolve:
             "knowledge/signatures/wazuh-rule-5710/context.md",
             "knowledge/signatures/wazuh-rule-5710/playbook.md",
             "knowledge/common/checklist.md",
-            "knowledge/common/utilities/wazuh-queries.md",
-            "knowledge/common/lessons/ip-classification.md",
         ]
         for marker in expected_markers:
             assert f"<!-- source: {marker} -->" in out, f"Missing source marker: {marker}"
@@ -207,12 +176,9 @@ class TestEndToEndResolve:
         assert "# Wazuh Rule 5710" in out
         assert "# Investigation Playbook" in out
         assert "# Investigation Checklist" in out
-        assert "# IP Classification" in out
-        assert "# Example: Wazuh Query Patterns" in out
 
-    def test_synthetic_playbook_with_imports(self, tmp_path):
-        """Create a minimal signature with @import refs and verify resolver output."""
-        # Create a synthetic signature directory
+    def test_synthetic_playbook_without_imports(self, tmp_path):
+        """Create a minimal signature without @import refs and verify resolver output."""
         sig_dir = SOC_AGENT_ROOT / "knowledge" / "signatures" / "_test-synthetic"
         sig_dir.mkdir(exist_ok=True)
 
@@ -225,31 +191,23 @@ class TestEndToEndResolve:
                 "---\nsignature_id: _test-synthetic\nlast_updated: 2026-01-01\n"
                 "total_investigations: 0\nresolution_rate: null\n---\n"
                 "# Test Playbook\n\n"
-                "### lead-1\nSee @import:ip-classification for IP ranges.\n\n"
-                "### lead-2\nSee @import:wazuh-queries for query syntax.\n"
+                "### lead-1\nQuery auth events.\n"
             )
 
             result = run_resolver("_test-synthetic")
             assert result.returncode == 0, f"stderr: {result.stderr}"
 
             out = result.stdout
-            # Verify all expected files present
             assert "# Test Context" in out
             assert "# Test Playbook" in out
             assert "# Investigation Checklist" in out
-            assert "# IP Classification" in out
-            assert "# Example: Wazuh Query Patterns" in out
 
             # Verify correct ordering
             ctx_pos = out.index("Test Context")
             pb_pos = out.index("Test Playbook")
             cl_pos = out.index("Investigation Checklist")
-            ip_pos = out.index("IP Classification")
-            wq_pos = out.index("Wazuh Query Patterns")
-            assert ctx_pos < pb_pos < cl_pos < ip_pos
-            assert cl_pos < wq_pos
+            assert ctx_pos < pb_pos < cl_pos
         finally:
-            # Clean up synthetic signature
             import shutil
             shutil.rmtree(sig_dir, ignore_errors=True)
 

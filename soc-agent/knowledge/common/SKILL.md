@@ -1,11 +1,11 @@
 ---
 name: common-investigation
-description: Common investigation utilities and knowledge applicable across all signatures. Includes IP classification, query pattern examples, investigation vocabulary, and the investigation checklist.
+description: Portable investigation methodology — checklist, lead definitions, lessons, and investigation vocabulary. Applicable across all signatures and environments.
 ---
 
 # Common Investigation Knowledge
 
-Shared resources for hypothesis-driven security alert investigation.
+Portable methodology for hypothesis-driven security alert investigation.
 
 ## Available Resources
 
@@ -16,15 +16,11 @@ Shared resources for hypothesis-driven security alert investigation.
 - Report structure requirements
 - Common mistakes to avoid
 
-### lessons/ip-classification.md
-How to classify IP addresses:
-- RFC1918 private ranges (internal)
-- Cloud provider ranges
-- Known infrastructure IPs
+### leads/
+Shared investigation vocabulary — reusable lead definitions. Each specifies what to characterize, pitfalls to avoid, and `data_tags` connecting to `knowledge/environment/data-sources/`. Browse the directory for available leads.
 
-### utilities/
-Query pattern examples for specific SIEM tools. These are **examples** — adapt to whatever tools are available in your environment.
-- `wazuh-queries.md` — Example query patterns for Wazuh SIEM
+### lessons/
+Cross-cutting lessons from past investigations.
 
 ## Investigation Vocabulary
 
@@ -43,12 +39,3 @@ Weight evidence against hypotheses using:
 
 ### Trace
 A compressed one-line summary of the investigation path: `lead1(result)->lead2(result)->disposition`
-
-## When to Use
-
-This skill supplements signature-specific skills. Use it for:
-- IP address analysis
-- Query pattern reference (adapt examples to your SIEM)
-- Cross-cutting investigation patterns
-- Understanding the hypothesis-driven flow language
-- Self-checking investigation quality via checklist.md

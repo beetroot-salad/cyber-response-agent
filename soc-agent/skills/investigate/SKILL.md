@@ -118,10 +118,35 @@ Write an initial section in `{run_dir}/investigation.md`:
 
 **Goal:** Form or update hypotheses and select the most diagnostic lead.
 
-1. List all active hypotheses (from playbook + any you've added)
-2. You **must** maintain at least one adversarial hypothesis (one that represents a real threat) until it is explicitly refuted with `--` evidence
-3. Select the lead that best discriminates between surviving hypotheses
-4. Write predictions: what you expect to observe under each hypothesis
+#### Generating Hypotheses
+
+A hypothesis answers: **what mechanism produced this event?**
+
+For known signatures, the playbook provides a hypothesis catalog — start there. You may add hypotheses the playbook doesn't cover if the evidence suggests them.
+
+For novel alerts (no playbook), generate hypotheses by considering which mechanism categories apply. Common categories:
+
+- **Automation** — monitoring, CI/CD, scheduled tasks, backups, health checks
+- **Credential attack** — brute force, credential stuffing, password spray
+- **Exploitation** — RCE, privilege escalation, container escape
+- **Lateral movement** — pivot, pass-the-hash, stolen session
+- **Data exfiltration** — bulk download, DNS exfil, staging
+- **Supply chain** — compromised dependency, malicious update
+- **Misconfiguration** — stale credentials, wrong permissions
+- **User error** — typo, wrong host, expired session
+- **Insider threat** — unauthorized access, privilege abuse
+
+Specialize applicable categories to the specific alert context. You **must** maintain at least one adversarial hypothesis until it is explicitly refuted with `--` evidence.
+
+#### Selecting Leads
+
+For each surviving hypothesis, write the expected evidence story — what observations would you see if this hypothesis is true? Then find where the stories **diverge most**. That divergence point is your most diagnostic lead.
+
+A lead is diagnostic when different hypotheses predict different outcomes for it. Prioritize leads that cut across the most hypotheses, not leads that only confirm one.
+
+Reference `knowledge/common/leads/` for lead methodology — what to characterize and pitfalls to avoid. If no common lead definition exists for what you need, pursue the evidence inline.
+
+#### Output
 
 Write state:
 ```bash
@@ -143,9 +168,9 @@ Append to `{run_dir}/investigation.md`:
 
 **Goal:** Execute the selected lead — query SIEM, read data, collect evidence.
 
-1. Use whatever SIEM/query tools are available to you via MCP to execute the lead
-2. Refer to the query examples in the **Signature Knowledge** section above for syntax guidance
-3. Record raw observations faithfully — do not interpret yet
+1. Read the lead's definition in `knowledge/common/leads/{lead-name}.md` if it exists — it tells you what to characterize and what pitfalls to avoid. Follow its `data_tags` to find relevant systems in `knowledge/environment/data-sources/`
+2. Use whatever SIEM/query tools are available to you via MCP to execute the lead. Check `knowledge/environment/systems/` for system-specific query patterns
+3. Record raw observations faithfully — **characterize, do not interpret**. "Timing is periodic, 5min ±3s" is characterization. "This is a monitoring probe" is interpretation — save that for ANALYZE
 4. If a query fails, try alternatives (different time range, different tool, indirect evidence)
 
 Write state:
@@ -173,9 +198,21 @@ For each surviving hypothesis, assign a weight:
 - `--` strongly refutes (contradicts a core prediction)
 
 **Decision after ANALYZE:**
-- If one hypothesis has `++` and all adversarial hypotheses have `--`: → CONCLUDE
 - If hypotheses remain undifferentiated: → HYPOTHESIZE (select next lead)
 - If evidence contradicts all hypotheses: → CONCLUDE with escalation
+- If a mechanism hypothesis is confirmed (`++`): **verify and scope before concluding**
+
+#### Verification and Scoping
+
+When a hypothesis about the mechanism is confirmed, two questions remain:
+
+1. **Is this instance legitimate?** Trace the causal chain toward a trust anchor — the authoritative source that establishes authorization. For automation: check the job config, creator, approval. For user activity: verify the identity and authorization. If you can verify authoritatively, confidence is high. If you can only rely on circumstantial evidence (pattern match + precedent), confidence is medium. If only weak circumstantial evidence is available, escalate.
+
+2. **What is the scope?** What was accessed, what's the blast radius, what's the impact? This determines escalation severity for confirmed threats, and informs the recommendation for benign activity (e.g., suggest rule tuning).
+
+These are not separate phases — they are additional HYPOTHESIZE→GATHER→ANALYZE cycles. After confirming the mechanism, form new hypotheses about legitimacy or scope, and investigate them through the same loop.
+
+When mechanism is confirmed AND verified AND scoped → CONCLUDE.
 
 Write state:
 ```bash

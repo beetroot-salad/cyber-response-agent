@@ -34,7 +34,7 @@ Automated job using stale credentials after a password rotation event.
 ## Lead List
 
 ### authentication-history
-**Query:** Failed logins from same srcip in last 5 minutes + successful logins from same srcip within 60s after alert. See @import:wazuh-queries for query syntax.
+**Query:** Failed logins from same srcip in last 5 minutes + successful logins from same srcip within 60s after alert.
 
 **Discriminates:** All four hypotheses.
 
@@ -46,7 +46,7 @@ Automated job using stale credentials after a password rotation event.
 | ?service-account-rotation | Single attempt, service account username, no success, same alert recurring |
 
 ### source-reputation
-**Query:** IP classification (internal/external) + historical alerts from same srcip across all rules. See @import:ip-classification for classification rules.
+**Query:** IP classification (internal/external) + historical alerts from same srcip across all rules.
 
 **Discriminates:** Internal vs external hypotheses.
 

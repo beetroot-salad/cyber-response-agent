@@ -289,10 +289,16 @@ class TestPlaybookImports:
                     pairs.append((playbook, match.group(1)))
         return pairs
 
-    def test_at_least_one_import_exists(self):
-        """At least one signature playbook should have @import: refs."""
+    def test_imports_resolve_if_present(self):
+        """If any playbook has @import: refs, each must resolve."""
         pairs = self._get_imports_by_playbook()
-        assert len(pairs) > 0, "No @import: references found in any playbook"
+        for playbook, name in pairs:
+            resolved = resolve_import(name)
+            assert resolved is not None, (
+                f"@import:{name} in {playbook.parent.name}/playbook.md "
+                f"does not resolve to any file in lessons/"
+            )
+            assert resolved.exists()
 
     @pytest.mark.parametrize(
         "playbook_file, import_name",
@@ -308,11 +314,11 @@ class TestPlaybookImports:
         ],
     )
     def test_import_resolves(self, playbook_file, import_name):
-        """Each @import:name must resolve to a file in lessons/ or utilities/."""
+        """Each @import:name must resolve to a file in lessons/."""
         resolved = resolve_import(import_name)
         assert resolved is not None, (
             f"@import:{import_name} in {playbook_file.parent.name}/playbook.md "
-            f"does not resolve to any file in lessons/ or utilities/"
+            f"does not resolve to any file in lessons/"
         )
         assert resolved.exists()
 
