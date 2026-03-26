@@ -289,12 +289,16 @@ class TestPlaybookImports:
                     pairs.append((playbook, match.group(1)))
         return pairs
 
-    def test_imports_are_optional(self):
-        """Playbooks may have @import: refs but they are not required."""
+    def test_imports_resolve_if_present(self):
+        """If any playbook has @import: refs, each must resolve."""
         pairs = self._get_imports_by_playbook()
-        # @import: is optional — playbooks may or may not use it
-        # This test documents that the mechanism exists but isn't mandatory
-        assert isinstance(pairs, list)
+        for playbook, name in pairs:
+            resolved = resolve_import(name)
+            assert resolved is not None, (
+                f"@import:{name} in {playbook.parent.name}/playbook.md "
+                f"does not resolve to any file in lessons/"
+            )
+            assert resolved.exists()
 
     @pytest.mark.parametrize(
         "playbook_file, import_name",

@@ -128,9 +128,8 @@ Query patterns: @import:wazuh-queries
         imports = extract_imports(text)
         assert imports == []
 
-    def test_resolve_import_lessons(self):
-        """Imports resolve from lessons/ directory."""
-        # ip-classification was moved to environment/context/, no longer importable
+    def test_moved_import_no_longer_resolves(self):
+        """ip-classification was moved to environment/context/, no longer importable."""
         path = resolve_import("ip-classification")
         assert path is None
 

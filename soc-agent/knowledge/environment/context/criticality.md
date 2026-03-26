@@ -28,5 +28,5 @@ tags: [assets, criticality]
 
 When alert involves a critical/high-tier system:
 - Minimum 3 leads before resolution (regardless of signature severity)
-- Adversarial hypotheses require stronger refutation (++ not sufficient alone)
+- Adversarial hypotheses require `--` from multiple independent leads to refute
 - Consider scoping leads even for benign disposition
