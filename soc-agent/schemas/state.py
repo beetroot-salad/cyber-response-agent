@@ -30,8 +30,10 @@ TRANSITIONS: dict[Phase, set[Phase]] = {
 # CONTEXTUALIZE is the only valid initial phase
 INITIAL_PHASE = Phase.CONTEXTUALIZE
 
-# Maximum number of hypothesis-gather-analyze loops before forced conclusion
-MAX_LOOPS = 10
+# Maximum number of hypothesis-gather-analyze loops before forced conclusion.
+# 5 loops (each with GATHER+ANALYZE) is already 15+ phases. Investigations
+# that haven't converged by loop 3-4 should consider escalation.
+MAX_LOOPS = 5
 
 
 def validate_transition(current: Optional[str], proposed: str) -> tuple[bool, str]:

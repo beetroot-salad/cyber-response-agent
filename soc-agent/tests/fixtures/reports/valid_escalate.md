@@ -15,6 +15,9 @@ trace: "authentication-history(47 fail, 12 users) -> source-reputation(external)
 
 External IP brute force attack. 47 failed attempts with 12 distinct usernames.
 
+## Observations
+No notable observations.
+
 ## For Analyst
 
 ### What We Know

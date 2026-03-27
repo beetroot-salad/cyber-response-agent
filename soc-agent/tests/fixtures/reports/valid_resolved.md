@@ -16,6 +16,9 @@ trace: "authentication-history(1 fail, testuser) -> source-reputation(internal) 
 Internal monitoring probe activity from known monitoring subnet. Single failed SSH login
 attempt with username 'testuser' from 10.0.1.50. Matches monitoring-probe precedent.
 
+## Observations
+No notable observations.
+
 ## Verdict
 
 Benign — automated health check from monitoring system.
