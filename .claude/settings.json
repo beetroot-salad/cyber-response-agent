@@ -6,11 +6,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd soc-agent && python3 hooks/scripts/validate_report.py"
+            "command": "cd /workspace/soc-agent && python3 hooks/scripts/validate_report.py"
           },
           {
             "type": "command",
-            "command": "cd soc-agent && python3 hooks/scripts/investigation_summary.py"
+            "command": "cd /workspace/soc-agent && python3 hooks/scripts/investigation_summary.py"
           }
         ]
       }
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd soc-agent && python3 hooks/scripts/audit_tool_calls.py"
+            "command": "cd /workspace/soc-agent && python3 hooks/scripts/audit_tool_calls.py"
           }
         ]
       }

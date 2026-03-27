@@ -1,0 +1,174 @@
+"""Tests for scripts/setup_run.py — run directory creation and alert saving."""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
+SCRIPT = SOC_AGENT_ROOT / "scripts" / "setup_run.py"
+
+VALID_ALERT = json.dumps({"ticket_id": "T-1234", "alert_data": {"srcip": "10.0.1.50"}})
+
+
+def run_setup(
+    signature_id: str = "wazuh-rule-5710",
+    alert_json: str = VALID_ALERT,
+    *,
+    runs_dir: str | None = None,
+    omit_alert: bool = False,
+) -> subprocess.CompletedProcess:
+    """Run setup_run.py as a subprocess."""
+    args = [sys.executable, str(SCRIPT), signature_id]
+    if not omit_alert:
+        args.append(alert_json)
+    env = None
+    if runs_dir is not None:
+        import os
+
+        env = {**os.environ, "SOC_AGENT_RUNS_DIR": runs_dir}
+    return subprocess.run(args, capture_output=True, text=True, env=env)
+
+
+class TestHappyPath:
+    """Tests with valid input."""
+
+    def test_exit_code_zero(self, tmp_path):
+        result = run_setup(runs_dir=str(tmp_path))
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+
+    def test_creates_run_directory(self, tmp_path):
+        result = run_setup(runs_dir=str(tmp_path))
+        assert result.returncode == 0
+        # Exactly one subdirectory created
+        subdirs = list(tmp_path.iterdir())
+        assert len(subdirs) == 1
+        assert subdirs[0].is_dir()
+
+    def test_writes_alert_json(self, tmp_path):
+        result = run_setup(runs_dir=str(tmp_path))
+        assert result.returncode == 0
+        run_dir = list(tmp_path.iterdir())[0]
+        alert_file = run_dir / "alert.json"
+        assert alert_file.exists()
+        data = json.loads(alert_file.read_text())
+        assert data["ticket_id"] == "T-1234"
+        assert data["alert_data"]["srcip"] == "10.0.1.50"
+
+    def test_alert_json_is_formatted(self, tmp_path):
+        """alert.json should be pretty-printed for readability."""
+        run_setup(runs_dir=str(tmp_path))
+        run_dir = list(tmp_path.iterdir())[0]
+        content = (run_dir / "alert.json").read_text()
+        assert "\n" in content  # Not a single-line dump
+
+    def test_stdout_contains_run_directory(self, tmp_path):
+        result = run_setup(runs_dir=str(tmp_path))
+        assert "Run directory:" in result.stdout
+
+    def test_stdout_contains_signature(self, tmp_path):
+        result = run_setup(signature_id="wazuh-rule-5710", runs_dir=str(tmp_path))
+        assert "Signature: wazuh-rule-5710" in result.stdout
+
+    def test_stdout_contains_run_id(self, tmp_path):
+        result = run_setup(runs_dir=str(tmp_path))
+        assert "Run ID:" in result.stdout
+
+    def test_run_dir_name_is_uuid(self, tmp_path):
+        """Run directory should be named with a UUID, not derived from alert fields."""
+        import re
+
+        run_setup(runs_dir=str(tmp_path))
+        run_dir = list(tmp_path.iterdir())[0]
+        uuid_pattern = re.compile(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        )
+        assert uuid_pattern.match(run_dir.name), f"Expected UUID, got: {run_dir.name}"
+
+
+class TestRunsDirEnvVar:
+    """Tests for SOC_AGENT_RUNS_DIR environment variable."""
+
+    def test_uses_env_var(self, tmp_path):
+        custom_dir = tmp_path / "custom-runs"
+        result = run_setup(runs_dir=str(custom_dir))
+        assert result.returncode == 0
+        assert custom_dir.exists()
+        assert len(list(custom_dir.iterdir())) == 1
+
+    def test_creates_parent_dirs(self, tmp_path):
+        nested = tmp_path / "a" / "b" / "c"
+        result = run_setup(runs_dir=str(nested))
+        assert result.returncode == 0
+        assert nested.exists()
+
+
+class TestErrorHandling:
+    """Tests for invalid input."""
+
+    def test_no_args_fails(self):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert "Usage" in result.stderr
+
+    def test_missing_alert_arg_fails(self):
+        result = run_setup(omit_alert=True)
+        assert result.returncode == 1
+        assert "Usage" in result.stderr
+
+    def test_malformed_json_fails(self, tmp_path):
+        result = run_setup(alert_json="not json", runs_dir=str(tmp_path))
+        assert result.returncode == 1
+        assert "malformed" in result.stderr.lower()
+        # No run directory should be created
+        assert len(list(tmp_path.iterdir())) == 0
+
+    def test_non_object_json_fails(self, tmp_path):
+        result = run_setup(alert_json='"just a string"', runs_dir=str(tmp_path))
+        assert result.returncode == 1
+        assert "object" in result.stderr.lower()
+
+    def test_array_json_fails(self, tmp_path):
+        result = run_setup(alert_json="[1, 2, 3]", runs_dir=str(tmp_path))
+        assert result.returncode == 1
+        assert "object" in result.stderr.lower()
+
+    def test_empty_string_fails(self, tmp_path):
+        result = run_setup(alert_json="", runs_dir=str(tmp_path))
+        assert result.returncode == 1
+
+
+class TestAlertVariations:
+    """Tests with different alert shapes — no field name assumptions."""
+
+    def test_empty_object_succeeds(self, tmp_path):
+        """An empty JSON object is valid — the agent identifies fields later."""
+        result = run_setup(alert_json="{}", runs_dir=str(tmp_path))
+        assert result.returncode == 0
+
+    def test_arbitrary_fields_preserved(self, tmp_path):
+        """Alert fields pass through unchanged regardless of naming convention."""
+        alert = json.dumps({"alertId": "A-99", "src": "1.2.3.4", "custom_field": True})
+        result = run_setup(alert_json=alert, runs_dir=str(tmp_path))
+        assert result.returncode == 0
+        run_dir = list(tmp_path.iterdir())[0]
+        data = json.loads((run_dir / "alert.json").read_text())
+        assert data["alertId"] == "A-99"
+        assert data["custom_field"] is True
+
+    def test_nested_alert_data_preserved(self, tmp_path):
+        alert = json.dumps(
+            {"id": "X-1", "data": {"nested": {"deep": "value"}, "list": [1, 2, 3]}}
+        )
+        result = run_setup(alert_json=alert, runs_dir=str(tmp_path))
+        assert result.returncode == 0
+        run_dir = list(tmp_path.iterdir())[0]
+        data = json.loads((run_dir / "alert.json").read_text())
+        assert data["data"]["nested"]["deep"] == "value"
+        assert data["data"]["list"] == [1, 2, 3]
