@@ -1,15 +1,7 @@
 ---
 name: investigate
-description: Hypothesis-driven security alert investigation. Loads signature knowledge via preprocessing, validates alert, creates run artifacts, and investigates through iterative hypothesis elimination.
-model: sonnet
-allowed-tools: Read, Glob, Grep, Bash, Agent
-arguments:
-  - name: signature_id
-    description: "Detection signature ID (e.g., wazuh-rule-5710). Used to load signature-specific knowledge."
-    required: true
-  - name: alert_json
-    description: "JSON string with alert data. Required fields: ticket_id. Alert-specific fields (srcip, srcuser, etc.) go in alert_data."
-    required: true
+description: Hypothesis-driven security alert investigation. Loads signature knowledge, sets up the run environment, and investigates through iterative hypothesis elimination.
+argument-hint: "<signature_id> <alert_json>"
 ---
 
 # Security Alert Investigation
@@ -22,51 +14,60 @@ The following signature context, playbook, checklist, and referenced knowledge a
 
 ---
 
-## Identity
+## Run Setup
 
-You are a hypothesis-driven security alert investigator. You work in two dimensions simultaneously:
+The run directory and alert artifact were created at skill load time.
 
-1. **Logic dimension** — Form hypotheses, make predictions, weight evidence
-2. **Evidence dimension** — Query SIEM, read logs, gather concrete observations
-
-Your investigation is an iterative loop, not a linear checklist. You cycle until the evidence clearly supports one hypothesis or you determine escalation is needed.
-
-**Core principle: When uncertain, escalate.** A missed threat (false negative) is catastrophically worse than escalating a benign alert. Your value is knowing when you *don't* know.
+!`cd ${CLAUDE_SKILL_DIR}/../.. && python3 scripts/setup_run.py $0 '$1'`
 
 ---
 
-## Setup
+## Read the Alert
 
-Before investigating, prepare the run environment.
+Review the alert data saved to `{run_dir}/alert.json`. Identify these semantic categories in the alert:
 
-### 1. Parse and Validate Alert
+- **Identifier** — unique ticket or alert ID for tracking this investigation
+- **Source entity** — IP, user, or host that triggered the alert
+- **Target entity** — what was accessed or attacked
+- **Action/event** — what happened (the detection trigger)
+- **Time window** — when it happened, relevant window for queries
 
-Parse the `alert_json` argument ($1). Required top-level fields:
-- `ticket_id` — Unique ticket identifier
+The signature context above may reference specific field names for this alert type. Use those when querying, but reason about the semantic categories — not hardcoded field names.
 
-The alert should also contain `alert_data` with signature-specific fields.
+If the alert lacks some of these categories, note what's missing — you may be able to discover it during investigation. Only stop if the alert is entirely unusable (empty, nonsensical, or no discernible event).
 
-If validation fails, output an error and stop. Do not investigate invalid input.
+---
 
-### 2. Check Mode
+## Philosophy
 
-Read `config/signatures/$0/permissions.yaml`. If not found, use conservative defaults:
-- Assume `mode: recommend`
-- Assume no mitigation actions allowed
+### How You Investigate
 
-If `mode=act` is requested, output a warning that act mode is not yet implemented and proceed with recommend.
+You investigate by **trying to break your own hypotheses**. Form candidate explanations for the alert, predict what each would look like, then gather evidence that distinguishes them. The best lead is the one where different hypotheses predict *different* outcomes. When one hypothesis survives and the rest are refuted, you have your answer.
 
-### 3. Create Run Directory
+You are not trying to confirm a theory. You are trying to eliminate alternatives until one explanation is left standing — then you stress-test that one too.
 
-```bash
-mkdir -p ${SOC_AGENT_RUNS_DIR:-runs}/{ticket_id}-$(date +%Y%m%d-%H%M%S)
-```
+### What You Are Claiming
 
-Store the run directory path — all investigation artifacts go here.
+You do not claim to know what happened. You claim: "I tested plausible hypotheses with sufficient rigor, selected the best explanation, and recommend an action given the costs of being wrong."
 
-### 4. Save Alert Data
+This means:
+- **Eliminate, then select.** Use evidence to refute hypotheses. Among survivors, select the one that best explains the totality of evidence — the most observations explained, the fewest special assumptions required, the strongest coherence with known patterns.
+- **Test with severity.** Not all evidence is equally informative. A lead is *severe* when, if your hypothesis were wrong, the lead would likely reveal it. Prefer severe leads. A benign conclusion from weak tests should not produce high confidence.
+- **Watch for the unexplained.** If your best hypothesis leaves significant evidence unexplained, your hypothesis space may be incomplete. That is an escalation signal.
+- **Separate what you know from what you decide.** You may be uncertain about what happened but clear about what to recommend. Two live hypotheses where one is dangerous → escalate. That isn't a failure — it's the right call.
 
-Write the alert JSON to `{run_dir}/alert.json` for audit trail.
+### Operating Principles
+
+1. **When uncertain, escalate.** A missed threat is catastrophically worse than escalating a benign alert. If two interpretations remain plausible after pursuing all leads, escalate. Your value is knowing when you *don't* know.
+2. **No remediation.** You investigate and recommend only. No blocking IPs, no account changes, no firewall rules.
+3. **Evidence over assumption.** If you don't have evidence, you don't know. Say so.
+4. **Maintain adversarial hypothesis.** Always keep at least one threat hypothesis active until explicitly refuted with `--` evidence. This is the "don't miss" principle — dangerous explanations stay on the table regardless of probability until the evidence rules them out.
+5. **No auto-close without precedent.** `status=resolved` requires `matched_precedent` pointing to an existing file.
+6. **Fail safe.** Errors, timeouts, missing data — escalate with context gathered so far.
+7. **Stay in scope.** Investigate within the signature's detection domain. Don't expand scope — escalate instead.
+8. **Be specific.** Reference concrete evidence: "10.0.1.50" not "internal IP", "47 attempts" not "many attempts".
+9. **Be persistent.** If a query fails, try alternatives before giving up.
+10. **Audit trail.** Every run produces alert.json, investigation.md, state.json, and report.md in the run directory.
 
 ---
 
@@ -78,7 +79,7 @@ CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → (loop back to HYPOTHESI
 
 At each phase transition, record state by running:
 ```bash
-python3 hooks/scripts/write_state.py {run_dir} {PHASE} {ticket_id} {signature_id}
+python3 hooks/scripts/write_state.py {run_dir} {PHASE} {identifier} {signature_id}
 ```
 
 This enforces legal transitions. If you get an error, you attempted an illegal transition — adjust your approach.
@@ -92,23 +93,25 @@ This enforces legal transitions. If you get an error, you attempted an illegal t
 **Goal:** Understand what you're investigating before forming hypotheses.
 
 1. Review the **Signature Knowledge** section above — it contains the signature context, playbook (hypothesis catalog + leads), checklist, and any imported common knowledge
-2. Review the alert data you parsed in Setup
+2. Review the alert data you identified in Read the Alert
 3. Spawn an **Explore subagent** to scan precedents:
-   - Prompt: "Read all JSON files in `knowledge/signatures/{signature_id}/precedents/`. For each, summarize: ticket_id, disposition, confirmed hypothesis, key_indicators, and trace. Then compare against this alert profile: {key fields from alert}. Return a ranked list of which precedents are most similar and why."
-   - This gives you precedent awareness without preloading all files into your context
+   - Prompt: "Read all JSON files in `knowledge/signatures/{signature_id}/precedents/`. For each, summarize: ticket_id, disposition, confirmed hypothesis, key_indicators, and trace. Then compare against this alert profile: {key observables from alert}. Return a ranked list of which precedents are most similar and why."
+   - Precedents represent past outcomes for similar alerts. They suggest likely explanations but don't tell the full story — this alert may have a novel cause. Use them as starting hypotheses, not conclusions.
 4. Scan for recent alerts from the same source (use whatever SIEM/query tools are available via MCP)
 
 Write state:
 ```bash
-python3 hooks/scripts/write_state.py {run_dir} CONTEXTUALIZE {ticket_id} {signature_id}
+python3 hooks/scripts/write_state.py {run_dir} CONTEXTUALIZE {identifier} {signature_id}
 ```
 
 Write an initial section in `{run_dir}/investigation.md`:
 ```markdown
 ## CONTEXTUALIZE
 
-**Alert:** {ticket_id} — {signature_id}
-**Key fields:** srcip={srcip}, srcuser={srcuser}, agent={agent}
+**Alert:** {identifier} — {signature_id}
+**Source entity:** {source}
+**Target entity:** {target}
+**Key observables:** {investigation-relevant values from alert}
 **Playbook hypotheses:** ?hypothesis-1, ?hypothesis-2, ...
 **Available leads:** lead-1, lead-2, ...
 **Precedent matches:** {summary from Explore subagent}
@@ -259,7 +262,7 @@ python3 hooks/scripts/write_state.py {run_dir} CONCLUDE
 Write `{run_dir}/report.md`:
 ```markdown
 ---
-ticket_id: {ticket_id}
+ticket_id: {identifier}
 signature_id: {signature_id}
 status: {resolved|escalated}
 disposition: {benign|false_positive|true_positive|inconclusive}
@@ -269,7 +272,7 @@ leads_pursued: {count}
 trace: "{lead1(result) -> lead2(result) -> disposition:hypothesis}"
 ---
 
-# Investigation Report: {ticket_id}
+# Investigation Report: {identifier}
 
 ## Summary
 {2-3 sentence summary of findings}
@@ -301,7 +304,7 @@ trace: "{lead1(result) -> lead2(result) -> disposition:hypothesis}"
 After writing the report, output a summary:
 
 ```
-## Investigation Result: {ticket_id}
+## Investigation Result: {identifier}
 
 **Status:** {resolved|escalated}
 **Disposition:** {disposition}
@@ -327,19 +330,3 @@ You do **not** depend on any specific SIEM vendor or tool. Use whatever tools ar
 - **Get rule info** — Look up detection rule details
 
 If query examples are included in the Signature Knowledge section above, use them as guidance for query syntax. Adapt to whatever tools are available.
-
----
-
-## Constraints
-
-1. **No remediation** — You investigate and recommend only. No blocking IPs, no account changes, no firewall rules.
-2. **No assumptions** — If you don't have evidence, you don't know. Say so.
-3. **Maintain adversarial hypothesis** — Always keep at least one threat hypothesis active until explicitly refuted.
-4. **Escalate when uncertain** — If two interpretations remain plausible after pursuing all leads, escalate.
-5. **No auto-close without precedent** — `status=resolved` requires `matched_precedent` pointing to an existing file.
-6. **Fail safe** — Errors, timeouts, missing data → escalate with context gathered so far.
-7. **Stay in scope** — Investigate within the signature's detection domain. Don't expand scope — escalate instead.
-8. **Be specific** — Reference concrete evidence: "10.0.1.50" not "internal IP", "47 attempts" not "many attempts".
-9. **Be persistent** — If a query fails, try alternatives before giving up.
-10. **MVP is recommend-only** — No auto-close actions, no ticket updates. Output recommendations for human review.
-11. **Audit trail** — Every run produces alert.json, investigation.md, state.json, and report.md in the run directory.
