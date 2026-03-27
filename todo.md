@@ -26,8 +26,9 @@
 ## Phase 2 — Post-MVP
 
 ### Agent Architecture
-- [ ] Lead subagents — context isolation for verbose SIEM responses
+- [ ] Lead subagents — context isolation for verbose SIEM responses; reframe Philosophy "evidence dimension" to reflect agent-as-director, subagents-as-executors
 - [ ] Tier 2 semantic judge — Haiku validates report consistency after investigation
+- [ ] CONTEXTUALIZE: add Explore subagent for recent tickets ("what is going on right now?") — situational awareness, alert correlation
 - [ ] Budget enforcement hook — cap token/cost spend per investigation
 - [ ] Input sanitization hooks — validate alert_json before investigation starts
 
