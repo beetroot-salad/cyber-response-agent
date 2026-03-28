@@ -80,7 +80,7 @@ Transitions:
 - ANALYZE → CONCLUDE (mechanism confirmed + verified + scoped, or escalation)
 ```
 
-A hard limit of 5 hypothesis loops is enforced by the state machine. If you reach 3-4 loops without convergence, strongly consider escalating — extended investigations with no convergence indicate the hypothesis space may be incomplete.
+A hard limit on hypothesis loops is enforced by the state machine. The write_state script reports your current loop count — if you're approaching the limit without convergence, escalate.
 
 At each phase transition, record state by running:
 ```bash
@@ -102,11 +102,10 @@ This enforces legal transitions. If you get an error, you attempted an illegal t
 3. Spawn an **Explore subagent** to scan precedents:
    - Prompt: "Read all JSON files in `knowledge/signatures/{signature_id}/precedents/`. For each, summarize: ticket_id, disposition, confirmed hypothesis, key_indicators, and trace. Then compare against this alert profile: {key observables from alert}. Return a ranked list of which precedents are most similar and why."
    - Precedents represent past outcomes for similar alerts. They suggest likely explanations but don't tell the full story — this alert may have a novel cause. Use them as starting hypotheses, not conclusions.
-4. Spawn an **Explore subagent** to scan recent alerts across the environment:
-   - Goal: understand "what's going on right now" — find duplicates, related alerts from same entities, alerts that may share a common cause
-   - Search for alerts involving the same source entity, target entity, and any related entities from the alert
-   - Return a structured summary: duplicate alerts, related alerts (same entities, similar signatures), temporal clustering, and any patterns that suggest a common cause
-   - The main agent uses this summary during hypothesis formation
+4. Spawn an **Explore subagent** for alert context — search for:
+   - **Recent alerts** (broad): all alerts in the ~2 hours before this alert, regardless of signature or status. Goal: understand what activity is happening right now. This provides situational awareness — the alert may be part of a larger pattern.
+   - **Related alerts** (focused): alerts matching key entities from this alert — same source IP, target host, username. Goal: find duplicates, correlated activity, or alerts stemming from the same cause. **Pitfall:** central entities (e.g., a jump host, a CI runner) appear in many alerts — a match on a high-centrality entity is less meaningful than a match on a rare entity.
+   - Return: structured summary of recent activity, related alerts with shared entities noted, and any temporal clustering
 
 Write state:
 ```bash
@@ -132,35 +131,48 @@ Write an initial section in `{run_dir}/investigation.md`:
 
 #### Generating Hypotheses
 
-A hypothesis answers: **what mechanism produced this event?**
+A hypothesis is a causal story: it proposes an actor, an intent, and an action that produced this specific event. `?monitoring-probe` is shorthand for: "a monitoring system performed a health check via SSH using a test credential that doesn't exist on this host."
 
 For known signatures, the playbook provides a hypothesis catalog — start there. You may add hypotheses the playbook doesn't cover if the evidence suggests them.
 
-For novel alerts (no playbook), generate hypotheses using the actor × action grid:
+For novel alerts (no playbook), generate hypotheses by:
 
-| | Expected operation | Misconfigured operation | Adversarial operation |
-|---|---|---|---|
-| **Automated system** | Scheduled task, monitoring probe, CI/CD pipeline | Stale credentials, wrong target, misconfigured schedule | Compromised automation, malicious cron job |
-| **Authorized human** | Normal admin activity, approved access | Wrong host, expired session, fat-finger | Insider threat, privilege abuse |
-| **Unauthorized human** | — | — | External attacker, credential theft, lateral movement |
+1. **Parse the event semantics.** What exactly does this alert mean? Not "SSH failure" but "SSH login attempt with a non-existent username." Precision constrains the quality of your hypotheses.
 
-Start broad: which cells in this grid could explain the alert? Then specialize only after evidence narrows the space. Don't hypothesize "brute force with hydra from a VPS" before you know the source is external.
+2. **Enumerate mechanisms.** What real-world activities would produce this specific event? Consider all technical pathways — for a process alert: what spawned it? For an auth alert: what initiated the connection? For a file change: what modified it?
 
-You **must** maintain at least one adversarial hypothesis until it is explicitly refuted with `--` evidence.
+3. **Constrain with observables.** The alert already contains data. Use it to prune: if the source is internal, don't hypothesize opportunistic external scanning.
+
+4. **Scope to current evidence.** Start with the mechanism ("unauthorized authentication attempt") not the implementation ("brute force with hydra from a VPS"). The right scope: enough detail to make distinct predictions, testable with 1-2 leads. If you can't test it in 1-2 leads, the hypothesis is too broad (split it) or too narrow (merge with a sibling).
+
+**Completeness checks** — verify before proceeding:
+- **Actor types:** Have you considered automated systems, authorized humans, and unauthorized humans?
+- **Pathways:** Have you considered all technical mechanisms that could produce this event?
+- **Adversarial:** At least one adversarial hypothesis must survive until explicitly refuted with `--` evidence.
 
 #### Selecting Leads
 
-For each surviving hypothesis, write the narrative: "If this hypothesis is true, then we'd observe X, Y, Z." Then diff the narratives to find where they **diverge most** — that divergence point is your most diagnostic lead.
+For each surviving hypothesis, construct the story in three layers:
 
-A lead is diagnostic when different hypotheses predict different outcomes for it. Prioritize leads that cut across the most hypotheses, not leads that only confirm one.
+1. **The story:** "If this hypothesis is true, then it happened like this..." — the causal sequence from actor to event
+2. **The artifacts:** "...which would produce these artifacts..." — what evidence exists in principle (logs, network flows, process trees, file changes)
+3. **The observations:** "...and given our data sources, we can observe..." — what we can actually check, given what's instrumented
 
-If primary evidence sources are unavailable (e.g., no process logs), consider secondary artifacts — the hypothesized activity would also leave traces in network traffic, authentication logs, file system changes, etc. Don't give up on a lead because the obvious data source is missing.
+Then find where the stories **diverge most** across hypotheses. That divergence point is your most diagnostic lead.
 
-Reference `knowledge/common/leads/` for lead methodology — what to characterize and pitfalls to avoid. If no common lead definition exists for what you need, pursue the evidence inline.
+**Absence is evidence.** A hypothesis predicts what you WILL find and what you WON'T find. If `?brute-force` predicts high volume and you see exactly 1 attempt, that's refuting evidence. Some mechanisms are defined by the conjunction of "event X present AND event Y absent" — actively verify both sides. Don't assume absence; query for it.
+
+If primary evidence sources are unavailable, consider secondary artifacts — the hypothesized activity would also leave traces in network traffic, authentication logs, file system changes, etc. Don't give up on a lead because the obvious data source is missing.
+
+Reference `knowledge/common/leads/` for lead methodology. If no common lead definition exists for what you need, pursue the evidence inline.
 
 #### Past Investigation Patterns
 
-Consult precedent files not just for outcomes, but for what hypotheses were formed and what leads were chosen. If a precedent for this signature tested hypothesis X with lead Y and got result Z, that informs both your hypothesis generation and your lead selection. Past investigations may also reveal which leads tend to be most diagnostic for this signature type.
+Use the precedent search tool to review past investigations for this signature:
+```bash
+python3 scripts/search_precedents.py {signature_id}
+```
+This shows what hypotheses were tested, what leads were chosen, and what the outcomes were. Past investigations inform both hypothesis generation and lead selection — they reveal which leads tend to be most diagnostic for this signature type.
 
 #### Output
 
@@ -215,7 +227,7 @@ For each surviving hypothesis, assign a weight:
 
 Cross-check your analysis against the investigation philosophy:
 - **Severity of tests:** Are your leads severe enough? A benign conclusion from weak tests should not produce high confidence. If you've only pursued leads where all hypotheses predict the same outcome, you haven't actually discriminated.
-- **Watch for the unexplained:** If your best hypothesis leaves significant observations unexplained, your hypothesis space may be incomplete — revisit the actor × action grid.
+- **Watch for the unexplained:** If your best hypothesis leaves significant observations unexplained, your hypothesis space may be incomplete — consider whether you've missed an actor type, pathway, or mechanism.
 
 **Decision after ANALYZE:**
 - If hypotheses remain undifferentiated: → HYPOTHESIZE (select next lead)

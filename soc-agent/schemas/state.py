@@ -31,9 +31,9 @@ TRANSITIONS: dict[Phase, set[Phase]] = {
 INITIAL_PHASE = Phase.CONTEXTUALIZE
 
 # Maximum number of hypothesis-gather-analyze loops before forced conclusion.
-# 5 loops (each with GATHER+ANALYZE) is already 15+ phases. Investigations
-# that haven't converged by loop 3-4 should consider escalation.
-MAX_LOOPS = 5
+# 7 loops is generous — most investigations resolve in 2-3. If you're past 5
+# without convergence, the hypothesis space is likely incomplete.
+MAX_LOOPS = 7
 
 
 def validate_transition(current: Optional[str], proposed: str) -> tuple[bool, str]:
