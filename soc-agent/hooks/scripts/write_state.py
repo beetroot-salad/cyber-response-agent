@@ -87,7 +87,7 @@ def main():
     with open(state_file, "w") as f:
         json.dump(state, f, indent=2)
 
-    print(f"State: {current_phase or '(init)'} -> {new_phase}")
+    print(f"State: {current_phase or '(init)'} -> {new_phase} (loop {loops}/{MAX_LOOPS})")
     sys.exit(0)
 
 

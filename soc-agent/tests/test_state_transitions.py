@@ -214,6 +214,39 @@ class TestWriteStateScript:
         assert result.returncode == 1
         assert "Illegal" in result.stderr
 
+    def test_write_state_enforces_max_loops(self, tmp_path):
+        """Test that write_state.py rejects transitions beyond MAX_LOOPS."""
+        import subprocess
+
+        script = SOC_AGENT_ROOT / "hooks" / "scripts" / "write_state.py"
+        run_dir = tmp_path / "run-test"
+        run_dir.mkdir()
+
+        # Run CONTEXTUALIZE
+        subprocess.run(
+            [sys.executable, str(script), str(run_dir), "CONTEXTUALIZE"],
+            capture_output=True,
+        )
+
+        # Run MAX_LOOPS full cycles (H->G->A)
+        for _ in range(MAX_LOOPS):
+            for phase in ["HYPOTHESIZE", "GATHER", "ANALYZE"]:
+                result = subprocess.run(
+                    [sys.executable, str(script), str(run_dir), phase],
+                    capture_output=True,
+                    text=True,
+                )
+                assert result.returncode == 0, f"Failed at {phase}: {result.stderr}"
+
+        # The (MAX_LOOPS+1)th HYPOTHESIZE should be rejected
+        result = subprocess.run(
+            [sys.executable, str(script), str(run_dir), "HYPOTHESIZE"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert "Maximum" in result.stderr
+
     def test_write_state_sequence(self, tmp_path):
         """Test a full valid sequence through the script."""
         import subprocess

@@ -8,15 +8,11 @@ argument-hint: "<signature_id> <alert_json>"
 
 ## Signature Knowledge
 
-The following signature context, playbook, checklist, and referenced knowledge atoms were resolved at skill load time.
-
 !`cd ${CLAUDE_SKILL_DIR}/../.. && python3 scripts/resolve_imports.py $0`
 
 ---
 
 ## Run Setup
-
-The run directory and alert artifact were created at skill load time.
 
 !`cd ${CLAUDE_SKILL_DIR}/../.. && python3 scripts/setup_run.py $0 '$1'`
 
@@ -74,8 +70,17 @@ This means:
 ## Investigation Loop
 
 ```
-CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → (loop back to HYPOTHESIZE | CONCLUDE)
+Phases: CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → CONCLUDE
+
+Transitions:
+- CONTEXTUALIZE → HYPOTHESIZE (once)
+- HYPOTHESIZE → GATHER
+- GATHER → ANALYZE
+- ANALYZE → HYPOTHESIZE (more leads needed)
+- ANALYZE → CONCLUDE (mechanism confirmed + verified + scoped, or escalation)
 ```
+
+A hard limit on hypothesis loops is enforced by the state machine. The write_state script reports your current loop count — if you're approaching the limit without convergence, escalate.
 
 At each phase transition, record state by running:
 ```bash
@@ -97,7 +102,10 @@ This enforces legal transitions. If you get an error, you attempted an illegal t
 3. Spawn an **Explore subagent** to scan precedents:
    - Prompt: "Read all JSON files in `knowledge/signatures/{signature_id}/precedents/`. For each, summarize: ticket_id, disposition, confirmed hypothesis, key_indicators, and trace. Then compare against this alert profile: {key observables from alert}. Return a ranked list of which precedents are most similar and why."
    - Precedents represent past outcomes for similar alerts. They suggest likely explanations but don't tell the full story — this alert may have a novel cause. Use them as starting hypotheses, not conclusions.
-4. Scan for recent alerts from the same source (use whatever SIEM/query tools are available via MCP)
+4. Spawn an **Explore subagent** for alert context — search for:
+   - **Recent alerts** (broad): all alerts in the ~2 hours before this alert, regardless of signature or status. Goal: understand what activity is happening right now. This provides situational awareness — the alert may be part of a larger pattern.
+   - **Related alerts** (focused): alerts matching key entities from this alert — same source IP, target host, username. Goal: find duplicates, correlated activity, or alerts stemming from the same cause. **Pitfall:** central entities (e.g., a jump host, a CI runner) appear in many alerts — a match on a high-centrality entity is less meaningful than a match on a rare entity.
+   - Return: structured summary of recent activity, related alerts with shared entities noted, and any temporal clustering
 
 Write state:
 ```bash
@@ -123,31 +131,48 @@ Write an initial section in `{run_dir}/investigation.md`:
 
 #### Generating Hypotheses
 
-A hypothesis answers: **what mechanism produced this event?**
+A hypothesis is a causal story: it proposes an actor, an intent, and an action that produced this specific event. `?monitoring-probe` is shorthand for: "a monitoring system performed a health check via SSH using a test credential that doesn't exist on this host."
 
 For known signatures, the playbook provides a hypothesis catalog — start there. You may add hypotheses the playbook doesn't cover if the evidence suggests them.
 
-For novel alerts (no playbook), generate hypotheses by considering which mechanism categories apply. Common categories:
+For novel alerts (no playbook), generate hypotheses by:
 
-- **Automation** — monitoring, CI/CD, scheduled tasks, backups, health checks
-- **Credential attack** — brute force, credential stuffing, password spray
-- **Exploitation** — RCE, privilege escalation, container escape
-- **Lateral movement** — pivot, pass-the-hash, stolen session
-- **Data exfiltration** — bulk download, DNS exfil, staging
-- **Supply chain** — compromised dependency, malicious update
-- **Misconfiguration** — stale credentials, wrong permissions
-- **User error** — typo, wrong host, expired session
-- **Insider threat** — unauthorized access, privilege abuse
+1. **Parse the event semantics.** What exactly does this alert mean? Not "SSH failure" but "SSH login attempt with a non-existent username." Precision constrains the quality of your hypotheses.
 
-Specialize applicable categories to the specific alert context. You **must** maintain at least one adversarial hypothesis until it is explicitly refuted with `--` evidence.
+2. **Enumerate mechanisms.** What real-world activities would produce this specific event? Consider all technical pathways — for a process alert: what spawned it? For an auth alert: what initiated the connection? For a file change: what modified it?
+
+3. **Constrain with observables.** The alert already contains data. Use it to prune: if the source is internal, don't hypothesize opportunistic external scanning.
+
+4. **Scope to current evidence.** Start with the mechanism ("unauthorized authentication attempt") not the implementation ("brute force with hydra from a VPS"). The right scope: enough detail to make distinct predictions, testable with 1-2 leads. If you can't test it in 1-2 leads, the hypothesis is too broad (split it) or too narrow (merge with a sibling).
+
+**Completeness checks** — verify before proceeding:
+- **Actor types:** Have you considered automated systems, authorized humans, and unauthorized humans?
+- **Pathways:** Have you considered all technical mechanisms that could produce this event?
+- **Adversarial:** At least one adversarial hypothesis must survive until explicitly refuted with `--` evidence.
 
 #### Selecting Leads
 
-For each surviving hypothesis, write the expected evidence story — what observations would you see if this hypothesis is true? Then find where the stories **diverge most**. That divergence point is your most diagnostic lead.
+For each surviving hypothesis, construct the story in three layers:
 
-A lead is diagnostic when different hypotheses predict different outcomes for it. Prioritize leads that cut across the most hypotheses, not leads that only confirm one.
+1. **The story:** "If this hypothesis is true, then it happened like this..." — the causal sequence from actor to event
+2. **The artifacts:** "...which would produce these artifacts..." — what evidence exists in principle (logs, network flows, process trees, file changes)
+3. **The observations:** "...and given our data sources, we can observe..." — what we can actually check, given what's instrumented
 
-Reference `knowledge/common/leads/` for lead methodology — what to characterize and pitfalls to avoid. If no common lead definition exists for what you need, pursue the evidence inline.
+Then find where the stories **diverge most** across hypotheses. That divergence point is your most diagnostic lead.
+
+**Absence is evidence.** A hypothesis predicts what you WILL find and what you WON'T find. If `?brute-force` predicts high volume and you see exactly 1 attempt, that's refuting evidence. Some mechanisms are defined by the conjunction of "event X present AND event Y absent" — actively verify both sides. Don't assume absence; query for it.
+
+If primary evidence sources are unavailable, consider secondary artifacts — the hypothesized activity would also leave traces in network traffic, authentication logs, file system changes, etc. Don't give up on a lead because the obvious data source is missing.
+
+Reference `knowledge/common/leads/` for lead methodology. If no common lead definition exists for what you need, pursue the evidence inline.
+
+#### Past Investigation Patterns
+
+Use the precedent search tool to review past investigations for this signature:
+```bash
+python3 scripts/search_precedents.py {signature_id}
+```
+This shows what hypotheses were tested, what leads were chosen, and what the outcomes were. Past investigations inform both hypothesis generation and lead selection — they reveal which leads tend to be most diagnostic for this signature type.
 
 #### Output
 
@@ -200,6 +225,10 @@ For each surviving hypothesis, assign a weight:
 - `-` weakly refutes (somewhat inconsistent)
 - `--` strongly refutes (contradicts a core prediction)
 
+Cross-check your analysis against the investigation philosophy:
+- **Severity of tests:** Are your leads severe enough? A benign conclusion from weak tests should not produce high confidence. If you've only pursued leads where all hypotheses predict the same outcome, you haven't actually discriminated.
+- **Watch for the unexplained:** If your best hypothesis leaves significant observations unexplained, your hypothesis space may be incomplete — consider whether you've missed an actor type, pathway, or mechanism.
+
 **Decision after ANALYZE:**
 - If hypotheses remain undifferentiated: → HYPOTHESIZE (select next lead)
 - If evidence contradicts all hypotheses: → CONCLUDE with escalation
@@ -213,9 +242,17 @@ When a hypothesis about the mechanism is confirmed, two questions remain:
 
 2. **What is the scope?** What was accessed, what's the blast radius, what's the impact? This determines escalation severity for confirmed threats, and informs the recommendation for benign activity (e.g., suggest rule tuning).
 
-These are not separate phases — they are additional HYPOTHESIZE→GATHER→ANALYZE cycles. After confirming the mechanism, form new hypotheses about legitimacy or scope, and investigate them through the same loop.
+> **Important:** Verification and scoping are not separate phases. They are additional HYPOTHESIZE→GATHER→ANALYZE cycles using the same loop. After confirming the mechanism, form new hypotheses about legitimacy or scope, and investigate them through the same loop structure.
 
 When mechanism is confirmed AND verified AND scoped → CONCLUDE.
+
+#### Chain-of-Events Awareness
+
+When confirming a mechanism that implies prior stages (e.g., data exfiltration implies prior unauthorized access; lateral movement implies initial compromise), note those implied stages as potential new investigation scopes. Per the "stay in scope" principle, do not chase the full kill chain — flag them for follow-up:
+
+> "Data exfiltrated via DNS tunneling. Recommend investigating initial access vector as a separate investigation."
+
+This keeps your current investigation focused while ensuring nothing is lost.
 
 Write state:
 ```bash
@@ -288,6 +325,9 @@ trace: "{lead1(result) -> lead2(result) -> disposition:hypothesis}"
 - {evidence point 1}
 - {evidence point 2}
 
+## Observations
+{Things noticed during investigation that are not part of the verdict but are worth noting — gaps in logging coverage, anomalous configurations, data quality issues, unusual environmental patterns. Keep factual, not prescriptive.}
+
 ## Verdict
 {clear explanation of recommendation}
 
@@ -321,12 +361,8 @@ If the report fails validation (the Stop hook will catch this), review the error
 
 ## Tool Discovery
 
-You do **not** depend on any specific SIEM vendor or tool. Use whatever tools are available to you in your MCP environment. Common operations you may need:
+You need to know **what data is available** to investigate. Consult `knowledge/environment/data-sources/` for the data types available in this environment — these tell you what questions you can answer.
 
-- **Search events** — Find events matching criteria within a time window
-- **Count events** — Get event counts for a query
-- **Get host/agent info** — Look up details about a monitored endpoint
-- **List alerts** — Browse recent alerts with filters
-- **Get rule info** — Look up detection rule details
+For **how to query** specific systems, consult `knowledge/environment/systems/` — these contain system-specific query patterns and syntax.
 
-If query examples are included in the Signature Knowledge section above, use them as guidance for query syntax. Adapt to whatever tools are available.
+Use whatever tools are available to you in your MCP environment. If query examples are included in the Signature Knowledge section above, use them as guidance for query syntax. Adapt to whatever tools are available.

@@ -26,9 +26,13 @@
 ## Phase 2 — Post-MVP
 
 ### Agent Architecture
-- [ ] Lead subagents — context isolation for verbose SIEM responses; reframe Philosophy "evidence dimension" to reflect agent-as-director, subagents-as-executors
+- [ ] Lead subagents — refactor so each lead is executed by a subagent with isolated context. Subagent receives hypothesis predictions + lead definition, executes queries, returns structured summary (observation + characterization). Keeps raw SIEM data out of the main agent's context window. Reframe Philosophy to reflect agent-as-director, subagents-as-executors
+- [ ] Context window management — migrate detailed investigation reasoning to a subagent. Main agent holds: investigation flow, phase state, key findings, hypothesis table. Reasoning subagent handles: detailed evidence analysis, hypothesis weighting, narrative construction. Prevents context exhaustion on complex multi-loop investigations
+- [ ] Tool discovery refactor — split into two concerns: (1) data availability (main agent consults `knowledge/environment/data-sources/` to know what questions can be answered), (2) tool mechanics (lead subagent consults `knowledge/environment/systems/` for query patterns). Also: not all tools are MCP — agent may need to call APIs via scripts
 - [ ] Tier 2 semantic judge — Haiku validates report consistency after investigation
-- [ ] CONTEXTUALIZE: add Explore subagent for recent tickets ("what is going on right now?") — situational awareness, alert correlation
+- [x] CONTEXTUALIZE: Explore subagent for recent alerts — situational awareness, alert correlation (added to SKILL.md)
+- [ ] Playbook-driven vs investigation-loop separation — evaluate whether known signatures should default to playbook-driven investigation (follow the playbook's recommended lead order) and fall back to the general investigation loop only when the playbook doesn't resolve. Could simplify routine investigations and reduce token usage
+- [ ] Ticket-context skill/subagent — extract CONTEXTUALIZE alert context (recent + related alert scanning) into a dedicated skill with pre-made queries. Reusable across signatures and invocable independently
 - [ ] Budget enforcement hook — cap token/cost spend per investigation
 - [ ] Input sanitization hooks — validate alert_json before investigation starts
 
