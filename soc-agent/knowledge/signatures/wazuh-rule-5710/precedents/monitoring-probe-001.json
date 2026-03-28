@@ -51,5 +51,12 @@
     "srcuser:testuser (monitoring probe pattern)",
     "attempt_count:1",
     "successful_login_after:false"
-  ]
+  ],
+  "alert_data": {
+    "rule": {"id": "5710", "description": "Attempt to login using a non-existent user", "level": 5},
+    "agent": {"id": "001", "name": "target-endpoint"},
+    "data": {"srcip": "10.0.1.50", "srcuser": "testuser", "dstuser": "testuser"},
+    "timestamp": "2024-01-15T14:32:00.000Z",
+    "location": "/var/log/auth.log"
+  }
 }

@@ -61,6 +61,7 @@ class Precedent:
     trace: str
     reasoning: dict  # conditions (list[str]) + refutes (list[str])
     key_indicators: list[str]
+    alert_data: dict  # raw alert fields from the original investigation
 
     def validate(self) -> list[str]:
         """Validate the precedent. Returns list of error messages."""
@@ -86,6 +87,9 @@ class Precedent:
             errors.append("trace is required")
         if not self.key_indicators:
             errors.append("at least one key_indicator is required")
+
+        if not isinstance(self.alert_data, dict) or not self.alert_data:
+            errors.append("alert_data must be a non-empty dict")
 
         for h in self.hypotheses:
             for err in h.validate():
@@ -117,7 +121,7 @@ def parse_precedent(data: dict) -> tuple[Optional[Precedent], list[str]]:
     """Parse a dict into a Precedent. Returns (precedent, errors)."""
     errors = []
 
-    required = ["ticket_id", "signature_id", "status", "disposition", "hypotheses", "flow", "trace", "reasoning", "key_indicators"]
+    required = ["ticket_id", "signature_id", "status", "disposition", "hypotheses", "flow", "trace", "reasoning", "key_indicators", "alert_data"]
     for f in required:
         if f not in data:
             errors.append(f"missing required field: {f}")
@@ -153,6 +157,7 @@ def parse_precedent(data: dict) -> tuple[Optional[Precedent], list[str]]:
         trace=data.get("trace", ""),
         reasoning=data.get("reasoning", {}),
         key_indicators=data.get("key_indicators", []),
+        alert_data=data.get("alert_data", {}),
     )
 
     validation_errors = precedent.validate()

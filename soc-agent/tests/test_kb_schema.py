@@ -159,6 +159,7 @@ class TestPrecedentEdgeCases:
             "trace": "t",
             "reasoning": {"conditions": [], "refutes": []},
             "key_indicators": ["k1"],
+            "alert_data": {"rule": {"id": "test"}},
         }
         _, errors = parse_precedent(data)
         assert any("disposition" in e for e in errors)
@@ -175,6 +176,7 @@ class TestPrecedentEdgeCases:
             "trace": "t",
             "reasoning": {"conditions": [], "refutes": []},
             "key_indicators": ["k1"],
+            "alert_data": {"rule": {"id": "test"}},
         }
         _, errors = parse_precedent(data)
         assert any("status" in e for e in errors)
@@ -191,6 +193,7 @@ class TestPrecedentEdgeCases:
             "trace": "t",
             "reasoning": {"conditions": [], "refutes": []},
             "key_indicators": ["k1"],
+            "alert_data": {"rule": {"id": "test"}},
         }
         _, errors = parse_precedent(data)
         assert any("confirmed hypothesis" in e for e in errors)
@@ -207,6 +210,7 @@ class TestPrecedentEdgeCases:
             "trace": "t",
             "reasoning": {"conditions": [], "refutes": []},
             "key_indicators": ["k1"],
+            "alert_data": {"rule": {"id": "test"}},
         }
         _, errors = parse_precedent(data)
         assert not any("confirmed hypothesis" in e for e in errors)
@@ -223,6 +227,7 @@ class TestPrecedentEdgeCases:
             "trace": "t",
             "reasoning": {"conditions": [], "refutes": []},
             "key_indicators": ["k1"],
+            "alert_data": {"rule": {"id": "test"}},
         }
         _, errors = parse_precedent(data)
         assert not any("hypothesis status" in e for e in errors)
@@ -336,6 +341,7 @@ class TestPrecedentTemplate:
         required = [
             "ticket_id", "signature_id", "status", "disposition",
             "hypotheses", "flow", "trace", "reasoning", "key_indicators",
+            "alert_data",
         ]
         for field in required:
             assert field in data, f"Template missing required field: {field}"
