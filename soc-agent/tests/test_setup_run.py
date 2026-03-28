@@ -87,6 +87,29 @@ class TestHappyPath:
         )
         assert uuid_pattern.match(run_dir.name), f"Expected UUID, got: {run_dir.name}"
 
+    def test_writes_meta_json(self, tmp_path):
+        """meta.json should be created with run_id, signature_id, and salt."""
+        result = run_setup(runs_dir=str(tmp_path))
+        assert result.returncode == 0
+        run_dir = list(tmp_path.iterdir())[0]
+        meta_file = run_dir / "meta.json"
+        assert meta_file.exists()
+        meta = json.loads(meta_file.read_text())
+        assert "run_id" in meta
+        assert meta["signature_id"] == "wazuh-rule-5710"
+        assert "salt" in meta
+        assert len(meta["salt"]) == 16  # secrets.token_hex(8)
+
+    def test_meta_salt_is_unique(self, tmp_path):
+        """Each run should get a different salt."""
+        run_setup(runs_dir=str(tmp_path))
+        run_setup(runs_dir=str(tmp_path))
+        dirs = sorted(tmp_path.iterdir())
+        assert len(dirs) == 2
+        salt1 = json.loads((dirs[0] / "meta.json").read_text())["salt"]
+        salt2 = json.loads((dirs[1] / "meta.json").read_text())["salt"]
+        assert salt1 != salt2
+
 
 class TestRunsDirEnvVar:
     """Tests for SOC_AGENT_RUNS_DIR environment variable."""

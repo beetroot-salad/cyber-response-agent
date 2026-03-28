@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""Stop hook: Validate investigation report frontmatter.
+"""PostToolUse hook: Combined Tier 1 + Tier 2 report validation.
 
-Reads the Claude Code hook event from stdin, finds report.md in the run
-directory, parses YAML frontmatter, and performs Tier 1 validation checks.
+Fires on Write/Edit tool calls. Checks if the written file is a report.md
+inside a run directory. If so, runs:
+  - Tier 1: deterministic frontmatter validation (fast, no dependencies)
+  - Tier 2: semantic judge via claude CLI with Haiku (only for valid reports)
+
+The run directory is extracted deterministically from tool_input.file_path.
 
 Exit codes:
-    0 - Validation passed (or no report found — nothing to validate)
+    0 - Validation passed (or not a report.md write — nothing to validate)
     2 - Validation failed (message fed back to agent)
 """
 
 import json
 import os
+import re
+import secrets
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,31 +25,53 @@ from pathlib import Path
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from hooks.scripts.frontmatter import parse_yaml_frontmatter  # noqa: F401 — re-exported
+from hooks.scripts.frontmatter import parse_yaml_frontmatter
 from schemas.report_frontmatter import (
     MIN_LEADS_BY_SEVERITY,
     parse_frontmatter,
 )
 
+JUDGE_PROMPT_PATH = Path(__file__).resolve().parent / "judge_prompt.md"
+JUDGE_MODEL = os.environ.get("SOC_AGENT_JUDGE_MODEL", "haiku")
+
+
+# ---------------------------------------------------------------------------
+# Run directory identification (from PostToolUse event)
+# ---------------------------------------------------------------------------
 
 def get_runs_dir() -> Path:
     """Get the runs directory. Configurable via SOC_AGENT_RUNS_DIR env var."""
     return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
 
 
-def find_report_in_runs() -> Path | None:
-    """Find the most recent report.md in runs/."""
-    runs_dir = get_runs_dir()
-    if not runs_dir.exists():
+def extract_run_dir(hook_data: dict) -> Path | None:
+    """Extract the run directory from a PostToolUse event.
+
+    Returns the parent directory if the tool wrote to a report.md
+    inside the runs directory. Returns None otherwise.
+    """
+    tool_input = hook_data.get("tool_input", {})
+    file_path = tool_input.get("file_path", "")
+    if not file_path:
         return None
 
-    reports = sorted(
-        runs_dir.glob("*/report.md"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    return reports[0] if reports else None
+    path = Path(file_path)
+    if path.name != "report.md":
+        return None
 
+    # Verify it's inside the runs directory
+    runs_dir = get_runs_dir()
+    try:
+        path.parent.relative_to(runs_dir)
+    except ValueError:
+        return None
+
+    return path.parent
+
+
+# ---------------------------------------------------------------------------
+# Tier 1: Deterministic validation
+# ---------------------------------------------------------------------------
 
 def check_precedent_exists(matched_precedent: str, signature_id: str) -> bool:
     """Check that the referenced precedent file actually exists."""
@@ -53,7 +82,6 @@ def check_precedent_exists(matched_precedent: str, signature_id: str) -> bool:
         SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "precedents"
     )
 
-    # Try exact match, then with .json extension
     candidate = precedent_dir / matched_precedent
     if candidate.exists():
         return True
@@ -77,29 +105,23 @@ def get_signature_severity(signature_id: str) -> str:
     return fm.get("severity", "medium")
 
 
-def validate(report_path: Path) -> tuple[bool, list[str]]:
-    """Run all Tier 1 validation checks on a report.
-
-    Returns (passed, errors).
-    """
+def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
+    """Run Tier 1 validation. Returns (passed, errors, frontmatter_fields)."""
     errors = []
 
-    with open(report_path) as f:
-        content = f.read()
-
-    # Parse frontmatter
+    content = report_path.read_text()
     fields = parse_yaml_frontmatter(content)
     if not fields:
-        return False, ["report.md has no YAML frontmatter (missing --- delimiters)"]
+        return False, ["report.md has no YAML frontmatter (missing --- delimiters)"], None
 
     report, parse_errors = parse_frontmatter(fields)
     if parse_errors:
         errors.extend(parse_errors)
 
     if report is None:
-        return False, errors
+        return False, errors, None
 
-    # Check 1: leads_pursued meets minimum for severity
+    # Check: leads_pursued meets minimum for severity
     severity = get_signature_severity(report.signature_id)
     min_leads = MIN_LEADS_BY_SEVERITY.get(severity, 2)
     if report.leads_pursued < min_leads:
@@ -108,7 +130,7 @@ def validate(report_path: Path) -> tuple[bool, list[str]]:
             f"for {severity} severity (requires >= {min_leads})"
         )
 
-    # Check 2: resolved requires precedent file exists
+    # Check: resolved requires precedent file exists
     if report.status == "resolved":
         if not report.matched_precedent:
             errors.append("status=resolved requires matched_precedent")
@@ -118,28 +140,203 @@ def validate(report_path: Path) -> tuple[bool, list[str]]:
                 f"knowledge/signatures/{report.signature_id}/precedents/"
             )
 
-    return len(errors) == 0, errors
+    return len(errors) == 0, errors, fields
 
+
+# ---------------------------------------------------------------------------
+# Tier 2: Semantic judge
+# ---------------------------------------------------------------------------
+
+def load_report_frontmatter(report_path: Path) -> dict | None:
+    """Parse report frontmatter. Returns None if invalid or missing."""
+    content = report_path.read_text()
+    fields = parse_yaml_frontmatter(content)
+    if not fields:
+        return None
+    report, errors = parse_frontmatter(fields)
+    if errors:
+        return None
+    return fields
+
+
+def load_precedent(signature_id: str, matched_precedent: str) -> dict | None:
+    """Load the matched precedent JSON."""
+    precedent_dir = (
+        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "precedents"
+    )
+    candidate = precedent_dir / matched_precedent
+    if candidate.exists():
+        return json.loads(candidate.read_text())
+    if not matched_precedent.endswith(".json"):
+        candidate = precedent_dir / (matched_precedent + ".json")
+        if candidate.exists():
+            return json.loads(candidate.read_text())
+    return None
+
+
+def read_file_safe(path: Path, label: str) -> str:
+    """Read file contents or return a placeholder."""
+    if path.exists():
+        return path.read_text()
+    return f"[{label} not found: {path.name}]"
+
+
+def get_run_salt(run_dir: Path) -> str:
+    """Get the per-run salt from meta.json, or generate a fallback."""
+    meta_path = run_dir / "meta.json"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+            return meta.get("salt", "")
+        except (json.JSONDecodeError, KeyError):
+            pass
+    # Fallback: generate a per-invocation salt
+    return secrets.token_hex(8)
+
+
+def wrap_untrusted(content: str, tag: str, salt: str) -> str:
+    """Wrap untrusted content in salted delimiters."""
+    return f"<run-{salt}-{tag}>\n{content}\n</run-{salt}-{tag}>"
+
+
+def assemble_prompt(
+    alert_data: str,
+    investigation_log: str,
+    report: str,
+    precedent: str | None,
+    salt: str,
+) -> str:
+    """Assemble the judge prompt from the template and context.
+
+    If precedent is None, the prompt runs in no-precedent mode (4 criteria).
+    """
+    template = JUDGE_PROMPT_PATH.read_text()
+
+    # Wrap untrusted content with salted delimiters
+    safe_alert = wrap_untrusted(alert_data, "alert-data", salt)
+    safe_log = wrap_untrusted(investigation_log, "investigation-log", salt)
+
+    prompt = template.replace("{alert_data}", safe_alert)
+    prompt = template.replace("{alert_data}", safe_alert)
+    prompt = prompt.replace("{investigation_log}", safe_log)
+    prompt = prompt.replace("{report}", report)
+
+    if precedent is not None:
+        prompt = prompt.replace("{precedent}", precedent)
+        prompt = prompt.replace("{judge_mode}", "full")
+    else:
+        prompt = prompt.replace("{precedent}", "[No precedent — this is an escalated report]")
+        prompt = prompt.replace("{judge_mode}", "no-precedent")
+
+    return prompt
+
+
+def invoke_judge(prompt: str) -> tuple[str, int]:
+    """Invoke claude CLI with the judge prompt. Returns (output, returncode)."""
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--model", JUDGE_MODEL, "--output-format", "text"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.stdout.strip(), result.returncode
+    except FileNotFoundError:
+        return "claude CLI not found", 1
+    except subprocess.TimeoutExpired:
+        return "judge timed out after 30s", 1
+
+
+def parse_verdict(output: str) -> tuple[str, str]:
+    """Parse the VERDICT line from judge output. Returns (pass|flag, reason)."""
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("VERDICT:"):
+            rest = line[len("VERDICT:"):].strip()
+            match = re.match(r"(PASS|FLAG)\s*[—\-]\s*(.*)", rest, re.IGNORECASE)
+            if match:
+                return match.group(1).upper(), match.group(2)
+            if "PASS" in rest.upper():
+                return "PASS", rest
+            return "FLAG", rest
+    return "FLAG", "could not parse judge verdict from output"
+
+
+def run_tier2(run_dir: Path, fields: dict) -> tuple[bool, str]:
+    """Run Tier 2 semantic judge. Returns (passed, message)."""
+    status = fields.get("status", "")
+    matched_precedent = fields.get("matched_precedent")
+    signature_id = fields.get("signature_id", "")
+
+    # Load precedent if available (resolved reports always have one after Tier 1)
+    precedent_data = None
+    if matched_precedent:
+        precedent_data = load_precedent(signature_id, matched_precedent)
+        if precedent_data is None:
+            return False, f"matched precedent '{matched_precedent}' could not be loaded"
+
+    # Load artifacts
+    salt = get_run_salt(run_dir)
+    alert_text = read_file_safe(run_dir / "alert.json", "alert data")
+    investigation_text = read_file_safe(run_dir / "investigation.md", "investigation log")
+    report_text = (run_dir / "report.md").read_text()
+    precedent_text = json.dumps(precedent_data, indent=2) if precedent_data else None
+
+    # Assemble and invoke
+    prompt = assemble_prompt(alert_text, investigation_text, report_text, precedent_text, salt)
+    output, returncode = invoke_judge(prompt)
+
+    if returncode != 0:
+        return False, f"claude CLI error (rc={returncode}): {output}"
+
+    verdict, reason = parse_verdict(output)
+
+    if verdict == "PASS":
+        return True, ""
+    else:
+        return False, f"Judge flagged report: {reason}\n\nFull judge output:\n{output}"
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 
 def main():
-    """Main entry point — reads hook event from stdin."""
+    """Main entry point — reads PostToolUse event from stdin."""
     try:
-        sys.stdin.read()
+        raw = sys.stdin.read()
+        hook_data = json.loads(raw)
     except Exception:
-        pass
-
-    report_path = find_report_in_runs()
-    if report_path is None:
         sys.exit(0)
 
-    passed, errors = validate(report_path)
+    # Only process report.md writes inside runs/
+    run_dir = extract_run_dir(hook_data)
+    if run_dir is None:
+        sys.exit(0)
+
+    report_path = run_dir / "report.md"
+    if not report_path.exists():
+        sys.exit(0)
+
+    # --- Tier 1: Deterministic validation ---
+    passed, errors, fields = validate_tier1(report_path)
+
+    if not passed:
+        print("Report validation failed (Tier 1):", file=sys.stderr)
+        for err in errors:
+            print(f"  - {err}", file=sys.stderr)
+        sys.exit(2)
+
+    if fields is None:
+        sys.exit(0)
+
+    # --- Tier 2: Semantic judge ---
+    passed, message = run_tier2(run_dir, fields)
 
     if passed:
         sys.exit(0)
     else:
-        print("Report validation failed:", file=sys.stderr)
-        for err in errors:
-            print(f"  - {err}", file=sys.stderr)
+        print(f"Report validation failed (Tier 2):\n{message}", file=sys.stderr)
         sys.exit(2)
 
 

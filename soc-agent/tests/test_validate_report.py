@@ -1,8 +1,10 @@
-"""Tests for report frontmatter validation.
+"""Tests for report validation (Tier 1 + Tier 2 hook architecture).
 
-Tests the validate_report.py hook logic and report_frontmatter schema.
+Tests the validate_report.py hook: PostToolUse event parsing, run directory
+extraction, Tier 1 deterministic validation, and Tier 2 helper functions.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -18,7 +20,10 @@ from schemas.report_frontmatter import (
 )
 from hooks.scripts.validate_report import (
     check_precedent_exists,
-    validate,
+    extract_run_dir,
+    get_run_salt,
+    validate_tier1,
+    wrap_untrusted,
 )
 
 FIXTURES = SOC_AGENT_ROOT / "tests" / "fixtures" / "reports"
@@ -91,7 +96,7 @@ class TestParseFrontmatter:
     def test_missing_required_fields(self):
         report, errors = parse_frontmatter({"ticket_id": "SEC-001"})
         assert report is None
-        assert len(errors) >= 4  # missing signature_id, status, disposition, confidence, leads_pursued
+        assert len(errors) >= 4
 
     def test_valid_dict(self):
         fields = {
@@ -122,35 +127,35 @@ class TestParseFrontmatter:
         assert report.leads_pursued == 3
 
 
-# --- Full validation with fixtures ---
+# --- Tier 1 validation with fixtures ---
 
 
 class TestValidateFixtures:
     def test_valid_resolved_report(self):
-        passed, errors = validate(FIXTURES / "valid_resolved.md")
+        passed, errors, _ = validate_tier1(FIXTURES / "valid_resolved.md")
         assert passed, f"Expected valid but got errors: {errors}"
 
     def test_valid_escalate_report(self):
-        passed, errors = validate(FIXTURES / "valid_escalate.md")
+        passed, errors, _ = validate_tier1(FIXTURES / "valid_escalate.md")
         assert passed, f"Expected valid but got errors: {errors}"
 
     def test_invalid_missing_fields(self):
-        passed, errors = validate(FIXTURES / "invalid_missing_fields.md")
+        passed, errors, _ = validate_tier1(FIXTURES / "invalid_missing_fields.md")
         assert not passed
         assert any("missing required field" in e for e in errors)
 
     def test_invalid_no_precedent(self):
-        passed, errors = validate(FIXTURES / "invalid_no_precedent.md")
+        passed, errors, _ = validate_tier1(FIXTURES / "invalid_no_precedent.md")
         assert not passed
         assert any("not found" in e for e in errors)
 
     def test_invalid_low_leads(self):
-        passed, errors = validate(FIXTURES / "invalid_low_leads.md")
+        passed, errors, _ = validate_tier1(FIXTURES / "invalid_low_leads.md")
         assert not passed
         assert any("leads_pursued" in e for e in errors)
 
     def test_invalid_bad_enums(self):
-        passed, errors = validate(FIXTURES / "invalid_bad_enums.md")
+        passed, errors, _ = validate_tier1(FIXTURES / "invalid_bad_enums.md")
         assert not passed
         assert any("status" in e for e in errors)
 
@@ -169,3 +174,101 @@ class TestCheckPrecedentExists:
 
     def test_nonexistent_signature(self):
         assert check_precedent_exists("anything.json", "nonexistent-sig") is False
+
+
+# --- PostToolUse event parsing ---
+
+
+class TestExtractRunDir:
+    def test_report_write_in_runs(self, tmp_path, monkeypatch):
+        """Write to runs/{id}/report.md extracts the run dir."""
+        runs = tmp_path / "runs"
+        run_dir = runs / "abc-123"
+        run_dir.mkdir(parents=True)
+        monkeypatch.setenv("SOC_AGENT_RUNS_DIR", str(runs))
+
+        hook_data = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(run_dir / "report.md")},
+        }
+        result = extract_run_dir(hook_data)
+        assert result == run_dir
+
+    def test_non_report_file_ignored(self, tmp_path, monkeypatch):
+        """Write to a non-report file returns None."""
+        runs = tmp_path / "runs"
+        run_dir = runs / "abc-123"
+        run_dir.mkdir(parents=True)
+        monkeypatch.setenv("SOC_AGENT_RUNS_DIR", str(runs))
+
+        hook_data = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(run_dir / "investigation.md")},
+        }
+        assert extract_run_dir(hook_data) is None
+
+    def test_file_outside_runs_ignored(self, tmp_path, monkeypatch):
+        """Write to report.md outside runs/ returns None."""
+        runs = tmp_path / "runs"
+        runs.mkdir(parents=True)
+        monkeypatch.setenv("SOC_AGENT_RUNS_DIR", str(runs))
+
+        hook_data = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/other/report.md"},
+        }
+        assert extract_run_dir(hook_data) is None
+
+    def test_missing_file_path(self):
+        """No file_path in tool_input returns None."""
+        hook_data = {"tool_name": "Write", "tool_input": {}}
+        assert extract_run_dir(hook_data) is None
+
+    def test_edit_tool_also_works(self, tmp_path, monkeypatch):
+        """Edit tool events are also handled."""
+        runs = tmp_path / "runs"
+        run_dir = runs / "abc-123"
+        run_dir.mkdir(parents=True)
+        monkeypatch.setenv("SOC_AGENT_RUNS_DIR", str(runs))
+
+        hook_data = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(run_dir / "report.md")},
+        }
+        result = extract_run_dir(hook_data)
+        assert result == run_dir
+
+
+# --- Salt handling ---
+
+
+class TestRunSalt:
+    def test_reads_salt_from_meta(self, tmp_path):
+        """Salt is read from meta.json when present."""
+        meta = {"run_id": "test", "salt": "abc123"}
+        (tmp_path / "meta.json").write_text(json.dumps(meta))
+        assert get_run_salt(tmp_path) == "abc123"
+
+    def test_fallback_when_no_meta(self, tmp_path):
+        """Generates a fallback salt when meta.json doesn't exist."""
+        salt = get_run_salt(tmp_path)
+        assert len(salt) == 16  # secrets.token_hex(8) = 16 chars
+
+    def test_fallback_when_meta_corrupt(self, tmp_path):
+        """Generates a fallback salt when meta.json is invalid."""
+        (tmp_path / "meta.json").write_text("not json")
+        salt = get_run_salt(tmp_path)
+        assert len(salt) == 16
+
+
+class TestWrapUntrusted:
+    def test_wraps_with_salted_tags(self):
+        result = wrap_untrusted("hello", "alert-data", "abc123")
+        assert result == "<run-abc123-alert-data>\nhello\n</run-abc123-alert-data>"
+
+    def test_different_salts_produce_different_tags(self):
+        a = wrap_untrusted("x", "data", "salt1")
+        b = wrap_untrusted("x", "data", "salt2")
+        assert a != b
+        assert "salt1" in a
+        assert "salt2" in b
