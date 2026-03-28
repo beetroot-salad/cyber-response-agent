@@ -33,5 +33,8 @@
   },
   "key_indicators": [
     "field:value (context that makes this indicator diagnostic)"
-  ]
+  ],
+  "alert_data": {
+    "_comment": "Raw alert fields from the original investigation — copy from alert.json"
+  }
 }

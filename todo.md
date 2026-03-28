@@ -5,7 +5,7 @@
 - [x] Delete v2 pipeline (shell hooks, bash scoring, old tests)
 - [x] Python schemas: report_frontmatter, state machine, precedent (dataclass validators)
 - [x] Hooks: validate_report.py (Stop hook safety gate), write_state.py (state machine), investigation_summary.py (JSONL outcomes), audit_tool_calls.py (PostToolUse JSONL)
-- [x] Hook registration in .claude/settings.json
+- [x] Hook registration moved to plugin.json (plugin-only, not fired during development)
 - [x] Knowledge base migrated: context.md, playbook.md (hypothesis catalog + leads), precedents/ (v3 schema)
 - [x] Signature template updated for v3 vocabulary
 - [x] Investigator agent: hypothesis-driven 5-phase loop (C→H→G→A→CONCLUDE) with looping
@@ -29,7 +29,8 @@
 - [ ] Lead subagents — refactor so each lead is executed by a subagent with isolated context. Subagent receives hypothesis predictions + lead definition, executes queries, returns structured summary (observation + characterization). Keeps raw SIEM data out of the main agent's context window. Reframe Philosophy to reflect agent-as-director, subagents-as-executors
 - [ ] Context window management — migrate detailed investigation reasoning to a subagent. Main agent holds: investigation flow, phase state, key findings, hypothesis table. Reasoning subagent handles: detailed evidence analysis, hypothesis weighting, narrative construction. Prevents context exhaustion on complex multi-loop investigations
 - [ ] Tool discovery refactor — split into two concerns: (1) data availability (main agent consults `knowledge/environment/data-sources/` to know what questions can be answered), (2) tool mechanics (lead subagent consults `knowledge/environment/systems/` for query patterns). Also: not all tools are MCP — agent may need to call APIs via scripts
-- [ ] Tier 2 semantic judge — Haiku validates report consistency after investigation
+- [x] Tier 2 semantic judge — Haiku validates report consistency after investigation (judge_report.py + judge_prompt.md, invoked via claude CLI)
+- [x] Precedent schema: added `alert_data` field (raw alert for judge comparison + future post-mortem seeding)
 - [x] CONTEXTUALIZE: Explore subagent for recent alerts — situational awareness, alert correlation (added to SKILL.md)
 - [ ] Playbook-driven vs investigation-loop separation — evaluate whether known signatures should default to playbook-driven investigation (follow the playbook's recommended lead order) and fall back to the general investigation loop only when the playbook doesn't resolve. Could simplify routine investigations and reduce token usage
 - [ ] Ticket-context skill/subagent — extract CONTEXTUALIZE alert context (recent + related alert scanning) into a dedicated skill with pre-made queries. Reusable across signatures and invocable independently

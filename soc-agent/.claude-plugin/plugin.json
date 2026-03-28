@@ -1,6 +1,6 @@
 {
   "name": "soc-agent",
-  "version": "3.1.0",
+  "version": "3.3.0",
   "description": "Hypothesis-driven security alert triage agent. Investigates alerts through iterative hypothesis elimination, validates findings against precedents, and recommends disposition.",
   "skills": [
     "skills/investigate/SKILL.md"
@@ -8,5 +8,38 @@
   "knowledge": [
     "knowledge/common/SKILL.md",
     "knowledge/signatures/*/SKILL.md"
-  ]
+  ],
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/investigation_summary.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate_report.py"
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/audit_tool_calls.py"
+          }
+        ]
+      }
+    ]
+  }
 }

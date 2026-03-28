@@ -33,14 +33,16 @@ This file provides guidance to Claude Code when working with this repository.
 |-----------|------|---------|
 | **Investigate Skill** | `soc-agent/skills/investigate/SKILL.md` | Entry point + investigation loop (merged skill) |
 | **Import Resolver** | `soc-agent/scripts/resolve_imports.py` | `!command` preprocessing: resolves signature knowledge |
-| **Validate Report Hook** | `soc-agent/hooks/scripts/validate_report.py` | Stop hook: Tier 1 report validation (safety gate) |
+| **Validate Report Hook** | `soc-agent/hooks/scripts/validate_report.py` | PostToolUse hook (Write\|Edit): combined Tier 1 + Tier 2 validation |
+| **Judge Prompt** | `soc-agent/hooks/scripts/judge_prompt.md` | Prompt template for Tier 2 judge (5 criteria, two modes) |
 | **Write State Script** | `soc-agent/hooks/scripts/write_state.py` | State machine enforcement |
 | **Investigation Summary Hook** | `soc-agent/hooks/scripts/investigation_summary.py` | JSONL outcome log per completed investigation |
 | **Tool Call Audit Hook** | `soc-agent/hooks/scripts/audit_tool_calls.py` | PostToolUse: audit + trace JSONL split |
 
 ### Safety Architecture
 
-- **Hook validation** replaces deterministic scoring — the `validate_report.py` Stop hook enforces that investigations actually happened (leads pursued, precedent match required for resolution)
+- **Two-tier validation** — `validate_report.py` is a PostToolUse hook (Write|Edit) that fires when report.md is written. Tier 1 enforces structural constraints deterministically. Tier 2 uses Haiku via claude CLI to validate report consistency, precedent match validity, and evidence sufficiency. Runs in full mode (5 checks) for resolved reports with precedent, or no-precedent mode (4 checks) for escalated reports. Untrusted content (alert data, investigation log) is wrapped in per-run salted delimiters to prevent prompt injection.
+- **Hooks registered in plugin.json** — hooks only fire when the plugin is loaded, not during development
 - **State machine** (`write_state.py`) prevents phase skipping — agent must follow CONTEXTUALIZE→HYPOTHESIZE→GATHER→ANALYZE→(loop|CONCLUDE)
 - **Precedent requirement** — `status=resolved` requires `matched_precedent` pointing to an existing file
 - **Adversarial hypothesis** — agent must maintain at least one threat hypothesis until explicitly refuted
@@ -59,7 +61,8 @@ This file provides guidance to Claude Code when working with this repository.
 │   │   └── resolve_imports.py     # !command resolver: signature knowledge → stdout
 │   ├── hooks/
 │   │   └── scripts/
-│   │       ├── validate_report.py      # Stop hook: report validation
+│   │       ├── validate_report.py      # PostToolUse hook: combined Tier 1 + Tier 2 validation
+│   │       ├── judge_prompt.md         # Prompt template for Tier 2 judge
 │   │       ├── write_state.py          # State machine enforcement
 │   │       ├── investigation_summary.py # Stop hook: JSONL outcome log
 │   │       └── audit_tool_calls.py     # PostToolUse: audit + trace JSONL split

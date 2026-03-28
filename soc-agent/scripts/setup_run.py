@@ -5,6 +5,7 @@ Usage: python3 scripts/setup_run.py <signature_id> <alert_json>
 
 Creates:
   {SOC_AGENT_RUNS_DIR:-runs}/{uuid}/alert.json
+  {SOC_AGENT_RUNS_DIR:-runs}/{uuid}/meta.json  (run_id, signature_id, salt)
 
 Prints run metadata to stdout for !command substitution in SKILL.md.
 
@@ -15,6 +16,7 @@ Exit codes:
 
 import json
 import os
+import secrets
 import sys
 import uuid
 from pathlib import Path
@@ -51,9 +53,17 @@ def main() -> int:
     run_dir = runs_base / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # Generate per-run salt for untrusted content delimiters
+    salt = secrets.token_hex(8)
+
     # Save alert.json
     alert_file = run_dir / "alert.json"
     alert_file.write_text(json.dumps(alert, indent=2))
+
+    # Save meta.json (run metadata for hooks)
+    meta = {"run_id": run_id, "signature_id": signature_id, "salt": salt}
+    meta_file = run_dir / "meta.json"
+    meta_file.write_text(json.dumps(meta, indent=2))
 
     # Output for skill substitution
     print(f"Run directory: {run_dir}")
