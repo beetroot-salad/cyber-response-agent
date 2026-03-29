@@ -24,7 +24,7 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from schemas.state import Phase, validate_transition
 from schemas.report_frontmatter import parse_frontmatter
-from hooks.scripts.validate_report import parse_yaml_frontmatter, validate
+from hooks.scripts.validate_report import parse_yaml_frontmatter, validate_tier1
 
 
 FIXTURES = SOC_AGENT_ROOT / "tests" / "fixtures"
@@ -41,12 +41,12 @@ class TestInvestigationArtifacts:
     def test_valid_report_passes_validation(self):
         """A well-formed report.md passes the validate_report hook."""
         report_path = FIXTURES / "reports" / "valid_resolved.md"
-        passed, errors = validate(report_path)
+        passed, errors, _ = validate_tier1(report_path)
         assert passed, f"Valid report failed validation: {errors}"
 
     def test_escalation_report_passes_validation(self):
         report_path = FIXTURES / "reports" / "valid_escalate.md"
-        passed, errors = validate(report_path)
+        passed, errors, _ = validate_tier1(report_path)
         assert passed, f"Escalation report failed validation: {errors}"
 
     def test_report_frontmatter_has_required_fields(self):
@@ -81,6 +81,24 @@ class TestStateTransitionContract:
             "HYPOTHESIZE", "GATHER", "ANALYZE",
             "CONCLUDE",
         ]
+        current = None
+        for phase in phases:
+            valid, error = validate_transition(current, phase)
+            assert valid, f"{current} -> {phase}: {error}"
+            current = phase
+
+    def test_screen_resolve_sequence(self):
+        """C -> SCREEN -> CONCLUDE is valid (screen resolved)."""
+        phases = ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+        current = None
+        for phase in phases:
+            valid, error = validate_transition(current, phase)
+            assert valid, f"{current} -> {phase}: {error}"
+            current = phase
+
+    def test_screen_fallthrough_sequence(self):
+        """C -> SCREEN -> H -> G -> A -> CONCLUDE (screen didn't resolve)."""
+        phases = ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -305,8 +323,8 @@ class TestLLMInvestigation:
         state = json.loads(state_file.read_text())
         assert "phase" in state
         assert "history" in state
-        assert len(state["history"]) >= 5, (
-            f"Expected at least 5 phases (C-H-G-A-CONCLUDE), got {state['history']}"
+        assert len(state["history"]) >= 3, (
+            f"Expected at least 3 phases (C-SCREEN-CONCLUDE or C-H-G-A-CONCLUDE), got {state['history']}"
         )
 
         # Verify all transitions were legal
@@ -381,7 +399,7 @@ class TestLLMInvestigation:
         if not report_file.exists():
             pytest.skip("report.md not created")
 
-        passed, errors = validate(report_file)
+        passed, errors, _ = validate_tier1(report_file)
         assert passed, f"Report validation errors: {errors}"
 
     def test_no_hallucinated_tools(self, llm_investigation_run):

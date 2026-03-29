@@ -37,6 +37,7 @@ This research phase is the foundation. The context, playbook, and precedents sho
 - Update frontmatter (signature_id, last_updated)
 - Hypothesis catalog — from the outcome clusters you identified in research (must include at least one adversarial hypothesis)
 - Leads with per-hypothesis predictions — based on what queries/checks actually resolved past tickets
+- Screen patterns (optional, recommended) — identify the most common benign outcomes with clear, mechanical indicators. These enable fast resolution without the full investigation loop. Only include patterns where every indicator is unambiguous. Prioritize adding screen patterns during post-mortem review when you have real outcome data.
 - Escalation and auto-close criteria — derived from real resolution patterns
 
 **precedents/:**

@@ -37,6 +37,21 @@ Description of the second candidate explanation (must include at least one adver
 
 ---
 
+## Screen
+
+<!-- Optional but recommended. Define fast-path patterns for common resolutions.
+     The screen subagent checks these before the full investigation loop.
+     Only include patterns with unambiguous mechanical indicators.
+     For high/critical severity signatures, screen leads must meet MIN_LEADS_BY_SEVERITY. -->
+
+| Pattern | Indicators | Leads | Action | Precedent |
+|---------|-----------|-------|--------|-----------|
+| {pattern} | {indicator-1, indicator-2, ...} | {lead-1, lead-2} | {disposition} | {precedent.json} |
+
+<!-- Remove this section entirely if no clear fast-path patterns exist. -->
+
+---
+
 ## Start With
 
 Recommend which lead to pursue first and why.

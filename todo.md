@@ -32,7 +32,7 @@
 - [x] Tier 2 semantic judge — Haiku validates report consistency after investigation (judge_report.py + judge_prompt.md, invoked via claude CLI)
 - [x] Precedent schema: added `alert_data` field (raw alert for judge comparison + future post-mortem seeding)
 - [x] CONTEXTUALIZE: Explore subagent for recent alerts — situational awareness, alert correlation (added to SKILL.md)
-- [ ] Playbook-driven vs investigation-loop separation — evaluate whether known signatures should default to playbook-driven investigation (follow the playbook's recommended lead order) and fall back to the general investigation loop only when the playbook doesn't resolve. Could simplify routine investigations and reduce token usage
+- [x] Playbook-driven vs investigation-loop separation — implemented as SCREEN phase: playbooks define fast-path patterns checked by a cheap subagent (Sonnet/Haiku) before the full investigation loop. Falls through to full loop on no match.
 - [ ] Ticket-context skill/subagent — extract CONTEXTUALIZE alert context (recent + related alert scanning) into a dedicated skill with pre-made queries. Reusable across signatures and invocable independently
 - [ ] Budget enforcement hook — cap token/cost spend per investigation
 - [ ] Input sanitization hooks — validate alert_json before investigation starts
