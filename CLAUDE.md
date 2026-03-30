@@ -20,18 +20,23 @@ This file provides guidance to Claude Code when working with this repository.
         ├── !command: resolve_imports.py bakes knowledge into prompt
         │   (context.md + playbook.md + checklist.md + @import: atoms)
         │
-        └── CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE
-                                 ↑                    │
-                                 └────── loop ────────┘
-                                                      │
-                                                 CONCLUDE → report.md
+        └── CONTEXTUALIZE → [SCREEN] → HYPOTHESIZE → GATHER → ANALYZE
+                                 │           ↑                    │
+                                 │           └────── loop ────────┘
+                                 │                                │
+                                 └──────────────────────┬─────────┘
+                                                        │
+                                                   CONCLUDE → report.md
 ```
+
+The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts fast pattern matching against playbook-defined screen patterns. If matched, skips the full loop. If not, passes gathered evidence into the full investigation.
 
 ### Core Components
 
 | Component | Path | Purpose |
 |-----------|------|---------|
 | **Investigate Skill** | `soc-agent/skills/investigate/SKILL.md` | Entry point + investigation loop (merged skill) |
+| **Screen Prompt** | `soc-agent/skills/investigate/screen.md` | Subagent prompt for fast pattern matching (SCREEN phase) |
 | **Import Resolver** | `soc-agent/scripts/resolve_imports.py` | `!command` preprocessing: resolves signature knowledge |
 | **Validate Report Hook** | `soc-agent/hooks/scripts/validate_report.py` | PostToolUse hook (Write\|Edit): combined Tier 1 + Tier 2 validation |
 | **Judge Prompt** | `soc-agent/hooks/scripts/judge_prompt.md` | Prompt template for Tier 2 judge (5 criteria, two modes) |
@@ -43,7 +48,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 - **Two-tier validation** — `validate_report.py` is a PostToolUse hook (Write|Edit) that fires when report.md is written. Tier 1 enforces structural constraints deterministically. Tier 2 uses Haiku via claude CLI to validate report consistency, precedent match validity, and evidence sufficiency. Runs in full mode (5 checks) for resolved reports with precedent, or no-precedent mode (4 checks) for escalated reports. Untrusted content (alert data, investigation log) is wrapped in per-run salted delimiters to prevent prompt injection.
 - **Hooks registered in plugin.json** — hooks only fire when the plugin is loaded, not during development
-- **State machine** (`write_state.py`) prevents phase skipping — agent must follow CONTEXTUALIZE→HYPOTHESIZE→GATHER→ANALYZE→(loop|CONCLUDE)
+- **State machine** (`write_state.py`) prevents phase skipping — agent must follow CONTEXTUALIZE→[SCREEN]→HYPOTHESIZE→GATHER→ANALYZE→(loop|CONCLUDE)
 - **Precedent requirement** — `status=resolved` requires `matched_precedent` pointing to an existing file
 - **Adversarial hypothesis** — agent must maintain at least one threat hypothesis until explicitly refuted
 
@@ -56,7 +61,8 @@ This file provides guidance to Claude Code when working with this repository.
 │   │   └── plugin.json            # Plugin manifest
 │   ├── skills/
 │   │   └── investigate/
-│   │       └── SKILL.md           # Merged investigation skill (entry point + loop)
+│   │       ├── SKILL.md           # Merged investigation skill (entry point + loop)
+│   │       └── screen.md          # Subagent prompt for SCREEN fast pattern matching
 │   ├── scripts/
 │   │   └── resolve_imports.py     # !command resolver: signature knowledge → stdout
 │   ├── hooks/

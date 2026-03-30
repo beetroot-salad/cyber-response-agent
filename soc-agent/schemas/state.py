@@ -12,6 +12,7 @@ from typing import Optional
 
 class Phase(str, Enum):
     CONTEXTUALIZE = "CONTEXTUALIZE"
+    SCREEN = "SCREEN"
     HYPOTHESIZE = "HYPOTHESIZE"
     GATHER = "GATHER"
     ANALYZE = "ANALYZE"
@@ -20,7 +21,8 @@ class Phase(str, Enum):
 
 # Legal transitions: from_phase -> set of allowed to_phases
 TRANSITIONS: dict[Phase, set[Phase]] = {
-    Phase.CONTEXTUALIZE: {Phase.HYPOTHESIZE},
+    Phase.CONTEXTUALIZE: {Phase.SCREEN, Phase.HYPOTHESIZE},  # SCREEN if playbook has it, else skip
+    Phase.SCREEN: {Phase.HYPOTHESIZE, Phase.CONCLUDE},       # resolve or fall through
     Phase.HYPOTHESIZE: {Phase.GATHER},
     Phase.GATHER: {Phase.ANALYZE},
     Phase.ANALYZE: {Phase.HYPOTHESIZE, Phase.CONCLUDE},

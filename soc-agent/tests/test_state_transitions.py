@@ -42,7 +42,10 @@ class TestValidateTransition:
 
     def test_all_legal_transitions(self):
         legal = [
-            ("CONTEXTUALIZE", "HYPOTHESIZE"),
+            ("CONTEXTUALIZE", "SCREEN"),      # screen if playbook has it
+            ("CONTEXTUALIZE", "HYPOTHESIZE"),  # skip screen
+            ("SCREEN", "HYPOTHESIZE"),         # screen fall-through
+            ("SCREEN", "CONCLUDE"),            # screen resolved
             ("HYPOTHESIZE", "GATHER"),
             ("GATHER", "ANALYZE"),
             ("ANALYZE", "HYPOTHESIZE"),  # loop back
@@ -57,15 +60,23 @@ class TestValidateTransition:
             ("CONTEXTUALIZE", "GATHER"),
             ("CONTEXTUALIZE", "ANALYZE"),
             ("CONTEXTUALIZE", "CONCLUDE"),
+            ("SCREEN", "CONTEXTUALIZE"),
+            ("SCREEN", "GATHER"),
+            ("SCREEN", "ANALYZE"),
+            ("SCREEN", "SCREEN"),
             ("HYPOTHESIZE", "CONTEXTUALIZE"),
+            ("HYPOTHESIZE", "SCREEN"),
             ("HYPOTHESIZE", "ANALYZE"),
             ("HYPOTHESIZE", "CONCLUDE"),
             ("GATHER", "CONTEXTUALIZE"),
+            ("GATHER", "SCREEN"),
             ("GATHER", "HYPOTHESIZE"),
             ("GATHER", "CONCLUDE"),
             ("ANALYZE", "CONTEXTUALIZE"),
+            ("ANALYZE", "SCREEN"),
             ("ANALYZE", "GATHER"),
             ("CONCLUDE", "CONTEXTUALIZE"),
+            ("CONCLUDE", "SCREEN"),
             ("CONCLUDE", "HYPOTHESIZE"),
             ("CONCLUDE", "GATHER"),
             ("CONCLUDE", "ANALYZE"),
@@ -110,6 +121,10 @@ class TestCountLoops:
             history.extend(["HYPOTHESIZE", "GATHER", "ANALYZE"])
         assert count_loops(history) == MAX_LOOPS
 
+    def test_screen_does_not_count_as_loop(self):
+        history = ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE"]
+        assert count_loops(history) == 1
+
 
 # --- make_state ---
 
@@ -153,6 +168,33 @@ class TestTransitionSequence:
             "CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE",
             "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE",
         ]
+        current = None
+        for phase in phases:
+            valid, error = validate_transition(current, phase)
+            assert valid, f"Failed at {current} -> {phase}: {error}"
+            current = phase
+
+    def test_screen_resolve_sequence(self):
+        """C -> SCREEN -> CONCLUDE is valid (screen resolved)."""
+        phases = ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+        current = None
+        for phase in phases:
+            valid, error = validate_transition(current, phase)
+            assert valid, f"Failed at {current} -> {phase}: {error}"
+            current = phase
+
+    def test_screen_fallthrough_sequence(self):
+        """C -> SCREEN -> H -> G -> A -> CONCLUDE (screen didn't resolve)."""
+        phases = ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        current = None
+        for phase in phases:
+            valid, error = validate_transition(current, phase)
+            assert valid, f"Failed at {current} -> {phase}: {error}"
+            current = phase
+
+    def test_skip_screen_sequence(self):
+        """C -> H -> G -> A -> CONCLUDE (no screen section in playbook)."""
+        phases = ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -263,6 +305,46 @@ class TestWriteStateScript:
                 text=True,
             )
             assert result.returncode == 0, f"Failed at {phase}: {result.stderr}"
+
+        state = json.loads((run_dir / "state.json").read_text())
+        assert state["phase"] == "CONCLUDE"
+        assert state["history"] == phases
+
+    def test_write_state_screen_resolve_sequence(self, tmp_path):
+        """Test C -> SCREEN -> CONCLUDE via the script."""
+        import subprocess
+
+        script = SOC_AGENT_ROOT / "hooks" / "scripts" / "write_state.py"
+        run_dir = tmp_path / "run-test"
+        run_dir.mkdir()
+
+        phases = ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+        for phase in phases:
+            args = [sys.executable, str(script), str(run_dir), phase]
+            if phase == "CONTEXTUALIZE":
+                args.extend(["SEC-001", "wazuh-rule-5710"])
+            result = subprocess.run(args, capture_output=True, text=True)
+            assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
+
+        state = json.loads((run_dir / "state.json").read_text())
+        assert state["phase"] == "CONCLUDE"
+        assert state["history"] == phases
+
+    def test_write_state_screen_fallthrough_sequence(self, tmp_path):
+        """Test C -> SCREEN -> H -> G -> A -> CONCLUDE via the script."""
+        import subprocess
+
+        script = SOC_AGENT_ROOT / "hooks" / "scripts" / "write_state.py"
+        run_dir = tmp_path / "run-test"
+        run_dir.mkdir()
+
+        phases = ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        for phase in phases:
+            args = [sys.executable, str(script), str(run_dir), phase]
+            if phase == "CONTEXTUALIZE":
+                args.extend(["SEC-001", "wazuh-rule-5710"])
+            result = subprocess.run(args, capture_output=True, text=True)
+            assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
 
         state = json.loads((run_dir / "state.json").read_text())
         assert state["phase"] == "CONCLUDE"

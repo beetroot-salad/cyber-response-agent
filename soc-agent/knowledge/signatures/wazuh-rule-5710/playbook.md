@@ -1,6 +1,6 @@
 ---
 signature_id: wazuh-rule-5710
-last_updated: 2026-03-23
+last_updated: 2026-03-29
 total_investigations: 0
 resolution_rate: null
 ---
@@ -80,6 +80,16 @@ Automated job using stale credentials after a password rotation event.
 | ?brute-force | Usernames from common attack wordlists: admin, root, user, test, oracle, postgres |
 | ?credential-stuffing | Real-looking usernames that don't match obvious patterns |
 | ?service-account-rotation | Service account patterns: svc-*, backup-*, cron-*, ansible-* |
+
+---
+
+## Screen
+
+Fast-path patterns for automated resolution. The screen subagent checks these before the full investigation loop.
+
+| Pattern | Indicators | Leads | Action | Precedent |
+|---------|-----------|-------|--------|-----------|
+| monitoring-probe | srcip: internal, username: monitoring-pattern (testuser/probe/nagios/zabbix/healthcheck), attempt_count: 1, successful_login_after: false | authentication-history, source-reputation | resolve → benign | monitoring-probe-001.json |
 
 ---
 

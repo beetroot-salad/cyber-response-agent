@@ -70,10 +70,13 @@ This means:
 ## Investigation Loop
 
 ```
-Phases: CONTEXTUALIZE → HYPOTHESIZE → GATHER → ANALYZE → CONCLUDE
+Phases: CONTEXTUALIZE → [SCREEN] → HYPOTHESIZE → GATHER → ANALYZE → CONCLUDE
 
 Transitions:
-- CONTEXTUALIZE → HYPOTHESIZE (once)
+- CONTEXTUALIZE → SCREEN (when playbook has a ## Screen section)
+- CONTEXTUALIZE → HYPOTHESIZE (when playbook has no ## Screen section)
+- SCREEN → CONCLUDE (screen matched a known pattern — after validation)
+- SCREEN → HYPOTHESIZE (screen didn't match — pass evidence to full loop)
 - HYPOTHESIZE → GATHER
 - GATHER → ANALYZE
 - ANALYZE → HYPOTHESIZE (more leads needed)
@@ -123,6 +126,39 @@ Write an initial section in `{run_dir}/investigation.md`:
 **Playbook hypotheses:** ?hypothesis-1, ?hypothesis-2, ...
 **Available leads:** lead-1, lead-2, ...
 **Precedent matches:** {summary from Explore subagent}
+```
+
+### SCREEN (optional)
+
+**Goal:** Attempt fast resolution via mechanical pattern matching before the full investigation loop.
+
+**When to enter:** The playbook loaded in Signature Knowledge contains a `## Screen` section. If there is no Screen section, skip directly to HYPOTHESIZE.
+
+1. Write state:
+   ```bash
+   python3 hooks/scripts/write_state.py {run_dir} SCREEN
+   ```
+
+2. Spawn a **subagent** (use a cheaper model — Sonnet or Haiku) with the prompt from `skills/investigate/screen.md`. Pass it:
+   - The `{run_dir}` path — the subagent reads alert.json and investigation.md from the run directory
+   - The `## Screen` section from the playbook (the pattern table and specified leads)
+   - Access to the same MCP tools for running queries
+
+**If `screen_result: match`** — validate the screen output is well-formed (all required YAML fields present, observations are non-empty, matched_pattern corresponds to an entry in the Screen table). If valid, proceed to CONCLUDE using the screen result. If malformed, fall through to HYPOTHESIZE with the evidence gathered.
+
+> Note: The report validation hooks (Tier 1 + Tier 2 judge) handle deeper validation — precedent existence, evidence sufficiency, report consistency. The main agent's job here is only to check that the screen subagent returned a coherent, complete response.
+
+**If `screen_result: no_match`** — proceed to HYPOTHESIZE. The evidence gathered during screening (the `leads_run` observations) becomes part of the investigation record. Do not re-run those leads in the full loop unless you have reason to believe the results were incomplete.
+
+**If the subagent returns malformed or unparseable output** — treat as no_match and fall through to HYPOTHESIZE.
+
+Append to `{run_dir}/investigation.md`:
+```markdown
+## SCREEN
+
+**Result:** {match|no_match}
+**Leads run:** {lead names and observations from screen subagent}
+**Outcome:** {proceeding to CONCLUDE | falling through to HYPOTHESIZE — reason}
 ```
 
 ### HYPOTHESIZE
@@ -286,8 +322,10 @@ hypotheses:
 
 1. Review the **Investigation Checklist** in the Signature Knowledge section above — verify every item before writing the report
 2. Generate a trace line summarizing the investigation path
+   - For SCREEN-resolved investigations, use the format: `screen({pattern}, {leads}) → disposition:hypothesis`
 3. Determine status: `resolved` (confident, precedent match) or `escalated` (uncertain, adversarial, or insufficient evidence)
 4. Determine disposition: `benign` (correct detection, harmless), `false_positive` (rule misfired), `true_positive` (confirmed threat), or `inconclusive` (can't determine)
+   - For SCREEN-resolved investigations, use the disposition, confidence, and matched_precedent from the validated screen result
 5. If `resolved`: identify the matching precedent file
 6. Write `{run_dir}/report.md` with YAML frontmatter
 

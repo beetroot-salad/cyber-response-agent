@@ -105,6 +105,34 @@ def get_signature_severity(signature_id: str) -> str:
     return fm.get("severity", "medium")
 
 
+def is_screen_resolved(run_dir: Path) -> bool:
+    """Check if this investigation was resolved via the SCREEN phase.
+
+    Reads state.json and checks if SCREEN is in history but HYPOTHESIZE
+    is not (i.e., the investigation didn't enter the full loop).
+    """
+    state_path = run_dir / "state.json"
+    if not state_path.exists():
+        return False
+    try:
+        state = json.loads(state_path.read_text())
+        history = state.get("history", [])
+        return "SCREEN" in history and "HYPOTHESIZE" not in history
+    except (json.JSONDecodeError, KeyError):
+        return False
+
+
+def playbook_has_screen_section(signature_id: str) -> bool:
+    """Check if the playbook for this signature has a ## Screen section."""
+    playbook_path = (
+        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "playbook.md"
+    )
+    if not playbook_path.exists():
+        return False
+    content = playbook_path.read_text()
+    return bool(re.search(r"^## Screen\b", content, re.MULTILINE))
+
+
 def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
     """Run Tier 1 validation. Returns (passed, errors, frontmatter_fields)."""
     errors = []
@@ -121,14 +149,27 @@ def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
     if report is None:
         return False, errors, None
 
+    # Determine if this is a screen-resolved investigation
+    run_dir = report_path.parent
+    screen = is_screen_resolved(run_dir)
+
     # Check: leads_pursued meets minimum for severity
-    severity = get_signature_severity(report.signature_id)
-    min_leads = MIN_LEADS_BY_SEVERITY.get(severity, 2)
-    if report.leads_pursued < min_leads:
-        errors.append(
-            f"leads_pursued={report.leads_pursued} is below minimum "
-            f"for {severity} severity (requires >= {min_leads})"
-        )
+    # Screen-resolved reports are exempt — their safety comes from
+    # precedent match + pattern match + judge validation
+    if screen:
+        if not playbook_has_screen_section(report.signature_id):
+            errors.append(
+                f"report is screen-resolved but playbook for "
+                f"'{report.signature_id}' has no ## Screen section"
+            )
+    else:
+        severity = get_signature_severity(report.signature_id)
+        min_leads = MIN_LEADS_BY_SEVERITY.get(severity, 2)
+        if report.leads_pursued < min_leads:
+            errors.append(
+                f"leads_pursued={report.leads_pursued} is below minimum "
+                f"for {severity} severity (requires >= {min_leads})"
+            )
 
     # Check: resolved requires precedent file exists
     if report.status == "resolved":
