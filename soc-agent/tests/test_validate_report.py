@@ -22,6 +22,8 @@ from hooks.scripts.validate_report import (
     check_precedent_exists,
     extract_run_dir,
     get_run_salt,
+    is_screen_resolved,
+    playbook_has_screen_section,
     validate_tier1,
     wrap_untrusted,
 )
@@ -158,6 +160,94 @@ class TestValidateFixtures:
         passed, errors, _ = validate_tier1(FIXTURES / "invalid_bad_enums.md")
         assert not passed
         assert any("status" in e for e in errors)
+
+
+# --- Screen-resolved validation ---
+
+
+class TestScreenResolved:
+    """Test that screen-resolved reports are exempt from MIN_LEADS_BY_SEVERITY."""
+
+    SCREEN_REPORT = """\
+---
+ticket_id: SEC-SCREEN-001
+signature_id: wazuh-rule-5710
+status: resolved
+disposition: benign
+confidence: high
+matched_precedent: monitoring-probe-001.json
+leads_pursued: 1
+trace: "screen(monitoring-probe, auth-history) -> benign:monitoring-probe"
+---
+
+# Investigation Report: SEC-SCREEN-001
+
+## Summary
+Screen-resolved monitoring probe.
+"""
+
+    def _setup_screen_run(self, tmp_path, history):
+        """Create a run dir with state.json and report.md."""
+        run_dir = tmp_path / "run-screen"
+        run_dir.mkdir()
+        state = {"phase": history[-1], "history": history}
+        (run_dir / "state.json").write_text(json.dumps(state))
+        (run_dir / "report.md").write_text(self.SCREEN_REPORT)
+        return run_dir
+
+    def test_screen_resolved_skips_leads_check(self, tmp_path):
+        """Screen-resolved report with 1 lead passes (medium severity needs 2)."""
+        run_dir = self._setup_screen_run(
+            tmp_path, ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+        )
+        passed, errors, _ = validate_tier1(run_dir / "report.md")
+        assert passed, f"Expected pass but got: {errors}"
+
+    def test_non_screen_still_checks_leads(self, tmp_path):
+        """Non-screen report with 1 lead fails for medium severity."""
+        run_dir = tmp_path / "run-full"
+        run_dir.mkdir()
+        state = {
+            "phase": "CONCLUDE",
+            "history": ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"],
+        }
+        (run_dir / "state.json").write_text(json.dumps(state))
+        (run_dir / "report.md").write_text(self.SCREEN_REPORT)
+        passed, errors, _ = validate_tier1(run_dir / "report.md")
+        assert not passed
+        assert any("leads_pursued" in e for e in errors)
+
+    def test_screen_resolved_requires_screen_section(self, tmp_path):
+        """Screen-resolved report fails if playbook has no ## Screen section."""
+        report_text = self.SCREEN_REPORT.replace(
+            "wazuh-rule-5710", "nonexistent-sig"
+        )
+        run_dir = tmp_path / "run-no-playbook"
+        run_dir.mkdir()
+        state = {"phase": "CONCLUDE", "history": ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]}
+        (run_dir / "state.json").write_text(json.dumps(state))
+        (run_dir / "report.md").write_text(report_text)
+        passed, errors, _ = validate_tier1(run_dir / "report.md")
+        assert not passed
+        assert any("Screen section" in e for e in errors)
+
+    def test_is_screen_resolved_no_state(self, tmp_path):
+        """No state.json means not screen-resolved."""
+        assert is_screen_resolved(tmp_path) is False
+
+    def test_is_screen_resolved_with_hypothesize(self, tmp_path):
+        """SCREEN in history but also HYPOTHESIZE means fallthrough, not screen-resolved."""
+        state = {
+            "history": ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        }
+        (tmp_path / "state.json").write_text(json.dumps(state))
+        assert is_screen_resolved(tmp_path) is False
+
+    def test_playbook_has_screen_section_true(self):
+        assert playbook_has_screen_section("wazuh-rule-5710") is True
+
+    def test_playbook_has_screen_section_nonexistent(self):
+        assert playbook_has_screen_section("nonexistent-sig") is False
 
 
 # --- Precedent existence check ---

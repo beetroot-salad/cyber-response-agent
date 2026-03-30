@@ -323,13 +323,28 @@ class TestLLMInvestigation:
         state = json.loads(state_file.read_text())
         assert "phase" in state
         assert "history" in state
-        assert len(state["history"]) >= 3, (
-            f"Expected at least 3 phases (C-SCREEN-CONCLUDE or C-H-G-A-CONCLUDE), got {state['history']}"
-        )
+        history = state["history"]
+
+        # Validate minimum length based on actual path taken
+        if "SCREEN" in history and "HYPOTHESIZE" not in history:
+            # Screen-resolved path: C -> SCREEN -> CONCLUDE
+            assert len(history) >= 3, (
+                f"Screen-resolved path needs >= 3 phases, got {history}"
+            )
+        elif "SCREEN" in history:
+            # Screen fallthrough + full loop: C -> SCREEN -> H -> G -> A -> CONCLUDE
+            assert len(history) >= 6, (
+                f"Screen-fallthrough path needs >= 6 phases, got {history}"
+            )
+        else:
+            # No screen (skip path): C -> H -> G -> A -> CONCLUDE
+            assert len(history) >= 5, (
+                f"Full investigation path needs >= 5 phases, got {history}"
+            )
 
         # Verify all transitions were legal
         current = None
-        for phase in state["history"]:
+        for phase in history:
             valid, error = validate_transition(current, phase)
             assert valid, f"Illegal transition {current} -> {phase}: {error}"
             current = phase

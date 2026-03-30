@@ -140,23 +140,17 @@ Write an initial section in `{run_dir}/investigation.md`:
    ```
 
 2. Spawn a **subagent** (use a cheaper model — Sonnet or Haiku) with the prompt from `skills/investigate/screen.md`. Pass it:
-   - The alert observables identified in CONTEXTUALIZE
+   - The `{run_dir}` path — the subagent reads alert.json and investigation.md from the run directory
    - The `## Screen` section from the playbook (the pattern table and specified leads)
-   - The precedent summary from the CONTEXTUALIZE Explore subagent
    - Access to the same MCP tools for running queries
 
-3. Parse the subagent's YAML response.
+**If `screen_result: match`** — validate the screen output is well-formed (all required YAML fields present, observations are non-empty, matched_pattern corresponds to an entry in the Screen table). If valid, proceed to CONCLUDE using the screen result. If malformed, fall through to HYPOTHESIZE with the evidence gathered.
 
-4. **If `screen_result: match`** — validate before concluding:
-   - Verify `matched_precedent` file exists in `knowledge/signatures/{signature_id}/precedents/`
-   - Verify the number of leads run meets the minimum for this signature's severity (check context.md frontmatter for severity; low=1, medium=2, high=3, critical=4)
-   - Spot-check that the observations actually support the claimed pattern match
-   - If all checks pass → proceed to CONCLUDE using the screen result
-   - If any check fails → proceed to HYPOTHESIZE with the evidence gathered (do not discard it)
+> Note: The report validation hooks (Tier 1 + Tier 2 judge) handle deeper validation — precedent existence, evidence sufficiency, report consistency. The main agent's job here is only to check that the screen subagent returned a coherent, complete response.
 
-5. **If `screen_result: no_match`** — proceed to HYPOTHESIZE. The evidence gathered during screening (the `leads_run` observations) becomes part of the investigation record. Do not re-run those leads in the full loop unless you have reason to believe the results were incomplete.
+**If `screen_result: no_match`** — proceed to HYPOTHESIZE. The evidence gathered during screening (the `leads_run` observations) becomes part of the investigation record. Do not re-run those leads in the full loop unless you have reason to believe the results were incomplete.
 
-6. **If the subagent returns malformed output** — treat as no_match and fall through to HYPOTHESIZE.
+**If the subagent returns malformed or unparseable output** — treat as no_match and fall through to HYPOTHESIZE.
 
 Append to `{run_dir}/investigation.md`:
 ```markdown
