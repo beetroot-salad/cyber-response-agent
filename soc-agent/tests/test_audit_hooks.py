@@ -1,9 +1,11 @@
-"""Tests for audit hooks: tool call logger and investigation summary.
+"""Tests for audit hooks: tool call logger, investigation summary, and tool result tagging.
 
-Tests the audit_tool_calls.py (PostToolUse) and investigation_summary.py (Stop) hooks.
+Tests the audit_tool_calls.py (PostToolUse), investigation_summary.py (Stop),
+and tag_tool_results.py (PostToolUse) hooks.
 """
 
 import json
+import subprocess
 import sys
 from io import StringIO
 from pathlib import Path
@@ -295,3 +297,65 @@ leads_pursued: 4
         assert entry["status"] == "resolved"
         assert entry["leads_pursued"] == 4
         assert entry["matched_precedent"] == "monitoring-probe-001.json"
+
+
+# --- tag_tool_results ---
+
+TAG_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "tag_tool_results.py"
+
+
+class TestTagToolResults:
+    def _run_hook(self, hook_data: dict) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(TAG_SCRIPT)],
+            input=json.dumps(hook_data),
+            capture_output=True, text=True,
+        )
+
+    def test_mcp_tool_triggers_warning(self):
+        result = self._run_hook({"tool_name": "mcp__wazuh__query"})
+        assert result.returncode == 0
+        assert "UNTRUSTED" in result.stderr
+
+    def test_bash_tool_triggers_warning(self):
+        result = self._run_hook({"tool_name": "Bash"})
+        assert result.returncode == 0
+        assert "UNTRUSTED" in result.stderr
+
+    def test_read_alert_json_triggers_warning(self):
+        result = self._run_hook({
+            "tool_name": "Read",
+            "tool_input": {
+                "file_path": "/runs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/alert.json"
+            },
+        })
+        assert result.returncode == 0
+        assert "UNTRUSTED" in result.stderr
+
+    def test_read_non_alert_no_warning(self):
+        result = self._run_hook({
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/some/path/investigation.md"},
+        })
+        assert result.returncode == 0
+        assert result.stderr == ""
+
+    def test_read_knowledge_base_no_warning(self):
+        result = self._run_hook({
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/soc-agent/knowledge/signatures/context.md"},
+        })
+        assert result.returncode == 0
+        assert result.stderr == ""
+
+    def test_never_blocks_agent(self):
+        result = subprocess.run(
+            [sys.executable, str(TAG_SCRIPT)],
+            input="not valid json",
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+
+    def test_includes_tool_name_in_output(self):
+        result = self._run_hook({"tool_name": "mcp__siem__search"})
+        assert "mcp__siem__search" in result.stderr

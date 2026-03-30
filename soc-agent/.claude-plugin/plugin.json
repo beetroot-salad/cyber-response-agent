@@ -32,7 +32,7 @@
         ]
       },
       {
-        "matcher": "Bash|mcp__.*",
+        "matcher": "Bash|mcp__.*|Read",
         "hooks": [
           {
             "type": "command",

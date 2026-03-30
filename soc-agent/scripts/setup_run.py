@@ -113,22 +113,10 @@ def main() -> int:
     meta_file = run_dir / "meta.json"
     meta_file.write_text(json.dumps(meta, indent=2))
 
-    # Write wrapped alert for the investigation agent.
-    # The agent reads this instead of raw alert.json — salted delimiters
-    # prevent pre-crafted closing tag attacks from alert field values.
-    alert_text = json.dumps(alert, indent=2)
-    wrapped = (
-        f"<run-{salt}-alert-data>\n"
-        f"{alert_text}\n"
-        f"</run-{salt}-alert-data>"
-    )
-    (run_dir / "alert_wrapped.md").write_text(wrapped)
-
     # Output for skill substitution
     print(f"Run directory: {run_dir}")
     print(f"Run ID: {run_id}")
     print(f"Signature: {signature_id}")
-    print(f"Salt: {salt}")
 
     return 0
 
