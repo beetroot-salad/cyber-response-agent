@@ -23,6 +23,7 @@ from hooks.scripts.budget_enforcer import (
     load_or_create_budget,
     parse_yaml_config,
     resolve_run_dir,
+    update_budget_locked,
 )
 from schemas.budget import DEFAULT_LIMITS, WARNING_THRESHOLD, make_budget_state
 
@@ -319,6 +320,43 @@ class TestLoadOrCreateBudget:
         (tmp_path / "budget.json").write_text("not json")
         budget = load_or_create_budget(tmp_path, "run-x")
         assert budget["tool_calls"] == 0
+
+
+# ---------------------------------------------------------------------------
+# update_budget_locked
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateBudgetLocked:
+    def test_creates_file_when_missing(self, tmp_path):
+        budget = update_budget_locked(tmp_path, "run-1", "Bash")
+        assert budget["tool_calls"] == 1
+        assert budget["subagent_spawns"] == 0
+        assert (tmp_path / "budget.json").exists()
+
+    def test_increments_existing(self, tmp_path):
+        (tmp_path / "budget.json").write_text(json.dumps(
+            make_budget_state("run-1") | {"tool_calls": 5}
+        ))
+        budget = update_budget_locked(tmp_path, "run-1", "Bash")
+        assert budget["tool_calls"] == 6
+
+    def test_agent_increments_both(self, tmp_path):
+        budget = update_budget_locked(tmp_path, "run-1", "Agent")
+        assert budget["tool_calls"] == 1
+        assert budget["subagent_spawns"] == 1
+
+    def test_recovers_from_corrupt_file(self, tmp_path):
+        (tmp_path / "budget.json").write_text("not json")
+        budget = update_budget_locked(tmp_path, "run-1", "Bash")
+        assert budget["tool_calls"] == 1
+
+    def test_concurrent_increments(self, tmp_path):
+        """Sequential calls accumulate correctly (serialized by lock)."""
+        for _ in range(10):
+            update_budget_locked(tmp_path, "run-1", "Bash")
+        budget = json.loads((tmp_path / "budget.json").read_text())
+        assert budget["tool_calls"] == 10
 
 
 # ---------------------------------------------------------------------------

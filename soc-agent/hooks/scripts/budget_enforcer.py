@@ -18,6 +18,7 @@ Exit codes:
     0 - Always (budget warnings should never block the agent)
 """
 
+import fcntl
 import json
 import os
 import sys
@@ -174,6 +175,35 @@ def save_budget(run_dir: Path, budget: dict) -> None:
     budget_path.write_text(json.dumps(budget, indent=2))
 
 
+def update_budget_locked(run_dir: Path, run_id: str, tool_name: str) -> dict:
+    """Atomically read-modify-write budget.json under an exclusive file lock.
+
+    Uses fcntl.flock on budget.json itself to serialize concurrent hook
+    invocations for the same run.
+    """
+    budget_path = run_dir / "budget.json"
+    budget_path.touch(exist_ok=True)
+
+    with open(budget_path, "r+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        raw = f.read()
+        try:
+            budget = json.loads(raw) if raw else make_budget_state(run_id)
+        except json.JSONDecodeError:
+            budget = make_budget_state(run_id)
+
+        budget["tool_calls"] = budget.get("tool_calls", 0) + 1
+        if tool_name == "Agent":
+            budget["subagent_spawns"] = budget.get("subagent_spawns", 0) + 1
+
+        f.seek(0)
+        f.truncate()
+        f.write(json.dumps(budget, indent=2))
+        # Lock released when f is closed.
+
+    return budget
+
+
 def check_budgets(budget: dict, limits: dict) -> list[str]:
     """Check budget counters against limits. Returns warning messages."""
     warnings = []
@@ -249,17 +279,10 @@ def main():
     if run_dir is None:
         sys.exit(0)
 
-    # Load or create budget state.
+    # Atomically increment counters under file lock.
     run_id = run_dir.name
-    budget = load_or_create_budget(run_dir, run_id)
-
-    # Increment counters.
-    budget["tool_calls"] = budget.get("tool_calls", 0) + 1
     tool_name = hook_data.get("tool_name", "")
-    if tool_name == "Agent":
-        budget["subagent_spawns"] = budget.get("subagent_spawns", 0) + 1
-
-    save_budget(run_dir, budget)
+    budget = update_budget_locked(run_dir, run_id, tool_name)
 
     # Check limits and print warnings.
     limits = load_limits(signature_id)
