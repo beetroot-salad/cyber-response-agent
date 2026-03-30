@@ -315,12 +315,12 @@ class TestTagToolResults:
     def test_mcp_tool_triggers_warning(self):
         result = self._run_hook({"tool_name": "mcp__wazuh__query"})
         assert result.returncode == 0
-        assert "UNTRUSTED" in result.stderr
+        assert "Untrusted" in result.stderr
 
     def test_bash_tool_triggers_warning(self):
         result = self._run_hook({"tool_name": "Bash"})
         assert result.returncode == 0
-        assert "UNTRUSTED" in result.stderr
+        assert "Untrusted" in result.stderr
 
     def test_read_alert_json_triggers_warning(self):
         result = self._run_hook({
@@ -330,7 +330,7 @@ class TestTagToolResults:
             },
         })
         assert result.returncode == 0
-        assert "UNTRUSTED" in result.stderr
+        assert "Untrusted" in result.stderr
 
     def test_read_non_alert_no_warning(self):
         result = self._run_hook({
@@ -356,6 +356,7 @@ class TestTagToolResults:
         )
         assert result.returncode == 0
 
-    def test_includes_tool_name_in_output(self):
+    def test_output_is_terse(self):
         result = self._run_hook({"tool_name": "mcp__siem__search"})
-        assert "mcp__siem__search" in result.stderr
+        assert "Untrusted external data" in result.stderr
+        assert len(result.stderr.strip()) < 40
