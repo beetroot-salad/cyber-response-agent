@@ -39,6 +39,15 @@
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/audit_tool_calls.py"
           }
         ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/budget_enforcer.py"
+          }
+        ]
       }
     ]
   }
