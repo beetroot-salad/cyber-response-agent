@@ -305,58 +305,30 @@ TAG_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "tag_tool_results.py"
 
 
 class TestTagToolResults:
-    def _run_hook(self, hook_data: dict) -> subprocess.CompletedProcess:
+    """Tests for tag_tool_results.py hook.
+
+    The script itself always prints the warning — Read-vs-non-alert filtering
+    is handled by the ``if`` field in plugin.json before the script is invoked.
+    These tests verify the script's own behavior (always warn, never block).
+    """
+
+    def _run_hook(self, stdin: str = "{}") -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable, str(TAG_SCRIPT)],
-            input=json.dumps(hook_data),
+            input=stdin,
             capture_output=True, text=True,
         )
 
-    def test_mcp_tool_triggers_warning(self):
-        result = self._run_hook({"tool_name": "mcp__wazuh__query"})
+    def test_always_prints_warning(self):
+        result = self._run_hook()
         assert result.returncode == 0
         assert "Untrusted" in result.stderr
 
-    def test_bash_tool_triggers_warning(self):
-        result = self._run_hook({"tool_name": "Bash"})
-        assert result.returncode == 0
-        assert "Untrusted" in result.stderr
-
-    def test_read_alert_json_triggers_warning(self):
-        result = self._run_hook({
-            "tool_name": "Read",
-            "tool_input": {
-                "file_path": "/runs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/alert.json"
-            },
-        })
-        assert result.returncode == 0
-        assert "Untrusted" in result.stderr
-
-    def test_read_non_alert_no_warning(self):
-        result = self._run_hook({
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/some/path/investigation.md"},
-        })
-        assert result.returncode == 0
-        assert result.stderr == ""
-
-    def test_read_knowledge_base_no_warning(self):
-        result = self._run_hook({
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/soc-agent/knowledge/signatures/context.md"},
-        })
-        assert result.returncode == 0
-        assert result.stderr == ""
-
-    def test_never_blocks_agent(self):
-        result = subprocess.run(
-            [sys.executable, str(TAG_SCRIPT)],
-            input="not valid json",
-            capture_output=True, text=True,
-        )
+    def test_never_blocks_on_invalid_input(self):
+        result = self._run_hook(stdin="not valid json")
         assert result.returncode == 0
 
     def test_output_is_terse(self):
-        result = self._run_hook({"tool_name": "mcp__siem__search"})
+        result = self._run_hook()
         assert "Untrusted external data" in result.stderr
         assert len(result.stderr.strip()) < 40
