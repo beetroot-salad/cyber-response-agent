@@ -16,12 +16,59 @@ Exit codes:
 
 import json
 import os
+import re
 import secrets
 import sys
 import uuid
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
+
+# ---------------------------------------------------------------------------
+# Static sanitization — protects human reviewers and structural plumbing.
+# Does NOT stop semantic injection (LLMs understand language regardless).
+# See docs/design-v3-architecture.md §8.2 for rationale.
+# ---------------------------------------------------------------------------
+
+# Unicode characters that can hide content from human reviewers or confuse
+# delimiter parsing, while being processed by LLM tokenizers.
+_DANGEROUS_CODEPOINTS = re.compile(
+    "["
+    "\u200b-\u200f"  # zero-width space, joiners, direction marks
+    "\u2028-\u2029"  # line/paragraph separators
+    "\u202a-\u202e"  # bidi embedding/override
+    "\u2060-\u2064"  # invisible operators
+    "\u2066-\u2069"  # bidi isolates
+    "\ufeff"          # BOM / zero-width no-break space
+    "\ufff9-\ufffb"  # interlinear annotations
+    "\U000e0001"      # language tag
+    "\U000e0020-\U000e007f"  # tag characters
+    "]"
+)
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+MAX_FIELD_LEN = 4096
+
+
+def sanitize_value(value: str) -> str:
+    """Strip dangerous invisible characters and enforce length limits."""
+    value = _DANGEROUS_CODEPOINTS.sub("", value)
+    value = _ANSI_ESCAPE.sub("", value)
+    if len(value) > MAX_FIELD_LEN:
+        value = value[:MAX_FIELD_LEN] + " [TRUNCATED]"
+    return value
+
+
+def sanitize_alert(obj: object) -> object:
+    """Recursively sanitize string values in alert data."""
+    if isinstance(obj, str):
+        return sanitize_value(obj)
+    if isinstance(obj, dict):
+        return {k: sanitize_alert(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize_alert(v) for v in obj]
+    return obj
 
 
 def main() -> int:
@@ -56,7 +103,8 @@ def main() -> int:
     # Generate per-run salt for untrusted content delimiters
     salt = secrets.token_hex(8)
 
-    # Save alert.json
+    # Sanitize and save alert.json
+    alert = sanitize_alert(alert)
     alert_file = run_dir / "alert.json"
     alert_file.write_text(json.dumps(alert, indent=2))
 

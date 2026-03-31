@@ -1,4 +1,4 @@
-"""Tests for scripts/setup_run.py — run directory creation and alert saving."""
+"""Tests for scripts/setup_run.py — run directory creation, alert saving, and sanitization."""
 
 import json
 import subprocess
@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SOC_AGENT_ROOT))
 SCRIPT = SOC_AGENT_ROOT / "scripts" / "setup_run.py"
+
+from scripts.setup_run import sanitize_alert, sanitize_value
 
 VALID_ALERT = json.dumps({"ticket_id": "T-1234", "alert_data": {"srcip": "10.0.1.50"}})
 
@@ -195,3 +198,77 @@ class TestAlertVariations:
         data = json.loads((run_dir / "alert.json").read_text())
         assert data["data"]["nested"]["deep"] == "value"
         assert data["data"]["list"] == [1, 2, 3]
+
+
+# --- Input sanitization ---
+
+
+class TestSanitizeValue:
+    def test_normal_text_unchanged(self):
+        assert sanitize_value("hello world") == "hello world"
+
+    def test_strips_zero_width_chars(self):
+        assert sanitize_value("hello\u200bworld") == "helloworld"
+
+    def test_strips_bidi_overrides(self):
+        assert sanitize_value("admin\u202eselur") == "adminselur"
+
+    def test_strips_bidi_isolates(self):
+        assert sanitize_value("test\u2066hidden\u2069end") == "testhiddenend"
+
+    def test_strips_bom(self):
+        assert sanitize_value("\ufeffdata") == "data"
+
+    def test_strips_ansi_escapes(self):
+        assert sanitize_value("\x1b[31mred\x1b[0m") == "red"
+
+    def test_truncates_long_values(self):
+        result = sanitize_value("x" * 5000)
+        assert len(result) < 5000
+        assert result.endswith("[TRUNCATED]")
+
+    def test_preserves_normal_unicode(self):
+        text = "cafe\u0301 \u4e16\u754c \U0001f680"
+        assert sanitize_value(text) == text
+
+    def test_combined_attack_string(self):
+        attack = "\ufeff\u202eignore\u202c\x1b[8m instructions\x1b[0m\u200b"
+        result = sanitize_value(attack)
+        assert "\ufeff" not in result
+        assert "\x1b" not in result
+        assert "\u200b" not in result
+        assert "ignore" in result
+
+
+class TestSanitizeAlert:
+    def test_sanitizes_nested_structure(self):
+        alert = {
+            "user": "admin\u200b",
+            "data": {"cmd": "ls\x1b[31m -la", "items": ["a\u200b", "b\ufeff"]},
+            "count": 42,
+        }
+        result = sanitize_alert(alert)
+        assert result["user"] == "admin"
+        assert result["data"]["cmd"] == "ls -la"
+        assert result["data"]["items"] == ["a", "b"]
+        assert result["count"] == 42
+
+
+class TestSanitizationIntegration:
+    """Integration tests: sanitization applied during setup_run.py execution."""
+
+    def test_dangerous_unicode_stripped_from_alert(self, tmp_path):
+        alert = json.dumps({"user": "admin\u200b\u202e"})
+        result = run_setup(alert_json=alert, runs_dir=str(tmp_path))
+        assert result.returncode == 0
+        run_dir = list(tmp_path.iterdir())[0]
+        data = json.loads((run_dir / "alert.json").read_text())
+        assert data["user"] == "admin"
+
+    def test_ansi_escapes_stripped_from_alert(self, tmp_path):
+        alert = json.dumps({"cmd": "ls\x1b[31m -la"})
+        result = run_setup(alert_json=alert, runs_dir=str(tmp_path))
+        assert result.returncode == 0
+        run_dir = list(tmp_path.iterdir())[0]
+        data = json.loads((run_dir / "alert.json").read_text())
+        assert data["cmd"] == "ls -la"

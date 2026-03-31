@@ -138,6 +138,13 @@ class TestAssemblePrompt:
         assert "run-mysalt-report" not in prompt
         assert "report_content" in prompt
 
+    def test_precedent_is_salted(self):
+        """Precedent data is wrapped in salted delimiters (defense-in-depth)."""
+        prompt = assemble_prompt("alert", "log", "report", "prec_data", "mysalt")
+        assert "<run-mysalt-precedent>" in prompt
+        assert "</run-mysalt-precedent>" in prompt
+        assert "prec_data" in prompt
+
 
 # --- File reading ---
 

@@ -258,12 +258,12 @@ def assemble_prompt(
     safe_log = wrap_untrusted(investigation_log, "investigation-log", salt)
 
     prompt = template.replace("{alert_data}", safe_alert)
-    prompt = template.replace("{alert_data}", safe_alert)
     prompt = prompt.replace("{investigation_log}", safe_log)
     prompt = prompt.replace("{report}", report)
 
     if precedent is not None:
-        prompt = prompt.replace("{precedent}", precedent)
+        safe_precedent = wrap_untrusted(precedent, "precedent", salt)
+        prompt = prompt.replace("{precedent}", safe_precedent)
         prompt = prompt.replace("{judge_mode}", "full")
     else:
         prompt = prompt.replace("{precedent}", "[No precedent — this is an escalated report]")

@@ -1,9 +1,11 @@
-"""Tests for audit hooks: tool call logger and investigation summary.
+"""Tests for audit hooks: tool call logger, investigation summary, and tool result tagging.
 
-Tests the audit_tool_calls.py (PostToolUse) and investigation_summary.py (Stop) hooks.
+Tests the audit_tool_calls.py (PostToolUse), investigation_summary.py (Stop),
+and tag_tool_results.py (PostToolUse) hooks.
 """
 
 import json
+import subprocess
 import sys
 from io import StringIO
 from pathlib import Path
@@ -295,3 +297,38 @@ leads_pursued: 4
         assert entry["status"] == "resolved"
         assert entry["leads_pursued"] == 4
         assert entry["matched_precedent"] == "monitoring-probe-001.json"
+
+
+# --- tag_tool_results ---
+
+TAG_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "tag_tool_results.py"
+
+
+class TestTagToolResults:
+    """Tests for tag_tool_results.py hook.
+
+    The script itself always prints the warning — Read-vs-non-alert filtering
+    is handled by the ``if`` field in plugin.json before the script is invoked.
+    These tests verify the script's own behavior (always warn, never block).
+    """
+
+    def _run_hook(self, stdin: str = "{}") -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(TAG_SCRIPT)],
+            input=stdin,
+            capture_output=True, text=True,
+        )
+
+    def test_always_prints_warning(self):
+        result = self._run_hook()
+        assert result.returncode == 0
+        assert "Untrusted" in result.stderr
+
+    def test_never_blocks_on_invalid_input(self):
+        result = self._run_hook(stdin="not valid json")
+        assert result.returncode == 0
+
+    def test_output_is_terse(self):
+        result = self._run_hook()
+        assert "Untrusted external data" in result.stderr
+        assert len(result.stderr.strip()) < 40

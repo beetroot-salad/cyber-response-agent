@@ -32,6 +32,25 @@
         ]
       },
       {
+        "matcher": "Bash|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/tag_tool_results.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Read(*/alert.json)",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/tag_tool_results.py"
+          }
+        ]
+      },
+      {
         "matcher": "",
         "hooks": [
           {
