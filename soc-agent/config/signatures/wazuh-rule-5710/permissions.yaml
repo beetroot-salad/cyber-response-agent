@@ -27,21 +27,9 @@ mitigation:
     block_ip: auto
     disable_user: approve
 
-# TODO: Budget enforcement (not yet implemented)
-#
-# v3 design (§1.3, §5.3) specifies resource limits enforced by a budget-enforcer
-# hook that tracks counters in {run_dir}/budget.json:
-#
-#   | Limit               | Default | Enforced by          |
-#   |---------------------|---------|----------------------|
-#   | Max tool calls      | 50      | budget-enforcer hook |
-#   | Max subagent spawns | 5       | budget-enforcer hook |
-#   | Wall-clock timeout  | 5 min   | Process-level        |
-#
-# Defaults live in config/budget-defaults.yaml (does not exist yet),
-# overridable per-signature here. Budget exhaustion forces the agent to
-# recommend with current evidence or escalate.
-#
-# Design note: denied mitigation responses could count against budget
-# differently (e.g., 3x weight) to surface agents that are stuck or
-# repeatedly requesting actions outside their permissions.
+# Budget overrides (per-signature). Defaults from config/budget-defaults.yaml.
+# Warnings print at 75% and 100% of each limit.
+# budget:
+#   max_tool_calls: 150
+#   max_subagent_spawns: 10
+#   wall_clock_timeout: 600

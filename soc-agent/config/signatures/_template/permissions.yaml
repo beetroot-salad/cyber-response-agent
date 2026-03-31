@@ -31,12 +31,9 @@ mitigation:
   #   disable_user: approve
   #   isolate_host: approve
 
-# TODO: Budget overrides (not yet implemented)
-#
-# Per-signature overrides for defaults in config/budget-defaults.yaml.
-# See v3 design §1.3, §5.3 for budget enforcement details.
-#
+# Budget overrides (per-signature). Defaults from config/budget-defaults.yaml.
+# Warnings print at 75% and 100% of each limit.
 # budget:
-#   max_tool_calls: 50
-#   max_subagent_spawns: 5
-#   wall_clock_timeout: 300  # seconds
+#   max_tool_calls: 150
+#   max_subagent_spawns: 10
+#   wall_clock_timeout: 600
