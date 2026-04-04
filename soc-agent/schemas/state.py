@@ -21,7 +21,7 @@ class Phase(str, Enum):
 
 # Legal transitions: from_phase -> set of allowed to_phases
 TRANSITIONS: dict[Phase, set[Phase]] = {
-    Phase.CONTEXTUALIZE: {Phase.SCREEN, Phase.HYPOTHESIZE},  # SCREEN if playbook has it, else skip
+    Phase.CONTEXTUALIZE: {Phase.SCREEN, Phase.HYPOTHESIZE, Phase.CONCLUDE},  # SCREEN/CONCLUDE if fast path, else HYPOTHESIZE
     Phase.SCREEN: {Phase.HYPOTHESIZE, Phase.CONCLUDE},       # resolve or fall through
     Phase.HYPOTHESIZE: {Phase.GATHER},
     Phase.GATHER: {Phase.ANALYZE},

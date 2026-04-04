@@ -30,7 +30,7 @@ CONTEXTUALIZE), the scope is broader than standalone lead execution:
 
 - **All signatures** are queried, not just the current one — the goal
   is situational awareness and cross-signature correlation
-- **Longer time window** (4h vs the typical 1-2h) for the "maybe" tier
+- **Longer time window** (4h default, tunable) for the "maybe" tier
 - Output feeds into **two-tier classification** (definite/maybe) with
   agent reasoning about entity centrality and causal plausibility
 - The subagent may also check `audit.jsonl` for prior investigations

@@ -59,25 +59,6 @@ def main():
         with open(state_path) as f:
             state = json.load(f)
 
-    # Read key entities from alert.json for correlation lookups
-    alert_entities = {}
-    alert_path = run_dir / "alert.json"
-    if alert_path.exists():
-        try:
-            with open(alert_path) as f:
-                alert_data = json.load(f)
-            # Extract common entity fields (nested under data.* in Wazuh)
-            data = alert_data.get("data", alert_data)
-            for field in ("srcip", "dstip", "srcuser"):
-                if field in data:
-                    alert_entities[field] = data[field]
-            # agent.name is top-level in Wazuh alerts
-            agent = alert_data.get("agent", {})
-            if isinstance(agent, dict) and "name" in agent:
-                alert_entities["agent_name"] = agent["name"]
-        except (json.JSONDecodeError, OSError):
-            pass  # Best-effort — don't block summary on parse failure
-
     entry = {
         "run_id": state.get("run_id", run_dir.name),
         "ticket_id": frontmatter.get("ticket_id", ""),
@@ -87,7 +68,6 @@ def main():
         "confidence": frontmatter.get("confidence", ""),
         "matched_precedent": frontmatter.get("matched_precedent"),
         "leads_pursued": frontmatter.get("leads_pursued", 0),
-        "entities": alert_entities,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
