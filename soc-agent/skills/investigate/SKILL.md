@@ -111,6 +111,12 @@ This enforces legal transitions. If you get an error, you attempted an illegal t
    - **Recent alerts** (broad): all alerts in the ~2 hours before this alert, regardless of signature or status. Goal: understand what activity is happening right now. This provides situational awareness — the alert may be part of a larger pattern.
    - **Related alerts** (focused): alerts matching key entities from this alert — same source IP, target host, username. Goal: find duplicates, correlated activity, or alerts stemming from the same cause. **Pitfall:** central entities (e.g., a jump host, a CI runner) appear in many alerts — a match on a high-centrality entity is less meaningful than a match on a rare entity.
    - Return: structured summary of recent activity, related alerts with shared entities noted, and any temporal clustering
+5. **Build resolution map** — resolve the data environment for this investigation (see `docs/design-v3-tool-execution.md §10`):
+   - Identify which abstract operations the playbook's leads need (from lead `data_tags`)
+   - Read `knowledge/environment/operations/` files → enumerate concrete operations + sources
+   - Run `--health-check` on each primary source CLI (deduplicated — one check per unique system)
+   - Build a resolution map: for each abstract operation, which concrete operations exist, which sources are healthy, and what data gaps exist
+   - Note data gaps explicitly — operations that are not observable in this environment affect hypothesis discrimination in later phases
 
 Write state:
 ```bash
@@ -128,6 +134,7 @@ Write an initial section in `{run_dir}/investigation.md`:
 **Playbook hypotheses:** ?hypothesis-1, ?hypothesis-2, ...
 **Available leads:** lead-1, lead-2, ...
 **Precedent matches:** {summary from Explore subagent}
+**Data environment:** {summary of resolution map — available operations, healthy sources, gaps}
 ```
 
 ### SCREEN (optional)
@@ -202,7 +209,7 @@ Then find where the stories **diverge most** across hypotheses. That divergence 
 
 If primary evidence sources are unavailable, consider secondary artifacts — the hypothesized activity would also leave traces in network traffic, authentication logs, file system changes, etc. Don't give up on a lead because the obvious data source is missing.
 
-Reference `knowledge/common/leads/` for lead methodology. If no common lead definition exists for what you need, pursue the evidence inline.
+Reference `knowledge/common-investigation/leads/` for lead methodology. Each lead is a directory containing `definition.md` (what to characterize, pitfalls) and optionally `templates/` (pre-built query templates per SIEM). If no lead directory exists for what you need, follow `leads/ad-hoc/definition.md`.
 
 #### Past Investigation Patterns
 
@@ -232,12 +239,41 @@ Append to `{run_dir}/investigation.md`:
 
 ### GATHER
 
-**Goal:** Execute the selected lead — query SIEM, read data, collect evidence.
+**Goal:** Execute the selected lead(s) — query SIEM, read data, collect evidence.
 
-1. Read the lead's definition in `knowledge/common/leads/{lead-name}.md` if it exists — it tells you what to characterize and what pitfalls to avoid. Follow its `data_tags` to find relevant systems in `knowledge/environment/data-sources/`
-2. Use whatever SIEM/query tools are available to you via MCP to execute the lead. Check `knowledge/environment/systems/` for system-specific query patterns
-3. Record raw observations faithfully — **characterize, do not interpret**. "Timing is periodic, 5min ±3s" is characterization. "This is a monitoring probe" is interpretation — save that for ANALYZE
-4. If a query fails, try alternatives (different time range, different tool, indirect evidence)
+#### Dispatch modes
+
+Choose the dispatch mode based on the investigative question:
+
+- **Single lead:** One subagent, one lead. Use for independent evidence-gathering where cross-lead context doesn't help.
+- **Composite lead:** One subagent, multiple leads executed sequentially. Use when profiling an entity across multiple data sources — earlier lead results can refine later queries (e.g., auth session boundaries narrow the time window for data access queries). See `docs/design-v3-tool-execution.md §11` for the full design.
+
+**When to use composite dispatch:**
+- The leads share the same entity (user, IP, host) and time window
+- The investigative question is a profiling question ("what did this entity do?")
+- Earlier lead results can meaningfully improve later queries (session boundaries, entity disambiguation, time refinement)
+
+**When NOT to use composite dispatch:**
+- Leads target different entities — dispatch independently (parallel if possible)
+- Leads are fully independent (e.g., source reputation + process lineage for unrelated entities)
+- Only one lead is needed
+
+#### Lead execution
+
+For each lead (whether single or part of a composite):
+
+1. Read `knowledge/common-investigation/leads/{lead-name}/definition.md` for what to characterize and pitfalls to avoid. If no lead directory exists, follow `leads/ad-hoc/definition.md`.
+
+2. **Query execution:** Check if `{lead-name}/templates/` has a template for your SIEM. If yes, read it — it contains the base query in native syntax and entity field mappings. Plug in the relevant entities and time range, then execute via the SIEM CLI (`scripts/siem/wazuh_cli.py` for Wazuh). If no template exists, construct the query yourself using `knowledge/environment/systems/` for field mappings and `field-quirks.md` for gotchas.
+
+3. **Validate results:** Check the data source health section in the output. If results are suspect (zero matches, unexpectedly low count, stale latest event), follow `leads/data-source-debug/definition.md`.
+
+4. **Record faithfully:** Characterize, do not interpret. "Timing is periodic, 5min ±3s" is characterization. "This is a monitoring probe" is interpretation — save that for ANALYZE.
+
+For composite dispatch, additionally:
+- **Refine later leads** using earlier results where applicable (e.g., narrow time window to observed session boundaries)
+- **Note cross-lead observations** — consistencies, contradictions, or patterns that span leads
+- **Do not skip leads** or change their methodology based on earlier results — each lead's "What to Characterize" requirements still apply in full
 
 Write state:
 ```bash
@@ -248,9 +284,10 @@ Append to `{run_dir}/investigation.md`:
 ```markdown
 ## GATHER (loop {N})
 
-**Lead:** {lead-name}
+**Lead:** {lead-name} (or: **Leads:** lead-1, lead-2, lead-3 for composite)
 **Query:** {what you searched for}
 **Raw observation:** {what you found — be specific with numbers, IPs, usernames}
+**Cross-lead notes:** {for composite only — consistencies, contradictions, refinements applied}
 ```
 
 ### ANALYZE

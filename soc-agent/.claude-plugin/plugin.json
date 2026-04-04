@@ -6,7 +6,7 @@
     "skills/investigate/SKILL.md"
   ],
   "knowledge": [
-    "knowledge/common/SKILL.md",
+    "knowledge/common-investigation/SKILL.md",
     "knowledge/signatures/*/SKILL.md"
   ],
   "hooks": {

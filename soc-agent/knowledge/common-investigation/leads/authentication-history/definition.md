@@ -8,7 +8,10 @@ data_tags: [auth-events]
 Retrieve and characterize authentication patterns for a given entity
 (IP, user, or host) over a time window.
 
-## What to Characterize
+## What to Characterize (required output)
+
+Each bullet below MUST be reported on, even if the answer is "not
+available" or "not observed." Omission is ambiguous to the main agent.
 
 - **Timing pattern**: Classify as periodic (regular intervals — note
   interval and variance), burst (clustered in short window — note

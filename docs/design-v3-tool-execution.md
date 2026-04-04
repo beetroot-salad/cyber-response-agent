@@ -76,8 +76,11 @@ Each lead has three knowledge layers that serve different purposes:
 Lead definition (definition.md)     — WHAT: methodology
   "What to characterize, common pitfalls, data tags"
 
-Lead execution (run.sh|run.py)      — HOW: parameterized query + verification
-  "Execute query, format results, include verification metadata"
+Query templates (templates/{vendor}.md) — HOW: field mappings + native query patterns
+  "Entity field mapping, base query in native syntax, example CLI invocations"
+
+SIEM CLI (scripts/siem/{vendor}_cli.py) — EXECUTE: auth, HTTP, output formatting
+  "Thin execution wrapper — the agent constructs queries, the CLI runs them"
 
 Environment (systems/{vendor}/)     — WHERE: system-specific config
   "Field names, index names, API endpoints, credentials, defaults"
@@ -91,203 +94,138 @@ These layers compose through the data tag vocabulary:
 playbook.md                    lead directory (common/leads/{lead}/)
   lists leads by name    →       definition.md — methodology + data_tags
   with predictions                    ↓ data_tags
-  and priority                   data-sources/ file
-                                      ↓ points to
-                                 systems/{vendor}/ — env knowledge + config
-                                      ↓ consumed by
-                                 run.sh — execution script in lead dir
+  and priority                   operations/ file (§10)
+                                      ↓ concrete operations + sources
+                                 sources/ file
+                                      ↓ access method + CLI
+                                 templates/{vendor}.md — query template in lead dir
+                                      ↓ executed via
+                                 scripts/siem/{vendor}_cli.py — lean SIEM CLI
 ```
 
 ### 3.2 Lead directory structure
 
-Each lead is a directory under `common/leads/`, containing its definition, execution layer, and stored baselines. This keeps everything about a lead colocated — methodology, execution, and historical data live together.
+Each lead is a directory under `common/leads/`, containing its definition and optional query templates per vendor. This keeps methodology and query knowledge colocated.
 
 ```
-knowledge/common/leads/
+knowledge/common-investigation/leads/
 ├── _template/                        # Template for new leads
 │   ├── definition.md                 #   Methodology template
-│   └── run.sh                        #   Execution template with standard output format
+│   └── templates/
+│       └── system-name.md            #   Query template skeleton per vendor
 ├── authentication-history/
 │   ├── definition.md                 # What to characterize, pitfalls, data tags
-│   ├── run.sh                        # Pre-built query + verification + output formatting
-│   └── baselines.jsonl               # Stored execution summaries for comparison
+│   └── templates/
+│       └── wazuh.md                  # Wazuh query template: field mapping + base query + examples
 ├── process-lineage/
-│   ├── definition.md
-│   ├── run.sh
-│   └── baselines.jsonl
+│   └── definition.md
 ├── source-reputation/
-│   ├── definition.md
-│   └── run.sh                        # No baselines — binary check, not volume-based
+│   └── definition.md
 ├── network-analysis/
-│   ├── definition.md
-│   ├── run.sh
-│   └── baselines.jsonl
-├── data-source-debug/                # Meta-lead: debugging protocol (no run.sh)
+│   └── definition.md
+├── recent-alert-correlation/
+│   └── definition.md
+├── username-analysis/
+│   └── definition.md
+├── data-source-debug/                # Meta-lead: debugging protocol (no templates)
 │   └── definition.md
 └── ad-hoc/                           # Meta-lead: checklist for undefined leads
     └── definition.md
 ```
 
-The existing flat `.md` files (`authentication-history.md`, etc.) become `definition.md` inside their lead directory. Content stays the same — what to characterize, common pitfalls, data tags. No hypothesis references (those belong in playbooks).
+Not every lead has `templates/`. Some leads (like `data-source-debug`) are methodology-only — the subagent follows the protocol using environment knowledge and ad-hoc queries. A missing `templates/` directory is a signal to the subagent: construct the query ad-hoc using `systems/{vendor}/` knowledge.
 
-Not every lead has a `run.sh`. Some leads (like `data-source-debug`) are methodology-only — the subagent follows the protocol using environment knowledge and ad-hoc queries. A missing `run.sh` is a signal to the subagent: use the ad-hoc framework.
+### 3.3 Query templates and SIEM CLI
 
-### 3.3 Lead execution scripts
+The execution layer is split into two parts:
 
-The `run.sh` (or `run.py`) is the execution layer — a self-contained script that the subagent both **reads** (to understand methodology) and **executes** (to get results). It is a knowledge artifact that carries institutional learning between investigations.
+1. **Query templates** (`templates/{vendor}.md`) — per-lead, per-vendor knowledge artifacts that map the lead's investigative question to a concrete query. They contain entity field mappings, the base query in native syntax, and example CLI invocations. The agent reads these to understand *what to query and how*.
 
-#### Parameters and time format
+2. **SIEM CLI** (`scripts/siem/{vendor}_cli.py`) — a thin, vendor-specific wrapper that handles authentication, HTTP, pagination, and output formatting. The agent constructs queries using the template's field mappings and passes them to the CLI. The CLI never interprets query semantics — it just runs what it's given.
 
-Scripts accept parameters via standard CLI flags. Entity types are **open** — the examples below are common cases, not a closed list. Any entity the investigation needs to profile (user, IP, host, process, file, port, domain, hash, service account, container ID, etc.) is valid.
+This separation keeps query knowledge (which field to use, what filters to apply) in the lead directory where it belongs, while execution plumbing (auth, HTTP, output formatting) lives once in the CLI.
 
-**Time format:** Three equally supported modes for specifying time ranges. All timestamps use ISO 8601 (`YYYY-MM-DDTHH:MM:SSZ`). Durations use short suffix notation (`30m`, `2h`, `7d`, `1w`; regex: `^[0-9]+(m|h|d|w)$`).
+#### Query template structure
 
-| Mode | Use case | Flags |
-|------|----------|-------|
-| **Absolute** | Historical analysis, specific incident windows | `--start TIMESTAMP --end TIMESTAMP` |
-| **Centered** | Alert-relative, symmetric window | `--center TIMESTAMP --window DURATION` |
-| **Asymmetric** | Alert-relative, different before/after reach | `--center TIMESTAMP --before DURATION --after DURATION` |
+Each template follows a standard format (see `_template/templates/system-name.md`):
 
-```bash
-# Absolute: arbitrary historical range
-./run.sh --start "2026-01-01T17:20:00Z" --end "2026-01-03T08:33:00Z"
+```markdown
+# {System} Query Template: {lead-name}
 
-# Centered: 2h symmetric around alert (1h each side)
-./run.sh --center "2026-04-01T14:30:00Z" --window 2h
+## Entity Field Mapping
+| Entity type | Field        | Notes                                  |
+|-------------|--------------|----------------------------------------|
+| ip          | data.srcip   | Source IP of the auth attempt           |
+| user        | data.srcuser | SSH only. For Windows AD use data.dstuser |
 
-# Asymmetric: 30m before to 2h after alert
-./run.sh --center "2026-04-01T14:30:00Z" --before 30m --after 2h
+## Base Query
+\`\`\`
+rule.groups:sshd AND {entity_field}:{entity_value}
+\`\`\`
 
-# Baseline: any mode + offset shifts the window to a comparison period
-./run.sh --center "2026-04-01T14:30:00Z" --window 2h --baseline-offset 7d
-./run.sh --start "2026-01-01T17:20:00Z" --end "2026-01-03T08:33:00Z" --baseline-offset 7d
+## Example Invocations
+\`\`\`bash
+python3 scripts/siem/wazuh_cli.py \
+  --query 'rule.groups:sshd AND data.srcip:10.0.0.5' \
+  --start 2026-04-04T10:00:00Z --window 2h
+\`\`\`
+
+## Customization Notes
+- How to narrow/broaden the query for common variations
+- Known quirks specific to this query on this system
 ```
 
-Absolute mode is essential for: reviewing historical activity for a user or host, investigating a specific incident window identified from another source, and re-running past analyses. `--center`/`--window` is sugar for the common alert-relative case, but `--start`/`--end` is the fundamental interface.
+#### SIEM CLI interface
 
-#### Script template
+The CLI accepts queries in the vendor's native syntax. It handles the plumbing:
 
 ```bash
-#!/usr/bin/env bash
-# Lead: authentication-history
-# Data tags: auth-events
-#
-# Queries authentication events for a given entity and time window.
-# Returns structured summary with verification metadata.
-#
-# The agent reads this script to understand what it does and how.
-# Comments explain investigative rationale, not just code mechanics.
+# Basic query with time window
+python3 scripts/siem/wazuh_cli.py \
+  --query 'rule.groups:sshd AND data.srcip:10.0.1.50' \
+  --start 2026-04-04T10:00:00Z --window 2h
 
-set -euo pipefail
+# Absolute time range
+python3 scripts/siem/wazuh_cli.py \
+  --query 'rule.groups:sshd AND data.srcuser:admin' \
+  --start 2026-04-04T08:00:00Z --end 2026-04-04T12:00:00Z
 
-# --- Parameter parsing ---
-# Entity: any identifier relevant to the investigation (user, ip, host, etc.)
-# Not a closed list — the script handles the entity type it was built for,
-# and reports clearly if asked for something it doesn't support.
-ENTITY=""
-VALUE=""
-CENTER=""
-WINDOW="2h"
-BEFORE="" ; AFTER=""
-START="" ; END=""
-BASELINE_OFFSET=""
-SELF_TEST=false
+# Health check (connectivity canary)
+python3 scripts/siem/wazuh_cli.py --health-check
 
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --entity)   ENTITY="$2";   shift 2;;
-    --value)    VALUE="$2";    shift 2;;
-    --center)   CENTER="$2";   shift 2;;
-    --window)   WINDOW="$2";   shift 2;;
-    --before)   BEFORE="$2";   shift 2;;
-    --after)    AFTER="$2";    shift 2;;
-    --start)    START="$2";    shift 2;;
-    --end)      END="$2";      shift 2;;
-    --baseline-offset) BASELINE_OFFSET="$2"; shift 2;;
-    --self-test) SELF_TEST=true; shift;;
-    *) echo "Unknown param: $1" >&2; exit 1;;
-  esac
-done
-
-# Validate duration format
-validate_duration() { [[ $1 =~ ^[0-9]+(m|h|d|w)$ ]] || { echo "Invalid duration: $1" >&2; exit 1; }; }
-
-# --- Environment config ---
-# Source system-specific settings (index names, field mappings, credentials).
-# The script never hardcodes these — they come from environment config.
-# Credentials are sourced here, never passed as parameters.
-source "${SOC_AGENT_DIR}/knowledge/environment/systems/${SYSTEM}/config.env"
-
-# --- Query construction ---
-# This is the core knowledge the script carries.
-# Each filter is commented with WHY it exists:
-#   - "rule.groups:sshd" → scopes to SSH events only (not all auth)
-#   - "data.srcip:${VALUE}" → matches the source IP being investigated
-# When this script returns wrong results, update it here.
-
-# --- Self-test mode ---
-# Verifies query logic against synthetic data, independent of live systems.
-# Run after modifying the query to catch logic regressions.
-if [[ "$SELF_TEST" == true ]]; then
-  # ... run against test fixtures, verify expected output ...
-  exit 0
-fi
-
-# --- Execution ---
-# Execute via the configured query tool.
-# The script is the credential trust boundary — credentials are used here
-# and never exposed in output.
-
-# --- Output format (standard for all lead scripts) ---
-cat <<RESULT
-## Lead: authentication-history
-**Mode:** ${MODE}
-**Parameters:** entity=${ENTITY}, value=${VALUE}, window=${WINDOW_DISPLAY}
-**Query executed:** ${QUERY}
-**Time range:** ${TIME_RANGE_DISPLAY}
-
-### Data Source Health
-- **Source:** ${DATA_SOURCE}
-- **Most recent event in index:** ${LATEST_EVENT_TIMESTAMP}
-- **Index event count (unfiltered, same window):** ${TOTAL_INDEX_EVENTS}
-
-### Summary
-- **Matching events:** ${MATCH_COUNT}
-- **Unique source IPs:** ...
-- **Unique usernames:** ...
-- **Time pattern:** (periodic|burst|irregular), details...
-- **Success/failure breakdown:** ...
-
-### Sample Events (first 5)
-${SAMPLE_EVENTS}
-
-### Raw Event Count Breakdown
-${COUNT_BREAKDOWN}
-RESULT
+# Raw JSON output for programmatic parsing
+python3 scripts/siem/wazuh_cli.py --query '...' --start ... --window 2h --raw
 ```
 
-#### Output format properties
+The CLI's formatted output includes built-in verification metadata:
 
 | Field | Purpose |
 |-------|---------|
-| Query executed | Transparency — agent can review and adapt if needed |
-| Most recent event in index | Canary — is the data source alive and current? |
-| Unfiltered index count | Scale reference — 0 filtered from 500K = good filtering; 0 from 0 = dead source |
-| Match count | Primary result |
-| Sample events | Sanity check — agent verifies events match expectations |
-| Count breakdown | Quantified summary for the main agent to reason about |
+| Query | Transparency — agent can review and adapt if needed |
+| Most recent matching event | Canary — is the data source alive and current? |
+| Index event count (unfiltered) | Scale reference — 0 filtered from 500K = good filtering; 0 from 0 = dead source |
+| Matching events | Primary result |
+| Sample events (first 5) | Sanity check — agent verifies events match expectations |
+| Count breakdowns (by rule, IP, user, hour) | Quantified summary for the main agent to reason about |
 
-### 3.4 Baseline mode
+#### Credential handling
 
-Same script, different timeframe. The `--baseline-offset` flag shifts the query window to a comparison period. Output structure is identical, enabling direct comparison: "47 failed auths in alert window vs 3 in baseline — 15x deviation."
+The SIEM CLI is the credential trust boundary. Credentials are injected via environment variables (`WAZUH_API_PASSWORD`), never passed as CLI arguments or exposed in output. The CLI sources non-secret config (index names, endpoints, retention) from `systems/{vendor}/config.env`.
+
+### 3.4 Baseline comparison
+
+The agent runs the same query with a shifted time window for comparison. The SIEM CLI returns identical output structure, enabling direct comparison: "47 failed auths in alert window vs 3 in equivalent window 7 days ago — 15x deviation."
 
 ```bash
 # Alert window
-./run.sh --entity ip --value 10.0.1.50 --center "$ALERT_TIME" --window 2h
+python3 scripts/siem/wazuh_cli.py \
+  --query 'rule.groups:sshd AND data.srcip:10.0.1.50' \
+  --start "$ALERT_TIME" --window 2h
 
-# Same query, 7 days earlier
-./run.sh --entity ip --value 10.0.1.50 --center "$ALERT_TIME" --window 2h \
-         --baseline-offset 7d
+# Same query, 7 days earlier (agent computes the shifted time range)
+python3 scripts/siem/wazuh_cli.py \
+  --query 'rule.groups:sshd AND data.srcip:10.0.1.50' \
+  --start "$BASELINE_START" --window 2h
 ```
 
 #### When to use baselines
@@ -296,23 +234,6 @@ Not every lead needs a baseline. The agent decides based on context:
 - **High-volume sources** (auth, network flow) — baseline useful, "14 failed logins" means nothing without context
 - **Binary checks** (file hash reputation, known-bad IP) — no baseline needed
 - **Rare events** (privilege escalation, lateral movement) — baseline useful, wider comparison window (30d)
-
-#### Stored baselines
-
-Each lead directory contains an optional `baselines.jsonl` — structured summaries (not raw events) appended after each execution:
-
-```json
-{
-  "timestamp": "2026-04-01T14:30:00Z",
-  "entity": "ip",
-  "value": "10.0.1.50",
-  "window": "2h",
-  "match_count": 47,
-  "investigation_id": "run-2026-04-01-001"
-}
-```
-
-Not a database — a reference log. Value: "the last 5 times we profiled auth for IPs in this subnet, counts were in the 5-20 range; this one shows 300."
 
 ### 3.5 Missing leads: the ad-hoc path
 
@@ -359,34 +280,31 @@ available data, or escalate.
 
 ---
 
-## 4. Environment Knowledge: The `systems/` Layer
+## 4. Environment Knowledge
 
 ### 4.1 Responsibility split
 
-The `environment/` directory serves two purposes that should be clearly separated:
+The `environment/` directory is organized into four layers that serve different audiences and change at different rates. See §10 for the full data resolution model.
 
-| Layer | Content | Audience | Mutability |
-|-------|---------|----------|------------|
-| **Context** (`context/`) | What's normal here — IP ranges, identity patterns, business rhythms | Agent reasoning (both main + subagent) | Human-maintained, slow-changing |
-| **Data sources** (`data-sources/`) | Where data lives — system priority, coverage, pipeline quirks, known gaps | Subagent tool selection | Human-maintained, medium-changing |
-| **Systems** (`systems/{vendor}/`) | How to query — field mappings, query patterns, API specifics, defaults | Scripts + subagent ad-hoc | Maintained with tool updates |
+| Layer | Directory | Content | Audience | Mutability |
+|-------|-----------|---------|----------|------------|
+| **Context** | `context/` | What's normal here — IP ranges, identity patterns, business rhythms | Agent reasoning (both main + subagent) | Human-maintained, slow-changing |
+| **Operations** | `operations/` | Abstract → concrete operation mapping, coverage, data gaps | Main agent (predictions, gap awareness) + subagent (what to query) | Human-maintained, changes with environment |
+| **Sources** | `sources/` | Where data lives — system, index, retention, access method, coverage per operation | Subagent (source selection, fallback) | Human-maintained, changes with pipelines |
+| **Access** | `access/` | Tool constraints — CLI usage, rate limits, host access rules | Subagent (execution) | Maintained with tool updates |
+| **Systems** | `systems/{vendor}/` | Vendor-specific field knowledge — quirks, query patterns, config | Subagent (query construction) + templates | Maintained with tool updates |
 
-**New: system configuration** (proposed addition to `systems/`):
+The `systems/{vendor}/` directory contains:
 
 ```
 systems/{vendor}/
 ├── SKILL.md                  # High-level: what this system provides
-├── auth-queries.md           # Query patterns (existing)
+├── auth-queries.md           # Query patterns
 ├── field-quirks.md           # Non-obvious field semantics and gotchas
-├── config.env                # Production defaults: index names, endpoints, retention
-└── health-check.sh           # Canary query: "is this system alive and current?"
+└── config.env                # Deployment config: index names, endpoints, retention
 ```
 
-The `config.env` and `health-check.sh` are the technical glue that scripts consume. The `.md` files are the knowledge that agents and humans read. This separation means:
-
-- Scripts source `config.env` for index names, endpoints, and defaults — no hardcoding
-- The agent reads `.md` files when constructing ad-hoc queries
-- `health-check.sh` provides a fast "is this data source alive?" check that any lead script can call
+The `config.env` is consumed by the SIEM CLI for non-secret config (index names, endpoints, retention). The `.md` files are the knowledge that agents read when constructing queries. The SIEM CLI's `--health-check` flag provides a fast "is this data source alive?" canary.
 
 ### 4.2 Field reference: document the quirks, not the obvious
 
@@ -417,8 +335,8 @@ Each system should have a field reference, but it should focus on **what would c
 The principle: if a veteran would understand it from context without documentation, skip it. If a veteran would waste 10 minutes on a wrong query before realizing the issue, document it prominently. Scripts encode the correct field usage; the field reference explains *why* those choices were made so the agent can adapt for ad-hoc queries.
 
 Consumed by:
-- **Scripts** — to construct queries with correct field names (the reference explains the reasoning behind the script's field choices)
-- **Subagents** — when doing ad-hoc queries or debugging script failures
+- **Query templates** — reference field quirks to explain non-obvious field choices
+- **Subagents** — when doing ad-hoc queries or debugging template failures
 - **Main agent** — when interpreting raw sample events that contain non-obvious field semantics
 
 ---
@@ -447,7 +365,7 @@ Not every dispatch needs a vocabulary. For single-lead investigations or leads w
 
 ### 5.2 Execution: inside the subagent
 
-The subagent's resolution path:
+The subagent's resolution path (without resolution map — full resolution):
 
 ```
 1. Check for lead directory (common/leads/{lead}/)
@@ -459,24 +377,31 @@ The subagent's resolution path:
 2. Read lead definition (common/leads/{lead}/definition.md)
    → Understand what to characterize, pitfalls to avoid
 
-3. Follow data tags → read data-sources/ file
-   → Identify available systems, priority order, known gaps
+3. Resolve data layers (§10):
+   a. Follow data tags → read operations/ file (layer 1→2)
+      → Which concrete operations exist for this abstract question
+   b. For each concrete operation → read sources/ file (layer 3)
+      → Which sources are available, priority order, coverage
+   c. Select source → read access/ constraints (layer 4)
 
-4. Check for execution script (common/leads/{lead}/run.sh)
-   ├── EXISTS: Read script, execute with parameters
+4. Check for query template (common/leads/{lead}/templates/{vendor}.md)
+   ├── EXISTS: Read template for field mappings + base query
+   │           Construct query with entity values + time range
+   │           Execute via SIEM CLI (scripts/siem/{vendor}_cli.py)
    │           Review verification metadata in output
-   │           If suspect → debug protocol (§6.2) → ad-hoc fallback
+   │           If suspect → debug protocol (§6.2) → try next source or ad-hoc
    └── DOES NOT EXIST: Ad-hoc query construction
        a. Read systems/{vendor}/ knowledge (query patterns, field quirks)
-       b. Run health check
+       b. Run health check via SIEM CLI (--health-check)
        c. Construct query using patterns + dispatch parameters
-       d. Execute, verify, iterate if needed
+       d. Execute via SIEM CLI, verify, iterate if needed
 
-5. [Optional] Run baseline (--baseline-offset) if lead has baselines.jsonl
-   or if the agent judges baseline comparison is valuable
+5. [Optional] Run baseline comparison — same query with shifted time window
 
 6. Format response with verification metadata and field glossary
 ```
+
+With a resolution map (passed from CONTEXTUALIZE, see §10), steps 3a-3c are pre-resolved. The subagent skips directly to step 4 using the source and CLI specified in the map.
 
 ### 5.3 The interpretation boundary
 
@@ -508,7 +433,7 @@ observed: |
   - src 10.0.5.100: 2 attempts, isolated
   Success/failure: all failures, no subsequent success within 30min.
   Rate vs 7-day baseline: 15x (baseline: 3 attempts in equivalent window).
-method: "leads/authentication-history/run.sh, Wazuh SIEM via MCP"
+method: "leads/authentication-history/templates/wazuh.md → wazuh_cli.py"
 evidence_quality: high
 quality_notes: "Data source healthy (last event 2min ago). Full 2h window covered."
 field_glossary:
@@ -592,15 +517,7 @@ For complex queries that do processing and correlation (not just filtering), tes
 - **Decomposition** — Break a complex query into stages. Run each stage independently and verify intermediate results make sense before combining.
 - **Boundary testing** — Test edge cases: what does the query return for an entity with exactly 1 event? For a time window boundary? For special characters in field values?
 
-Script self-test mode:
-
-```bash
-# Verify query logic against synthetic data
-./run.sh --self-test
-# Output: PASS/FAIL with explanation
-```
-
-This is particularly valuable when scripts are updated — run self-tests to verify the change didn't break the logic.
+For the lean CLI model, logic testing means verifying query construction: does the template's base query, when parameterized with known values, produce the expected results? The SIEM CLI's `--raw` flag enables programmatic verification of query output against expected structure.
 
 ### 6.4 Cross-lead correlation as validation
 
@@ -614,59 +531,57 @@ The main agent performs this correlation in the ANALYZE phase. It's not a formal
 
 ---
 
-## 7. Pre-made Scripts vs Ad-hoc Queries
+## 7. Templates vs Ad-hoc Queries
 
 ### 7.1 When each applies
 
 | Situation | Approach | Rationale |
 |-----------|----------|-----------|
-| Lead directory exists, has `run.sh` | Execute script | Institutional knowledge, fast, consistent |
-| Lead directory exists, no `run.sh` | Ad-hoc via definition.md + environment knowledge | Methodology exists, execution doesn't |
-| Lead directory exists, `run.sh` returns suspect results | Script → debug protocol (§6.2) → ad-hoc | Graceful degradation |
+| Lead has `templates/{vendor}.md` | Use template: read field mapping, construct query, execute via CLI | Institutional knowledge, fast, consistent |
+| Lead exists, no template for this vendor | Ad-hoc via definition.md + `systems/{vendor}/` knowledge | Methodology exists, query pattern doesn't |
+| Lead template returns suspect results | Template query → debug protocol (§6.2) → ad-hoc | Graceful degradation |
 | No lead directory | Fail fast, return to main agent (§3.5) | Don't burn budget on undefined work |
 | Main agent re-dispatches with ad-hoc instructions | Subagent follows ad-hoc checklist + specific instructions | Informed ad-hoc, not open-ended exploration |
 
-### 7.2 Script lifecycle
+### 7.2 Knowledge lifecycle
 
-Scripts are institutional knowledge that needs maintenance. The feedback loop:
+Templates and lead definitions are institutional knowledge that needs maintenance. The feedback loop:
 
 ```
 Investigation dispatches lead
         │
-        ├── run.sh exists and works → results enter investigation
-        │                              Summary appended to baselines.jsonl
+        ├── Template exists and works → results enter investigation
         │
-        ├── run.sh exists but suspect → debug protocol → ad-hoc fallback
+        ├── Template exists but suspect → debug protocol → ad-hoc fallback
         │   Ad-hoc methodology recorded in lead return (method field)
         │
-        ├── No run.sh → subagent uses definition.md + ad-hoc
+        ├── No template → subagent uses definition.md + ad-hoc
         │   Successful ad-hoc approach recorded in method field
         │
         └── No lead directory → fail fast → main agent reformulates
             (signals knowledge base gap)
 
 Post-mortem reviews method fields across investigations:
-  - Script-to-adhoc fallback → proposes script update (field change? query fix?)
-  - Repeated successful ad-hoc for same lead → proposes run.sh creation
+  - Template-to-adhoc fallback → proposes template update (field change? query fix?)
+  - Repeated successful ad-hoc for same lead → proposes template creation
   - Repeated fail-fast for same lead name → proposes new lead directory
 ```
 
 The investigation summary hook (`investigation_summary.py`) should flag:
-- Cases where a subagent abandoned `run.sh` in favor of ad-hoc
+- Cases where a subagent abandoned a template in favor of ad-hoc
 - Leads that triggered the fail-fast path
 - New lead names that don't exist in the knowledge base
 
 This creates a maintenance backlog — closing the feedback loop from runtime to knowledge base.
 
-### 7.3 Script readability requirement
+### 7.3 Template readability requirement
 
-The agent reads scripts to understand methodology. This means scripts must be:
-- **Commented with investigative rationale** — not "filter by srcip" but "filter by srcip because this lead profiles a single source entity's auth pattern"
-- **Structured** with clear sections (parameters, query construction, execution, output formatting)
-- **Explicit about what they filter and why** — a `WHERE status != 0` needs a comment explaining that status 0 means success and we're looking for failures
-- **Transparent about field choices** — reference the field quirks doc when using non-obvious field mappings
+The agent reads templates to understand query methodology. Templates must:
+- **Explain field choices** — not just "data.srcip" but why this field and not another (reference field-quirks.md for non-obvious mappings)
+- **Document customization** — how to narrow/broaden the query for common variations
+- **Note vendor-specific quirks** — anything that would trip up an agent constructing a related ad-hoc query
 
-This is not about code quality — it's about the script being a knowledge artifact that the agent learns from.
+The SIEM CLI itself is intentionally thin and opaque to the agent — it handles auth, HTTP, and formatting. The agent's query knowledge lives in templates and `systems/{vendor}/` docs, not in the CLI code.
 
 ---
 
@@ -675,42 +590,64 @@ This is not about code quality — it's about the script being a knowledge artif
 Complete flow from lead request to evidence in the investigation:
 
 ```
+CONTEXTUALIZE phase (main agent)
+│
+│  ...existing steps (alert review, precedent scan, context search)...
+│
+│  NEW: Build resolution map (§10)
+│  1. Read operations/ files for lead data tags → concrete operations
+│  2. Read sources/ for each → available sources, priority
+│  3. Run --health-check per unique CLI (deduplicated)
+│  4. Build resolution map: { operation → sources → health }
+│  5. Note data gaps for hypothesis discrimination
+│
 HYPOTHESIZE phase (main agent)
 │
 │  Selects leads based on hypothesis predictions (from playbook)
+│  Uses resolution map for:
+│    - prediction specificity (which concrete operations are testable)
+│    - gap awareness (what's NOT observable)
+│    - lead prioritization (avoid degraded sources)
 │  Sets vocabulary for cross-lead correlation
 │
 ├─── Dispatch: lead subagent(s) ───────────────────────────────┐
-│    { lead, goal, vocabulary?, notes? }                        │
+│    { lead(s), goal, vocabulary?, notes?, resolution_map }     │
 │                                                               │
 │    ┌─ Subagent execution ──────────────────────────────────┐  │
 │    │                                                        │  │
 │    │  1. Check for lead directory                           │  │
-│    │     └── NOT FOUND → fail fast, return available        │  │
-│    │         data sources to main agent (§3.5)              │  │
+│    │     └── NOT FOUND → fail fast (§3.5)                   │  │
 │    │                                                        │  │
 │    │  2. Read definition.md (methodology, pitfalls)         │  │
-│    │  3. Follow data tags → read data-sources/              │  │
+│    │  3. Use resolution map → skip to source + CLI          │  │
+│    │     (or resolve layers 2-4 from scratch if no map)     │  │
 │    │  4. Execute:                                           │  │
-│    │     ├── run.sh exists → execute with params            │  │
+│    │     ├── Template exists → read field mappings,          │  │
+│    │     │   construct query, execute via CLI                │  │
 │    │     │   ├── Review verification metadata               │  │
 │    │     │   │   - Source health (latest event timestamp)    │  │
 │    │     │   │   - Result scale (filtered vs unfiltered)     │  │
 │    │     │   │   - Sample events (sanity check)              │  │
-│    │     │   └── If suspect → debug protocol → ad-hoc       │  │
-│    │     └── No run.sh → ad-hoc via env knowledge           │  │
-│    │  5. [Optional] Baseline comparison (--baseline-offset)  │  │
+│    │     │   └── If suspect → try next source → ad-hoc      │  │
+│    │     └── No template → ad-hoc via env knowledge + CLI   │  │
+│    │  5. [Optional] Baseline comparison (shifted time range)  │  │
 │    │  6. Format response                                    │  │
 │    │     - Quantified observations (no interpretation)      │  │
 │    │     - Verification metadata                            │  │
-│    │     - Field glossary                                   │  │
+│    │     - Field glossary (vendor fields → standard vocab)  │  │
 │    │     - Notable patterns                                 │  │
+│    │                                                        │  │
+│    │  For composite dispatch (§11):                          │  │
+│    │     Repeat steps 1-6 per lead, accumulating context.   │  │
+│    │     Earlier results may refine later query parameters.  │  │
+│    │     Return includes cross_lead_notes.                   │  │
 │    │                                                        │  │
 │    └────────────────────────────────────────────────────────┘  │
 │                                                               │
 │    Return: { observed, method, evidence_quality,              │
 │              field_glossary, notable }                         │
-│    OR (fail-fast): { lead, status: "undefined",               │
+│    OR composite: { leads_executed[], cross_lead_notes }       │
+│    OR fail-fast: { lead, status: "undefined",                 │
 │              available_sources, recommendation }               │
 │                                                               │
 ├─── Receive lead results ─────────────────────────────────────┘
@@ -725,7 +662,9 @@ ANALYZE phase (main agent)
 │  2. Cross-correlate across lead results (using vocabulary)
 │  3. Check for contradictions between leads
 │  4. Assess each hypothesis (++/+/-/--)
-│  5. Decide: another cycle needed, or sufficient to conclude?
+│  5. Check resolution map gaps — do unobservable operations
+│     affect confidence in any hypothesis?
+│  6. Decide: another cycle needed, or sufficient to conclude?
 │
 └─── Next HYPOTHESIZE or CONCLUDE
 ```
@@ -735,31 +674,441 @@ ANALYZE phase (main agent)
 ## 9. Open Questions
 
 ### Resolved in this document
-- **MCP vs bash?** — Scripts as primary, MCP as fallback for vendor-managed integrations. Not either/or.
-- **Lead definitions vs scripts?** — Both, colocated in lead directories. Definitions capture methodology, scripts capture execution. Playbooks add hypothesis context on top.
-- **How to validate results?** — Built-in verification metadata (health check, unfiltered count, sample events) + formalized debug protocol.
+- **MCP vs CLI?** — Lean SIEM CLI as primary execution layer, MCP as fallback for vendor-managed integrations. Not either/or.
+- **Lead definitions vs query knowledge?** — Both, colocated in lead directories. Definitions capture methodology (`definition.md`), query templates capture vendor-specific field mappings and patterns (`templates/{vendor}.md`). Playbooks add hypothesis context on top.
+- **How to validate results?** — Built-in verification metadata in SIEM CLI output (health check, unfiltered count, sample events) + formalized debug protocol.
 - **What happens when a lead doesn't exist?** — Fail fast (§3.5). Subagent returns available data sources; main agent reformulates or pivots.
-- **Time format?** — Short suffix (`2h`, `30m`, `7d`, `1w`) with `--center`/`--before`/`--after` for relative windows. ISO 8601 for timestamps.
-- **Where do scripts live?** — Inside lead directories (`common/leads/{lead}/run.sh`), not in a separate `scripts/` tree.
+- **Where does query knowledge live?** — Templates inside lead directories (`common/leads/{lead}/templates/{vendor}.md`). SIEM CLI in `scripts/siem/`. Environment knowledge in `systems/{vendor}/`.
 
 ### Still open
 
-1. **Baseline storage and retention** — `baselines.jsonl` per lead directory grows indefinitely. What retention policy? Probably recent-N (last 100 entries) with periodic truncation. How does the agent efficiently query past baselines — tail the file? Separate index?
+1. **Cross-environment portability** — Templates are per-vendor. Goal: adding Splunk should require new `templates/splunk.md` per lead + `scripts/siem/splunk_cli.py` + `systems/splunk/` config, without touching definitions or playbooks. How much template content can be shared vs vendor-specific?
 
-2. **Cross-environment portability** — Scripts source `config.env` for system-specific values. Goal: switching from Wazuh to Splunk should require changing `systems/` and `config.env`, not rewriting every `run.sh`. How much query logic can be truly system-agnostic vs needing per-vendor variants?
+2. **Parallel lead execution** — Multiple independent leads can run concurrently as separate subagents. What's the coordination model? Can one lead's early results cause another to abort? How does the main agent handle partial returns?
 
-3. **Parallel lead execution** — Multiple independent leads can run concurrently as separate subagents. What's the coordination model? Can one lead's early results cause another to abort? How does the main agent handle partial returns?
+3. **Result size management** — Sample events help, but some leads (network analysis over a wide window) produce genuinely large result sets. Need a truncation/pagination strategy that's explicit about what was omitted. The SIEM CLI's `--limit` flag caps events but doesn't communicate what was lost.
 
-4. **Script testing in CI** — `--self-test` validates logic against synthetic data. But how to test against realistic data without a live SIEM? Recorded responses (replay mode)? This is the traditional integration test challenge.
+4. **Credential rotation and access review** — SIEM CLI sources credentials from environment variables. Who provisions them? How are they rotated? What audit trail exists?
 
-5. **Result size management** — Sample events help, but some leads (network analysis over a wide window) produce genuinely large result sets. Need a truncation/pagination strategy that's explicit about what was omitted.
+5. **Ad-hoc query guardrails** — When the subagent falls back to ad-hoc, what prevents runaway queries? Budget limits apply to tool calls, but a single expensive query can still be a problem. Query-level guardrails (mandatory time filter, result limit) should be encoded in environment knowledge or enforced by the SIEM CLI.
 
-6. **Credential rotation and access review** — Scripts source credentials from `config.env`. Who provisions them? How are they rotated? What audit trail exists? Operationally relevant because it affects the threat model.
+6. **Template promotion threshold** — Post-mortem proposes template creation when ad-hoc patterns repeat. What's the threshold? Probably: post-mortem proposes, human approves — same as precedent creation.
 
-7. **Ad-hoc query guardrails** — When the subagent falls back to ad-hoc, what prevents runaway queries? Budget limits apply to tool calls, but a single expensive query can still be a problem. Query-level guardrails (mandatory time filter, result limit) should be encoded in environment knowledge or enforced by the system skill.
+7. **Prompt injection via tool results** — Alert data flowing through SIEM queries could contain crafted payloads. The salted-delimiter approach from the judge prompt should extend to tool result consumption, particularly for leads that pull raw log content (command lines, URLs, email subjects, user-controlled fields).
 
-8. **Script promotion threshold** — Post-mortem proposes `run.sh` creation when ad-hoc patterns repeat. What's the threshold? Every successful ad-hoc? After N uses? This affects maintenance burden. Probably: post-mortem proposes, human approves — same as precedent creation.
+8. **Data resolution and normalization** — Resolved in §10. Four-layer model (abstract operation → concrete operation → source → access) with explicit knowledge base structure. Resolution map built per-investigation in CONTEXTUALIZE.
 
-9. **Prompt injection via tool results** — Alert data flowing through SIEM queries could contain crafted payloads. The salted-delimiter approach from the judge prompt should extend to tool result consumption, particularly for leads that pull raw log content (command lines, URLs, email subjects, user-controlled fields).
+9. **Composite lead dispatch** — Resolved in §11. Multi-lead subagent dispatch for profiling questions. Sequential execution with cross-lead context accumulation.
 
-10. **Lead directory migration** — Current leads are flat `.md` files. Migration to directory structure needs a plan: move existing files to `{lead}/definition.md`, create `_template/` directory, update references in playbooks and architecture doc.
+---
+
+## 10. Data Resolution: From Investigative Question to Query
+
+### The problem
+
+When the main agent asks "check authentication history," four layers of resolution happen before a query runs:
+
+1. **What** — the abstract investigative question ("authentication")
+2. **Where it happened** — concrete real-world operations ("AD domain auth", "SSH auth", "Okta SSO")
+3. **Where it's documented** — sources that record those operations ("SIEM index", "DC event log", "Okta API")
+4. **How to access it** — tools and methods ("splunk_cli.py", "Ansible → Get-WinEvent", "okta_cli.py")
+
+Currently, the knowledge base conflates layers 2-3 in the `data-sources/` files and spreads layer 4 across `systems/{vendor}/` and `leads/{lead}/templates/`. The lead subagent resolves all four layers from scratch every time.
+
+This matters for three reasons:
+
+- **The main agent needs layer 2.** Its predictions are abstract ("if brute-force, we'd see many failed attempts from the same source") but knowing which concrete operations exist determines whether those predictions are testable. If the environment has AD auth + Okta SSO but the Okta pipeline is down, the main agent needs to know — the absence of Okta data is a gap that affects hypothesis discrimination, not just an access problem.
+
+- **Layers have different change frequencies.** Abstract operations never change. Concrete operations change when the environment changes (new systems deployed). Sources change when pipelines change. Access methods change when tools are updated. Conflating them means the subagent can't distinguish stable knowledge from runtime state.
+
+- **The resolution chain is data modeling.** Mapping "authentication" → "AD domain auth events (4625)" → "Splunk `index=windows_security`" → "`splunk_cli.py --query '...'`" is normalization. Experienced analysts carry this model in their heads. We're encoding it in the knowledge base, with the LLM bridging the gaps that a traditional pipeline would need rigid transformation rules for.
+
+### The four layers
+
+| Layer | Question | Example | Changes | Who needs it |
+|-------|----------|---------|---------|-------------|
+| **1. Abstract operation** | What happened? | "authentication", "process execution" | Never | Main agent (predictions) |
+| **2. Concrete operation** | Where in the real world? | "AD domain auth (4625)", "SSH auth", "Sysmon process create (Event 1)" | When environment changes | Main agent (data gaps, prediction specificity) + Lead subagent (what to query) |
+| **3. Source** | Where is it documented? | "Splunk `index=windows_security`", "DC local event log", "CrowdStrike API" | When pipelines change | Lead subagent (source selection) |
+| **4. Access method** | How to get it? | "`splunk_cli.py`", "Ansible → `Get-WinEvent`", "`crowdstrike_cli.py`" | When tools change | Lead subagent (execution) |
+
+Key relationships:
+- **One concrete operation → multiple sources.** AD domain auth (4625) can be queried via SIEM index, directly on the DC event log, or via CrowdStrike if it captures logon telemetry.
+- **One source → multiple concrete operations.** The Sysmon index contains process creation (Event 1), network connections (Event 3), DNS queries (Event 22), and file creates (Event 11).
+- **One source → multiple access methods.** The DC event log can be queried via SIEM (already forwarded) or via Ansible (direct host access).
+
+### What the LLM handles vs what we write down
+
+This is unavoidable data modeling, but we don't need a full normalization pipeline. The LLM's semantic understanding replaces the obvious part:
+
+| Layer | Written in knowledge base | LLM handles |
+|-------|--------------------------|-------------|
+| Abstract operations | List of investigative concepts, standard vocabulary | Mapping predictions to concepts |
+| Concrete operations | Which exist in this environment, coverage gaps, platform specifics | — |
+| Sources | Field mappings for non-obvious fields, coverage notes, known quirks | Obvious field semantics, consolidation across sources |
+| Access methods | CLI usage, constraints, priority order | Query construction from template + context |
+
+The principle from §4.2 applies: document what would trip up an experienced analyst, not the obvious. `data.srcip` means source IP — don't document that. But `data.srcuser` vs `data.dstuser` meaning different things for SSH vs Windows AD — document that prominently.
+
+The shared vocabulary between main agent and lead subagent is the **investigative concept layer**: "parent process", "source IP", "username", "event outcome", "session duration." The main agent predicts with these concepts. The lead subagent translates them to vendor-specific fields and reports back in concept terms. This already exists implicitly in the `vocabulary` agreement (§5.1) — we're making it explicit and grounding it in the knowledge base.
+
+### Target knowledge base structure
+
+The current `environment/` directory conflates layers. The target structure separates them:
+
+```
+knowledge/environment/
+├── SKILL.md                          # Index: what's in this directory
+├── context/                          # (unchanged) Classification heuristics
+│   ├── ip-ranges.md
+│   ├── identity-patterns.md
+│   ├── criticality.md
+│   └── data-classification.md
+│
+├── operations/                       # Layer 1→2: abstract → concrete mapping
+│   ├── SKILL.md                      # Index of investigative operations
+│   ├── authentication.md             # Abstract: "authentication"
+│   │                                 #   Concrete: AD domain auth, SSH, Okta SSO, ...
+│   │                                 #   Per concrete op: which sources, coverage, gaps
+│   ├── process-execution.md          # Abstract: "process execution"
+│   │                                 #   Concrete: Sysmon Event 1, Security 4688,
+│   │                                 #   CrowdStrike, Prefetch, ...
+│   ├── network-activity.md           # Abstract: "network activity"
+│   ├── file-access.md               # Abstract: "file access"
+│   ├── identity-lookup.md           # Abstract: "who is this entity?"
+│   └── asset-lookup.md              # Abstract: "what is this system?"
+│
+├── sources/                          # Layer 3: where data lives
+│   ├── SKILL.md                      # Index of available sources
+│   ├── splunk-windows-security.md    # One file per source (not per vendor)
+│   │                                 #   Covers: [AD auth, process creation, file audit, ...]
+│   │                                 #   Access: splunk_cli.py, index=windows_security
+│   │                                 #   Retention: 90 days
+│   │                                 #   Notes: "4688 command line requires audit policy"
+│   ├── splunk-sysmon.md              # Covers: [process, network, DNS, file]
+│   ├── splunk-firewall.md            # Covers: [network flows, URL filtering]
+│   ├── crowdstrike-api.md            # Covers: [process, network, file]
+│   │                                 #   Access: crowdstrike_cli.py
+│   │                                 #   Notes: "Rate-limited 15 req/min"
+│   ├── dc-local-eventlog.md          # Covers: [AD auth]
+│   │                                 #   Access: ansible → Get-WinEvent
+│   │                                 #   Notes: "Fallback when SIEM has gaps"
+│   └── okta-api.md                   # Covers: [SSO auth]
+│                                     #   Access: okta_cli.py
+│
+├── access/                           # Layer 4: tools and constraints
+│   ├── SKILL.md                      # Index + general constraints
+│   ├── splunk.md                     # splunk_cli.py usage, auth, limitations
+│   ├── ansible.md                    # "Use for all host queries. NOT Invoke-Command."
+│   ├── crowdstrike.md                # API rate limits, pagination
+│   └── okta.md                       # API usage, scoping
+│
+└── systems/                          # (renamed/refocused) Vendor-specific field knowledge
+    └── wazuh/                        # Field quirks, query syntax gotchas
+        ├── field-quirks.md           # Non-obvious field semantics
+        ├── auth-queries.md           # Query patterns
+        └── config.env                # Deployment config (index, endpoint, retention)
+```
+
+#### Example: `operations/authentication.md`
+
+```markdown
+---
+name: authentication
+description: Where authentication events can be found in this environment
+---
+
+# Authentication
+
+## Concrete Operations
+
+### AD Domain Authentication
+- **What:** Windows logon events — success (4624), failure (4625), lockout (4740)
+- **Sources:** splunk-windows-security, dc-local-eventlog
+- **Coverage:** All domain-joined hosts
+- **Gaps:** Does not cover local account auth or service account token refresh
+- **Standard vocabulary:** source IP → "source", target user → "username",
+  success/failure → "outcome"
+
+### SSH Authentication
+- **What:** SSH login attempts — success/failure via PAM
+- **Sources:** splunk-wazuh-sshd (rules 5710-5720)
+- **Coverage:** All Linux hosts with Wazuh agent
+- **Gaps:** Key-based vs password auth not distinguishable from Wazuh fields alone
+- **Standard vocabulary:** source IP → "source", attempted user → "username",
+  success/failure → "outcome"
+
+### Okta SSO
+- **What:** SSO authentication events — success, failure, MFA challenge
+- **Sources:** okta-api
+- **Coverage:** All SSO-enrolled applications
+- **Gaps:** App-specific auth (non-SSO) not visible. Okta may block before
+  reaching AD, so AD logs would show nothing.
+- **Standard vocabulary:** client IP → "source", user → "username",
+  result → "outcome", factor → "auth_method"
+
+## Data Gaps (negative observations)
+
+- If only AD auth is checked, Okta-only failures are invisible
+- VPN auth (not currently collected) means pre-network-access auth is a blind spot
+- Service account token refresh is not logged as an auth event
+```
+
+#### Example: `sources/splunk-windows-security.md`
+
+```markdown
+---
+name: splunk-windows-security
+description: Windows Security event log forwarded to Splunk
+covers: [ad-domain-auth, process-creation-4688, file-audit-4663, logon-type]
+---
+
+# Splunk: Windows Security Index
+
+## Access
+- **CLI:** `scripts/siem/splunk_cli.py`
+- **Index:** `index=windows_security`
+- **Retention:** 90 days
+
+## Operations Covered
+| Operation | Event IDs | Notes |
+|-----------|-----------|-------|
+| AD domain auth | 4624, 4625, 4740 | Primary auth source |
+| Process creation | 4688 | Command line only if audit policy enabled |
+| File audit | 4663 | Only on shares with object access auditing |
+| Logon type | 4624 field `LogonType` | Distinguish interactive (2), network (3), RDP (10) |
+
+## Field Notes
+- `TargetUserName` → the user being authenticated (not the caller)
+- `IpAddress` → source of the auth attempt (may be `-` for local logon)
+- `LogonType` → integer, see mapping above
+- See systems/wazuh/field-quirks.md for Wazuh-specific normalization
+```
+
+#### Example: `access/ansible.md`
+
+```markdown
+---
+name: ansible
+description: Host access via Ansible for direct event log and file queries
+---
+
+# Ansible Host Access
+
+## Usage
+Ansible is the ONLY supported method for direct host queries.
+Do NOT use Invoke-Command, Enter-PSSession, or direct SSH for queries.
+
+## Common Patterns
+
+### Windows Event Log query
+\`\`\`bash
+ansible {hostname} -m win_shell -a "Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625} -MaxEvents 100 | ConvertTo-Json"
+\`\`\`
+
+### Linux log query
+\`\`\`bash
+ansible {hostname} -m shell -a "journalctl -u sshd --since '2h ago' --no-pager"
+\`\`\`
+
+## Constraints
+- Requires host to be in Ansible inventory
+- Timeout: 30s default, extend for large queries
+- Rate: no formal limit, but avoid parallel queries to same host
+```
+
+### Resolution map: runtime snapshot of layers 2-3
+
+The main agent resolves the environment once during CONTEXTUALIZE and passes a **resolution map** to all lead dispatches. The map captures:
+- Which concrete operations exist for each abstract operation the investigation needs
+- Which sources are available for each concrete operation
+- Source health at resolution time (from CLI `--health-check`)
+
+```yaml
+# Resolution map — built in CONTEXTUALIZE, passed to all lead subagents
+resolution:
+  authentication:
+    operations:
+      - name: "AD domain auth"
+        sources:
+          - source: splunk-windows-security
+            cli: scripts/siem/splunk_cli.py
+            health: healthy
+            last_event: "2026-04-04T13:58:00Z"
+          - source: dc-local-eventlog
+            access: ansible
+            health: not_checked   # fallback, only check if primary fails
+        coverage: "All domain-joined hosts"
+      - name: "SSH authentication"
+        sources:
+          - source: splunk-wazuh-sshd
+            cli: scripts/siem/wazuh_cli.py
+            health: healthy
+            last_event: "2026-04-04T13:57:00Z"
+        coverage: "Linux hosts with Wazuh agent"
+      - name: "Okta SSO"
+        sources:
+          - source: okta-api
+            cli: scripts/siem/okta_cli.py
+            health: degraded
+            notes: "API returning 429s intermittently"
+        coverage: "SSO-enrolled apps"
+    gaps:
+      - "VPN auth not collected"
+      - "Service account token refresh not logged"
+```
+
+#### Resolution process (during CONTEXTUALIZE)
+
+1. Identify which abstract operations the signature's leads need (from lead `data_tags` + playbook)
+2. Read `operations/` files for each — enumerate concrete operations + sources
+3. Run `--health-check` on each primary source (deduplicated per CLI)
+4. Build the resolution map
+5. Pass to all subsequent lead dispatches
+
+The main agent uses the resolution map for:
+- **Prediction specificity** — knowing AD + SSH + Okta exist shapes hypothesis predictions
+- **Gap awareness** — "VPN auth not collected" influences confidence assessment
+- **Lead selection** — if Okta is degraded, leads depending on SSO data get lower priority
+
+The lead subagent uses it for:
+- **Skip discovery** — go straight to source → template → CLI
+- **Source fallback** — if primary source returns suspect results, try the next source in the list
+- **Health-aware quality reporting** — note degraded sources in `quality_notes`
+
+#### What the resolution map does NOT contain
+
+- **Field mappings** — those are in query templates and source docs. The subagent still reads those.
+- **Access method details** — those are in `access/` docs. Static knowledge, not runtime state.
+- **Full config** — `config.env` values stay in files. The map points to the CLI, not the config.
+
+#### When to resolve fresh
+
+- **Data-source-debug lead** (§6.2) — its purpose is diagnosing data source issues; it should resolve from scratch
+- **Ad-hoc fallback** — if a template query fails, the subagent reads source/access docs directly
+- **Cross-investigation** — the map is per-investigation, not persisted. Environment changes are picked up on next CONTEXTUALIZE
+
+---
+
+## 11. Composite Lead Dispatch
+
+### Problem
+
+Some investigative questions span multiple data sources and leads. "What did this user do in the 2-hour window?" requires authentication history, application logs, and data access events. Currently the main agent must:
+
+1. Dispatch 3 separate subagents (or 3 sequential dispatches)
+2. Receive 3 independent observation sets
+3. Correlate them in ANALYZE
+
+This works for truly independent leads. But for **profiling questions** — where the goal is a unified picture of an entity's activity — the leads are not independent. Knowing the auth pattern (logged in at 14:00, logged out at 14:30) directly improves the data access query (scope to that session window). Knowing the user authenticated via a service account changes what to look for in app logs.
+
+### Design: multi-lead subagent (option b)
+
+The main agent dispatches a **single subagent with multiple leads**. The subagent executes them sequentially, accumulating context. Earlier lead results can inform later lead execution — tighter time windows, better entity scoping, cross-lead sanity checks during execution rather than after.
+
+#### Dispatch format
+
+```yaml
+# Composite lead dispatch
+leads:
+  - authentication-history
+  - app-log-review
+  - data-access-events
+goal: "Profile user jsmith's activity in the 2h window around the alert"
+investigation_log: ./investigation.md
+vocabulary:
+  user: "jsmith"
+  time_window: "2026-04-04T10:00:00Z to 2026-04-04T12:00:00Z"
+notes: "Execute leads in order. Use findings from earlier leads to refine later queries where applicable."
+siem_resolution: { ... }  # from §10, if available
+```
+
+#### Execution model
+
+The subagent processes leads sequentially:
+
+```
+For each lead in leads[]:
+  1. Resolve lead (same path as §5.2, accelerated by siem_resolution if present)
+  2. Execute query
+     - MAY refine parameters based on prior lead results
+       (e.g., narrow time window based on auth session boundaries)
+     - MUST NOT skip the lead or change its methodology
+     - MUST still follow the definition.md "What to Characterize" requirements
+  3. Record observations
+  4. Note cross-lead observations (consistencies and contradictions)
+```
+
+#### Return format
+
+```yaml
+# Composite return
+leads_executed:
+  - lead: authentication-history
+    observed: |
+      User jsmith: 1 successful SSH login at 14:02 from 10.0.1.50,
+      logout at 14:28. No failed attempts.
+    method: "leads/authentication-history/templates/wazuh.md → wazuh_cli.py"
+    evidence_quality: high
+  - lead: app-log-review
+    observed: |
+      3 application actions by jsmith between 14:03-14:25.
+      All within authenticated session window (refined from auth-history).
+    method: "ad-hoc, wazuh_cli.py"
+    evidence_quality: medium
+    quality_notes: "No template for app-log-review/wazuh. Query constructed ad-hoc."
+  - lead: data-access-events
+    observed: |
+      2 data export operations at 14:20 and 14:24.
+      Both within session window, both to authorized destination.
+    method: "ad-hoc, wazuh_cli.py"
+    evidence_quality: medium
+cross_lead_notes:
+  - "All activity falls within the single auth session (14:02-14:28)"
+  - "Data exports occurred in last 5 minutes of session — temporal clustering"
+  - "No activity outside the auth session boundaries"
+field_glossary:
+  user: "data.srcuser (SSH), data.user (app logs)"
+  src: "data.srcip — 10.0.1.50 across all leads"
+```
+
+#### The interpretation boundary still holds
+
+The composite subagent follows the same "facts up, meaning down" principle (§5.3). It reports cross-lead factual observations ("all activity within a single session", "temporal clustering of exports") but does not interpret them ("this looks like exfiltration"). The main agent assigns investigative meaning in ANALYZE.
+
+The one refinement: the composite subagent MAY note **cross-lead contradictions** as explicit warnings. "Auth shows no session for jsmith, but app-logs show 3 actions attributed to jsmith" is a factual contradiction that the main agent needs to see prominently.
+
+#### When to use composite vs single-lead dispatch
+
+| Situation | Dispatch mode | Rationale |
+|-----------|--------------|-----------|
+| Independent leads, different entities | Parallel single-lead subagents | No cross-lead value, maximize speed |
+| Related leads, same entity, profiling question | Composite (multi-lead) subagent | Cross-lead context improves execution |
+| Single critical lead | Single-lead subagent | No composition needed |
+| Lead + its baseline comparison | Single-lead subagent (agent runs both queries) | Same data source, same entity — naturally sequential |
+
+The main agent decides the dispatch mode based on the investigative question. The playbook may suggest composite dispatch for known profiling patterns, but the main agent is not bound by this.
+
+### Trade-offs
+
+**Benefits of composite dispatch:**
+- Cross-lead context accumulation — earlier results refine later queries
+- Single subagent overhead instead of N — reduces total context window cost
+- Cross-lead consistency checks happen during execution, not after
+- Unified field glossary across leads
+
+**Costs:**
+- Sequential execution — no parallelism between leads in the composite
+- ~2x token usage per lead (prior lead results in context during later execution)
+- Error in early lead can influence later leads (mitigated by per-lead verification metadata)
+- Longer single subagent run — if it fails midway, partial results may be lost
+
+**Net assessment:** For profiling questions (2-4 related leads on the same entity), composite dispatch is the right default. The token cost is acceptable because the cross-lead context genuinely improves query quality. For independent leads or large fan-outs (5+ leads), single-lead dispatch with parallel execution is better.
+
+### Adaptability: defined vs open-ended composition
+
+Currently, the main agent specifies exact lead names in the composite dispatch. This is the **defined composition** model — the main agent knows which leads to run, and the subagent executes them.
+
+An alternative is **open-ended composition**: the main agent passes a high-level investigative question ("profile this user's activity") and the subagent decides which leads to run based on the knowledge base. This would use the LLM's semantic understanding to adaptively select and sequence leads.
+
+This is deferred for now. The defined composition model is simpler, more predictable, and maintains the main agent's control over the investigation strategy. The open-ended model is more powerful but introduces a new risk: the subagent making investigative priority decisions that belong to the main agent. If we pursue it, the boundary would need careful design — likely a "propose and confirm" step where the subagent reads the knowledge base, proposes a lead sequence, and the main agent approves before execution begins. But that reintroduces bidirectional communication, which the current single-shot architecture avoids.
