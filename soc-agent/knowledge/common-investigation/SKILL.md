@@ -17,7 +17,7 @@ Portable methodology for hypothesis-driven security alert investigation.
 - Common mistakes to avoid
 
 ### leads/
-Shared investigation vocabulary — reusable lead definitions. Each lead is a directory containing `definition.md` (methodology, pitfalls, data tags) and optionally `run.sh` (executable query script with standard output format). Browse subdirectories for available leads. `_template/` shows the standard structure. `ad-hoc/` and `data-source-debug/` are meta-leads for handling undefined leads and debugging suspect results.
+Shared investigation vocabulary — reusable lead definitions. Each lead is a directory containing `definition.md` (what to characterize, pitfalls, data tags) and optionally `templates/` (pre-built query templates per SIEM in native syntax). Browse subdirectories for available leads. `_template/` shows the standard structure. `ad-hoc/` and `data-source-debug/` are meta-leads for handling undefined leads and debugging suspect results.
 
 ### lessons/
 Cross-cutting lessons from past investigations.

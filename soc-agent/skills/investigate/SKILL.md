@@ -202,7 +202,7 @@ Then find where the stories **diverge most** across hypotheses. That divergence 
 
 If primary evidence sources are unavailable, consider secondary artifacts — the hypothesized activity would also leave traces in network traffic, authentication logs, file system changes, etc. Don't give up on a lead because the obvious data source is missing.
 
-Reference `knowledge/common/leads/` for lead methodology. Each lead is a directory containing `definition.md` (methodology) and optionally `run.sh` (executable query script). If the lead has a `run.sh`, read it to understand the query logic, then execute it with the appropriate parameters. If no `run.sh` exists, use the methodology from `definition.md` with ad-hoc queries. If no lead directory exists for what you need, follow `leads/ad-hoc/definition.md`.
+Reference `knowledge/common-investigation/leads/` for lead methodology. Each lead is a directory containing `definition.md` (what to characterize, pitfalls) and optionally `templates/` (pre-built query templates per SIEM). If no lead directory exists for what you need, follow `leads/ad-hoc/definition.md`.
 
 #### Past Investigation Patterns
 
@@ -234,12 +234,13 @@ Append to `{run_dir}/investigation.md`:
 
 **Goal:** Execute the selected lead — query SIEM, read data, collect evidence.
 
-1. Check for lead directory `knowledge/common/leads/{lead-name}/`. If it doesn't exist, follow the fail-fast protocol in `leads/ad-hoc/definition.md`
-2. Read `{lead-name}/definition.md` — it tells you what to characterize and what pitfalls to avoid. Follow its `data_tags` to find relevant systems in `knowledge/environment/data-sources/`
-3. If `{lead-name}/run.sh` exists, read it to understand the query logic, then execute it with parameters (`--entity`, `--value`, `--center`, `--window`, etc.). Review the verification metadata in the output (data source health, unfiltered count, sample events)
-4. If no `run.sh` exists, use SIEM/query tools available via MCP. Check `knowledge/environment/systems/` for query patterns and `field-quirks.md` for non-obvious field semantics
-5. If a query returns suspect results (zero results, unexpectedly low count), follow the debugging protocol in `leads/data-source-debug/definition.md`
-6. Record raw observations faithfully — **characterize, do not interpret**. "Timing is periodic, 5min ±3s" is characterization. "This is a monitoring probe" is interpretation — save that for ANALYZE
+Read `knowledge/common-investigation/leads/{lead-name}/definition.md` for what to characterize and pitfalls to avoid. If no lead directory exists, follow `leads/ad-hoc/definition.md`.
+
+**Query execution:** Check if `{lead-name}/templates/` has a template for your SIEM. If yes, read it — it contains the base query in native syntax and entity field mappings. Plug in the relevant entities and time range, then execute via the SIEM CLI (`scripts/siem/wazuh_cli.py` for Wazuh). If no template exists, construct the query yourself using `knowledge/environment/systems/` for field mappings and `field-quirks.md` for gotchas.
+
+**Validate results:** Check the data source health section in the output. If results are suspect (zero matches, unexpectedly low count, stale latest event), follow `leads/data-source-debug/definition.md`.
+
+**Record faithfully:** Characterize, do not interpret. "Timing is periodic, 5min ±3s" is characterization. "This is a monitoring probe" is interpretation — save that for ANALYZE.
 
 Write state:
 ```bash

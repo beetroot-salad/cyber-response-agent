@@ -64,7 +64,9 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 │   │       ├── SKILL.md           # Merged investigation skill (entry point + loop)
 │   │       └── screen.md          # Subagent prompt for SCREEN fast pattern matching
 │   ├── scripts/
-│   │   └── resolve_imports.py     # !command resolver: signature knowledge → stdout
+│   │   ├── resolve_imports.py     # !command resolver: signature knowledge → stdout
+│   │   └── siem/
+│   │       └── wazuh_cli.py       # Wazuh SIEM CLI: auth, HTTP, query execution, output formatting
 │   ├── hooks/
 │   │   └── scripts/
 │   │       ├── validate_report.py      # PostToolUse hook: combined Tier 1 + Tier 2 validation
@@ -73,10 +75,10 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 │   │       ├── investigation_summary.py # Stop hook: JSONL outcome log
 │   │       └── audit_tool_calls.py     # PostToolUse: audit + trace JSONL split
 │   ├── knowledge/
-│   │   ├── common/                # Portable investigation methodology
+│   │   ├── common-investigation/  # Portable investigation methodology
 │   │   │   ├── SKILL.md           # Common investigation knowledge
 │   │   │   ├── checklist.md       # Investigation self-check guide
-│   │   │   ├── leads/             # Reusable lead definitions (methodology)
+│   │   │   ├── leads/             # Reusable lead definitions (methodology + query templates)
 │   │   │   └── lessons/           # Cross-cutting investigation lessons
 │   │   ├── environment/           # Org-specific deployment knowledge
 │   │   │   ├── context/           # Classification heuristics (IP ranges, identity patterns, etc.)
@@ -122,8 +124,8 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 ## Running Tests
 
 ```bash
-# All unit tests (no LLM required)
-pytest soc-agent/tests/ -v
+# All unit tests (no LLM required, ~25s — subprocess-heavy state tests)
+pytest soc-agent/tests/ -v -m "not llm"
 
 # Specific test suites
 pytest soc-agent/tests/test_validate_report.py -v    # Report validation
@@ -178,7 +180,7 @@ See `soc-agent/knowledge/signatures/_template/README.md` for the full onboarding
 3. Research past tickets for this signature — pull alerts, review closed tickets, identify outcome clusters
 4. Fill in `context.md` — signature logic, threat model, known false positives (grounded in real data)
 5. Fill in `playbook.md` — hypothesis catalog, leads with predictions (from actual investigation patterns)
-   - Optionally use `@import:name` inline to reference common lessons from `knowledge/common/lessons/`
+   - Optionally use `@import:name` inline to reference common lessons from `knowledge/common-investigation/lessons/`
    - The resolver (`scripts/resolve_imports.py`) loads referenced atoms automatically at skill load time
 6. Add precedents from representative tickets to `precedents/`
 7. Create `soc-agent/config/signatures/{signature-id}/permissions.yaml`

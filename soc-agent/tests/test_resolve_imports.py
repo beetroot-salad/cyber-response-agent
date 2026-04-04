@@ -52,7 +52,7 @@ class TestResolverHappyPath:
         assert "Hypothesis Catalog" in wazuh_5710_result.stdout
 
     def test_contains_checklist(self, wazuh_5710_result):
-        assert "<!-- source: knowledge/common/checklist.md -->" in wazuh_5710_result.stdout
+        assert "<!-- source: knowledge/common-investigation/checklist.md -->" in wazuh_5710_result.stdout
         assert "Investigation Checklist" in wazuh_5710_result.stdout
 
     def test_output_order(self, wazuh_5710_result):
@@ -164,7 +164,7 @@ class TestEndToEndResolve:
         expected_markers = [
             "knowledge/signatures/wazuh-rule-5710/context.md",
             "knowledge/signatures/wazuh-rule-5710/playbook.md",
-            "knowledge/common/checklist.md",
+            "knowledge/common-investigation/checklist.md",
         ]
         for marker in expected_markers:
             assert f"<!-- source: {marker} -->" in out, f"Missing source marker: {marker}"

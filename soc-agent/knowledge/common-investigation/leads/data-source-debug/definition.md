@@ -15,10 +15,10 @@ is data availability, field naming, query construction, or source health.
 - Is the data source alive? Are there recent events?
 - Expected: non-zero event count, latest event within expected freshness
 
-### Step 2: Entity presence
-- Free-text search for the entity identifier (IP, user, hostname)
+### Step 2: Target presence
+- Free-text search for the target identifier (IP, user, hostname, process name)
   across all fields in the relevant index
-- Is the entity visible at all in this data source?
+- Is the target visible at all in this data source?
 - If yes: which fields contain the entity? (may differ from expected)
 
 ### Step 3: Field discovery

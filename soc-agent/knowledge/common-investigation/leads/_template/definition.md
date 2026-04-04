@@ -9,8 +9,10 @@ data_tags: [tag1, tag2]
 
 ## What to Characterize
 
-<!-- Specific observables to record. Each bullet should be something the
-     subagent can quantify or classify from tool output. -->
+<!-- Required output schema. Each bullet MUST be reported on, even if the
+     answer is "not available in this data source" or "not observed."
+     Omission is an error — the main agent cannot distinguish between
+     "observed and not noted" and "not observed." -->
 
 - **Observable 1**: Description of what to measure and how to classify it.
 - **Observable 2**: Description.

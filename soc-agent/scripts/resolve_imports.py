@@ -4,13 +4,13 @@
 Usage: python3 scripts/resolve_imports.py <signature_id>
 
 Scans the signature's playbook.md for inline @import:name references,
-resolves each to a file in knowledge/common/, and outputs all knowledge
+resolves each to a file in knowledge/common-investigation/, and outputs all knowledge
 to stdout for !`command` substitution in SKILL.md.
 
 Output order:
 1. knowledge/signatures/{sig_id}/context.md (always)
 2. knowledge/signatures/{sig_id}/playbook.md (always)
-3. knowledge/common/checklist.md (always — safety artifact)
+3. knowledge/common-investigation/checklist.md (always — safety artifact)
 4. Each unique @import:name found in playbook body
 
 Resolution: @import:name looks in lessons/{name}.md.
@@ -26,7 +26,7 @@ from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 KNOWLEDGE_DIR = SOC_AGENT_ROOT / "knowledge"
-COMMON_DIR = KNOWLEDGE_DIR / "common"
+COMMON_DIR = KNOWLEDGE_DIR / "common-investigation"
 SIGNATURES_DIR = KNOWLEDGE_DIR / "signatures"
 
 IMPORT_PATTERN = re.compile(r"@import:([a-zA-Z0-9_-]+)")

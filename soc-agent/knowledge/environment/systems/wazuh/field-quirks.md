@@ -4,8 +4,9 @@ tags: [wazuh, fields, gotchas]
 
 # Wazuh: Field Quirks
 
-Non-obvious field semantics that cause wrong queries. If a veteran analyst
-would waste 10 minutes before realizing the issue, it belongs here.
+Non-obvious field semantics that cause wrong queries. Even a familiar analyst
+may not recall these after time away. This section closes the gap — it
+provides the "what" so you don't have to rediscover it each time.
 
 ## Authentication Events — Gotchas
 
@@ -35,6 +36,6 @@ would waste 10 minutes before realizing the issue, it belongs here.
   pipeline delay. Use `timestamp` for investigative time comparisons.
 
 - **rule.id is a string:** Even though rule IDs look numeric, they're
-  stored as strings in the index. Query `rule.id:5710`, not `rule.id:5710`
+  stored as strings in the index. Query `rule.id:"5710"`, not `rule.id:5710`
   as integer — most query interfaces handle this, but programmatic
   access may need explicit string comparison.
