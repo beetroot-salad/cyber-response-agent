@@ -78,13 +78,17 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 │   │   ├── common-investigation/  # Portable investigation methodology
 │   │   │   ├── SKILL.md           # Common investigation knowledge
 │   │   │   ├── checklist.md       # Investigation self-check guide
-│   │   │   ├── leads/             # Reusable lead definitions (methodology + query templates)
+│   │   │   ├── leads/             # Reusable lead definitions + per-vendor query templates
+│   │   │   │   ├── {lead}/definition.md      # Methodology: what to characterize, pitfalls
+│   │   │   │   └── {lead}/templates/{vendor}.md  # Query template: field mapping + base query
 │   │   │   └── lessons/           # Cross-cutting investigation lessons
-│   │   ├── environment/           # Org-specific deployment knowledge
+│   │   ├── environment/           # Org-specific deployment knowledge (4-layer model, see design-v3-tool-execution.md §10)
 │   │   │   ├── context/           # Classification heuristics (IP ranges, identity patterns, etc.)
-│   │   │   ├── data-sources/      # Data mapping: what data exists where (state + events)
-│   │   │   └── systems/           # System-specific implementation knowledge (queries, quirks)
-│   │   │       └── wazuh/         # Wazuh SIEM query patterns and field mappings
+│   │   │   ├── operations/        # Layer 1→2: abstract operations → concrete operations + coverage gaps
+│   │   │   ├── sources/           # Layer 3: data sources — what they cover, access method, retention
+│   │   │   ├── access/            # Layer 4: tool constraints (CLI usage, Ansible rules, rate limits)
+│   │   │   └── systems/           # Vendor-specific field knowledge (quirks, query patterns, config)
+│   │   │       └── wazuh/         # Wazuh field quirks, query patterns, config.env
 │   │   └── signatures/
 │   │       ├── _template/         # Skeleton + onboarding guide for new signatures
 │   │       └── wazuh-rule-5710/   # SSH Invalid User (example signature)
@@ -230,5 +234,6 @@ docker logs falco --follow
 Detailed documentation in `docs/`:
 - `playground-setup.md` — Complete environment setup guide
 - `design-v2.md` — System architecture and design decisions
+- `design-v3-tool-execution.md` — Tool execution architecture: lead model, SIEM CLI, query templates, composite dispatch
 - `agent-execution-architecture.md` — Agent lifecycle details
 - `reproduction-agent-design.md` — Reproduction sandbox design
