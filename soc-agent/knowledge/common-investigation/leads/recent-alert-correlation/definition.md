@@ -23,6 +23,23 @@ is part of a larger pattern or an isolated event.
 - **Cross-signature patterns**: Alerts from different rule types that
   together suggest a kill chain (recon → exploit → lateral movement).
 
+## Usage by ticket-context subagent
+
+When this lead is executed by the ticket-context subagent (during
+CONTEXTUALIZE), the scope is broader than standalone lead execution:
+
+- **All signatures** are queried, not just the current one — the goal
+  is situational awareness and cross-signature correlation
+- **Longer time window** (4h vs the typical 1-2h) for the "maybe" tier
+- Output feeds into **two-tier classification** (definite/maybe) with
+  agent reasoning about entity centrality and causal plausibility
+- The subagent may also check `audit.jsonl` for prior investigations
+  of the same pattern to support fast-resolve recommendations
+
+When executed as a standalone lead during the investigation loop,
+the original scope applies (focused on the current signature's
+escalation signals within the playbook-defined time window).
+
 ## Common Pitfalls
 
 - High-volume rules generate correlation noise. Focus on rules that
