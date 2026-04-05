@@ -3,7 +3,7 @@
 
 services:
   wazuh.manager:
-    image: wazuh/wazuh-manager:4.9.2
+    image: wazuh/wazuh-manager:4.7.5
     container_name: wazuh-manager
     networks:
       - response-network
@@ -21,29 +21,23 @@ services:
       - ../playground/config/wazuh_cluster/rules:/var/ossec/etc/rules
 
   wazuh.indexer:
-    image: wazuh/wazuh-indexer:4.9.2
+    image: wazuh/wazuh-indexer:4.7.5
     container_name: wazuh-indexer
     networks:
       - response-network
     volumes:
-      # Override relative paths with absolute paths
-      # Mount to both expected locations
-      - ../playground/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-indexer/config/certs/root-ca.pem
-      - ../playground/config/wazuh_indexer_ssl_certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.key
-      - ../playground/config/wazuh_indexer_ssl_certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.pem
-      - ../playground/config/wazuh_indexer_ssl_certs/admin.pem:/usr/share/wazuh-indexer/config/certs/admin.pem
-      - ../playground/config/wazuh_indexer_ssl_certs/admin-key.pem:/usr/share/wazuh-indexer/config/certs/admin-key.pem
-      # Mount certificates to /etc location where the default config expects them
-      - ../playground/config/wazuh_indexer_ssl_certs/wazuh.indexer.pem:/etc/wazuh-indexer/certs/indexer.pem:ro
-      - ../playground/config/wazuh_indexer_ssl_certs/wazuh.indexer-key.pem:/etc/wazuh-indexer/certs/indexer-key.pem:ro
-      - ../playground/config/wazuh_indexer_ssl_certs/admin.pem:/etc/wazuh-indexer/certs/admin.pem:ro
-      - ../playground/config/wazuh_indexer_ssl_certs/admin-key.pem:/etc/wazuh-indexer/certs/admin-key.pem:ro
-      - ../playground/config/wazuh_indexer_ssl_certs/root-ca.pem:/etc/wazuh-indexer/certs/root-ca.pem:ro
+      # SSL certificates (4.7.5 layout: /usr/share/wazuh-indexer/certs/)
+      - ../playground/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-indexer/certs/root-ca.pem
+      - ../playground/config/wazuh_indexer_ssl_certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/certs/wazuh.indexer.key
+      - ../playground/config/wazuh_indexer_ssl_certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/certs/wazuh.indexer.pem
+      - ../playground/config/wazuh_indexer_ssl_certs/admin.pem:/usr/share/wazuh-indexer/certs/admin.pem
+      - ../playground/config/wazuh_indexer_ssl_certs/admin-key.pem:/usr/share/wazuh-indexer/certs/admin-key.pem
+      # Config and security
       - ../playground/config/wazuh_indexer/wazuh.indexer.yml:/usr/share/wazuh-indexer/opensearch.yml
       - ../playground/config/wazuh_indexer/internal_users.yml:/usr/share/wazuh-indexer/opensearch-security/internal_users.yml
 
   wazuh.dashboard:
-    image: wazuh/wazuh-dashboard:4.9.2
+    image: wazuh/wazuh-dashboard:4.7.5
     container_name: wazuh-dashboard
     networks:
       - response-network

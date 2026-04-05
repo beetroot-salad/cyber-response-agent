@@ -31,7 +31,8 @@ RUN pip install --no-cache-dir \
     debugpy \
     pytest \
     pytest-asyncio \
-    httpx
+    httpx \
+    uv
 
 # Development command - start shell by default (uvicorn can be run manually)
 CMD ["bash"]

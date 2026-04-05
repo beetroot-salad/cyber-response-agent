@@ -218,10 +218,7 @@ docker logs falco --follow
 
 ## Credentials (Development Only)
 
-| Service | Username | Password |
-|---------|----------|----------|
-| Wazuh Dashboard | admin | SecretPassword |
-| Wazuh API | wazuh-wui | MyS3cr37P450r.*- |
+Credentials are stored in `.env` (git-ignored). See `.env` for Wazuh API, indexer, and dashboard passwords. The `.env` file is loaded by docker-compose services and should be sourced or exported for CLI usage.
 
 ## Known Issues
 

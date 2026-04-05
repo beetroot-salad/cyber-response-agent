@@ -33,7 +33,7 @@
 - [x] Precedent schema: added `alert_data` field (raw alert for judge comparison + future post-mortem seeding)
 - [x] CONTEXTUALIZE: Explore subagent for recent alerts — situational awareness, alert correlation (added to SKILL.md)
 - [x] Playbook-driven vs investigation-loop separation — implemented as SCREEN phase: playbooks define fast-path patterns checked by a cheap subagent (Sonnet/Haiku) before the full investigation loop. Falls through to full loop on no match.
-- [ ] Ticket-context skill/subagent — extract CONTEXTUALIZE alert context (recent + related alert scanning) into a dedicated skill with pre-made queries. Reusable across signatures and invocable independently
+- [x] Ticket-context skill/subagent — extract CONTEXTUALIZE alert context (recent + related alert scanning) into a dedicated skill with pre-made queries. Reusable across signatures and invocable independently
 - [ ] Budget enforcement hook — cap token/cost spend per investigation
 - [ ] Input sanitization hooks — validate alert_json before investigation starts
 
@@ -46,10 +46,19 @@
 - [ ] Populate lead definitions in `common/leads/` (authentication-history, source-reputation, etc.)
 - [ ] Populate environment files with real org data (currently example/template content)
 
+### SIEM CLI
+- [ ] Configurable host/port (not just env vars — support CLI flags, config file, or env)
+- [ ] Multiple authentication options (API key, token file, username/password, etc.)
+- [ ] Vendor abstraction — CLI should work across SIEM backends, not just Wazuh
+
 ### Operations
 - [ ] `act` mode — auto-close for mature signatures with high-confidence precedent matches
 - [ ] Retention policy for run data (configurable cleanup)
 - [ ] Audit dashboard / analytics on investigation outcomes
+
+### Package Management
+- [ ] Finalize packaging strategy — using `uv` + `pyproject.toml` in `soc-agent/` for now. Decide on venv integration, Dockerfile install step, and dev vs prod deps
+- Current external deps: `opensearch-py` (used by wazuh_cli.py)
 
 ## Backlog Ideas
 
