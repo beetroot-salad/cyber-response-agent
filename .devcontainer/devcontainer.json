@@ -60,7 +60,7 @@
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
   ],
 
-  "postCreateCommand": "echo 'Development environment created!'",
+  "postCreateCommand": "cd /workspace/soc-agent && uv pip install --system -r pyproject.toml",
   "postStartCommand": "echo 'Development environment ready!'",
 
   "remoteUser": "root",
