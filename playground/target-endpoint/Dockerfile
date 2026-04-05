@@ -30,14 +30,15 @@ RUN mkdir -p /run/sshd && \
     sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
-# Install Wazuh agent (4.9.x to match manager)
+# Install Wazuh agent (must match manager version)
 RUN curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import && \
     chmod 644 /usr/share/keyrings/wazuh.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" > /etc/apt/sources.list.d/wazuh.list && \
     apt-get update && \
-    WAZUH_MANAGER="wazuh.manager" apt-get install -y wazuh-agent=4.9.2-1 && \
+    WAZUH_MANAGER="wazuh.manager" apt-get install -y wazuh-agent=4.7.5-1 && \
     rm -rf /var/lib/apt/lists/* && \
-    update-rc.d wazuh-agent defaults 95 10
+    update-rc.d wazuh-agent defaults 95 10 && \
+    sed -i '/<\/ossec_config>/i \  <localfile>\n    <log_format>syslog</log_format>\n    <location>/var/log/auth.log</location>\n  </localfile>' /var/ossec/etc/ossec.conf
 
 # Create a non-root user for simulating user activity
 RUN useradd -m -s /bin/bash testuser && \
