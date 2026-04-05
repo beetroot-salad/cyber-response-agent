@@ -75,6 +75,7 @@ This means:
 Phases: CONTEXTUALIZE → [SCREEN] → HYPOTHESIZE → GATHER → ANALYZE → CONCLUDE
 
 Transitions:
+- CONTEXTUALIZE → CONCLUDE (ticket-context fast-resolve for repeat alerts with prior investigation)
 - CONTEXTUALIZE → SCREEN (when playbook has a ## Screen section)
 - CONTEXTUALIZE → HYPOTHESIZE (when playbook has no ## Screen section)
 - SCREEN → CONCLUDE (screen matched a known pattern — after validation)
@@ -107,10 +108,12 @@ This enforces legal transitions. If you get an error, you attempted an illegal t
 3. Spawn an **Explore subagent** to scan precedents:
    - Prompt: "Read all JSON files in `knowledge/signatures/{signature_id}/precedents/`. For each, summarize: ticket_id, disposition, confirmed hypothesis, key_indicators, and trace. Then compare against this alert profile: {key observables from alert}. Return a ranked list of which precedents are most similar and why."
    - Precedents represent past outcomes for similar alerts. They suggest likely explanations but don't tell the full story — this alert may have a novel cause. Use them as starting hypotheses, not conclusions.
-4. Spawn an **Explore subagent** for alert context — search for:
-   - **Recent alerts** (broad): all alerts in the ~2 hours before this alert, regardless of signature or status. Goal: understand what activity is happening right now. This provides situational awareness — the alert may be part of a larger pattern.
-   - **Related alerts** (focused): alerts matching key entities from this alert — same source IP, target host, username. Goal: find duplicates, correlated activity, or alerts stemming from the same cause. **Pitfall:** central entities (e.g., a jump host, a CI runner) appear in many alerts — a match on a high-centrality entity is less meaningful than a match on a rare entity.
-   - Return: structured summary of recent activity, related alerts with shared entities noted, and any temporal clustering
+4. Spawn a **ticket-context subagent** (Sonnet) with the prompt from `skills/investigate/ticket-context.md`. Pass it:
+   - The `{run_dir}` path — the subagent reads alert.json and investigation.md from the run directory
+   - Access to the same SIEM tools for running queries (MCP or CLI — whatever is available)
+   - The subagent queries the SIEM directly for recent and related alerts, clusters them, reasons about match quality, and checks for prior investigations of the same pattern
+   - **If `fast_resolve.recommended: true`**: validate the recommendation — check that the prior investigation exists, the precedent file exists, and the pattern genuinely matches. If valid, proceed directly to CONCLUDE using the prior precedent. If not, continue to HYPOTHESIZE with the context provided.
+   - **Otherwise**: use the `situation` summary for awareness, `definite` matches to inform hypothesis ranking (repeats suggest the same mechanism), and `maybe` matches as leads to consider if the investigation stalls
 5. **Build resolution map** — resolve the data environment for this investigation (see `docs/design-v3-tool-execution.md §10`):
    - Identify which abstract operations the playbook's leads need (from lead `data_tags`)
    - Read `knowledge/environment/operations/` files → enumerate concrete operations + sources

@@ -44,6 +44,7 @@ class TestValidateTransition:
         legal = [
             ("CONTEXTUALIZE", "SCREEN"),      # screen if playbook has it
             ("CONTEXTUALIZE", "HYPOTHESIZE"),  # skip screen
+            ("CONTEXTUALIZE", "CONCLUDE"),     # ticket-context fast-resolve
             ("SCREEN", "HYPOTHESIZE"),         # screen fall-through
             ("SCREEN", "CONCLUDE"),            # screen resolved
             ("HYPOTHESIZE", "GATHER"),
@@ -59,7 +60,6 @@ class TestValidateTransition:
         illegal = [
             ("CONTEXTUALIZE", "GATHER"),
             ("CONTEXTUALIZE", "ANALYZE"),
-            ("CONTEXTUALIZE", "CONCLUDE"),
             ("SCREEN", "CONTEXTUALIZE"),
             ("SCREEN", "GATHER"),
             ("SCREEN", "ANALYZE"),
@@ -192,6 +192,15 @@ class TestTransitionSequence:
             assert valid, f"Failed at {current} -> {phase}: {error}"
             current = phase
 
+    def test_ticket_context_fast_resolve_sequence(self):
+        """C -> CONCLUDE is valid (ticket-context fast-resolve for repeat alerts)."""
+        phases = ["CONTEXTUALIZE", "CONCLUDE"]
+        current = None
+        for phase in phases:
+            valid, error = validate_transition(current, phase)
+            assert valid, f"Failed at {current} -> {phase}: {error}"
+            current = phase
+
     def test_skip_screen_sequence(self):
         """C -> H -> G -> A -> CONCLUDE (no screen section in playbook)."""
         phases = ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
@@ -247,9 +256,9 @@ class TestWriteStateScript:
             capture_output=True,
         )
 
-        # Try illegal transition
+        # Try illegal transition (CONTEXTUALIZE -> GATHER is not allowed)
         result = subprocess.run(
-            [sys.executable, str(script), str(run_dir), "CONCLUDE"],
+            [sys.executable, str(script), str(run_dir), "GATHER"],
             capture_output=True,
             text=True,
         )
@@ -305,6 +314,26 @@ class TestWriteStateScript:
                 text=True,
             )
             assert result.returncode == 0, f"Failed at {phase}: {result.stderr}"
+
+        state = json.loads((run_dir / "state.json").read_text())
+        assert state["phase"] == "CONCLUDE"
+        assert state["history"] == phases
+
+    def test_write_state_ticket_context_fast_resolve(self, tmp_path):
+        """Test C -> CONCLUDE via the script (ticket-context fast-resolve)."""
+        import subprocess
+
+        script = SOC_AGENT_ROOT / "hooks" / "scripts" / "write_state.py"
+        run_dir = tmp_path / "run-test"
+        run_dir.mkdir()
+
+        phases = ["CONTEXTUALIZE", "CONCLUDE"]
+        for phase in phases:
+            args = [sys.executable, str(script), str(run_dir), phase]
+            if phase == "CONTEXTUALIZE":
+                args.extend(["SEC-001", "wazuh-rule-5710"])
+            result = subprocess.run(args, capture_output=True, text=True)
+            assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
 
         state = json.loads((run_dir / "state.json").read_text())
         assert state["phase"] == "CONCLUDE"
