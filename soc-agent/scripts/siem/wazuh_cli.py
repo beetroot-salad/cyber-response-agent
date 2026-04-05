@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Wazuh SIEM CLI — thin wrapper for query execution.
 
-Handles authentication, HTTP, pagination, and output formatting.
-The agent constructs queries in native Wazuh API syntax and passes
-them here. This script never interprets query semantics.
+Alert queries go to the Wazuh Indexer (OpenSearch) via opensearch-py.
+Health checks use both the indexer and the Wazuh Manager API.
 
 Usage:
-    python3 wazuh_cli.py --query 'rule.groups:sshd AND data.srcip:10.0.0.5' \
+    python3 wazuh_cli.py --query 'rule.id:5710 AND data.srcip:10.0.0.5' \
         --start 2026-04-04T10:00:00Z --window 1h
 
     python3 wazuh_cli.py --query 'rule.groups:sshd' \
@@ -21,15 +20,18 @@ Exit codes:
 """
 
 import argparse
+import base64
 import json
 import os
 import sys
-import urllib.request
-import urllib.error
 import ssl
+import urllib.error
+import urllib.request
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from opensearchpy import OpenSearch
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SOC_AGENT_DIR = Path(os.environ.get(
@@ -43,6 +45,7 @@ def load_config():
     config = {
         "WAZUH_INDEX": "wazuh-alerts-*",
         "WAZUH_API_ENDPOINT": "https://wazuh-manager:55000",
+        "WAZUH_INDEXER_ENDPOINT": "https://wazuh-indexer:9200",
         "WAZUH_RETENTION_DAYS": "90",
     }
     if CONFIG_PATH.exists():
@@ -54,6 +57,22 @@ def load_config():
                 key, _, val = line.partition("=")
                 config[key.strip()] = val.strip().strip('"')
     return config
+
+
+def get_indexer_client(config):
+    """Create an OpenSearch client for the Wazuh Indexer."""
+    user = os.environ.get("WAZUH_INDEXER_USER", "admin")
+    password = os.environ.get("WAZUH_INDEXER_PASSWORD", "")
+    if not password:
+        print("error: WAZUH_INDEXER_PASSWORD environment variable must be set", file=sys.stderr)
+        sys.exit(2)
+
+    return OpenSearch(
+        hosts=[config["WAZUH_INDEXER_ENDPOINT"]],
+        http_auth=(user, password),
+        verify_certs=False,
+        ssl_show_warn=False,
+    )
 
 
 def parse_duration(s):
@@ -80,31 +99,51 @@ def compute_time_range(args):
     )
 
 
+# ---------------------------------------------------------------------------
+# Indexer (OpenSearch) — alert queries
+# ---------------------------------------------------------------------------
+
+def query_alerts(client, config, query_string, time_start, time_end, limit=500):
+    """Query Wazuh alerts via the indexer. Returns (hits_list, total_count)."""
+    body = {
+        "size": limit,
+        "sort": [{"timestamp": {"order": "desc"}}],
+        "query": {
+            "bool": {
+                "must": [
+                    {"query_string": {"query": query_string}} if query_string else {"match_all": {}},
+                ],
+                "filter": [
+                    {"range": {"timestamp": {"gte": time_start, "lte": time_end}}},
+                ],
+            }
+        },
+    }
+    try:
+        resp = client.search(index=config["WAZUH_INDEX"], body=body)
+    except Exception as e:
+        print(f"error: Indexer query failed: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    hits = resp.get("hits", {})
+    total = hits.get("total", {}).get("value", 0)
+    items = [h["_source"] for h in hits.get("hits", [])]
+    return items, total
+
+
+# ---------------------------------------------------------------------------
+# Manager API — health check only
+# ---------------------------------------------------------------------------
+
 def get_ssl_context():
-    """SSL context — skip verification only for dev self-signed certs."""
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
 
-def api_request(endpoint, config, token=None, method="GET", timeout=30):
-    """Make a Wazuh API request. Returns parsed JSON."""
-    url = config["WAZUH_API_ENDPOINT"].rstrip("/") + endpoint
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, context=get_ssl_context(), timeout=timeout) as resp:
-            return json.loads(resp.read())
-    except urllib.error.URLError as e:
-        print(f"error: API request failed: {e}", file=sys.stderr)
-        sys.exit(2)
-
-
-def authenticate(config):
-    """Authenticate and return JWT token."""
+def authenticate_manager(config):
+    """Authenticate against the Wazuh Manager API and return JWT token."""
     user = os.environ.get("WAZUH_API_USER", "wazuh-wui")
     password = os.environ.get("WAZUH_API_PASSWORD")
     if not password:
@@ -112,8 +151,6 @@ def authenticate(config):
         sys.exit(2)
 
     url = config["WAZUH_API_ENDPOINT"].rstrip("/") + "/security/user/authenticate"
-    # Basic auth header
-    import base64
     credentials = base64.b64encode(f"{user}:{password}".encode()).decode()
     headers = {
         "Content-Type": "application/json",
@@ -123,37 +160,31 @@ def authenticate(config):
     try:
         with urllib.request.urlopen(req, context=get_ssl_context(), timeout=10) as resp:
             data = json.loads(resp.read())
-            token = data.get("data", {}).get("token", "")
-            if not token:
-                print("error: Authentication succeeded but no token returned", file=sys.stderr)
-                sys.exit(2)
-            return token
+            return data.get("data", {}).get("token", "")
     except urllib.error.URLError as e:
-        print(f"error: Authentication failed: {e}", file=sys.stderr)
+        print(f"error: Manager auth failed: {e}", file=sys.stderr)
         sys.exit(2)
 
 
-def query_alerts(config, token, query_string, time_start, time_end, limit=500):
-    """Query Wazuh alerts API. Returns the full response dict."""
-    time_filter = f"timestamp:[{time_start} TO {time_end}]"
-    full_query = f"{query_string} AND {time_filter}" if query_string else time_filter
-    endpoint = f"/alerts?q={full_query}&limit={limit}&sort=-timestamp"
-    return api_request(endpoint, config, token=token)
+def manager_api_request(endpoint, config, token, timeout=30):
+    url = config["WAZUH_API_ENDPOINT"].rstrip("/") + endpoint
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, context=get_ssl_context(), timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except urllib.error.URLError as e:
+        print(f"error: Manager API request failed: {e}", file=sys.stderr)
+        sys.exit(2)
 
 
-def format_output(query_string, time_start, time_end, config, filtered_resp, unfiltered_resp):
-    """Format structured output from query results."""
-    filtered_data = filtered_resp.get("data", {})
-    unfiltered_data = unfiltered_resp.get("data", {})
+# ---------------------------------------------------------------------------
+# Output formatting
+# ---------------------------------------------------------------------------
 
-    match_count = filtered_data.get("total_affected_items", 0)
-    index_count = unfiltered_data.get("total_affected_items", 0)
-    items = filtered_data.get("affected_items", [])
-
-    # Latest event timestamp
+def format_output(query_string, time_start, time_end, config, items, match_count, index_count):
     latest_ts = items[0].get("timestamp", "none") if items else "no matching events"
 
-    # Sample events
     if not items:
         sample_text = "(no matching events)"
     else:
@@ -169,7 +200,6 @@ def format_output(query_string, time_start, time_end, config, filtered_resp, unf
             )
         sample_text = "\n".join(lines)
 
-    # Count breakdowns
     if not items:
         breakdown_text = "(no data)"
     else:
@@ -206,7 +236,7 @@ def format_output(query_string, time_start, time_end, config, filtered_resp, unf
 **Time range:** {time_start} to {time_end}
 
 ### Data Source Health
-- **Source:** Wazuh SIEM ({config['WAZUH_API_ENDPOINT']})
+- **Source:** Wazuh Indexer ({config['WAZUH_INDEXER_ENDPOINT']})
 - **Most recent matching event:** {latest_ts}
 - **Index event count (unfiltered, same window):** {index_count}
 
@@ -220,43 +250,53 @@ def format_output(query_string, time_start, time_end, config, filtered_resp, unf
 {breakdown_text}"""
 
 
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
 def health_check(config):
-    """Quick connectivity canary. Prints status and exits."""
+    """Check both manager API and indexer connectivity."""
+    # Manager API
     try:
-        token = authenticate(config)
+        token = authenticate_manager(config)
+        resp = manager_api_request("/agents?limit=1&sort=-lastKeepAlive", config, token)
+        data = resp.get("data", {})
+        total = data.get("total_affected_items", 0)
+        items = data.get("affected_items", [])
+        last_ka = items[0].get("lastKeepAlive", "unknown") if items else "unknown"
+        print("manager: healthy")
+        print(f"agents: {total}")
+        print(f"last_keepalive: {last_ka}")
     except SystemExit:
-        print("status: unreachable")
-        sys.exit(2)
+        print("manager: unreachable")
 
-    resp = api_request("/agents?limit=1&sort=-lastKeepAlive", config, token=token)
-    data = resp.get("data", {})
-    total = data.get("total_affected_items", 0)
-    items = data.get("affected_items", [])
-    last_ka = items[0].get("lastKeepAlive", "unknown") if items else "unknown"
-
-    if total == 0:
-        print("status: degraded")
-        print("agents: 0")
-        print("error: No agents reporting to Wazuh manager")
+    # Indexer
+    try:
+        client = get_indexer_client(config)
+        resp = client.search(index=config["WAZUH_INDEX"], body={"size": 0, "query": {"match_all": {}}})
+        total_docs = resp.get("hits", {}).get("total", {}).get("value", 0)
+        print("indexer: healthy")
+        print(f"indexed_alerts: {total_docs}")
+    except Exception as e:
+        print(f"indexer: unreachable ({e})")
         sys.exit(1)
 
-    print("status: healthy")
-    print(f"agents: {total}")
-    print(f"last_keepalive: {last_ka}")
-    sys.exit(0)
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 def build_parser():
     p = argparse.ArgumentParser(
         description="Wazuh SIEM CLI — execute queries with structured output",
     )
-    p.add_argument("--query", "-q", help="Wazuh API query string (native syntax)")
+    p.add_argument("--query", "-q", help="Lucene query string (OpenSearch syntax)")
     p.add_argument("--start", help="Start time (ISO 8601 UTC)")
     p.add_argument("--end", help="End time (ISO 8601 UTC, defaults to now)")
     p.add_argument("--window", default="1h", help="Time window duration (e.g. 1h, 30m, 7d). Used when --end is omitted.")
     p.add_argument("--limit", type=int, default=500, help="Max events to return (default: 500)")
     p.add_argument("--raw", action="store_true", help="Output raw JSON instead of formatted text")
-    p.add_argument("--health-check", action="store_true", help="Check API connectivity and exit")
+    p.add_argument("--health-check", action="store_true", help="Check connectivity and exit")
     return p
 
 
@@ -272,33 +312,21 @@ def main():
     if not args.query:
         parser.error("--query is required (unless using --health-check)")
 
-    if not args.start and not args.end:
-        # Default: window ending now
-        pass
-    elif args.start and args.end:
-        pass
-    elif args.start and not args.end:
-        pass
-    else:
+    if args.end and not args.start:
         parser.error("--end without --start is not supported. Use --start/--end or --start/--window.")
 
     time_start, time_end = compute_time_range(args)
+    client = get_indexer_client(config)
 
-    token = authenticate(config)
-
-    # Filtered query
-    filtered_resp = query_alerts(config, token, args.query, time_start, time_end, limit=args.limit)
+    items, match_count = query_alerts(client, config, args.query, time_start, time_end, limit=args.limit)
 
     if args.raw:
-        print(json.dumps(filtered_resp, indent=2))
+        print(json.dumps(items, indent=2))
         return
 
-    # Unfiltered query (same time window, no entity filter) for scale reference
-    # Strip entity-specific filters by querying just the broadest group filter
-    # The agent can also pass --query with just the group filter for unfiltered
-    unfiltered_resp = query_alerts(config, token, "", time_start, time_end, limit=1)
+    _, index_count = query_alerts(client, config, "", time_start, time_end, limit=0)
 
-    output = format_output(args.query, time_start, time_end, config, filtered_resp, unfiltered_resp)
+    output = format_output(args.query, time_start, time_end, config, items, match_count, index_count)
     print(output)
 
 

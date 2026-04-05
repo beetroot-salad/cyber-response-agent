@@ -5,6 +5,8 @@ services:
       context: ../
       dockerfile: .devcontainer/Dockerfile.dev
     container_name: response-devcontainer
+    env_file:
+      - ../.env
     environment:
       - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
@@ -94,8 +96,8 @@ services:
     environment:
       # Wazuh Manager connection
       - WAZUH_PROD_URL=https://wazuh-manager:55000
-      - WAZUH_PROD_USERNAME=wazuh-wui
-      - WAZUH_PROD_PASSWORD=MyS3cr37P450r.*-
+      - WAZUH_PROD_USERNAME=${WAZUH_API_USER:-wazuh-wui}
+      - WAZUH_PROD_PASSWORD=${WAZUH_API_PASSWORD}
       - WAZUH_PROD_SSL_VERIFY=false
       - WAZUH_PROD_TIMEOUT=30
       # MCP Server configuration
