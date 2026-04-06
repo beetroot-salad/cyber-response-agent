@@ -291,6 +291,25 @@ def manager_api_request(endpoint, config, token, timeout=30):
 # Output formatting
 # ---------------------------------------------------------------------------
 
+def load_run_salt(run_dir: str | None) -> str | None:
+    """Read per-run salt from meta.json. Returns None if unavailable."""
+    if not run_dir:
+        return None
+    meta_path = Path(run_dir) / "meta.json"
+    if not meta_path.exists():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text())
+        return meta.get("salt") or None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def wrap_with_salt(content: str, salt: str) -> str:
+    """Wrap output in salted untrusted-data delimiters."""
+    return f"<run-{salt}-siem-data>\n{content}\n</run-{salt}-siem-data>"
+
+
 def format_output(query_string, time_start, time_end, config, items, match_count, index_count):
     latest_ts = items[0].get("timestamp", "none") if items else "no matching events"
 
@@ -405,6 +424,7 @@ def build_parser():
     p.add_argument("--window", default="1h", help="Time window duration (e.g. 1h, 30m, 7d). Used when --end is omitted.")
     p.add_argument("--limit", type=int, default=500, help="Max events to return (default: 500, max: 10000)")
     p.add_argument("--raw", action="store_true", help="Output raw JSON instead of formatted text")
+    p.add_argument("--run-dir", help="Investigation run directory (reads salt from meta.json to wrap output in untrusted-data delimiters)")
     p.add_argument("--health-check", action="store_true", help="Check connectivity and exit")
     return p
 
@@ -431,14 +451,17 @@ def main():
 
     items, match_count = query_alerts(client, config, args.query, time_start, time_end, limit=args.limit)
 
+    salt = load_run_salt(args.run_dir)
+
     if args.raw:
-        print(json.dumps(items, indent=2))
+        raw_output = json.dumps(items, indent=2)
+        print(wrap_with_salt(raw_output, salt) if salt else raw_output)
         return
 
     _, index_count = query_alerts(client, config, "", time_start, time_end, limit=0)
 
     output = format_output(args.query, time_start, time_end, config, items, match_count, index_count)
-    print(output)
+    print(wrap_with_salt(output, salt) if salt else output)
 
 
 if __name__ == "__main__":

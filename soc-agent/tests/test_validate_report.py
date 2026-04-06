@@ -24,9 +24,11 @@ from hooks.scripts.validate_report import (
     get_run_salt,
     is_screen_resolved,
     playbook_has_screen_section,
+    validate_precedent_content,
     validate_tier1,
     wrap_untrusted,
 )
+from schemas.precedent import check_recency, parse_validated_at
 
 FIXTURES = SOC_AGENT_ROOT / "tests" / "fixtures" / "reports"
 
@@ -248,6 +250,117 @@ Screen-resolved monitoring probe.
 
     def test_playbook_has_screen_section_nonexistent(self):
         assert playbook_has_screen_section("nonexistent-sig") is False
+
+
+# --- Precedent existence check ---
+
+
+# --- Precedent content validation ---
+
+
+class TestValidatePrecedentContent:
+    def test_matching_signature_and_recent(self):
+        """Valid precedent with matching signature_id and recent validated_at."""
+        errors = validate_precedent_content(
+            "monitoring-probe-001.json", "wazuh-rule-5710"
+        )
+        assert errors == []
+
+    def test_signature_id_mismatch(self, tmp_path):
+        """Precedent with wrong signature_id is rejected."""
+        prec_dir = tmp_path / "knowledge" / "signatures" / "test-sig" / "precedents"
+        prec_dir.mkdir(parents=True)
+        prec = {
+            "signature_id": "WRONG-SIG",
+            "validated_at": "2026-04-01",
+        }
+        (prec_dir / "test.json").write_text(json.dumps(prec))
+        # Monkeypatch SOC_AGENT_ROOT
+        import hooks.scripts.validate_report as vr
+        orig = vr.SOC_AGENT_ROOT
+        vr.SOC_AGENT_ROOT = tmp_path
+        try:
+            errors = validate_precedent_content("test.json", "test-sig")
+            assert any("does not match" in e for e in errors)
+        finally:
+            vr.SOC_AGENT_ROOT = orig
+
+    def test_missing_validated_at(self, tmp_path):
+        """Precedent without validated_at is flagged."""
+        prec_dir = tmp_path / "knowledge" / "signatures" / "test-sig" / "precedents"
+        prec_dir.mkdir(parents=True)
+        prec = {"signature_id": "test-sig"}
+        (prec_dir / "test.json").write_text(json.dumps(prec))
+        import hooks.scripts.validate_report as vr
+        orig = vr.SOC_AGENT_ROOT
+        vr.SOC_AGENT_ROOT = tmp_path
+        try:
+            errors = validate_precedent_content("test.json", "test-sig")
+            assert any("validated_at" in e for e in errors)
+        finally:
+            vr.SOC_AGENT_ROOT = orig
+
+    def test_stale_precedent(self, tmp_path):
+        """Precedent older than max_age is rejected."""
+        prec_dir = tmp_path / "knowledge" / "signatures" / "test-sig" / "precedents"
+        prec_dir.mkdir(parents=True)
+        prec = {
+            "signature_id": "test-sig",
+            "validated_at": "2020-01-01",
+        }
+        (prec_dir / "test.json").write_text(json.dumps(prec))
+        import hooks.scripts.validate_report as vr
+        orig = vr.SOC_AGENT_ROOT
+        vr.SOC_AGENT_ROOT = tmp_path
+        try:
+            errors = validate_precedent_content("test.json", "test-sig")
+            assert any("days old" in e for e in errors)
+        finally:
+            vr.SOC_AGENT_ROOT = orig
+
+    def test_malformed_json(self, tmp_path):
+        """Malformed precedent JSON is caught."""
+        prec_dir = tmp_path / "knowledge" / "signatures" / "test-sig" / "precedents"
+        prec_dir.mkdir(parents=True)
+        (prec_dir / "test.json").write_text("not json {{{")
+        import hooks.scripts.validate_report as vr
+        orig = vr.SOC_AGENT_ROOT
+        vr.SOC_AGENT_ROOT = tmp_path
+        try:
+            errors = validate_precedent_content("test.json", "test-sig")
+            assert any("not valid JSON" in e for e in errors)
+        finally:
+            vr.SOC_AGENT_ROOT = orig
+
+
+class TestPrecedentRecency:
+    def test_fresh_precedent(self):
+        fresh, msg = check_recency("2026-04-01", max_age_days=90)
+        assert fresh
+        assert msg == ""
+
+    def test_stale_precedent(self):
+        fresh, msg = check_recency("2020-01-01", max_age_days=90)
+        assert not fresh
+        assert "days old" in msg
+
+    def test_iso_datetime_format(self):
+        fresh, _ = check_recency("2026-04-01T00:00:00Z", max_age_days=90)
+        assert fresh
+
+    def test_invalid_format(self):
+        fresh, msg = check_recency("not-a-date")
+        assert not fresh
+        assert "invalid date format" in msg
+
+    def test_parse_validated_at_date(self):
+        dt = parse_validated_at("2026-03-15")
+        assert dt.year == 2026
+        assert dt.month == 3
+
+    def test_parse_validated_at_datetime(self):
+        dt = parse_validated_at("2026-03-15T10:30:00Z")
+        assert dt.hour == 10
 
 
 # --- Precedent existence check ---

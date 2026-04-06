@@ -307,9 +307,10 @@ TAG_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "tag_tool_results.py"
 class TestTagToolResults:
     """Tests for tag_tool_results.py hook.
 
-    The script itself always prints the warning — Read-vs-non-alert filtering
-    is handled by the ``if`` field in plugin.json before the script is invoked.
-    These tests verify the script's own behavior (always warn, never block).
+    The script outputs structured JSON to stdout with hook-specific output.
+    For MCP tools: updatedMCPToolOutput with salted delimiters.
+    For Bash/Read: additionalContext with untrusted data annotation.
+    Read-vs-non-alert filtering is handled by ``if`` in plugin.json.
     """
 
     def _run_hook(self, stdin: str = "{}") -> subprocess.CompletedProcess:
@@ -319,16 +320,38 @@ class TestTagToolResults:
             capture_output=True, text=True,
         )
 
-    def test_always_prints_warning(self):
+    def test_always_outputs_annotation(self):
         result = self._run_hook()
         assert result.returncode == 0
-        assert "Untrusted" in result.stderr
+        assert "UNTRUSTED" in result.stdout or "untrusted" in result.stdout.lower()
 
     def test_never_blocks_on_invalid_input(self):
         result = self._run_hook(stdin="not valid json")
         assert result.returncode == 0
 
-    def test_output_is_terse(self):
-        result = self._run_hook()
-        assert "Untrusted external data" in result.stderr
-        assert len(result.stderr.strip()) < 40
+    def test_outputs_json_with_hook_specific_output(self):
+        hook_data = json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo hi"}})
+        result = self._run_hook(stdin=hook_data)
+        output = json.loads(result.stdout)
+        assert "hookSpecificOutput" in output
+        assert output["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+
+    def test_mcp_tool_uses_updated_mcp_output(self):
+        hook_data = json.dumps({
+            "tool_name": "mcp__wazuh__query",
+            "tool_input": {},
+            "tool_response": {"data": "siem results"},
+        })
+        result = self._run_hook(stdin=hook_data)
+        output = json.loads(result.stdout)
+        assert "updatedMCPToolOutput" in output["hookSpecificOutput"]
+        mcp_output = output["hookSpecificOutput"]["updatedMCPToolOutput"]
+        assert "siem-data>" in mcp_output
+        assert "siem results" in mcp_output
+
+    def test_bash_tool_uses_additional_context(self):
+        hook_data = json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo hi"}})
+        result = self._run_hook(stdin=hook_data)
+        output = json.loads(result.stdout)
+        assert "additionalContext" in output["hookSpecificOutput"]
+        assert "UNTRUSTED" in output["hookSpecificOutput"]["additionalContext"]

@@ -26,6 +26,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.frontmatter import parse_yaml_frontmatter
+from schemas.precedent import check_recency, DEFAULT_MAX_AGE_DAYS
 from schemas.report_frontmatter import (
     MIN_LEADS_BY_SEVERITY,
     parse_frontmatter,
@@ -72,6 +73,73 @@ def extract_run_dir(hook_data: dict) -> Path | None:
 # ---------------------------------------------------------------------------
 # Tier 1: Deterministic validation
 # ---------------------------------------------------------------------------
+
+def get_precedent_max_age(signature_id: str) -> int:
+    """Load precedent_max_age_days from permissions.yaml, or use default."""
+    perms_path = (
+        SOC_AGENT_ROOT / "config" / "signatures" / signature_id / "permissions.yaml"
+    )
+    if not perms_path.exists():
+        return DEFAULT_MAX_AGE_DAYS
+    try:
+        import yaml
+        data = yaml.safe_load(perms_path.read_text()) or {}
+    except Exception:
+        # yaml not available or parse error — use default
+        # Fall back to simple key scanning for stdlib-only envs
+        try:
+            for line in perms_path.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("precedent_max_age_days:"):
+                    return int(line.split(":", 1)[1].strip())
+        except (ValueError, IndexError):
+            pass
+        return DEFAULT_MAX_AGE_DAYS
+    return int(data.get("precedent_max_age_days", DEFAULT_MAX_AGE_DAYS))
+
+
+def validate_precedent_content(
+    matched_precedent: str, signature_id: str
+) -> list[str]:
+    """Load and validate precedent content: signature_id match + recency."""
+    errors = []
+    precedent_dir = (
+        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "precedents"
+    )
+    candidate = precedent_dir / matched_precedent
+    if not candidate.exists() and not matched_precedent.endswith(".json"):
+        candidate = precedent_dir / (matched_precedent + ".json")
+    if not candidate.exists():
+        return []  # file-existence is checked separately
+
+    try:
+        data = json.loads(candidate.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        errors.append(f"precedent '{matched_precedent}' is not valid JSON: {e}")
+        return errors
+
+    # Check signature_id matches
+    prec_sig = data.get("signature_id", "")
+    if prec_sig != signature_id:
+        errors.append(
+            f"precedent signature_id '{prec_sig}' does not match "
+            f"report signature_id '{signature_id}'"
+        )
+
+    # Check recency
+    validated_at = data.get("validated_at")
+    if not validated_at:
+        errors.append(
+            f"precedent '{matched_precedent}' has no validated_at field"
+        )
+    else:
+        max_age = get_precedent_max_age(signature_id)
+        fresh, msg = check_recency(validated_at, max_age)
+        if not fresh:
+            errors.append(f"precedent '{matched_precedent}': {msg}")
+
+    return errors
+
 
 def check_precedent_exists(matched_precedent: str, signature_id: str) -> bool:
     """Check that the referenced precedent file actually exists."""
@@ -171,7 +239,7 @@ def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
                 f"for {severity} severity (requires >= {min_leads})"
             )
 
-    # Check: resolved requires precedent file exists
+    # Check: resolved requires precedent file exists + valid content
     if report.status == "resolved":
         if not report.matched_precedent:
             errors.append("status=resolved requires matched_precedent")
@@ -180,6 +248,11 @@ def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
                 f"matched_precedent '{report.matched_precedent}' not found in "
                 f"knowledge/signatures/{report.signature_id}/precedents/"
             )
+        else:
+            content_errors = validate_precedent_content(
+                report.matched_precedent, report.signature_id
+            )
+            errors.extend(content_errors)
 
     return len(errors) == 0, errors, fields
 

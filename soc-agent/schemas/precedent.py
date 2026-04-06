@@ -5,6 +5,7 @@ Precedents are past resolved investigations used for pattern matching.
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 from schemas.enums import (
@@ -12,6 +13,10 @@ from schemas.enums import (
     VALID_HYPOTHESIS_STATUSES,
     VALID_STATUSES,
 )
+
+# Default maximum age (days) for a precedent to be considered fresh.
+# Overridable per-signature via permissions.yaml `precedent_max_age_days`.
+DEFAULT_MAX_AGE_DAYS = 90
 
 
 @dataclass
@@ -62,6 +67,7 @@ class Precedent:
     reasoning: dict  # conditions (list[str]) + refutes (list[str])
     key_indicators: list[str]
     alert_data: dict  # raw alert fields from the original investigation
+    validated_at: Optional[str] = None  # ISO 8601 date of last validation
 
     def validate(self) -> list[str]:
         """Validate the precedent. Returns list of error messages."""
@@ -107,6 +113,14 @@ class Precedent:
             if "refutes" not in self.reasoning:
                 errors.append("reasoning must have 'refutes' key")
 
+        if self.validated_at:
+            try:
+                parse_validated_at(self.validated_at)
+            except ValueError as e:
+                errors.append(f"validated_at: {e}")
+        else:
+            errors.append("validated_at is required (ISO 8601 date, e.g. '2026-03-15')")
+
         if self.status == "resolved":
             confirmed = [h for h in self.hypotheses if h.status == "confirmed"]
             if not confirmed:
@@ -115,6 +129,39 @@ class Precedent:
                 )
 
         return errors
+
+
+def parse_validated_at(value: str) -> datetime:
+    """Parse a validated_at string to a datetime. Raises ValueError on bad format."""
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(value, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except ValueError:
+            continue
+    raise ValueError(f"invalid date format: {value!r} (expected ISO 8601)")
+
+
+def check_recency(validated_at: str, max_age_days: int = DEFAULT_MAX_AGE_DAYS) -> tuple[bool, str]:
+    """Check whether a precedent is recent enough.
+
+    Returns (is_fresh, message). message is empty when fresh.
+    """
+    try:
+        dt = parse_validated_at(validated_at)
+    except ValueError as e:
+        return False, str(e)
+
+    now = datetime.now(timezone.utc)
+    age_days = (now - dt).days
+    if age_days > max_age_days:
+        return False, (
+            f"precedent validated_at {validated_at} is {age_days} days old "
+            f"(max {max_age_days})"
+        )
+    return True, ""
 
 
 def parse_precedent(data: dict) -> tuple[Optional[Precedent], list[str]]:
@@ -158,6 +205,7 @@ def parse_precedent(data: dict) -> tuple[Optional[Precedent], list[str]]:
         reasoning=data.get("reasoning", {}),
         key_indicators=data.get("key_indicators", []),
         alert_data=data.get("alert_data", {}),
+        validated_at=data.get("validated_at"),
     )
 
     validation_errors = precedent.validate()
