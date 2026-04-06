@@ -1,6 +1,7 @@
 {
   "ticket_id": "SEC-YYYY-NNN",
   "signature_id": "SIGNATURE-ID",
+  "validated_at": "YYYY-MM-DD",
   "status": "resolved",
   "disposition": "benign",
   "hypotheses": [

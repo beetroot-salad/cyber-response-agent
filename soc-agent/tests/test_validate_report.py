@@ -18,15 +18,19 @@ from schemas.report_frontmatter import (
     ReportFrontmatter,
     parse_frontmatter,
 )
+import hooks.scripts.validate_report as vr
 from hooks.scripts.validate_report import (
     check_precedent_exists,
     extract_run_dir,
+    get_precedent_max_age,
     get_run_salt,
     is_screen_resolved,
     playbook_has_screen_section,
+    validate_precedent_content,
     validate_tier1,
     wrap_untrusted,
 )
+from schemas.precedent import DEFAULT_MAX_AGE_DAYS, check_recency, parse_validated_at
 
 FIXTURES = SOC_AGENT_ROOT / "tests" / "fixtures" / "reports"
 
@@ -248,6 +252,210 @@ Screen-resolved monitoring probe.
 
     def test_playbook_has_screen_section_nonexistent(self):
         assert playbook_has_screen_section("nonexistent-sig") is False
+
+
+# --- Precedent existence check ---
+
+
+# --- Precedent content validation ---
+
+
+@pytest.fixture()
+def fake_root(tmp_path, monkeypatch):
+    """Redirect SOC_AGENT_ROOT to a temp dir and restore after test."""
+    monkeypatch.setattr(vr, "SOC_AGENT_ROOT", tmp_path)
+    return tmp_path
+
+
+def _make_precedent_file(root: Path, sig: str, name: str, data: dict) -> Path:
+    """Helper: create a precedent JSON file under a fake SOC_AGENT_ROOT."""
+    prec_dir = root / "knowledge" / "signatures" / sig / "precedents"
+    prec_dir.mkdir(parents=True, exist_ok=True)
+    path = prec_dir / name
+    path.write_text(json.dumps(data))
+    return path
+
+
+def _make_permissions_yaml(root: Path, sig: str, content: str) -> Path:
+    """Helper: create a permissions.yaml under a fake SOC_AGENT_ROOT."""
+    cfg_dir = root / "config" / "signatures" / sig
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    path = cfg_dir / "permissions.yaml"
+    path.write_text(content)
+    return path
+
+
+class TestValidatePrecedentContent:
+    def test_matching_signature_and_recent(self):
+        """Valid precedent with matching signature_id and recent validated_at."""
+        errors = validate_precedent_content(
+            "monitoring-probe-001.json", "wazuh-rule-5710"
+        )
+        assert errors == []
+
+    def test_signature_id_mismatch(self, fake_root):
+        """Precedent with wrong signature_id is rejected."""
+        _make_precedent_file(fake_root, "test-sig", "test.json", {
+            "signature_id": "WRONG-SIG",
+            "validated_at": "2026-04-01",
+        })
+        errors = validate_precedent_content("test.json", "test-sig")
+        assert any("does not match" in e for e in errors)
+
+    def test_missing_validated_at(self, fake_root):
+        """Precedent without validated_at is flagged."""
+        _make_precedent_file(fake_root, "test-sig", "test.json", {
+            "signature_id": "test-sig",
+        })
+        errors = validate_precedent_content("test.json", "test-sig")
+        assert any("validated_at" in e for e in errors)
+
+    def test_stale_precedent(self, fake_root):
+        """Precedent older than max_age is rejected."""
+        _make_precedent_file(fake_root, "test-sig", "test.json", {
+            "signature_id": "test-sig",
+            "validated_at": "2020-01-01",
+        })
+        errors = validate_precedent_content("test.json", "test-sig")
+        assert any("days old" in e for e in errors)
+
+    def test_malformed_json(self, fake_root):
+        """Malformed precedent JSON is caught."""
+        prec_dir = fake_root / "knowledge" / "signatures" / "test-sig" / "precedents"
+        prec_dir.mkdir(parents=True)
+        (prec_dir / "test.json").write_text("not json {{{")
+        errors = validate_precedent_content("test.json", "test-sig")
+        assert any("not valid JSON" in e for e in errors)
+
+    def test_multiple_errors_accumulated(self, fake_root):
+        """Both signature mismatch and missing validated_at are reported together."""
+        _make_precedent_file(fake_root, "test-sig", "test.json", {
+            "signature_id": "WRONG-SIG",
+            # no validated_at
+        })
+        errors = validate_precedent_content("test.json", "test-sig")
+        assert len(errors) >= 2
+        assert any("does not match" in e for e in errors)
+        assert any("validated_at" in e for e in errors)
+
+    def test_auto_extension_json(self, fake_root):
+        """Finds precedent when called without .json extension."""
+        _make_precedent_file(fake_root, "test-sig", "probe.json", {
+            "signature_id": "test-sig",
+            "validated_at": "2026-04-01",
+        })
+        errors = validate_precedent_content("probe", "test-sig")
+        assert errors == []
+
+    def test_nonexistent_file_returns_empty(self, fake_root):
+        """Non-existent precedent returns [] (existence checked elsewhere)."""
+        errors = validate_precedent_content("missing.json", "test-sig")
+        assert errors == []
+
+    def test_custom_max_age_from_permissions(self, fake_root):
+        """Custom precedent_max_age_days in permissions.yaml is respected."""
+        _make_precedent_file(fake_root, "strict-sig", "test.json", {
+            "signature_id": "strict-sig",
+            "validated_at": "2026-02-01",  # ~64 days ago
+        })
+        # 30-day max age should reject this
+        _make_permissions_yaml(fake_root, "strict-sig",
+            "precedent_max_age_days: 30\n"
+        )
+        errors = validate_precedent_content("test.json", "strict-sig")
+        assert any("days old" in e for e in errors)
+
+    def test_default_max_age_when_no_permissions(self, fake_root):
+        """Falls back to DEFAULT_MAX_AGE_DAYS when no permissions.yaml."""
+        _make_precedent_file(fake_root, "no-config-sig", "test.json", {
+            "signature_id": "no-config-sig",
+            "validated_at": "2026-04-01",  # recent
+        })
+        # No permissions.yaml exists — should use default (90 days)
+        errors = validate_precedent_content("test.json", "no-config-sig")
+        assert errors == []
+
+
+class TestPrecedentRecency:
+    def test_fresh_precedent(self):
+        fresh, msg = check_recency("2026-04-01", max_age_days=90)
+        assert fresh
+        assert msg == ""
+
+    def test_stale_precedent(self):
+        fresh, msg = check_recency("2020-01-01", max_age_days=90)
+        assert not fresh
+        assert "days old" in msg
+
+    def test_iso_datetime_format(self):
+        fresh, _ = check_recency("2026-04-01T00:00:00Z", max_age_days=90)
+        assert fresh
+
+    def test_invalid_format(self):
+        fresh, msg = check_recency("not-a-date")
+        assert not fresh
+        assert "invalid date format" in msg
+
+    def test_max_age_zero_rejects_everything(self):
+        """max_age_days=0 means only today is fresh."""
+        fresh, msg = check_recency("2026-04-05", max_age_days=0)
+        assert not fresh
+
+    def test_parse_validated_at_date(self):
+        dt = parse_validated_at("2026-03-15")
+        assert dt.year == 2026
+        assert dt.month == 3
+
+    def test_parse_validated_at_datetime(self):
+        dt = parse_validated_at("2026-03-15T10:30:00Z")
+        assert dt.hour == 10
+
+    def test_parse_validated_at_with_tz_offset(self):
+        dt = parse_validated_at("2026-03-15T10:30:00+02:00")
+        assert dt.hour == 10
+
+    def test_parse_validated_at_invalid_raises(self):
+        with pytest.raises(ValueError, match="invalid date format"):
+            parse_validated_at("not-a-date")
+
+
+class TestGetPrecedentMaxAge:
+    def test_returns_default_when_no_permissions(self, fake_root):
+        assert get_precedent_max_age("nonexistent-sig") == DEFAULT_MAX_AGE_DAYS
+
+    def test_returns_default_when_key_absent(self, fake_root):
+        """permissions.yaml exists but has no precedent_max_age_days."""
+        _make_permissions_yaml(fake_root, "test-sig", "mode:\n  default: recommend\n")
+        assert get_precedent_max_age("test-sig") == DEFAULT_MAX_AGE_DAYS
+
+    def test_reads_custom_value(self, fake_root):
+        _make_permissions_yaml(fake_root, "test-sig", "precedent_max_age_days: 30\n")
+        assert get_precedent_max_age("test-sig") == 30
+
+    def test_plaintext_fallback_when_yaml_unavailable(self, fake_root, monkeypatch):
+        """Falls back to line scanning when yaml import fails."""
+        _make_permissions_yaml(fake_root, "test-sig", "precedent_max_age_days: 45\n")
+        # Force yaml import to fail
+        import builtins
+        real_import = builtins.__import__
+        def mock_import(name, *args, **kwargs):
+            if name == "yaml":
+                raise ImportError("no yaml")
+            return real_import(name, *args, **kwargs)
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+        assert get_precedent_max_age("test-sig") == 45
+
+    def test_malformed_value_returns_default(self, fake_root, monkeypatch):
+        """Non-integer value falls back to default."""
+        _make_permissions_yaml(fake_root, "test-sig", "precedent_max_age_days: notanumber\n")
+        import builtins
+        real_import = builtins.__import__
+        def mock_import(name, *args, **kwargs):
+            if name == "yaml":
+                raise ImportError("no yaml")
+            return real_import(name, *args, **kwargs)
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+        assert get_precedent_max_age("test-sig") == DEFAULT_MAX_AGE_DAYS
 
 
 # --- Precedent existence check ---
