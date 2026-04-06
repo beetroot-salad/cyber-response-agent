@@ -57,8 +57,53 @@ DENY_PATTERNS = [
     "curl * -X PUT*",
     "curl * -X POST*",
     "wget *",
+    # GitHub PR mutations — always require explicit approval
+    "gh pr create*",
+    "gh pr merge*",
     # Pipe to file overwrites (> but not >>)
     "* > *",
+]
+
+# Safe command prefixes — when a command matches, persist the PREFIX pattern
+# (e.g. "Bash(git status:*)") instead of the exact command string.
+# This keeps settings.local.json clean and covers future variations.
+SAFE_PREFIXES = [
+    "git status",
+    "git diff",
+    "git log",
+    "git add",
+    "git commit",
+    "git push",
+    "git checkout -b",
+    "git -C",
+    "pytest",
+    "python -m pytest",
+    "python3 --version",
+    "ls",
+    "tree",
+    "find",
+    "mkdir",
+    "cat",
+    "grep",
+    "head",
+    "tail",
+    "docker logs",
+    "docker inspect",
+    "docker ps",
+    "docker exec",
+    "docker restart",
+    "gh pr view",
+    "gh pr diff",
+    "gh pr checks",
+    "gh run view",
+    "gh run list",
+    "gh issue view",
+    "gh issue list",
+    "uv lock",
+    "wc",
+    "which",
+    "type",
+    "file",
 ]
 
 # Patterns that look like compound commands — skip these, they're ambiguous.
@@ -134,10 +179,22 @@ def is_already_allowed(allow_list: list, tool_name: str, value: str) -> bool:
     return False
 
 
+def matching_safe_prefix(command: str) -> str | None:
+    """Return the longest SAFE_PREFIXES entry that matches command, or None."""
+    best = None
+    for prefix in SAFE_PREFIXES:
+        if command == prefix or command.startswith(prefix + " ") or command.startswith(prefix + "\t"):
+            if best is None or len(prefix) > len(best):
+                best = prefix
+    return best
+
+
 def build_rule(tool_name: str, tool_input: dict) -> str | None:
     """Build the permission rule string for the given tool call.
 
     Returns None if the command should not be auto-allowed.
+    If the command matches a safe prefix, returns a prefix pattern
+    (e.g. "Bash(git status:*)") instead of the exact command.
     """
     if tool_name == "Bash":
         command = tool_input.get("command", "")
@@ -147,6 +204,13 @@ def build_rule(tool_name: str, tool_input: dict) -> str | None:
             return None
         if is_compound(command):
             return None
+        prefix = matching_safe_prefix(command)
+        if prefix:
+            # Single-word prefixes use "Bash(ls*)" to also match bare "ls".
+            # Multi-word prefixes use "Bash(git add *)" — space before wildcard.
+            if " " in prefix:
+                return f"Bash({prefix} *)"
+            return f"Bash({prefix}*)"
         return f"Bash({command})"
 
     if tool_name == "Read":
