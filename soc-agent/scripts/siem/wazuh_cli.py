@@ -48,23 +48,64 @@ SOC_AGENT_DIR = Path(os.environ.get(
 CONFIG_PATH = SOC_AGENT_DIR / "knowledge" / "environment" / "systems" / "wazuh" / "config.env"
 
 
+REQUIRED_CONFIG_KEYS = [
+    "WAZUH_INDEX",
+    "WAZUH_API_ENDPOINT",
+    "WAZUH_INDEXER_ENDPOINT",
+    "WAZUH_RETENTION_DAYS",
+    "WAZUH_SSL_VERIFY",
+]
+
+
 def load_config():
-    """Load non-secret config from config.env."""
-    config = {
-        "WAZUH_INDEX": "wazuh-alerts-*",
-        "WAZUH_API_ENDPOINT": "https://wazuh-manager:55000",
-        "WAZUH_INDEXER_ENDPOINT": "https://wazuh-indexer:9200",
-        "WAZUH_RETENTION_DAYS": "90",
-    }
-    if CONFIG_PATH.exists():
-        for line in CONFIG_PATH.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, _, val = line.partition("=")
-                config[key.strip()] = val.strip().strip('"')
+    """Load non-secret config from config.env.
+
+    All required keys must be present in config.env.  Environment variables
+    override individual values (useful for CI or per-run tweaks).
+    """
+    if not CONFIG_PATH.exists():
+        print(
+            f"error: config file not found: {CONFIG_PATH}\n"
+            f"hint: copy the template and fill in your environment values:\n"
+            f"  cp knowledge/environment/systems/wazuh/config.env.template \\\n"
+            f"     knowledge/environment/systems/wazuh/config.env",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    config = {}
+    for line in CONFIG_PATH.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, val = line.partition("=")
+            config[key.strip()] = val.strip().strip('"')
+
+    # Environment variables override config.env
+    for key in list(config) + REQUIRED_CONFIG_KEYS:
+        env_val = os.environ.get(key)
+        if env_val is not None:
+            config[key] = env_val
+
+    missing = [k for k in REQUIRED_CONFIG_KEYS if k not in config]
+    if missing:
+        print(
+            f"error: missing required keys in {CONFIG_PATH}: {', '.join(missing)}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     return config
+
+
+def _ssl_verify(config) -> bool:
+    return config.get("WAZUH_SSL_VERIFY", "false").lower() in ("true", "1", "yes")
+
+
+def _ca_cert_path(config) -> str | None:
+    path = config.get("WAZUH_CA_CERT", "")
+    return path if path else None
 
 
 def get_indexer_client(config):
@@ -72,14 +113,22 @@ def get_indexer_client(config):
     user = os.environ.get("WAZUH_INDEXER_USER")
     password = os.environ.get("WAZUH_INDEXER_PASSWORD")
     if not user or not password:
-        print("error: WAZUH_INDEXER_USER and WAZUH_INDEXER_PASSWORD environment variables must be set", file=sys.stderr)
+        print(
+            "error: WAZUH_INDEXER_USER and WAZUH_INDEXER_PASSWORD must be set as environment variables\n"
+            f"hint: export them in your shell, or add them to .env (loaded by docker-compose)\n"
+            f"hint: non-secret config is loaded from {CONFIG_PATH}",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
+    verify = _ssl_verify(config)
+    ca_cert = _ca_cert_path(config)
     return OpenSearch(
         hosts=[config["WAZUH_INDEXER_ENDPOINT"]],
         http_auth=(user, password),
-        verify_certs=False,
-        ssl_show_warn=False,
+        verify_certs=verify,
+        ssl_show_warn=verify,
+        ca_certs=ca_cert,
     )
 
 
@@ -111,39 +160,81 @@ def compute_time_range(args):
 # Indexer (OpenSearch) — alert queries
 # ---------------------------------------------------------------------------
 
-def query_alerts(client, config, query_string, time_start, time_end, limit=500):
-    """Query Wazuh alerts via the indexer. Returns (hits_list, total_count)."""
-    body = {
-        "size": limit,
-        "sort": [{"timestamp": {"order": "desc"}}],
-        "query": {
-            "bool": {
-                "must": [
-                    {"query_string": {"query": query_string}} if query_string else {"match_all": {}},
-                ],
-                "filter": [
-                    {"range": {"timestamp": {"gte": time_start, "lte": time_end}}},
-                ],
-            }
-        },
-    }
-    try:
-        resp = client.search(index=config["WAZUH_INDEX"], body=body)
-    except Exception as e:
-        print(f"error: Indexer query failed: {e}", file=sys.stderr)
-        sys.exit(2)
+PAGE_SIZE = 500
 
-    hits = resp.get("hits", {})
-    total = hits.get("total", {}).get("value", 0)
-    items = [h["_source"] for h in hits.get("hits", [])]
-    return items, total
+
+def query_alerts(client, config, query_string, time_start, time_end, limit=500):
+    """Query Wazuh alerts via the indexer. Returns (hits_list, total_count).
+
+    Automatically paginates using search_after when limit exceeds PAGE_SIZE.
+    """
+    query = {
+        "bool": {
+            "must": [
+                {"query_string": {"query": query_string}} if query_string else {"match_all": {}},
+            ],
+            "filter": [
+                {"range": {"timestamp": {"gte": time_start, "lte": time_end}}},
+            ],
+        }
+    }
+    sort = [{"timestamp": {"order": "desc"}}, {"_id": {"order": "desc"}}]
+
+    # limit=0 means "count only, no results"
+    if limit == 0:
+        body = {"size": 0, "query": query}
+        try:
+            resp = client.search(index=config["WAZUH_INDEX"], body=body)
+        except Exception as e:
+            print(f"error: Indexer query failed: {e}", file=sys.stderr)
+            sys.exit(2)
+        total = resp.get("hits", {}).get("total", {}).get("value", 0)
+        return [], total
+
+    all_items = []
+    total = 0
+    search_after = None
+
+    while len(all_items) < limit:
+        page_size = min(PAGE_SIZE, limit - len(all_items))
+        body = {"size": page_size, "sort": sort, "query": query}
+        if search_after is not None:
+            body["search_after"] = search_after
+
+        try:
+            resp = client.search(index=config["WAZUH_INDEX"], body=body)
+        except Exception as e:
+            print(f"error: Indexer query failed: {e}", file=sys.stderr)
+            sys.exit(2)
+
+        hits = resp.get("hits", {})
+        page_total = hits.get("total", {}).get("value", 0)
+        if page_total > 0:
+            total = page_total
+        page_hits = hits.get("hits", [])
+
+        if not page_hits:
+            break
+
+        remaining = limit - len(all_items)
+        all_items.extend(h["_source"] for h in page_hits[:remaining])
+        search_after = page_hits[-1]["sort"]
+
+    return all_items, total
 
 
 # ---------------------------------------------------------------------------
 # Manager API — health check only
 # ---------------------------------------------------------------------------
 
-def get_ssl_context():
+def get_ssl_context(config):
+    """Build SSL context based on WAZUH_SSL_VERIFY and WAZUH_CA_CERT config."""
+    if _ssl_verify(config):
+        ctx = ssl.create_default_context()
+        ca_cert = _ca_cert_path(config)
+        if ca_cert:
+            ctx.load_verify_locations(ca_cert)
+        return ctx
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -155,7 +246,12 @@ def authenticate_manager(config):
     user = os.environ.get("WAZUH_API_USER")
     password = os.environ.get("WAZUH_API_PASSWORD")
     if not user or not password:
-        print("error: WAZUH_API_USER and WAZUH_API_PASSWORD environment variables must be set", file=sys.stderr)
+        print(
+            "error: WAZUH_API_USER and WAZUH_API_PASSWORD must be set as environment variables\n"
+            f"hint: export them in your shell, or add them to .env (loaded by docker-compose)\n"
+            f"hint: non-secret config is loaded from {CONFIG_PATH}",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     url = config["WAZUH_API_ENDPOINT"].rstrip("/") + "/security/user/authenticate"
@@ -166,7 +262,7 @@ def authenticate_manager(config):
     }
     req = urllib.request.Request(url, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, context=get_ssl_context(), timeout=10) as resp:
+        with urllib.request.urlopen(req, context=get_ssl_context(config), timeout=10) as resp:
             data = json.loads(resp.read())
             return data.get("data", {}).get("token", "")
     except urllib.error.URLError as e:
@@ -179,7 +275,7 @@ def manager_api_request(endpoint, config, token, timeout=30):
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
     req = urllib.request.Request(url, headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(req, context=get_ssl_context(), timeout=timeout) as resp:
+        with urllib.request.urlopen(req, context=get_ssl_context(config), timeout=timeout) as resp:
             return json.loads(resp.read())
     except urllib.error.URLError as e:
         print(f"error: Manager API request failed: {e}", file=sys.stderr)
@@ -302,7 +398,7 @@ def build_parser():
     p.add_argument("--start", help="Start time (ISO 8601 UTC)")
     p.add_argument("--end", help="End time (ISO 8601 UTC, defaults to now)")
     p.add_argument("--window", default="1h", help="Time window duration (e.g. 1h, 30m, 7d). Used when --end is omitted.")
-    p.add_argument("--limit", type=int, default=500, help="Max events to return (default: 500)")
+    p.add_argument("--limit", type=int, default=500, help="Max events to return (default: 500, max: 10000)")
     p.add_argument("--raw", action="store_true", help="Output raw JSON instead of formatted text")
     p.add_argument("--health-check", action="store_true", help="Check connectivity and exit")
     return p
@@ -322,6 +418,8 @@ def main():
 
     if args.end and not args.start:
         parser.error("--end without --start is not supported. Use --start/--end or --start/--window.")
+
+    args.limit = min(args.limit, 10000)
 
     time_start, time_end = compute_time_range(args)
     client = get_indexer_client(config)

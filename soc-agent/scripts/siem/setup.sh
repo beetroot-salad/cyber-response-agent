@@ -19,6 +19,7 @@ if command -v uv &>/dev/null; then
     uv venv "$VENV_DIR" -q
     uv pip install -q -p "$VENV_DIR/bin/python3" -r "$REQ_FILE"
 else
+    echo "note: uv not found, falling back to stdlib venv + pip (slower)" >&2
     python3 -m venv "$VENV_DIR"
     "$VENV_DIR/bin/python3" -m pip install -q -r "$REQ_FILE"
 fi
