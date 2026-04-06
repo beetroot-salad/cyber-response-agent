@@ -17,9 +17,5 @@ dev = [
     "debugpy",
     "httpx",
 ]
-wazuh = [
-    "opensearch-py>=3.0.0",
-]
-
 [tool.setuptools]
 packages = []  # Not a traditional package — scripts are invoked directly
