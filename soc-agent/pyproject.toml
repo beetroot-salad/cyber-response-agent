@@ -3,6 +3,19 @@ name = "soc-agent"
 version = "0.1.0"
 description = "Hypothesis-driven security alert triage agent"
 requires-python = ">=3.11"
-dependencies = [
-    "opensearch-py>=3.0.0",
+dependencies = []  # Core is stdlib-only — by design
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio",
+    "black",
+    "isort",
+    "flake8",
+    "mypy",
+    "ipython",
+    "debugpy",
+    "httpx",
 ]
+[tool.setuptools]
+packages = []  # Not a traditional package — scripts are invoked directly

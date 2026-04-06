@@ -21,18 +21,8 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /workspace
 
-# Install Python development tools (no app dependencies)
-RUN pip install --no-cache-dir \
-    black \
-    isort \
-    flake8 \
-    mypy \
-    ipython \
-    debugpy \
-    pytest \
-    pytest-asyncio \
-    httpx \
-    uv
+# Install uv (all Python deps managed via pyproject.toml)
+RUN pip install --no-cache-dir uv
 
 # Development command - start shell by default (uvicorn can be run manually)
 CMD ["bash"]
