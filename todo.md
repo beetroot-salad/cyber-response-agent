@@ -26,7 +26,8 @@
 ## Phase 2 — Post-MVP
 
 ### Agent Architecture
-- [ ] Lead subagents — refactor so each lead is executed by a subagent with isolated context. Subagent receives hypothesis predictions + lead definition, executes queries, returns structured summary (observation + characterization). Keeps raw SIEM data out of the main agent's context window. Reframe Philosophy to reflect agent-as-director, subagents-as-executors
+
+- [x] Lead subagents — refactor so each lead is executed by a subagent with isolated context. Subagent receives hypothesis predictions + lead definition, executes queries, returns structured summary (observation + characterization). Keeps raw SIEM data out of the main agent's context window. Reframe Philosophy to reflect agent-as-director, subagents-as-executors
 - [ ] Context window management — migrate detailed investigation reasoning to a subagent. Main agent holds: investigation flow, phase state, key findings, hypothesis table. Reasoning subagent handles: detailed evidence analysis, hypothesis weighting, narrative construction. Prevents context exhaustion on complex multi-loop investigations
 - [ ] Tool discovery refactor — split into two concerns: (1) data availability (main agent consults `knowledge/environment/data-sources/` to know what questions can be answered), (2) tool mechanics (lead subagent consults `knowledge/environment/systems/` for query patterns). Also: not all tools are MCP — agent may need to call APIs via scripts
 - [x] Tier 2 semantic judge — Haiku validates report consistency after investigation (judge_report.py + judge_prompt.md, invoked via claude CLI)
@@ -34,10 +35,11 @@
 - [x] CONTEXTUALIZE: Explore subagent for recent alerts — situational awareness, alert correlation (added to SKILL.md)
 - [x] Playbook-driven vs investigation-loop separation — implemented as SCREEN phase: playbooks define fast-path patterns checked by a cheap subagent (Sonnet/Haiku) before the full investigation loop. Falls through to full loop on no match.
 - [x] Ticket-context skill/subagent — extract CONTEXTUALIZE alert context (recent + related alert scanning) into a dedicated skill with pre-made queries. Reusable across signatures and invocable independently
-- [ ] Budget enforcement hook — cap token/cost spend per investigation
-- [ ] Input sanitization hooks — validate alert_json before investigation starts
+- [x] Budget enforcement hook — cap token/cost spend per investigation
+- [x] Input sanitization hooks — validate alert_json before investigation starts
 
 ### Knowledge Expansion
+
 - [ ] Second signature — validate cross-signature generalization (e.g., Falco rule or different Wazuh rule)
 - [x] `common/leads/` — reusable lead definitions across signatures (directory scaffolded)
 - [x] `environment/data-sources/` — data mapping: what data exists where (state + events)
@@ -47,27 +49,31 @@
 - [ ] Populate environment files with real org data (currently example/template content)
 
 ### SIEM CLI
+
 - [ ] Configurable host/port (not just env vars — support CLI flags, config file, or env)
 - [ ] Multiple authentication options (API key, token file, username/password, etc.)
 - [ ] Vendor abstraction — CLI should work across SIEM backends, not just Wazuh
 
 ### Operations
+
 - [ ] `act` mode — auto-close for mature signatures with high-confidence precedent matches
 - [ ] Retention policy for run data (configurable cleanup)
 - [ ] Audit dashboard / analytics on investigation outcomes
 
 ### Package Management
-- [ ] Finalize packaging strategy — using `uv` + `pyproject.toml` in `soc-agent/` for now. Decide on venv integration, Dockerfile install step, and dev vs prod deps
-- Current external deps: `opensearch-py` (used by wazuh_cli.py)
+
+- [x] Finalize packaging strategy — stdlib-only core, optional dep groups (`[dev]`, `[wazuh]`), Dockerfile installs only system packages + uv, postCreateCommand runs `uv pip install -e '.[dev,wazuh]'`
 
 ## Backlog Ideas
 
 ### Analytics Suite
+
 - High-volume alert detection: track alert frequency per signature over time windows
 - Should this live at SIEM level or application level? Probably SIEM correlation rules
 - Consider: alert fatigue metrics, auto-close rate tracking, escalation patterns
 
 ### Knowledge Learning
+
 - Post-investigation knowledge updates (new precedents, lessons learned)
 - Impose increasing costs per token appended to lessons/utilities to avoid unbounded growth
 - Mechanism for pruning stale knowledge

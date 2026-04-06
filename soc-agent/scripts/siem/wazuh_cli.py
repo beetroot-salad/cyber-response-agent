@@ -31,7 +31,15 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from opensearchpy import OpenSearch
+try:
+    from opensearchpy import OpenSearch
+except ImportError:
+    print(
+        "Error: opensearch-py is required for Wazuh indexer queries.\n"
+        "Install with: uv pip install -e '.[wazuh]'",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SOC_AGENT_DIR = Path(os.environ.get(
