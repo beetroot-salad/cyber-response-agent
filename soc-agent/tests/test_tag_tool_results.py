@@ -9,12 +9,16 @@ import pytest
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
+import time
+
 from hooks.scripts.tag_tool_results import (
     context_annotation,
+    find_active_run,
     get_salt,
     mcp_wrapped_output,
     wrap,
 )
+import hooks.scripts.tag_tool_results as ttr
 
 
 class TestWrap:
@@ -72,6 +76,51 @@ class TestMCPWrappedOutput:
         result = mcp_wrapped_output({"data": "test"}, "s1")
         # Should be serializable (hook writes this to stdout)
         json.dumps(result)
+
+
+class TestFindActiveRun:
+    def test_returns_none_when_no_runs_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SOC_AGENT_RUNS_DIR", str(tmp_path / "nonexistent"))
+        monkeypatch.setattr(ttr, "get_runs_dir", lambda: tmp_path / "nonexistent")
+        assert find_active_run() is None
+
+    def test_returns_none_when_empty(self, tmp_path, monkeypatch):
+        runs = tmp_path / "runs"
+        runs.mkdir()
+        monkeypatch.setattr(ttr, "get_runs_dir", lambda: runs)
+        assert find_active_run() is None
+
+    def test_skips_dirs_without_meta(self, tmp_path, monkeypatch):
+        runs = tmp_path / "runs"
+        (runs / "no-meta-run").mkdir(parents=True)
+        monkeypatch.setattr(ttr, "get_runs_dir", lambda: runs)
+        assert find_active_run() is None
+
+    def test_selects_most_recent_by_mtime(self, tmp_path, monkeypatch):
+        runs = tmp_path / "runs"
+        # Create two runs with different mtimes
+        old_run = runs / "old-run"
+        old_run.mkdir(parents=True)
+        (old_run / "meta.json").write_text('{"salt": "old"}')
+
+        time.sleep(0.05)  # ensure mtime differs
+
+        new_run = runs / "new-run"
+        new_run.mkdir(parents=True)
+        (new_run / "meta.json").write_text('{"salt": "new"}')
+
+        monkeypatch.setattr(ttr, "get_runs_dir", lambda: runs)
+        result = find_active_run()
+        assert result == new_run
+
+    def test_picks_only_dir_with_meta(self, tmp_path, monkeypatch):
+        runs = tmp_path / "runs"
+        (runs / "no-meta").mkdir(parents=True)
+        good = runs / "has-meta"
+        good.mkdir(parents=True)
+        (good / "meta.json").write_text('{"salt": "x"}')
+        monkeypatch.setattr(ttr, "get_runs_dir", lambda: runs)
+        assert find_active_run() == good
 
 
 class TestContextAnnotation:
