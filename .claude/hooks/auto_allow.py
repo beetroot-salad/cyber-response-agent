@@ -204,13 +204,10 @@ def build_rule(tool_name: str, tool_input: dict) -> str | None:
             return None
         if is_compound(command):
             return None
-        prefix = matching_safe_prefix(command)
-        if prefix:
-            # Single-word prefixes use "Bash(ls*)" to also match bare "ls".
-            # Multi-word prefixes use "Bash(git add *)" — space before wildcard.
-            if " " in prefix:
-                return f"Bash({prefix} *)"
-            return f"Bash({prefix}*)"
+        # Only persist commands that match a known safe prefix.
+        # Always save the exact command (useful for debugging iteration).
+        if matching_safe_prefix(command) is None:
+            return None
         return f"Bash({command})"
 
     if tool_name == "Read":
