@@ -220,6 +220,15 @@ docker logs falco --follow
 
 Credentials are stored in `.env` (git-ignored). See `.env` for Wazuh API, indexer, and dashboard passwords. The `.env` file is loaded by docker-compose services and should be sourced or exported for CLI usage.
 
+## Fail Fast — No Guessing
+
+When a required value is missing, unknown, or ambiguous — **fail immediately with a clear error**. Never silently substitute a default, placeholder, or made-up value. This applies everywhere: scripts, hooks, skill arguments, tool parameters, queries, and field mappings.
+
+- If a required argument is not provided, stop and ask or error out.
+- If a field name, index, or API path is uncertain, surface the uncertainty — don't guess.
+- If a SIEM query field might not exist, say so rather than fabricating a plausible name.
+- Prefer a loud failure the user can diagnose over a silent wrong answer they can't.
+
 ## Known Issues
 
 - Wazuh API not accessible from localhost (use `wazuh-manager:55000` from within Docker network)
