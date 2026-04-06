@@ -23,8 +23,6 @@ import argparse
 import base64
 import json
 import os
-import shutil
-import subprocess
 import sys
 import ssl
 import urllib.error
@@ -33,42 +31,17 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+try:
+    from opensearchpy import OpenSearch
+except ImportError:
+    print(
+        "error: opensearch-py is required for Wazuh indexer queries\n"
+        "Run: scripts/siem/setup.sh",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-
-
-def _ensure_venv():
-    """Bootstrap a per-integration venv and re-exec if not already inside it."""
-    venv_dir = SCRIPT_DIR / ".venv"
-    venv_python = venv_dir / "bin" / "python3"
-
-    # Already running from our venv — nothing to do.
-    if Path(sys.executable).resolve().is_relative_to(venv_dir.resolve()):
-        return
-
-    if not venv_python.exists():
-        req_file = SCRIPT_DIR / "requirements.txt"
-        if not req_file.exists():
-            print(f"Error: {req_file} not found.", file=sys.stderr)
-            sys.exit(2)
-        print("Bootstrapping venv for Wazuh CLI deps...", file=sys.stderr)
-        has_uv = shutil.which("uv") is not None
-        if has_uv:
-            subprocess.check_call(["uv", "venv", str(venv_dir), "-q"])
-            subprocess.check_call(
-                ["uv", "pip", "install", "-q", "-p", str(venv_python), "-r", str(req_file)]
-            )
-        else:
-            subprocess.check_call([sys.executable, "-m", "venv", str(venv_dir)])
-            subprocess.check_call(
-                [str(venv_python), "-m", "pip", "install", "-q", "-r", str(req_file)]
-            )
-
-    os.execv(str(venv_python), [str(venv_python)] + sys.argv)
-
-
-_ensure_venv()
-
-from opensearchpy import OpenSearch  # noqa: E402 — available after venv bootstrap
 SOC_AGENT_DIR = Path(os.environ.get(
     "SOC_AGENT_DIR", SCRIPT_DIR.parent.parent
 ))
@@ -96,10 +69,10 @@ def load_config():
 
 def get_indexer_client(config):
     """Create an OpenSearch client for the Wazuh Indexer."""
-    user = os.environ.get("WAZUH_INDEXER_USER", "admin")
-    password = os.environ.get("WAZUH_INDEXER_PASSWORD", "")
-    if not password:
-        print("error: WAZUH_INDEXER_PASSWORD environment variable must be set", file=sys.stderr)
+    user = os.environ.get("WAZUH_INDEXER_USER")
+    password = os.environ.get("WAZUH_INDEXER_PASSWORD")
+    if not user or not password:
+        print("error: WAZUH_INDEXER_USER and WAZUH_INDEXER_PASSWORD environment variables must be set", file=sys.stderr)
         sys.exit(2)
 
     return OpenSearch(
@@ -179,10 +152,10 @@ def get_ssl_context():
 
 def authenticate_manager(config):
     """Authenticate against the Wazuh Manager API and return JWT token."""
-    user = os.environ.get("WAZUH_API_USER", "wazuh-wui")
+    user = os.environ.get("WAZUH_API_USER")
     password = os.environ.get("WAZUH_API_PASSWORD")
-    if not password:
-        print("error: WAZUH_API_PASSWORD environment variable must be set", file=sys.stderr)
+    if not user or not password:
+        print("error: WAZUH_API_USER and WAZUH_API_PASSWORD environment variables must be set", file=sys.stderr)
         sys.exit(2)
 
     url = config["WAZUH_API_ENDPOINT"].rstrip("/") + "/security/user/authenticate"
