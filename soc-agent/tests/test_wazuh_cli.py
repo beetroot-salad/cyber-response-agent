@@ -107,6 +107,10 @@ class TestSSLConfig:
     def test_ssl_verify_yes(self):
         assert wazuh_cli._ssl_verify({"WAZUH_SSL_VERIFY": "yes"}) is True
 
+    def test_ssl_verify_missing_warns(self, capsys):
+        assert wazuh_cli._ssl_verify({}) is False
+        assert "warning: WAZUH_SSL_VERIFY not set" in capsys.readouterr().err
+
     def test_ca_cert_path_empty(self):
         assert wazuh_cli._ca_cert_path({"WAZUH_CA_CERT": ""}) is None
 

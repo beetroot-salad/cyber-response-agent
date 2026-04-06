@@ -100,6 +100,11 @@ def load_config():
 
 
 def _ssl_verify(config) -> bool:
+    if "WAZUH_SSL_VERIFY" not in config:
+        print(
+            "warning: WAZUH_SSL_VERIFY not set in config, defaulting to verify=False",
+            file=sys.stderr,
+        )
     return config.get("WAZUH_SSL_VERIFY", "false").lower() in ("true", "1", "yes")
 
 
@@ -209,7 +214,7 @@ def query_alerts(client, config, query_string, time_start, time_end, limit=500):
 
         hits = resp.get("hits", {})
         page_total = hits.get("total", {}).get("value", 0)
-        if page_total > 0:
+        if search_after is None:
             total = page_total
         page_hits = hits.get("hits", [])
 

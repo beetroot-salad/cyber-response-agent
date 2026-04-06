@@ -41,6 +41,9 @@ logs/
 *.pem
 *.crt
 
+# Per-environment config (template is tracked, actual config is not)
+soc-agent/knowledge/environment/systems/wazuh/config.env
+
 # IDE
 .vscode/
 .idea/
