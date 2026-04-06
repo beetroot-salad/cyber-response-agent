@@ -50,9 +50,9 @@
 
 ### SIEM CLI
 
-- [ ] Configurable host/port (not just env vars — support CLI flags, config file, or env)
-- [ ] Multiple authentication options (API key, token file, username/password, etc.)
-- [ ] Vendor abstraction — CLI should work across SIEM backends, not just Wazuh
+- [x] ~~Configurable host/port~~ — deferred: config file + env var override is sufficient; CLI flags add no value for agent-invoked tools
+- [x] ~~Multiple authentication options~~ — deferred: Wazuh only supports username/password→JWT (Manager) and basic auth (Indexer); no alternative auth methods to implement
+- [x] ~~Vendor abstraction~~ — deferred: intentionally separate CLI per SIEM (different configs, query languages, auth flows); abstraction layer adds complexity without benefit
 
 ### Operations
 
