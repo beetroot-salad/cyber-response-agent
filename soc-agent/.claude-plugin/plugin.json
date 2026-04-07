@@ -2,13 +2,10 @@
   "name": "soc-agent",
   "version": "3.4.0",
   "description": "Hypothesis-driven security alert triage agent. Investigates alerts through iterative hypothesis elimination, validates findings against precedents, and recommends disposition.",
-  "skills": [
-    "skills/investigate/SKILL.md"
-  ],
-  "knowledge": [
-    "knowledge/common-investigation/SKILL.md",
-    "knowledge/signatures/*/SKILL.md"
-  ],
+  "author": {
+    "name": "Cyber Response Agent"
+  },
+  "skills": "./skills/",
   "hooks": {
     "Stop": [
       {

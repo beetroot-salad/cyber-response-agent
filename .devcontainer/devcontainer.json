@@ -57,7 +57,8 @@
   },
 
   "mounts": [
-    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=${localEnv:USERPROFILE}/.claude,target=/root/.claude,type=bind"
   ],
 
   "postCreateCommand": "cd /workspace/soc-agent && uv pip install --system -e '.[dev]' && scripts/siem/setup.sh",

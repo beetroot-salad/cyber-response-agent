@@ -10,11 +10,9 @@ Run LLM tests:        pytest soc-agent/tests/test_e2e_mock.py -v -m llm
 """
 
 import json
-import os
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -22,12 +20,12 @@ import pytest
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from schemas.state import Phase, validate_transition
 from schemas.report_frontmatter import parse_frontmatter
 from hooks.scripts.validate_report import parse_yaml_frontmatter, validate_tier1
-
-
-FIXTURES = SOC_AGENT_ROOT / "tests" / "fixtures"
+from conftest import FIXTURES, run_investigation_mock
 
 
 # ---------------------------------------------------------------------------
@@ -202,87 +200,12 @@ class TestWriteStateIntegration:
 # ---------------------------------------------------------------------------
 
 
-def _run_investigator(run_dir: Path, alert: dict, timeout: int = 300) -> str:
-    """Invoke the investigate skill via claude CLI.
-
-    Simulates the skill flow:
-    1. Writes alert.json to run_dir
-    2. Resolves signature knowledge via resolve_imports.py
-    3. Invokes claude with skill prompt + mock SIEM data
-    4. Returns the raw output
-    """
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    # Write alert
-    (run_dir / "alert.json").write_text(json.dumps(alert, indent=2))
-
-    # Load mock SIEM data for context
-    sig_id = alert.get("signature_id", "wazuh-rule-5710")
-    siem_fixture = FIXTURES / "siem_responses" / "wazuh-5710-monitoring-probe.json"
-    siem_data = json.loads(siem_fixture.read_text()) if siem_fixture.exists() else {}
-
-    # Resolve signature knowledge (simulates !command preprocessing)
-    resolve_result = subprocess.run(
-        [sys.executable, str(SOC_AGENT_ROOT / "scripts" / "resolve_imports.py"), sig_id],
-        capture_output=True, text=True, cwd=str(SOC_AGENT_ROOT),
-    )
-    resolved_knowledge = resolve_result.stdout if resolve_result.returncode == 0 else ""
-
-    # Build the prompt that simulates the investigate skill
-    prompt = f"""You are running a security alert investigation. Your working directory is the soc-agent plugin root.
-
-SIGNATURE KNOWLEDGE (resolved at skill load time):
-{resolved_knowledge}
-
-ALERT DATA:
-```json
-{json.dumps(alert, indent=2)}
-```
-
-RUN DIRECTORY: {run_dir}
-
-MOCK SIEM DATA (use this instead of querying live SIEM — no MCP tools are available in this test):
-```json
-{json.dumps(siem_data, indent=2)}
-```
-
-INSTRUCTIONS:
-1. Read the investigate skill instructions from skills/investigate/SKILL.md
-2. The signature knowledge above is already resolved — do not re-read context.md, playbook.md, or checklist.md
-3. Follow the investigation loop: CONTEXTUALIZE -> HYPOTHESIZE -> GATHER -> ANALYZE -> CONCLUDE
-4. At each phase, call write_state.py: python3 hooks/scripts/write_state.py {run_dir} <PHASE> {alert['ticket_id']} {sig_id}
-5. For the GATHER phase, use the MOCK SIEM DATA above instead of querying live tools
-6. Skip the Explore subagent for precedents in this test — use the mock data
-7. Write investigation.md and report.md to {run_dir}/
-8. The report.md MUST have YAML frontmatter with all required fields
-
-Complete the full investigation loop. Do not skip phases."""
-
-    result = subprocess.run(
-        [
-            "claude", "-p",
-            "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep",
-            "--output-format", "text",
-            "--max-budget-usd", "2.00",
-            prompt,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=str(SOC_AGENT_ROOT),
-    )
-
-    return result.stdout
-
-
-_llm_run_cache: dict = {}
-
-
 @pytest.fixture(scope="module")
 def llm_investigation_run(tmp_path_factory):
     """Run the investigator once and share the results across all LLM tests.
 
     This avoids invoking claude multiple times (expensive + slow).
+    Uses the shared run_investigation_mock() helper from conftest.
     """
     run_dir = tmp_path_factory.mktemp("llm-run") / "investigation"
     run_dir.mkdir()
@@ -291,12 +214,12 @@ def llm_investigation_run(tmp_path_factory):
         (FIXTURES / "alerts" / "benign-monitoring-probe.json").read_text()
     )
 
-    output = _run_investigator(run_dir, alert, timeout=300)
+    result = run_investigation_mock(run_dir, alert, timeout=300)
 
     return {
-        "run_dir": run_dir,
+        "run_dir": result.run_dir,
         "alert": alert,
-        "output": output,
+        "output": result.stdout,
     }
 
 
