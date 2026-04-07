@@ -25,6 +25,19 @@ else
     echo "    ✗ rsyslog failed to start"
 fi
 
+# Start dnsmasq (local DNS resolver with query logging)
+echo "[+] Starting dnsmasq..."
+# Point local resolution to dnsmasq
+echo "nameserver 127.0.0.1" > /etc/resolv.conf
+dnsmasq
+if [ $? -eq 0 ]; then
+    echo "    ✓ dnsmasq is running (DNS queries logged to /var/log/dnsmasq.log)"
+else
+    echo "    ✗ dnsmasq failed to start"
+    # Fallback to external DNS so container still works
+    echo "nameserver 8.8.8.8" > /etc/resolv.conf
+fi
+
 # Start openssh-server for SSH alert generation
 echo "[+] Starting sshd..."
 /usr/sbin/sshd
@@ -54,8 +67,15 @@ echo "========================================="
 echo "Monitoring:  Falco (eBPF - external container)"
 echo "Cron:        ✓ Running (workload scripts scheduled)"
 echo "SSH:         ✓ Running (port 22)"
+echo "DNS:         ✓ dnsmasq logging queries"
+echo "Syscheck:    ✓ FIM every 5 min, realtime on /etc"
 echo "Wazuh Agent: ✓ Running (manager: wazuh.manager)"
 echo "Workload:    /var/log/workload.log"
+echo ""
+echo "Workload schedule:"
+echo "  Every 5m:  benign_activity.sh, dns_activity.sh"
+echo "  Every 10m: fim_activity.sh"
+echo "  Every 15m: suspicious_patterns.sh"
 echo "========================================="
 echo ""
 

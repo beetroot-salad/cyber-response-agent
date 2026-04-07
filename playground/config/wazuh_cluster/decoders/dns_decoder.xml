@@ -1,0 +1,42 @@
+<!--
+  dnsmasq Decoder for Wazuh
+  Parses DNS query/reply/forward log lines from dnsmasq local resolver.
+  dnsmasq logs via syslog, so the parent syslog decoder handles timestamp/hostname/program_name.
+  These child decoders extract DNS-specific fields.
+
+  Log examples:
+    dnsmasq[1234]: query[A] google.com from 127.0.0.1
+    dnsmasq[1234]: forwarded google.com to 8.8.8.8
+    dnsmasq[1234]: reply google.com is 142.250.80.46
+    dnsmasq[1234]: reply xk3j2aa.example.com is NXDOMAIN
+    dnsmasq[1234]: config error is REFUSED
+-->
+
+<!-- Match program_name = dnsmasq -->
+<decoder name="dnsmasq">
+  <program_name>^dnsmasq</program_name>
+</decoder>
+
+<!-- DNS query: query[TYPE] DOMAIN from SOURCE_IP -->
+<decoder name="dnsmasq-query">
+  <parent>dnsmasq</parent>
+  <prematch>^query\[</prematch>
+  <regex>^query\[(\S+)\] (\S+) from (\S+)</regex>
+  <order>dns_query_type, url, srcip</order>
+</decoder>
+
+<!-- DNS reply: reply DOMAIN is ADDRESS_OR_STATUS -->
+<decoder name="dnsmasq-reply">
+  <parent>dnsmasq</parent>
+  <prematch>^reply </prematch>
+  <regex>^reply (\S+) is (\S+)</regex>
+  <order>url, dns_reply</order>
+</decoder>
+
+<!-- DNS forwarded: forwarded DOMAIN to UPSTREAM_SERVER -->
+<decoder name="dnsmasq-forwarded">
+  <parent>dnsmasq</parent>
+  <prematch>^forwarded </prematch>
+  <regex>^forwarded (\S+) to (\S+)</regex>
+  <order>url, dns_upstream</order>
+</decoder>
