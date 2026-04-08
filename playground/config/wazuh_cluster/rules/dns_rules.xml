@@ -4,19 +4,21 @@
 
   Rule ID Range: 100100-100199
   Severity Mapping:
-    - Known DGA/C2 patterns → Level 10-12 (High)
-    - Suspicious TLD/encoding → Level 8-9 (Medium)
-    - Informational DNS events → Level 3-4 (Low)
+    - Known DGA/C2 patterns: Level 10-12 (High)
+    - Suspicious TLD/encoding: Level 8-9 (Medium)
+    - Informational DNS events: Level 3-4 (Low)
 
   These rules match against dnsmasq query events decoded by dns_decoder.xml.
-  The decoded fields are: url (domain), srcip (query source), dns_query_type.
+  The decoded field is dns_domain (dynamic field, matched via <field>).
 -->
 
 <group name="dns,security,">
 
-  <!-- Base DNS query event (informational, not alerted by default) -->
+  <!-- Base DNS query event (informational) -->
+  <!-- decoded_as matches the parent decoder name; field match narrows to queries -->
   <rule id="100100" level="3">
-    <decoded_as>dnsmasq-query</decoded_as>
+    <decoded_as>dnsmasq</decoded_as>
+    <field name="dns_query_type">\.+</field>
     <description>DNS query logged by dnsmasq</description>
     <options>no_full_log</options>
     <group>dns_query,</group>
@@ -24,8 +26,8 @@
 
   <!-- DNS reply: NXDOMAIN (domain does not exist) -->
   <rule id="100101" level="3">
-    <decoded_as>dnsmasq-reply</decoded_as>
-    <match>NXDOMAIN</match>
+    <decoded_as>dnsmasq</decoded_as>
+    <field name="dns_reply">NXDOMAIN</field>
     <description>DNS query returned NXDOMAIN</description>
     <group>dns_nxdomain,</group>
   </rule>
@@ -37,23 +39,22 @@
   <!--
     High-entropy subdomain pattern (potential DGA or DNS tunneling).
     Matches domains with long random-looking subdomains:
-    - 12+ alphanumeric chars followed by a dot (e.g., xk3j2aab8f9q.example.com)
-    This is a simple heuristic; real DGA detection needs more sophistication.
+    12+ alphanumeric chars followed by a dot (e.g., xk3j2aab8f9q.example.com)
   -->
   <rule id="100110" level="10">
     <if_sid>100100</if_sid>
-    <field name="url">\w{12,}\.\w+\.\w+</field>
+    <field name="dns_domain">\w\w\w\w\w\w\w\w\w\w\w\w\S*\.\w+\.\w+</field>
     <description>DNS query to domain with high-entropy subdomain (possible DGA/tunneling)</description>
     <group>dns_suspicious,dns_dga,attack.command_and_control,</group>
   </rule>
 
   <!--
-    Query to recently-registered or suspicious TLDs commonly abused.
+    Query to frequently-abused TLDs.
     Matches: .xyz, .top, .club, .buzz, .tk, .ml, .ga, .cf, .gq, .pw, .cc, .ws
   -->
   <rule id="100111" level="8">
     <if_sid>100100</if_sid>
-    <field name="url">\.xyz$|\.top$|\.club$|\.buzz$|\.tk$|\.ml$|\.ga$|\.cf$|\.gq$|\.pw$|\.cc$|\.ws$</field>
+    <field name="dns_domain">\.xyz|\.top|\.club|\.buzz|\.tk|\.ml|\.ga|\.cf|\.gq|\.pw</field>
     <description>DNS query to frequently-abused TLD</description>
     <group>dns_suspicious,dns_suspicious_tld,</group>
   </rule>
@@ -82,25 +83,12 @@
   </rule>
 
   <!--
-    Hexadecimal-encoded subdomain pattern — potential data exfiltration via DNS.
-    Matches subdomains that look like hex-encoded data (16+ hex chars).
-    Example: 4a6f686e446f65.exfil.attacker.com
-  -->
-  <rule id="100114" level="11">
-    <if_sid>100100</if_sid>
-    <field name="url">[0-9a-f]{16,}\.</field>
-    <description>DNS query with hex-encoded subdomain (possible data exfiltration)</description>
-    <group>dns_suspicious,dns_exfiltration,attack.exfiltration,</group>
-  </rule>
-
-  <!--
     Known C2/malware callback domain patterns used by our test workload.
-    In production, this would be a CDB list lookup. For testing, we match
-    specific patterns our workload generates.
+    In production, this would be a CDB list lookup.
   -->
   <rule id="100115" level="12">
     <if_sid>100100</if_sid>
-    <field name="url">\.onion\.|malware-c2|callback\.evil|beacon\.\w+\.cc</field>
+    <field name="dns_domain">malware-c2|callback\.evil|beacon\.\S+\.cc</field>
     <description>DNS query to known malicious domain pattern</description>
     <group>dns_suspicious,dns_c2,attack.command_and_control,</group>
   </rule>
@@ -114,17 +102,6 @@
     <same_source_ip />
     <description>High-volume DNS queries from single source (possible beaconing/tunneling)</description>
     <group>dns_suspicious,dns_beaconing,attack.command_and_control,</group>
-  </rule>
-
-  <!--
-    Base64-like subdomain pattern — another exfiltration encoding.
-    Matches subdomains with mixed case + digits + padding chars, 20+ chars.
-  -->
-  <rule id="100117" level="10">
-    <if_sid>100100</if_sid>
-    <field name="url">[A-Za-z0-9+/=]{20,}\.</field>
-    <description>DNS query with base64-like subdomain (possible data exfiltration)</description>
-    <group>dns_suspicious,dns_exfiltration,attack.exfiltration,</group>
   </rule>
 
 </group>

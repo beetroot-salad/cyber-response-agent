@@ -34,12 +34,12 @@ RUN mkdir -p /run/sshd && \
     sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
 # Configure dnsmasq as local DNS resolver with query logging
+# Configure dnsmasq: log to syslog (so rsyslog adds proper syslog header for Wazuh decoder)
 RUN echo '# Local DNS resolver with query logging for security monitoring' > /etc/dnsmasq.conf && \
     echo 'listen-address=127.0.0.1' >> /etc/dnsmasq.conf && \
     echo 'port=53' >> /etc/dnsmasq.conf && \
     echo 'bind-interfaces' >> /etc/dnsmasq.conf && \
     echo 'log-queries' >> /etc/dnsmasq.conf && \
-    echo 'log-facility=/var/log/dnsmasq.log' >> /etc/dnsmasq.conf && \
     echo 'cache-size=0' >> /etc/dnsmasq.conf && \
     echo '# Forward to external DNS' >> /etc/dnsmasq.conf && \
     echo 'server=8.8.8.8' >> /etc/dnsmasq.conf && \
@@ -54,8 +54,9 @@ RUN curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | gpg --no-default-keyr
     rm -rf /var/lib/apt/lists/* && \
     update-rc.d wazuh-agent defaults 95 10
 
-# Configure Wazuh agent: localfile entries (auth.log, syslog, dnsmasq)
-RUN sed -i '/<\/ossec_config>/i \  <localfile>\n    <log_format>syslog</log_format>\n    <location>/var/log/auth.log</location>\n  </localfile>\n\n  <localfile>\n    <log_format>syslog</log_format>\n    <location>/var/log/syslog</location>\n  </localfile>\n\n  <localfile>\n    <log_format>syslog</log_format>\n    <location>/var/log/dnsmasq.log</location>\n  </localfile>' /var/ossec/etc/ossec.conf
+# Configure Wazuh agent: localfile entries (auth.log, syslog)
+# dnsmasq logs to syslog (no log-facility), so /var/log/syslog covers DNS events too
+RUN sed -i '/<\/ossec_config>/i \  <localfile>\n    <log_format>syslog</log_format>\n    <location>/var/log/auth.log</location>\n  </localfile>\n\n  <localfile>\n    <log_format>syslog</log_format>\n    <location>/var/log/syslog</location>\n  </localfile>' /var/ossec/etc/ossec.conf
 
 # Configure Wazuh agent: faster syscheck for testing (5 min instead of 12 hours)
 # and realtime monitoring on /etc for FIM alerts
@@ -83,7 +84,7 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Create log files
-RUN touch /var/log/workload.log /var/log/dnsmasq.log
+RUN touch /var/log/workload.log
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["tail", "-f", "/dev/null"]

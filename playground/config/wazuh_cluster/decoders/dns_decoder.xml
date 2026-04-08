@@ -18,11 +18,14 @@
 </decoder>
 
 <!-- DNS query: query[TYPE] DOMAIN from SOURCE_IP -->
+<!-- Wazuh OS_Regex: \w matches [a-zA-Z0-9], \S matches non-whitespace,
+     literal brackets are tricky so we skip past "query[" with prematch
+     using OS_Match (which treats [ literally) and capture from TYPE onward -->
 <decoder name="dnsmasq-query">
   <parent>dnsmasq</parent>
-  <prematch>^query\[</prematch>
-  <regex>^query\[(\S+)\] (\S+) from (\S+)</regex>
-  <order>dns_query_type, url, srcip</order>
+  <prematch>query[</prematch>
+  <regex offset="after_prematch">(\w+)] (\S+) from (\S+)</regex>
+  <order>dns_query_type, dns_domain, srcip</order>
 </decoder>
 
 <!-- DNS reply: reply DOMAIN is ADDRESS_OR_STATUS -->
@@ -30,7 +33,7 @@
   <parent>dnsmasq</parent>
   <prematch>^reply </prematch>
   <regex>^reply (\S+) is (\S+)</regex>
-  <order>url, dns_reply</order>
+  <order>dns_domain, dns_reply</order>
 </decoder>
 
 <!-- DNS forwarded: forwarded DOMAIN to UPSTREAM_SERVER -->
@@ -38,5 +41,5 @@
   <parent>dnsmasq</parent>
   <prematch>^forwarded </prematch>
   <regex>^forwarded (\S+) to (\S+)</regex>
-  <order>url, dns_upstream</order>
+  <order>dns_domain, dns_upstream</order>
 </decoder>

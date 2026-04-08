@@ -27,11 +27,19 @@ fi
 
 # Start dnsmasq (local DNS resolver with query logging)
 echo "[+] Starting dnsmasq..."
+# Capture Docker's embedded DNS (127.0.0.11) before overwriting resolv.conf
+# so dnsmasq can forward to it for container name resolution (e.g., wazuh.manager)
+DOCKER_DNS=$(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}')
+if [ -n "$DOCKER_DNS" ] && [ "$DOCKER_DNS" != "127.0.0.1" ]; then
+    # Prepend Docker DNS as primary upstream (for internal names)
+    sed -i "1i server=${DOCKER_DNS}" /etc/dnsmasq.conf
+    echo "    Using Docker DNS upstream: $DOCKER_DNS"
+fi
 # Point local resolution to dnsmasq
 echo "nameserver 127.0.0.1" > /etc/resolv.conf
 dnsmasq
 if [ $? -eq 0 ]; then
-    echo "    ✓ dnsmasq is running (DNS queries logged to /var/log/dnsmasq.log)"
+    echo "    ✓ dnsmasq is running (DNS queries logged via syslog)"
 else
     echo "    ✗ dnsmasq failed to start"
     # Fallback to external DNS so container still works
