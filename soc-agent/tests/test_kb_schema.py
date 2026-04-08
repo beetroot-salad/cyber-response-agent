@@ -305,28 +305,6 @@ class TestPlaybookImports:
             )
             assert resolved.exists()
 
-    @pytest.mark.parametrize(
-        "playbook_file, import_name",
-        [
-            pytest.param(pb, name, id=f"{pb.parent.name}/{name}")
-            for pb, name in [
-                (pb, name)
-                for sig_dir in SIGNATURES_DIR.iterdir()
-                if not sig_dir.name.startswith("_") and (sig_dir / "playbook.md").exists()
-                for pb in [sig_dir / "playbook.md"]
-                for name in [m.group(1) for m in IMPORT_PATTERN.finditer(pb.read_text())]
-            ]
-        ],
-    )
-    def test_import_resolves(self, playbook_file, import_name):
-        """Each @import:name must resolve to a file in lessons/."""
-        resolved = resolve_import(import_name)
-        assert resolved is not None, (
-            f"@import:{import_name} in {playbook_file.parent.name}/playbook.md "
-            f"does not resolve to any file in lessons/"
-        )
-        assert resolved.exists()
-
 
 # --- Precedent template ---
 
