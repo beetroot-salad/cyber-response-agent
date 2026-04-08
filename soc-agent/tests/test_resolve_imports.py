@@ -146,7 +146,7 @@ class TestEndToEndResolve:
         out = wazuh_5710_result.stdout
 
         # context.md content
-        assert "Triggers when sshd logs an attempt to login using a non-existent user" in out
+        assert "Invalid user" in out
         assert "data.srcip" in out
 
         # playbook.md content

@@ -1,0 +1,12 @@
+# Permissions for Wazuh Rule 100001: Terminal shell in container (Falco)
+#
+# PLAYGROUND CONFIG — recommend-only, no mitigation actions defined yet.
+
+schema_version: "2.0"
+
+mode:
+  allowed: [recommend]
+  default: recommend
+
+mitigation:
+  actions: {}

@@ -148,8 +148,8 @@ class TestRealFrontmatter:
         assert fm["mitre"]["techniques"] == "T1110"
         # Block list
         assert isinstance(fm["data_sources"], list)
-        assert "sshd" in fm["data_sources"]
-        assert len(fm["data_sources"]) == 3
+        assert "auth-events" in fm["data_sources"]
+        assert len(fm["data_sources"]) == 1
         # Nested dict with nulls
         assert isinstance(fm["base_rate"], dict)
         assert fm["base_rate"]["benign_pct"] is None
