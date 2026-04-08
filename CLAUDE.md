@@ -203,17 +203,16 @@ Multi-container stack (`.devcontainer/docker-compose.yml`):
 | **wazuh.indexer** | Elasticsearch for events |
 | **wazuh.dashboard** | Web UI |
 
-### Common Commands
+### Managing Containers
+
+Always go through Compose with the **full** project + file set below — never bare `docker run/start/stop/rm` on a Compose-managed container, and never a partial `-f` set. Mismatched `-p`/`-f` splits the stack into parallel projects and collides on names like `target-endpoint`, requiring manual cleanup.
 
 ```bash
-# Start all containers
-cd .devcontainer && docker compose up -d
-
-# Start Wazuh stack
-docker compose -p cyber-response-agent_devcontainer -f wazuh-stack.yml -f wazuh-overrides.yml up -d
-
-# View Falco events
-docker logs falco --follow
+docker compose -p cyber-response-agent_devcontainer \
+  -f .devcontainer/docker-compose.yml \
+  -f .devcontainer/wazuh-stack.yml \
+  -f .devcontainer/wazuh-overrides.yml \
+  <up -d | down | ps | logs ...>
 ```
 
 ## Credentials (Development Only)
