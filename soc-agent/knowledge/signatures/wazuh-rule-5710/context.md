@@ -3,11 +3,9 @@ signature_id: wazuh-rule-5710
 name: SSH Invalid User
 severity: medium
 data_sources:
-  - sshd
-  - /var/log/auth.log
-  - /var/log/secure
+  - auth-events
 created_at: 2024-11-15
-updated_at: 2026-03-23
+updated_at: 2026-04-08
 mitre:
   tactics: Initial Access
   techniques: T1110
@@ -23,7 +21,14 @@ base_rate:
 
 ## Signature Logic
 
-Triggers when sshd logs an attempt to login using a non-existent user.
+Wazuh built-in rule. The fundamental detected activity: **OpenSSH's `sshd`
+process logged an authentication attempt for a username that does not
+exist on the host.** OpenSSH writes this to `auth.log` (Debian/Ubuntu) or
+`/var/log/secure` (RHEL family) before any password or key check happens.
+
+The Wazuh sshd decoder parses the syslog line and extracts `srcip` and
+`srcuser`. The parent rule 5700 catches all sshd messages; rule 5710 is a
+child that matches the "Invalid user ..." pattern.
 
 **Log pattern:**
 ```
@@ -35,60 +40,79 @@ Invalid user <username> from <IP> port <port>
 Nov 15 02:30:00 server sshd[12345]: Invalid user testuser from 10.0.1.50 port 54321
 ```
 
-**Parent rule:** 5700 (sshd messages grouping)
-
 ## Alert Fields
 
-| Field | JSON Path | Description | Example |
-|-------|-----------|-------------|---------|
-| Source IP | `data.srcip` | Connection source IP | `10.0.1.50` |
-| Username | `data.srcuser` | Invalid username attempted | `testuser` |
-| Agent | `agent.name` | Host where event detected | `web-server-01` |
-| Timestamp | `timestamp` | Event time | `2024-11-15T02:30:00Z` |
+| Field | JSON Path | Why it's worth documenting |
+|-------|-----------|----------------------------|
+| Username | `data.srcuser` | The attempted username — easy to read as "the user who connected", but it's the *target* the attacker is trying. The connecting party has no host account by definition (that's why the rule fires). |
+| Source IP | `data.srcip` | The connection source as seen by sshd. May be a NAT egress IP, not the actual attacker. |
+
+`data.dstuser` and `agent.name` are self-explanatory.
 
 ## Related Rules
 
 | Rule ID | Description | Relationship |
 |---------|-------------|--------------|
-| 5700 | sshd messages grouping | Parent rule |
-| 5501 | SSH successful login | Check for subsequent success |
+| 5700 | sshd messages grouping | Parent rule (always fires first) |
+| 5501 | SSH successful login | Check for subsequent success (compromise indicator) |
 | 5715 | SSH authentication success | Check for subsequent success |
-| 5712 | SSH brute force attack | May fire if pattern continues |
+| 5712 | SSH brute force attack | Composite rule that fires when 5710 repeats |
 
 ## Threat & Motivation
 
-An attacker attempting SSH brute force aims to gain initial access (MITRE T1110). The invalid user variant means they're guessing usernames, not just passwords — suggesting either:
-- Opportunistic scanning (common, low sophistication)
-- Targeted enumeration (rare, higher sophistication)
+**What the activity is.** Someone connected to the SSH port and submitted
+a username that doesn't exist on the host. sshd logs this *before* the
+password/key check, so we know nothing about credentials yet — only that
+the username was wrong.
 
-**Blast radius if real:** Full shell access to the target host, potential lateral movement.
+**Why an attacker would do this.** Brute-force credential guessing
+(MITRE T1110). Attackers typically don't know what usernames exist on a
+target, so they iterate through common ones (`admin`, `root`, `oracle`,
+`postgres`, ...). Each invalid attempt produces this rule.
 
-## Known False Positives
+**Concrete attacker scenarios:**
+- Mass scanning bot iterating a wordlist against SSH-exposed hosts
+- Targeted enumeration trying to discover real account names before
+  switching to password attacks
+- Credential stuffing using usernames leaked from a third-party breach
 
-1. **Monitoring probes** — Health check systems (Nagios, Zabbix) using test credentials. See: `precedents/monitoring-probe-001.json`
-2. **User typos** — Legitimate users mistyping their username, followed by successful login
-3. **Service account rotation** — Automated jobs using stale credentials after password rotation
-4. **Scanner assessments** — Internal security scans during approved assessment windows
+**Legitimate reasons this fires.** Common in real environments:
+- Monitoring systems using a test credential to verify SSH availability
+- Users mistyping their username (often followed by a successful login)
+- Service accounts using stale credentials after a password/account rotation
+- Internal security scanners during approved assessment windows
+
+**Blast radius if real.** Each individual 5710 doesn't grant access — the
+auth check fails by definition. The risk is what *follows*: if the
+attacker eventually guesses a valid username and password, they get a
+shell on the host with that user's privileges.
 
 ## Risk Indicators
 
-### Lower Risk
-1. Internal source IP (RFC1918 ranges)
-2. Monitoring probe usernames (testuser, probe, nagios, zabbix)
-3. Single attempt (no repetition)
-4. Successful login follows shortly after
-5. Known scanner IP during assessment window
+The risk on this signature comes from **two orthogonal axes**:
 
-### Higher Risk
-1. External source IP
-2. Multiple failed attempts (>5 in short window)
-3. Multiple different usernames attempted
-4. No subsequent successful login
-5. Random or common attack usernames (admin, root, user)
+### Axis 1 — Source trust
 
-## Field Notes
+Where did the connection originate?
 
-- Base rate is high — most SSH-exposed servers see continuous invalid user attempts from the internet
-- Internal-source alerts are far more likely to be benign than external-source
-- The username attempted is highly diagnostic: monitoring patterns vs. attack wordlists are distinct
-- Time-of-day matters for service accounts (cron patterns) but not for external attacks
+- Internal RFC1918 source IP, especially from a known monitoring,
+  scanner, or jumpbox subnet (lower risk)
+- External source IP, no prior history (higher risk)
+- External source IP that has fired other rules in the recent past
+  (higher risk)
+
+### Axis 2 — Pattern shape
+
+Does this look like a single misfire or like an attack in progress?
+
+- Single attempt, single username, especially a username that fits a
+  recognized monitoring or service-account pattern (lower risk)
+- Multiple attempts in a short window, multiple distinct usernames,
+  usernames from common attack wordlists (higher risk; rule 5712 may
+  also fire)
+- Followed by a successful login from the same source (higher risk —
+  potential compromise; check rules 5501 / 5715)
+
+A trusted source + single-shot pattern is the low-risk quadrant. An
+external source + high-volume / multi-username pattern is the high-risk
+quadrant.

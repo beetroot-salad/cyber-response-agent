@@ -7,6 +7,15 @@ resolution_rate: null
 
 # Investigation Playbook: Terminal shell in container (100001)
 
+> **Note on the hypothesis catalog below:** the current shape conflates
+> observable primitives with outcome stories — `?operator-debug` and
+> `?ci-cd-pipeline` share all the same primitives, `?image-startup` and
+> `?healthcheck-or-probe` differ only in cadence, etc. Worker-mode validation
+> confirmed this catalog over-escalates because the leads cannot
+> discriminate the entries. A primitives + archetypes + trust-anchors
+> redesign is tracked in `docs/design-v3-hypothesis-archetype-rewrite.md`
+> and will replace this section.
+
 ## Hypothesis Catalog
 
 ### ?operator-debug
@@ -119,20 +128,16 @@ redirect), 100006 (sensitive file read), 100007 (drop-and-exec), and 100008
 | ?image-startup | No correlated suspicious events |
 | ?adversary-post-exploit | One or more correlated rules in the same container window |
 
-### host-and-runtime-context
-**Query:** What other alerts (any rule) have fired on the agent running
-Falco for this container in the last 24h? Is the container privileged, does
-it mount the Docker socket, does it run with host network or host PID?
+> **Host-context queries** ("other alerts on this agent in last 24h",
+> "is this a repeat or part of a pattern") are handled by the
+> ticket-context subagent at CONTEXTUALIZE — its findings are already in
+> the investigation context by the time leads run. Don't re-execute those
+> queries here; reference the ticket-context output instead.
 
-**Discriminates:** Severity of a true positive and likelihood the shell is
-part of broader activity.
-
-| Hypothesis | Prediction |
-|------------|------------|
-| ?operator-debug | Clean host context |
-| ?ci-cd-pipeline | Clean host context |
-| ?image-startup | Clean host context |
-| ?adversary-post-exploit | May correlate with prior auth, network, or process alerts on the same host |
+> **Container runtime privileges** (privileged flag, Docker socket mount,
+> host network/PID) are scoping evidence that informs severity and the
+> Privilege axis of risk indicators. Gather them as scoping evidence when
+> the primitive pattern looks adversarial; not a separate diagnostic lead.
 
 ---
 
@@ -159,19 +164,28 @@ All must be true:
 ## Escalation Criteria
 
 Escalate immediately if ANY:
-- Parent process is an application binary (web server, database, language
-  runtime) rather than a runtime exec primitive
-- Shell command line indicates an interactive or networked shell (`-i`,
-  pipes to `/dev/tcp`, redirects to a socket)
+- Shell command line indicates a networked shell (pipes to `/dev/tcp`,
+  redirects to a socket fd) — this is unambiguously adversarial
 - Correlated 100002, 100006, 100007, or 100008 event from the same container
   within the surrounding window
 - Container is privileged, mounts the Docker socket, or runs with host
-  network / host PID
-- No hypothesis reaches `++` after pursuing all leads
+  network / host PID **and** the primitive pattern doesn't match a known
+  benign archetype for this image
+- Parent is an application binary **and** this image has no prior history
+  of shells from that parent **and** no operator/CI/deploy activity
+  explains the timing
 - Container image has never previously fired this rule and the operator
   hypothesis cannot be confirmed
+- No hypothesis reaches `++` after pursuing all leads
 - A field a lead depends on (`proc.pname`, `proc.cmdline`, `container.image`,
   etc.) is missing from the alert and cannot be retrieved — do not guess
+
+> **Removed:** "parent is an application binary → escalate" as a hard
+> standalone trigger. Real apps shell out routinely (build/deploy hooks,
+> `subprocess.run`, ImageMagick/ffmpeg wrappers, log rotation) and the
+> trigger as written produced too many false escalations. App-spawned
+> shells now require corroboration from the abnormality axis before
+> escalating.
 
 ## Scope
 

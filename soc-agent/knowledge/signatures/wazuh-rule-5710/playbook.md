@@ -7,6 +7,15 @@ resolution_rate: null
 
 # Investigation Playbook: SSH Invalid User (5710)
 
+> **Note on the hypothesis catalog below:** the existing catalog
+> (`?monitoring-probe`, `?brute-force`, `?credential-stuffing`,
+> `?service-account-rotation`) is story-shaped — entries combine actor
+> type, intent, and modality into single hypotheses. The primitives +
+> archetypes + trust-anchors redesign in
+> `docs/design-v3-hypothesis-archetype-rewrite.md` will replace this
+> section. Until then, treat these as informal categories rather than
+> rigorously discriminable hypotheses.
+
 ## Hypothesis Catalog
 
 ### ?monitoring-probe
@@ -57,17 +66,13 @@ Automated job using stale credentials after a password rotation event.
 | ?credential-stuffing | External IP, likely no prior alerts |
 | ?service-account-rotation | Internal IP, same alert recurring on schedule |
 
-### recent-alert-correlation
-**Query:** Other alerts from same agent (target host) in last 24 hours, especially rules 5712 (brute force composite), 5501/5715 (successful login).
-
-**Discriminates:** Escalation signals.
-
-| Hypothesis | Prediction |
-|------------|------------|
-| ?monitoring-probe | No correlated alerts (or only other monitoring noise) |
-| ?brute-force | May have 5712 (brute force composite), multiple 5710s |
-| ?credential-stuffing | Isolated alert, no composite triggers |
-| ?service-account-rotation | Same 5710 recurring at regular intervals |
+> **Recent-alert correlation** ("other alerts from this host in last 24h",
+> "is this a repeat or part of a pattern", "did 5712/5501/5715 also fire")
+> is handled by the ticket-context subagent at CONTEXTUALIZE — its
+> findings are already in the investigation context by the time leads
+> run. Don't re-execute those queries here; reference the ticket-context
+> output for escalation signals (composite rule firing, successful login
+> follow-up, recurring alert pattern).
 
 ### username-analysis
 **Query:** Examine the attempted username(s) against known patterns.

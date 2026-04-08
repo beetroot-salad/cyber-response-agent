@@ -135,7 +135,7 @@ class TestContextFrontmatter:
         assert fm["mitre"]["tactics"] == "Initial Access"
         assert fm["mitre"]["techniques"] == "T1110"
         assert isinstance(fm["data_sources"], list)
-        assert "sshd" in fm["data_sources"]
+        assert "auth-events" in fm["data_sources"]
 
 
 # --- Precedent schema edge cases ---

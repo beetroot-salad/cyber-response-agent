@@ -7,6 +7,15 @@ resolution_rate: null
 
 # Investigation Playbook: DNS query with high-entropy subdomain (100110)
 
+> **Note on the hypothesis catalog below:** the catalog mixes
+> "what-the-domain-looks-like" stories (`?cdn-or-cloud-service`,
+> `?analytics-or-tracking`) with adversary stories (`?dga-malware`,
+> `?dns-tunneling`). The benign-side stories share all the same primitives
+> and the adversary-side stories ended with identical assessments under
+> worker-mode validation. The primitives + archetypes + trust-anchors
+> redesign in `docs/design-v3-hypothesis-archetype-rewrite.md` will
+> replace this section.
+
 > **Stress test:** This signature is inherently ambiguous. Many legitimate
 > services produce DNS queries that match the rule's pattern. The
 > investigation goal is **not** to "prove benign" — it is to determine
@@ -114,18 +123,11 @@ encoded, or hex? What is its length and character distribution?
 | ?dga-malware | Family-dependent: random alphanumerics, dictionary-word concatenation, or syllable concatenation; length usually consistent within a family |
 | ?dns-tunneling | Long, dense, base32/base64/hex chunks; often fixed format across queries |
 
-### host-context
-**Query:** Other alerts from the same agent in the last 24h, especially
-process events (100001+), file changes (550), or auth anomalies (5710+).
-
-**Discriminates:** Whether the DNS event is isolated or part of a chain.
-
-| Hypothesis | Prediction |
-|------------|------------|
-| ?cdn-or-cloud-service | Clean host context |
-| ?analytics-or-tracking | Clean host context |
-| ?dga-malware | May correlate with process, file, or persistence alerts |
-| ?dns-tunneling | May correlate with process or network alerts |
+> **Host-context queries** ("other alerts on this agent in last 24h",
+> "is this a repeat or part of a pattern") are handled by the
+> ticket-context subagent at CONTEXTUALIZE — its findings are already in
+> the investigation context by the time leads run. Don't re-execute those
+> queries here; reference the ticket-context output instead.
 
 ---
 

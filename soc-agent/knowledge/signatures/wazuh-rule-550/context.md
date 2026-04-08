@@ -3,7 +3,7 @@ signature_id: wazuh-rule-550
 name: Integrity checksum changed
 severity: medium
 data_sources:
-  - wazuh-syscheck
+  - file-events
 created_at: 2026-04-08
 updated_at: 2026-04-08
 mitre:
@@ -23,34 +23,35 @@ base_rate:
 
 ## Signature Logic
 
-Triggers when Wazuh syscheck detects that the hash of a file under a monitored
-directory has changed since the last scan. The agent runs syscheck periodically
-(`<frequency>`), and may run in realtime mode for directories configured with
-`realtime="yes"`. The rule fires once per modified file per scan.
+Wazuh rule 550 is a built-in rule that fires whenever the **syscheck** agent
+module reports that a monitored file's content hash has changed since the
+previous scan. The fundamental detected activity is "the bytes of a file
+under a watched path changed" — syscheck reads the file, computes
+md5/sha1/sha256, and compares against its stored baseline.
 
-In this environment syscheck is configured for `/etc`, `/usr/bin`, `/usr/sbin`,
-`/bin`, `/sbin`, `/boot`, with realtime + report_changes on `/etc`. Frequency
-is 300s. See `playground/target-endpoint/Dockerfile`.
+Two operating modes:
+- **Periodic scan** — every `<frequency>` seconds, the agent walks every
+  configured directory. Latency between modification and alert can be up
+  to one frequency interval.
+- **Realtime** — for directories configured with `realtime="yes"`, syscheck
+  uses inotify (Linux) and fires within seconds of the modification.
+
+In this environment syscheck watches `/etc`, `/usr/bin`, `/usr/sbin`,
+`/bin`, `/sbin`, `/boot`, with realtime + report_changes on `/etc`.
+Frequency is 300s. See `playground/target-endpoint/Dockerfile`.
+
+The rule fires once per modified file per scan.
 
 ## Alert Fields
 
-| Field | JSON Path | Description | Example |
-|-------|-----------|-------------|---------|
-| Path | `syscheck.path` | Modified file path | `/etc/ssh/sshd_config` |
-| Event | `syscheck.event` | Type of change | `modified` |
-| MD5 before | `syscheck.md5_before` | Hash before change | `5f4dcc...` |
-| MD5 after | `syscheck.md5_after` | Hash after change | `e99a18...` |
-| SHA1 before | `syscheck.sha1_before` | SHA1 before change | |
-| SHA1 after | `syscheck.sha1_after` | SHA1 after change | |
-| Size before | `syscheck.size_before` | File size before | `3242` |
-| Size after | `syscheck.size_after` | File size after | `3275` |
-| Owner before | `syscheck.uname_before` | File owner before | `root` |
-| Owner after | `syscheck.uname_after` | File owner after | `root` |
-| Mtime before | `syscheck.mtime_before` | Modification time before | |
-| Mtime after | `syscheck.mtime_after` | Modification time after | |
-| Changed attrs | `syscheck.changed_attributes` | List of attributes that changed | `["md5","sha1","size"]` |
-| Diff | `syscheck.diff` | Text diff (only when `report_changes=yes` and file is text) | |
-| Agent | `agent.name` | Host where change was detected | `target-endpoint` |
+| Field | JSON Path | Why it's worth documenting |
+|-------|-----------|----------------------------|
+| Changed attrs | `syscheck.changed_attributes` | List of which attributes changed (`md5`, `size`, `mtime`, `perm`, `uname`, ...). The set of changed attributes is the strongest hint about *what kind* of change this is — perm/uname changes carry different threat weight than mtime/md5. |
+| Diff | `syscheck.diff` | Text diff of before/after content. **Only present** when `report_changes=yes` AND the file is text AND the parent dir has the option enabled. Absent for binaries or unconfigured paths. |
+| Scan vs realtime | (implicit from path config) | The agent does not flag which mode produced the alert. You have to know from the agent's `<directories>` config whether the path is realtime or scan-based — affects timestamp interpretation. |
+
+Other fields (`syscheck.path`, `syscheck.event`, `syscheck.md5_before/after`,
+`syscheck.uname_before/after`, etc.) are self-explanatory.
 
 ## Related Rules
 
@@ -58,79 +59,99 @@ is 300s. See `playground/target-endpoint/Dockerfile`.
 |---------|-------------|--------------|
 | 553 | File deleted | Sibling syscheck rule |
 | 554 | File added | Sibling syscheck rule |
-| 591 | Audit: file integrity event correlated with auditd | Higher-confidence variant when auditd is available |
+| 591 | Audit: file integrity event correlated with auditd | Higher-confidence variant when auditd is available — names the process that touched the file |
 
 ## Threat & Motivation
 
-File modification under monitored system paths is a classic primitive for:
+**What the activity is.** The bytes of a file under a watched path changed.
+At the OS level this is one or more `write()`, `truncate()`, or
+`rename()` syscalls. Syscheck doesn't see the syscalls themselves — it
+only sees that the file's hash drifted between two reads.
 
-- **Persistence (T1543, T1546):** Cron jobs, systemd unit files, init scripts,
-  shell rc files, PAM modules, `ld.so.preload`.
-- **Defense Evasion (T1222, T1070):** Permission changes, log clearing,
-  auth.log truncation, hosts file pinning.
-- **Privilege Escalation:** sudoers edits, setuid bit additions on binaries.
-- **Initial Access / Backdoors:** sshd_config changes (PermitRootLogin,
-  AuthorizedKeysFile), authorized_keys appends, /etc/passwd edits.
+**Why an attacker would want to modify a file under `/etc`, `/usr/bin`,
+`/boot`, etc.** These paths are where Linux stores everything that
+controls authentication, autostart, command paths, and trust:
 
-**Blast radius if real:** depends entirely on the file. A modified
-`/etc/sudoers` or `/etc/ssh/sshd_config` is high-impact; a modified MOTD is
-not.
+- **Persistence (T1543, T1546):** drop a cron job, systemd unit, init
+  script, PAM module, shell rc, or `ld.so.preload` entry to regain access
+  after a reboot or session end
+- **Privilege escalation:** edit `/etc/sudoers` to grant a low-priv
+  account root, or set the setuid bit on a writable binary
+- **Backdoors / initial access:** edit `/etc/ssh/sshd_config` to allow
+  root login or password auth, append a key to `~/.ssh/authorized_keys`,
+  add a user to `/etc/passwd`
+- **Defense evasion (T1222, T1070):** truncate `/var/log/auth.log`,
+  pin `/etc/hosts`, change permissions to hide files
 
-## Known False Positives
+**Concrete attacker scenarios:**
+- Web app RCE → drops a script in `/etc/cron.hourly/` → cron picks it up
+  next hour → persistent C2
+- Compromised SSH session → appends a public key to
+  `/root/.ssh/authorized_keys` → durable access even after the original
+  vector is patched
+- Container escape → writes to host's `/etc/sudoers.d/` via mounted volume
 
-Not yet characterized for this environment — populate from real tickets as
-they accumulate. Generic categories that *typically* drive benign 550 alerts
-on Linux servers include package management, configuration management runs,
-and routine admin edits, but the specific patterns that dominate this
-environment are unknown.
+**Legitimate reasons this fires.** Most 550 events on a Linux server are
+not adversarial. Common drivers:
+- Package install/upgrade/removal touching package-owned files
+- Automatic patching (`unattended-upgrades`, `dnf-automatic`) running on
+  schedule
+- Configuration management (Ansible, Puppet, Chef, Salt, cloud-init)
+  pushing config from a controller
+- Operators editing config files directly during troubleshooting
+- Application self-update mechanisms touching their own config files
+
+**Blast radius if real.** Entirely depends on the file. A modified `/etc/motd`
+is cosmetic. A modified `/etc/sudoers` is host root. Always classify the
+file before assigning severity.
 
 ## Risk Indicators
 
-### Lower Risk
-1. Path is a known-noisy file (e.g., `/etc/mtab`, MOTD, package caches)
-2. Change correlates with a package install or config-management run window
+The risk on this signature comes from **two orthogonal axes**:
 
-### Higher Risk
-1. Path is security-relevant (`/etc/passwd`, `/etc/shadow`, `/etc/sudoers`,
-   `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys`, `/etc/cron*`,
-   `/etc/systemd/system/*`, `/etc/pam.d/*`, `/etc/ld.so.preload`)
-2. Owner or permission change on a binary in `/usr/bin` or `/usr/sbin`
-3. Setuid/setgid bit added (visible via `changed_attributes` containing `perm`)
-4. Multiple unrelated security-relevant files changed in a short window
-5. Change occurs outside any change-management window
+### Axis 1 — Sensitivity of the path
 
-## Field Notes
+How much harm does writing to this file enable?
 
-- `report_changes=yes` only produces a `syscheck.diff` for text files; binaries
-  show only hash/size deltas.
-- Realtime monitoring on `/etc` produces alerts within seconds; non-realtime
-  paths only fire on the next scheduled scan, so timestamps may lag the
-  actual modification by up to one scan interval.
-- Wazuh syscheck does **not** record the process or user that made the change.
-  Attribution requires correlating with auditd (rule 591), shell history, or
-  package manager logs.
+- Authentication and authorization: `/etc/passwd`, `/etc/shadow`,
+  `/etc/sudoers*`, `/etc/pam.d/*`, `/etc/ssh/sshd_config`,
+  `~/.ssh/authorized_keys`
+- Autostart and scheduling: `/etc/cron*`, `/etc/systemd/system/*`,
+  `/etc/init.d/*`, shell rc files
+- Trust and execution: `/etc/ld.so.preload`, `/etc/ld.so.conf*`,
+  binaries in `/usr/bin` / `/usr/sbin` / `/bin` / `/sbin`
+- Logging integrity: `/var/log/*` (when watched), `/etc/rsyslog*`,
+  `/etc/audit/*`
 
-## Impact
+### Axis 2 — Sanctioned vs unsanctioned change
 
-If the modification is malicious, the impact ranges from a quiet persistence
-foothold to full host compromise depending on the file. Treat unattributed
-changes to authentication, privilege, or autostart files as potentially
-critical until ruled out.
+Does this change correlate with an approved source?
 
-## Operational Notes
+- A package install/upgrade event from the package manager?
+- An active change-management window?
+- A config-management run from the controller?
+- A merged PR in the infra repo?
+- A correlated `syscheck.diff` that matches a known template?
 
-To be populated from real investigations.
+Without an external sanction signal, *every* change to a sensitive path
+is suspicious by default. Sanction lives in org systems outside the SIEM
+(see the trust-anchor layer in
+`docs/design-v3-hypothesis-archetype-rewrite.md`); the current playbook
+infers it heuristically until that layer is wired up.
 
-## Tuning Guidance
+### Notes
 
-To be populated from real investigations. The Wazuh `<ignore>` list in the
-manager config is the primary tuning lever; per-directory `report_changes`
-and `realtime` settings control telemetry depth.
+- `changed_attributes` containing `uname`, `gname`, or `perm` (especially
+  setuid/setgid additions) is a stronger signal than hash-only changes.
+- Binary files without a `syscheck.diff` give you no content visibility at
+  all — escalate by default for high-sensitivity binary changes.
 
 ## Detection Gaps
 
-- No process/user attribution — syscheck only sees the file delta.
+- No process or user attribution — syscheck only sees the file delta.
+  Attribution requires correlating with auditd (rule 591), shell history,
+  or package manager logs.
 - Binary diffs are not produced — only hash/size/mtime deltas.
-- A file modified and reverted between two scans is invisible (unless realtime
-  is enabled for that path).
+- A file modified and reverted between two scans is invisible unless
+  realtime monitoring is enabled for that path.
 - Scan-based monitoring has up to one frequency interval of latency.

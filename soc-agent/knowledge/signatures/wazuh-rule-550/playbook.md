@@ -7,6 +7,14 @@ resolution_rate: null
 
 # Investigation Playbook: Integrity checksum changed (550)
 
+> **Note on the hypothesis catalog below:** the catalog mixes observable
+> primitives (what kind of change happened) with story attribution
+> (`?package-management` vs `?automatic-patching` vs `?config-management`
+> all share identical primitives — they only differ in *what triggered the
+> package install*). The primitives + archetypes + trust-anchors redesign
+> in `docs/design-v3-hypothesis-archetype-rewrite.md` will replace this
+> section.
+
 ## Hypothesis Catalog
 
 ### ?package-management
@@ -118,22 +126,11 @@ changes (admin/adversary).
 | ?adversary-persistence | One or few files, possibly correlated with non-syscheck alerts |
 | ?adversary-tampering | One or few files, possibly correlated with non-syscheck alerts |
 
-### host-context
-**Query:** Other alerts from the same agent in the last 24 hours, especially
-authentication anomalies (5710/5712), Falco process events (100001+), or
-other 550 events on security-relevant paths.
-
-**Discriminates:** Whether the modification appears in isolation or as part
-of a broader incident.
-
-| Hypothesis | Prediction |
-|------------|------------|
-| ?package-management | Clean host context |
-| ?automatic-patching | Clean host context |
-| ?config-management | Clean host context |
-| ?interactive-admin | Clean host context |
-| ?adversary-persistence | May correlate with prior auth, process, or network alerts |
-| ?adversary-tampering | May correlate with prior auth, process, or network alerts |
+> **Host-context queries** ("other alerts on this agent in last 24h",
+> "is this a repeat or part of a pattern") are handled by the
+> ticket-context subagent at CONTEXTUALIZE — its findings are already in
+> the investigation context by the time leads run. Don't re-execute those
+> queries here; reference the ticket-context output instead.
 
 ---
 
@@ -144,7 +141,7 @@ Many investigations can be narrowed to one or two hypotheses purely from the
 file category, before any contextual queries are needed.
 
 Follow with `change-attributes` to confirm the kind of change, then
-`temporal-correlation` and `host-context` if the picture isn't yet clear.
+`temporal-correlation` if the picture isn't yet clear.
 
 ---
 

@@ -3,8 +3,7 @@ signature_id: wazuh-rule-100110
 name: DNS query with high-entropy subdomain
 severity: medium
 data_sources:
-  - dnsmasq
-  - /var/log/syslog
+  - network-events
 created_at: 2026-04-08
 updated_at: 2026-04-08
 mitre:
@@ -26,42 +25,41 @@ base_rate:
 
 ## Signature Logic
 
-Custom rule 100110 fires when a DNS query is observed (via the local dnsmasq
-resolver, decoded into the `dnsmasq-query` decoder) and the queried
-`dns_domain` contains a leading label of 12 or more alphanumeric characters
-followed by a parent domain. The intent is to flag domain-generation-algorithm
-(DGA) and DNS-tunneling patterns where data or pseudo-random labels appear in
-the subdomain.
+Custom Wazuh rule. The fundamental detected activity: **a DNS query was
+issued whose leading label is at least 12 alphanumeric characters long.**
 
-The rule is intentionally broad — it does **not** compute true entropy, only
-match a length/character pattern. See
-`playground/config/wazuh_cluster/rules/dns_rules.xml`.
+The activity is observed via the local dnsmasq resolver on the endpoint,
+which logs every query through syslog. A custom Wazuh decoder
+(`dnsmasq-query`) parses the syslog line into `dns_query_type`,
+`dns_domain`, and `srcip` fields. Rule 100100 catches every parsed query;
+rule 100110 narrows to queries whose `dns_domain` matches a regex
+requiring 12+ alphanumerics in the leftmost label followed by a parent
+domain. See `playground/config/wazuh_cluster/rules/dns_rules.xml`.
 
-This is a stress-test signature: the underlying detection is inherently
-ambiguous. Many legitimate services (CDNs, cloud providers, analytics
-platforms, PWAs) emit DNS queries that match this shape, and attackers
-deliberately blend into that noise. Resolving these alerts requires domain
-knowledge that the rule cannot encode.
+The rule does **not** compute Shannon entropy or any real randomness
+measure — only label length. A 12-character English word matches the same
+as a 12-character base32 blob.
+
+This is a deliberate stress-test signature: the rule is broad and
+ambiguous by design. Many legitimate services emit DNS queries that match
+this shape. Resolving these alerts requires domain knowledge the rule
+cannot encode.
 
 ## Alert Fields
 
-| Field | JSON Path | Description | Example |
-|-------|-----------|-------------|---------|
-| Query type | `data.dns_query_type` | DNS record type | `A`, `AAAA`, `TXT` |
-| Domain | `data.dns_domain` | Queried FQDN | `xk3j2aab8f9q.example.com` |
-| Source IP | `data.srcip` | Querying client (as seen by dnsmasq) | `127.0.0.1` |
-| Agent | `agent.name` | Host running dnsmasq | `target-endpoint` |
+| Field | JSON Path | Why it's worth documenting |
+|-------|-----------|----------------------------|
+| Source IP | `data.srcip` | Almost always `127.0.0.1` because dnsmasq runs locally on the endpoint. **Not** the originating process — that information is lost at this layer. Process attribution requires correlating with auditd / Falco / EDR. |
+| Domain | `data.dns_domain` | The full FQDN. To extract the parent (eTLD+1) you have to apply public-suffix-list logic — the field doesn't pre-split it. |
 
-> **Note:** Because dnsmasq runs locally on the endpoint, `data.srcip` is
-> almost always `127.0.0.1`. The querying *process* is not visible from the
-> dnsmasq log alone. Process attribution requires correlating with auditd,
-> Falco, or similar host telemetry.
+`data.dns_query_type` (`A`/`AAAA`/`TXT`/...) and `agent.name` are
+self-explanatory.
 
 ## Related Rules
 
 | Rule ID | Description | Relationship |
 |---------|-------------|--------------|
-| 100100 | Base DNS query event | Parent rule (always fires first) |
+| 100100 | Base DNS query event | Parent rule (always fires first via `if_sid`) |
 | 100101 | DNS reply NXDOMAIN | Useful correlator for DGA |
 | 100112 | TXT query | Often paired with tunneling cases |
 | 100113 | NXDOMAIN burst (8 in 120s) | Strong DGA signal when correlated |
@@ -70,92 +68,106 @@ knowledge that the rule cannot encode.
 
 ## Threat & Motivation
 
-Attackers use high-entropy subdomains for two main reasons:
+**What the activity is.** A process on the endpoint called the resolver
+(directly or via libc) for a domain name with a long leading label. At
+the OS level this is a `connect()` to the resolver socket and a DNS
+packet on the wire. dnsmasq is the local intercept that lets us see it
+without taking a pcap.
 
-- **DGA C2 (T1568.002):** Malware iterates a list of algorithmically
-  generated domains until it finds an active controller. Most queries return
-  NXDOMAIN; one returns a valid IP.
-- **DNS tunneling / exfiltration (T1071.004, T1048.003):** Data is encoded
-  into the subdomain label of queries to a controlled domain, where the
-  authoritative server decodes and reassembles it. Typically uses TXT,
-  NULL, or A records.
+**Why an attacker would do this.** Two main use cases:
 
-**Blast radius if real:** Active C2 channel or ongoing data exfiltration. The
-host issuing the query is presumed compromised.
+- **DGA C2 (T1568.002):** Malware embeds a domain-generation algorithm.
+  At runtime it generates many candidate domains, queries each one, and
+  uses whichever resolves to find its current C2 controller. Most queries
+  return NXDOMAIN; one resolves and becomes the live channel. Defenders
+  who block known C2 domains can't keep up because the domains rotate.
+- **DNS tunneling / exfiltration (T1071.004, T1048.003):** The attacker
+  controls an authoritative server for some domain. The malware encodes
+  data into DNS query labels (typically base32 because of DNS character
+  restrictions) and queries them as subdomains of the controlled parent.
+  The auth server logs the queries and reassembles the data. Often uses
+  TXT or NULL records for two-way traffic.
 
-## Known False Positives
+**Concrete attacker scenarios:**
+- Commodity malware (Conficker, Necurs, Sality) calling home via DGA
+- Cobalt Strike or Sliver implants tunnelling over DNS in network-egress
+  -restricted environments
+- Slow exfiltration of credentials or files via base32-encoded subdomain
+  labels to an attacker domain
 
-Not yet characterized for this environment. The rule's design — a 12+ char
-alphanumeric leading label — is known to overlap with several legitimate
-patterns on the modern internet, but the specific patterns dominant in
-this environment are unknown. Populate from real tickets as they accumulate.
+**Legitimate reasons this fires.** A lot of the modern internet looks
+like this. All of these are real and common:
 
-> **Stress-test note:** Treat every benign-looking match as a hypothesis to
-> validate, not a fact to assume. The single biggest failure mode for this
-> signature is dismissing a real C2 query as "looks like a CDN".
+- CDN cache keys and edge routing — CloudFront, Akamai, Fastly, Cloudflare
+  all use long opaque hostnames
+- Cloud services using opaque shard/region identifiers — AWS S3,
+  GoogleUserContent, Azure CDN
+- Browser anti-DNS-rebinding random subdomains
+- Email tracking / link shortener / abuse-prevention domains
+- Analytics, advertising, anti-fraud, and bot-detection telemetry
+- Service workers and PWA cache lookups
+
+**Blast radius if real.** Active C2 channel or ongoing data exfiltration.
+The host issuing the query is presumed compromised.
 
 ## Risk Indicators
 
-### Lower Risk
-1. Parent domain (eTLD+1) belongs to a well-known CDN, cloud provider, or
-   analytics platform
-2. Query is for a common record type (A, AAAA) and resolved successfully
-3. Source host has no other suspicious activity in the surrounding window
-4. The same parent domain has been queried many times historically with
-   varied subdomains (consistent CDN behaviour)
+The risk on this signature comes from **two orthogonal axes**:
 
-### Higher Risk
-1. Parent domain is unknown or recently registered
-2. Query is `TXT`, `NULL`, or another record type unusual for endpoint use
-3. Burst of NXDOMAIN replies from the same host (rule 100113 also fired)
-4. High volume of queries to varied subdomains under the same parent in a
-   short window (rule 100116 also fired)
-5. Subdomain label encodes recognizable structure (base32/base64/hex chunks,
-   length/format consistent with data encoding)
-6. Source host has correlated process, file, or network alerts
-7. Parent domain is in a frequently-abused TLD (rule 100111 also fired)
+### Axis 1 — Reputation of the parent domain
 
-## Field Notes
+Is the eTLD+1 a recognizable, established service in this environment, or
+something unknown?
 
-- dnsmasq's source IP field is essentially always `127.0.0.1` in this setup
-  because the resolver runs locally on the endpoint. Source attribution
-  must come from process-level telemetry, not the DNS event itself.
-- Successful resolution does not imply benign — DGA controllers and
-  tunneling endpoints both resolve normally.
-- Subdomain entropy is approximated by length, not measured. A 12-char
-  English word will match the rule. A 12-char base32 string will also match.
-  The rule cannot tell them apart.
-- Rule 100110 fires per query. Correlate with 100113 (NXDOMAIN burst) and
-  100116 (volume) to recognize DGA and beaconing patterns.
+- Parent matches a known CDN / cloud / analytics provider allowlist
+  (lower risk)
+- Parent has been queried many times historically from this environment
+  with varied subdomains (lower risk — established footprint)
+- Parent is unknown / never queried before / recently registered (higher
+  risk)
+- Parent is in a frequently-abused TLD (.xyz, .top, .tk, .ml, ...; higher
+  risk; rule 100111 fires when this is true)
 
-## Impact
+### Axis 2 — Pattern shape and co-firing rules
 
-If real, this is C2 or active exfiltration. The originating host should be
-treated as compromised pending investigation.
+Does the alert sit alone, or is it part of a recognizable C2/tunneling
+pattern?
 
-## Operational Notes
+- Single isolated query, normal record type (A/AAAA), resolves
+  successfully (lower risk in isolation; ambiguous without parent
+  reputation)
+- Burst of NXDOMAIN replies from the same host (rule 100113 co-fires;
+  classic DGA probing signature)
+- High volume of queries to varied subdomains under the same parent in a
+  short window (rule 100116 co-fires; beaconing or tunneling)
+- TXT or NULL record queries (rule 100112 co-fires; tunneling-favoured
+  record types)
+- Subdomain label is structured (base32/base64/hex chunks, fixed format
+  across queries; possible encoded data)
 
-To be populated from real investigations.
+A high-reputation parent + isolated normal-shape query is the low-risk
+quadrant. An unknown/new parent + co-firing volume/NXDOMAIN/TXT rules is
+the high-risk quadrant.
 
-## Tuning Guidance
-
-The rule is intentionally broad. The right tuning lever is allowlisting
-**parent domains** (eTLD+1) once they have been characterized as benign
-high-entropy emitters in this environment, rather than relaxing the regex.
-Allowlists belong in a Wazuh CDB list, not in the rule file.
+> **Stress-test note:** Treat every benign-looking match as a hypothesis
+> to validate, not a fact to assume. The single biggest failure mode for
+> this signature is dismissing a real C2 query as "looks like a CDN."
+> Reputation classification is not a guarantee — domain-fronting and
+> compromised legit services exist. Sanction must come from outside the
+> SIEM (allowlist, threat-intel feed, etc.).
 
 ## Detection Gaps
 
 - No process attribution — the query log contains no PID or process name.
-- No client identification — `srcip` is the local resolver, not the original
-  client process.
-- Real entropy is not measured; only label length is checked. Genuinely
-  random short labels (≤11 chars) will not match.
+- No client identification — `srcip` is the local resolver, not the
+  originating client process.
+- Real entropy is not measured; only label length. A 12-char English word
+  matches; a 12-char base32 blob matches; an 11-char base32 blob doesn't.
 - Encrypted DNS (DoH/DoT) bypasses the local resolver entirely and is
   invisible to this rule.
-- Queries to subdomains shorter than 12 characters under controlled domains
-  can still serve as tunneling channels and will not match.
-- The rule's regex requires the parent domain to have **exactly two labels**
+- Queries to subdomains shorter than 12 characters under controlled
+  domains can still serve as tunneling channels and will not match.
+- The regex requires the parent domain to have **exactly two labels**
   after the high-entropy leading label (`<12+ chars>.<label>.<label>`).
   Single-label parents (e.g., `xk3j2aab8f9q.localhost`) and deeper parents
   (e.g., `xk3j2aab8f9q.foo.bar.example.com`) match differently and may be

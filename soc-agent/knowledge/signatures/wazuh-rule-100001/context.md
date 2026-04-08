@@ -3,15 +3,14 @@ signature_id: wazuh-rule-100001
 name: Terminal shell in container
 severity: medium
 data_sources:
-  - falco
-  - /var/log/falco/events.json
+  - process-events
 created_at: 2026-04-08
 updated_at: 2026-04-08
 mitre:
   tactics: Execution
   techniques: T1059
 references:
-  - https://falco.org/docs/rules/default-rules/
+  - https://github.com/falcosecurity/rules/blob/main/rules/falco_rules.yaml
 related_signatures:
   - wazuh-rule-100002
   - wazuh-rule-100007
@@ -24,124 +23,132 @@ base_rate:
 
 ## Signature Logic
 
-Wazuh rule 100001 maps Falco's default rule **"Terminal shell in container"**
-to Wazuh level 10. Falco fires when an interactive shell (`bash`, `sh`, `ash`,
-`zsh`, `csh`, `ksh`, etc.) is spawned inside a container with a TTY attached
-or under a parent that indicates interactive use.
+Wazuh rule 100001 is a wrapper around Falco's default rule
+**"Terminal shell in container"**. The condition Falco evaluates (paraphrased
+from the upstream rule):
 
-The Falco event is ingested via `/var/log/falco/events.json` (JSON localfile
-in the manager). Wazuh rule 100000 catches the base Falco event; 100001
-matches the specific rule name. See
-`playground/config/wazuh_cluster/rules/falco_rules.xml`.
+> `spawned_process` event where `proc.name` is one of the known shell
+> binaries (`bash`, `sh`, `ash`, `csh`, `ksh`, `zsh`, ...), the process has
+> a controlling terminal (`proc.tty != 0`), and the process is running
+> inside a container (`container.id != "host"`), excluding processes whose
+> ancestor matches the `user_known_shell_in_container_activities` macro.
+
+So the fundamental detected activity is: **a shell binary started, with a
+TTY attached, inside a container's pid namespace.** This is a syscall-level
+event captured by Falco's eBPF probe — `execve` of a shell binary with a
+TTY fd open and a non-host `container.id`.
+
+The Wazuh side is a JSON localfile ingestion of `/var/log/falco/events.json`
+plus a rule chain: rule 100000 catches any Falco event, rule 100001 narrows
+to events whose `data.rule` matches this name. The Wazuh chain is in
+`playground/config/wazuh_cluster/rules/falco_rules.xml`. The upstream Falco
+rule definition (and any version drift) is in the falcosecurity/rules repo
+linked above.
 
 ## Alert Fields
 
-Falco event fields come through under `data.*` in the Wazuh alert. Exact
-paths depend on the Falco output format, but commonly include:
+Field paths to know — only the non-obvious ones are listed. `data.rule`,
+`data.priority`, etc. are self-explanatory.
 
-| Field | JSON Path | Description | Example |
-|-------|-----------|-------------|---------|
-| Falco rule | `data.rule` | Falco rule name | `Terminal shell in container` |
-| Priority | `data.priority` | Falco priority | `Notice` |
-| Output | `data.output` | Falco-formatted message | `A shell was spawned in a container...` |
-| Process name | `data.output_fields."proc.name"` | The shell binary | `bash` |
-| Parent process | `data.output_fields."proc.pname"` | Parent of the shell | `runc` |
-| Command line | `data.output_fields."proc.cmdline"` | Full shell command | `bash -i` |
-| User | `data.output_fields."user.name"` | User inside the container | `root` |
-| Container ID | `data.output_fields."container.id"` | Short container ID | `a1b2c3d4e5f6` |
-| Container name | `data.output_fields."container.name"` | Container name | `target-endpoint` |
-| Container image | `data.output_fields."container.image.repository"` | Image name | `ubuntu` |
-| Agent | `agent.name` | Host running Falco | `falco` |
-
-> **Note:** Field names under `output_fields` follow Falco's dotted convention.
-> Inspect a real event to confirm the exact JSON path before relying on a
-> field — the structure depends on the Falco output format and version.
+| Field | JSON Path | Why it's worth documenting |
+|-------|-----------|----------------------------|
+| Parent process | `data.output_fields.proc.pname` | "pname" = parent process name. Easy to misread as "process name." This is the strongest discriminator on this signature. |
+| Process ancestry | `data.output_fields.proc.aname[2..n]` | Grandparent, great-grandparent, etc. Useful when `pname` itself is a shell or interpreter and you need to walk further up. |
+| Container ID | `data.output_fields.container.id` | Short (12-char) Docker/containerd ID. Note: `output_fields` is **nested** in the indexed event (`output_fields.container.id`), even though the original Falco JSON uses dotted keys (`"container.id"`). Query the nested form. |
+| Falco priority | `data.priority` | Wazuh maps Falco priority to its own level. The Falco-side priority can differ from the Wazuh-side level. |
 
 ## Related Rules
 
 | Rule ID | Description | Relationship |
 |---------|-------------|--------------|
-| 100000 | Base Falco event | Parent rule (always fires first) |
-| 100002 | Redirect STDOUT/STDIN to network connection | Stronger reverse-shell signal |
-| 100007 | Drop and execute new binary in container | Often correlated with post-exploitation |
-| 100020 | Falco high priority unclassified | Catch-all fallback |
+| 100000 | Base Falco event | Parent rule (always fires first via `if_sid`) |
+| 100002 | Redirect STDOUT/STDIN to network connection | Stronger reverse-shell signal — verified firing in playground |
+| 100007 | Drop and execute new binary in container | Often correlated with post-exploitation — verified firing in playground |
+| 100020 | Falco high priority unclassified | Catch-all fallback (level 4 — specific rules win) |
 
 ## Threat & Motivation
 
-Containers are typically immutable execution units. An interactive shell
-inside a running container is unusual outside of:
+**What the activity is.** A shell binary executing with a TTY inside a
+container's pid namespace. At the OS level this is one syscall: `execve`
+of `/bin/bash` (or similar) by some parent process, with stdin/stdout
+attached to a pty.
 
-- Operator debugging via `docker exec` / `kubectl exec`
-- CI/CD pipelines that exec into a build container
-- Containers whose entrypoint or healthcheck themselves invoke a shell
-- Post-exploitation activity by an attacker who reached RCE inside a container
+**Why an attacker would want this.** Containers are typically immutable
+execution units shipped with a fixed application surface. An interactive
+shell gives an attacker arbitrary command execution inside that surface,
+which is what they need for: enumeration of the container's filesystem and
+mounted secrets, lateral movement to other containers/services reachable
+from this one, persistence via dropped binaries or modified entrypoint
+scripts, and (if container privileges allow) escape to the host.
 
-**Blast radius if real:** The blast radius is the container's privileges plus
-any escape primitives available (mounted Docker socket, privileged flag,
-host path mounts, capabilities). A shell in a privileged or
-host-network container is significantly higher impact than a shell in an
-unprivileged sidecar.
+**Concrete attacker scenarios:**
+- Web app RCE → shell in the app container → read mounted Kubernetes
+  service-account token → API server access
+- Compromised CI pipeline → shell in a build container → exfiltrate
+  source / signing keys
+- Container with the Docker socket mounted → shell → `docker run` a
+  privileged container → host root
 
-## Known False Positives
+**Legitimate reasons this fires.** All of these are real and common:
+- Operator debugging via `docker exec` / `kubectl exec` / `oc exec`
+- CI/CD pipelines exec'ing into containers to run scripted commands
+- Healthcheck and readiness probes that invoke `sh -c "..."`
+- Container entrypoints or init scripts that themselves call a shell
+- Application code that calls `os.system()` / `subprocess.run(shell=True)`
+  or otherwise shells out as part of normal operation
 
-Not yet characterized for this environment — populate from real tickets as
-they accumulate. Generic categories that *typically* drive benign 100001
-alerts include `kubectl exec` debugging, CI/CD pipelines, and images whose
-entrypoints invoke `/bin/sh`, but the specific patterns dominant in this
-environment are unknown.
+**Blast radius if real.** Equal to the container's effective privileges:
+unprivileged sidecar < typical app container < container with mounted
+Docker socket / privileged flag / host-network / host-pid. Always check
+container privileges before assigning severity.
 
 ## Risk Indicators
 
-### Lower Risk
-1. Parent process is a container runtime exec primitive (`runc`, `containerd-shim`,
-   `docker-exec`) reachable from an operator-initiated exec
-2. Container image is a known interactive/debug image
-3. Shell command line is a recognizable operator pattern (e.g., `bash`, no args)
-4. Originates during a known maintenance window
+The risk on this signature comes from **two orthogonal axes**:
 
-### Higher Risk
-1. Parent process is an application binary (web server, database, etc.) — the
-   app spawned a shell, which it should not do
-2. Shell is `bash -i`, `sh -i`, or pipes stdout/stdin to a network socket
-3. Container is privileged, has the Docker socket mounted, or runs with host
-   network/PID
-4. Correlated with rule 100002 (STDOUT/STDIN to network), 100006 (sensitive
-   file read), or 100007 (drop-and-exec) within the same container
-5. Shell appears in a long-running production container that has never had a
-   shell event before
+### Axis 1 — Privilege of the target
 
-## Field Notes
+How much harm could the attacker do if this *were* an attacker?
 
-- Falco's exact output field layout depends on the configured `json_output`
-  format and the Falco version. Confirm field paths against a real event
-  before writing rigid query templates.
-- The healthcheck operations of monitoring containers can themselves trigger
-  Falco events — be ready to identify and exclude known benign sources.
-- Wazuh rule 100001 fires once per Falco event; Falco itself rate-limits
-  duplicate events.
+- Container is privileged, has the Docker socket mounted, runs with host
+  network or host PID
+- Container hosts a critical workload (production database, payment
+  service, identity provider)
+- Container has secrets mounted or holds tokens with broad scope
 
-## Impact
+### Axis 2 — Abnormality vs baseline
 
-A shell inside a production container is a strong post-exploitation signal
-when it cannot be tied back to an operator action or automation pipeline.
-Treat unattributed shells in production workloads as potentially critical
-until ruled out.
+Does this look like *novel* activity or an *expected* pattern?
 
-## Operational Notes
+- This image/container has fired this rule before, in a recurring pattern
+  (lower risk — likely a healthcheck, init script, or CI flow)
+- This image/container has *never* fired this rule before (higher risk)
+- The shell ancestry doesn't match any pattern we've seen for this image
+- Co-firing of related Falco rules (100002 network redirect, 100006
+  sensitive file read, 100007 drop-and-exec) in the same `container.id`
+  in a tight window
 
-To be populated from real investigations.
+A high-privilege target + novel/abnormal pattern is the high-risk
+quadrant. A low-privilege target + recurring expected pattern is the
+low-risk quadrant.
 
-## Tuning Guidance
-
-Falco's default "Terminal shell in container" rule can be tuned via macros
-(`user_known_shell_in_container_activities`). Wazuh-side tuning is generally
-limited to suppressing specific image/container combinations after they have
-been characterized as benign.
+> **Note on "app spawned a shell":** parent being an application binary
+> (web server, database, language runtime) is a *suspicion multiplier*,
+> not a hard indicator. Many real applications shell out as part of normal
+> work — `subprocess.run(..., shell=True)` from Python, `system()` calls
+> from C, build/deploy/log-rotation hooks, ImageMagick and ffmpeg
+> wrappers, anything that calls a binary via a shell. Treat
+> `pname=<app binary>` as input to the abnormality axis (never seen this
+> app spawn a shell before? higher risk; routinely spawns shells? lower
+> risk), not as a standalone red flag.
 
 ## Detection Gaps
 
 - Falco only sees containers it is configured to watch — host shells and
-  shells in containers outside Falco's scope are invisible to this rule.
-- A non-shell process executing arbitrary commands (e.g., a Python interpreter
-  invoked with `-c`) does not match this rule.
-- Shells started via syscalls Falco does not instrument may be missed.
+  shells in containers outside Falco's scope are invisible.
+- A non-shell process executing arbitrary commands (e.g., `python -c`,
+  `perl -e`) does not match this rule.
+- Shells started via syscalls Falco doesn't instrument can be missed.
+- Falco's `user_known_shell_in_container_activities` macro suppresses
+  matches — anything that exception list covers is invisible to this
+  rule even if the activity is interesting.
