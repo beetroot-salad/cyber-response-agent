@@ -1,0 +1,107 @@
+<!--
+  Wazuh Custom Rules for DNS Events (via dnsmasq)
+  Detects suspicious DNS query patterns for investigation.
+
+  Rule ID Range: 100100-100199
+  Severity Mapping:
+    - Known DGA/C2 patterns: Level 10-12 (High)
+    - Suspicious TLD/encoding: Level 8-9 (Medium)
+    - Informational DNS events: Level 3-4 (Low)
+
+  These rules match against dnsmasq query events decoded by dns_decoder.xml.
+  The decoded field is dns_domain (dynamic field, matched via <field>).
+-->
+
+<group name="dns,security,">
+
+  <!-- Base DNS query event (informational) -->
+  <!-- decoded_as matches the parent decoder name; field match narrows to queries -->
+  <rule id="100100" level="3">
+    <decoded_as>dnsmasq</decoded_as>
+    <field name="dns_query_type">\.+</field>
+    <description>DNS query logged by dnsmasq</description>
+    <options>no_full_log</options>
+    <group>dns_query,</group>
+  </rule>
+
+  <!-- DNS reply: NXDOMAIN (domain does not exist) -->
+  <rule id="100101" level="3">
+    <decoded_as>dnsmasq</decoded_as>
+    <field name="dns_reply">NXDOMAIN</field>
+    <description>DNS query returned NXDOMAIN</description>
+    <group>dns_nxdomain,</group>
+  </rule>
+
+  <!-- ============================================ -->
+  <!-- Suspicious Domain Patterns                   -->
+  <!-- ============================================ -->
+
+  <!--
+    High-entropy subdomain pattern (potential DGA or DNS tunneling).
+    Matches domains with long random-looking subdomains:
+    12+ alphanumeric chars followed by a dot (e.g., xk3j2aab8f9q.example.com)
+  -->
+  <rule id="100110" level="10">
+    <if_sid>100100</if_sid>
+    <field name="dns_domain">\w\w\w\w\w\w\w\w\w\w\w\w\S*\.\w+\.\w+</field>
+    <description>DNS query to domain with high-entropy subdomain (possible DGA/tunneling)</description>
+    <group>dns_suspicious,dns_dga,attack.command_and_control,</group>
+  </rule>
+
+  <!--
+    Query to frequently-abused TLDs.
+    Matches: .xyz, .top, .club, .buzz, .tk, .ml, .ga, .cf, .gq, .pw, .cc, .ws
+  -->
+  <rule id="100111" level="8">
+    <if_sid>100100</if_sid>
+    <field name="dns_domain">\.xyz|\.top|\.club|\.buzz|\.tk|\.ml|\.ga|\.cf|\.gq|\.pw</field>
+    <description>DNS query to frequently-abused TLD</description>
+    <group>dns_suspicious,dns_suspicious_tld,</group>
+  </rule>
+
+  <!--
+    DNS TXT query — commonly used for DNS tunneling / C2 data exfiltration.
+    Legitimate uses exist (SPF, DKIM), but TXT queries from endpoints are unusual.
+  -->
+  <rule id="100112" level="9">
+    <if_sid>100100</if_sid>
+    <field name="dns_query_type">TXT</field>
+    <description>DNS TXT query from endpoint (possible DNS tunneling/C2)</description>
+    <group>dns_suspicious,dns_tunneling,attack.command_and_control,</group>
+  </rule>
+
+  <!--
+    Burst of NXDOMAIN replies — DGA malware typically generates many failed lookups
+    as it iterates through algorithmically generated domains looking for the active C2.
+    Frequency: 8+ NXDOMAIN replies in 120 seconds from same agent.
+  -->
+  <rule id="100113" level="10" frequency="8" timeframe="120">
+    <if_matched_sid>100101</if_matched_sid>
+    <same_source_ip />
+    <description>Burst of NXDOMAIN responses (possible DGA activity)</description>
+    <group>dns_suspicious,dns_dga,attack.command_and_control,</group>
+  </rule>
+
+  <!--
+    Known C2/malware callback domain patterns used by our test workload.
+    In production, this would be a CDB list lookup.
+  -->
+  <rule id="100115" level="12">
+    <if_sid>100100</if_sid>
+    <field name="dns_domain">malware-c2|callback\.evil|beacon\.\S+\.cc</field>
+    <description>DNS query to known malicious domain pattern</description>
+    <group>dns_suspicious,dns_c2,attack.command_and_control,</group>
+  </rule>
+
+  <!--
+    High volume DNS queries — potential beaconing or tunneling.
+    15+ queries in 60 seconds from same source.
+  -->
+  <rule id="100116" level="9" frequency="15" timeframe="60">
+    <if_matched_sid>100100</if_matched_sid>
+    <same_source_ip />
+    <description>High-volume DNS queries from single source (possible beaconing/tunneling)</description>
+    <group>dns_suspicious,dns_beaconing,attack.command_and_control,</group>
+  </rule>
+
+</group>
