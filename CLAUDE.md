@@ -205,15 +205,29 @@ Multi-container stack (`.devcontainer/docker-compose.yml`):
 
 ### Managing Containers
 
-Always go through Compose with the **full** project + file set below — never bare `docker run/start/stop/rm` on a Compose-managed container, and never a partial `-f` set. Mismatched `-p`/`-f` splits the stack into parallel projects and collides on names like `target-endpoint`, requiring manual cleanup.
+Always go through Compose. Never bare `docker run/start/stop/rm` on a Compose-managed container, and never invoke compose with a partial `-f` set — that splits the stack into parallel projects and collides on names like `target-endpoint`, requiring manual cleanup.
+
+The canonical entry point is `playground/scripts/compose.sh`, which works identically from the host shell and from inside the devcontainer:
 
 ```bash
-docker compose -p cyber-response-agent_devcontainer \
-  -f .devcontainer/docker-compose.yml \
-  -f .devcontainer/wazuh-stack.yml \
-  -f .devcontainer/wazuh-overrides.yml \
-  <up -d | down | ps | logs ...>
+playground/scripts/compose.sh up -d --build target-endpoint
+playground/scripts/compose.sh ps
+playground/scripts/compose.sh logs -f wazuh-manager
+playground/scripts/compose.sh down
 ```
+
+The wrapper handles two pieces of plumbing that are otherwise easy to get wrong:
+1. **Project name** (`cyber-response-agent_devcontainer`) — set via `name:` at the top of `docker-compose.yml`, picked up automatically
+2. **File list** — set via `COMPOSE_FILE=docker-compose.yml:wazuh-stack.yml:wazuh-overrides.yml` in `.devcontainer/.env`
+3. **Path translation when running from inside the devcontainer** — the docker daemon runs on the host and only speaks host paths, so compose needs `--project-directory` pointing at the host-style `.devcontainer/` for bind mount sources to resolve correctly. The wrapper sets this from `HOST_WORKSPACE` in `.devcontainer/.env`.
+
+`.devcontainer/.env` must be created from `.devcontainer/.env.example` and have `HOST_WORKSPACE` filled in per machine. From a fresh checkout:
+```bash
+cp .devcontainer/.env.example .devcontainer/.env
+# edit .devcontainer/.env, set HOST_WORKSPACE to the host path that maps to /workspace
+```
+
+**Persistent agent state.** The target-endpoint Wazuh agent state (`client.keys`, FIM database, anti-replay counters) persists across container recreates via the `target-endpoint-state` named volume. Combined with the `<force>` block in the manager's `<auth>` config (`playground/config/wazuh_cluster/wazuh_manager.conf`), this means container recreate / rebuild "just works" — no manual deregistration needed. To force a fresh enrollment, `docker volume rm cyber-response-agent_devcontainer_target-endpoint-state`.
 
 ## Credentials (Development Only)
 

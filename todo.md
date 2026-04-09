@@ -27,7 +27,7 @@
 
 ### State Machine Transition Verification Criteria
 
-Goal: Add actionable verification gates to each transition so `write_state.py` can reject transitions where the agent hasn't done meaningful work. Currently the state machine enforces *legal transitions* but not *quality of work within a phase*. Data from evaluation runs should inform which criteria matter most (start loose, tighten based on observed failure modes).
+Goal: Add actionable verification gates to each transition so `write_state.py` can reject transitions where the agent hasn't done meaningful work. Currently the state machine enforces _legal transitions_ but not _quality of work within a phase_. Data from evaluation runs should inform which criteria matter most (start loose, tighten based on observed failure modes).
 
 **Criteria to define per transition (gather data first, then enforce):**
 
@@ -40,6 +40,7 @@ Goal: Add actionable verification gates to each transition so `write_state.py` c
 - [ ] ANALYZE → CONCLUDE: Is there exactly one `++` hypothesis? Are all adversarial hypotheses explicitly `--` refuted with reasoning? Does the investigation meet min-leads-by-severity?
 
 **Approach:**
+
 1. Instrument: log what the agent actually writes at each transition during evaluation runs
 2. Identify failure modes: where does the agent skip work, produce shallow output, or transition prematurely?
 3. Define thresholds: which criteria are hard gates (block transition) vs soft warnings (log but allow)?
@@ -48,11 +49,13 @@ Goal: Add actionable verification gates to each transition so `write_state.py` c
 ### Evaluation Plan — Screening Phase
 
 Screening is the right starting point for evaluation:
+
 - Most common sub-flow (most alerts should match a known pattern)
 - Runs before the investigation loop — poor screening contaminates downstream context
 - Cheapest to evaluate (1-2 leads, deterministic pattern matching, clear pass/fail)
 
 **Evaluation approach:**
+
 - [ ] Build a test corpus: ~10-20 alerts per signature covering the pattern space (clear matches, near-misses, true negatives)
 - [ ] Define ground truth: expected screen_result, matched_pattern, and disposition per alert
 - [ ] Run screening subagent against corpus, collect structured output
@@ -78,12 +81,12 @@ Screening is the right starting point for evaluation:
 ### Knowledge Expansion
 
 - [x] Telemetry infrastructure for 3 new signature domains (FIM, process execution, DNS)
-    - dnsmasq local resolver with query logging + Wazuh decoder + rules (100100-100117)
-    - Wazuh agent syscheck: 5-min frequency, realtime+report_changes on /etc
-    - Workload scripts: fim_activity.sh, dns_activity.sh, enhanced suspicious_patterns.sh
-- [ ] Signature knowledge: FIM (Wazuh syscheck rule 550) — context.md, playbook.md, precedents/
-- [ ] Signature knowledge: Suspicious Process Execution (Falco/Wazuh 100001) — context.md, playbook.md, precedents/
-- [ ] Signature knowledge: Suspicious DNS Query (Wazuh 100110+) — context.md, playbook.md, precedents/
+  - dnsmasq local resolver with query logging + Wazuh decoder + rules (100100-100117)
+  - Wazuh agent syscheck: 5-min frequency, realtime+report_changes on /etc
+  - Workload scripts: fim_activity.sh, dns_activity.sh, enhanced suspicious_patterns.sh
+- [x] Signature knowledge: FIM (Wazuh syscheck rule 550) — context.md, playbook.md, precedents/
+- [x] Signature knowledge: Suspicious Process Execution (Falco/Wazuh 100001) — context.md, playbook.md, precedents/
+- [x] Signature knowledge: Suspicious DNS Query (Wazuh 100110+) — context.md, playbook.md, precedents/
 - [x] `common/leads/` — reusable lead definitions across signatures (directory scaffolded)
 - [x] `environment/data-sources/` — data mapping: what data exists where (state + events)
 - [x] `environment/context/` — classification heuristics (ip-ranges, identity-patterns, criticality, data-classification)

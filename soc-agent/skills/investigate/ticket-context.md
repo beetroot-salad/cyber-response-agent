@@ -17,7 +17,6 @@ Extract the **key entities** from the alert — the fields that carry investigat
 
 Read environment knowledge for entity context:
 
-- `knowledge/environment/context/ip-ranges.md` — IP classification, known subnets, NAT gateways
 - `knowledge/environment/context/identity-patterns.md` — service accounts, admin patterns, known roles
 - `knowledge/environment/systems/` — SIEM-specific field mappings, query syntax, and field quirks
 

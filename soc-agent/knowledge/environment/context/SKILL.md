@@ -9,7 +9,6 @@ Classification rules and interpretation heuristics. Use these as fallbacks when 
 
 ## Files
 
-- **ip-ranges.md** — IP classification: private ranges, special ranges, org-specific subnets
 - **identity-patterns.md** — Username classification: service accounts, admin patterns
 - **data-classification.md** — Data sensitivity categories and patterns
-- **criticality.md** — System criticality patterns and escalation thresholds
+- **criticality.md** — System criticality tier definitions and naming patterns
