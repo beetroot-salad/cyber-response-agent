@@ -57,21 +57,47 @@ fi
 
 # Persist Wazuh agent state across container recreates
 # /var/ossec-state is a named volume; on first run it's empty.
-# We seed it from the image defaults, then symlink the live paths to it.
 echo "[+] Setting up persistent Wazuh agent state..."
 STATE_DIR=/var/ossec-state
 mkdir -p "$STATE_DIR"
 
 # client.keys — agent identity / enrollment
-if [ ! -f "$STATE_DIR/client.keys" ]; then
-    echo "    First run: creating empty client.keys (agent will auto-enroll)"
+# We can't symlink: wazuh-agentd writes via atomic-replace (write-temp +
+# rename), which clobbers the symlink with a regular file. Instead we
+# *copy* the persistent file in on startup, and run a background sync that
+# copies the live file back to the persistent location whenever it changes.
+if [ -s "$STATE_DIR/client.keys" ]; then
+    echo "    Restoring client.keys from persistent state"
+    cp "$STATE_DIR/client.keys" /var/ossec/etc/client.keys
+else
+    echo "    First run: empty client.keys (agent will auto-enroll)"
+    : > /var/ossec/etc/client.keys
     : > "$STATE_DIR/client.keys"
 fi
-chown wazuh:wazuh "$STATE_DIR/client.keys"
-chmod 640 "$STATE_DIR/client.keys"
-ln -sf "$STATE_DIR/client.keys" /var/ossec/etc/client.keys
+chown wazuh:wazuh /var/ossec/etc/client.keys "$STATE_DIR/client.keys"
+chmod 640 /var/ossec/etc/client.keys "$STATE_DIR/client.keys"
+
+# Background sync: every 30s, copy live client.keys to persistent location
+# if it has changed. This catches the post-enrollment write.
+(
+    LAST_HASH=""
+    while true; do
+        sleep 30
+        if [ -s /var/ossec/etc/client.keys ]; then
+            HASH=$(md5sum /var/ossec/etc/client.keys 2>/dev/null | awk '{print $1}')
+            if [ "$HASH" != "$LAST_HASH" ]; then
+                cp -p /var/ossec/etc/client.keys "$STATE_DIR/client.keys.tmp" 2>/dev/null \
+                    && mv "$STATE_DIR/client.keys.tmp" "$STATE_DIR/client.keys" \
+                    && LAST_HASH="$HASH"
+            fi
+        fi
+    done
+) &
+echo "    Started client.keys sync watcher (PID $!)"
 
 # queue/ — syscheck FIM DB, rids anti-replay counters, agent buffers
+# Symlink is safe here because wazuh-syscheckd writes individual files
+# inside the directory rather than replacing the directory itself.
 if [ ! -d "$STATE_DIR/queue" ]; then
     echo "    First run: seeding queue/ from image defaults"
     cp -a /var/ossec/queue "$STATE_DIR/queue"
