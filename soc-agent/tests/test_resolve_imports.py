@@ -55,7 +55,8 @@ class TestResolverHappyPath:
 
     def test_contains_playbook(self, wazuh_5710_result):
         assert "<!-- source: knowledge/signatures/wazuh-rule-5710/playbook.md -->" in wazuh_5710_result.stdout
-        assert "Hypothesis Catalog" in wazuh_5710_result.stdout
+        # New playbook shape: starter hypotheses replace the old "Hypothesis Catalog" section
+        assert "Starter hypotheses" in wazuh_5710_result.stdout
 
     def test_contains_checklist(self, wazuh_5710_result):
         assert "<!-- source: knowledge/common-investigation/checklist.md -->" in wazuh_5710_result.stdout
@@ -141,10 +142,31 @@ class TestResolverArchetypes:
         cl_pos = out.index("checklist.md -->")
         assert ctx_pos < pb_pos < first_arch_pos < last_arch_pos < cl_pos
 
-    def test_signature_without_archetypes_dir_still_works(self, wazuh_5710_result):
-        """Signatures without an archetypes/ directory output as before."""
-        out = wazuh_5710_result.stdout
-        assert "archetypes/" not in out
+    def test_signature_without_archetypes_dir_still_works(self, tmp_path):
+        """Signatures without an archetypes/ directory output as before.
+
+        All real signatures now have an archetypes/ directory; use a synthetic
+        signature to verify the legacy code path still works.
+        """
+        sig_dir = SOC_AGENT_ROOT / "knowledge" / "signatures" / "_test-legacy-shape"
+        sig_dir.mkdir(exist_ok=True)
+        try:
+            (sig_dir / "context.md").write_text(
+                "---\nsignature_id: _test-legacy-shape\nname: NoArchTest\n"
+                "severity: low\ndata_sources: [test]\n---\n# NoArch Context\n"
+            )
+            (sig_dir / "playbook.md").write_text(
+                "---\nsignature_id: _test-legacy-shape\nlast_updated: 2026-01-01\n"
+                "total_investigations: 0\nresolution_rate: null\n---\n"
+                "# NoArch Playbook\n\n### lead-1\nQuery something.\n"
+            )
+
+            result = run_resolver("_test-legacy-shape")
+            assert result.returncode == 0, f"stderr: {result.stderr}"
+            assert "archetypes/" not in result.stdout
+        finally:
+            import shutil
+            shutil.rmtree(sig_dir, ignore_errors=True)
 
 
 class TestResolverErrors:
@@ -221,10 +243,11 @@ class TestEndToEndResolve:
         assert "Invalid user" in out
         assert "data.srcip" in out
 
-        # playbook.md content
+        # playbook.md content — starter hypothesis names + the lead name
         assert "?monitoring-probe" in out
-        assert "?brute-force" in out
         assert "authentication-history" in out
+        # Archetype content (external-bruteforce replaced the ?brute-force story)
+        assert "External Brute-Force" in out
 
         # checklist.md content
         assert "adversarial hypothesis" in out.lower()
