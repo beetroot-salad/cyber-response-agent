@@ -10,8 +10,9 @@ to stdout for !`command` substitution in SKILL.md.
 Output order:
 1. knowledge/signatures/{sig_id}/context.md (always)
 2. knowledge/signatures/{sig_id}/playbook.md (always)
-3. knowledge/common-investigation/checklist.md (always — safety artifact)
-4. Each unique @import:name found in playbook body
+3. knowledge/signatures/{sig_id}/archetypes/*.md (when present, sorted by name)
+4. knowledge/common-investigation/checklist.md (always — safety artifact)
+5. Each unique @import:name found in playbook body
 
 Resolution: @import:name looks in lessons/{name}.md.
 
@@ -99,7 +100,13 @@ def main() -> int:
     # 2. Signature playbook
     emit_file(playbook_path)
 
-    # 3. Checklist (always)
+    # 3. Archetypes (when present) — sorted for deterministic output
+    archetypes_dir = sig_dir / "archetypes"
+    if archetypes_dir.is_dir():
+        for archetype_file in sorted(archetypes_dir.glob("*.md")):
+            emit_file(archetype_file)
+
+    # 4. Checklist (always)
     if checklist_path.exists():
         emit_file(checklist_path)
     else:

@@ -20,12 +20,15 @@ from schemas.report_frontmatter import (
 )
 import hooks.scripts.validate_report as vr
 from hooks.scripts.validate_report import (
+    check_archetype_exists,
     check_precedent_exists,
     extract_run_dir,
     get_precedent_max_age,
     get_run_salt,
     is_screen_resolved,
+    load_archetype_frontmatter,
     playbook_has_screen_section,
+    validate_archetype_anchors,
     validate_precedent_content,
     validate_tier1,
     wrap_untrusted,
@@ -472,6 +475,267 @@ class TestCheckPrecedentExists:
 
     def test_nonexistent_signature(self):
         assert check_precedent_exists("anything.json", "nonexistent-sig") is False
+
+
+# --- Archetype + trust anchor validation ---
+
+
+def _make_archetype_file(
+    root: Path, sig: str, name: str, required_anchors: list
+) -> Path:
+    """Helper: write an archetype .md file with the given required_anchors."""
+    arch_dir = root / "knowledge" / "signatures" / sig / "archetypes"
+    arch_dir.mkdir(parents=True, exist_ok=True)
+    path = arch_dir / f"{name}.md"
+    anchors_yaml = "\n".join(f"  - {a}" for a in required_anchors) or "[]"
+    if required_anchors:
+        anchors_block = f"required_anchors:\n{anchors_yaml}"
+    else:
+        anchors_block = "required_anchors: []"
+    path.write_text(
+        f"---\n"
+        f"archetype: {name}\n"
+        f"signature_id: {sig}\n"
+        f"{anchors_block}\n"
+        f"precedents: []\n"
+        f"---\n\n"
+        f"# {name}\n"
+    )
+    return path
+
+
+class TestArchetypeValidation:
+    def test_load_archetype_frontmatter_real(self):
+        """Loads an existing archetype from the real signature directory."""
+        fm = load_archetype_frontmatter(
+            "operator-runtime-debug", "wazuh-rule-100001"
+        )
+        assert fm is not None
+        assert fm["archetype"] == "operator-runtime-debug"
+        assert "oncall-schedule" in fm["required_anchors"]
+        assert "change-windows" in fm["required_anchors"]
+
+    def test_load_archetype_frontmatter_with_extension(self):
+        """Loads with explicit .md extension."""
+        fm = load_archetype_frontmatter(
+            "post-exploit-interactive.md", "wazuh-rule-100001"
+        )
+        assert fm is not None
+        assert fm["required_anchors"] == []
+
+    def test_load_archetype_missing(self):
+        assert load_archetype_frontmatter("nonexistent", "wazuh-rule-100001") is None
+
+    def test_check_archetype_exists_real(self):
+        assert check_archetype_exists(
+            "operator-runtime-debug", "wazuh-rule-100001"
+        ) is True
+
+    def test_check_archetype_exists_missing(self):
+        assert check_archetype_exists("nope", "wazuh-rule-100001") is False
+
+    def test_anchors_all_confirmed(self, fake_root):
+        _make_archetype_file(fake_root, "test-sig", "ok", ["a1", "a2"])
+        anchors = [
+            {"anchor": "a1", "kind": "org-authority", "result": "confirmed"},
+            {"anchor": "a2", "kind": "org-authority", "result": "confirmed"},
+        ]
+        errors = validate_archetype_anchors("ok", "test-sig", anchors)
+        assert errors == []
+
+    def test_anchors_missing_one(self, fake_root):
+        _make_archetype_file(fake_root, "test-sig", "ok", ["a1", "a2"])
+        anchors = [
+            {"anchor": "a1", "kind": "org-authority", "result": "confirmed"},
+        ]
+        errors = validate_archetype_anchors("ok", "test-sig", anchors)
+        assert any("a2" in e and "not consulted" in e for e in errors)
+
+    def test_anchors_one_refuted(self, fake_root):
+        _make_archetype_file(fake_root, "test-sig", "ok", ["a1"])
+        anchors = [
+            {"anchor": "a1", "kind": "org-authority", "result": "refuted"},
+        ]
+        errors = validate_archetype_anchors("ok", "test-sig", anchors)
+        assert any("a1" in e and "refuted" in e for e in errors)
+
+    def test_anchors_one_unavailable(self, fake_root):
+        _make_archetype_file(fake_root, "test-sig", "ok", ["a1"])
+        anchors = [
+            {"anchor": "a1", "kind": "org-authority", "result": "unavailable"},
+        ]
+        errors = validate_archetype_anchors("ok", "test-sig", anchors)
+        assert any("a1" in e and "unavailable" in e for e in errors)
+
+    def test_anchors_archetype_no_requirements(self, fake_root):
+        """Archetype with empty required_anchors needs no consultations."""
+        _make_archetype_file(fake_root, "test-sig", "esc", [])
+        errors = validate_archetype_anchors("esc", "test-sig", [])
+        assert errors == []
+
+    def test_validate_tier1_resolved_with_archetype_and_confirmed_anchors(
+        self, fake_root, tmp_path
+    ):
+        """A resolved report citing an archetype with all anchors confirmed passes."""
+        _make_archetype_file(fake_root, "test-sig", "benign-arch", ["a1"])
+        # context.md so severity defaults to medium (needs >= 2 leads)
+        ctx_dir = fake_root / "knowledge" / "signatures" / "test-sig"
+        ctx_dir.mkdir(parents=True, exist_ok=True)
+        (ctx_dir / "context.md").write_text(
+            "---\nseverity: low\n---\n# context\n"
+        )
+
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        (run_dir / "report.md").write_text(
+            "---\n"
+            "ticket_id: T-001\n"
+            "signature_id: test-sig\n"
+            "status: resolved\n"
+            "disposition: benign\n"
+            "confidence: high\n"
+            "matched_archetype: benign-arch\n"
+            "trust_anchors_consulted:\n"
+            "  - anchor: a1\n"
+            "    kind: org-authority\n"
+            "    result: confirmed\n"
+            "    citation: 'CHG-1234'\n"
+            "leads_pursued: 2\n"
+            "---\n\n# Report\n"
+        )
+        passed, errors, _ = validate_tier1(run_dir / "report.md")
+        assert passed, f"Expected pass but got: {errors}"
+
+    def test_validate_tier1_resolved_with_archetype_missing_anchor(
+        self, fake_root, tmp_path
+    ):
+        """A resolved report whose archetype requires an anchor that wasn't consulted fails."""
+        _make_archetype_file(fake_root, "test-sig", "benign-arch", ["a1"])
+        ctx_dir = fake_root / "knowledge" / "signatures" / "test-sig"
+        ctx_dir.mkdir(parents=True, exist_ok=True)
+        (ctx_dir / "context.md").write_text(
+            "---\nseverity: low\n---\n# context\n"
+        )
+
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        (run_dir / "report.md").write_text(
+            "---\n"
+            "ticket_id: T-001\n"
+            "signature_id: test-sig\n"
+            "status: resolved\n"
+            "disposition: benign\n"
+            "confidence: high\n"
+            "matched_archetype: benign-arch\n"
+            "leads_pursued: 2\n"
+            "---\n\n# Report\n"
+        )
+        passed, errors, _ = validate_tier1(run_dir / "report.md")
+        assert not passed
+        assert any("a1" in e and "not consulted" in e for e in errors)
+
+    def test_validate_tier1_resolved_with_unknown_archetype(
+        self, fake_root, tmp_path
+    ):
+        """Citing an archetype that doesn't exist fails."""
+        ctx_dir = fake_root / "knowledge" / "signatures" / "test-sig"
+        ctx_dir.mkdir(parents=True, exist_ok=True)
+        (ctx_dir / "context.md").write_text(
+            "---\nseverity: low\n---\n# context\n"
+        )
+
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        (run_dir / "report.md").write_text(
+            "---\n"
+            "ticket_id: T-001\n"
+            "signature_id: test-sig\n"
+            "status: resolved\n"
+            "disposition: benign\n"
+            "confidence: high\n"
+            "matched_archetype: ghost\n"
+            "leads_pursued: 2\n"
+            "---\n\n# Report\n"
+        )
+        passed, errors, _ = validate_tier1(run_dir / "report.md")
+        assert not passed
+        assert any("ghost" in e and "not found" in e for e in errors)
+
+
+class TestReportFrontmatterArchetypeFields:
+    """Schema-level checks for the new archetype/anchor frontmatter fields."""
+
+    def _make_resolved(self, **overrides):
+        defaults = dict(
+            ticket_id="T-001",
+            signature_id="test-sig",
+            status="resolved",
+            disposition="benign",
+            confidence="high",
+            matched_precedent=None,
+            leads_pursued=2,
+        )
+        defaults.update(overrides)
+        return ReportFrontmatter(**defaults)
+
+    def test_resolved_with_archetype_only_passes(self):
+        r = self._make_resolved(matched_archetype="some-arch")
+        assert r.validate() == []
+
+    def test_resolved_with_neither_fails(self):
+        r = self._make_resolved()
+        errors = r.validate()
+        assert any("matched_archetype" in e for e in errors)
+
+    def test_resolved_with_both_passes(self):
+        r = self._make_resolved(
+            matched_archetype="arch", matched_precedent="p.json"
+        )
+        assert r.validate() == []
+
+    def test_anchor_entry_invalid_kind(self):
+        r = self._make_resolved(
+            matched_archetype="arch",
+            trust_anchors_consulted=[
+                {"anchor": "a", "kind": "wishful-thinking", "result": "confirmed"}
+            ],
+        )
+        errors = r.validate()
+        assert any("kind" in e for e in errors)
+
+    def test_anchor_entry_invalid_result(self):
+        r = self._make_resolved(
+            matched_archetype="arch",
+            trust_anchors_consulted=[
+                {"anchor": "a", "kind": "org-authority", "result": "maybe"}
+            ],
+        )
+        errors = r.validate()
+        assert any("result" in e for e in errors)
+
+    def test_anchor_entry_missing_anchor_field(self):
+        r = self._make_resolved(
+            matched_archetype="arch",
+            trust_anchors_consulted=[
+                {"kind": "org-authority", "result": "confirmed"}
+            ],
+        )
+        errors = r.validate()
+        assert any("anchor" in e for e in errors)
+
+    def test_anchor_entry_well_formed(self):
+        r = self._make_resolved(
+            matched_archetype="arch",
+            trust_anchors_consulted=[
+                {
+                    "anchor": "oncall-schedule",
+                    "kind": "org-authority",
+                    "result": "confirmed",
+                    "citation": "alice on-call",
+                }
+            ],
+        )
+        assert r.validate() == []
 
 
 # --- PostToolUse event parsing ---

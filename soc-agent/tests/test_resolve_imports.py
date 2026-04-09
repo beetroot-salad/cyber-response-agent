@@ -37,6 +37,12 @@ def wazuh_5710_result():
     return run_resolver("wazuh-rule-5710")
 
 
+@pytest.fixture(scope="module")
+def wazuh_100001_result():
+    """Run resolver once for wazuh-rule-100001 (signature with archetypes)."""
+    return run_resolver("wazuh-rule-100001")
+
+
 class TestResolverHappyPath:
     """Tests with the real wazuh-rule-5710 signature."""
 
@@ -73,6 +79,72 @@ class TestResolverImports:
         # No import source markers should appear after checklist
         assert "ip-classification.md -->" not in out
         assert "wazuh-queries.md -->" not in out
+
+
+class TestResolverArchetypes:
+    """Tests for archetype file inclusion (new model — wazuh-rule-100001)."""
+
+    EXPECTED_ARCHETYPES = [
+        "app-spawned-shell",
+        "ci-pipeline-exec",
+        "container-init-script",
+        "k8s-exec-probe",
+        "operator-runtime-debug",
+        "post-exploit-interactive",
+    ]
+
+    def test_exit_code_zero(self, wazuh_100001_result):
+        assert wazuh_100001_result.returncode == 0, (
+            f"stderr: {wazuh_100001_result.stderr}"
+        )
+
+    def test_all_archetypes_present(self, wazuh_100001_result):
+        """Every archetype file in archetypes/ must appear in resolver output."""
+        out = wazuh_100001_result.stdout
+        for name in self.EXPECTED_ARCHETYPES:
+            marker = (
+                f"<!-- source: knowledge/signatures/wazuh-rule-100001/"
+                f"archetypes/{name}.md -->"
+            )
+            assert marker in out, f"Missing archetype marker: {name}"
+
+    def test_archetype_content_present(self, wazuh_100001_result):
+        """Archetype bodies (not just headers) must be in the output."""
+        out = wazuh_100001_result.stdout
+        # Story content from each archetype — distinct phrases
+        assert "Operator Runtime Debug" in out
+        assert "Post-Exploit Interactive Shell" in out
+        assert "operator's session is bounded" in out
+        assert "Application-Spawned Shell" in out
+        assert "Container Init Script" in out
+        assert "Kubernetes Exec Probe" in out
+        assert "CI/CD Pipeline Exec" in out
+
+    def test_archetypes_sorted_deterministic(self, wazuh_100001_result):
+        """Archetype order is alphabetical (deterministic across runs)."""
+        out = wazuh_100001_result.stdout
+        positions = []
+        for name in self.EXPECTED_ARCHETYPES:
+            marker = f"archetypes/{name}.md -->"
+            positions.append(out.index(marker))
+        assert positions == sorted(positions), (
+            "Archetypes are not in alphabetical order"
+        )
+
+    def test_archetypes_between_playbook_and_checklist(self, wazuh_100001_result):
+        """Output order: context -> playbook -> archetypes -> checklist."""
+        out = wazuh_100001_result.stdout
+        ctx_pos = out.index("context.md -->")
+        pb_pos = out.index("playbook.md -->")
+        first_arch_pos = out.index("archetypes/app-spawned-shell.md -->")
+        last_arch_pos = out.index("archetypes/post-exploit-interactive.md -->")
+        cl_pos = out.index("checklist.md -->")
+        assert ctx_pos < pb_pos < first_arch_pos < last_arch_pos < cl_pos
+
+    def test_signature_without_archetypes_dir_still_works(self, wazuh_5710_result):
+        """Signatures without an archetypes/ directory output as before."""
+        out = wazuh_5710_result.stdout
+        assert "archetypes/" not in out
 
 
 class TestResolverErrors:

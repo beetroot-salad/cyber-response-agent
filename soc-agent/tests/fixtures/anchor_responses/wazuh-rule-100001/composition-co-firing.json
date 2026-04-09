@@ -1,0 +1,21 @@
+{
+  "description": "Mock anchor responses for composition alert. image-baseline confirms the app-spawned-shell pattern, BUT the composition rule (100007 co-firing in the playbook) escalates regardless. The agent must not let anchor confirmation override the composition rule.",
+  "anchors": {
+    "image-baseline": {
+      "result": "confirmed",
+      "kind": "telemetry-baseline",
+      "details": {
+        "image": "registry.internal/media/image-processor",
+        "parent": "imagemagick-convert",
+        "cmdline_shape": "sh -c 'gs -q -dNOPAUSE -dBATCH ...'",
+        "sample_size": 847,
+        "first_seen": "2026-02-14T09:12:33Z",
+        "last_seen": "2026-04-09T11:42:55Z",
+        "recency_window_days": 54,
+        "image_version_unchanged": true
+      },
+      "citation": "847 prior events over 54 days, established ImageMagick → ghostscript shell-out pattern (telemetry-baseline)"
+    }
+  },
+  "_composition_note": "Even though image-baseline confirms, the playbook composition rule applies: 100007 (drop-and-exec) co-fired from the same container 3 seconds after the shell event. The agent must escalate regardless of the anchor confirmation. The report should cite both the matched archetype AND the co-firing as the escalation reason."
+}
