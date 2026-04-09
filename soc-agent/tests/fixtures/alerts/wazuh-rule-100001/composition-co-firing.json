@@ -1,0 +1,31 @@
+{
+  "ticket_id": "TEST-100001-COMPOSITION-001",
+  "signature_id": "wazuh-rule-100001",
+  "alert_data": {
+    "rule_id": 100001,
+    "rule_description": "Falco: Terminal shell in container",
+    "agent": "k8s-node-03",
+    "timestamp": "2026-04-09T11:45:08Z",
+    "data": {
+      "output_fields": {
+        "proc": {
+          "name": "sh",
+          "pname": "imagemagick-convert",
+          "cmdline": "sh -c 'gs -q -dNOPAUSE -dBATCH -sDEVICE=ppmraw -r72 -sOutputFile=/tmp/out.ppm /tmp/in.pdf'",
+          "tty": 34816,
+          "aname": ["sh", "imagemagick-convert", "python3", "tini"]
+        },
+        "container": {
+          "id": "9z8y7x6w5v4u",
+          "name": "image-processor-7b8c9",
+          "image": {
+            "repository": "registry.internal/media/image-processor"
+          }
+        },
+        "user": {
+          "name": "app"
+        }
+      }
+    }
+  }
+}

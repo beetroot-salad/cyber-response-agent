@@ -158,6 +158,78 @@ def check_precedent_exists(matched_precedent: str, signature_id: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Archetype + trust anchor validation (new model)
+# ---------------------------------------------------------------------------
+
+def load_archetype_frontmatter(matched_archetype: str, signature_id: str) -> dict | None:
+    """Load and parse the YAML frontmatter of an archetype file.
+
+    Returns None if the file does not exist or has no frontmatter.
+    """
+    archetype_dir = (
+        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "archetypes"
+    )
+    candidate = archetype_dir / matched_archetype
+    if not candidate.exists() and not matched_archetype.endswith(".md"):
+        candidate = archetype_dir / (matched_archetype + ".md")
+    if not candidate.exists():
+        return None
+    return parse_yaml_frontmatter(candidate.read_text())
+
+
+def check_archetype_exists(matched_archetype: str, signature_id: str) -> bool:
+    """Check that the referenced archetype file actually exists and parses."""
+    if not matched_archetype:
+        return False
+    return load_archetype_frontmatter(matched_archetype, signature_id) is not None
+
+
+def validate_archetype_anchors(
+    matched_archetype: str,
+    signature_id: str,
+    anchors_consulted: list,
+) -> list[str]:
+    """Verify every required anchor on the archetype was consulted and confirmed.
+
+    Called only when status=resolved. An archetype with required_anchors
+    cannot resolve to a non-escalation status without all of them confirming.
+    """
+    fm = load_archetype_frontmatter(matched_archetype, signature_id)
+    if fm is None:
+        return []  # existence is checked separately
+
+    required = fm.get("required_anchors") or []
+    if not isinstance(required, list):
+        return [
+            f"archetype '{matched_archetype}' has invalid required_anchors "
+            f"(must be a list)"
+        ]
+
+    consulted_by_name: dict = {}
+    for entry in anchors_consulted or []:
+        if isinstance(entry, dict) and entry.get("anchor"):
+            consulted_by_name[entry["anchor"]] = entry
+
+    errors: list[str] = []
+    for anchor_name in required:
+        if anchor_name not in consulted_by_name:
+            errors.append(
+                f"archetype '{matched_archetype}' requires anchor "
+                f"'{anchor_name}' but it was not consulted"
+            )
+            continue
+        entry = consulted_by_name[anchor_name]
+        result = entry.get("result", "")
+        if result != "confirmed":
+            errors.append(
+                f"archetype '{matched_archetype}' requires anchor "
+                f"'{anchor_name}' to be confirmed but result was '{result}'"
+            )
+
+    return errors
+
+
 def get_signature_severity(signature_id: str) -> str:
     """Get severity from context.md frontmatter. Default: medium."""
     context_path = (
@@ -239,20 +311,45 @@ def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
                 f"for {severity} severity (requires >= {min_leads})"
             )
 
-    # Check: resolved requires precedent file exists + valid content
+    # Check: resolved requires either matched_archetype or matched_precedent
     if report.status == "resolved":
-        if not report.matched_precedent:
-            errors.append("status=resolved requires matched_precedent")
-        elif not check_precedent_exists(report.matched_precedent, report.signature_id):
+        has_archetype = bool(report.matched_archetype)
+        has_precedent = bool(report.matched_precedent)
+
+        if not has_archetype and not has_precedent:
             errors.append(
-                f"matched_precedent '{report.matched_precedent}' not found in "
-                f"knowledge/signatures/{report.signature_id}/precedents/"
+                "status=resolved requires matched_archetype or matched_precedent"
             )
-        else:
-            content_errors = validate_precedent_content(
+
+        if has_archetype:
+            if not check_archetype_exists(
+                report.matched_archetype, report.signature_id
+            ):
+                errors.append(
+                    f"matched_archetype '{report.matched_archetype}' not found in "
+                    f"knowledge/signatures/{report.signature_id}/archetypes/"
+                )
+            else:
+                anchor_errors = validate_archetype_anchors(
+                    report.matched_archetype,
+                    report.signature_id,
+                    report.trust_anchors_consulted,
+                )
+                errors.extend(anchor_errors)
+
+        if has_precedent:
+            if not check_precedent_exists(
                 report.matched_precedent, report.signature_id
-            )
-            errors.extend(content_errors)
+            ):
+                errors.append(
+                    f"matched_precedent '{report.matched_precedent}' not found in "
+                    f"knowledge/signatures/{report.signature_id}/precedents/"
+                )
+            else:
+                content_errors = validate_precedent_content(
+                    report.matched_precedent, report.signature_id
+                )
+                errors.extend(content_errors)
 
     return len(errors) == 0, errors, fields
 

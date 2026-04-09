@@ -1,0 +1,38 @@
+{
+  "description": "Pre-canned SIEM response for composition (app-spawned-shell baseline confirmed BUT 100007 co-firing) scenario (wazuh-rule-100001)",
+  "queries": {
+    "container_baseline": {
+      "query": "rule.id:100001 AND data.output_fields.container.image.repository:\"registry.internal/media/image-processor\" AND @timestamp:[now-30d TO now]",
+      "response": {
+        "total": 847,
+        "summary": "847 prior 100001 events for this image over 30 days, all from proc.pname=imagemagick-convert with sh -c 'gs ...' cmdline shape. Established pattern dating back 54 days (since the current image was deployed). This is a routine ImageMagick → ghostscript shell-out pattern; the baseline is well-established.",
+        "cluster": {
+          "pname": "imagemagick-convert",
+          "cmdline_shape": "sh -c 'gs -q -dNOPAUSE -dBATCH ...'",
+          "count": 847,
+          "first_seen": "2026-02-14T09:12:33Z",
+          "last_seen": "2026-04-09T11:42:55Z"
+        }
+      }
+    },
+    "correlated_falco_events": {
+      "query": "rule.id:[100000 TO 100099] AND data.output_fields.container.id:9z8y7x6w5v4u AND @timestamp:[now-15m TO now+15m]",
+      "response": {
+        "total": 1,
+        "summary": "Rule 100007 (Drop and execute new binary) co-fired from the same container 3 seconds after the shell event. The dropped binary is /tmp/.x1, which is not present in the image's layer manifest.",
+        "hits": [
+          {
+            "timestamp": "2026-04-09T11:45:11Z",
+            "rule": {"id": "100007", "description": "Falco: Drop and execute new binary in container"},
+            "data": {
+              "output_fields": {
+                "proc": {"name": ".x1", "pname": "sh", "cmdline": "/tmp/.x1 -p"},
+                "container": {"id": "9z8y7x6w5v4u"}
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

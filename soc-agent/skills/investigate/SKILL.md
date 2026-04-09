@@ -181,7 +181,7 @@ Append to `{run_dir}/investigation.md`:
 
 A hypothesis is a causal story: it proposes an actor, an intent, and an action that produced this specific event. `?monitoring-probe` is shorthand for: "a monitoring system performed a health check via SSH using a test credential that doesn't exist on this host."
 
-For known signatures, the playbook provides a hypothesis catalog — start there. You may add hypotheses the playbook doesn't cover if the evidence suggests them.
+For known signatures, the playbook may list **archetypes** in its `archetypes/` directory — named patterns rooted in real tickets, each with its own story, required trust anchors, and discriminating boundary. When archetypes are present, prefer recognizing one of them over enumerating fresh hypotheses; the archetype is the analyst-shared vocabulary for how this kind of alert resolves. Older playbooks may instead provide a hypothesis catalog — treat it as starter stories. In either case, you may form hypotheses the catalog doesn't cover if the evidence suggests them.
 
 For novel alerts (no playbook), generate hypotheses by:
 
@@ -318,6 +318,8 @@ When a hypothesis about the mechanism is confirmed, two questions remain:
 
 1. **Is this instance legitimate?** Trace the causal chain toward a trust anchor — the authoritative source that establishes authorization. For automation: check the job config, creator, approval. For user activity: verify the identity and authorization. If you can verify authoritatively, confidence is high. If you can only rely on circumstantial evidence (pattern match + precedent), confidence is medium. If only weak circumstantial evidence is available, escalate.
 
+   When the matched archetype declares `required_anchors` in its frontmatter, those are the specific anchors to consult — see `knowledge/environment/operations/` for each anchor's question shape, query method, and failure modes. Record every consultation in the report's `trust_anchors_consulted` field with `anchor`, `kind` (`org-authority` or `telemetry-baseline`), `result` (`confirmed`, `refuted`, or `unavailable`), and a short `citation`. An archetype with required anchors **cannot** resolve to a non-escalation status without all of them returning `confirmed`.
+
 2. **What is the scope?** What was accessed, what's the blast radius, what's the impact? This determines escalation severity for confirmed threats, and informs the recommendation for benign activity (e.g., suggest rule tuning).
 
 > **Important:** Verification and scoping are not separate phases. They are additional HYPOTHESIZE→GATHER→ANALYZE cycles using the same loop. After confirming the mechanism, form new hypotheses about legitimacy or scope, and investigate them through the same loop structure.
@@ -365,10 +367,12 @@ hypotheses:
 1. Review the **Investigation Checklist** in the Signature Knowledge section above — verify every item before writing the report
 2. Generate a trace line summarizing the investigation path
    - For SCREEN-resolved investigations, use the format: `screen({pattern}, {leads}) → disposition:hypothesis`
-3. Determine status: `resolved` (confident, precedent match) or `escalated` (uncertain, adversarial, or insufficient evidence)
+3. Determine status: `resolved` (confident, archetype or precedent match with anchors confirmed) or `escalated` (uncertain, adversarial, anchors unconfirmed, or insufficient evidence)
 4. Determine disposition: `benign` (correct detection, harmless), `false_positive` (rule misfired), `true_positive` (confirmed threat), or `inconclusive` (can't determine)
    - For SCREEN-resolved investigations, use the disposition, confidence, and matched_precedent from the validated screen result
-5. If `resolved`: identify the matching precedent file
+5. If `resolved`:
+   - Identify the matching archetype file (if the signature has an `archetypes/` directory) **or** the matching precedent file (older signature shape)
+   - If matched_archetype is set, every anchor declared in its `required_anchors` frontmatter must appear in `trust_anchors_consulted` with `result: confirmed`
 6. Write `{run_dir}/report.md` with YAML frontmatter
 
 Write state:
@@ -384,7 +388,13 @@ signature_id: {signature_id}
 status: {resolved|escalated}
 disposition: {benign|false_positive|true_positive|inconclusive}
 confidence: {high|medium|low}
+matched_archetype: {archetype-name|null}
 matched_precedent: {filename.json|null}
+trust_anchors_consulted:
+  - anchor: {anchor-name}
+    kind: {org-authority|telemetry-baseline}
+    result: {confirmed|refuted|unavailable}
+    citation: "{short human-readable description of the result}"
 leads_pursued: {count}
 trace: "{lead1(result) -> lead2(result) -> disposition:hypothesis}"
 ---

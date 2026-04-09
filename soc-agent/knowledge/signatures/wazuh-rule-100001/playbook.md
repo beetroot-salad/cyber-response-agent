@@ -1,195 +1,132 @@
 ---
 signature_id: wazuh-rule-100001
-last_updated: 2026-04-08
+last_updated: 2026-04-09
 total_investigations: 0
 resolution_rate: null
 ---
 
 # Investigation Playbook: Terminal shell in container (100001)
 
-> **Note on the hypothesis catalog below:** the current shape conflates
-> observable primitives with outcome stories — `?operator-debug` and
-> `?ci-cd-pipeline` share all the same primitives, `?image-startup` and
-> `?healthcheck-or-probe` differ only in cadence, etc. Worker-mode validation
-> confirmed this catalog over-escalates because the leads cannot
-> discriminate the entries. A primitives + archetypes + trust-anchors
-> redesign is tracked in `docs/design-v3-hypothesis-archetype-rewrite.md`
-> and will replace this section.
+This playbook is **steering, not procedure**. The investigation
+methodology — hypothesis discipline, lead severity, verification and
+scoping, escalation defaults, stop conditions — lives in the
+`investigate` skill. This file provides only what is signature-specific:
 
-## Hypothesis Catalog
+- Field shortcuts so the agent doesn't query for what the alert already
+  carries
+- Named archetypes the agent should try to recognize, each defined in
+  `archetypes/`
+- A recommended starter lead order
+- Composition rules when multiple archetypes match
+- Quirks of this signature that aren't general investigation lessons
 
-### ?operator-debug
-An authorized operator opened a shell into the container via `docker exec`,
-`kubectl exec`, or an equivalent runtime primitive for debugging or
-maintenance.
+## Field shortcuts
 
-**Typical profile:** Parent process is a container runtime exec primitive
-(`runc`, `containerd-shim`, `docker-exec`); user is a real human account or
-matches an operator service account; correlates in time with a deploy,
-incident, or ticketed maintenance.
+| Field | JSON path |
+|---|---|
+| Parent process | `data.output_fields.proc.pname` |
+| Process ancestry | `data.output_fields.proc.aname[2..n]` |
+| Container image | `data.output_fields.container.image.repository` |
 
-### ?ci-cd-pipeline
-A build, test, or deploy pipeline executed a shell command inside the
-container as part of an automated workflow.
+`pname` is easy to misread as "process name" — it's the parent. `aname`
+is the ancestry walk for cases where `pname` itself is a shell or
+interpreter and you need to walk further up. Container image carries
+the registry prefix that the `container-baseline` lead keys on.
 
-**Typical profile:** Container name or image is a CI/build image; shell
-invocation is short-lived and non-interactive; recurring on a predictable
-cadence.
+`proc.tty != 0` is **always true** on every 100001 alert by
+construction of the upstream Falco rule. Do not treat it as a
+discriminating signal.
 
-### ?image-startup
-The container's own entrypoint or init script invokes a shell as part of
-normal startup. The shell is spawned **inside** the container's process tree,
-not via a runtime exec primitive.
+## Archetypes
 
-**Typical profile:** Shell event happens within seconds of container start;
-`proc.pname` is the container's init/entrypoint binary (e.g., `node`,
-`python3`, `java`, a custom launcher) — **not** `runc` /
-`containerd-shim` / `docker-exec` / `crio`; the same image fires this event
-once per container start and not in between.
+The archetypes recognized for this signature are defined as standalone
+files in `archetypes/`. Each declares its own story, required trust
+anchors, and precedents.
 
-**Discriminator vs `?healthcheck-or-probe`:** parent is an in-container
-process, and the event happens at container start, not on a recurring
-schedule.
+| Archetype | One-line description | File |
+|---|---|---|
+| `operator-runtime-debug` | Authorized operator opened a shell via `docker exec` / `kubectl exec` for ad-hoc debugging | `archetypes/operator-runtime-debug.md` |
+| `ci-pipeline-exec` | CI/CD job exec'd into the container to run a scripted, non-interactive command | `archetypes/ci-pipeline-exec.md` |
+| `k8s-exec-probe` | Kubernetes liveness/readiness/exec probe runs `sh -c "..."` on a strict cadence | `archetypes/k8s-exec-probe.md` |
+| `container-init-script` | The image's own entrypoint or init script invokes a shell at container start | `archetypes/container-init-script.md` |
+| `app-spawned-shell` | A long-running application binary shells out as part of its normal work, matching this image's established baseline | `archetypes/app-spawned-shell.md` |
+| `post-exploit-interactive` | Application-spawned interactive shell with no benign baseline — escalation outcome | `archetypes/post-exploit-interactive.md` |
 
-### ?healthcheck-or-probe
-A liveness/readiness/exec-probe configured on the container invokes a shell
-to run a small script (e.g., `sh -c "curl localhost:8080/health"`). The
-orchestrator runs the probe by exec-ing into the container, so the shell is
-spawned by the runtime, not by the container's own process tree.
+## Starter lead order
 
-**Typical profile:** Recurring at a fixed interval matching the configured
-probe period; identical `proc.cmdline` on every occurrence; `proc.pname` is
-a runtime exec primitive (`runc`, `containerd-shim`, `docker-exec`, `crio`);
-shell terminates within milliseconds.
+Most investigations resolve after the first two leads. The third only
+runs when the composition rules below need checking, or when the
+picture is still ambiguous after lead 2.
 
-**Discriminator vs `?image-startup`:** parent is a runtime exec primitive
-(the probe came from outside the container's process tree), and the event
-recurs on a strict schedule.
+1. **`shell-context`** — read parent process, cmdline, container image,
+   and user from the alert directly (no query needed). This alone is
+   enough to recognize most archetypes; the rest of the leads only
+   refine.
+2. **`container-baseline`** — query other 100001 events from the same
+   `container.image` over the last 7-30 days. Surfaces whether this
+   image has a history of shells from this parent (the
+   `app-spawned-shell` vs `post-exploit-interactive` discriminator) and
+   whether the cadence matches a probe (`k8s-exec-probe`).
+3. **`correlated-falco-events`** — query Falco rules 100000-100099 from
+   the same `container.id` in a ±15 minute window, especially 100002,
+   100006, 100007, and 100008. Required by the composition rules below.
 
-**Discriminator vs `?operator-debug`:** identical recurring `cmdline` on a
-strict schedule, vs. ad-hoc operator commands at irregular times.
+**Composite dispatch:** leads 2 and 3 share the same `container.id`
+and overlap in window. If lead 1 alone does not uniquely match an
+archetype, dispatch leads 2 and 3 as a composite — one subagent, one
+expanded base query.
 
-### ?adversary-post-exploit
-An attacker who reached code execution inside the container spawned an
-interactive shell for follow-on activity.
+## Composition rules
 
-**Typical profile:** Parent process is an application binary (web server,
-database, language runtime); shell command line indicates interactivity
-(`bash -i`, `sh -i`); may correlate with other Falco events from the same
-container (sensitive file read, network redirect, dropped binary).
+When evidence matches multiple archetypes, the composition is the
+finding — escalate with all matching archetypes named, do not pick one.
 
----
+The composition that matters for this signature:
 
-## Lead List
+**Any benign archetype + co-firing of related Falco rules in the same
+`container.id` window is severe regardless of the otherwise-benign
+match.** If the `correlated-falco-events` lead returns any of the
+following from the same container within ±15 minutes, escalate
+immediately and cite both the matched benign archetype and the
+co-firing rule(s):
 
-### shell-context
-**Query:** Inspect the Falco event fields for this alert: `proc.name`,
-`proc.pname`, `proc.cmdline`, `user.name`, `container.name`,
-`container.image.repository`.
+- 100002 — Redirect STDOUT/STDIN to network connection
+- 100006 — Sensitive file read
+- 100007 — Drop and execute new binary
+- 100008 — Log clearing
 
-**Discriminates:** All hypotheses — the parent process and command line are
-the strongest single signals.
+This applies even when an anchor confirms the benign match. A
+confirmed `operator-runtime-debug` accompanied by 100007 in the same
+window is the strongest possible evidence that operator credentials
+were compromised — the anchor confirmation does not override the
+co-firing.
 
-| Hypothesis | Prediction |
-|------------|------------|
-| ?operator-debug | Parent is `runc` / `containerd-shim` / `docker-exec`; cmdline is plain `bash`/`sh` (no `-c`), interactive flags possible |
-| ?ci-cd-pipeline | Parent is a runtime exec primitive; cmdline is `sh -c "..."` or `bash -c "..."` with a scripted command, non-interactive |
-| ?image-startup | Parent is the container's init/entrypoint binary (not a runtime exec primitive); happens at container start |
-| ?healthcheck-or-probe | Parent is a runtime exec primitive; cmdline is a short fixed `sh -c "..."` matching the configured probe |
-| ?adversary-post-exploit | Parent is an application binary (nginx, java, python, node, ...); cmdline shows `-i`, pipes, or redirects to a socket |
+## Signature quirks
 
-### container-baseline
-**Query:** Other 100001 events from the same `container.image` (and ideally
-`container.name`) over the last 7-30 days. Has this image been observed
-spawning shells before? At what cadence?
-
-**Discriminates:** Routine vs anomalous behaviour for this workload.
-
-| Hypothesis | Prediction |
-|------------|------------|
-| ?operator-debug | Sporadic prior events tied to operator activity windows |
-| ?ci-cd-pipeline | Regular cadence matching pipeline schedule |
-| ?image-startup | Event fires once per container start, not in between |
-| ?healthcheck-or-probe | Strictly periodic, matching the configured probe interval, with identical cmdline |
-| ?adversary-post-exploit | No prior events for this image, or sudden change in pattern |
-
-### correlated-falco-events
-**Query:** Other Falco-derived alerts (rules 100000-100099) from the same
-`container.id` in a ±15 minute window — especially 100002 (network
-redirect), 100006 (sensitive file read), 100007 (drop-and-exec), and 100008
-(log clearing).
-
-**Discriminates:** Whether the shell is isolated or part of a chain.
-
-| Hypothesis | Prediction |
-|------------|------------|
-| ?operator-debug | No correlated suspicious events, or only operator-driven follow-ups |
-| ?ci-cd-pipeline | No correlated suspicious events |
-| ?image-startup | No correlated suspicious events |
-| ?adversary-post-exploit | One or more correlated rules in the same container window |
-
-> **Host-context queries** ("other alerts on this agent in last 24h",
-> "is this a repeat or part of a pattern") are handled by the
-> ticket-context subagent at CONTEXTUALIZE — its findings are already in
-> the investigation context by the time leads run. Don't re-execute those
-> queries here; reference the ticket-context output instead.
-
-> **Container runtime privileges** (privileged flag, Docker socket mount,
-> host network/PID) are scoping evidence that informs severity and the
-> Privilege axis of risk indicators. Gather them as scoping evidence when
-> the primitive pattern looks adversarial; not a separate diagnostic lead.
-
----
-
-## Start With
-
-**`shell-context`** — the parent process and command line are the most
-diagnostic single signal. A shell whose parent is `runc` is a very different
-situation from a shell whose parent is `nginx` or `java`.
-
-Follow with `container-baseline` to determine whether this is normal behaviour
-for the image, then `correlated-falco-events` if any doubt remains.
-
----
-
-## Auto-Close Criteria
-
-All must be true:
-1. Exactly one hypothesis remains with `++` support
-2. The adversary-post-exploit hypothesis has `--` refutation
-3. A matching precedent exists in `precedents/`
-4. No correlated Falco events from the same container in the surrounding window
-5. `confidence` is `high`
-
-## Escalation Criteria
-
-Escalate immediately if ANY:
-- Shell command line indicates a networked shell (pipes to `/dev/tcp`,
-  redirects to a socket fd) — this is unambiguously adversarial
-- Correlated 100002, 100006, 100007, or 100008 event from the same container
-  within the surrounding window
-- Container is privileged, mounts the Docker socket, or runs with host
-  network / host PID **and** the primitive pattern doesn't match a known
-  benign archetype for this image
-- Parent is an application binary **and** this image has no prior history
-  of shells from that parent **and** no operator/CI/deploy activity
-  explains the timing
-- Container image has never previously fired this rule and the operator
-  hypothesis cannot be confirmed
-- No hypothesis reaches `++` after pursuing all leads
-- A field a lead depends on (`proc.pname`, `proc.cmdline`, `container.image`,
-  etc.) is missing from the alert and cannot be retrieved — do not guess
-
-> **Removed:** "parent is an application binary → escalate" as a hard
-> standalone trigger. Real apps shell out routinely (build/deploy hooks,
-> `subprocess.run`, ImageMagick/ffmpeg wrappers, log rotation) and the
-> trigger as written produced too many false escalations. App-spawned
-> shells now require corroboration from the abnormality axis before
-> escalating.
+- **Falco only sees containers it watches.** Containers outside Falco's
+  configured scope are invisible to this rule. Absence of prior events
+  for an image *might* mean "first time" or *might* mean "Falco isn't
+  watching it." The `container-baseline` lead must distinguish via
+  Falco's coverage data, not by inferring from silence alone.
+- **The `user_known_shell_in_container_activities` macro suppresses
+  matches.** Anything on Falco's exception list never fires this rule,
+  so absence of an alert is not evidence the activity didn't happen.
+- **Container privileges are scoping evidence, not a discriminator.**
+  Privileged containers, Docker-socket mounts, host network, host PID
+  raise severity if the matched archetype escalates, but they do not
+  change which archetype matches. Capture them when escalating for
+  accurate blast-radius reporting.
+- **Apps shelling out is normal.** `pname=<application binary>` is not
+  a standalone red flag — `subprocess.run`, build hooks, image
+  processing wrappers, log rotation, and many other legitimate things
+  all produce app-spawned shells. The discriminating signal is whether
+  this image has done it *before* (the baseline anchor on
+  `app-spawned-shell`).
 
 ## Scope
 
-Investigation covers the alerting Falco event, other Falco events from the
-same `container.id` in a ±15 minute window, and other alerts from the same
-agent in the last 24 hours. Do not expand beyond the originating host
-without escalating.
+Standard for this signature: the alerting Falco event, other Falco
+events from the same `container.id` in ±15 minutes, and other alerts
+from the same agent in the last 24 hours (the latter is provided by
+ticket-context at CONTEXTUALIZE — don't re-query). Anything beyond
+this requires escalation per the skill's stay-in-scope rule.

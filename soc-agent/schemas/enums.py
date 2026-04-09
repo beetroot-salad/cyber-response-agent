@@ -15,3 +15,10 @@ VALID_CONFIDENCES = ("high", "medium", "low")
 
 # Current state of a hypothesis during/after investigation
 VALID_HYPOTHESIS_STATUSES = ("active", "confirmed", "refuted", "untested")
+
+# Trust anchor citation kinds — distinguishes org authorities from
+# telemetry-derived pragmatic anchors (e.g. image-baseline)
+VALID_ANCHOR_KINDS = ("org-authority", "telemetry-baseline")
+
+# Result of a trust anchor consultation
+VALID_ANCHOR_RESULTS = ("confirmed", "refuted", "unavailable")

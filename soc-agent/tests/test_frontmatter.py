@@ -313,6 +313,66 @@ ports:
         fm = parse_yaml_frontmatter(text)
         assert fm["ports"] == [22, 443, 8080]
 
+    def test_list_of_dicts_single_item(self):
+        """A single dict in a block list — used by trust_anchors_consulted."""
+        text = """---
+trust_anchors_consulted:
+  - anchor: oncall-schedule
+    kind: org-authority
+    result: confirmed
+    citation: "alice on-call"
+---"""
+        fm = parse_yaml_frontmatter(text)
+        assert fm["trust_anchors_consulted"] == [
+            {
+                "anchor": "oncall-schedule",
+                "kind": "org-authority",
+                "result": "confirmed",
+                "citation": "alice on-call",
+            }
+        ]
+
+    def test_list_of_dicts_multiple_items(self):
+        """Multiple dicts in a block list — each ``- key:`` starts a new dict."""
+        text = """---
+anchors:
+  - name: a1
+    kind: org-authority
+    result: confirmed
+  - name: a2
+    kind: telemetry-baseline
+    result: refuted
+---"""
+        fm = parse_yaml_frontmatter(text)
+        assert fm["anchors"] == [
+            {"name": "a1", "kind": "org-authority", "result": "confirmed"},
+            {"name": "a2", "kind": "telemetry-baseline", "result": "refuted"},
+        ]
+
+    def test_list_of_dicts_then_top_level_key(self):
+        """A list-of-dicts followed by a top-level key — list-item context resets."""
+        text = """---
+items:
+  - k: a
+    v: 1
+  - k: b
+    v: 2
+name: test
+---"""
+        fm = parse_yaml_frontmatter(text)
+        assert fm["items"] == [{"k": "a", "v": 1}, {"k": "b", "v": 2}]
+        assert fm["name"] == "test"
+
+    def test_mixed_scalar_and_dict_list_items(self):
+        """A list with mixed scalar and dict items — each starts a new entry."""
+        text = """---
+mixed:
+  - first
+  - k: v
+---"""
+        fm = parse_yaml_frontmatter(text)
+        assert fm["mixed"] == ["first", {"k": "v"}]
+
 
 # ---------------------------------------------------------------------------
 # Known limitations — document what the parser does NOT handle.

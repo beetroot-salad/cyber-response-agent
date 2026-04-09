@@ -4,10 +4,16 @@ Validates the YAML frontmatter of investigation report.md files.
 Used by hooks/scripts/validate_report.py to enforce structural safety.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
-from schemas.enums import VALID_CONFIDENCES, VALID_DISPOSITIONS, VALID_STATUSES
+from schemas.enums import (
+    VALID_ANCHOR_KINDS,
+    VALID_ANCHOR_RESULTS,
+    VALID_CONFIDENCES,
+    VALID_DISPOSITIONS,
+    VALID_STATUSES,
+)
 
 # Minimum leads_pursued per severity level
 MIN_LEADS_BY_SEVERITY = {
@@ -33,6 +39,13 @@ class ReportFrontmatter:
     # Optional fields
     signature_description: Optional[str] = None
     trace: Optional[str] = None
+    # Archetype-shape fields (new model). matched_archetype names a file in
+    # knowledge/signatures/{sig}/archetypes/. trust_anchors_consulted records
+    # which anchors were consulted and what they returned, in the order
+    # consulted. Each entry is a dict with keys: anchor, kind, result,
+    # citation (citation is a free-form short description).
+    matched_archetype: Optional[str] = None
+    trust_anchors_consulted: list = field(default_factory=list)
 
     def validate(self) -> list[str]:
         """Validate all fields. Returns list of error messages (empty = valid)."""
@@ -59,10 +72,40 @@ class ReportFrontmatter:
         if not isinstance(self.leads_pursued, int) or self.leads_pursued < 0:
             errors.append(f"leads_pursued must be a non-negative integer, got '{self.leads_pursued}'")
 
-        if self.status == "resolved" and not self.matched_precedent:
-            errors.append(
-                "status=resolved requires matched_precedent to be set"
-            )
+        if self.status == "resolved":
+            if not self.matched_precedent and not self.matched_archetype:
+                errors.append(
+                    "status=resolved requires matched_archetype or matched_precedent to be set"
+                )
+
+        # Validate trust_anchors_consulted shape (when present)
+        if self.trust_anchors_consulted:
+            if not isinstance(self.trust_anchors_consulted, list):
+                errors.append("trust_anchors_consulted must be a list")
+            else:
+                for i, entry in enumerate(self.trust_anchors_consulted):
+                    if not isinstance(entry, dict):
+                        errors.append(
+                            f"trust_anchors_consulted[{i}] must be a dict"
+                        )
+                        continue
+                    for required_key in ("anchor", "kind", "result"):
+                        if not entry.get(required_key):
+                            errors.append(
+                                f"trust_anchors_consulted[{i}] missing '{required_key}'"
+                            )
+                    kind = entry.get("kind")
+                    if kind and kind not in VALID_ANCHOR_KINDS:
+                        errors.append(
+                            f"trust_anchors_consulted[{i}] kind must be one of "
+                            f"{VALID_ANCHOR_KINDS}, got '{kind}'"
+                        )
+                    result = entry.get("result")
+                    if result and result not in VALID_ANCHOR_RESULTS:
+                        errors.append(
+                            f"trust_anchors_consulted[{i}] result must be one of "
+                            f"{VALID_ANCHOR_RESULTS}, got '{result}'"
+                        )
 
         return errors
 
@@ -98,6 +141,8 @@ def parse_frontmatter(fields: dict) -> tuple[Optional[ReportFrontmatter], list[s
         leads_pursued=leads,
         signature_description=fields.get("signature_description"),
         trace=fields.get("trace"),
+        matched_archetype=fields.get("matched_archetype"),
+        trust_anchors_consulted=fields.get("trust_anchors_consulted") or [],
     )
 
     validation_errors = report.validate()

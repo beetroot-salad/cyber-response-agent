@@ -5,7 +5,9 @@ start of a Markdown file. Covers the subset of YAML used in this project:
 
 - Scalar values: strings, integers, ``null``/``~``, quoted strings
 - Inline lists: ``[a, b, c]``
-- Block lists: indented ``- item`` lines
+- Block lists of scalars: indented ``- item`` lines
+- Block lists of dicts: indented ``- key: value`` lines, with subsequent
+  more-indented ``key: value`` lines added to the same dict
 - One level of nesting: indented ``key: value`` under a parent key
 
 This is intentionally NOT a full YAML parser. It exists so that hooks
@@ -14,7 +16,7 @@ If you need richer YAML support, use ``yaml.safe_load`` from PyYAML in
 non-hook code where dependencies are acceptable.
 
 Limitations:
-- Only one level of nesting (no deeply nested structures)
+- Only one level of nesting (no dicts within dicts within lists, etc.)
 - No multi-line string values (``|``, ``>``)
 - No anchors/aliases (``&``, ``*``)
 - No flow mappings (``{key: value}``)
@@ -70,6 +72,7 @@ def parse_yaml_frontmatter(text: str) -> dict:
 
     fields: dict = {}
     current_key: str | None = None  # Tracks parent key for indented content
+    current_list_item: dict | None = None  # Tracks latest dict in a list-of-dicts
 
     for line in fm_lines:
         indent = len(line) - len(line.lstrip())
@@ -81,20 +84,36 @@ def parse_yaml_frontmatter(text: str) -> dict:
         # Indented line — belongs to current_key (list item or nested key).
         if indent > 0 and current_key is not None:
             if stripped.startswith("- "):
-                item = _parse_scalar(stripped[2:].strip())
+                item_content = stripped[2:].strip()
                 if not isinstance(fields[current_key], list):
                     fields[current_key] = []
-                fields[current_key].append(item)
+                # "- key: value" starts a new dict in the list; "- scalar"
+                # appends a plain scalar.
+                if ":" in item_content:
+                    sub_key, _, sub_value = item_content.partition(":")
+                    new_item = {sub_key.strip(): _parse_scalar(sub_value.strip())}
+                    fields[current_key].append(new_item)
+                    current_list_item = new_item
+                else:
+                    fields[current_key].append(_parse_scalar(item_content))
+                    current_list_item = None
             elif ":" in stripped:
                 sub_key, _, sub_value = stripped.partition(":")
-                if not isinstance(fields[current_key], dict):
-                    fields[current_key] = {}
-                fields[current_key][sub_key.strip()] = _parse_scalar(
-                    sub_value.strip()
-                )
+                if current_list_item is not None:
+                    # Belongs to the latest dict appended to the list.
+                    current_list_item[sub_key.strip()] = _parse_scalar(
+                        sub_value.strip()
+                    )
+                else:
+                    if not isinstance(fields[current_key], dict):
+                        fields[current_key] = {}
+                    fields[current_key][sub_key.strip()] = _parse_scalar(
+                        sub_value.strip()
+                    )
             continue
 
-        # Top-level key: value line.
+        # Top-level key: value line — reset list-item context.
+        current_list_item = None
         if ":" in stripped:
             key, _, value = stripped.partition(":")
             key = key.strip()

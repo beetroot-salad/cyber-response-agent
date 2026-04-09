@@ -1,0 +1,25 @@
+{
+  "description": "Pre-canned SIEM response for operator-runtime-debug scenario (wazuh-rule-100001)",
+  "queries": {
+    "container_baseline": {
+      "query": "rule.id:100001 AND data.output_fields.container.image.repository:\"registry.internal/payments/api\" AND @timestamp:[now-30d TO now]",
+      "response": {
+        "total": 8,
+        "summary": "8 prior 100001 events for this image over 30 days. All from runtime exec primitives (containerd-shim). Sporadic timing tied to operator activity windows. No periodic pattern. No events from non-runtime parents.",
+        "hits": [
+          {"timestamp": "2026-03-15T09:12:33Z", "data": {"output_fields": {"proc": {"pname": "containerd-shim", "cmdline": "bash"}, "user": {"name": "bob"}}}},
+          {"timestamp": "2026-03-22T14:45:01Z", "data": {"output_fields": {"proc": {"pname": "containerd-shim", "cmdline": "bash -c 'kubectl logs payment-api'"}, "user": {"name": "alice"}}}},
+          {"timestamp": "2026-04-01T08:23:11Z", "data": {"output_fields": {"proc": {"pname": "containerd-shim", "cmdline": "bash"}, "user": {"name": "alice"}}}}
+        ]
+      }
+    },
+    "correlated_falco_events": {
+      "query": "rule.id:[100000 TO 100099] AND data.output_fields.container.id:a1b2c3d4e5f6 AND @timestamp:[now-15m TO now+15m]",
+      "response": {
+        "total": 0,
+        "hits": [],
+        "summary": "No correlated Falco events from this container in the surrounding ±15 minute window."
+      }
+    }
+  }
+}

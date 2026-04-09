@@ -37,6 +37,12 @@ def wazuh_5710_result():
     return run_resolver("wazuh-rule-5710")
 
 
+@pytest.fixture(scope="module")
+def wazuh_100001_result():
+    """Run resolver once for wazuh-rule-100001 (signature with archetypes)."""
+    return run_resolver("wazuh-rule-100001")
+
+
 class TestResolverHappyPath:
     """Tests with the real wazuh-rule-5710 signature."""
 
@@ -49,7 +55,8 @@ class TestResolverHappyPath:
 
     def test_contains_playbook(self, wazuh_5710_result):
         assert "<!-- source: knowledge/signatures/wazuh-rule-5710/playbook.md -->" in wazuh_5710_result.stdout
-        assert "Hypothesis Catalog" in wazuh_5710_result.stdout
+        # New playbook shape: starter hypotheses replace the old "Hypothesis Catalog" section
+        assert "Starter hypotheses" in wazuh_5710_result.stdout
 
     def test_contains_checklist(self, wazuh_5710_result):
         assert "<!-- source: knowledge/common-investigation/checklist.md -->" in wazuh_5710_result.stdout
@@ -73,6 +80,93 @@ class TestResolverImports:
         # No import source markers should appear after checklist
         assert "ip-classification.md -->" not in out
         assert "wazuh-queries.md -->" not in out
+
+
+class TestResolverArchetypes:
+    """Tests for archetype file inclusion (new model — wazuh-rule-100001)."""
+
+    EXPECTED_ARCHETYPES = [
+        "app-spawned-shell",
+        "ci-pipeline-exec",
+        "container-init-script",
+        "k8s-exec-probe",
+        "operator-runtime-debug",
+        "post-exploit-interactive",
+    ]
+
+    def test_exit_code_zero(self, wazuh_100001_result):
+        assert wazuh_100001_result.returncode == 0, (
+            f"stderr: {wazuh_100001_result.stderr}"
+        )
+
+    def test_all_archetypes_present(self, wazuh_100001_result):
+        """Every archetype file in archetypes/ must appear in resolver output."""
+        out = wazuh_100001_result.stdout
+        for name in self.EXPECTED_ARCHETYPES:
+            marker = (
+                f"<!-- source: knowledge/signatures/wazuh-rule-100001/"
+                f"archetypes/{name}.md -->"
+            )
+            assert marker in out, f"Missing archetype marker: {name}"
+
+    def test_archetype_content_present(self, wazuh_100001_result):
+        """Archetype bodies (not just headers) must be in the output."""
+        out = wazuh_100001_result.stdout
+        # Story content from each archetype — distinct phrases
+        assert "Operator Runtime Debug" in out
+        assert "Post-Exploit Interactive Shell" in out
+        assert "operator's session is bounded" in out
+        assert "Application-Spawned Shell" in out
+        assert "Container Init Script" in out
+        assert "Kubernetes Exec Probe" in out
+        assert "CI/CD Pipeline Exec" in out
+
+    def test_archetypes_sorted_deterministic(self, wazuh_100001_result):
+        """Archetype order is alphabetical (deterministic across runs)."""
+        out = wazuh_100001_result.stdout
+        positions = []
+        for name in self.EXPECTED_ARCHETYPES:
+            marker = f"archetypes/{name}.md -->"
+            positions.append(out.index(marker))
+        assert positions == sorted(positions), (
+            "Archetypes are not in alphabetical order"
+        )
+
+    def test_archetypes_between_playbook_and_checklist(self, wazuh_100001_result):
+        """Output order: context -> playbook -> archetypes -> checklist."""
+        out = wazuh_100001_result.stdout
+        ctx_pos = out.index("context.md -->")
+        pb_pos = out.index("playbook.md -->")
+        first_arch_pos = out.index("archetypes/app-spawned-shell.md -->")
+        last_arch_pos = out.index("archetypes/post-exploit-interactive.md -->")
+        cl_pos = out.index("checklist.md -->")
+        assert ctx_pos < pb_pos < first_arch_pos < last_arch_pos < cl_pos
+
+    def test_signature_without_archetypes_dir_still_works(self, tmp_path):
+        """Signatures without an archetypes/ directory output as before.
+
+        All real signatures now have an archetypes/ directory; use a synthetic
+        signature to verify the legacy code path still works.
+        """
+        sig_dir = SOC_AGENT_ROOT / "knowledge" / "signatures" / "_test-legacy-shape"
+        sig_dir.mkdir(exist_ok=True)
+        try:
+            (sig_dir / "context.md").write_text(
+                "---\nsignature_id: _test-legacy-shape\nname: NoArchTest\n"
+                "severity: low\ndata_sources: [test]\n---\n# NoArch Context\n"
+            )
+            (sig_dir / "playbook.md").write_text(
+                "---\nsignature_id: _test-legacy-shape\nlast_updated: 2026-01-01\n"
+                "total_investigations: 0\nresolution_rate: null\n---\n"
+                "# NoArch Playbook\n\n### lead-1\nQuery something.\n"
+            )
+
+            result = run_resolver("_test-legacy-shape")
+            assert result.returncode == 0, f"stderr: {result.stderr}"
+            assert "archetypes/" not in result.stdout
+        finally:
+            import shutil
+            shutil.rmtree(sig_dir, ignore_errors=True)
 
 
 class TestResolverErrors:
@@ -149,10 +243,11 @@ class TestEndToEndResolve:
         assert "Invalid user" in out
         assert "data.srcip" in out
 
-        # playbook.md content
+        # playbook.md content — starter hypothesis names + the lead name
         assert "?monitoring-probe" in out
-        assert "?brute-force" in out
         assert "authentication-history" in out
+        # Archetype content (external-bruteforce replaced the ?brute-force story)
+        assert "External Brute-Force" in out
 
         # checklist.md content
         assert "adversarial hypothesis" in out.lower()
