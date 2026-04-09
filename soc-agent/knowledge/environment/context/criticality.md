@@ -6,12 +6,12 @@ tags: [assets, criticality]
 
 ## Criticality Tiers
 
-| Tier | Definition | Escalation Threshold |
-|------|------------|---------------------|
-| Critical | Revenue-impacting, customer-facing, auth infrastructure | Any confirmed threat → immediate escalate |
-| High | Internal production, CI/CD, data pipelines | Confirmed threat → escalate, suspicious → investigate thoroughly |
-| Medium | Development, staging, internal tools | Normal investigation flow |
-| Low | Test environments, sandboxes | Reduced investigation depth acceptable |
+| Tier | Definition |
+|------|------------|
+| Critical | Revenue-impacting, customer-facing, auth infrastructure |
+| High | Internal production, CI/CD, data pipelines |
+| Medium | Development, staging, internal tools |
+| Low | Test environments, sandboxes |
 
 ## Critical System Patterns
 
@@ -24,9 +24,3 @@ tags: [assets, criticality]
 | ci-*, jenkins-*, gitlab-runner-* | High | CI/CD pipeline |
 -->
 
-## Investigation Impact
-
-When alert involves a critical/high-tier system:
-- Minimum 3 leads before resolution (regardless of signature severity)
-- Adversarial hypotheses require `--` from multiple independent leads to refute
-- Consider scoping leads even for benign disposition

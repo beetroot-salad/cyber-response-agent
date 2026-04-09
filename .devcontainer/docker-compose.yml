@@ -1,3 +1,5 @@
+name: cyber-response-agent_devcontainer
+
 services:
   # Pure development environment - "coding machine"
   devcontainer:
@@ -12,6 +14,12 @@ services:
     volumes:
       - ../:/workspace # Mount full workspace directory
       - /var/run/docker.sock:/var/run/docker.sock
+      # Second mount of the same source at the host's own path. This lets
+      # `docker compose` invoked from inside the devcontainer use host-style
+      # paths for build contexts and bind mounts (the daemon runs on the host
+      # and only speaks host paths). HOST_WORKSPACE must be set in .env to
+      # the host filesystem path that maps to /workspace.
+      - ../:${HOST_WORKSPACE}
     networks:
       - response-network
     command: ["sleep", "infinity"]
@@ -25,6 +33,13 @@ services:
     hostname: target-endpoint
     volumes:
       - ../playground/target-endpoint/workloads:/opt/workloads
+      # Persist Wazuh agent state across container recreates:
+      #   - client.keys (agent identity / enrollment)
+      #   - syscheck/fim DB (FIM baseline — avoids re-scan on every restart)
+      #   - rids (anti-replay counters)
+      # The whole queue dir + client.keys live behind a single named volume.
+      # See entrypoint.sh for the symlink setup.
+      - target-endpoint-state:/var/ossec-state
     networks:
       - response-network
 
@@ -115,3 +130,4 @@ networks:
 volumes:
   falco-logs:
   registry_data:
+  target-endpoint-state:

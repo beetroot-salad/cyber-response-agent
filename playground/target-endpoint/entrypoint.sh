@@ -55,6 +55,31 @@ else
     echo "    ✗ sshd failed to start"
 fi
 
+# Persist Wazuh agent state across container recreates
+# /var/ossec-state is a named volume; on first run it's empty.
+# We seed it from the image defaults, then symlink the live paths to it.
+echo "[+] Setting up persistent Wazuh agent state..."
+STATE_DIR=/var/ossec-state
+mkdir -p "$STATE_DIR"
+
+# client.keys — agent identity / enrollment
+if [ ! -f "$STATE_DIR/client.keys" ]; then
+    echo "    First run: creating empty client.keys (agent will auto-enroll)"
+    : > "$STATE_DIR/client.keys"
+fi
+chown wazuh:wazuh "$STATE_DIR/client.keys"
+chmod 640 "$STATE_DIR/client.keys"
+ln -sf "$STATE_DIR/client.keys" /var/ossec/etc/client.keys
+
+# queue/ — syscheck FIM DB, rids anti-replay counters, agent buffers
+if [ ! -d "$STATE_DIR/queue" ]; then
+    echo "    First run: seeding queue/ from image defaults"
+    cp -a /var/ossec/queue "$STATE_DIR/queue"
+fi
+chown -R wazuh:wazuh "$STATE_DIR/queue"
+rm -rf /var/ossec/queue
+ln -s "$STATE_DIR/queue" /var/ossec/queue
+
 # Start Wazuh agent
 echo "[+] Starting wazuh-agent..."
 /var/ossec/bin/wazuh-control start

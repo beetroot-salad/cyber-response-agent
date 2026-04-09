@@ -27,7 +27,7 @@ tags: [identity, classification]
 
 ## Classification Logic
 
-1. Match against known service account patterns → likely automated
-2. Match against admin patterns → escalation-worthy if anomalous
-3. Common attack wordlist names (admin, root, user, test, oracle, postgres) → likely adversarial if source is external
-4. Real-looking but unknown username → could be credential stuffing
+1. Match against known service account patterns → **automated / service**
+2. Match against admin patterns → **privileged / human admin**
+3. Common attack-wordlist names (admin, root, user, test, oracle, postgres) → **generic** (high collision with both default accounts and brute-force wordlists; the label alone is not diagnostic)
+4. Real-looking but unrecognized username → **unknown** (not in any known pattern set for this org)

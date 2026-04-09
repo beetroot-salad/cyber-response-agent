@@ -6,12 +6,12 @@ tags: [data, sensitivity]
 
 ## Sensitivity Levels
 
-| Level | Description | Examples | Breach Impact |
-|-------|-------------|----------|---------------|
-| Critical | Credentials, encryption keys | API keys, DB passwords, TLS private keys | Immediate escalation |
-| High | PII, financial data | SSNs, credit cards, salary data, medical records | Regulatory + reputational |
-| Medium | Internal business data | Revenue reports, roadmaps, internal comms | Business impact |
-| Low | Public or near-public | Marketing materials, public docs | Minimal |
+| Level | Description | Examples |
+|-------|-------------|----------|
+| Critical | Credentials, encryption keys | API keys, DB passwords, TLS private keys |
+| High | PII, financial data | SSNs, credit cards, salary data, medical records |
+| Medium | Internal business data | Revenue reports, roadmaps, internal comms |
+| Low | Public or near-public | Marketing materials, public docs |
 
 ## Sensitive Data Locations
 
@@ -23,9 +23,3 @@ tags: [data, sensitivity]
 | /data/hr/ | Employee PII | High | HR |
 -->
 
-## Investigation Impact
-
-Access to critical/high sensitivity data during a confirmed incident:
-- Elevates severity regardless of initial alert level
-- Requires scoping lead to assess data exposure
-- Triggers notification obligations (regulatory)

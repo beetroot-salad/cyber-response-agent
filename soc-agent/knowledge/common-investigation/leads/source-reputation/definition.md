@@ -12,7 +12,8 @@ or unrecognized?
 ## What to Characterize
 
 - **Internal/external classification**: RFC1918 or org-specific range?
-  See environment/context/ip-ranges.md.
+  Check environment/context/ for any documented org subnets; otherwise
+  classify based on standard private ranges.
 - **Asset identity**: If internal, what system is it? Query asset
   inventory for hostname, owner, purpose, criticality.
 - **Historical alert activity**: Other alerts from this source across

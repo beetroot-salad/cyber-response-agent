@@ -24,13 +24,16 @@ available" or "not observed." Omission is ambiguous to the main agent.
   failures is a critical signal).
 - **Volume and rate**: Total event count, events per hour, and
   whether rate is constant or changing.
-- **Source context**: Cross-reference source IP against
-  environment/context/ip-ranges.md. Note if internal/external, known subnet.
+- **Source context**: Classify source IP (internal/external, RFC1918,
+  loopback). If org-specific subnet metadata is available under
+  environment/context/, use it; otherwise note the basic classification.
 
 ## Common Pitfalls
 
-- NAT can collapse multiple sources into one IP. Check if srcip
-  is a known NAT gateway (see environment/context/ip-ranges.md).
+- NAT can collapse multiple sources into one IP. If the environment
+  documents known NAT gateways, check there; otherwise treat any
+  high-volume single-IP source skeptically and look for additional
+  discriminators (username, session ID).
 - Failed auth for non-existent users vs existing users are different
   signals (different SIEM rules, different threat implications).
 - Cached/stale credentials cause periodic failures after password
