@@ -20,7 +20,7 @@ argument-hint: "<signature_id> <alert_json>"
 
 ## Workspace Map
 
-The investigation knowledge tree, lead catalog, and script surface for this deployment, derived from the on-disk structure. To read any of these, use the `Read` tool with an absolute path under `/workspace/soc-agent/`.
+A starting orientation derived from the on-disk knowledge tree. Your shell cwd at startup is the soc-agent root, so the script paths shown below are relative to it (e.g. `python3 hooks/scripts/write_state.py …` runs from there). When in doubt about a path, run `ls` or `pwd` — this map is a starting point, not an exhaustive index.
 
 !`cd ${CLAUDE_SKILL_DIR}/../.. && python3 scripts/workspace_map.py`
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print a structured listing of the soc-agent knowledge tree.
+"""Print a slim starting map of the soc-agent knowledge tree.
 
 Used as a `!command` preamble in `skills/investigate/SKILL.md` so the
 workspace map gets baked into the skill prompt at load time, derived from
@@ -8,14 +8,15 @@ keeps the generic skill vendor-neutral: which SIEM and host-inspection
 systems are available is determined by what's in
 `knowledge/environment/systems/`, not by hardcoded prose in the skill.
 
-The script walks four enforced layers:
-  - knowledge/environment/{context,data-sources,operations,systems}/
-  - knowledge/common-investigation/leads/
-  - knowledge/signatures/
-  - skill-internal scripts (still hardcoded — the script set is part of
-    the skill machinery, not a deployment variable)
+The output is intentionally **slim** — it lists what *varies* between
+deployments (vendor systems, lead catalog, signature catalog) rather than
+dumping per-file contents. The agent is encouraged to `ls`, `Glob`, or
+`Read` further when it needs specifics. Treating this as the complete and
+authoritative map (rather than a starting orientation) is a mistake we
+have explicitly seen the agent make in past evaluation runs.
 
-Excludes: hidden files, __pycache__, _template/, .venv/, venv/.
+Excludes: hidden files, __pycache__, _template/, .venv/, venv/, ad-hoc
+(the lead fallback is called out in the skill itself).
 
 Usage:
   cd /workspace/soc-agent && python3 scripts/workspace_map.py
@@ -33,109 +34,51 @@ def is_excluded(p: Path) -> bool:
     return p.name.startswith(".") or p.name in EXCLUDED_NAMES
 
 
-def list_md_files(d: Path) -> list[str]:
+def list_subdir_names(d: Path, *, exclude: set[str] = frozenset()) -> list[str]:
     if not d.is_dir():
         return []
     return sorted(
         p.name for p in d.iterdir()
-        if p.is_file() and p.suffix == ".md" and not is_excluded(p)
+        if p.is_dir() and not is_excluded(p) and p.name not in exclude
     )
-
-
-def list_subdirs(d: Path) -> list[Path]:
-    if not d.is_dir():
-        return []
-    return sorted(
-        p for p in d.iterdir() if p.is_dir() and not is_excluded(p)
-    )
-
-
-def print_environment() -> None:
-    print("### `knowledge/environment/` — org-specific deployment knowledge")
-    print()
-    env_root = ROOT / "knowledge" / "environment"
-    for layer in ("context", "data-sources", "operations"):
-        layer_dir = env_root / layer
-        if not layer_dir.is_dir():
-            continue
-        files = [f for f in list_md_files(layer_dir) if f != "SKILL.md"]
-        files_str = ", ".join(files) if files else "(empty)"
-        print(f"- `{layer}/` — {files_str}")
-
-    systems_dir = env_root / "systems"
-    if systems_dir.is_dir():
-        print("- `systems/` — per-vendor SKILL.md files. **Read the relevant system's SKILL.md before invoking any command against that system.** Available in this deployment:")
-        for sysdir in list_subdirs(systems_dir):
-            files = list_md_files(sysdir)
-            other = [f for f in files if f != "SKILL.md"]
-            extra = f" (+ {', '.join(other)})" if other else ""
-            print(f"    - **{sysdir.name}/** — SKILL.md{extra}")
-    print()
-    print(
-        "Each layer has a `SKILL.md` index. The `operations/` files are trust "
-        "anchors (change-windows, deploy-runs, etc.) — many are template "
-        "scaffolding in this environment, so always check whether the file is "
-        "customized before relying on it."
-    )
-    print()
-
-
-def print_leads() -> None:
-    print("### `knowledge/common-investigation/leads/` — reusable lead definitions")
-    print()
-    leads_dir = ROOT / "knowledge" / "common-investigation" / "leads"
-    if leads_dir.is_dir():
-        for d in list_subdirs(leads_dir):
-            if d.name == "ad-hoc":
-                continue  # ad-hoc is the fallback, called out in the skill
-            print(f"- {d.name}")
-    print()
-    print(
-        "Each lead is a directory with `definition.md` (methodology, pitfalls) "
-        "and optionally `templates/{vendor}.md` (pre-built query templates). "
-        "Use `data-source-debug` when a query returns suspicious results "
-        "(zero matches, stale events, unexpectedly low counts) — its "
-        "definition.md has the diagnostic checklist. Use `ad-hoc` as the "
-        "fallback when no lead directory matches what you need."
-    )
-    print()
-
-
-def print_signatures() -> None:
-    print("### `knowledge/signatures/` — signatures with playbooks and precedents")
-    print()
-    sigs_dir = ROOT / "knowledge" / "signatures"
-    if sigs_dir.is_dir():
-        for d in list_subdirs(sigs_dir):
-            print(f"- {d.name}")
-    print()
-
-
-def print_scripts() -> None:
-    print("### Skill-internal scripts the agent invokes via Bash")
-    print()
-    print("```")
-    print("scripts/resolve_imports.py        — bakes signature knowledge (loaded automatically)")
-    print("scripts/setup_run.py              — creates the run dir (loaded automatically)")
-    print("scripts/search_precedents.py      — search/list precedents for a signature")
-    print("hooks/scripts/write_state.py      — state machine transitions")
-    print("```")
-    print()
-    print(
-        "For environment-specific tooling (SIEM CLIs, host inspection utilities), "
-        "read the relevant `knowledge/environment/systems/{vendor}/SKILL.md` file. "
-        "Each vendor's SKILL.md documents the concrete invocation patterns for "
-        "that environment. The generic skill is vendor-neutral and does not "
-        "assume any specific CLI or path."
-    )
-    print()
 
 
 def main() -> int:
-    print_environment()
-    print_leads()
-    print_signatures()
-    print_scripts()
+    env_root = ROOT / "knowledge" / "environment"
+    leads = list_subdir_names(
+        ROOT / "knowledge" / "common-investigation" / "leads",
+        exclude={"ad-hoc"},
+    )
+    signatures = list_subdir_names(ROOT / "knowledge" / "signatures")
+    systems = list_subdir_names(env_root / "systems")
+
+    # Knowledge tree — one line per layer, no per-file enumeration
+    print("**Knowledge tree:**")
+    print("- `knowledge/environment/{context, data-sources, operations, systems}/` — org-specific deployment knowledge. Each layer has a `SKILL.md` index. The `operations/` files are trust anchors (change-windows, deploy-runs, etc.); many are template scaffolding in this environment, so verify before relying on them.")
+    if leads:
+        print(f"- `knowledge/common-investigation/leads/` — {', '.join(leads)}. Each lead is a directory with `definition.md` and optional `templates/{{vendor}}.md`. Use `data-source-debug` when a query returns suspicious results, and `ad-hoc` as the fallback.")
+    if signatures:
+        print(f"- `knowledge/signatures/` — {', '.join(signatures)}")
+    print()
+
+    # Systems — names with explicit "read SKILL.md before using" cue
+    if systems:
+        print("**Systems available in this deployment:**")
+        for s in systems:
+            print(f"- `{s}/` — read `knowledge/environment/systems/{s}/SKILL.md` before invoking any command against it")
+        print()
+
+    # Skill-internal scripts — these are part of the skill machinery and don't vary
+    print("**Skill-internal scripts** (relative to your shell cwd at startup, which is the soc-agent root):")
+    print("- `scripts/resolve_imports.py` — bakes signature knowledge (loaded automatically)")
+    print("- `scripts/setup_run.py` — creates the run dir (loaded automatically)")
+    print("- `scripts/search_precedents.py` — search/list precedents for a signature")
+    print("- `hooks/scripts/write_state.py` — state machine transitions")
+    print()
+    print("For environment-specific tooling (SIEM CLIs, host inspection utilities), read the relevant `knowledge/environment/systems/{vendor}/SKILL.md` file.")
+    print()
+    print("> This is a starting map. Use `ls`, `Glob`, or `Read` to discover further when you need specifics — for instance, `ls knowledge/environment/operations/` to see which trust anchor files are populated, or `ls hooks/scripts/` if you need to verify a script's exact path before invoking it.")
+
     return 0
 
 

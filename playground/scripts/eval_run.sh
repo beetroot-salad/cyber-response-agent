@@ -144,6 +144,8 @@ echo
 stdbuf -oL -eL claude \
     --allowedTools \
         "Bash(cd *)" \
+        "Bash(ls *)" \
+        "Bash(pwd)" \
         "Bash(python3 scripts/resolve_imports.py *)" \
         "Bash(python3 scripts/setup_run.py *)" \
         "Bash(python3 scripts/search_precedents.py *)" \
