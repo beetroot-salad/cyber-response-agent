@@ -304,7 +304,7 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
             ev = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if ev.get("tool_name") != "Task":
+        if ev.get("tool_name") not in ("Task", "Agent"):
             continue
         # Inspect the tool_input as a serialized blob — the agent may put the
         # ticket-context reference in the prompt, the description, or via the

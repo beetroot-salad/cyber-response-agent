@@ -292,6 +292,20 @@ class TestCheckTicketContextSpawned:
         run_dir = self._make_run_with_audit(tmp_path, [entry])
         assert check_ticket_context_spawned(run_dir) is None
 
+    def test_passes_when_tool_name_is_agent(self, tmp_path):
+        # Some stream-json variants surface subagent invocations as `Agent`
+        # rather than `Task`. The check accepts both.
+        entry = json.dumps({
+            "tool_name": "Agent",
+            "tool_input": {
+                "subagent_type": "general-purpose",
+                "description": "ticket-context for SEC-001",
+                "prompt": "Read /workspace/soc-agent/skills/investigate/ticket-context.md ...",
+            },
+        })
+        run_dir = self._make_run_with_audit(tmp_path, [entry])
+        assert check_ticket_context_spawned(run_dir) is None
+
     def test_fails_when_no_task_calls(self, tmp_path):
         entries = [
             json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}),
