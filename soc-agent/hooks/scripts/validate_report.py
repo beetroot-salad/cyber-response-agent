@@ -314,15 +314,13 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
             return None
 
     return (
-        "no ticket-context subagent invocation found in tool_audit.jsonl. "
-        "SKILL.md §CONTEXTUALIZE requires spawning a ticket-context subagent "
-        "via the Task tool (prompt template at "
-        "skills/investigate/ticket-context.md) to handle cross-alert "
-        "recurrence and prior-investigation checks. Without it, "
-        "recurring-pattern detection is structurally incomplete. Spawn it "
-        "now with Task(subagent_type=..., description=..., prompt=<contents "
-        "of ticket-context.md with {run_dir} substituted>), then re-write "
-        "report.md."
+        "This investigation did not record a ticket-context subagent "
+        "invocation in the audit log. The CONTEXTUALIZE phase delegates "
+        "cross-alert correlation (similar alerts, prior firings, related "
+        "activity on the same entities) to a ticket-context subagent so "
+        "that work doesn't crowd the main agent's reasoning context. "
+        "Spawn it now using the Agent tool with the prompt template at "
+        "skills/investigate/ticket-context.md, then re-write report.md."
     )
 
 

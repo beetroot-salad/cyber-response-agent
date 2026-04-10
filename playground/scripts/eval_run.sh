@@ -147,15 +147,20 @@ stdbuf -oL -eL claude \
         "Bash(python3 scripts/resolve_imports.py *)" \
         "Bash(python3 scripts/setup_run.py *)" \
         "Bash(python3 scripts/search_precedents.py *)" \
+        "Bash(python3 scripts/workspace_map.py *)" \
         "Bash(python3 scripts/siem/wazuh_cli.py *)" \
+        "Bash(python3 scripts/host_query.py *)" \
         "Bash(python3 hooks/scripts/write_state.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/resolve_imports.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/setup_run.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/search_precedents.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/workspace_map.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/siem/wazuh_cli.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/host_query.py *)" \
         "Bash(python3 /workspace/soc-agent/hooks/scripts/write_state.py *)" \
         "mcp__wazuh__*" \
         "Task" \
+        "Agent" \
     --plugin-dir "$PLUGIN_DIR" \
     --add-dir "$PLUGIN_DIR" \
     --setting-sources user \
