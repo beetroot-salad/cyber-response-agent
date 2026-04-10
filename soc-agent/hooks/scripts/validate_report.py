@@ -273,6 +273,59 @@ def playbook_has_screen_section(signature_id: str) -> bool:
     return bool(re.search(r"^## Screen\b", content, re.MULTILINE))
 
 
+def check_ticket_context_spawned(run_dir: Path) -> str | None:
+    """Verify a ticket-context subagent was spawned during this investigation.
+
+    SKILL.md §CONTEXTUALIZE requires spawning a ticket-context subagent (Task
+    tool) to handle cross-alert recurrence and prior-investigation checks.
+    Without it, recurring-pattern detection is structurally incomplete and the
+    main agent ends up doing those queries inline with weaker context.
+
+    Walks the per-run audit log for any Task call whose tool_input references
+    the ticket-context prompt path or contains ticket-context as a keyword.
+    Returns None on pass, an error message on fail.
+    """
+    audit_path = run_dir.parent / "tool_audit.jsonl"
+    if not audit_path.exists():
+        # No audit log means the audit hook hasn't run (or isn't configured).
+        # Don't fail validation in that case — the absence is its own signal
+        # but not actionable from here.
+        return None
+
+    try:
+        lines = audit_path.read_text().splitlines()
+    except OSError:
+        return None
+
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("tool_name") != "Task":
+            continue
+        # Inspect the tool_input as a serialized blob — the agent may put the
+        # ticket-context reference in the prompt, the description, or via the
+        # file path. Substring match handles all three.
+        blob = json.dumps(ev.get("tool_input", {})).lower()
+        if "ticket-context" in blob or "ticket_context" in blob:
+            return None
+
+    return (
+        "no ticket-context subagent invocation found in tool_audit.jsonl. "
+        "SKILL.md §CONTEXTUALIZE requires spawning a ticket-context subagent "
+        "via the Task tool (prompt template at "
+        "skills/investigate/ticket-context.md) to handle cross-alert "
+        "recurrence and prior-investigation checks. Without it, "
+        "recurring-pattern detection is structurally incomplete. Spawn it "
+        "now with Task(subagent_type=..., description=..., prompt=<contents "
+        "of ticket-context.md with {run_dir} substituted>), then re-write "
+        "report.md."
+    )
+
+
 def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
     """Run Tier 1 validation. Returns (passed, errors, frontmatter_fields)."""
     errors = []
@@ -292,6 +345,13 @@ def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
     # Determine if this is a screen-resolved investigation
     run_dir = report_path.parent
     screen = is_screen_resolved(run_dir)
+
+    # Check: ticket-context subagent must have been spawned during CONTEXTUALIZE.
+    # This applies to all investigations regardless of screen-resolution, since
+    # CONTEXTUALIZE runs before SCREEN in the phase ordering.
+    ticket_ctx_error = check_ticket_context_spawned(run_dir)
+    if ticket_ctx_error:
+        errors.append(ticket_ctx_error)
 
     # Check: leads_pursued meets minimum for severity
     # Screen-resolved reports are exempt — their safety comes from

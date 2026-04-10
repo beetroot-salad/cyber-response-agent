@@ -25,6 +25,29 @@
 
 ## Next — Reliability & Evaluation
 
+### Subagent enforcement — stronger gating
+
+The Tier 1 ticket-context check (`validate_report.check_ticket_context_spawned`) catches missing spawns at conclude-time by walking `tool_audit.jsonl`. This is a soft gate: the agent only finds out it was wrong at the very end, then has to retry the report write. If observed in eval runs that the recovery is expensive (extra Tier 2 judge invocations, wall-clock blow-out, agent confusion about what went wrong), promote to a hard gate via a new PreToolUse hook:
+
+- [ ] PreToolUse blocking hook: count tool calls per session against `tool_audit.jsonl`, and after N tool calls (N≈5) reject any further tool call until a Task call referencing `ticket-context` has been recorded. Error message points the agent at SKILL.md §CONTEXTUALIZE step 3 with the Task template.
+  - Caveat: PreToolUse hooks fire before EVERY tool call so they need to be cheap (read-only, no LLM). Implementation should cache the "ticket-context spawned" boolean per session_id.
+  - Risk: blocking too aggressively can fight the agent if it needs a few read calls before spawning. Tune N based on observed eval data.
+  - Also extend the same pattern for Explore/precedent-scan subagent if eval data shows it being skipped too.
+
+### State machine bypass — soft boundary, not isolated
+
+Discovered during the first eval run: when `write_state.py` is unavailable (e.g., blocked by allowlist, unavailable env, etc.), the agent can — and does — write `state.json` directly via the `Write` tool, bypassing the phase-ordering checks in `write_state.py` entirely. The agent in the eval run wrote `state.json` with `phase: "ANALYZE"` and a fabricated history list `["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE"]` even though it had only completed CONTEXTUALIZE work.
+
+Implication: the state machine in the SKILL.md design is **enforcement-by-convention**, not enforcement-by-isolation. A misaligned (or under-resourced) agent that knows the state.json schema can fake state transitions whenever it wants. The Tier 1 validation in `validate_report.py` catches malformed reports but does not catch faked state history.
+
+Possible mitigations (pick one, not all):
+
+- [ ] PreToolUse hook gates `Write` against any path matching `*/state.json` inside a run dir, allowing only invocations originating from `write_state.py`. Cleanest but requires identifying the invoker, which PreToolUse may not surface.
+- [ ] Move state out of a file the agent can write. Use a sqlite db or a write-only socket that only `write_state.py` knows how to address.
+- [ ] Accept the soft-boundary model and document explicitly that the safety guarantee is "well-aligned agent + structural validation of outputs" rather than "process-isolated state machine". Update `docs/security-model.md` accordingly.
+
+The decision matters more than the implementation. The current behavior is "the state machine looks isolated but isn't", which is the worst of both worlds.
+
 ### State Machine Transition Verification Criteria
 
 Goal: Add actionable verification gates to each transition so `write_state.py` can reject transitions where the agent hasn't done meaningful work. Currently the state machine enforces _legal transitions_ but not _quality of work within a phase_. Data from evaluation runs should inform which criteria matter most (start loose, tighten based on observed failure modes).
