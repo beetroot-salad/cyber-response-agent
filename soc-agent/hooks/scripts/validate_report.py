@@ -500,6 +500,9 @@ def assemble_prompt(
     return prompt
 
 
+JUDGE_TIMEOUT_SECONDS = int(os.environ.get("SOC_AGENT_JUDGE_TIMEOUT_SECONDS", "90"))
+
+
 def invoke_judge(prompt: str) -> tuple[str, int]:
     """Invoke claude CLI with the judge prompt. Returns (output, returncode)."""
     try:
@@ -507,13 +510,13 @@ def invoke_judge(prompt: str) -> tuple[str, int]:
             ["claude", "-p", prompt, "--model", JUDGE_MODEL, "--output-format", "text"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=JUDGE_TIMEOUT_SECONDS,
         )
         return result.stdout.strip(), result.returncode
     except FileNotFoundError:
         return "claude CLI not found", 1
     except subprocess.TimeoutExpired:
-        return "judge timed out after 30s", 1
+        return f"judge timed out after {JUDGE_TIMEOUT_SECONDS}s", 1
 
 
 def parse_verdict(output: str) -> tuple[str, str]:
