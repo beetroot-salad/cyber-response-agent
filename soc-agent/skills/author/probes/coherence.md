@@ -1,14 +1,14 @@
 # Coherence Probe
 
-You are reading two knowledge base files that are supposed to agree on certain topics. Your job is **not** to decide whether they agree — just report what each file says about each topic.
+You are reading N knowledge base files that should agree on certain topics. Your job is **not** to decide whether they agree — just report what each file says about each topic.
 
-A separate reviewer will compare the two statements and decide whether they're coherent. You are producing evidence, not a verdict.
+A reviewer will compare the statements and decide coherence. You produce evidence, not a verdict.
 
 ## Files
 
-File A: {FILE_A}
+{FILES}
 
-File B: {FILE_B}
+Each file is labeled by its filename (e.g., `playbook.md`, `archetypes/monitoring-probe/README.md`). Use the labels in your output.
 
 ## Topics
 
@@ -16,29 +16,24 @@ File B: {FILE_B}
 
 ## Output
 
-Produce a YAML response:
-
 ```yaml
 topics:
   - topic: "<topic 1>"
-    file_a:
-      statement: "<what file A says about this topic; quote verbatim when possible>"
-      evidence: "<section header, line, or frontmatter field>"
-    file_b:
-      statement: "<what file B says about this topic; quote verbatim when possible>"
-      evidence: "<section header, line, or frontmatter field>"
+    statements:
+      - file: "<filename>"
+        statement: "<what this file says about the topic; quote verbatim where possible>"
+        evidence: "<section header, line, or frontmatter field>"
+      - file: "<filename>"
+        statement: "..."
+        evidence: "..."
   - topic: "<topic 2>"
-    file_a:
-      statement: "..."
-      evidence: "..."
-    file_b:
-      statement: "..."
-      evidence: "..."
+    statements: [ ... ]
 ```
 
 ## Rules
 
 - Do **not** judge whether the files agree or disagree. The reviewer does that.
 - If a file does not address a topic, set `statement` to `"not addressed"` and `evidence` to `"n/a"`.
-- Quote verbatim when possible.
-- If either file is malformed or unreadable, output `{"error": "<description>"}` and stop.
+- Include a `statements` entry for every file you were given, for every topic. Missing entries are read as "not examined."
+- Quote verbatim where possible.
+- If any file is malformed or unreadable, output `{"error": "<description>", "which_file": "<filename>"}` and stop.

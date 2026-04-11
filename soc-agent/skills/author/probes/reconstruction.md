@@ -1,46 +1,45 @@
 # Reconstruction Probe
 
-You are reading a knowledge base file from a security investigation agent's knowledge base. Your job is **not** to judge the file, suggest improvements, or grade it. Your job is to produce a faithful high-level summary of what the file actually says.
+You are reading a knowledge base file that describes a real-world artifact — a SIEM detection rule, an alert shape, a query template, a config, an authoritative data source. Your job is to **reconstruct the underlying artifact** from the file's description, in the artifact's native form.
 
-A separate reviewer will compare your summary against the pre-edit version of the same file to detect information that was silently lost during editing. Be complete and literal — omissions in your summary will be read as "the file no longer contains this."
+This is not a summary. A summary paraphrases the file's prose. A reconstruction is an attempt to regenerate the real underlying thing from the description, so that a reviewer can compare your reconstruction against the actual artifact and detect anything the description dropped, distorted, or silently changed.
+
+If a reader of this file — including the investigation agent at runtime — cannot recover the underlying artifact from the description, the description has lost information, even if the prose looks fine.
+
+## File type → what to reconstruct
+
+| File | Reconstruct | Native form |
+|---|---|---|
+| `signatures/{id}/context.md` | The SIEM detection rule | Pseudo-query in the vendor's syntax (Wazuh rule XML, Lucene, SPL, KQL, EQL) |
+| `signatures/{id}/playbook.md` | A canonical alert that would fire this signature + the first investigation step it routes to | Alert JSON skeleton + numbered step |
+| `signatures/{id}/archetypes/{name}/README.md` | A canonical alert matching this archetype + the single-sentence closing reason | Alert JSON skeleton + "closes as {benign\|escalated} because …" |
+| `common-investigation/leads/{name}/definition.md` | The query the lead runs | Pseudo-query + list of fields examined + what the result distinguishes |
+| `environment/data-sources/*.md` | The real data source and its event shape | Index/schema name + canonical event JSON skeleton |
+| `environment/operations/*.md` (trust anchor) | The authoritative system and the question you ask it | Lookup shape + expected response shape + failure modes |
+| anything else | high-level structured summary | YAML — purpose, covers, excludes, dependencies, key claims |
 
 ## Files
 
-Read each file below in full:
+Read in full:
 
 {FILES}
 
 ## Output
 
-Produce a YAML summary with these exact fields. Use `[]` for empty lists.
-
 ```yaml
-purpose: "<one sentence: what this artifact is for>"
-covers:
-  - "<case or scenario the file explicitly addresses>"
-excludes:
-  - "<case or scenario the file explicitly does NOT address, if any stated>"
-dependencies:
-  fields:
-    - "<specific field name referenced, verbatim — e.g., data.srcip>"
-  thresholds:
-    - "<specific numeric threshold or time window, verbatim>"
-  anchors:
-    - "<required trust anchor name, if any>"
-  leads:
-    - "<lead name referenced, if any>"
-  imports:
-    - "<@import: atom name, if any>"
-key_claims:
-  - "<a specific, concrete claim the file makes that a reader must understand>"
-prescriptive_language:
-  - "<any MUST / REQUIRED / NEVER / SHALL statement, quoted verbatim>"
+file_type: "<one of: context | playbook | archetype | lead-definition | data-source | operations | other>"
+target_artifact: "<what you're reconstructing, one phrase>"
+reconstruction: |
+  <the reconstructed artifact in its native form — a query, a JSON skeleton, a config block, a lookup spec. Multi-line is fine>
+assumptions:
+  - "<inference you had to make because the file left a detail implicit>"
+missing_for_reconstruction:
+  - "<specific thing the file does not state that you would need to build the real artifact>"
 ```
 
 ## Rules
 
-- Extract only what the file **actually says**. Do not infer or paraphrase away from the literal content.
-- Quote field names, thresholds, and prescriptive language verbatim.
-- If a section is empty or not present in the file, use `[]`.
-- Do not make recommendations. Do not describe what the file *should* say.
+- **Reconstruct, do not summarize.** If the file says "this rule fires on SSH invalid user attempts from internal source IPs", the reconstruction is an actual Wazuh rule expression (or Lucene query, or similar) — not prose. If you cannot produce a native-form artifact, say so in `missing_for_reconstruction`.
+- Do not invent details the file doesn't state. If something is implicit, put it under `assumptions` or `missing_for_reconstruction`.
+- Quote specific fields, thresholds, and prescriptive language verbatim when you use them.
 - If the file is malformed or unreadable, output `{"error": "<description>"}` and stop.

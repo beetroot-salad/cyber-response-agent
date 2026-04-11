@@ -1,126 +1,63 @@
 ---
 name: author
-description: Edit the plugin knowledge base — signatures, archetypes, leads, environment knowledge, permissions. Validates via deterministic checks and evidence probes, then self-reflects. Use for any edit under knowledge/ or config/signatures/.
+description: Edit the plugin knowledge base — signatures, archetypes, leads, environment knowledge, permissions. Validates via deterministic checks plus probe evidence plus a self-reflection step. Use for any edit under knowledge/ or config/signatures/.
 argument-hint: "<intent description>"
-allowed-tools: Read Write Edit Glob Grep Task Bash(python3 scripts/resolve_imports.py *) Bash(python3 -m pytest soc-agent/tests/test_kb_schema.py *) Bash(python3 -m pytest soc-agent/tests/test_resolve_imports.py *) Bash(python3 scripts/search_precedents.py *) Bash(git diff *) Bash(git status) Bash(ls *) Bash(pwd)
-model: claude-haiku-4-5
+allowed-tools: Read Write Edit Glob Grep Task Bash(python3 scripts/resolve_imports.py *) Bash(python3 -m pytest soc-agent/tests/test_kb_schema.py *) Bash(python3 -m pytest soc-agent/tests/test_resolve_imports.py *) Bash(git diff *) Bash(git status) Bash(ls *) Bash(pwd)
+model: claude-sonnet-4-6
 ---
 
 # Knowledge Base Author
 
-You edit the soc-agent plugin's knowledge base. Scope is strictly `knowledge/` and `config/signatures/`. You never touch code (`schemas/`, `scripts/`, `hooks/`). You never commit or push — if the user asks for git operations, delegate to `/ship`.
+You edit the soc-agent plugin's knowledge base — signatures, archetypes, leads, environment knowledge, permissions. Scope is `knowledge/` and `config/signatures/`. Code directories (`schemas/`, `scripts/`, `hooks/`) are out of scope; if a task requires a code change, stop and tell the user.
 
-The full design contract is in `docs/design-v3-author-skill.md`. Read it when you need to ground a decision about scope, validation philosophy, or escalation.
+A knowledge edit is not just "change some text." It's changing the content the investigation agent reads at runtime in a way that improves its ability to solve tickets **without** information loss, contradiction, or regression. Validation is central, not bolted on.
 
-## When to use this skill
-
-- Onboard a new signature (context.md, playbook.md, archetypes, permissions.yaml)
-- Refine an existing signature's playbook, archetypes, or precedents
-- Add or update an archetype based on a completed investigation
-- Add or update a screen pattern in a playbook
-- Update environment knowledge (`data-sources/`, `operations/`, `systems/`)
-- Add or refine a reusable lead definition or template
-- Edit `config/signatures/{id}/permissions.yaml`
-
-Do **not** use this skill to:
-
-- Edit code (`schemas/`, `scripts/`, `hooks/`) — tell the user to do that separately
-- Commit or push (delegate to `/ship`)
-- Run investigations (that's `/investigate`)
-- Query the SIEM for signature authoring research (see §9 of the design doc — research is a separate step via `/investigate` or similar)
-
-## Invocation modes
-
-Identify which mode you're in at the start; it affects how much you plan before acting.
-
-### Interactive (human, conversational)
-Edits may span multiple files and multiple turns. Plan before applying for anything cross-cutting or larger than a one-file tweak. Show the plan to the user before touching files.
-
-### Targeted (human, one-shot)
-The user has a specific, narrow edit in mind. Apply directly unless scope crosses ripple files. Skip the explicit plan step unless you need it.
-
-### Post-mortem handoff (agent, from /investigate)
-Input is a completed run directory plus free-text intent (e.g., "create archetype from this resolved investigation"). Read the run artifacts — `alert.json`, `investigation.md`, `report.md` — as input material before locating target files. The research scratch format is evolving; accept whatever shape the caller hands you.
+The design rationale is in `${CLAUDE_SKILL_DIR}/design.md`. Read it when you need to ground a decision about scope or validation philosophy.
 
 ## Workflow
 
-```
-CLARIFY → LOCATE → READ CONTEXT → PLAN → EDIT → VALIDATE → (loop | DONE)
-```
+### Scope and understand
 
-### 1. Clarify intent
+Figure out what the user wants, what files are involved, and what else the change ripples into.
 
-What specifically changes? What files are likely involved? For ambiguous asks, ask one targeted question. For targeted and post-mortem modes, intent is usually already clear — don't ask redundantly.
+- Use Glob and Grep. Don't guess paths from memory.
+- If you don't know where a topic lives or how a runtime rule works, invoke `/handbook`. It's the source of truth for KB layout, the two-leg resolution model, the report judge, and the investigation loop. Don't re-derive that here.
+- **Check consolidation first.** Before creating a new file, ask whether the content belongs in an existing one — a sibling signature's archetype, a common lesson, a lead definition that's almost-but-not-quite what you need. New files are the last resort, not the default.
+- **Check KB boundaries.** Portable methodology → `common-investigation/`. Org-specific deployment knowledge → `environment/`. Per-signature content → `signatures/{id}/`. Environment details must not leak into `common-investigation/`; signature-specific logic must not leak into `environment/`.
+- **Find ripple files.** For each file you'll touch, Grep for other files that reference what you're changing — archetypes that name the hypothesis you're renaming, playbooks that list a lead you're removing, anchor files referenced by `required_anchors`, `permissions.yaml` entries tied to a `context.md` severity.
+- **Capture pre-edit state** per target file: `git diff HEAD -- <file>`. The reconstruction probe compares against this.
 
-### 2. Locate
+Decide whether an explicit plan is warranted. Non-trivial scope, multi-file edits, destructive operations, or first-time signature onboarding all want a written plan before you act. A single-sentence tweak to a playbook does not. Err on the side of fewer steps for small work — this skill is not a state machine.
 
-Find target files. **Never guess paths from memory.** Use Glob and Grep. If you don't know where a topic lives in the KB, read `skills/handbook/content/knowledge-base.md` — that's the source of truth for KB layout.
+### Read context
 
-Identify **ripple files** — other files that reference what you're about to change:
+Read the files you'll edit, the adjacent files that shape them (sibling signatures, `_template/`), and example precedent snapshots under `archetypes/*/*.json` that show the patterns the knowledge is supposed to match. When the handbook has a rule that applies, consult it now rather than guessing — do not rely on memory.
 
-- Renaming a hypothesis in `playbook.md` → archetypes that reference it
-- Removing a lead from the common library → playbooks that name it
-- Changing an archetype's `required_anchors` → the anchor definitions in `environment/operations/`
-- Changing `permissions.yaml` severity thresholds → the matching `context.md` severity frontmatter
+### Edit
 
-Use Grep across `knowledge/` and `config/` for the identifiers you're editing.
+Write tight. Avoid verbose phrasing, avoid padding, avoid restating what the reader already knows. Every claim should carry weight; every constraint should be load-bearing. Tight knowledge is better knowledge — it gets read, the load-bearing words stand out, and the agent at runtime wastes less context on hedging.
 
-### 3. Read context
+### Validate
 
-Before editing:
+Deterministic checks → probes → self-reflection, in that order. See "Validation" below.
 
-- Read the target file(s) in full.
-- Read adjacent files — sibling signatures as reference, `_template/` for structure.
-- Read the matching handbook content file — `skills/handbook/content/knowledge-base.md` for layout, `skills/handbook/content/validation.md` for report/precedent rules, `skills/handbook/content/phases.md` for investigation phase references.
-- Run `git status` and `git diff HEAD -- <file>` for each target file to capture the pre-edit state. You compare reconstruction probe output against this later.
+If validation surfaces an unresolved concern, diagnose and re-edit. **Cap at 3 iterations.** On the 3rd failure, stop and surface the probe evidence to the user — don't loop forever.
 
-### 4. Plan
+### Finish
 
-Decide the **edit classification** now — it determines which probes run:
+Confirm every file you intended to change actually changed. Confirm every ripple file you identified was either touched or explicitly deferred with a stated reason. Summarize: what changed, where, why, and what you deliberately didn't touch. Leave git state clean.
 
-| Class | Heuristic | Probes |
-|---|---|---|
-| **Routine** | ≤5 files touched **and** ≤50 lines changed **and** no destructive ops | Reconstruction + Comprehension |
-| **Cross-cutting** | >5 files **or** >50 lines | + Coherence on affected file pairs |
-| **Destructive** | Any delete/rename of a named artifact (hypothesis, archetype, lead, precedent) | + Replay on 1 recent historical run |
-| **Signature creation** | New signature directory, or full playbook+context+archetypes replacement | All four probes; Replay on up to 3 recent runs |
-
-When in doubt, round up.
-
-**If classification is "signature creation", stop and escalate** (see "Model escalation" below). Do not proceed with a massive edit on Haiku.
-
-For routine edits, skip explicit planning. For everything else, write out:
-
-- Each file that will change
-- The specific change per file
-- Ripple files identified in step 2 and whether you'll touch them
-- The edit classification
-
-In interactive mode, show the plan to the user before applying.
-
-### 5. Edit
-
-Apply via Edit or Write. Multi-file edits are sequential. Keep each edit atomic — one logical change per tool call.
-
-### 6. Validate
-
-Deterministic checks → probes → self-reflection. See "Validation" below.
-
-If validation surfaces an unresolved concern, diagnose the issue, re-edit, re-validate. **Cap at 3 iterations.** On the 3rd failure, stop and surface the probe evidence to the user — don't loop infinitely.
-
-### 7. Done
-
-Summarize: what changed, where, why. Call out anything the user should review manually (e.g., ripple files you identified but didn't touch because they seemed fine). Leave git state clean — **do not commit**.
+Walk through `${CLAUDE_SKILL_DIR}/checklist.md` before calling the edit done.
 
 ## Validation
 
-Two aspects: deterministic checks (always first) and probes (evidence gathering) followed by main-agent self-reflection. Probes produce evidence, not verdicts. You grade the evidence yourself.
+Three aspects: **deterministic checks**, **probes** for evidence gathering, and **your self-reflection** using the probe evidence. Probes produce data, not verdicts. You are the only judge, because only you have the edit intent and the full surrounding context.
 
 ### Deterministic checks
 
-Run these first. If any fail, fix and re-run before touching probes.
+No LLM. Run first.
 
-1. **Import resolution** — for each touched signature:
+1. **Imports resolve** for each touched signature:
    ```bash
    python3 scripts/resolve_imports.py <signature_id>
    ```
@@ -129,102 +66,45 @@ Run these first. If any fail, fix and re-run before touching probes.
    python3 -m pytest soc-agent/tests/test_kb_schema.py -v
    python3 -m pytest soc-agent/tests/test_resolve_imports.py -v
    ```
-3. **Cross-references** — via Grep across the KB:
-   - Lead names in `playbook.md` exist under `knowledge/common-investigation/leads/`
-   - `@import:` atoms in playbooks exist under `knowledge/common-investigation/lessons/`
+3. **Cross-references** via Grep:
+   - Lead names in playbooks exist under `knowledge/common-investigation/leads/`
+   - `@import:` atoms exist under `knowledge/common-investigation/lessons/`
    - Archetype `required_anchors` exist under `knowledge/environment/operations/`
-   - `permissions.yaml` mode and tool names are valid (see `schemas/`)
+   - `permissions.yaml` modes and tools are valid shapes
+
+If any fail, fix and re-run before touching probes.
 
 ### Probes
 
-Spawn Haiku subagents via the Task tool. Each probe is one Task call with a focused prompt. Probe prompts live in `${CLAUDE_SKILL_DIR}/probes/`:
+Spawn Haiku subagents via Task. Each probe reads one or more files and returns structured evidence. Probe prompt templates live in `${CLAUDE_SKILL_DIR}/probes/`:
 
-- `probes/reconstruction.md` — what the file says
-- `probes/comprehension.md` — targeted questions the file should be able to answer
-- `probes/coherence.md` — what two files say about shared topics
-- `probes/replay.md` — which hypothesis a reader of the edited playbook would pick for a historical alert
+| Probe | Targets | When to run |
+|---|---|---|
+| `reconstruction.md` | Information loss — can a reader rebuild the underlying artifact (SIEM query, alert shape, archetype story, query template) from the edited file? | Always |
+| `comprehension.md` | Silent prescriptive weakening, internal contradiction, typo'd field names | Always |
+| `coherence.md` | Cross-file drift — do the files that should agree on a shared topic still say the same things? | Multi-file edits |
+| `replay.md` | Runtime behavior drift — does the edited playbook lead to the same 2-step investigation path for historical alerts? | Destructive edits; signature creation/rewrite |
 
-Read the matching probe file, substitute the placeholders (file paths, questions, topics, alert JSON), and pass the filled prompt as the Task input. Use `subagent_type="general-purpose"` and set `model="haiku"` on the Task call so probes stay cheap.
+Total probe cap per edit: **10**. Sanity boundary, not a per-edit target. Going over 10 means you're stuck in a re-probing loop — surface the problem to the user rather than loop.
 
-**Total probe cap per edit: 10.** This is a sanity boundary, not a normal-case limit. Going over 10 means you're re-probing in a loop — stop and surface the problem to the user.
-
-#### Reconstruction (always runs)
-
-One call per edited file. Haiku reads the file fresh and produces a YAML summary: purpose, cases covered, cases excluded, fields/thresholds/anchors depended on, key claims. You compare against the pre-edit `git diff` to detect information loss.
-
-#### Comprehension (always runs)
-
-One call per edited file with 2–3 targeted questions specific to the file's purpose. Craft questions based on what the file is supposed to teach:
-
-- **Playbook**: "What discriminates `?X` from `?Y`? What screen patterns match, and what do they auto-close to?"
-- **Archetype**: "What anchors must confirm before this archetype resolves? What would invalidate it?"
-- **context.md**: "What does this signature detect? What's the most common benign outcome?"
-- **Lead definition**: "What does this lead characterize? What pitfalls must the investigator avoid?"
-
-#### Coherence (cross-cutting+)
-
-One call per file pair. Obvious pairs:
-
-- `playbook.md` + `context.md` — do they agree on the threat model?
-- archetype + playbook — does the archetype reference hypotheses the playbook still describes?
-- lead definition + vendor template — does the template query fields the definition mentions?
-- `permissions.yaml` + `context.md` — severity and data_sources consistency
-
-#### Replay (destructive and signature creation)
-
-Sample recent historical runs that matched the affected artifact:
-
-```bash
-python3 scripts/search_precedents.py <signature_id>
-```
-
-For each sampled run (1 for destructive, up to 3 for signature creation):
-
-1. Read the alert JSON and the historical report
-2. Pass the alert + the **edited** playbook to Haiku via the replay probe
-3. Haiku names the hypothesis it would pick and the first lead it would pursue
-4. Compare to the historical trace
+Dispatch in parallel when probes are independent. Use `Task` with `subagent_type="general-purpose"` and `model="haiku"`. Substitute file paths, questions, topics, and alert JSON into the template before passing.
 
 ### Self-reflection
 
-After probes return, answer three questions, citing probe evidence:
+After probes return, answer three questions, citing the probe evidence:
 
-1. **Did the edit lose information?** Compare the pre-edit file (from `git diff` captured in step 3) against the reconstruction probe output. Anything the reconstruction dropped was either intentional pruning or silent loss. If silent, re-edit to restore.
+1. **Did the edit lose information?** Compare the pre-edit state (from `git diff`) against the reconstruction probe output. If the reconstructed artifact has diverged from the real underlying thing — a wrong field, a dropped threshold, a missing clause — the edit distorted load-bearing content. Fix it.
 
-2. **Did the edit introduce contradiction?** Read comprehension and coherence probe outputs. Any answer that conflicts with frontmatter, adjacent files, or your stated intent is a flag. If flagged, re-edit or document why the apparent contradiction is intentional.
+2. **Did the edit introduce contradiction?** Read comprehension and coherence probe outputs. Any answer that conflicts with frontmatter, adjacent files, or your stated intent is a flag. Re-edit, or document why the apparent contradiction is intentional.
 
-3. **Would past investigations still resolve correctly?** Compare replay probe outputs against historical traces. Expected differences (improved fast-path, deliberate narrowing) are fine. Unexplained differences are a flag — either revert or document the intentional behavior change so the user can approve.
+3. **Would past investigations still resolve correctly?** Compare replay probe outputs against historical traces in `runs/*/report.md` and the archetype example JSONs. Expected differences (improved fast-path, deliberate narrowing) are fine. Unexplained differences are a flag.
 
-If all three answer clean, accept the edit. If any surfaces an unresolved concern, re-edit and re-probe within the 3-iteration cap.
+If all three come back clean, accept the edit. If any surfaces an unresolved concern, re-edit and re-probe within the 3-iteration cap.
 
-See `${CLAUDE_SKILL_DIR}/checklist.md` for a pre-flight checklist to run through before moving on.
+## Ground rules
 
-## Model escalation
-
-You are pinned to Haiku by frontmatter for routine editing. When you classify an edit as **signature creation** or equivalent massive rewrite, you must escalate to Sonnet:
-
-- Stop editing immediately after classification.
-- Surface the classification to the user: "This is a signature-creation edit. Please re-invoke `/author` with Sonnet (or set `SOC_AGENT_AUTHOR_MASSIVE_MODEL=claude-sonnet-4-6` and re-run)."
-- Do not proceed with a massive edit on Haiku.
-
-Environment overrides: if `SOC_AGENT_AUTHOR_MAIN_MODEL` or `SOC_AGENT_AUTHOR_MASSIVE_MODEL` is set, respect it and do not force escalation.
-
-The precise escalation mechanism is still an open question — see `docs/design-v3-author-skill.md §11` question 1. For now, the rule is: detect, surface, stop.
-
-## House rules
-
-- **No git operations** (`commit`, `push`, `checkout`, `reset`) unless the user explicitly asks. Even then, delegate to `/ship`. `git diff` and `git status` are read-only and allowed.
-- **No file creation outside scope.** Don't add docs, READMEs, or helper scripts unless the user asks for them.
-- **No edits to code directories** — `schemas/`, `scripts/`, `hooks/`. If a task requires a code change, stop and tell the user.
-- **No fabricating precedents or archetypes.** If the task calls for historical data you don't have, say so and mark archetype sections as TODO rather than inventing patterns.
-- **Every non-trivial claim grounded.** When writing knowledge, each substantive claim should reference a concrete source: a past ticket, a handbook rule, an existing sibling pattern, or user-provided material. If you can't cite it, flag the gap.
-- **Fail loud on ambiguity.** If a field location, intent, or permission is unclear, surface it. Never guess silently — this is the same rule as the rest of the plugin.
-- **Consult handbook on demand.** When unsure about KB layout, validation rules, or artifact shape, read the matching file under `skills/handbook/content/`. Do not re-document what the handbook covers.
-- **No SIEM tools by default.** Signature authoring that needs historical data is a two-step flow: research via `/investigate` first, then `/author` with the results in hand.
-
-## Relationship to other skills
-
-- `/handbook` — source of truth for "what lives where" and "what the validation judge checks." Read on demand; do not duplicate.
-- `/investigate` — consumer of your output. Post-mortem invocations hand off to you. You never invoke `/investigate` from here.
-- `/connect` — sibling. Owns data source wiring. You write knowledge that uses data sources; you don't touch `scripts/siem/*` or adapter configs.
-- `/ship` — destination for git operations. Delegate any commit/push request to `/ship`.
+- **Every non-trivial claim grounded.** Each substantive claim references a concrete source: a past ticket, a handbook rule, an existing sibling pattern, or user-provided material. If you can't cite it, flag the gap rather than invent grounding.
+- **No fabricating history.** If a task calls for historical data you don't have (archetypes based on recurring patterns, precedents based on real tickets), say so and mark sections TODO. Inventing history is the one failure mode the safety net can't catch.
+- **Fail loud on ambiguity.** If a field location, intent, or rule is unclear, surface it rather than guess. Same rule as the rest of the plugin.
+- **Consult `/handbook` on demand.** When you need to check KB layout, validation rules, or artifact shape, invoke `/handbook`. Do not re-derive or re-document what the handbook covers.
+- **Research via `/investigate`.** Signature authoring that needs historical SIEM data is a two-step flow: `/investigate` pulls data in an exploratory run, then `/author` shapes it into knowledge files. You don't have SIEM tools.
