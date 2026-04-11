@@ -71,9 +71,31 @@ A template library can be added later as a purely additive change — the `/conn
 Two checks, named in `SKILL.md` Phase 3:
 
 1. **The adapter connects and queries.** `health-check` returns exit 0. A sample query returns reasonable output. This is the machine-side check.
-2. **The agent can use the adapter without friction.** The environment knowledge exists — at minimum a per-system directory with field documentation, and a data-source doc noting this system as a source for the relevant data type.
+2. **There is enough environment knowledge for `/author` to build on later.** A per-system directory exists with a lean `field-notes.md`, a `SKILL.md` with at least one real CLI example, and a short data-source entry. Not a comprehensive reference — enough for post-mortem to grow.
 
 `preflight.py` enforces the first deterministically. The second is where the interesting design question lives.
+
+### Connect-time scaffold vs post-mortem growth
+
+The environment knowledge `/connect` produces is deliberately thin. The runtime reader for the investigation loop is `knowledge/common-investigation/leads/{lead}/templates/{vendor}.md` — a per-lead, per-vendor query template plus field mapping that the agent consults at query time. Those lead templates are written by `/author` after real investigation experience reveals which leads are worth formalizing and what the actual field semantics are for this deployment. They are not written at connect time.
+
+That split is load-bearing. Writing lead templates upfront would be:
+
+- **Unbounded.** Which leads for this vendor? Which shape? Which fields? The answers depend on which signatures your team investigates, which environments the system covers, and which post-mortem findings surface — none of which are known at connect time.
+- **Speculative.** API docs tell you what the system *can* return, not which queries actually characterize the alerts you'll see. The difference between those two is exactly what post-mortem extracts.
+- **Unmaintainable.** Pre-written templates rot. Templates grounded in real investigations get refreshed whenever an investigation reveals drift.
+
+So the lifecycle is:
+
+1. **`/connect` (this skill).** Adapter + lean `field-notes.md` + short data-source entry + `SKILL.md` with one CLI example. Captures what Claude can spot during the connection session — obvious gotchas, vendor-specific aliases, the minimum the investigation loop needs to *find* the system. Friction on the first investigations is expected and accepted.
+
+2. **`/investigate` (existing skill).** Runs against the system. Hits friction on query composition the first few times — Claude composes queries on the fly from whatever field knowledge exists plus its training priors. Some guesses are right; some are wrong. That's the input signal for the next step.
+
+3. **`/author` post-mortem (existing skill).** Reads the investigation run, identifies where Claude got field names wrong or reached for the wrong enum, and bakes those findings into `field-notes.md` and into new/updated lead templates under `knowledge/common-investigation/leads/{lead}/templates/{vendor}.md`. Each post-mortem run compounds on the last.
+
+By investigation N (for small N — maybe 5–10), the system has lead templates grounded in real data and a `field-notes.md` that covers the actually-encountered gotchas. That's the steady-state quality bar. `/connect` doesn't try to hit it upfront because it can't — the required information isn't available at connect time.
+
+Practical consequence: **lean is correct at connect time, not a shortcut.** A three-bullet `field-notes.md` that captures the one vendor-specific field alias you noticed is a better MVP than a twenty-bullet reference you're guessing at. The guesses become noise; the observed gotcha stays useful.
 
 ### Two axes of friction-free
 
@@ -188,8 +210,9 @@ Every WebFetch call from `/connect` prompts them with the URL and a short reason
 
 | Non-goal | Why | Alternative |
 |---|---|---|
-| Lead templates for the new system | Lead templates encode investigative methodology, which comes from investigation experience, not API docs | `/author` adds lead templates after the team uses the system |
-| Signature onboarding | That's `/author`'s job; they require historical investigation data | Run `/author` after `/connect` |
+| Lead templates for the new system | Unbounded (which leads?), speculative (which queries actually characterize real alerts?), unmaintainable (pre-written templates rot) — see §5 "Connect-time scaffold vs post-mortem growth" | `/author` writes lead templates post-mortem from investigation runs |
+| Comprehensive field reference | Connect-time guesses become noise; post-mortem records real gotchas | `field-notes.md` grows via `/author` post-mortem |
+| Signature onboarding | That's `/author`'s job; signatures require historical investigation data | Run `/author` after `/connect` |
 | Network / VPN setup | Organizational, predates the agent | The user configures their own network path |
 | Credential storage | Credentials live in env vars or vault; the skill never touches them | `.env`, shell export, vault integration — user's choice |
 | Template library for popular vendors | Drift + maintenance cost > marginal onboarding speedup | Generate fresh each time; revisit if synthesis fails often |

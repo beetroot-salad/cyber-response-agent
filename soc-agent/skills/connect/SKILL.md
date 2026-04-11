@@ -189,25 +189,27 @@ If the sample query returns zero events, that's not necessarily a failure — th
 
 #### 3.3 Optional: field-model probe
 
-Run this when your field knowledge for the system is thin (unfamiliar vendor, undocumented schema, vendor docs that diverge from what the user's deployment actually contains). Skip it when `field-notes.md` is already drawn from real org data.
+Run this when the vendor or the deployment looks unfamiliar and you want a cheap sanity check on `field-notes.md`. Skip it when the field knowledge you're writing is already grounded in what the user told you or what their docs confirm.
 
-The probe targets **field-model fidelity**, not CLI shape. Sourcetype names, field spellings, enum values, event ordering — that's where runtime friction lives.
+The probe targets the **obvious gotchas** a connect-time scaffold should catch. It does **not** try to produce a complete field reference — that's post-mortem territory.
 
 Spawn a short-lived Haiku subagent with a clean context. Hand it *only* the `query --help` output and the first draft of `field-notes.md`. Give it a concrete task like *"find the 5 most recent failed SSH logins on host `web-01` in the last hour"*. Ask for the exact shell command and a short note on any ambiguities.
 
-Read the output:
+Read the output and triage each ambiguity into one of three buckets:
 
-- If Haiku guessed at field names not covered by the docs or help examples, `field-notes.md` is too thin — expand it before committing.
-- If Haiku reached for field names that are *wrong* (training-prior hallucinations), add an explicit "don't use X, use Y" note to `field-notes.md`.
-- If Haiku only surfaced ambiguity about intrinsic query semantics (SPL syntax, operator precedence) that no amount of doc improvement would fix, that's fine — leave it.
+- **Add to `field-notes.md` now.** The ambiguity is an obvious vendor-specific gotcha Claude got wrong — an aliased field name, a non-default enum value, a null semantic the user can confirm with a one-line answer. Write the gotcha, move on.
+- **Add an explicit "don't use X, use Y" note.** Haiku reached for a wrong field name from training priors. That's worth naming even if you're leaving the rest thin.
+- **Leave it. Post-mortem will catch it.** Haiku surfaced a detail that isn't an obvious gotcha — a subtle field semantics question, an unusual enum value, an edge-case retention quirk. Real investigations against the system will reveal which of these actually matter; adding them speculatively upfront is the opposite of the lean-scaffold approach.
 
-The probe produces evidence, not a verdict. You decide whether a mismatch is worth fixing the adapter vs documenting the quirk.
+The probe produces evidence, not a verdict. Your judgment is what separates "Day-1 obvious" from "will-learn-later". When in doubt, lean toward leaving things out — the scaffold is meant to be grown, not polished.
 
 ### Phase 4: Scaffold environment knowledge
 
-The adapter runs. Now make the agent able to use it without friction. The investigate loop reads environment knowledge to resolve "this lead needs auth events" to "query Splunk like this." If that chain is broken, the adapter is useless — the agent won't find it.
+The adapter runs. Now record just enough environment knowledge for `/author` to build on later and for `/investigate` to compose its first queries without grepping around. The bar is **lean**, not comprehensive.
 
-Scaffold the following files. Each is lean at first; the team fills them in over time as they use the system.
+At runtime the investigation loop reads per-lead query templates (`knowledge/common-investigation/leads/{lead}/templates/{vendor}.md`) and composes queries from those. Those lead templates are not your job — they're written by `/author` after investigation experience reveals which leads are worth formalizing. Your job is the foundation underneath them: the adapter, the per-system docs, and the data-source registration. Everything you write here will be grown through post-mortem `/author` runs, not polished upfront.
+
+Scaffold the following files. Start lean. Expect everything to be revised.
 
 #### Per-system directory
 
@@ -215,8 +217,8 @@ Scaffold the following files. Each is lean at first; the team fills them in over
 
 - **`config.env.template`** — **tracked in git.** The canonical list of non-secret config keys the adapter reads (endpoint, index, retention days, SSL verify). Each key is commented with what it means and an example value. *Secrets are never in this file and never will be.* Include a header: `# Copy this file to config.env and fill in values for your deployment.`
 - **`config.env`** — **not tracked in git.** Local copy of the template with the deployment-specific values the user gave you in Phase 1. Each deployment has a different copy. Init.sh already adds the `config.env` pattern to `.gitignore`; if it didn't, add it now. *Do not commit a filled-in config.env, even if it "only" contains an endpoint URL* — deployment details are sensitive.
-- **`field-notes.md`** — frontmatter `tags: [{system}, fields, gotchas]`, then two sections: "Fields you'll reach for" (names, types, what they mean, which enum values are valid) and "Known quirks" (non-obvious semantics, surprising nulls, field-splits across event types, hallucinations to avoid). Start small. Leave a `TODO: fill in as the team learns` at the bottom. This is the single most load-bearing file for runtime agent quality — invest here.
-- **`SKILL.md`** — frontmatter `name: {system}`, `description: {system} implementation knowledge for this org`. Body: how to invoke the CLI (at least one complete real example), common query patterns if you discovered any, a pointer to `field-notes.md`. Reference any supporting docs you create.
+- **`field-notes.md`** — frontmatter `tags: [{system}, fields, gotchas]`. Body: **obvious gotchas only.** The things Claude is likely to get wrong on first try, that you can spot during the connection session: vendor-specific field aliasing (`customField1` = actual name), odd null semantics, names that collide with common terms, enum values that differ from vendor docs. **Not a comprehensive field reference.** If you catch yourself writing a long field catalog, stop — that level of detail is post-mortem territory, not connect-time. A three-bullet file is a good first version. Leave a `<!-- grown via post-mortem /author runs -->` marker at the bottom.
+- **`SKILL.md`** — frontmatter `name: {system}`, `description: {system} implementation knowledge for this org`. Body: one complete real CLI invocation example, a pointer to `field-notes.md`. That's the minimum. If you learned something concrete about query patterns during the sample query in Phase 3.2, add a short note; otherwise leave room for post-mortem additions.
 
 #### Where secrets actually live
 
@@ -232,28 +234,29 @@ The adapter's `load_config()` reads `config.env` for non-secrets and `os.environ
 
 The `.env` file pattern is convention, not enforcement — users can substitute shell export, direnv, a vault integration, or whatever their org's secret management looks like. Your job is to tell them which env var names the adapter expects (you do this in Phase 1 question 4, and reinforce it in the Phase 5 summary) and to ensure `.env` is in `.gitignore`. The init script already adds it. If a user brings their own secret management, they're responsible for getting the env vars into the adapter process — don't try to solve their secret layer for them.
 
-#### Data-source doc
+#### Data-source registration
 
-`knowledge/environment/data-sources/{data_type}.md` — the data-sources layout is organized by data type (auth-events, process-events, network-events, etc.), not per system. Read what's already there:
+`knowledge/environment/data-sources/{data_type}.md` — organized by data type (auth-events, process-events, network-events, etc.), not per system. Read what's already there:
 
 ```bash
 ls knowledge/environment/data-sources/
 ```
 
-For each data type the system covers (from Phase 1, question 3), **append** a section to the matching file noting that this system is a source, with:
+For each data type the system covers (from Phase 1 question 3), append a **short** entry naming this system as a source:
 
-- Access: `scripts/tools/{system}_cli.py` (or MCP tool names, if MCP-direct)
-- Query language: SPL / KQL / Lucene / native
-- Retention: what the user told you
-- Coverage notes: which subset of the data type this system holds (e.g., "CrowdStrike covers process events on endpoints, not servers")
+- Adapter path (`scripts/tools/{system}_cli.py`) or MCP tool names
+- Query language (SPL / KQL / Lucene / native / etc.)
+- Retention, if the user knows it
+- One-line coverage note if the system only holds a subset (e.g., "CrowdStrike covers endpoint process events, not servers")
 
-If no matching file exists yet for a data type the system covers, create one. Use an existing file as the template.
+A four-line bullet is the target. Deeper coverage documentation grows via post-mortem as investigations reveal gaps and edge cases. If a matching data-type file doesn't exist yet, create one modeled on a sibling file.
 
 #### What you do NOT scaffold
 
 - **Signature knowledge.** `/connect` does not touch `knowledge/signatures/`. That's `/author`'s job.
-- **Lead templates.** Lead templates encode investigative methodology ("characterize the source IP, then cross-reference with asset DB"), which comes from investigation experience, not API documentation. If the team wants starter lead templates for the new system, they run `/author` after.
+- **Lead templates** (`knowledge/common-investigation/leads/{lead}/templates/{system}.md`). These are the runtime readers for the investigation loop — for each lead, a per-vendor query template plus field mapping. They come from investigation experience, not API docs. Pre-building them at connect time is unbounded (which leads? which shape? which fields matter?) and speculative (you don't yet know which leads are worth formalizing for this vendor). The correct path is: connect the system here → run real investigations against it → `/author` takes the post-mortem material and writes lead templates grounded in what actually worked. Friction on the first few investigations is the cost of admission; post-mortem compounds it away.
 - **Permissions.** Adapter access is implicit via `Bash(python3 scripts/tools/{system}_cli.py *)`. Per-signature permissions live in `config/signatures/{id}/permissions.yaml` and are edited by `/author`.
+- **Comprehensive field reference.** Don't write a full schema dictionary. Catch the obvious gotchas, move on.
 
 ### Phase 5: Re-run preflight and commit
 
@@ -283,6 +286,7 @@ git add scripts/tools/{system}_cli.py \
 - Sample query result (one line of output)
 - Environment variables the user must have set
 - Open items / TODOs left in the scaffolded knowledge
+- **What to expect next:** the first few `/investigate` runs against this system will likely hit friction on query composition (field names, enum values, sourcetype conventions). That's expected — lead templates for this vendor are written by `/author` after post-mortem, not here. Suggest running `/author` after the first handful of investigations to bake the learnings into `field-notes.md` and the relevant lead templates.
 
 Tell the user: "Review the diff and merge when ready." Then stop.
 
