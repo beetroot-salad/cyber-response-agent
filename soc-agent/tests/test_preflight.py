@@ -21,29 +21,16 @@ SCRIPT = SOC_AGENT_ROOT / "scripts" / "preflight.py"
 # ---------------------------------------------------------------------------
 
 
-def make_fake_adapter(cli_path: Path, health_exit: int = 0, style: str = "subcommand"):
-    """Write a stub adapter that the health check can invoke.
-
-    style="subcommand" — supports `cli.py health-check`
-    style="flag"       — supports `cli.py --health-check` (legacy wazuh shape)
-    """
+def make_fake_adapter(cli_path: Path, health_exit: int = 0):
+    """Write a stub adapter with a `health-check` subcommand."""
     cli_path.parent.mkdir(parents=True, exist_ok=True)
-    if style == "subcommand":
-        body = (
-            "#!/usr/bin/env python3\n"
-            "import sys\n"
-            "if len(sys.argv) >= 2 and sys.argv[1] == 'health-check':\n"
-            f"    sys.exit({health_exit})\n"
-            "sys.exit(9)\n"
-        )
-    else:
-        body = (
-            "#!/usr/bin/env python3\n"
-            "import sys\n"
-            "if '--health-check' in sys.argv:\n"
-            f"    sys.exit({health_exit})\n"
-            "sys.exit(9)\n"
-        )
+    body = (
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "if len(sys.argv) >= 2 and sys.argv[1] == 'health-check':\n"
+        f"    sys.exit({health_exit})\n"
+        "sys.exit(9)\n"
+    )
     cli_path.write_text(body)
     cli_path.chmod(0o755)
 
@@ -54,14 +41,12 @@ def fake_root(tmp_path, monkeypatch):
 
     Creates:
       scripts/tools/           (empty — populate per test)
-      scripts/siem/            (empty — populate per test)
       knowledge/signatures/    (empty — populate per test)
       knowledge/environment/systems/
 
     preflight.py respects SOC_AGENT_DIR, so we point it at this tmp root.
     """
     (tmp_path / "scripts" / "tools").mkdir(parents=True)
-    (tmp_path / "scripts" / "siem").mkdir(parents=True)
     (tmp_path / "knowledge" / "signatures").mkdir(parents=True)
     (tmp_path / "knowledge" / "environment" / "systems").mkdir(parents=True)
     (tmp_path / "knowledge" / "environment" / "data-sources").mkdir(parents=True)
@@ -120,41 +105,40 @@ class TestEmptyWorkspace:
 
 
 class TestAdapterDiscovery:
-    def test_discovers_subcommand_adapter_under_tools(self, fake_root):
+    def test_discovers_cli_suffixed_adapter(self, fake_root):
+        """Historical `{name}_cli.py` filenames are accepted for readability;
+        the `_cli` suffix is stripped from the reported system name."""
         make_fake_adapter(fake_root / "scripts" / "tools" / "splunk_cli.py")
-        make_system_docs(fake_root, "splunk")
-        result = run_preflight(fake_root, "--systems")
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "splunk" in result.stdout
-        assert "connected" in result.stdout
-
-    def test_discovers_legacy_flag_adapter_under_siem(self, fake_root):
-        make_fake_adapter(
-            fake_root / "scripts" / "siem" / "wazuh_cli.py",
-            style="flag",
-        )
-        make_system_docs(fake_root, "wazuh")
-        result = run_preflight(fake_root, "--systems")
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "wazuh" in result.stdout
-        assert "connected" in result.stdout
-
-    def test_new_tools_path_wins_over_legacy(self, fake_root):
-        """If the same name exists in both scripts/tools/ and scripts/siem/,
-        the new contract location wins and the legacy one is ignored."""
-        make_fake_adapter(fake_root / "scripts" / "tools" / "splunk_cli.py")
-        make_fake_adapter(
-            fake_root / "scripts" / "siem" / "splunk_cli.py",
-            health_exit=1,
-            style="flag",
-        )
         make_system_docs(fake_root, "splunk")
         result = run_preflight(fake_root, "--systems", "--json")
         payload = json.loads(result.stdout)
-        splunks = [s for s in payload["systems"] if s["system"] == "splunk"]
-        assert len(splunks) == 1
-        assert splunks[0]["cli_path"].startswith("scripts/tools/")
-        assert splunks[0]["connected"] is True
+        assert len(payload["systems"]) == 1
+        assert payload["systems"][0]["system"] == "splunk"
+        assert payload["systems"][0]["connected"] is True
+
+    def test_discovers_plain_name_adapter(self, fake_root):
+        """Adapters without the `_cli` suffix (e.g. host_query.py) discover
+        cleanly — the filename stem is the system name as-is."""
+        make_fake_adapter(fake_root / "scripts" / "tools" / "host_query.py")
+        make_system_docs(fake_root, "host_query")
+        result = run_preflight(fake_root, "--systems", "--json")
+        payload = json.loads(result.stdout)
+        assert len(payload["systems"]) == 1
+        assert payload["systems"][0]["system"] == "host_query"
+        assert payload["systems"][0]["connected"] is True
+
+    def test_skips_private_and_non_python_files(self, fake_root):
+        """`__init__.py`, `_private.py`, and non-.py files must not be
+        discovered as adapters."""
+        make_fake_adapter(fake_root / "scripts" / "tools" / "real_cli.py")
+        make_system_docs(fake_root, "real")
+        (fake_root / "scripts" / "tools" / "__init__.py").write_text("")
+        (fake_root / "scripts" / "tools" / "_helper.py").write_text("# private\n")
+        (fake_root / "scripts" / "tools" / "requirements.txt").write_text("")
+        result = run_preflight(fake_root, "--systems", "--json")
+        payload = json.loads(result.stdout)
+        assert len(payload["systems"]) == 1
+        assert payload["systems"][0]["system"] == "real"
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +165,83 @@ class TestHealthCheck:
         lone = next(s for s in payload["systems"] if s["system"] == "lone")
         assert lone["connected"] is True
         assert lone["knowledge_gaps"], "expected a knowledge gap report"
+
+    def test_hyphenated_knowledge_dir_matches_underscored_adapter(self, fake_root):
+        """Python filenames use underscores; knowledge dirs often use hyphens.
+        `host_query.py` must find `knowledge/environment/systems/host-query/`
+        so the mismatch doesn't show up as a spurious knowledge gap."""
+        make_fake_adapter(fake_root / "scripts" / "tools" / "host_query.py")
+        hyphen_dir = fake_root / "knowledge" / "environment" / "systems" / "host-query"
+        hyphen_dir.mkdir(parents=True)
+        (hyphen_dir / "SKILL.md").write_text("# host-query\n")
+        result = run_preflight(fake_root, "--systems", "--json")
+        payload = json.loads(result.stdout)
+        hq = next(s for s in payload["systems"] if s["system"] == "host_query")
+        assert hq["connected"] is True
+        assert hq["knowledge_gaps"] == []
+
+    def test_uses_adapter_local_venv_python_when_present(self, fake_root):
+        """If a `.venv/bin/python` exists alongside the adapter (e.g.
+        scripts/tools/.venv/), preflight must invoke the CLI with that
+        interpreter, not the system python3. Real wazuh_cli depends on
+        opensearch-py installed only in scripts/tools/.venv — using
+        system python3 misses it and reports a spurious ModuleNotFoundError."""
+        adapter_dir = fake_root / "scripts" / "tools"
+        marker = fake_root / "marker.txt"
+        cli = adapter_dir / "marker_cli.py"
+        cli.parent.mkdir(parents=True, exist_ok=True)
+        cli.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            f"open({str(marker)!r}, 'w').write(sys.executable)\n"
+            "if len(sys.argv) >= 2 and sys.argv[1] == 'health-check':\n"
+            "    sys.exit(0)\n"
+            "sys.exit(9)\n"
+        )
+        cli.chmod(0o755)
+        make_system_docs(fake_root, "marker")
+
+        # Symlink an adapter-local .venv/bin/python to the current interpreter.
+        venv_bin = adapter_dir / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        venv_python = venv_bin / "python"
+        venv_python.symlink_to(sys.executable)
+
+        result = run_preflight(fake_root, "--systems")
+        assert result.returncode == 0, result.stdout + result.stderr
+        invoker = marker.read_text().strip()
+        assert invoker == str(venv_python), (
+            f"expected adapter-local venv python {venv_python}, got {invoker!r}"
+        )
+
+    def test_falls_back_to_system_python3_without_venv(self, fake_root):
+        """No adapter-local .venv → preflight must still invoke the CLI
+        successfully via system python3 (tests, CI, fresh checkouts)."""
+        adapter_dir = fake_root / "scripts" / "tools"
+        marker = fake_root / "marker2.txt"
+        cli = adapter_dir / "bare_cli.py"
+        cli.parent.mkdir(parents=True, exist_ok=True)
+        cli.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            f"open({str(marker)!r}, 'w').write(sys.executable)\n"
+            "if len(sys.argv) >= 2 and sys.argv[1] == 'health-check':\n"
+            "    sys.exit(0)\n"
+            "sys.exit(9)\n"
+        )
+        cli.chmod(0o755)
+        make_system_docs(fake_root, "bare")
+
+        # Intentionally no .venv under adapter_dir.
+        result = run_preflight(fake_root, "--systems")
+        assert result.returncode == 0, result.stdout + result.stderr
+        invoker = marker.read_text().strip()
+        # With no adapter-local venv, preflight should resolve "python3"
+        # on PATH — verify it's *not* the adapter-local venv path (which
+        # doesn't exist) and that the CLI ran at all.
+        assert ".venv" not in invoker, (
+            f"unexpected venv python used when none exists: {invoker!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

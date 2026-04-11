@@ -28,7 +28,7 @@ Evaluates the `soc-agent:investigate` skill against one real Wazuh alert from th
 
    Verify the alert landed:
    ```bash
-   /workspace/soc-agent/scripts/siem/.venv/bin/python3 \
+   /workspace/soc-agent/scripts/tools/.venv/bin/python3 \
      /workspace/soc-agent/scripts/fetch_alert.py <rule_id> --window 5m
    ```
 
@@ -98,8 +98,8 @@ If either is removed, the agent will likely go back to inline screening. Treat b
 - **Tier 2 LLM judge timeout** is currently 90s (was 30s; bumped because two of three early runs hit it). Configurable via `SOC_AGENT_JUDGE_TIMEOUT_SECONDS` env var. If you still see timeouts, the Haiku judge call is genuinely slow that day; agent retries via Edit re-trigger.
 - **Agent's cwd at startup is `/workspace/soc-agent`** when invoked via `eval_run.sh`, NOT the eval run dir. Script paths in `soc-agent/skills/investigate/SKILL.md` are relative to that cwd. Watch for any `skills/investigate/hooks/scripts/...` invocations — that's the regression signal for the path-confusion bug fixed in commit `fdc0e43`.
 - **The Bash tool cannot parse `for` loops** — fails with `Unhandled node type: string`. Agent must use `;`-chained sequences instead. Not a bug we can fix; the agent has learned to work around it.
-- **`target-endpoint/SKILL.md` documents `scripts/host_query.py`** as the live host inspection CLI (NOT raw `docker exec`). The CLI has a deny-list for `/opt/workloads/` and `/etc/cron.d/` (the playground answer-key paths) — the agent will see "denied: path is in the playground answer-key region" if it tries to file-stat those. **Treat that denial as expected behavior**, not a bug.
-- **wazuh-mcp-server only exposes agent management / rule files / SCA tools** — NOT alert queries. The agent must use `python3 scripts/siem/wazuh_cli.py` for SIEM queries. This is documented in `knowledge/environment/systems/wazuh/SKILL.md`.
+- **`target-endpoint/SKILL.md` documents `scripts/tools/host_query.py`** as the live host inspection CLI (NOT raw `docker exec`). The CLI has a deny-list for `/opt/workloads/` and `/etc/cron.d/` (the playground answer-key paths) — the agent will see "denied: path is in the playground answer-key region" if it tries to file-stat those. **Treat that denial as expected behavior**, not a bug.
+- **wazuh-mcp-server only exposes agent management / rule files / SCA tools** — NOT alert queries. The agent must use `python3 scripts/tools/wazuh_cli.py query` for SIEM queries. This is documented in `knowledge/environment/systems/wazuh/SKILL.md`.
 - **`compose.sh` requires `/workspace/.env`** for Wazuh credentials. If the wazuh-mcp-server container is crash-looping with "Wazuh password is required", that env file is missing.
 - **The playground cron is unreliable** for pattern 9 firing. If `fetch_alert.py 5710 --window 24h` returns empty, manually trigger via the docker exec block in step 1.
 

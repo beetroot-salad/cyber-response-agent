@@ -217,7 +217,7 @@ def run_investigation_live(
 3. Follow the investigation loop as described in the skill
 4. At each phase, call write_state.py: python3 hooks/scripts/write_state.py {run_dir} <PHASE> {alert.get('ticket_id', 'UNKNOWN')} {signature_id}
 5. For SIEM queries, use wazuh_cli.py:
-   python3 scripts/siem/wazuh_cli.py --query '<lucene_query>' --start <iso_time> --window <duration> --run-dir {run_dir}
+   python3 scripts/tools/wazuh_cli.py query --query '<lucene_query>' --start <iso_time> --window <duration> --run-dir {run_dir}
 6. Write investigation.md and report.md to {run_dir}/
 7. The report.md MUST have YAML frontmatter with all required fields
 8. If SIEM queries fail or return errors, document the failure and escalate — do not guess at data

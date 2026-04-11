@@ -1,4 +1,4 @@
-"""Tests for scripts/siem/wazuh_cli.py — config loading, pagination, input validation."""
+"""Tests for scripts/tools/wazuh_cli.py — config loading, pagination, input validation."""
 
 import json
 import sys
@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-# Add scripts/siem to path so we can import wazuh_cli
-SIEM_DIR = Path(__file__).resolve().parent.parent / "scripts" / "siem"
-sys.path.insert(0, str(SIEM_DIR))
+# Add scripts/tools to path so we can import wazuh_cli
+TOOLS_DIR = Path(__file__).resolve().parent.parent / "scripts" / "tools"
+sys.path.insert(0, str(TOOLS_DIR))
 
 # Patch opensearchpy before importing wazuh_cli (it's not installed in test env)
 sys.modules["opensearchpy"] = MagicMock()
@@ -259,7 +259,7 @@ class TestInputValidation:
     def test_limit_capped(self):
         """--limit is capped at 10000 in main()."""
         parser = wazuh_cli.build_parser()
-        args = parser.parse_args(["--query", "test", "--limit", "50000"])
+        args = parser.parse_args(["query", "--query", "test", "--limit", "50000"])
         args.limit = min(args.limit, 10000)
         assert args.limit == 10000
 

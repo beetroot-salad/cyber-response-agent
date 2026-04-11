@@ -12,35 +12,35 @@ Org-specific Wazuh implementation knowledge. For general Wazuh API usage, refer 
 The agent issues SIEM queries against the Wazuh indexer through:
 
 ```
-python3 scripts/siem/wazuh_cli.py [options]
+python3 scripts/tools/wazuh_cli.py <subcommand> [options]
 ```
 
-Run from the soc-agent root (e.g. `cd /workspace/soc-agent && python3 scripts/siem/wazuh_cli.py …`). The CLI is the only sanctioned path to issue alert queries — there is no `mcp__wazuh__QueryAlertsTool` in this deployment, so MCP tools are limited to agent management, rules, and SCA.
+Run from the soc-agent root (e.g. `cd /workspace/soc-agent && python3 scripts/tools/wazuh_cli.py …`). The CLI is the only sanctioned path to issue alert queries — there is no `mcp__wazuh__QueryAlertsTool` in this deployment, so MCP tools are limited to agent management, rules, and SCA.
 
-### Common subcommands
+### Subcommands
 
-| Flag | Purpose |
-|---|---|
-| `--health-check` | Verify connectivity and data freshness. Returns manager/indexer health and indexed alert count. Run this once at the start of an investigation. |
-| `--query <lucene>` (or `-q <lucene>`) | Run a Lucene query against the alerts index. Combine with `--start`/`--end` (ISO 8601 UTC) or `--window` (e.g. `2h`, `24h`, `7d`) to scope the time range. |
-| `--limit <N>` | Cap the number of returned events (default 500, max 10000). |
-| `--run-dir <path>` | Wraps query output in salted untrusted-data delimiters keyed off the run's `meta.json` salt — use this when feeding results into reasoning. |
-| `--raw` | Output raw JSON instead of formatted text. Default formatted output is designed for direct reading; raw is for programmatic re-parsing in rare cases. |
+- **`health-check`** — Verify connectivity to the Wazuh manager and indexer. Preflight (`scripts/preflight.py`) runs this at skill load, so you typically do not invoke it directly during an investigation.
+- **`query`** — Run a Lucene query against the alerts index. Options:
+  - `--query <lucene>` (or `-q`) — the Lucene query string (OpenSearch syntax). Required.
+  - `--start <ISO>` / `--end <ISO>` / `--window <duration>` — scope the time range. `--window` (e.g. `2h`, `24h`, `7d`) is used when `--end` is omitted.
+  - `--limit <N>` — cap the number of returned events (default 500, max 10000).
+  - `--run-dir <path>` — wraps query output in salted untrusted-data delimiters keyed off the run's `meta.json` salt. Use this when feeding results into reasoning.
+  - `--raw` — emit raw JSON instead of formatted text. Default formatted output is designed for direct reading; raw is for programmatic re-parsing in rare cases.
 
 ### Example invocations
 
 ```bash
-# Connectivity / data-freshness check
-python3 scripts/siem/wazuh_cli.py --health-check
+# Connectivity check (usually handled by preflight; run manually only if preflight disagrees)
+python3 scripts/tools/wazuh_cli.py health-check
 
 # Failed SSH attempts from a specific source IP, last 2 hours
-python3 scripts/siem/wazuh_cli.py \
+python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND data.srcip:10.0.0.5' \
   --window 2h \
   --run-dir /tmp/cra-eval/.../runs/<uuid>
 
 # All sshd events for an agent across an explicit time range
-python3 scripts/siem/wazuh_cli.py \
+python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND agent.name:web-server-01' \
   --start 2026-04-03T10:00:00Z --end 2026-04-04T10:00:00Z \
   --run-dir /tmp/cra-eval/.../runs/<uuid>

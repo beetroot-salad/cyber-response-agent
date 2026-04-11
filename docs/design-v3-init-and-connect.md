@@ -555,9 +555,10 @@ The exception: if the connected system is well-known (Splunk, Elastic, CrowdStri
 
 | Component | Change |
 |-----------|--------|
-| `scripts/siem/wazuh_cli.py` | Moves to `scripts/tools/wazuh_cli.py`. Refactored to conform to the adapter contract (binary health check, query subcommand). Existing functionality preserved. |
-| `scripts/siem/setup.sh` | Moves to `scripts/tools/wazuh/setup.sh`. Pattern replicated for each new integration. |
-| `knowledge/environment/systems/wazuh/` | Unchanged structure. Becomes the reference example for `/connect`-generated system docs. |
+| `scripts/tools/wazuh_cli.py` | Moved here from `scripts/siem/`. Refactored to the adapter contract — `health-check` and `query` subcommands (no more flat flag interface). |
+| `scripts/tools/setup.sh` | Moved here from `scripts/siem/`. One shared venv under `scripts/tools/.venv/` for all adapters; add new adapter deps to `scripts/tools/requirements.txt` and re-run. |
+| `scripts/tools/host_query.py` | Moved here from `scripts/host_query.py`. Already subcommand-style; added `health-check` subcommand for preflight. |
+| `knowledge/environment/systems/wazuh/` | Unchanged structure. Remains the reference example for `/connect`-generated system docs. |
 
 ### What's new
 

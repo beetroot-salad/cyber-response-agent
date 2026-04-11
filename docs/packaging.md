@@ -19,11 +19,12 @@ pyproject.toml
   [project.optional-dependencies]
     dev = [pytest, black, ...]   # development tools
 
-scripts/siem/
+scripts/tools/
   setup.sh                        # creates .venv, installs deps (run once)
-  requirements.txt                # opensearch-py (Wazuh integration)
+  requirements.txt                # pinned deps shared across all adapters
   .venv/                          # created by setup.sh, git-ignored
-  wazuh_cli.py                    # CLI — graceful error if deps missing
+  wazuh_cli.py                    # Wazuh SIEM adapter
+  host_query.py                   # Playground host-inspection adapter
 ```
 
 ## Per-integration venv setup
@@ -50,14 +51,14 @@ The plugin ships into the user's environment, not as a container image. A projec
 # Dockerfile.dev installs system packages + uv
 # postCreateCommand runs both:
 uv pip install --system -e '.[dev]'
-scripts/siem/setup.sh
+scripts/tools/setup.sh
 ```
 
 **Analyst machine** (distribution):
 ```bash
 # Only need Python 3.11+ and the plugin directory
 # No pip install required for core functionality
-# Set up SIEM integration deps:
-scripts/siem/setup.sh
-# Then activate the venv or invoke the CLI via .venv/bin/python3
+# Set up adapter tool deps (creates scripts/tools/.venv with opensearch-py etc.):
+scripts/tools/setup.sh
+# Then activate the venv or invoke tools via .venv/bin/python3
 ```

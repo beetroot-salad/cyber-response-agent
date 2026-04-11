@@ -42,13 +42,13 @@ Two operations: `health-check` and `query`. Everything else — field enumeratio
 
 The contract is deliberately tiny because every capability we bake into it has to work across every possible system. Two is the minimum; two is also what the investigation loop actually requires.
 
-### The `wazuh_cli.py` discrepancy
+### `wazuh_cli.py` as the reference
 
-`scripts/siem/wazuh_cli.py` is a reference example, not the default SIEM and not a shipping utility. It exists because the devcontainer runs a Wazuh stack, which gives the plugin something to integration-test against and a concrete working adapter to point at. It is not assumed to be relevant to any real user — no one's plugin installation is "connected to Wazuh" out of the box.
+`scripts/tools/wazuh_cli.py` is a reference example, not the default SIEM and not a shipping utility. It exists because the devcontainer runs a Wazuh stack, which gives the plugin something to integration-test against and a concrete working adapter to point at. It is not assumed to be relevant to any real user — no one's plugin installation is "connected to Wazuh" out of the box.
 
-The example predates this contract and uses a flag-based CLI shape (`--query`, `--health-check`) rather than argparse subcommands. `/connect` generates the **subcommand** shape for new adapters. A migration of the wazuh example to `scripts/tools/wazuh_cli.py` with subcommand argparse is plausible but not scheduled — it's a path change that ripples into hooks, env-knowledge docs, and lead templates, and it deserves its own review. For now the example stays where it is and serves as a read-only reference.
+The example conforms to the adapter contract — `health-check` and `query` subcommands, the same shape `/connect` generates for new adapters. Copy its config loading, salt wrapping, error handling, and argparse structure directly when scaffolding. There is no legacy shape to support.
 
-`preflight.py` handles both shapes on discovery: adapters under `scripts/tools/` are invoked with `health-check` as a subcommand; adapters under `scripts/siem/` are invoked with `--health-check` as a flag. This keeps the example working without forcing the migration.
+`preflight.py` discovers every adapter under `scripts/tools/*.py` uniformly: each is invoked with `health-check` as a subcommand. Filenames ending in `_cli.py` have the suffix stripped for the system name (`wazuh_cli.py` → `wazuh`); plain names like `host_query.py` are used as-is.
 
 ---
 

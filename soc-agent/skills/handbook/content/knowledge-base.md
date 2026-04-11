@@ -134,7 +134,7 @@ The knowledge base composes at runtime through a sequence of lookups. Here's wha
    `knowledge/environment/systems/wazuh/` is consulted for field names (`data.srcip` vs `agent.ip`, for example) and known quirks that affect the query.
 
 6. **Adapter CLI executes the query.**
-   `scripts/siem/wazuh_cli.py query "<composed lucene>"` runs the query with the loaded credentials and returns raw results. The agent never sees the credentials — they're loaded from environment variables or `config.env` by the adapter.
+   `scripts/tools/wazuh_cli.py query --query "<composed lucene>"` runs the query with the loaded credentials and returns raw results. The agent never sees the credentials — they're loaded from environment variables or `config.env` by the adapter.
 
 7. **Results flow back into GATHER.**
    The agent post-processes the raw results in Python, characterizes them (not interprets), and writes the observation into `investigation.md`.

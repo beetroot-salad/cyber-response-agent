@@ -17,10 +17,10 @@ Exit codes:
 
 What it checks
 --------------
-1. Systems: for every `scripts/tools/{system}_cli.py` and the legacy
-   `scripts/siem/{system}_cli.py`, runs `<cli> health-check` (or
-   `<cli> --health-check` for legacy flag-based adapters) and reports
-   connected / error.
+1. Systems: for every adapter under `scripts/tools/*.py`, runs
+   `<cli> health-check` and reports connected / error. Adapter
+   filenames may end in `_cli` for readability (the suffix is
+   stripped from the reported system name).
 
 2. System knowledge: for each system that exposes a CLI, confirms that
    `knowledge/environment/systems/{system}/` exists and contains at least
@@ -55,7 +55,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SOC_AGENT_DIR = Path(os.environ.get("SOC_AGENT_DIR", SCRIPT_DIR.parent))
 
 TOOLS_DIR = SOC_AGENT_DIR / "scripts" / "tools"
-LEGACY_SIEM_DIR = SOC_AGENT_DIR / "scripts" / "siem"
 KNOWLEDGE_DIR = SOC_AGENT_DIR / "knowledge"
 SYSTEMS_DIR = KNOWLEDGE_DIR / "environment" / "systems"
 DATA_SOURCES_DIR = KNOWLEDGE_DIR / "environment" / "data-sources"
@@ -123,35 +122,43 @@ class PreflightReport:
 # ---------------------------------------------------------------------------
 
 
-def discover_adapters() -> list[tuple[str, Path, bool]]:
-    """Return [(system_name, cli_path, is_legacy_flag_interface)].
+def discover_adapters() -> list[tuple[str, Path]]:
+    """Return [(system_name, cli_path)] for every adapter under scripts/tools/.
 
-    Looks in both scripts/tools/ (new contract: subcommands) and
-    scripts/siem/ (legacy: flag-based like wazuh_cli.py's --health-check).
+    Every adapter exposes a `health-check` subcommand; there is no other
+    contract. Filenames like `wazuh_cli.py` are allowed for readability
+    but the `_cli` suffix is dropped from the system name.
     """
-    adapters: list[tuple[str, Path, bool]] = []
-
-    if TOOLS_DIR.is_dir():
-        for path in sorted(TOOLS_DIR.glob("*_cli.py")):
-            name = path.stem.removesuffix("_cli")
-            adapters.append((name, path, False))
-
-    if LEGACY_SIEM_DIR.is_dir():
-        for path in sorted(LEGACY_SIEM_DIR.glob("*_cli.py")):
-            name = path.stem.removesuffix("_cli")
-            # Only include if not already discovered under tools/ (new wins).
-            if not any(n == name for n, _, _ in adapters):
-                adapters.append((name, path, True))
-
+    adapters: list[tuple[str, Path]] = []
+    if not TOOLS_DIR.is_dir():
+        return adapters
+    for path in sorted(TOOLS_DIR.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        name = path.stem.removesuffix("_cli")
+        adapters.append((name, path))
     return adapters
 
 
-def run_health_check(cli_path: Path, legacy: bool) -> tuple[bool, str | None]:
-    """Invoke an adapter's health check. Returns (connected, error)."""
-    if legacy:
-        cmd = ["python3", str(cli_path), "--health-check"]
-    else:
-        cmd = ["python3", str(cli_path), "health-check"]
+def _adapter_python(cli_path: Path) -> str:
+    """Python interpreter for running the given adapter CLI.
+
+    Adapters live under `scripts/tools/` with a shared `scripts/tools/.venv/`
+    created by `scripts/tools/setup.sh`. The venv carries vendor deps
+    (e.g. opensearch-py for wazuh_cli). Prefer `{cli_path.parent}/.venv/bin/python`
+    when present; fall back to system `python3` otherwise (tests, CI,
+    environments without a venv).
+    """
+    venv_python = cli_path.parent / ".venv" / "bin" / "python"
+    if venv_python.is_file():
+        return str(venv_python)
+    return "python3"
+
+
+def run_health_check(cli_path: Path) -> tuple[bool, str | None]:
+    """Invoke an adapter's `health-check` subcommand. Returns (connected, error)."""
+    python = _adapter_python(cli_path)
+    cmd = [python, str(cli_path), "health-check"]
 
     try:
         result = subprocess.run(
@@ -181,21 +188,31 @@ def check_knowledge(system: str) -> list[str]:
     contain at least one documentation file. Filename conventions are
     /connect's job to scaffold; preflight only flags a system with no
     environment knowledge at all.
+
+    Adapter filenames use underscores (Python identifier constraint);
+    knowledge directory names often use hyphens. Accept either form so
+    `host_query.py` matches `knowledge/environment/systems/host-query/`.
     """
-    sys_dir = SYSTEMS_DIR / system
-    if not sys_dir.is_dir():
-        return [f"knowledge/environment/systems/{system}/ (missing directory)"]
-    docs = [p for p in sys_dir.iterdir() if p.is_file() and p.suffix == ".md"]
-    if not docs:
-        return [f"knowledge/environment/systems/{system}/ (no .md docs)"]
-    return []
+    candidates = [system]
+    if "_" in system:
+        candidates.append(system.replace("_", "-"))
+
+    for name in candidates:
+        sys_dir = SYSTEMS_DIR / name
+        if sys_dir.is_dir():
+            docs = [p for p in sys_dir.iterdir() if p.is_file() and p.suffix == ".md"]
+            if not docs:
+                return [f"knowledge/environment/systems/{name}/ (no .md docs)"]
+            return []
+
+    return [f"knowledge/environment/systems/{system}/ (missing directory)"]
 
 
 def check_systems() -> list[SystemStatus]:
     adapters = discover_adapters()
     statuses: list[SystemStatus] = []
-    for name, cli_path, legacy in adapters:
-        connected, err = run_health_check(cli_path, legacy)
+    for name, cli_path in adapters:
+        connected, err = run_health_check(cli_path)
         gaps = check_knowledge(name)
         statuses.append(
             SystemStatus(
@@ -254,7 +271,7 @@ def print_human(report: PreflightReport) -> None:
     if report.checked_systems:
         print("Systems:")
         if not report.systems:
-            print(f"  {WARN} no adapters found under scripts/tools/ or scripts/siem/")
+            print(f"  {WARN} no adapters found under scripts/tools/")
             print("    Run /connect to add your first system.")
         else:
             for s in report.systems:

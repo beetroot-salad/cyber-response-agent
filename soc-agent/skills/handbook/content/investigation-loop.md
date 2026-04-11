@@ -41,7 +41,7 @@ The loop is a finite-state machine with six phases and a hard limit on hypothesi
 
 | Phase | What happens | Can transition to |
 |---|---|---|
-| `CONTEXTUALIZE` | Load signature knowledge, parse alert, spawn Explore + ticket-context subagents, build resolution map | `SCREEN`, `HYPOTHESIZE`, `CONCLUDE` |
+| `CONTEXTUALIZE` | Load signature knowledge, parse alert, dispatch ticket-context + precedent-scan subagents in parallel, build resolution map | `SCREEN`, `HYPOTHESIZE`, `CONCLUDE` |
 | `SCREEN` *(optional)* | Cheap subagent attempts mechanical pattern match against known benign outcomes | `HYPOTHESIZE`, `CONCLUDE` |
 | `HYPOTHESIZE` | Form or update candidate explanations, select the most diagnostic lead | `GATHER` |
 | `GATHER` | Execute the selected lead(s), characterize raw observations | `ANALYZE` |

@@ -194,6 +194,29 @@ def cmd_connection_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_health_check(args: argparse.Namespace) -> int:
+    """Verify docker exec reachability against every allowed host.
+
+    Intentionally ignores `--host`: preflight needs overall connectivity
+    across all inspection-eligible hosts, not per-request state. Iterates
+    over ALLOWED_HOSTS and exercises a minimal `true` invocation per host.
+
+    Exit 0 if every host responds; exit 1 if any host is unreachable
+    (matching preflight's legacy 0/1 health-check contract).
+    """
+    failures: list[str] = []
+    for host in ALLOWED_HOSTS:
+        out, rc = docker_exec(host, ["true"])
+        if rc == 0:
+            print(f"{host}: reachable")
+        else:
+            print(f"{host}: {out}")
+            failures.append(host)
+    if failures:
+        return 1
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Argparse plumbing
 # ---------------------------------------------------------------------------
@@ -256,6 +279,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="List established TCP connections (no process attribution)",
     )
     s.set_defaults(func=cmd_connection_list)
+
+    s = sub.add_parser(
+        "health-check",
+        help=(
+            "Verify docker exec reachability against every allowed host. "
+            "Used by scripts/preflight.py; ignores --host and checks all."
+        ),
+    )
+    s.set_defaults(func=cmd_health_check)
 
     return p
 
