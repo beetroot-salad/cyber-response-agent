@@ -32,7 +32,7 @@ The input alert, passed as a JSON string argument to `/investigate` and parsed a
 - Strip ANSI escape sequences.
 - Truncate any field longer than `MAX_FIELD_LEN = 4096` with a `[TRUNCATED]` marker.
 
-This is **structural sanitization**, not semantic defense. It protects human reviewers from hidden content and prevents invisible characters from confusing delimiter parsing. It does not stop an LLM from obeying a plain-language instruction buried in an alert field — that's what the judge's salted delimiters and the investigation's "treat alerts as evidence" rule are for.
+This is **structural sanitization** (Layer 1 of the injection defense), not semantic defense. It protects human reviewers from hidden content and prevents invisible characters from confusing delimiter parsing. It does not stop an LLM from obeying a plain-language instruction buried in an alert field — that's what Layer 2 (the judge's salted delimiters, described in `content/validation.md#prompt-injection-defense`) and the investigation's "treat alerts as evidence" rule are for.
 
 The alert is considered **untrusted** throughout the investigation. The agent reads it as data, not instructions.
 
@@ -51,7 +51,7 @@ Three fields:
 }
 ```
 
-The `salt` is the injection defense primitive. Every piece of untrusted content the plugin reads or forwards gets wrapped in `<run-{salt}-{tag}>...</run-{salt}-{tag}>` delimiters. An attacker crafting a prompt-injection payload into an alert cannot know the salt at authoring time, so they cannot forge a closing delimiter to escape the wrapper.
+The `salt` is the injection defense primitive (Layer 2 — see `content/validation.md#prompt-injection-defense` for the full story). Every piece of untrusted content the plugin forwards to the Tier 2 judge gets wrapped in `<run-{salt}-{tag}>...</run-{salt}-{tag}>` delimiters. An attacker crafting a prompt-injection payload into an alert cannot know the salt at authoring time, so they cannot forge a closing delimiter to escape the wrapper.
 
 The salt is generated per run (`secrets.token_hex(8)`) specifically so it cannot leak into training data or documentation and become forgeable — static delimiters would eventually.
 
@@ -167,9 +167,28 @@ This is the canonical "what did the agent decide" log. Downstream analytics (fal
 - **Agent-owned vs machine-owned** separation (`investigation.md` vs `state.json`) lets the agent write freely in the narrative log while the state machine guards the structural record.
 - **Audit vs trace split** keeps the "consequential actions" log useful without drowning it in file reads.
 
+## Monitoring a live investigation
+
+The runs directory is also the primary interface for **watching an investigation as it happens**. Because every artifact is a plain file that the agent updates incrementally, a second process (human, script, or dashboard) can `tail` them without coordinating with the agent.
+
+Useful live-monitoring views:
+
+- **`tail -f runs/{run_id}/investigation.md`** — the agent's narrative log, section by section. This is the highest-signal view of what the agent is thinking right now: which hypotheses it formed, which lead it just picked, what the observation was, how it weighed the evidence.
+- **`watch cat runs/{run_id}/state.json`** — the structural state. Shows current phase, history, and loop count. Useful when you want to see "is the agent stuck looping" vs "is it advancing" without reading prose.
+- **`tail -f runs/tool_audit.jsonl | jq 'select(.run_id == "{run_id}")'`** — the consequential actions, filtered to one run. Shows every Bash, Write, Edit, subagent spawn, and MCP call as it happens. Good for catching "what did the agent just try to do" in near real-time.
+- **`tail -f runs/tool_trace.jsonl | jq 'select(.run_id == "{run_id}")'`** — read-only navigation. Very chatty, but useful for understanding what files and fields the agent is looking at.
+- **`tail -f runs/audit.jsonl`** — one line per completed investigation. This is the cross-run "what did the agent just decide on everything it finished" feed — useful for a dashboard showing disposition rate, escalations per hour, or streaks of the same outcome.
+
+Two properties make this work:
+
+1. **Append-only JSONL**. Nothing rewrites earlier lines, so a `tail -f` consumer never misses events and never needs to handle truncation. Each line is a complete record.
+2. **One file per concern**. `investigation.md` is human narrative. `state.json` is structural state. `tool_audit.jsonl` is consequential actions. `tool_trace.jsonl` is navigation. A monitor can subscribe to whichever view it cares about without parsing the others.
+
+For production monitoring, the standard pattern is a sidecar process that tails `runs/audit.jsonl` for completed-investigation outcomes and `runs/tool_audit.jsonl` for per-action telemetry, fanning both into the org's observability stack. No agent-side changes are needed — the agent just writes the files.
+
 ## Reading the artifacts for debugging
 
-When an investigation produces a surprising outcome, the standard inspection sequence is:
+When an investigation produces a surprising outcome, the standard post-hoc inspection sequence is:
 
 1. **`report.md`** — what did the agent decide?
 2. **`investigation.md`** — what was the reasoning?
