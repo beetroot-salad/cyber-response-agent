@@ -271,11 +271,11 @@ def run_investigation_live(
 # ---------------------------------------------------------------------------
 
 def _wazuh_health_check() -> bool:
-    """Run wazuh_cli.py --health-check. Returns True if healthy."""
+    """Run wazuh_cli.py health-check. Returns True if healthy."""
     try:
         result = subprocess.run(
-            [sys.executable, str(SOC_AGENT_ROOT / "scripts" / "siem" / "wazuh_cli.py"),
-             "--health-check"],
+            [sys.executable, str(SOC_AGENT_ROOT / "scripts" / "tools" / "wazuh_cli.py"),
+             "health-check"],
             capture_output=True, text=True, timeout=30,
             cwd=str(SOC_AGENT_ROOT),
         )
@@ -325,8 +325,8 @@ def _wait_for_alerts(query: str, min_count: int = 1, timeout: int = 90) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         result = subprocess.run(
-            [sys.executable, str(SOC_AGENT_ROOT / "scripts" / "siem" / "wazuh_cli.py"),
-             "--query", query, "--window", "15m", "--limit", "1", "--raw"],
+            [sys.executable, str(SOC_AGENT_ROOT / "scripts" / "tools" / "wazuh_cli.py"),
+             "query", "--query", query, "--window", "15m", "--limit", "1", "--raw"],
             capture_output=True, text=True, timeout=30,
             cwd=str(SOC_AGENT_ROOT),
         )
