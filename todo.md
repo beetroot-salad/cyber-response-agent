@@ -109,6 +109,20 @@ Screening is the right starting point for evaluation:
 - [ ] Identify failure modes: which patterns break, which indicators are ambiguous, which prompts need tuning
 - [ ] After screening is solid: extend to ticket-context subagent, then full investigation loop
 
+### External retry-on-truncation wrapper (observed 2026-04-11, eval run #8)
+
+In eval run #8 the agent produced a high-quality CONTEXTUALIZE + SCREEN, correctly refused to short-circuit on a polluted monitoring-probe window, transitioned into HYPOTHESIZE, read grounding knowledge, then called `Read` against `knowledge/environment/operations/` — a directory. The tool returned `EISDIR is_error=true`, the Stop hook fired, and the Claude Code loop closed the session with `terminal_reason: "completed"` / `stop_reason: "end_turn"` — **without feeding the tool error back to the model for another turn**. No retry, no recovery, no report.md. The agent consumed \$1.15 and 331s of wall clock on a run that produced a complete investigation.md through SCREEN but an empty HYPOTHESIZE section.
+
+Claude Code docs say "turns continue until Claude produces output with no tool calls" — so in principle a tool_use followed by is_error should continue the loop. Our observation conflicts with that. Docs do not cover the stream-json result event schema, `terminal_reason` values, or tool-error-in-loop behavior, so we can't tell from docs alone whether this is a 2.1.101 bug, a Stop-hook interaction quirk, or a subtle edge case. **Classes of "the CLI hangs up mid-investigation" bugs will keep happening** — either from tool errors, transient API failures, hook misbehavior, or unknown-unknowns — and the right structural fix is not to hunt them one by one.
+
+**Proposal: external retry-on-truncation wrapper around `eval_run.sh` (and eventually production `/investigate` dispatch).**
+
+- [ ] **`playground/scripts/eval_run.sh` wrapper that detects truncated runs and resumes from transcript state.** When `claude --print` exits, check if `runs/<uuid>/report.md` exists. If not, the run is truncated. Walk `runs/<uuid>/state.json` (last phase), `runs/<uuid>/investigation.md` (phase sections populated), and the `transcript.jsonl` tail to identify where the agent stopped. Re-invoke `claude` with a continuation prompt that hands the agent the existing run dir and asks it to pick up from the recorded phase. The continuation invocation MUST NOT restart CONTEXTUALIZE — it should read the existing `investigation.md` + `state.json` and resume at the recorded phase. Hard cap on retry count (e.g. 2) to avoid infinite retry loops on genuine dead-ends. Log every retry to `runs/<uuid>/retry.jsonl` with the trigger condition so the eval postmortem can distinguish "completed naturally" from "completed after N retries".
+- [ ] **Only fix the underlying Read-directory-crashes-the-loop issue if it recurs across multiple evals.** Low priority until we see it again — a single observation under polluted test conditions is not enough signal to justify a skill-prompt patch or a hook-level workaround, and adding defensive pre-Glob instructions everywhere `Read` appears would bloat SKILL.md for a suspected one-off.
+- [ ] **File Claude Code feedback** on the termination-after-tool-error observation — docs gap is real regardless of whether the underlying behavior is a bug. See `.claude/skills/evaluate/SKILL.md` run #8 entry for the exact symptoms and transcript location.
+
+Why an external wrapper and not an in-agent hook: a Stop hook or PreToolUse hook can't restart the agent loop from outside — the CLI process owns the loop. A wrapper sits one level up, owns retry policy, and works for any class of CLI-level truncation (tool errors, transient failures, SIGKILL'd subprocess, etc.). The investigation run dir is already designed for resumption — `state.json` carries phase history, `investigation.md` is append-only, `alert.json` never changes. The wrapper just needs to tell the agent "here's the run dir, here's the phase you stopped at, continue from there."
+
 ## Phase 2 — Post-MVP
 
 ### Agent Architecture
