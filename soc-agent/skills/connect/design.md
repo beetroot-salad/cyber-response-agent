@@ -44,9 +44,11 @@ The contract is deliberately tiny because every capability we bake into it has t
 
 ### The `wazuh_cli.py` discrepancy
 
-`scripts/siem/wazuh_cli.py` is the reference implementation but predates the contract. It uses flags (`--health-check`, `--query`) rather than argparse subcommands. `/connect` generates the **subcommand** shape for new adapters. The wazuh_cli.py migration to `scripts/tools/wazuh_cli.py` with subcommand argparse is tracked as a follow-up — it's a path change that ripples into hooks, env-knowledge docs, and lead templates, and it deserves its own review.
+`scripts/siem/wazuh_cli.py` is a reference example, not the default SIEM and not a shipping utility. It exists because the devcontainer runs a Wazuh stack, which gives the plugin something to integration-test against and a concrete working adapter to point at. It is not assumed to be relevant to any real user — no one's plugin installation is "connected to Wazuh" out of the box.
 
-For now: `preflight.py` handles both shapes. When it finds an adapter in `scripts/tools/`, it runs `health-check`. When it finds one in the legacy `scripts/siem/`, it runs `--health-check`. No user-facing friction.
+The example predates this contract and uses a flag-based CLI shape (`--query`, `--health-check`) rather than argparse subcommands. `/connect` generates the **subcommand** shape for new adapters. A migration of the wazuh example to `scripts/tools/wazuh_cli.py` with subcommand argparse is plausible but not scheduled — it's a path change that ripples into hooks, env-knowledge docs, and lead templates, and it deserves its own review. For now the example stays where it is and serves as a read-only reference.
+
+`preflight.py` handles both shapes on discovery: adapters under `scripts/tools/` are invoked with `health-check` as a subcommand; adapters under `scripts/siem/` are invoked with `--health-check` as a flag. This keeps the example working without forcing the migration.
 
 ---
 
@@ -69,7 +71,7 @@ A template library can be added later as a purely additive change — the `/conn
 Two checks, named in `SKILL.md` Phase 3:
 
 1. **The adapter connects and queries.** `health-check` returns exit 0. A sample query returns reasonable output. This is the machine-side check.
-2. **The agent can use the adapter without friction.** The environment knowledge exists — at minimum a per-system directory with field documentation, and a data-source doc noting this system as a source for the relevant data type. The adapter's interface is legible to a fresh-context agent reading only `--help`.
+2. **The agent can use the adapter without friction.** The environment knowledge exists — at minimum a per-system directory with field documentation, and a data-source doc noting this system as a source for the relevant data type.
 
 `preflight.py` enforces the first deterministically. The second is where the interesting design question lives.
 
@@ -77,23 +79,42 @@ Two checks, named in `SKILL.md` Phase 3:
 
 There are two broadly orthogonal ways to reduce agent friction on a generated adapter:
 
-**Axis A — intrinsic legibility.** Make the interface predictable through convention, not instruction. Thin wrappers. Pass-through native query language. Consistent subcommand names across every adapter (`health-check`, `query`) so the agent's prior from one adapter transfers to the next. Argparse's free `--help` on every subcommand. Tight, concrete examples in the system's `SKILL.md`. All of this leans on the agent's training priors about Unix CLIs: if the interface looks like what a competent SRE would write, the agent will reach for the right flag on the first try.
+**Axis A — intrinsic legibility.** Make the interface predictable through convention, not instruction. Thin wrappers. Pass-through native query language. Consistent subcommand names across every adapter (`health-check`, `query`) so the agent's prior from one adapter transfers to the next. Argparse's free `--help` on every subcommand. Tight, concrete examples in the system's `SKILL.md`.
 
-Caveat the user correctly flags: runs are stateless. A consistency win across adapters benefits humans maintaining the plugin more than it benefits any single investigation run, because run N doesn't remember run N−1. The indirect path where it *does* benefit runtime is via the environment-knowledge SKILL.md files the agent reads at run startup — if those follow the same template, the agent gets consistency at read time even without cross-run memory.
+Runs are stateless, so a consistency win across adapters benefits humans maintaining the plugin more than it benefits any single investigation run. The indirect path where it *does* benefit runtime is via the environment-knowledge SKILL.md files the agent reads at run startup — if those follow the same template, the agent gets consistency at read time even without cross-run memory.
 
 MVP commits to Axis A. It's the baseline every adapter must hit. The contract (`schemas/adapter_contract.py`) pins the subcommand names. The checklist demands stdlib-first, native-language pass-through, hint-bearing error messages. No extra runtime cost, no extra Claude calls.
 
-**Axis B — empirical verification.** Before committing the adapter, spawn a fresh-context Haiku subagent, hand it only the adapter's `--help` output and a goal ("return the last 5 authentication events from user `alice`"), and ask it to produce the command line it would run. Compare to what the adapter actually accepts. If the probe reaches for `--query "..."` and the adapter wants `query "..."` (positional subcommand), or if the probe reaches for `--limit=5` and the adapter wants `-n 5`, you've mechanically detected a friction point that convention alone didn't catch.
+**Axis B — empirical verification via Haiku probe.** Before committing the adapter, spawn a fresh-context Haiku subagent, hand it a realistic task (e.g., *"find the 5 most recent failed SSH logins on host web-01 in the last hour"*), and inspect what command it emits and what ambiguities it calls out. The probe is evidence, not a verdict — the main agent reads the output and decides whether a mismatch means "fix the adapter" or "fill in the docs".
 
-This is the analogue of `/author`'s reconstruction probe: evidence, not a verdict. A probe mismatch is a signal to fix the adapter *or* to document the quirk prominently in `field-notes.md` so future runs see it in context. It closes the loop on "friction-free agent use" from a human-review concern to a mechanically measurable one.
+The original framing of this probe — draft in the previous version of this design — was that it would target the adapter's `--help` output, to catch cases where CLI shape (positional vs `--flag`, subcommand vs no subcommand) confused fresh-context agents. We ran the experiment.
 
-Axis B is **not** in MVP. Reasons:
+### What the probe measured
 
-- It adds a subagent spawn to every `/connect` run. Cost is small but non-zero, and the skill is meant to feel lightweight.
-- It's unnecessary overhead for plain-vanilla adapters that follow the contract. The interesting cases are the ones with unusual subcommand shapes (e.g., a CMDB that uses `lookup` instead of `query`, or a vendor CLI with idiosyncratic flags).
-- We want to see real synthesis failures before designing the probe — building it speculatively risks over-fitting.
+Three Haiku trials in parallel, each with isolated context, each given a different CLI shape of the same Splunk adapter:
 
-The checklist in `checklist.md` names the probe as an **optional belt-and-suspenders step** rather than a required one. Use it when the adapter's interface diverges from the default shape. Skip it when the adapter is a straightforward health-check + query. When we have data on how often synthesis-only adapters fail friction-free review, revisit: if the answer is "more than rarely," promote the probe to a required Phase 3.3 step.
+| Trial | Shape exposed | Result |
+|---|---|---|
+| 1 | `query "<spl>" --start ... --end ... --limit N` (subcommand + positional query, flag metadata) | Syntactically correct command on the first try. |
+| 2 | `query --query "<spl>" --start ... --end ... --limit N` (subcommand + `--query` flag) | Syntactically correct command on the first try. |
+| 3 | `--query "<spl>" --window 1h --limit N` (flag-based, no subcommand — the current `wazuh_cli.py` shape) | Syntactically correct command on the first try. |
+
+Zero CLI-shape confusion across all three shapes. Haiku correctly read argparse `--help` output and produced a valid invocation regardless of whether the query was positional or a flag, and regardless of whether there was a subcommand layer.
+
+What *did* produce uncertainty, in every trial: **field model**. Which sourcetype name (`linux_secure` vs `sshd` vs `ssh`). Which field for "failure" (`action=failure` vs `status=failed`). Whether to include `index=main`. Whether to assume newest-first ordering. One trial reached for `--window 1h` because that convenience flag existed in its `--help`; the others computed ISO timestamps because `--window` wasn't present. That's a design hint about what convenience flags to expose, not a CLI-shape problem.
+
+**Implication: the probe was targeted at the wrong layer.** CLI shape is not where runtime friction lives. Field semantics is. The probe should target `field-notes.md` and the `--help` *examples* — because those examples are load-bearing: Haiku pattern-matched against whatever example the help text showed, and if the example is wrong, the generated command inherits the wrongness.
+
+### What the probe should target, revised
+
+Axis B lives, but pivots:
+
+- **No longer probe CLI shape.** All three shapes pass. Using convention + argparse `--help` is sufficient.
+- **Probe field-model fidelity instead.** Hand Haiku the `query --help` output plus the draft `field-notes.md`, give it a realistic task, and inspect the ambiguities it surfaces. If Haiku has to guess at sourcetype names, field spellings, or enum values that should be documented, `field-notes.md` is too thin — expand it before committing.
+- **Check the `--help` examples.** If Haiku pattern-matches on an example in `--help` that uses generic placeholder field names, the adapter's examples need real deployment-specific values. "Examples in help are load-bearing" is a design principle now, not a hypothesis.
+- **Optional convenience-flag review.** If the task would be much easier with a `--window 1h` shortcut than with `--start`/`--end` arithmetic, consider adding it. Not required, but a cheap win.
+
+This is the version that ships in `checklist.md` as optional-but-useful and in `SKILL.md` Phase 3.3. Promote to required when we have evidence that synthesis-only adapters produce silently thin field-notes often enough to warrant the cost.
 
 ### Known gap
 
@@ -112,11 +133,18 @@ The interview in Phase 1 asks explicitly which pattern applies because it fundam
 | Direct API | `{system}_cli.py` with an HTTP client |
 | SOAR | `{system}_cli.py` that calls the SOAR API, not the target system directly |
 | Existing CLI | `{system}_cli.py` that shells out to the existing tool and parses output |
-| MCP (few tools) | No CLI — env knowledge docs referencing MCP tool names |
-| MCP (many tools) | `{system}_cli.py` that calls specific MCP tools, to keep context small |
+| MCP | No CLI, or a CLI that wraps specific MCP tools. Which path depends on user preference — see §3 MCP vs CLI. |
 | Bastion | **Stop.** The agent runs on the bastion, not the laptop. Exit cleanly. |
 
-Credential handling is always the same regardless of pattern: env vars hold secrets, `config.env` holds non-secrets, the adapter loads both and fails loud if either is missing. The skill never sees raw secrets at any point in the flow. This matters because an LLM context is not an auditable credential store — every other design question can shift, but this one cannot.
+Credential handling is always the same regardless of pattern:
+
+- `config.env.template` (tracked in git) — the canonical list of non-secret keys.
+- `config.env` (gitignored) — the deployment's actual non-secret values.
+- `.env` or shell environment (gitignored) — secrets only.
+
+The adapter loads both and fails loud if either is missing. The skill never sees raw secrets at any point in the flow. This matters because an LLM context is not an auditable credential store — every other design question can shift, but this one cannot.
+
+The `.env` file pattern is convention, not enforcement. Users bring their own secret management — shell export, direnv, vault integration, Kubernetes secrets, whatever. The adapter's only requirement is that the expected env var names are set in its process environment by the time it runs. How that happens is out of scope.
 
 ### Why we don't handle VPN / proxy / bastion setup
 
@@ -126,13 +154,14 @@ Those are organizational concerns that predate the agent. If the analyst can't r
 
 ## 7. Model and cost
 
-Main agent: **Sonnet 4.6**, pinned in `SKILL.md` frontmatter. No probes, no subagents.
+Main agent: **Sonnet 4.6**, pinned in `SKILL.md` frontmatter. Axis B probe (optional): Haiku, dispatched via Task.
 
 Rationale:
 
 - `/connect` is a code-generation task (an adapter CLI) plus interactive decision-making (interview, error diagnosis). Sonnet is comfortably strong enough for both. `/author`'s experience shows Sonnet handles comparable work reliably.
 - Opus is a 5× cost jump for judgment improvements on a task that's mostly structured. The one place Opus would matter — reasoning about unusual enterprise access topologies — is something we can handle by extending the interview, not by upgrading the model.
 - WebFetch is in `allowed-tools`: when Claude's memory of a vendor API is uncertain, fetching the current docs is the right move. Much higher leverage than upgrading the model.
+- The Axis B field-model probe is Haiku because it's a quick one-shot question ("here's the docs, here's a task, what would you run and what are you unsure about?"). No chain-of-thought, no multi-turn. Haiku is fast enough to keep Phase 3 feeling interactive.
 
 Override via `SOC_AGENT_CONNECT_MODEL` env var is possible if needed later, but not wired up in MVP.
 

@@ -88,6 +88,10 @@ ensure_ignore ".env"
 ensure_ignore "__pycache__/"
 ensure_ignore ".venv/"
 ensure_ignore "*.pyc"
+# Non-secret but deployment-specific config. Each environment has its own
+# values (endpoint, index name, retention). The tracked file is
+# config.env.template; each deployment copies it to config.env locally.
+ensure_ignore "knowledge/environment/systems/*/config.env"
 
 # ---------------------------------------------------------------------------
 # 4. Directory scaffold

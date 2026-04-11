@@ -28,14 +28,15 @@ Walk through this before calling a connection done. Anything unchecked goes in t
 - [ ] `python3 scripts/tools/{system}_cli.py health-check` exits 0 and prints `connected`.
 - [ ] A sample query with `--limit 5` returns output.
 - [ ] The user has eyeballed the sample output and confirmed the fields look right.
-- [ ] (Optional belt-and-suspenders) A Haiku usability probe against the adapter's `--help` output confirms the call shape is intuitive to a fresh-context agent. Skip if the adapter is plain-vanilla; use when the subcommands or flags are unusual.
+- [ ] (Optional, recommended when field-notes are thin) Field-model Haiku probe. Hand a fresh-context Haiku the output of `query --help` plus `field-notes.md`, give it a realistic task ("find 5 failed SSH logins on web-01 in the last hour"), and inspect the ambiguities it surfaces. Any field name, sourcetype, or enum value Haiku has to guess about is a gap in `field-notes.md` — fill it in before committing. (Don't probe CLI shape; that's been measured and all common shapes pass. See `design.md` §5.)
 
 ## Environment knowledge
 
-- [ ] `knowledge/environment/systems/{system}/config.env.template` exists and contains only non-secret keys, with comments.
-- [ ] `config.env` contains the actual values the user gave you. Deployment-specific values are gitignored if needed.
-- [ ] `field-notes.md` exists with a concrete "fields you'll reach for" section and at least one "known quirks" note (or an honest `TODO` if none were discovered yet).
-- [ ] `SKILL.md` for the system names it, describes how to invoke the CLI, and points at the field notes.
+- [ ] `knowledge/environment/systems/{system}/config.env.template` exists, is tracked in git, and contains only non-secret keys with comments.
+- [ ] `knowledge/environment/systems/{system}/config.env` exists locally with actual deployment values, is gitignored (verify via `git check-ignore`), and does not contain any secrets.
+- [ ] Secrets live in env vars (or a gitignored `.env` at the repo root), never in either config file.
+- [ ] `field-notes.md` exists with a concrete "fields you'll reach for" section and at least one "known quirks" note (or an honest `TODO` if none were discovered yet). This is the load-bearing file for runtime agent quality — don't ship it empty.
+- [ ] `SKILL.md` for the system names it, describes how to invoke the CLI with a real complete example, and points at the field notes.
 - [ ] `knowledge/environment/data-sources/{data-type}.md` has been updated (or created) to name this system as a source, with access method, query language, retention, and coverage notes.
 
 ## Credential boundary
@@ -46,10 +47,11 @@ Walk through this before calling a connection done. Anything unchecked goes in t
 
 ## Scope discipline
 
-- [ ] Only `scripts/tools/` and `knowledge/environment/` have been edited. No touches to `hooks/`, `schemas/`, `skills/`, `knowledge/signatures/`, or `config/signatures/`.
+- [ ] Only `scripts/tools/` and `knowledge/environment/` have been edited. Hard limit: no touches to `hooks/`, `schemas/`, `skills/`, `knowledge/signatures/`, or `config/signatures/`.
 - [ ] No signature knowledge was created or modified. If the user wants starter signatures for this system, that's a follow-up `/author` run.
 - [ ] No lead templates were created. Lead templates come from investigation experience, not API docs.
-- [ ] `wazuh_cli.py` / `scripts/siem/` was not touched. Its migration is a separate PR.
+- [ ] `scripts/siem/wazuh_cli.py` (the reference example) was not touched. Its eventual migration is a separate PR.
+- [ ] If the user's request legitimately falls outside the default flow (unusual upstream, weird access topology, bespoke integration), that divergence is surfaced in the summary to the user for human review — not silently patched over, and not blocked outright.
 
 ## Preflight
 
