@@ -49,7 +49,7 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 - **Two-tier validation** — `validate_report.py` is a PostToolUse hook (Write|Edit) that fires when report.md is written. Tier 1 enforces structural constraints deterministically. Tier 2 uses Haiku via claude CLI to validate report consistency, precedent match validity, and evidence sufficiency. Runs in full mode (5 checks) for resolved reports with precedent, or no-precedent mode (4 checks) for escalated reports. Untrusted content (alert data, investigation log) is wrapped in per-run salted delimiters to prevent prompt injection.
 - **Hooks registered in plugin.json** — hooks only fire when the plugin is loaded, not during development
 - **State machine** (`write_state.py`) prevents phase skipping — agent must follow CONTEXTUALIZE→[SCREEN]→HYPOTHESIZE→GATHER→ANALYZE→(loop|CONCLUDE)
-- **Precedent requirement** — `status=resolved` requires `matched_precedent` pointing to an existing file
+- **Two-leg resolution requirement** — `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding: every `required_anchors` entry confirmed OR `matched_ticket_id` citing a valid precedent snapshot inside that archetype directory. Archetypes with no required anchors must be grounded by `matched_ticket_id`
 - **Adversarial hypothesis** — agent must maintain at least one threat hypothesis until explicitly refuted
 
 ## Project Structure
@@ -93,8 +93,11 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 │   │       ├── _template/         # Skeleton + onboarding guide for new signatures
 │   │       └── wazuh-rule-5710/   # SSH Invalid User (example signature)
 │   │           ├── context.md     # Signature reference + threat model
-│   │           ├── playbook.md    # Hypothesis catalog + leads
-│   │           └── precedents/    # Past resolved investigations
+│   │           ├── playbook.md    # Archetype catalog + leads + screen table
+│   │           └── archetypes/    # One subdir per archetype
+│   │               └── {name}/
+│   │                   ├── README.md         # Story + required_anchors
+│   │                   └── {TICKET-ID}.json  # Cached precedent snapshots
 │   ├── schemas/                   # Python dataclass validators (system contracts)
 │   │   ├── report_frontmatter.py
 │   │   ├── state.py
@@ -183,10 +186,10 @@ See `soc-agent/knowledge/signatures/_template/README.md` for the full onboarding
 2. Remove `README.md` from the copy
 3. Research past tickets for this signature — pull alerts, review closed tickets, identify outcome clusters
 4. Fill in `context.md` — signature logic, threat model, known false positives (grounded in real data)
-5. Fill in `playbook.md` — hypothesis catalog, leads with predictions (from actual investigation patterns)
+5. Fill in `playbook.md` — archetype catalog, leads with predictions, optional screen table (from actual investigation patterns)
    - Optionally use `@import:name` inline to reference common lessons from `knowledge/common-investigation/lessons/`
    - The resolver (`scripts/resolve_imports.py`) loads referenced atoms automatically at skill load time
-6. Add precedents from representative tickets to `precedents/`
+6. Create one archetype subdirectory per outcome cluster under `archetypes/{archetype-name}/` — each with a `README.md` (story + `required_anchors`) and zero or more `{TICKET-ID}.json` precedent snapshots
 7. Create `soc-agent/config/signatures/{signature-id}/permissions.yaml`
 
 ## Docker Environment

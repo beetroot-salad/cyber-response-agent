@@ -54,6 +54,59 @@ construction, and the report's job is to ground the escalation in the
 volume/source/username shape that distinguishes them from the benign
 paths.
 
+## Hypothesis seeds
+
+The archetype catalog above is a *pattern-recognition cache* — fast
+paths for alerts whose shape matches a past ticket. But every 5710
+investigation should start from candidate mechanism hypotheses and
+gather evidence against them; an archetype match, when it happens, is
+a short-circuit on top of that, not a replacement for it. Novel
+variants, shape mutations, and adversaries mimicking benign patterns
+all require the agent to reason from mechanisms, not from cached
+patterns alone.
+
+The starter hypotheses below are lean mechanism-shaped candidates to
+consider at HYPOTHESIZE. They map roughly to the archetypes when the
+evidence fits, but the agent may confirm one of these without
+matching any archetype (in which case the outcome is escalation with
+a well-reasoned narrative), and may refute all of these and form a
+novel hypothesis if the evidence doesn't fit any seed.
+
+### ?legitimate-automation
+Some sanctioned automated system — monitoring probe, health check,
+scheduled job, backup worker — produced this failed login. Typical
+shape: internal source, sentinel or service-account username, low
+volume, no successful follow-up. Maps to `monitoring-probe` or
+`service-account-rotation` archetypes when the specific automation
+is documented in the sanction registry.
+
+### ?authentication-mistake
+A human or automation submitted a wrong username by accident — typo,
+stale credential after rotation, misconfigured client. Typical shape:
+any source, real-looking username or service-account shape, low
+volume, often followed by a successful login within seconds (the
+retry after noticing the typo). This hypothesis is usually benign but
+has no dedicated archetype — it resolves via evidence discipline
+rather than archetype match.
+
+### ?credential-guessing
+An adversary is trying to find valid accounts on this host. Typical
+shape: external source, multiple distinct usernames or repeated
+attempts, usernames drawn from wordlists or breach dumps, no
+successful login (yet). Maps to `external-bruteforce` at high volume
+with wordlist usernames, or `credential-stuffing` at low volume with
+real-looking usernames.
+
+### ?compromise-followup (adversarial — always keep active)
+This failed auth is one event in a chain that includes (or will
+include) a successful authentication from the same source. The shape
+alone looks like any of the above, but the *temporal context* —
+specifically any 5501 / 5715 success from the same srcip within
+seconds — takes the event out of the benign archetypes entirely and
+into compromise territory. This hypothesis must be explicitly
+refuted with a forward-looking `authentication-history` check before
+any resolution, regardless of which archetype the shape matched.
+
 ## Starter lead order
 
 1. **`source-classification`** — classify `data.srcip` against

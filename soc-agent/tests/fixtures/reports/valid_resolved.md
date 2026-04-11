@@ -9,11 +9,11 @@ trust_anchors_consulted:
   - anchor: oncall-schedule
     kind: org-authority
     result: confirmed
-    citation: alice on-call for prod-tier A
+    citation: alice on-call for prod-tier A, window 2026-04-11 14:00-18:00
   - anchor: change-windows
     kind: org-authority
     result: confirmed
-    citation: CHG-1234 window 2024-01-15 14:00-15:00
+    citation: CHG-1234 window 2026-04-11 14:00-15:00 (db index rebuild, target db-prod-01)
 leads_pursued: 2
 trace: "shell-context(runtime-exec, interactive) -> anchors(confirmed) -> benign:operator-runtime-debug"
 ---
