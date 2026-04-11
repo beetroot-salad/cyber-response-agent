@@ -103,4 +103,4 @@ What you bring:
 - Your signatures (author new directories under `knowledge/signatures/`, use `/author` for guided editing)
 - Your data source integrations (use `/connect` to bootstrap adapters and scaffold `environment/systems/` and `environment/data-sources/` entries)
 
-The shipped Wazuh signatures and the `target-endpoint` system knowledge are **reference examples**, not required components. You can delete them if they don't apply to your environment.
+The shipped Wazuh signatures and the playground `host-query` system knowledge are **reference examples**, not required components. You can delete them if they don't apply to your environment.

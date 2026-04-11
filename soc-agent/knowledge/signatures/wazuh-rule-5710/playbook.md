@@ -153,13 +153,13 @@ knowledge base and anchor lookups, not raw alert-field comparisons.
 **Why a real query, not pure field matching:** `attempt_count_5min`
 and `successful_login_after_60s` cannot be read from the alert
 itself. They describe context that requires a historical + forward
-lookup via `authentication-history`. The bait workload
-(`playground/monitoring-host/workloads/monitoring_bait.sh` — same
-srcip and username family as the real probe, but 5 attempts in a
-burst) is designed to break this fast path: the srcip and username
-match the approved triple, but `attempt_count_5min > 1` and the
-anchor's cadence check fails, forcing the investigation into the
-full loop where the shape can be diagnosed properly.
+lookup via `authentication-history`. This is by design — an
+adversarial variant that reuses an approved source IP and username
+family but bursts multiple attempts (same identity, different shape)
+would trivially bypass a pure field-match screen; requiring the
+historical + forward query forces the fast path to care about
+cadence and follow-up success, both of which the anchor's
+confirmation shape depends on.
 
 **Indicator resolution:**
 

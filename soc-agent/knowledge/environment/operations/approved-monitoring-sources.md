@@ -60,6 +60,30 @@ this source — in particular the manually-triggered multi-attempt variants
 under `playground/monitoring-host/workloads/monitoring_bait.sh` — is
 **not** sanctioned and must not match this anchor.
 
+### Grounding the monitoring-host as a live, operational source
+
+The playground deployment has no programmatic lookup API for "is this
+monitoring source approved right now?" — but the monitoring-host container
+is directly inspectable via the constrained host-query CLI (see
+`environment/systems/host-query/SKILL.md`). A concrete citation for the
+`approved-monitoring-sources` anchor, in this deployment, is a combination
+of:
+
+1. The `(srcip, srcuser, target)` triple appears in the table above.
+2. The monitoring-host is operationally alive — verifiable via
+   `python3 /workspace/soc-agent/scripts/host_query.py --host monitoring-host service-status cron`
+   and `package-installed openssh-client`.
+3. The observed SIEM history pattern for this srcip matches the declared
+   cadence (single attempt every ~10 min over the last hour), from an
+   `authentication-history` query.
+
+Any one of these alone is weak evidence; the combination is the
+citation. The host-query CLI explicitly blocks `file-stat` on
+`/opt/workloads/` and `/etc/cron.d/` (the playground answer-key paths)
+so the agent cannot read the probe script or the cron entry directly
+— the grounding must come from observable operational state plus the
+SIEM history pattern, not from reading the simulation source.
+
 ## Confirmation shape
 
 A confirmation requires all of:

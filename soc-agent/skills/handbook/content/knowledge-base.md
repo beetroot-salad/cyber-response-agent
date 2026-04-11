@@ -75,7 +75,7 @@ Everything that varies per deployment. Editing files in this tree is how an org 
 
   Archetypes declare which anchors are required in their `required_anchors` frontmatter. The runtime check (Tier 1 validation) enforces that every required anchor was consulted and confirmed before a resolved status is legal.
 
-- **`systems/`** — system-specific implementation knowledge. For each SIEM/EDR/lookup system: query patterns, field mappings, known quirks, config shape. `systems/wazuh/` documents Wazuh field semantics, index naming, and common gotchas. `systems/target-endpoint/` documents the playground's stand-in for endpoint tooling (live inspection via `docker exec`). A new system lives under a new subdirectory.
+- **`systems/`** — system-specific implementation knowledge. For each SIEM / EDR / lookup system: query patterns, field mappings, known quirks, config shape. Examples ship under this directory as worked references — the plugin's Wazuh knowledge lives under `systems/wazuh/`, and a constrained host-inspection CLI (an EDR stand-in for the playground deployment) lives under `systems/host-query/`. Each system's own SKILL.md describes its invocation pattern and constraints; the handbook does not hardcode those details. A new system lives under a new subdirectory.
 
 ## signatures — per-alert-type knowledge
 
