@@ -2,7 +2,7 @@
 name: connect
 description: Connect a new security system (SIEM, EDR, identity, CMDB) to the agent. Interviews the user, generates an adapter CLI that implements the contract, tests it end-to-end, and scaffolds the environment knowledge the investigation loop needs. One system per invocation.
 argument-hint: "[system_name]"
-allowed-tools: Read Write Edit Glob Grep Bash(python3 scripts/preflight.py *) Bash(python3 scripts/tools/* health-check*) Bash(python3 scripts/tools/* query *) Bash(bash scripts/tools/*/setup.sh*) Bash(ls *) Bash(pwd) Bash(git status) Bash(git diff *) Bash(git checkout -b *) Bash(git add *) WebFetch
+allowed-tools: Read Write Edit Glob Grep Bash(python3 scripts/preflight.py *) Bash(python3 scripts/tools/* health-check*) Bash(python3 scripts/tools/* query *) Bash(bash scripts/tools/*/setup.sh*) Bash(ls *) Bash(pwd) Bash(git status) Bash(git diff *) Bash(git checkout -b *) Bash(git add *)
 model: claude-sonnet-4-6
 ---
 
@@ -63,9 +63,7 @@ You do **not** ask for credential values, tokens, passwords, API keys, or endpoi
 
 This is closer to spaces-vs-tabs than to a clear architectural call. Both paths work. Both are supported. The right answer depends on what the user already has, what they want to own, and what they find ergonomic. **You are not opinionated here** — you present the trade-off honestly and let the user choose.
 
-Since Claude Code 2.1.7 (Jan 2026), Tool Search lazy-loads MCP tool schemas when they'd exceed ~10% of context, so the old "large MCP servers bloat context" concern is mostly retired. Small servers are frontloaded and cheap; large ones are deferred and loaded on demand. Token cost stopped being a tiebreaker.
-
-Here are the axes that actually differ:
+Tool Search lazy-loads MCP tool schemas when they would exceed ~10% of context, so token cost is rarely the tiebreaker. The axes that actually differ:
 
 | Axis | MCP server | Generated CLI adapter |
 |---|---|---|
@@ -115,7 +113,7 @@ If you're unsure, pick `AdapterContract`. Most systems fit it, and forcing a loo
 - On missing config or missing secret env vars, print a specific hint pointing to the fix and exit 2.
 - On import failure (missing `opensearch-py`, `splunk-sdk`, etc.), print the setup command (`bash scripts/tools/{system}/setup.sh`) and exit 2.
 - If `--run-dir` is passed, read the salt from `{run_dir}/meta.json` and wrap output in `<run-{salt}-{system}-data>…</run-{salt}-{system}-data>`. Untrusted-data defense.
-- **Examples in `--help` are load-bearing.** If you put an example query or field name in a subcommand's help text, runtime agents will pattern-match against it. Use *real* field names the user confirmed, not generic placeholders. (This was measured, not assumed — see `design.md` §5.)
+- **Examples in `--help` are load-bearing.** Runtime agents pattern-match against whatever example you put in a subcommand's help text. Use *real* field names and values the user confirmed, not generic placeholders.
 
 #### Language, dependencies, packaging
 
@@ -151,11 +149,13 @@ echo "Done. Activate with: source $VENV_DIR/bin/activate"
 
 `uv` is preferred when present (fast, reproducible). Plain `venv + pip` is the fallback so the script works on systems without uv. **Never install system-wide.** The adapter's shebang or invocation always goes through its own venv.
 
-**Reference example:** `scripts/siem/wazuh_cli.py` + `scripts/siem/setup.sh` — one working adapter that ships with the plugin as a CI/test target. Wazuh is not the default SIEM and is not assumed to be installed by real users; it's there because the devcontainer runs a Wazuh stack and it gives the plugin something to integration-test against. The wazuh_cli.py itself predates this contract and uses a flag-based CLI shape (`--query`, `--health-check`) rather than subcommands. **Copy the config loading, salt wrapping, and error-handling patterns from it. Do not copy the argparse shape** — new adapters use subcommands per the contract.
+**Reference example:** `scripts/siem/wazuh_cli.py` + `scripts/siem/setup.sh` — a working adapter shipped as a CI/test target against the devcontainer Wazuh stack. Copy its config loading, salt wrapping, and error-handling patterns. Do **not** copy its argparse shape — it's flag-based, and new adapters use subcommands per the contract.
 
 #### When in doubt, fetch the docs
 
-**Use WebFetch against the vendor's current API docs** whenever you're unsure about API shape, field names, auth flow, or pagination semantics. Your training knowledge is a starting point, not the source of truth. A 10-second doc check now beats a broken adapter later. Prefer official docs over third-party blog posts; prefer the vendor's current version over archived copies.
+Your training knowledge is a starting point, not the source of truth. When you're uncertain about API shape, field names, auth flow, or pagination semantics, request a WebFetch against the vendor's current official documentation. The skill does **not** pre-approve WebFetch — each call falls through to the user's permission settings and typically prompts them interactively. That's deliberate: blanket WebFetch permission is a prompt-injection vector. Tell the user which URL you want to fetch and why, in one line, so the approval is a one-second decision.
+
+Prefer official vendor docs over third-party blogs. Prefer the vendor's current version over archived copies.
 
 ### Phase 3: Test end-to-end
 
@@ -187,15 +187,21 @@ Show the output to the user and ask: **do these results look right?** This is th
 
 If the sample query returns zero events, that's not necessarily a failure — the query might just be too narrow. **Widen the time window** (e.g., from 1h to 24h, or 24h to 7d) or relax a filter clause. *Do not remove the time filter entirely* — an unbounded query against a production SIEM can return huge result sets, time out, or hit cost/rate limits. Widen, don't drop. After widening, confirm with the user whether the system actually has any data in the broader range.
 
-#### 3.3 Optional: field-model usability probe
+#### 3.3 Optional: field-model probe
 
-Skip this if you're confident in the field names and the `--help` examples are drawn from real org data. Run it when you're scaffolding a system you have limited schema knowledge of, or when the vendor's docs diverge from what the user says their deployment actually contains.
+Run this when your field knowledge for the system is thin (unfamiliar vendor, undocumented schema, vendor docs that diverge from what the user's deployment actually contains). Skip it when `field-notes.md` is already drawn from real org data.
 
-**What it targets.** An empirical trial we ran (documented in `design.md` §5) showed that CLI *shape* (positional vs `--flag`, subcommands vs no subcommands) is legible to fresh-context agents — all three shapes we tested produced syntactically correct commands on the first try. The friction Claude hits at runtime is **field-model** friction: which sourcetype name, which field spelling, which enum values, whether `action=failure` or `status=failed`. This is what the probe should check.
+The probe targets **field-model fidelity**, not CLI shape. Sourcetype names, field spellings, enum values, event ordering — that's where runtime friction lives.
 
-**How.** Spawn a short-lived Haiku subagent with a clean context. Hand it *only* the `--help` output for `query` plus the first draft of `field-notes.md`. Give it a concrete, realistic task like *"find the 5 most recent failed SSH logins on host `web-01` in the last hour"*. Ask for the exact shell command and a short note on what ambiguities it had to guess about. Examine the output: if Haiku had to guess field names that are not in the docs or the help examples, the field-notes are too thin — fill them in before committing. If Haiku reaches for field names that are *wrong* (hallucinations from training priors), call that out explicitly in field-notes as "don't use X, use Y".
+Spawn a short-lived Haiku subagent with a clean context. Hand it *only* the `query --help` output and the first draft of `field-notes.md`. Give it a concrete task like *"find the 5 most recent failed SSH logins on host `web-01` in the last hour"*. Ask for the exact shell command and a short note on any ambiguities.
 
-**Note.** The probe is evidence, not a verdict. You decide whether a mismatch is worth fixing vs documenting. See `${CLAUDE_SKILL_DIR}/design.md` §5 for the full finding and why we pivoted the probe away from `--help` shape and toward field model.
+Read the output:
+
+- If Haiku guessed at field names not covered by the docs or help examples, `field-notes.md` is too thin — expand it before committing.
+- If Haiku reached for field names that are *wrong* (training-prior hallucinations), add an explicit "don't use X, use Y" note to `field-notes.md`.
+- If Haiku only surfaced ambiguity about intrinsic query semantics (SPL syntax, operator precedence) that no amount of doc improvement would fix, that's fine — leave it.
+
+The probe produces evidence, not a verdict. You decide whether a mismatch is worth fixing the adapter vs documenting the quirk.
 
 ### Phase 4: Scaffold environment knowledge
 
@@ -299,7 +305,7 @@ These exist to keep the skill in its lane, not to block a legitimate request. Wh
 - **Adapter at `scripts/tools/{system}_cli.py`.** This is where the investigation loop and preflight look for adapters. Override only if the user has an existing directory structure you're integrating into, and in that case add a symlink or a note in preflight's discovery path.
 - **Python.** See Phase 2. Override means opening a conversation about why, not picking another language silently.
 - **No lead templates or signature knowledge.** Those come from investigation experience and live under `knowledge/signatures/` owned by `/author`. If the user wants starter lead templates for a well-known system, suggest running `/author` afterwards — don't build them here.
-- **Don't rewrite the wazuh example.** `scripts/siem/wazuh_cli.py` is the plugin's reference/test example. Its eventual migration to subcommand argparse is a separate PR. Note a divergence if you see it; do not fix it.
+- **Don't rewrite the wazuh example.** `scripts/siem/wazuh_cli.py` is the plugin's reference/test example. Note a divergence from the contract if you see one; do not fix it here.
 - **Adapter updates are a deliberate re-run.** If `{system}_cli.py` already exists when `/connect {system}` is invoked, stop and confirm the user wants to update before touching it.
 - **Consult `/handbook` on demand.** When you need KB layout, file shapes, or runtime rules, invoke `/handbook` rather than re-deriving them.
 

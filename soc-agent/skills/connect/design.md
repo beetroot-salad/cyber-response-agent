@@ -160,10 +160,27 @@ Rationale:
 
 - `/connect` is a code-generation task (an adapter CLI) plus interactive decision-making (interview, error diagnosis). Sonnet is comfortably strong enough for both. `/author`'s experience shows Sonnet handles comparable work reliably.
 - Opus is a 5× cost jump for judgment improvements on a task that's mostly structured. The one place Opus would matter — reasoning about unusual enterprise access topologies — is something we can handle by extending the interview, not by upgrading the model.
-- WebFetch is in `allowed-tools`: when Claude's memory of a vendor API is uncertain, fetching the current docs is the right move. Much higher leverage than upgrading the model.
-- The Axis B field-model probe is Haiku because it's a quick one-shot question ("here's the docs, here's a task, what would you run and what are you unsure about?"). No chain-of-thought, no multi-turn. Haiku is fast enough to keep Phase 3 feeling interactive.
+- The Haiku field-model probe is a quick one-shot question ("here's the docs, here's a task, what would you run and what are you unsure about?"). No chain-of-thought, no multi-turn. Haiku is fast enough to keep Phase 3 feeling interactive.
 
 Override via `SOC_AGENT_CONNECT_MODEL` env var is possible if needed later, but not wired up in MVP.
+
+## 7a. WebFetch and prompt injection
+
+WebFetch is deliberately **not** in the skill's `allowed-tools` list.
+
+The skill needs to fetch vendor API docs during Phase 2 when Claude's memory is uncertain. Granting blanket `WebFetch` permission would pre-approve every fetch, and an LLM fetching attacker-controlled content is a textbook prompt-injection vector — a malicious page can carry instructions that alter agent behavior mid-flow. For a security-adjacent tool like `/connect`, that's unacceptable blast radius.
+
+Claude Code's permission model treats `allowed-tools` as a grant, not a restriction: tools not listed are still *callable*, they just fall through to the user's permission settings and typically prompt interactively. That's exactly the fallback we want. Every WebFetch call becomes a one-second user decision with the URL visible — cheap friction in exchange for eliminating blind fetches.
+
+### What we considered and rejected
+
+- **Per-domain allowlist in `allowed-tools`.** Claude Code supports `WebFetch(domain:example.com)` but not wildcard or path restrictions. We'd need to pre-enumerate every vendor's documentation host (docs.splunk.com, www.elastic.co/guide, learn.microsoft.com, docs.crowdstrike.com, …), which is unmaintainable at scale and still doesn't cover first-party custom systems.
+- **A PreToolUse hook that validates domains at runtime.** Technically viable — the hook could hold a regex allowlist and block anything else. We're not building it in this PR because it's a separate piece of infrastructure with its own design questions (where does the allowlist live? can the user override? how do hooks compose with other plugins?) and because per-invocation user approval already achieves the safety goal without new code.
+- **Static project-scoped `settings.json` with `deny: ["WebFetch"]` as a baseline.** This could belong in the plugin's docs as a recommended hardening step for teams that want an extra belt. Not enforced by the skill itself.
+
+### What the user sees
+
+Every WebFetch call from `/connect` prompts them with the URL and a short reason ("fetching Splunk query API v2 docs to verify field names"). One-second approval for the legitimate path; one-second deny for anything unexpected. Users who trust a specific vendor domain globally can pre-authorize it in their own `settings.json` — that's opt-in hardening, not something the skill assumes.
 
 ---
 

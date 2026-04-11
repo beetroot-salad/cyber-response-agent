@@ -28,7 +28,7 @@ Walk through this before calling a connection done. Anything unchecked goes in t
 - [ ] `python3 scripts/tools/{system}_cli.py health-check` exits 0 and prints `connected`.
 - [ ] A sample query with `--limit 5` returns output.
 - [ ] The user has eyeballed the sample output and confirmed the fields look right.
-- [ ] (Optional, recommended when field-notes are thin) Field-model Haiku probe. Hand a fresh-context Haiku the output of `query --help` plus `field-notes.md`, give it a realistic task ("find 5 failed SSH logins on web-01 in the last hour"), and inspect the ambiguities it surfaces. Any field name, sourcetype, or enum value Haiku has to guess about is a gap in `field-notes.md` — fill it in before committing. (Don't probe CLI shape; that's been measured and all common shapes pass. See `design.md` §5.)
+- [ ] (Optional, recommended when field-notes are thin) Field-model probe. Hand a fresh-context Haiku the `query --help` output plus `field-notes.md`, give it a realistic task ("find 5 failed SSH logins on `web-01` in the last hour"), and inspect the ambiguities it surfaces. Any field name, sourcetype, or enum value Haiku has to guess about is a gap in `field-notes.md` — fill it in before committing.
 
 ## Environment knowledge
 
