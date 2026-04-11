@@ -22,6 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEVCONTAINER_DIR="$REPO_ROOT/.devcontainer"
 ENV_FILE="$DEVCONTAINER_DIR/.env"
+SECRETS_FILE="$REPO_ROOT/.env"
 
 if [ ! -f "$ENV_FILE" ]; then
     echo "error: $ENV_FILE not found" >&2
@@ -29,8 +30,16 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
 fi
 
+if [ ! -f "$SECRETS_FILE" ]; then
+    echo "error: $SECRETS_FILE not found" >&2
+    echo "hint: $SECRETS_FILE holds Wazuh credentials interpolated into docker-compose.yml" >&2
+    echo "      (\${WAZUH_API_PASSWORD}, \${WAZUH_INDEXER_PASSWORD}, ...). Without it the" >&2
+    echo "      wazuh-mcp-server container will crash with 'Wazuh password is required'." >&2
+    exit 1
+fi
+
 # shellcheck disable=SC1090
-set -a; source "$ENV_FILE"; set +a
+set -a; source "$ENV_FILE"; source "$SECRETS_FILE"; set +a
 
 if [ -z "${HOST_WORKSPACE:-}" ]; then
     echo "error: HOST_WORKSPACE not set in $ENV_FILE" >&2

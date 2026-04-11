@@ -75,6 +75,13 @@ fi
 # shellcheck disable=SC1090
 set -a; source "$REPO_ROOT/.env"; set +a
 
+# Activate the wazuh_cli venv so the agent's `python3 scripts/siem/wazuh_cli.py`
+# invocations resolve to the venv interpreter (which has opensearchpy). System
+# python3 is missing the SIEM client deps, so without this every lead query
+# would crash on ModuleNotFoundError.
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/scripts/siem/.venv/bin/activate"
+
 # ---------------------------------------------------------------------------
 # Run dir
 # ---------------------------------------------------------------------------
@@ -100,8 +107,18 @@ ALERT_TS=$(python3 -c "import json; print(json.load(open('$EVAL_DIR/alert.json')
 ALERT_DESC=$(python3 -c "import json; print(json.load(open('$EVAL_DIR/alert.json'))['rule']['description'])")
 echo "    alert: [$ALERT_TS] $ALERT_DESC"
 
-# Compact the JSON to a single line for the prompt argument
-ALERT_JSON=$(python3 -c "import json,sys; print(json.dumps(json.load(open('$EVAL_DIR/alert.json'))))")
+# Compact the JSON to a single line for the prompt argument. Slash command
+# args are whitespace-tokenized but honor shell-style quoting, so the JSON
+# (which contains spaces in fields like timestamp) MUST be passed wrapped in
+# single quotes — see PROMPT below. We strip insignificant whitespace via
+# json.dumps separators to keep the prompt smaller; internal spaces inside
+# string values still survive (and require the single-quote wrap).
+ALERT_JSON=$(python3 -c "import json,sys; print(json.dumps(json.load(open('$EVAL_DIR/alert.json')), separators=(',',':')))")
+if printf '%s' "$ALERT_JSON" | grep -q "'"; then
+    echo "error: alert JSON contains a literal single-quote, which would break the single-quoted prompt arg" >&2
+    echo "       (consider switching to base64 encoding if this becomes recurring)" >&2
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Invoke claude in isolated mode with transcript capture
@@ -112,7 +129,11 @@ export SOC_AGENT_RUNS_DIR="$EVAL_DIR/runs"
 
 cd "$EVAL_DIR"
 
-PROMPT="/investigate $RULE_ID $ALERT_JSON"
+# The skill expects the full signature_id (matching the directory name under
+# knowledge/signatures/), not the bare numeric rule ID. All signatures in this
+# repo are wazuh-rule-*, so prefix accordingly.
+SIGNATURE_ID="wazuh-rule-$RULE_ID"
+PROMPT="/investigate $SIGNATURE_ID '$ALERT_JSON'"
 
 echo "[+] Launching claude (isolated, transcript → $EVAL_DIR/transcript.jsonl)..."
 echo "    cwd: $(pwd)"
@@ -121,6 +142,27 @@ echo
 
 # stdbuf to keep the tee buffer flushing in real time
 stdbuf -oL -eL claude \
+    --allowedTools \
+        "Bash(cd *)" \
+        "Bash(ls *)" \
+        "Bash(pwd)" \
+        "Bash(python3 scripts/resolve_imports.py *)" \
+        "Bash(python3 scripts/setup_run.py *)" \
+        "Bash(python3 scripts/search_precedents.py *)" \
+        "Bash(python3 scripts/workspace_map.py *)" \
+        "Bash(python3 scripts/siem/wazuh_cli.py *)" \
+        "Bash(python3 scripts/host_query.py *)" \
+        "Bash(python3 hooks/scripts/write_state.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/resolve_imports.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/setup_run.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/search_precedents.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/workspace_map.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/siem/wazuh_cli.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/host_query.py *)" \
+        "Bash(python3 /workspace/soc-agent/hooks/scripts/write_state.py *)" \
+        "mcp__wazuh__*" \
+        "Task" \
+        "Agent" \
     --plugin-dir "$PLUGIN_DIR" \
     --add-dir "$PLUGIN_DIR" \
     --setting-sources user \

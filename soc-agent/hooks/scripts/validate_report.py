@@ -273,6 +273,57 @@ def playbook_has_screen_section(signature_id: str) -> bool:
     return bool(re.search(r"^## Screen\b", content, re.MULTILINE))
 
 
+def check_ticket_context_spawned(run_dir: Path) -> str | None:
+    """Verify a ticket-context subagent was spawned during this investigation.
+
+    SKILL.md §CONTEXTUALIZE requires spawning a ticket-context subagent (Task
+    tool) to handle cross-alert recurrence and prior-investigation checks.
+    Without it, recurring-pattern detection is structurally incomplete and the
+    main agent ends up doing those queries inline with weaker context.
+
+    Walks the per-run audit log for any Task call whose tool_input references
+    the ticket-context prompt path or contains ticket-context as a keyword.
+    Returns None on pass, an error message on fail.
+    """
+    audit_path = run_dir.parent / "tool_audit.jsonl"
+    if not audit_path.exists():
+        # No audit log means the audit hook hasn't run (or isn't configured).
+        # Don't fail validation in that case — the absence is its own signal
+        # but not actionable from here.
+        return None
+
+    try:
+        lines = audit_path.read_text().splitlines()
+    except OSError:
+        return None
+
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("tool_name") not in ("Task", "Agent"):
+            continue
+        # Inspect the tool_input as a serialized blob — the agent may put the
+        # ticket-context reference in the prompt, the description, or via the
+        # file path. Substring match handles all three.
+        blob = json.dumps(ev.get("tool_input", {})).lower()
+        if "ticket-context" in blob or "ticket_context" in blob:
+            return None
+
+    return (
+        "This investigation did not record a ticket-context subagent "
+        "invocation in the audit log. The CONTEXTUALIZE phase delegates "
+        "cross-alert correlation (similar alerts, prior firings, related "
+        "activity on the same entities) to a ticket-context subagent so "
+        "that work doesn't crowd the main agent's reasoning context. "
+        "Spawn it now using the Agent tool with the prompt template at "
+        "skills/investigate/ticket-context.md, then re-write report.md."
+    )
+
+
 def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
     """Run Tier 1 validation. Returns (passed, errors, frontmatter_fields)."""
     errors = []
@@ -292,6 +343,13 @@ def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
     # Determine if this is a screen-resolved investigation
     run_dir = report_path.parent
     screen = is_screen_resolved(run_dir)
+
+    # Check: ticket-context subagent must have been spawned during CONTEXTUALIZE.
+    # This applies to all investigations regardless of screen-resolution, since
+    # CONTEXTUALIZE runs before SCREEN in the phase ordering.
+    ticket_ctx_error = check_ticket_context_spawned(run_dir)
+    if ticket_ctx_error:
+        errors.append(ticket_ctx_error)
 
     # Check: leads_pursued meets minimum for severity
     # Screen-resolved reports are exempt — their safety comes from
@@ -442,6 +500,9 @@ def assemble_prompt(
     return prompt
 
 
+JUDGE_TIMEOUT_SECONDS = int(os.environ.get("SOC_AGENT_JUDGE_TIMEOUT_SECONDS", "90"))
+
+
 def invoke_judge(prompt: str) -> tuple[str, int]:
     """Invoke claude CLI with the judge prompt. Returns (output, returncode)."""
     try:
@@ -449,13 +510,13 @@ def invoke_judge(prompt: str) -> tuple[str, int]:
             ["claude", "-p", prompt, "--model", JUDGE_MODEL, "--output-format", "text"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=JUDGE_TIMEOUT_SECONDS,
         )
         return result.stdout.strip(), result.returncode
     except FileNotFoundError:
         return "claude CLI not found", 1
     except subprocess.TimeoutExpired:
-        return "judge timed out after 30s", 1
+        return f"judge timed out after {JUDGE_TIMEOUT_SECONDS}s", 1
 
 
 def parse_verdict(output: str) -> tuple[str, str]:

@@ -43,6 +43,23 @@ services:
     networks:
       - response-network
 
+  # Monitoring Host (generates realistic SSH traffic against target-endpoint
+  # from a stable "internal monitoring" IP — used as SCREEN-pattern ground
+  # truth for rule 5710 and as a reusable source entity for other signatures).
+  monitoring-host:
+    build:
+      context: ../playground/monitoring-host
+      dockerfile: Dockerfile
+    container_name: monitoring-host
+    hostname: monitoring-host
+    volumes:
+      - ../playground/monitoring-host/workloads:/opt/workloads
+    networks:
+      response-network:
+        ipv4_address: 172.22.0.10
+    depends_on:
+      - target-endpoint
+
   # Falco (eBPF monitoring - replaces auditd)
   falco:
     image: falcosecurity/falco:latest
@@ -126,6 +143,16 @@ networks:
   response-network:
     name: response-network
     driver: bridge
+    # Pin the subnet so monitoring-host can have a stable ipv4_address
+    # (172.22.0.10). Docker was already auto-assigning 172.22.0.0/16 —
+    # this just formalizes it so IPAM survives network recreates and the
+    # "internal monitoring host" ground truth has a fixed IP that the
+    # environment/context classification can reference.
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.22.0.0/16
+          gateway: 172.22.0.1
 
 volumes:
   falco-logs:

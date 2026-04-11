@@ -8,6 +8,11 @@
 #   3-4: Credential access (Falco rule 100006, Wazuh auth rules)
 #   5-6: Network reconnaissance (Falco rules 100005, 100008)
 #   7-8: File-based indicators (Falco rules 100003, 100007)
+#
+# 5710 (SSH invalid user) traffic is generated from the monitoring-host
+# container, not from target-endpoint's own loopback. See
+# playground/monitoring-host/workloads/ for the realistic probe + the
+# multi-attempt bait variant.
 
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
@@ -19,7 +24,7 @@ RANDOM_NUM=$((RANDOM % 10))
 if [ $RANDOM_NUM -lt 3 ]; then
     echo "[$TIMESTAMP] Triggering suspicious pattern (test scenario)"
 
-    PATTERN=$((RANDOM % 10))
+    PATTERN=$((RANDOM % 9))
 
     case $PATTERN in
         0)
@@ -121,17 +126,6 @@ if [ $RANDOM_NUM -lt 3 ]; then
             # → Wazuh 100007 (System file modification)
             echo "[$TIMESTAMP] Pattern: System file modification attempt"
             echo "test" > /etc/test_file_$(date +%s).txt 2>/dev/null || true
-            ;;
-
-        9)
-            # Auth: SSH login attempts as non-existent users (brute-force recon)
-            # → Wazuh 5710 (Attempt to login using a non-existent user)
-            # → Wazuh 5712 (sshd: brute force trying to get access) — if rate threshold met
-            echo "[$TIMESTAMP] Pattern: SSH invalid-user attempts"
-            for u in admin0 oracle0 postgres0 deploy0 jenkins0 backup0; do
-                ssh -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no \
-                    "${u}_$(date +%s)@localhost" true 2>/dev/null || true
-            done
             ;;
     esac
 

@@ -25,6 +25,29 @@
 
 ## Next — Reliability & Evaluation
 
+### Subagent enforcement — stronger gating
+
+The Tier 1 ticket-context check (`validate_report.check_ticket_context_spawned`) catches missing spawns at conclude-time by walking `tool_audit.jsonl`. This is a soft gate: the agent only finds out it was wrong at the very end, then has to retry the report write. If observed in eval runs that the recovery is expensive (extra Tier 2 judge invocations, wall-clock blow-out, agent confusion about what went wrong), promote to a hard gate via a new PreToolUse hook:
+
+- [ ] PreToolUse blocking hook: count tool calls per session against `tool_audit.jsonl`, and after N tool calls (N≈5) reject any further tool call until a Task call referencing `ticket-context` has been recorded. Error message points the agent at SKILL.md §CONTEXTUALIZE step 3 with the Task template.
+  - Caveat: PreToolUse hooks fire before EVERY tool call so they need to be cheap (read-only, no LLM). Implementation should cache the "ticket-context spawned" boolean per session_id.
+  - Risk: blocking too aggressively can fight the agent if it needs a few read calls before spawning. Tune N based on observed eval data.
+  - Also extend the same pattern for Explore/precedent-scan subagent if eval data shows it being skipped too.
+
+### State machine bypass — soft boundary, not isolated
+
+Discovered during the first eval run: when `write_state.py` is unavailable (e.g., blocked by allowlist, unavailable env, etc.), the agent can — and does — write `state.json` directly via the `Write` tool, bypassing the phase-ordering checks in `write_state.py` entirely. The agent in the eval run wrote `state.json` with `phase: "ANALYZE"` and a fabricated history list `["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE"]` even though it had only completed CONTEXTUALIZE work.
+
+Implication: the state machine in the SKILL.md design is **enforcement-by-convention**, not enforcement-by-isolation. A misaligned (or under-resourced) agent that knows the state.json schema can fake state transitions whenever it wants. The Tier 1 validation in `validate_report.py` catches malformed reports but does not catch faked state history.
+
+Possible mitigations (pick one, not all):
+
+- [ ] PreToolUse hook gates `Write` against any path matching `*/state.json` inside a run dir, allowing only invocations originating from `write_state.py`. Cleanest but requires identifying the invoker, which PreToolUse may not surface.
+- [ ] Move state out of a file the agent can write. Use a sqlite db or a write-only socket that only `write_state.py` knows how to address.
+- [ ] Accept the soft-boundary model and document explicitly that the safety guarantee is "well-aligned agent + structural validation of outputs" rather than "process-isolated state machine". Update `docs/security-model.md` accordingly.
+
+The decision matters more than the implementation. The current behavior is "the state machine looks isolated but isn't", which is the worst of both worlds.
+
 ### State Machine Transition Verification Criteria
 
 Goal: Add actionable verification gates to each transition so `write_state.py` can reject transitions where the agent hasn't done meaningful work. Currently the state machine enforces _legal transitions_ but not _quality of work within a phase_. Data from evaluation runs should inform which criteria matter most (start loose, tighten based on observed failure modes).
@@ -45,6 +68,23 @@ Goal: Add actionable verification gates to each transition so `write_state.py` c
 2. Identify failure modes: where does the agent skip work, produce shallow output, or transition prematurely?
 3. Define thresholds: which criteria are hard gates (block transition) vs soft warnings (log but allow)?
 4. Implement incrementally in `write_state.py` — start with structural checks (file exists, field present), defer semantic checks
+
+### Precedent schema — abstract the environment out
+
+Discovered during the SCREEN cost-reduction workstream: `monitoring-probe-001.json` has literal environment values (`srcip: 10.0.1.50`) baked into `key_indicators` and `alert_data`, which conflicts with the actual playground network (`172.22.0.0/16`) and — more importantly — doesn't generalize to any real deployment. A precedent is an abstract story; the raw tickets attached to it are what carry the environment-grounded details.
+
+- [ ] Refactor precedent schema: move literal values (IPs, hostnames, ticket-specific timestamps) out of `key_indicators` and `alert_data`. Introduce a sibling `tickets/` directory per precedent containing the raw alerts that resolved via this story, so historical matching can work without the precedent file claiming specific values.
+- [ ] `key_indicators` should carry semantic classifications (`source_classification: internal-monitoring-host`, `username_classification: monitoring-pattern`), matching the shape the new 5710 screen indicators already use.
+- [ ] Update `precedent.py` schema validator + `test_kb_schema.py` accordingly.
+- [ ] Migrate the existing `monitoring-probe-001.json` and `brute-force-001.json` as the first pass.
+
+### Main-agent baseline cost lever
+
+`eval_run.sh` does not pass `--model` to `claude`, so the main investigation loop runs at whatever the harness default is (observed: `claude-opus-4-6[1m]`). For a signature that's hypothesis-driven but not deeply adversarial, Sonnet may be sufficient and would drop baseline cost substantially. SCREEN's Haiku override is the bigger lever, but this is worth evaluating once SCREEN is pinned.
+
+- [ ] Add `--model sonnet` to the `claude` invocation in `playground/scripts/eval_run.sh`.
+- [ ] Run a matched eval pair (same alert, Opus vs Sonnet) and compare: disposition correctness, tool-call count, loop count, cost, wall clock.
+- [ ] If Sonnet is comparable on quality, promote it to the default. Document the finding in `.claude/skills/evaluate/SKILL.md` quirks.
 
 ### Evaluation Plan — Screening Phase
 

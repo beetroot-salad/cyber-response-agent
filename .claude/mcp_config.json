@@ -1,6 +1,7 @@
 {
   "mcpServers": {
     "wazuh": {
+      "type": "sse",
       "url": "http://wazuh-mcp-server:8000/sse"
     }
   }

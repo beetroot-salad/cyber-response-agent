@@ -22,6 +22,7 @@ import hooks.scripts.validate_report as vr
 from hooks.scripts.validate_report import (
     check_archetype_exists,
     check_precedent_exists,
+    check_ticket_context_spawned,
     extract_run_dir,
     get_precedent_max_age,
     get_run_salt,
@@ -255,6 +256,99 @@ Screen-resolved monitoring probe.
 
     def test_playbook_has_screen_section_nonexistent(self):
         assert playbook_has_screen_section("nonexistent-sig") is False
+
+
+# --- Ticket-context subagent spawn check ---
+
+
+class TestCheckTicketContextSpawned:
+    """Validates the audit-log scan that enforces ticket-context spawning."""
+
+    def _make_run_with_audit(self, tmp_path: Path, audit_lines: list[str]) -> Path:
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        run_dir = runs_dir / "run-uuid"
+        run_dir.mkdir()
+        (runs_dir / "tool_audit.jsonl").write_text("\n".join(audit_lines) + "\n")
+        return run_dir
+
+    def test_passes_when_task_with_ticket_context_path(self, tmp_path):
+        entry = json.dumps({
+            "tool_name": "Task",
+            "tool_input": {
+                "subagent_type": "general-purpose",
+                "description": "ticket-context for SEC-001",
+                "prompt": "Read /workspace/soc-agent/skills/investigate/ticket-context.md ...",
+            },
+        })
+        run_dir = self._make_run_with_audit(tmp_path, [entry])
+        assert check_ticket_context_spawned(run_dir) is None
+
+    def test_passes_when_keyword_in_description(self, tmp_path):
+        entry = json.dumps({
+            "tool_name": "Task",
+            "tool_input": {"description": "ticket-context scan", "prompt": "..."},
+        })
+        run_dir = self._make_run_with_audit(tmp_path, [entry])
+        assert check_ticket_context_spawned(run_dir) is None
+
+    def test_passes_when_tool_name_is_agent(self, tmp_path):
+        # Some stream-json variants surface subagent invocations as `Agent`
+        # rather than `Task`. The check accepts both.
+        entry = json.dumps({
+            "tool_name": "Agent",
+            "tool_input": {
+                "subagent_type": "general-purpose",
+                "description": "ticket-context for SEC-001",
+                "prompt": "Read /workspace/soc-agent/skills/investigate/ticket-context.md ...",
+            },
+        })
+        run_dir = self._make_run_with_audit(tmp_path, [entry])
+        assert check_ticket_context_spawned(run_dir) is None
+
+    def test_fails_when_no_task_calls(self, tmp_path):
+        entries = [
+            json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}),
+            json.dumps({"tool_name": "Write", "tool_input": {"file_path": "x"}}),
+        ]
+        run_dir = self._make_run_with_audit(tmp_path, entries)
+        msg = check_ticket_context_spawned(run_dir)
+        assert msg is not None
+        assert "ticket-context" in msg
+
+    def test_fails_when_task_unrelated(self, tmp_path):
+        entry = json.dumps({
+            "tool_name": "Task",
+            "tool_input": {
+                "subagent_type": "general-purpose",
+                "description": "scan precedents",
+                "prompt": "Read all JSON files in precedents/ ...",
+            },
+        })
+        run_dir = self._make_run_with_audit(tmp_path, [entry])
+        msg = check_ticket_context_spawned(run_dir)
+        assert msg is not None
+
+    def test_skips_silently_when_no_audit_log(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        run_dir = runs_dir / "run-uuid"
+        run_dir.mkdir()
+        # No tool_audit.jsonl exists
+        assert check_ticket_context_spawned(run_dir) is None
+
+    def test_handles_malformed_audit_lines(self, tmp_path):
+        entries = [
+            "not json at all",
+            json.dumps({"tool_name": "Bash"}),
+            "",
+            json.dumps({
+                "tool_name": "Task",
+                "tool_input": {"prompt": "use ticket-context.md"},
+            }),
+        ]
+        run_dir = self._make_run_with_audit(tmp_path, entries)
+        assert check_ticket_context_spawned(run_dir) is None
 
 
 # --- Precedent existence check ---

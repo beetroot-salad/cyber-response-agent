@@ -51,13 +51,30 @@ login, recurring on a daily/weekly cadence.
 ## Screen
 
 Fast-path patterns for automated resolution. The screen subagent
-checks these before the full investigation loop. This table covers
-the cases that resolve cleanly via mechanical pattern matching,
-predating the archetype layer.
+checks these before the full investigation loop. Indicators are
+**semantic predicates** — classifications derived from the environment
+knowledge base, not raw alert-field comparisons. The screen subagent
+must run the listed leads to obtain the evidence each indicator
+references; pure alert-field matching is not sufficient.
 
 | Pattern | Indicators | Leads | Action | Precedent |
-|---------|-----------|-------|--------|-----------|
-| monitoring-probe | srcip: internal, username: monitoring-pattern (testuser/probe/nagios/zabbix/healthcheck), attempt_count: 1, successful_login_after: false | authentication-history, source-reputation | resolve → benign | monitoring-probe-001.json |
+|---|---|---|---|---|
+| monitoring-probe | `source_classification: internal-monitoring-host` (resolved via `knowledge/environment/context/ip-ranges.md`) AND `username_classification: monitoring-pattern` (resolved via `knowledge/environment/context/identity-patterns.md`) AND `attempt_count_5min <= 2` AND `successful_login_after_60s: false` | authentication-history (scoped to `data.srcip:<srcip>`, 5-minute window before + 60-second window after the alert timestamp — this query is the evidence source for the attempt_count and successful_login_after indicators) | resolve → benign, confidence high | monitoring-probe-001.json |
+
+**Indicator resolution:**
+
+- **source_classification** — map the alert's `data.srcip` to a classification using `environment/context/ip-ranges.md`. Only `internal-monitoring-host` counts. `internal` alone is not sufficient — an unclassified internal IP is not a known monitoring source.
+- **username_classification** — map the alert's `data.srcuser` to a pattern in `environment/context/identity-patterns.md`. The monitoring pattern matches usernames from the "Monitoring" row (nagios, zabbix, prometheus, and explicit aliases like testuser, probe, healthcheck, monitorprobe, sensu).
+- **attempt_count_5min** — from the `authentication-history` lead: how many 5710 events from this srcip in the 5 minutes preceding the alert. The monitoring-probe pattern allows **at most 2** (the alert itself, plus optionally one prior probe tick that fell within the window). Any burst of 3+ disqualifies.
+- **successful_login_after_60s** — from the same lead: was there any successful SSH login (rule group `authentication_success`) from this srcip in the 60 seconds after the alert. Monitoring-probe must be **false** — legitimate probes don't follow with a real session.
+
+**Why a real query, not pure field matching:** `attempt_count_5min` and
+`successful_login_after_60s` cannot be read from the alert itself — they
+describe context that requires querying historical and forward-looking
+events. This is by design: without a real query, the screen pattern reduces
+to "does the alert look like monitoring?", which the bait workload
+(`playground/monitoring-host/workloads/monitoring_bait.sh` — same srcip,
+same username family, 5 attempts) would falsely match.
 
 ## Starter lead order
 
