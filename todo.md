@@ -69,6 +69,23 @@ Goal: Add actionable verification gates to each transition so `write_state.py` c
 3. Define thresholds: which criteria are hard gates (block transition) vs soft warnings (log but allow)?
 4. Implement incrementally in `write_state.py` — start with structural checks (file exists, field present), defer semantic checks
 
+### Precedent schema — abstract the environment out
+
+Discovered during the SCREEN cost-reduction workstream: `monitoring-probe-001.json` has literal environment values (`srcip: 10.0.1.50`) baked into `key_indicators` and `alert_data`, which conflicts with the actual playground network (`172.22.0.0/16`) and — more importantly — doesn't generalize to any real deployment. A precedent is an abstract story; the raw tickets attached to it are what carry the environment-grounded details.
+
+- [ ] Refactor precedent schema: move literal values (IPs, hostnames, ticket-specific timestamps) out of `key_indicators` and `alert_data`. Introduce a sibling `tickets/` directory per precedent containing the raw alerts that resolved via this story, so historical matching can work without the precedent file claiming specific values.
+- [ ] `key_indicators` should carry semantic classifications (`source_classification: internal-monitoring-host`, `username_classification: monitoring-pattern`), matching the shape the new 5710 screen indicators already use.
+- [ ] Update `precedent.py` schema validator + `test_kb_schema.py` accordingly.
+- [ ] Migrate the existing `monitoring-probe-001.json` and `brute-force-001.json` as the first pass.
+
+### Main-agent baseline cost lever
+
+`eval_run.sh` does not pass `--model` to `claude`, so the main investigation loop runs at whatever the harness default is (observed: `claude-opus-4-6[1m]`). For a signature that's hypothesis-driven but not deeply adversarial, Sonnet may be sufficient and would drop baseline cost substantially. SCREEN's Haiku override is the bigger lever, but this is worth evaluating once SCREEN is pinned.
+
+- [ ] Add `--model sonnet` to the `claude` invocation in `playground/scripts/eval_run.sh`.
+- [ ] Run a matched eval pair (same alert, Opus vs Sonnet) and compare: disposition correctness, tool-call count, loop count, cost, wall clock.
+- [ ] If Sonnet is comparable on quality, promote it to the default. Document the finding in `.claude/skills/evaluate/SKILL.md` quirks.
+
 ### Evaluation Plan — Screening Phase
 
 Screening is the right starting point for evaluation:

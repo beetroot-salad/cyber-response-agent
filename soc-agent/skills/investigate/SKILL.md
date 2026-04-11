@@ -175,10 +175,14 @@ Write an initial section in `{run_dir}/investigation.md`:
    ```
    Agent(
      subagent_type="general-purpose",
+     model="haiku",
      description="screen for {signature_id}",
      prompt=<read skills/investigate/screen.md, substitute {run_dir} and the playbook ## Screen section verbatim>
    )
    ```
+   The `model="haiku"` override is required — SCREEN is mechanical pattern matching against a short table of indicators, and pinning Haiku is the main cost lever for repeat-alert investigations (baseline screen cost drops from ~$0.30 at main-agent rate to ~$0.02). If a run shows Haiku consistently producing malformed YAML or failing to follow the indicator resolution rules, fall back to `model="sonnet"` — but do not remove the override entirely.
+
+   **Why this matters — do NOT inline the screen work.** Reading the playbook table and reasoning "looks like monitoring, no match" in the main agent's context is strictly cheaper *per invocation* but violates two goals: (a) the cost lever is Haiku screening on repeat alerts, which requires actually dispatching the subagent; (b) the indicator resolution requires a real `authentication-history` query whose raw results would pollute your main context if run inline. Always spawn.
 
 **If `screen_result: match`** — validate the screen output is well-formed (all required YAML fields present, observations are non-empty, matched_pattern corresponds to an entry in the Screen table). If valid, proceed to CONCLUDE using the screen result. If malformed, fall through to HYPOTHESIZE with the evidence gathered.
 
