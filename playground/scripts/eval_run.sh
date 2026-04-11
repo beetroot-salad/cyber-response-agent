@@ -98,7 +98,7 @@ echo "    dir: $EVAL_DIR"
 # ---------------------------------------------------------------------------
 
 echo "[+] Fetching alert (rule.id:$RULE_ID, window=$WINDOW, offset=$OFFSET)..."
-if ! "$WAZUH_CLI_VENV" "$FETCH_ALERT" "$RULE_ID" --window "$WINDOW" --offset "$OFFSET" > "$EVAL_DIR/alert.json"; then
+if ! "$TOOLS_VENV" "$FETCH_ALERT" "$RULE_ID" --window "$WINDOW" --offset "$OFFSET" > "$EVAL_DIR/alert.json"; then
     echo "error: fetch_alert.py failed" >&2
     exit 1
 fi
