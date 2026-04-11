@@ -130,6 +130,34 @@ class TestArgparseRouting:
         assert args.name == "openssh-server"
 
 
+class TestHostFlag:
+    """The --host flag selects which playground container to docker exec against."""
+
+    def test_default_host_is_target_endpoint(self):
+        args = build_parser().parse_args(["listening-sockets"])
+        assert args.host == "target-endpoint"
+
+    def test_monitoring_host_selected(self):
+        args = build_parser().parse_args(["--host", "monitoring-host", "listening-sockets"])
+        assert args.host == "monitoring-host"
+
+    def test_bogus_host_rejected_at_parse(self):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["--host", "wazuh-manager", "listening-sockets"])
+
+    def test_host_is_threaded_to_docker_exec(self):
+        """A --host value reaches docker_exec as the first positional arg."""
+        args = build_parser().parse_args(
+            ["--host", "monitoring-host", "process-list", "sshd"]
+        )
+        with patch("host_query.docker_exec") as mock_exec:
+            mock_exec.return_value = ("COMMAND\n", 0)
+            cmd_process_list(args)
+            host_arg, argv = mock_exec.call_args[0]
+        assert host_arg == "monitoring-host"
+        assert argv[0] == "ps"  # sanity check on the argv side too
+
+
 # ---------------------------------------------------------------------------
 # file-stat denial path through the handler (end-to-end via cmd_file_stat)
 # ---------------------------------------------------------------------------
@@ -156,9 +184,10 @@ class TestFileStatDenyPath:
             )
             rc = cmd_file_stat(args)
             mock_exec.assert_called_once()
-            call_args = mock_exec.call_args[0][0]
-            assert call_args[0] == "stat"
-            assert "/etc/passwd" in call_args
+            host_arg, argv = mock_exec.call_args[0]
+            assert host_arg == "target-endpoint"
+            assert argv[0] == "stat"
+            assert "/etc/passwd" in argv
         assert rc == 0
         out = capsys.readouterr().out
         assert "/etc/passwd" in out
@@ -185,8 +214,9 @@ class TestProcessList:
         with patch("host_query.docker_exec") as mock_exec:
             mock_exec.return_value = ("COMMAND\nsshd\nbash\n", 0)
             cmd_process_list(args)
-            call_args = mock_exec.call_args[0][0]
-        assert call_args == ["ps", "-e", "-o", "comm"]
+            host_arg, argv = mock_exec.call_args[0]
+        assert host_arg == "target-endpoint"
+        assert argv == ["ps", "-e", "-o", "comm"]
 
     def test_filters_by_pattern(self, capsys):
         args = build_parser().parse_args(["process-list", "ssh"])
@@ -232,9 +262,10 @@ class TestListeningSockets:
         with patch("host_query.docker_exec") as mock_exec:
             mock_exec.return_value = ("Netid State\ntcp LISTEN 0.0.0.0:22\n", 0)
             cmd_listening_sockets(args)
-            call_args = mock_exec.call_args[0][0]
-        assert call_args == ["ss", "-lntu"]
-        assert "-p" not in call_args
+            host_arg, argv = mock_exec.call_args[0]
+        assert host_arg == "target-endpoint"
+        assert argv == ["ss", "-lntu"]
+        assert "-p" not in argv
 
 
 # ---------------------------------------------------------------------------

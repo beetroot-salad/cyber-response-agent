@@ -3,7 +3,6 @@ archetype: ci-pipeline-exec
 signature_id: wazuh-rule-100001
 required_anchors:
   - deploy-runs
-precedents: []
 ---
 
 # CI/CD Pipeline Exec

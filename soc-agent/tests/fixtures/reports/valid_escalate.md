@@ -4,7 +4,6 @@ signature_id: wazuh-rule-5710
 status: escalated
 disposition: true_positive
 confidence: high
-matched_precedent: null
 leads_pursued: 3
 trace: "authentication-history(47 fail, 12 users) -> source-reputation(external) -> recent-alert-correlation(5712) -> escalated:brute-force"
 ---

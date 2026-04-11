@@ -489,7 +489,13 @@ status: resolved
 disposition: benign
 confidence: high
 leads_pursued: 2
-matched_precedent: monitoring-probe-001.json
+matched_archetype: monitoring-probe
+matched_ticket_id: SEC-2024-001
+trust_anchors_consulted:
+  - anchor: approved-monitoring-sources
+    kind: org-authority
+    result: confirmed
+    citation: playground monitoring-host cron
 ---
 
 # Investigation Report
@@ -510,7 +516,7 @@ Alert from internal monitoring IP. Single SSH failure with testuser.
 Pattern match: monitoring-probe. Internal IP, monitoring username, single attempt.
 
 ## CONCLUDE
-Resolved as benign monitoring probe matching precedent monitoring-probe-001.json.
+Resolved as benign monitoring probe matching archetype monitoring-probe.
 """)
 
     # Append to audit.jsonl
@@ -521,7 +527,8 @@ Resolved as benign monitoring probe matching precedent monitoring-probe-001.json
         "status": "resolved",
         "disposition": "benign",
         "confidence": "high",
-        "matched_precedent": "monitoring-probe-001.json",
+        "matched_archetype": "monitoring-probe",
+        "matched_ticket_id": "SEC-2024-001",
         "leads_pursued": 2,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

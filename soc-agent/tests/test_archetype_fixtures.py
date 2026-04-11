@@ -123,14 +123,14 @@ class TestAnchorReferencesResolve:
     def test_all_archetype_required_anchors_have_operation_files(self):
         """Every required_anchor in every archetype must have an operation file."""
         ops_names = self._operations_anchor_names()
-        for path in ARCHETYPE_DIR.glob("*.md"):
+        for path in ARCHETYPE_DIR.glob("*/README.md"):
             content = path.read_text()
             fm = parse_yaml_frontmatter(content)
             required = fm.get("required_anchors") or []
             for anchor_name in required:
                 assert anchor_name in ops_names, (
-                    f"archetype {path.name} requires anchor '{anchor_name}' "
-                    f"but no operation file under "
+                    f"archetype {path.parent.name} requires anchor "
+                    f"'{anchor_name}' but no operation file under "
                     f"knowledge/environment/operations/ provides it"
                 )
 
@@ -150,17 +150,18 @@ class TestExpectedOutcomesDocumented:
 
 
 class TestArchetypeFrontmatterParseable:
-    """Every archetype file under wazuh-rule-100001/archetypes/ must be
+    """Every archetype README under wazuh-rule-100001/archetypes/ must be
     parseable by the zero-dep frontmatter parser used by the validation hook."""
 
     def test_all_archetypes_parse(self):
-        for path in ARCHETYPE_DIR.glob("*.md"):
+        for path in ARCHETYPE_DIR.glob("*/README.md"):
             content = path.read_text()
             fm = parse_yaml_frontmatter(content)
-            assert fm.get("archetype"), f"{path.name} missing archetype name"
+            arch_name = path.parent.name
+            assert fm.get("archetype"), f"{arch_name} missing archetype name"
             assert fm.get("signature_id") == SIGNATURE_ID
             assert "required_anchors" in fm, (
-                f"{path.name} must declare required_anchors (use [] for none)"
+                f"{arch_name} must declare required_anchors (use [] for none)"
             )
 
 

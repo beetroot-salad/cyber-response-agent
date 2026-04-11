@@ -3,7 +3,6 @@ archetype: k8s-exec-probe
 signature_id: wazuh-rule-100001
 required_anchors:
   - workload-manifest
-precedents: []
 ---
 
 # Kubernetes Exec Probe

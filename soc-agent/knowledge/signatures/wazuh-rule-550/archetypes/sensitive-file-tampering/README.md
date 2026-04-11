@@ -2,7 +2,6 @@
 archetype: sensitive-file-tampering
 signature_id: wazuh-rule-550
 required_anchors: []
-precedents: []
 ---
 
 # Sensitive File Tampering

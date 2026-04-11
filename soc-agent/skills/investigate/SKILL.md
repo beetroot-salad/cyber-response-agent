@@ -70,7 +70,7 @@ This means:
 2. **No remediation.** You investigate and recommend only. No blocking IPs, no account changes, no firewall rules.
 3. **Evidence over assumption.** If you don't have evidence, you don't know. Say so.
 4. **Maintain adversarial hypothesis.** Always keep at least one threat hypothesis active until explicitly refuted with `--` evidence. This is the "don't miss" principle — dangerous explanations stay on the table regardless of probability until the evidence rules them out.
-5. **No auto-close without precedent.** `status=resolved` requires `matched_precedent` pointing to an existing file.
+5. **No auto-close without archetype + grounding.** `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding — either every `required_anchors` entry confirmed OR a `matched_ticket_id` citing a valid precedent snapshot under the same archetype. An archetype that declares no required anchors cannot resolve without `matched_ticket_id`.
 6. **Fail safe.** Errors, timeouts, missing data — escalate with context gathered so far.
 7. **Stay in scope.** Investigate within the signature's detection domain. Don't expand scope — escalate instead.
 8. **Be specific.** Reference concrete evidence: "10.0.1.50" not "internal IP", "47 attempts" not "many attempts".
@@ -113,7 +113,7 @@ This enforces legal transitions. If you get an error, you attempted an illegal t
 
 **Goal:** Understand what you're investigating before forming hypotheses.
 
-1. Review the **Signature Knowledge** section above — it contains the signature context, playbook (hypothesis catalog + leads), checklist, and any imported common knowledge
+1. Review the **Signature Knowledge** section above — it contains the signature context, playbook (archetype catalog + leads), archetype READMEs, checklist, and any imported common knowledge
 2. Review the alert data you identified in Read the Alert
 3. **Spawn the ticket-context subagent.** It provides cross-alert insights — similar alerts, prior firings of this signature, and other recent activity involving the same key entities (source, target, host).
    ```
@@ -130,10 +130,10 @@ This enforces legal transitions. If you get an error, you attempted an illegal t
    Agent(
      subagent_type="general-purpose",
      description="precedent scan for {signature_id}",
-     prompt="Read all JSON files in /workspace/soc-agent/knowledge/signatures/{signature_id}/precedents/. For each, summarize: ticket_id, disposition, confirmed hypothesis, key_indicators, and trace. Compare against this alert profile: {key observables}. Return a ranked list of which precedents are most similar and why."
+     prompt="Read all precedent snapshots under /workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/*/*.json. Each JSON file is a past ticket closed under the archetype named by its parent directory. For each file, summarize: ticket_id, archetype (parent dir), disposition, narrative, and anchors_at_time (note any entries with temporal: true — those confirmations do NOT transfer forward in time). Compare against this alert profile: {key observables}. Return a ranked list of which precedents are most similar by entity class (not just archetype), and for each flag any temporal anchor confirmations that would need to be re-verified today."
    )
    ```
-   Precedents are starting hypotheses, not conclusions — this alert may have a novel cause.
+   Precedents are starting hypotheses, not conclusions — this alert may have a novel cause, and any temporal confirmations in a cached precedent must be re-confirmed against live anchors before the match transfers.
 5. **Build resolution map** — resolve the data environment for this investigation (see `docs/design-v3-tool-execution.md §10`):
    - Identify which abstract operations the playbook's leads need (from lead `data_tags`)
    - Read `knowledge/environment/operations/` files → enumerate concrete operations + sources
@@ -209,7 +209,14 @@ Append to `{run_dir}/investigation.md`:
 
 A hypothesis is a causal story: it proposes an actor, an intent, and an action that produced this specific event. `?monitoring-probe` is shorthand for: "a monitoring system performed a health check via SSH using a test credential that doesn't exist on this host."
 
-For known signatures, the playbook may list **archetypes** in its `archetypes/` directory — named patterns rooted in real tickets, each with its own story, required trust anchors, and discriminating boundary. When archetypes are present, prefer recognizing one of them over enumerating fresh hypotheses; the archetype is the analyst-shared vocabulary for how this kind of alert resolves. Older playbooks may instead provide a hypothesis catalog — treat it as starter stories. In either case, you may form hypotheses the catalog doesn't cover if the evidence suggests them.
+**Two layers, not one.** Playbooks for known signatures carry two complementary catalogs:
+
+- **Hypothesis seeds** (in the playbook body) are lean, mechanism-shaped candidate explanations to reason from. They are lacking by design — skeletal prompts for "what could be producing this event?" that the agent develops during the investigation.
+- **Archetype catalog** (under `archetypes/{name}/`) is a pattern-recognition *cache*. Each archetype is a named pattern rooted in past tickets, with its own story, required trust anchors, and discriminating boundary. Archetypes frame and steer an investigation — and when an archetype's shape cleanly matches, they provide a fast-path resolution via the grounding leg (required anchors confirmed, or a precedent citation). But they are recommendations, not source of truth: novel variants, shape mutations, and adversaries mimicking benign patterns all require reasoning from mechanisms, not from the cached pattern alone.
+
+Work from both layers together. Start from the hypothesis seeds (plus any adversarial hypothesis the severity demands). As evidence accumulates, check whether the emerging shape matches an archetype. If it does, the archetype's grounding rules apply and a clean match + confirmed grounding can auto-resolve. If the evidence doesn't fit any archetype, the hypothesis loop keeps running until one hypothesis is confirmed with `++` evidence and the adversarial hypothesis is explicitly refuted — at which point the outcome is either escalation (no archetype matched, so no auto-close path) or, rarely, a novel pattern that deserves a new archetype after the fact.
+
+The COMPLETENESS criterion in Tier 2 captures the discipline: the judge expects you to have exhausted the shape space *inside and outside* the catalog. Forcing an alert into the closest archetype when the evidence has features the archetype doesn't describe is a failure mode the judge will catch.
 
 For novel alerts (no playbook), generate hypotheses by:
 
@@ -244,11 +251,7 @@ Reference `knowledge/common-investigation/leads/` for lead methodology. Each lea
 
 #### Past Investigation Patterns
 
-Use the precedent search tool to review past investigations for this signature:
-```bash
-python3 scripts/search_precedents.py {signature_id}
-```
-This shows what hypotheses were tested, what leads were chosen, and what the outcomes were. Past investigations inform both hypothesis generation and lead selection — they reveal which leads tend to be most diagnostic for this signature type.
+The precedent scan from CONTEXTUALIZE step 4 already summarized the past ticket snapshots for this signature — one entry per JSON file under `knowledge/signatures/{signature_id}/archetypes/*/*.json`. Review that summary at HYPOTHESIZE time: the precedents show which archetypes have actually matched in this environment, and each precedent's narrative explains the concrete reasoning that closed the ticket. Past investigations inform both hypothesis generation and lead selection — they reveal which leads tend to be most diagnostic for this signature type. Remember that a precedent with `temporal: true` anchor entries needs re-confirmation against live anchors before the match transfers to the current alert.
 
 #### Output
 
@@ -395,12 +398,16 @@ hypotheses:
 1. Review the **Investigation Checklist** in the Signature Knowledge section above — verify every item before writing the report
 2. Generate a trace line summarizing the investigation path
    - For SCREEN-resolved investigations, use the format: `screen({pattern}, {leads}) → disposition:hypothesis`
-3. Determine status: `resolved` (confident, archetype or precedent match with anchors confirmed) or `escalated` (uncertain, adversarial, anchors unconfirmed, or insufficient evidence)
+3. Determine status: `resolved` (confident — archetype matched AND grounding satisfied) or `escalated` (uncertain, adversarial, grounding unsatisfied, or insufficient evidence)
 4. Determine disposition: `benign` (correct detection, harmless), `false_positive` (rule misfired), `true_positive` (confirmed threat), or `inconclusive` (can't determine)
-   - For SCREEN-resolved investigations, use the disposition, confidence, and matched_precedent from the validated screen result
+   - For SCREEN-resolved investigations, use the disposition, confidence, matched_archetype, and matched_ticket_id from the validated screen result
 5. If `resolved`:
-   - Identify the matching archetype file (if the signature has an `archetypes/` directory) **or** the matching precedent file (older signature shape)
-   - If matched_archetype is set, every anchor declared in its `required_anchors` frontmatter must appear in `trust_anchors_consulted` with `result: confirmed`
+   - `matched_archetype` must name an archetype directory under `knowledge/signatures/{signature_id}/archetypes/` (the directory containing the archetype's `README.md`)
+   - **Grounding leg** (at least one of):
+     - Every anchor in the archetype's `required_anchors` frontmatter appears in `trust_anchors_consulted` with `result: confirmed` and a concrete citation, OR
+     - `matched_ticket_id` names a precedent snapshot JSON file inside the matched archetype's directory
+   - If the archetype declares no `required_anchors`, `matched_ticket_id` is **mandatory** — Tier 1 will reject the report otherwise
+   - If a precedent is cited, verify its `anchors_at_time` entries — any entry with `temporal: true` represents a confirmation that no longer transfers forward in time; the current investigation must show the equivalent anchor re-confirmed today
 6. Write `{run_dir}/report.md` with YAML frontmatter
 
 Write state:
@@ -417,7 +424,7 @@ status: {resolved|escalated}
 disposition: {benign|false_positive|true_positive|inconclusive}
 confidence: {high|medium|low}
 matched_archetype: {archetype-name|null}
-matched_precedent: {filename.json|null}
+matched_ticket_id: {SEC-YYYY-NNN|null}
 trust_anchors_consulted:
   - anchor: {anchor-name}
     kind: {org-authority|telemetry-baseline}

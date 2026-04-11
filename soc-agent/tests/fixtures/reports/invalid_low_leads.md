@@ -4,7 +4,6 @@ signature_id: wazuh-rule-5710
 status: escalated
 disposition: true_positive
 confidence: medium
-matched_precedent: null
 leads_pursued: 1
 ---
 

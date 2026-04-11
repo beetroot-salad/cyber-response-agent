@@ -24,7 +24,8 @@ Read the following files from the run directory to understand the alert and inve
 
 **If ALL indicators for a single pattern match clearly:**
 - Set `screen_result: match`
-- Identify which precedent from the Precedents Summary is most similar
+- Name the matched archetype (the pattern row's Archetype column)
+- If the pattern row cites a specific ticket under the archetype, include it as `matched_ticket_id` (purely supplementary — not required)
 
 **If ANY indicator does not match, or results are ambiguous, or multiple patterns could match:**
 - Set `screen_result: no_match`
@@ -38,7 +39,8 @@ Respond with EXACTLY this YAML block:
 screen_result: match|no_match
 matched_pattern: "{pattern name or null}"
 disposition: "{benign|false_positive|true_positive or null}"
-matched_precedent: "{filename.json or null}"
+matched_archetype: "{archetype-name or null}"
+matched_ticket_id: "{SEC-YYYY-NNN or null}"
 confidence: "{high or null}"
 leads_run:
   - lead: "{lead-name}"

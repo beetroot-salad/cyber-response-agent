@@ -53,8 +53,10 @@ class TestInvestigationArtifacts:
         content = report_path.read_text()
         fields = parse_yaml_frontmatter(content)
 
-        required = ["ticket_id", "signature_id", "status", "disposition",
-                     "confidence", "matched_precedent", "leads_pursued"]
+        required = [
+            "ticket_id", "signature_id", "status", "disposition",
+            "confidence", "matched_archetype", "leads_pursued",
+        ]
         for field in required:
             assert field in fields, f"Missing field: {field}"
 

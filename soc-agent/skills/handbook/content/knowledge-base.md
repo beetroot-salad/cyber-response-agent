@@ -24,8 +24,10 @@ soc-agent/
 │       └── {signature-id}/
 │           ├── context.md
 │           ├── playbook.md
-│           ├── archetypes/        # analyst-shared patterns with trust anchors (new model)
-│           └── precedents/        # past resolved investigations (legacy model, still supported)
+│           └── archetypes/        # one directory per recognized archetype
+│               └── {archetype-name}/
+│                   ├── README.md      # story + required_anchors
+│                   └── {TICKET-ID}.json  # precedent snapshots (cached past tickets)
 │
 ├── config/
 │   └── signatures/
@@ -73,7 +75,7 @@ Everything that varies per deployment. Editing files in this tree is how an org 
 
   Archetypes declare which anchors are required in their `required_anchors` frontmatter. The runtime check (Tier 1 validation) enforces that every required anchor was consulted and confirmed before a resolved status is legal.
 
-- **`systems/`** — system-specific implementation knowledge. For each SIEM/EDR/lookup system: query patterns, field mappings, known quirks, config shape. `systems/wazuh/` documents Wazuh field semantics, index naming, and common gotchas. `systems/target-endpoint/` documents the playground's stand-in for endpoint tooling (live inspection via `docker exec`). A new system lives under a new subdirectory.
+- **`systems/`** — system-specific implementation knowledge. For each SIEM / EDR / lookup system: query patterns, field mappings, known quirks, config shape. Examples ship under this directory as worked references — the plugin's Wazuh knowledge lives under `systems/wazuh/`, and a constrained host-inspection CLI (an EDR stand-in for the playground deployment) lives under `systems/host-query/`. Each system's own SKILL.md describes its invocation pattern and constraints; the handbook does not hardcode those details. A new system lives under a new subdirectory.
 
 ## signatures — per-alert-type knowledge
 
@@ -81,15 +83,20 @@ One directory per alert type. Each signature's directory is the domain knowledge
 
 - **`context.md`** — the signature reference. Frontmatter carries `signature_id`, `name`, `severity`, `data_sources`, MITRE mapping, related rules, base rate estimates. The body describes: detection logic (what triggers the rule), alert fields (what's in the payload), threat model (what an attacker would be doing if this is a true positive), known false positives (grounded in real closed tickets), risk indicators that actually discriminated outcomes historically, operational notes, tuning guidance, detection gaps. This is the document the agent reads to understand what kind of alert it's looking at and what the stakes are.
 
-- **`playbook.md`** — the hypothesis catalog and lead list. Hypotheses come from real outcome clusters in past tickets (plus at least one adversarial hypothesis). Each lead cross-references the `common-investigation/leads/` library where possible. An optional `## Screen` section defines mechanical fast-path patterns. Auto-close criteria and escalation criteria are signature-specific.
+- **`playbook.md`** — the body carries two complementary catalogs plus the operational scaffolding:
+  - **Hypothesis seeds** — lean, mechanism-shaped candidate explanations ("legitimate automation", "authentication mistake", "credential guessing", adversarial follow-up). These are *lacking by design*, skeletal prompts for the HYPOTHESIZE phase that the agent develops from evidence. They map roughly to archetypes when the shape fits, but an investigation can confirm a hypothesis without matching any archetype.
+  - **Archetype catalog** — a pointer table into `archetypes/{name}/`, described below.
+  - **Starter lead order** — the signature-specific leads that discriminate between the seeds/archetypes cheaply.
+  - **Screen table (optional)** — mechanical fast-path patterns against the most common benign archetype. Only included when every indicator is unambiguous and queryable.
+  - **Quirks, scope, and composition rules** — signature-specific guardrails that don't fit anywhere else.
 
   Playbooks can use `@import:lesson-name` inline to reference files in `common-investigation/lessons/` — the import resolver pulls them in at skill load time so playbooks don't duplicate cross-cutting content.
 
-- **`archetypes/`** *(new model)* — analyst-shared named patterns, each with its own story, discriminating boundary, and frontmatter-declared `required_anchors`. An archetype is how a team writes down "this is the shape of a `known-scanner` resolution; here's how to recognize it, here are the trust anchors you must confirm before you're allowed to call it resolved." Archetypes are preferred over ad-hoc hypotheses when the team has consolidated a recurring pattern.
+- **`archetypes/`** — the pattern-recognition **cache**, not the source of truth. One subdirectory per recognized archetype. Each archetype is a named pattern rooted in past tickets, used at HYPOTHESIZE time to frame / steer the investigation and at CONCLUDE time to short-circuit resolution via the grounding leg when the shape cleanly matches. Archetypes are *recommendations*, not the primary reasoning layer: the hypothesis loop always runs, and an investigation that doesn't match any archetype is a valid outcome (usually escalation, occasionally a novel pattern that deserves a new archetype after the fact). Each archetype directory holds:
+  - **`README.md`** — the archetype story: the abstract pattern, the discriminating boundary that takes alerts out of this archetype into siblings, and frontmatter-declared `required_anchors` listing the trust anchors that must be confirmed to resolve under this archetype.
+  - **`{TICKET-ID}.json`** (zero or more) — cached precedent snapshots. Each file is a pointer to a real past ticket in the source-of-truth ticketing system. The JSON captures `ticket_id`, `archetype`, `captured_at`, `disposition`, `narrative`, the raw `alert` snapshot, and `anchors_at_time` — the trust anchor responses at the moment the ticket closed. Entries in `anchors_at_time` marked `temporal: true` represent time-bounded confirmations (on-call windows, change tickets, deploy runs) that do NOT transfer forward in time and must be re-confirmed against live anchors.
 
-- **`precedents/`** *(legacy model, still supported)* — past resolved investigations as JSON files. Each precedent records an alert, the leads pursued, the observations, the confirmed hypothesis, and the disposition. Resolved reports that use `matched_precedent` must point at one of these files, and the precedent's `signature_id` must match and its `validated_at` must be within the signature's `precedent_max_age_days`.
-
-New signatures should prefer the archetype shape. The precedent shape remains supported for signatures that haven't been migrated and for screen-resolved investigations, which always match against precedents.
+When an archetype *does* match, resolution requires both legs: a shape match (`matched_archetype` naming a real archetype directory) AND grounding — at least one of (every `required_anchors` entry confirmed, OR `matched_ticket_id` citing a valid precedent snapshot under the same archetype). Archetypes that declare no `required_anchors` can only resolve with a cited precedent. See `content/validation.md` for the Tier 1 enforcement details. When no archetype matches, `status=resolved` is not an option — the investigation escalates with whatever evidence and reasoning it has gathered.
 
 ## config/signatures — safety configuration
 

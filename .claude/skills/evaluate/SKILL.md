@@ -68,7 +68,7 @@ Evaluates the `soc-agent:investigate` skill against one real Wazuh alert from th
 | 3 | **Investigation elegance** | Did the active hypothesis set evolve based on evidence? Lead choice diagnostic? No redundant queries? Subagents (ticket-context, precedent-scan, SCREEN) used appropriately? |
 | 4 | **Cost & latency** | Tokens, dollars, wall-clock. Target: 1-3 min MTTR, current baseline ~10 min and ~$2.50 / run. The biggest cost lever is whether SCREEN actually fires for repeat alerts. |
 
-## Cost & latency baseline (rule 5710, observed across 6 runs)
+## Cost & latency baseline (rule 5710, observed across 7 runs)
 
 | Run | Wall clock | Cost | Disposition | Notes |
 |---|---|---|---|---|
@@ -78,8 +78,9 @@ Evaluates the `soc-agent:investigate` skill against one real Wazuh alert from th
 | #4 | 672s | $2.43 | escalated, inconclusive, medium | Path-confusion fixed; cwd hint + slim workspace map |
 | #5 | 245s | $1.40 | **resolved, benign, high** | **Scenario A (monitoring-probe).** First SCREEN-resolved run. Path: CONTEXTUALIZE → SCREEN → CONCLUDE. Screen subagent dispatched to Haiku, matched monitoring-probe via authentication-history query. −64% wall clock, −42% cost vs #4. |
 | #6 | 590s | $2.39 | escalated, inconclusive, medium | **Scenario B (bait).** SCREEN stress test: monitoring_bait.sh (5-attempt burst, monitoring-alias usernames). Screen correctly returned no_match (attempt_count_5min=5 exceeded ≤2 threshold), full loop ran (CONTEXTUALIZE → SCREEN → HYPOTHESIZE → GATHER → ANALYZE → CONCLUDE), agent maintained adversarial hypothesis on unavailable trust anchors and escalated. No regression vs #4 full-loop baseline. |
+| #7 | 283s | $1.63 | **resolved, benign, high** | **Scenario A, post-refactor on Opus 4.6 1M.** First live run against the archetype-directory refactor + two-leg resolution model + rewritten Tier 2 judge. Path: CONTEXTUALIZE → SCREEN → CONCLUDE. Agent exercised every new feature: `matched_archetype: monitoring-probe`, `matched_ticket_id: SEC-2024-001` (new-schema precedent snapshot), rich `trust_anchors_consulted` citation built from the 3-part grounding recipe (approved-sources table + `host_query --host monitoring-host` live state + SIEM cadence history), all four hypothesis seeds from the rewritten 5710 playbook explicitly evaluated in the report. Tier 1 + Tier 2 judge both PASSED on first write (no retries). Zero denials, zero errors, 53 tool calls, 3 subagent spawns (ticket-context, precedent-scan, screen). Cost delta vs run #5 is pure model pricing (Opus 4.6 1M vs Sonnet), not behavior — the investigation shape is identical. |
 
-**Run #5 is the SCREEN-path baseline.** Next cost lever is CONTEXTUALIZE itself — 3 subagent spawns (ticket-context, precedent-scan, screen) run in sequence at main-agent model cost and dominate the $1.40. Promoting the main agent to Sonnet and moving ticket-context / precedent-scan to Sonnet/Haiku would push repeat-alert cost toward the $0.05-0.10 target. See todo.md "Main-agent baseline cost lever".
+**Run #5 is the Sonnet SCREEN-path baseline; run #7 is the Opus post-refactor baseline.** Next cost lever is still CONTEXTUALIZE itself — 3 subagent spawns (ticket-context, precedent-scan, screen) run in sequence at main-agent model cost and dominate the total. Promoting the main agent to Sonnet and moving ticket-context / precedent-scan to Sonnet/Haiku would push repeat-alert cost toward the $0.05-0.10 target. See todo.md "Main-agent baseline cost lever".
 
 ### What made SCREEN finally dispatch as a subagent
 
