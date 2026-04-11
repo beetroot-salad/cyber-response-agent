@@ -146,6 +146,7 @@ stdbuf -oL -eL claude \
         "Bash(cd *)" \
         "Bash(ls *)" \
         "Bash(pwd)" \
+        "Bash(python3 scripts/preflight.py *)" \
         "Bash(python3 scripts/resolve_imports.py *)" \
         "Bash(python3 scripts/setup_run.py *)" \
         "Bash(python3 scripts/search_precedents.py *)" \
@@ -153,6 +154,7 @@ stdbuf -oL -eL claude \
         "Bash(python3 scripts/tools/wazuh_cli.py *)" \
         "Bash(python3 scripts/tools/host_query.py *)" \
         "Bash(python3 hooks/scripts/write_state.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/preflight.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/resolve_imports.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/setup_run.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/search_precedents.py *)" \
