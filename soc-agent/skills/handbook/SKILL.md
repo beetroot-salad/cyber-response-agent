@@ -6,7 +6,7 @@ allowed-tools: Read, Glob, Grep
 
 # Cyber Response Agent Handbook
 
-On-demand reference for the cyber-response-agent plugin. This skill explains how the plugin works — it does not investigate alerts. Use `/investigate` for actual alert work. `/author` (signature authoring) and `/connect` (data source adapter) are planned sibling skills; see the relationship table below.
+On-demand reference for the cyber-response-agent plugin. This skill explains how the plugin works — it does not investigate alerts. Use `/investigate` for actual alert work, `/author` for knowledge-base edits, or `/connect` (planned) for data source wiring. See the relationship table below.
 
 ## Who asks this skill questions
 
@@ -58,10 +58,10 @@ Additional content files may be added over time. When you add one, include it in
 |---|---|---|---|
 | `/investigate` | shipped | Runs an actual alert investigation | "Please triage this alert" |
 | `/handbook` (this skill) | shipped | Explains the plugin itself | Pure reference questions, no state changes |
-| `/author` | planned | Guided signature authoring — context.md, playbook.md, precedents, permissions | Creating or editing a signature's knowledge |
+| `/author` | shipped | Edits the knowledge base — signatures, archetypes, leads, environment knowledge, permissions — with deterministic checks plus Haiku probes feeding a self-reflection step | Creating or editing knowledge content; post-mortem archetype authoring |
 | `/connect` | planned | Connects a new data source: adapter CLI, environment knowledge scaffolding, credential setup instructions | Wiring up a new SIEM/EDR/lookup system |
 
-`/author` and `/connect` are referenced in the design but not yet implemented. If asked about them, answer from the design docs (`content/design.md`, `docs/design-v3-init-and-connect.md`) or say the skill isn't available yet.
+`/author` is shipped — for questions about its design and contract, ground answers in `docs/design-v3-author-skill.md`. `/connect` is still referenced in the design but not yet implemented; for questions about it, answer from the design docs (`content/design.md`, `docs/design-v3-init-and-connect.md`) or say the skill isn't available yet.
 
 The handbook is read-only by contract. The `allowed-tools` frontmatter restricts this skill to `Read`, `Glob`, and `Grep` — no writes, no edits, no shell. If a question drifts into "now please do it," hand off to the appropriate shipped skill above, or tell the user the planned skill isn't available yet.
 
