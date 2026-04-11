@@ -237,10 +237,16 @@ class TestHealthCheck:
         assert result.returncode == 0, result.stdout + result.stderr
         invoker = marker.read_text().strip()
         # With no adapter-local venv, preflight should resolve "python3"
-        # on PATH — verify it's *not* the adapter-local venv path (which
-        # doesn't exist) and that the CLI ran at all.
-        assert ".venv" not in invoker, (
-            f"unexpected venv python used when none exists: {invoker!r}"
+        # on PATH. The interpreter CI hands us may itself live in a venv
+        # (e.g. setup-python's runner venv), so we can't assert ".venv"
+        # is absent globally — only that the *adapter-local* venv path,
+        # which doesn't exist, wasn't used.
+        adapter_local_venv = adapter_dir / ".venv"
+        assert not invoker.startswith(str(adapter_local_venv)), (
+            f"unexpected adapter-local venv python used when none exists: {invoker!r}"
+        )
+        assert str(fake_root) not in invoker, (
+            f"interpreter unexpectedly resolved inside fake_root: {invoker!r}"
         )
 
 
