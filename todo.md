@@ -23,6 +23,12 @@
 - [ ] Test with a second alert scenario (brute-force) to check investigator handles escalation correctly
 - [ ] Wire up the triage skill as actual Claude Code plugin invocation (currently tested via prompt, not `/soc-agent:triage`)
 
+## Followups from archetype-directory refactor (2026-04-11)
+
+- [ ] **Ticket-context subagent: entity-set past-ticket query.** Extend the ticket-context subagent (invoked at CONTEXTUALIZE) to query the ticketing system for past resolved tickets matching the current alert's entity set (srcip, srcuser, host, container image, etc.) — not just by signature or time window. CONCLUDE should then be able to cite a specific `matched_ticket_id` grounded in a real past ticket, without a second subagent round-trip. Related: the existing CONTEXTUALIZE precedent-scan subagent scans cached KB snapshots under `archetypes/*/*.json`, which are hand-curated. The ticketing-system query is the live source of truth that those snapshots cache.
+- [ ] **Precedent-matching temporal awareness.** When the ticket-context subagent (above) ranks past tickets as candidate precedents, it must filter out temporal anchor confirmations: a past ticket whose `anchors_at_time` included `temporal: true` entries (on-call windows, change tickets, deploy runs) does not transfer forward in time without re-confirmation. The skill at the matching step should surface "this past ticket matches shape + entity class, BUT its grounding depended on temporal state that has since elapsed — the current investigation must re-confirm the equivalent anchor today." Judge Tier 2 already does this semantic check (GROUNDING_MATCH criterion); the skill side needs the same logic applied at match time to avoid surfacing stale matches as confident.
+- [ ] **Precedent auto-extraction from ticketing system.** Currently the KB's precedent snapshots under `archetypes/*/{TICKET-ID}.json` are hand-curated. Long-term, build a sync pipeline that automatically captures snapshots from the real ticketing system when tickets close under an archetype — so precedents stay fresh without manual curation and so `captured_at` reflects real ticket-close times. Requires deciding: which ticketing system (ServiceNow / Jira / Linear / ...), what fields map to the schema, how to mark temporal anchors at capture time.
+
 ## Next — Reliability & Evaluation
 
 ### Subagent enforcement — stronger gating

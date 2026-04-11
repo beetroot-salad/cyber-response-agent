@@ -2,7 +2,6 @@
 archetype: co-fired-malicious-pattern
 signature_id: wazuh-rule-100110
 required_anchors: []
-precedents: []
 ---
 
 # Co-Fired Malicious DNS Pattern

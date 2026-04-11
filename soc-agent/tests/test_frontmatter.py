@@ -119,21 +119,27 @@ class TestRealFrontmatter:
         text = (FIXTURES_DIR / "valid_resolved.md").read_text()
         fm = parse_yaml_frontmatter(text)
         assert fm["ticket_id"] == "SEC-2024-001"
-        assert fm["signature_id"] == "wazuh-rule-5710"
+        assert fm["signature_id"] == "wazuh-rule-100001"
         assert fm["status"] == "resolved"
         assert fm["disposition"] == "benign"
         assert fm["confidence"] == "high"
-        assert fm["matched_precedent"] == "monitoring-probe-001.json"
+        assert fm["matched_archetype"] == "operator-runtime-debug"
+        # Grounding for operator-runtime-debug comes from required_anchors
+        # (oncall-schedule + change-windows), so no matched_ticket_id is
+        # needed on this fixture.
+        assert fm.get("matched_ticket_id") is None
         assert fm["leads_pursued"] == 2
         # Trace contains colons and arrows — must survive partition on ":"
-        assert "authentication-history" in fm["trace"]
+        assert "shell-context" in fm["trace"]
         assert "benign" in fm["trace"]
 
     def test_report_escalated(self):
         text = (FIXTURES_DIR / "valid_escalate.md").read_text()
         fm = parse_yaml_frontmatter(text)
         assert fm["status"] == "escalated"
-        assert fm["matched_precedent"] is None
+        # Escalated reports carry no archetype/ticket citation
+        assert fm.get("matched_archetype") is None
+        assert fm.get("matched_ticket_id") is None
         assert fm["leads_pursued"] == 3
 
     def test_signature_context(self):

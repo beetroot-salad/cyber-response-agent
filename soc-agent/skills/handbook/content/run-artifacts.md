@@ -109,19 +109,19 @@ signature_id: wazuh-rule-5710
 status: resolved              # resolved | escalated
 disposition: benign           # benign | false_positive | true_positive | inconclusive
 confidence: high              # high | medium | low
-matched_archetype: known-scanner.md  # optional; file under archetypes/
-matched_precedent: null       # or precedent filename under precedents/
+matched_archetype: known-scanner         # required for resolved; directory name under archetypes/
+matched_ticket_id: SEC-2024-042          # optional grounding via cached precedent snapshot
 trust_anchors_consulted:
   - anchor: asset-inventory
     kind: org-authority       # org-authority | telemetry-baseline
     result: confirmed         # confirmed | refuted | unavailable
     citation: "Source IP registered as vendor monitoring scanner"
 leads_pursued: 3
-trace: "source-reputation(scanner) -> asset-inventory(monitoring-vendor) -> benign:?known-scanner"
+trace: "source-reputation(scanner) -> asset-inventory(monitoring-vendor) -> benign:known-scanner"
 ---
 ```
 
-`status=resolved` requires either `matched_archetype` or `matched_precedent`. If `matched_archetype` is set, every anchor listed in its `required_anchors` frontmatter must appear here with `result: confirmed`. These rules are enforced by Tier 1 validation.
+`status=resolved` requires `matched_archetype` naming a real archetype directory AND grounding — at least one of: every `required_anchors` entry confirmed, OR `matched_ticket_id` citing a valid precedent snapshot inside the same archetype directory. Archetypes with no `required_anchors` must be grounded by `matched_ticket_id`. These rules are enforced by Tier 1 validation.
 
 Body sections expected by convention (not structurally enforced):
 

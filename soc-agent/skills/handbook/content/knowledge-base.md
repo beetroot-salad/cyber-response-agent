@@ -24,8 +24,10 @@ soc-agent/
 │       └── {signature-id}/
 │           ├── context.md
 │           ├── playbook.md
-│           ├── archetypes/        # analyst-shared patterns with trust anchors (new model)
-│           └── precedents/        # past resolved investigations (legacy model, still supported)
+│           └── archetypes/        # one directory per recognized archetype
+│               └── {archetype-name}/
+│                   ├── README.md      # story + required_anchors
+│                   └── {TICKET-ID}.json  # precedent snapshots (cached past tickets)
 │
 ├── config/
 │   └── signatures/
@@ -85,11 +87,11 @@ One directory per alert type. Each signature's directory is the domain knowledge
 
   Playbooks can use `@import:lesson-name` inline to reference files in `common-investigation/lessons/` — the import resolver pulls them in at skill load time so playbooks don't duplicate cross-cutting content.
 
-- **`archetypes/`** *(new model)* — analyst-shared named patterns, each with its own story, discriminating boundary, and frontmatter-declared `required_anchors`. An archetype is how a team writes down "this is the shape of a `known-scanner` resolution; here's how to recognize it, here are the trust anchors you must confirm before you're allowed to call it resolved." Archetypes are preferred over ad-hoc hypotheses when the team has consolidated a recurring pattern.
+- **`archetypes/`** — one subdirectory per recognized archetype. Each archetype directory holds:
+  - **`README.md`** — the archetype story: the abstract pattern, the discriminating boundary that takes alerts out of this archetype into siblings, and frontmatter-declared `required_anchors` listing the trust anchors that must be confirmed to resolve under this archetype.
+  - **`{TICKET-ID}.json`** (zero or more) — cached precedent snapshots. Each file is a pointer to a real past ticket in the source-of-truth ticketing system. The JSON captures `ticket_id`, `archetype`, `captured_at`, `disposition`, `narrative`, the raw `alert` snapshot, and `anchors_at_time` — the trust anchor responses at the moment the ticket closed. Entries in `anchors_at_time` marked `temporal: true` represent time-bounded confirmations (on-call windows, change tickets, deploy runs) that do NOT transfer forward in time and must be re-confirmed against live anchors.
 
-- **`precedents/`** *(legacy model, still supported)* — past resolved investigations as JSON files. Each precedent records an alert, the leads pursued, the observations, the confirmed hypothesis, and the disposition. Resolved reports that use `matched_precedent` must point at one of these files, and the precedent's `signature_id` must match and its `validated_at` must be within the signature's `precedent_max_age_days`.
-
-New signatures should prefer the archetype shape. The precedent shape remains supported for signatures that haven't been migrated and for screen-resolved investigations, which always match against precedents.
+Resolution requires both legs of the model: a shape match (`matched_archetype` naming a real archetype directory) AND grounding — at least one of (every `required_anchors` entry confirmed, OR `matched_ticket_id` citing a valid precedent snapshot under the same archetype). Archetypes that declare no `required_anchors` can only resolve with a cited precedent. See `content/validation.md` for the Tier 1 enforcement details.
 
 ## config/signatures — safety configuration
 

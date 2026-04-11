@@ -1,7 +1,7 @@
 """Tests for knowledge base schema validation.
 
 Validates precedent files against the precedent schema and
-context.md frontmatter structure.
+context.md / playbook.md frontmatter structure.
 """
 
 import json
@@ -25,8 +25,29 @@ SIGNATURES_DIR = KNOWLEDGE_DIR / "signatures"
 # --- Precedent validation ---
 
 
+def _valid_precedent_dict(**overrides):
+    """Build a valid minimal precedent dict. Override any field via kwargs."""
+    data = {
+        "ticket_id": "SEC-2026-001",
+        "archetype": "monitoring-probe",
+        "captured_at": "2026-04-11",
+        "disposition": "benign",
+        "narrative": "Internal monitoring host probed SSH with a single attempt.",
+        "alert": {"rule": {"id": "5710"}, "data": {"srcip": "10.0.0.1"}},
+        "anchors_at_time": [
+            {
+                "anchor": "approved-monitoring-sources",
+                "result": "confirmed",
+                "citation": "monitoring cron sanctioned",
+            }
+        ],
+    }
+    data.update(overrides)
+    return data
+
+
 class TestPrecedentSchema:
-    """All precedent files in knowledge/ must validate against the schema."""
+    """Precedent JSON files under archetypes/*/*.json must validate."""
 
     @staticmethod
     def _get_precedent_files():
@@ -35,52 +56,34 @@ class TestPrecedentSchema:
         for sig_dir in SIGNATURES_DIR.iterdir():
             if sig_dir.name.startswith("_"):
                 continue
-            precedents_dir = sig_dir / "precedents"
-            if precedents_dir.exists():
-                files.extend(precedents_dir.glob("*.json"))
+            archetypes_dir = sig_dir / "archetypes"
+            if not archetypes_dir.is_dir():
+                continue
+            for archetype_dir in archetypes_dir.iterdir():
+                if not archetype_dir.is_dir():
+                    continue
+                files.extend(archetype_dir.glob("*.json"))
         return files
 
     def test_precedent_files_exist(self):
-        """At least one precedent file should exist."""
+        """At least one real precedent snapshot must exist."""
         files = self._get_precedent_files()
         assert len(files) > 0, "No precedent files found"
 
-    @pytest.mark.parametrize(
-        "precedent_file",
-        [
-            pytest.param(f, id=f.name)
-            for f in (SIGNATURES_DIR / "wazuh-rule-5710" / "precedents").glob("*.json")
-        ],
-    )
-    def test_precedent_validates(self, precedent_file):
-        """Each precedent file must pass schema validation."""
-        data = json.loads(precedent_file.read_text())
-        precedent, errors = parse_precedent(data)
-        assert errors == [], f"Validation errors in {precedent_file.name}: {errors}"
-
-    def test_monitoring_probe_precedent(self):
-        """Specific check: monitoring-probe-001.json has expected structure."""
-        path = SIGNATURES_DIR / "wazuh-rule-5710" / "precedents" / "monitoring-probe-001.json"
-        data = json.loads(path.read_text())
-
-        assert data["status"] == "resolved"
-        assert data["disposition"] == "benign"
-        assert data["signature_id"] == "wazuh-rule-5710"
-        assert any(h["id"] == "monitoring-probe" and h["status"] == "confirmed" for h in data["hypotheses"])
-        assert any(h["id"] == "brute-force" and h["status"] == "refuted" for h in data["hypotheses"])
-        assert len(data["flow"]) >= 2
-        assert "trace" in data
-
-    def test_brute_force_precedent(self):
-        """Specific check: brute-force-001.json has expected structure."""
-        path = SIGNATURES_DIR / "wazuh-rule-5710" / "precedents" / "brute-force-001.json"
-        data = json.loads(path.read_text())
-
-        assert data["status"] == "escalated"
-        assert data["disposition"] == "true_positive"
-        assert data["signature_id"] == "wazuh-rule-5710"
-        assert any(h["id"] == "brute-force" and h["status"] == "confirmed" for h in data["hypotheses"])
-        assert len(data["flow"]) >= 3
+    def test_all_precedents_validate(self):
+        """Every precedent file that exists must pass schema validation
+        and its `archetype` field must match its parent directory name."""
+        for precedent_file in self._get_precedent_files():
+            data = json.loads(precedent_file.read_text())
+            precedent, errors = parse_precedent(data)
+            assert errors == [], (
+                f"Validation errors in {precedent_file}: {errors}"
+            )
+            parent_archetype = precedent_file.parent.name
+            assert data["archetype"] == parent_archetype, (
+                f"{precedent_file}: archetype field '{data['archetype']}' "
+                f"does not match parent directory '{parent_archetype}'"
+            )
 
 
 # --- Context.md frontmatter ---
@@ -142,6 +145,11 @@ class TestContextFrontmatter:
 
 
 class TestPrecedentEdgeCases:
+    def test_minimal_valid_precedent(self):
+        """A well-formed precedent dict should validate with no errors."""
+        _, errors = parse_precedent(_valid_precedent_dict())
+        assert errors == [], f"Valid precedent produced errors: {errors}"
+
     def test_missing_required_field(self):
         """Missing a required field should produce an error."""
         data = {"ticket_id": "SEC-001"}  # Missing everything else
@@ -149,88 +157,34 @@ class TestPrecedentEdgeCases:
         assert len(errors) > 0
 
     def test_invalid_disposition(self):
-        data = {
-            "ticket_id": "SEC-001",
-            "signature_id": "test",
-            "status": "resolved",
-            "disposition": "unknown",
-            "hypotheses": [{"id": "h1", "status": "confirmed", "reasoning": "r"}],
-            "flow": [{"lead": "l1", "observation": "o1", "assessment": "a1"}],
-            "trace": "t",
-            "reasoning": {"conditions": [], "refutes": []},
-            "key_indicators": ["k1"],
-            "alert_data": {"rule": {"id": "test"}},
-        }
-        _, errors = parse_precedent(data)
+        _, errors = parse_precedent(_valid_precedent_dict(disposition="unknown"))
         assert any("disposition" in e for e in errors)
 
-    def test_invalid_status(self):
-        """Invalid status value should produce an error."""
-        data = {
-            "ticket_id": "SEC-001",
-            "signature_id": "test",
-            "status": "closed",
-            "disposition": "benign",
-            "hypotheses": [{"id": "h1", "status": "confirmed", "reasoning": "r"}],
-            "flow": [{"lead": "l1", "observation": "o1", "assessment": "a1"}],
-            "trace": "t",
-            "reasoning": {"conditions": [], "refutes": []},
-            "key_indicators": ["k1"],
-            "alert_data": {"rule": {"id": "test"}},
-        }
-        _, errors = parse_precedent(data)
-        assert any("status" in e for e in errors)
+    def test_invalid_captured_at(self):
+        _, errors = parse_precedent(
+            _valid_precedent_dict(captured_at="not-a-date")
+        )
+        assert any("captured_at" in e for e in errors)
 
-    def test_resolved_needs_confirmed(self):
-        """Resolved precedents must have at least one confirmed hypothesis."""
-        data = {
-            "ticket_id": "SEC-001",
-            "signature_id": "test",
-            "status": "resolved",
-            "disposition": "benign",
-            "hypotheses": [{"id": "h1", "status": "refuted", "reasoning": "r"}],
-            "flow": [{"lead": "l1", "observation": "o1", "assessment": "a1"}],
-            "trace": "t",
-            "reasoning": {"conditions": [], "refutes": []},
-            "key_indicators": ["k1"],
-            "alert_data": {"rule": {"id": "test"}},
-        }
-        _, errors = parse_precedent(data)
-        assert any("confirmed hypothesis" in e for e in errors)
+    def test_empty_alert_rejected(self):
+        _, errors = parse_precedent(_valid_precedent_dict(alert={}))
+        assert any("alert" in e for e in errors)
 
-    def test_escalated_can_skip_confirmed(self):
-        """Escalated precedents don't need a confirmed hypothesis."""
-        data = {
-            "ticket_id": "SEC-001",
-            "signature_id": "test",
-            "status": "escalated",
-            "disposition": "inconclusive",
-            "hypotheses": [{"id": "h1", "status": "refuted", "reasoning": "r"}],
-            "flow": [{"lead": "l1", "observation": "o1", "assessment": "a1"}],
-            "trace": "t",
-            "reasoning": {"conditions": [], "refutes": []},
-            "key_indicators": ["k1"],
-            "alert_data": {"rule": {"id": "test"}},
-        }
-        _, errors = parse_precedent(data)
-        assert not any("confirmed hypothesis" in e for e in errors)
+    def test_empty_narrative_rejected(self):
+        _, errors = parse_precedent(_valid_precedent_dict(narrative=""))
+        assert any("narrative" in e for e in errors)
 
-    def test_active_hypothesis_status(self):
-        """Hypothesis with 'active' status should validate."""
-        data = {
-            "ticket_id": "SEC-001",
-            "signature_id": "test",
-            "status": "escalated",
-            "disposition": "inconclusive",
-            "hypotheses": [{"id": "h1", "status": "active", "reasoning": "still investigating"}],
-            "flow": [{"lead": "l1", "observation": "o1", "assessment": "a1"}],
-            "trace": "t",
-            "reasoning": {"conditions": [], "refutes": []},
-            "key_indicators": ["k1"],
-            "alert_data": {"rule": {"id": "test"}},
-        }
-        _, errors = parse_precedent(data)
-        assert not any("hypothesis status" in e for e in errors)
+    def test_anchor_result_must_be_valid(self):
+        bad = _valid_precedent_dict()
+        bad["anchors_at_time"][0]["result"] = "maybe"
+        _, errors = parse_precedent(bad)
+        assert any("result" in e for e in errors)
+
+    def test_empty_anchors_list_is_ok(self):
+        """A precedent with no anchor citations is valid (e.g. escalation
+        archetypes where anchor confirmation is not required)."""
+        _, errors = parse_precedent(_valid_precedent_dict(anchors_at_time=[]))
+        assert errors == []
 
 
 # --- Playbook frontmatter ---
@@ -310,16 +264,15 @@ class TestPlaybookImports:
 
 
 class TestPrecedentTemplate:
-    """The precedent template must exist and have all required fields."""
+    """The precedent template must exist and validate against the schema."""
 
     def test_precedent_template_exists(self):
-        template = SIGNATURES_DIR / "_template" / "precedents" / "_template.json"
+        template = (
+            SIGNATURES_DIR / "_template" / "archetypes" / "_template" / "TEMPLATE.json"
+        )
         assert template.exists(), "Precedent template missing"
         data = json.loads(template.read_text())
-        required = [
-            "ticket_id", "signature_id", "status", "disposition",
-            "hypotheses", "flow", "trace", "reasoning", "key_indicators",
-            "alert_data",
-        ]
-        for field in required:
-            assert field in data, f"Template missing required field: {field}"
+        _, errors = parse_precedent(data)
+        assert errors == [], (
+            f"Template precedent failed schema validation: {errors}"
+        )

@@ -44,18 +44,20 @@ Pulled from `validate_report.py::validate_tier1` and `schemas/report_frontmatter
 
 5. **Screen-resolved exemption.** If `state.json` history contains `SCREEN` but not `HYPOTHESIZE`, the investigation took the fast-path and is exempt from the minimum-leads floor. Its safety guarantee is the mechanical pattern match, not multi-lead evidence. In exchange, the playbook must actually have a `## Screen` section — if it doesn't, the report is rejected because a screen-resolved outcome is impossible without one.
 
-6. **Resolved → evidence anchor required.** `status=resolved` must set either `matched_archetype` or `matched_precedent`. A resolved report with neither is rejected outright — this is the "no auto-close without precedent" rule.
+6. **Resolved → archetype required.** `status=resolved` must set `matched_archetype`. A resolved report without one is rejected outright — the shape leg of the two-leg model is non-negotiable.
 
-7. **Referenced files actually exist.**
-   - `matched_precedent` must point to a real JSON file under `knowledge/signatures/{signature_id}/precedents/`. Both bare filenames and filenames-without-`.json` are accepted.
-   - `matched_archetype` must point to a real markdown file under `knowledge/signatures/{signature_id}/archetypes/` and its frontmatter must parse.
+7. **Resolved → grounding required.** At least one grounding leg must be satisfied:
+   - **Anchor grounding**: every entry in the archetype's `required_anchors` frontmatter list must appear in `trust_anchors_consulted` with `result == "confirmed"`. A required anchor that was skipped, unavailable, or refuted is rejected.
+   - **Precedent grounding**: `matched_ticket_id` names a precedent snapshot inside the matched archetype's directory.
+   - **Archetypes with empty `required_anchors`**: `matched_ticket_id` is **mandatory** — a resolved report citing such an archetype without a precedent ticket reference is rejected. There is no path to resolution without at least one of these two groundings.
 
-8. **Precedent content checks** (if `matched_precedent` resolves to an existing file):
-   - `signature_id` inside the precedent matches the report's `signature_id`. Cross-signature precedent matches are forbidden.
-   - `validated_at` is present and within `precedent_max_age_days` of now. The max age is per-signature, set in `config/signatures/{signature_id}/permissions.yaml`, defaulting to the constant in `schemas/precedent.py`. Stale precedents are rejected.
+8. **Referenced files actually exist.**
+   - `matched_archetype` must point to a real archetype directory under `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/` containing a parseable `README.md`.
+   - `matched_ticket_id` (if set) must point to a JSON file under `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/{matched_ticket_id}.json`. Both bare ticket IDs and filenames ending in `.json` are accepted.
 
-9. **Archetype required anchors** (if `matched_archetype` resolves):
-   - Every entry in the archetype's `required_anchors` frontmatter list must appear in the report's `trust_anchors_consulted` with `result == "confirmed"`. A required anchor that was skipped, unavailable, or refuted is rejected. This is how archetypes enforce their legitimacy check — an archetype match is only valid when the analyst-authored trust anchors have all been verified.
+9. **Precedent content checks** (if `matched_ticket_id` resolves to an existing file):
+   - The precedent's `archetype` field must match the parent directory name. A precedent whose `archetype` field disagrees with its filesystem location is rejected.
+   - `captured_at` is present and within `precedent_max_age_days` of now. The max age is per-signature, set in `config/signatures/{signature_id}/permissions.yaml`, defaulting to the constant in `schemas/precedent.py`. Stale precedents are rejected.
 
 ### What Tier 1 does *not* check
 

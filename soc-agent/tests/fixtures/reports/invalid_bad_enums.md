@@ -4,7 +4,6 @@ signature_id: wazuh-rule-5710
 status: closed
 disposition: benign
 confidence: very_high
-matched_precedent: null
 leads_pursued: 2
 ---
 

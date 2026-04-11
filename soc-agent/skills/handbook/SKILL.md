@@ -25,7 +25,7 @@ Either way, the job is the same: pull the smallest slice of documentation that a
 - Seeing the layout of `state.json`, `report.md`, `investigation.md`, or other run artifacts
 - Understanding how environment knowledge, signatures, and lead templates compose
 - Figuring out how to extend or customize the plugin (new signature, new SIEM, new lead)
-- Confirming a rule before acting on it (e.g., "does a screen-resolved report still need a matched_precedent?")
+- Confirming a rule before acting on it (e.g., "does a screen-resolved report still need a matched_archetype?")
 
 If the question is narrow, **read only the relevant content file**. Do not load all of `content/` into context — the documents are cross-referenced and individually complete, so loading one at a time keeps context lean.
 

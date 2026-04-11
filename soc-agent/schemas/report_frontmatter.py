@@ -33,18 +33,21 @@ class ReportFrontmatter:
     status: str  # resolved | escalated
     disposition: str  # benign | false_positive | true_positive | inconclusive
     confidence: str  # high | medium | low
-    matched_precedent: Optional[str]  # precedent filename or null
     leads_pursued: int
 
     # Optional fields
     signature_description: Optional[str] = None
     trace: Optional[str] = None
-    # Archetype-shape fields (new model). matched_archetype names a file in
-    # knowledge/signatures/{sig}/archetypes/. trust_anchors_consulted records
-    # which anchors were consulted and what they returned, in the order
-    # consulted. Each entry is a dict with keys: anchor, kind, result,
+    # Archetype + optional precedent ticket citation. matched_archetype names
+    # a directory under knowledge/signatures/{sig}/archetypes/ whose README.md
+    # declares the story and required_anchors. matched_ticket_id optionally
+    # names a precedent snapshot — a JSON file inside that archetype
+    # directory — which grounds the match in a specific past ticket.
+    # trust_anchors_consulted records which anchors were consulted and what
+    # they returned; each entry is a dict with keys: anchor, kind, result,
     # citation (citation is a free-form short description).
     matched_archetype: Optional[str] = None
+    matched_ticket_id: Optional[str] = None
     trust_anchors_consulted: list = field(default_factory=list)
 
     def validate(self) -> list[str]:
@@ -73,9 +76,13 @@ class ReportFrontmatter:
             errors.append(f"leads_pursued must be a non-negative integer, got '{self.leads_pursued}'")
 
         if self.status == "resolved":
-            if not self.matched_precedent and not self.matched_archetype:
+            if not self.matched_archetype:
                 errors.append(
-                    "status=resolved requires matched_archetype or matched_precedent to be set"
+                    "status=resolved requires matched_archetype to be set"
+                )
+            if self.matched_ticket_id and not self.matched_archetype:
+                errors.append(
+                    "matched_ticket_id cannot be set without matched_archetype"
                 )
 
         # Validate trust_anchors_consulted shape (when present)
@@ -137,11 +144,11 @@ def parse_frontmatter(fields: dict) -> tuple[Optional[ReportFrontmatter], list[s
         status=str(fields.get("status", "")),
         disposition=str(fields.get("disposition", "")),
         confidence=str(fields.get("confidence", "")),
-        matched_precedent=fields.get("matched_precedent"),
         leads_pursued=leads,
         signature_description=fields.get("signature_description"),
         trace=fields.get("trace"),
         matched_archetype=fields.get("matched_archetype"),
+        matched_ticket_id=fields.get("matched_ticket_id"),
         trust_anchors_consulted=fields.get("trust_anchors_consulted") or [],
     )
 

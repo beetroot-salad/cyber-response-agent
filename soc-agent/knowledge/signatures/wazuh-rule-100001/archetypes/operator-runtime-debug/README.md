@@ -4,7 +4,6 @@ signature_id: wazuh-rule-100001
 required_anchors:
   - oncall-schedule
   - change-windows
-precedents: []
 ---
 
 # Operator Runtime Debug

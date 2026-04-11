@@ -2,7 +2,6 @@
 archetype: external-bruteforce
 signature_id: wazuh-rule-5710
 required_anchors: []
-precedents: []
 ---
 
 # External Brute-Force
@@ -39,6 +38,5 @@ this archetype.
 
 ## Precedents
 
-The legacy precedent `precedents/brute-force-001.json` covers this
-pattern under the older hypothesis-shape catalog. It can be migrated
-to reference this archetype when the precedent schema is updated.
+Ticket snapshots that matched this archetype live as sibling
+`{TICKET-ID}.json` files next to this README.

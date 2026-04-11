@@ -32,8 +32,11 @@ This is your self-check — not a rigid schema, but a guide to ensure your inves
 ### Resolution (status=resolved)
 - [ ] Exactly one hypothesis has `++` support
 - [ ] **All** adversarial hypotheses have `--` refutation with explicit reasoning
-- [ ] A matching precedent exists in `precedents/` — you've verified the file is there
-- [ ] `matched_precedent` field points to the actual filename
+- [ ] `matched_archetype` names a real directory under `knowledge/signatures/{sig}/archetypes/` — you've verified the `README.md` is there and parses
+- [ ] **Grounding leg satisfied** — at least one of:
+  - [ ] Every entry in the archetype's `required_anchors` appears in `trust_anchors_consulted` with `result: confirmed` and a concrete citation
+  - [ ] `matched_ticket_id` names a precedent snapshot inside the same archetype directory, whose `captured_at` is within `precedent_max_age_days`, and whose `temporal: true` anchor entries have been re-confirmed against live anchors
+- [ ] If the archetype declares no `required_anchors`, `matched_ticket_id` is set (mandatory for anchor-less archetypes)
 - [ ] `leads_pursued` count meets minimum for the signature severity (low:1, medium:2, high:3, critical:4)
 - [ ] Confidence is `high`
 
@@ -46,7 +49,7 @@ This is your self-check — not a rigid schema, but a guide to ensure your inves
 
 ### Report Structure
 - [ ] YAML frontmatter between `---` delimiters at start of report.md
-- [ ] All required fields present: `ticket_id`, `signature_id`, `status`, `disposition`, `confidence`, `matched_precedent`, `leads_pursued`
+- [ ] All required fields present: `ticket_id`, `signature_id`, `status`, `disposition`, `confidence`, `leads_pursued` (plus `matched_archetype` and optionally `matched_ticket_id` + `trust_anchors_consulted` for resolved reports)
 - [ ] `status` is `resolved` or `escalated` (not "closed", "open", etc.)
 - [ ] `disposition` is `benign`, `false_positive`, `true_positive`, or `inconclusive`
 - [ ] `confidence` is `high`, `medium`, or `low`
@@ -62,7 +65,8 @@ This is your self-check — not a rigid schema, but a guide to ensure your inves
 ## Common Mistakes
 
 - **Confirming without refuting:** Finding evidence for your preferred hypothesis is not enough. You must also show why the adversarial hypothesis is wrong.
-- **Resolving without precedent:** `status=resolved` requires `matched_precedent` pointing to a real file. If no precedent matches, escalate.
+- **Resolving without grounding:** `status=resolved` requires BOTH a `matched_archetype` AND grounding (required anchors confirmed, OR a `matched_ticket_id` citation). An archetype match without grounding is not enough; a ticket citation without a matching archetype is not enough.
+- **Stale temporal grounding:** A cached precedent's `anchors_at_time` entries marked `temporal: true` are historical facts that may no longer be true — on-call windows rotate, change tickets close, deploy runs roll back. The current investigation must re-confirm them against live anchors before the precedent's grounding transfers.
 - **Skipping leads:** Don't conclude after one lead unless it conclusively discriminates all hypotheses. Most investigations need 2-3 leads.
 - **Vague observations:** "The IP appears internal" — did you check? What range? Be specific.
 - **Forgetting state transitions:** Every phase change needs a `write_state.py` call. Missing one breaks the audit trail.

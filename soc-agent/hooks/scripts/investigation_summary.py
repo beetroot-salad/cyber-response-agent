@@ -66,7 +66,8 @@ def main():
         "status": frontmatter.get("status", ""),
         "disposition": frontmatter.get("disposition", ""),
         "confidence": frontmatter.get("confidence", ""),
-        "matched_precedent": frontmatter.get("matched_precedent"),
+        "matched_archetype": frontmatter.get("matched_archetype"),
+        "matched_ticket_id": frontmatter.get("matched_ticket_id"),
         "leads_pursued": frontmatter.get("leads_pursued", 0),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

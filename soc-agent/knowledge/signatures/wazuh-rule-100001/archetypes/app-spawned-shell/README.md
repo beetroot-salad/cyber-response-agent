@@ -3,7 +3,6 @@ archetype: app-spawned-shell
 signature_id: wazuh-rule-100001
 required_anchors:
   - image-baseline
-precedents: []
 ---
 
 # Application-Spawned Shell
