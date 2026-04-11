@@ -122,18 +122,44 @@ class PreflightReport:
 # ---------------------------------------------------------------------------
 
 
+def _advertises_health_check(cli_path: Path) -> bool:
+    """True if `<cli> --help` mentions a `health-check` subcommand.
+
+    `scripts/tools/` also hosts agent-facing dev utilities that are not
+    SIEM adapters (e.g. `list_lead_tags.py`). Filter those out by probing
+    each script's argparse help text — a real adapter enumerates
+    `health-check` in its subcommand listing, a dev utility does not.
+    """
+    python = _adapter_python(cli_path)
+    try:
+        result = subprocess.run(
+            [python, str(cli_path), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=HEALTH_CHECK_TIMEOUT_SEC,
+            cwd=str(SOC_AGENT_DIR),
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+    return "health-check" in (result.stdout or "")
+
+
 def discover_adapters() -> list[tuple[str, Path]]:
     """Return [(system_name, cli_path)] for every adapter under scripts/tools/.
 
     Every adapter exposes a `health-check` subcommand; there is no other
     contract. Filenames like `wazuh_cli.py` are allowed for readability
-    but the `_cli` suffix is dropped from the system name.
+    but the `_cli` suffix is dropped from the system name. Scripts under
+    scripts/tools/ that do not advertise a `health-check` subcommand
+    (e.g. agent-facing dev utilities) are silently skipped.
     """
     adapters: list[tuple[str, Path]] = []
     if not TOOLS_DIR.is_dir():
         return adapters
     for path in sorted(TOOLS_DIR.glob("*.py")):
         if path.name.startswith("_"):
+            continue
+        if not _advertises_health_check(path):
             continue
         name = path.stem.removesuffix("_cli")
         adapters.append((name, path))

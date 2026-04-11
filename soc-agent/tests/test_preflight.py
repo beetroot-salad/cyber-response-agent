@@ -22,11 +22,20 @@ SCRIPT = SOC_AGENT_ROOT / "scripts" / "preflight.py"
 
 
 def make_fake_adapter(cli_path: Path, health_exit: int = 0):
-    """Write a stub adapter with a `health-check` subcommand."""
+    """Write a stub adapter with a `health-check` subcommand.
+
+    The stub also handles `--help` by printing a subcommand listing that
+    contains the literal token `health-check` — preflight's adapter
+    discovery filters on that to distinguish real adapters from
+    agent-facing dev utilities that also live under scripts/tools/.
+    """
     cli_path.parent.mkdir(parents=True, exist_ok=True)
     body = (
         "#!/usr/bin/env python3\n"
         "import sys\n"
+        "if len(sys.argv) >= 2 and sys.argv[1] == '--help':\n"
+        "    print('usage: stub [-h] {health-check} ...')\n"
+        "    sys.exit(0)\n"
         "if len(sys.argv) >= 2 and sys.argv[1] == 'health-check':\n"
         f"    sys.exit({health_exit})\n"
         "sys.exit(9)\n"
@@ -140,6 +149,36 @@ class TestAdapterDiscovery:
         assert len(payload["systems"]) == 1
         assert payload["systems"][0]["system"] == "real"
 
+    def test_skips_non_adapter_scripts_without_health_check(self, fake_root):
+        """`scripts/tools/` also hosts agent-facing dev utilities (e.g.
+        `list_lead_tags.py`) that are NOT SIEM adapters. Preflight must
+        filter them out — an entry in scripts/tools/ whose `--help` output
+        does not advertise `health-check` is skipped silently, not flagged
+        as a missing-knowledge-dir error that turns the result DEGRADED."""
+        # Real adapter — should be discovered.
+        make_fake_adapter(fake_root / "scripts" / "tools" / "real_cli.py")
+        make_system_docs(fake_root, "real")
+
+        # Non-adapter dev utility (e.g. a tag-lister) — no health-check
+        # subcommand, no corresponding environment/systems/ dir. Preflight
+        # must not treat it as an adapter.
+        dev_util = fake_root / "scripts" / "tools" / "list_lead_tags.py"
+        dev_util.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "if len(sys.argv) >= 2 and sys.argv[1] == '--help':\n"
+            "    print('usage: list_lead_tags [-h] [--root ROOT] [--check PATH]')\n"
+            "    sys.exit(0)\n"
+            "sys.exit(0)\n"
+        )
+        dev_util.chmod(0o755)
+
+        result = run_preflight(fake_root, "--systems", "--json")
+        assert result.returncode == 0, result.stdout + result.stderr
+        payload = json.loads(result.stdout)
+        assert len(payload["systems"]) == 1
+        assert payload["systems"][0]["system"] == "real"
+
 
 # ---------------------------------------------------------------------------
 # Health check outcomes
@@ -193,6 +232,9 @@ class TestHealthCheck:
         cli.write_text(
             "#!/usr/bin/env python3\n"
             "import sys\n"
+            "if len(sys.argv) >= 2 and sys.argv[1] == '--help':\n"
+            "    print('usage: marker [-h] {health-check} ...')\n"
+            "    sys.exit(0)\n"
             f"open({str(marker)!r}, 'w').write(sys.executable)\n"
             "if len(sys.argv) >= 2 and sys.argv[1] == 'health-check':\n"
             "    sys.exit(0)\n"
@@ -224,6 +266,9 @@ class TestHealthCheck:
         cli.write_text(
             "#!/usr/bin/env python3\n"
             "import sys\n"
+            "if len(sys.argv) >= 2 and sys.argv[1] == '--help':\n"
+            "    print('usage: bare [-h] {health-check} ...')\n"
+            "    sys.exit(0)\n"
             f"open({str(marker)!r}, 'w').write(sys.executable)\n"
             "if len(sys.argv) >= 2 and sys.argv[1] == 'health-check':\n"
             "    sys.exit(0)\n"
