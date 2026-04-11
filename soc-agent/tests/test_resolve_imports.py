@@ -55,8 +55,8 @@ class TestResolverHappyPath:
 
     def test_contains_playbook(self, wazuh_5710_result):
         assert "<!-- source: knowledge/signatures/wazuh-rule-5710/playbook.md -->" in wazuh_5710_result.stdout
-        # New playbook shape: starter hypotheses replace the old "Hypothesis Catalog" section
-        assert "Starter hypotheses" in wazuh_5710_result.stdout
+        # Archetype catalog replaces the old "Hypothesis Catalog" / "Starter hypotheses" section
+        assert "## Archetypes" in wazuh_5710_result.stdout
 
     def test_contains_checklist(self, wazuh_5710_result):
         assert "<!-- source: knowledge/common-investigation/checklist.md -->" in wazuh_5710_result.stdout
@@ -100,12 +100,12 @@ class TestResolverArchetypes:
         )
 
     def test_all_archetypes_present(self, wazuh_100001_result):
-        """Every archetype file in archetypes/ must appear in resolver output."""
+        """Every archetype README in archetypes/ must appear in resolver output."""
         out = wazuh_100001_result.stdout
         for name in self.EXPECTED_ARCHETYPES:
             marker = (
                 f"<!-- source: knowledge/signatures/wazuh-rule-100001/"
-                f"archetypes/{name}.md -->"
+                f"archetypes/{name}/README.md -->"
             )
             assert marker in out, f"Missing archetype marker: {name}"
 
@@ -126,7 +126,7 @@ class TestResolverArchetypes:
         out = wazuh_100001_result.stdout
         positions = []
         for name in self.EXPECTED_ARCHETYPES:
-            marker = f"archetypes/{name}.md -->"
+            marker = f"archetypes/{name}/README.md -->"
             positions.append(out.index(marker))
         assert positions == sorted(positions), (
             "Archetypes are not in alphabetical order"
@@ -137,8 +137,10 @@ class TestResolverArchetypes:
         out = wazuh_100001_result.stdout
         ctx_pos = out.index("context.md -->")
         pb_pos = out.index("playbook.md -->")
-        first_arch_pos = out.index("archetypes/app-spawned-shell.md -->")
-        last_arch_pos = out.index("archetypes/post-exploit-interactive.md -->")
+        first_arch_pos = out.index("archetypes/app-spawned-shell/README.md -->")
+        last_arch_pos = out.index(
+            "archetypes/post-exploit-interactive/README.md -->"
+        )
         cl_pos = out.index("checklist.md -->")
         assert ctx_pos < pb_pos < first_arch_pos < last_arch_pos < cl_pos
 
@@ -163,7 +165,13 @@ class TestResolverArchetypes:
 
             result = run_resolver("_test-legacy-shape")
             assert result.returncode == 0, f"stderr: {result.stderr}"
-            assert "archetypes/" not in result.stdout
+            # No archetype source markers should be emitted for this signature.
+            # The bare substring "archetypes/" appears in the baked-in checklist
+            # text, so scope the check to source-comment lines referencing this
+            # signature's archetype directory.
+            assert (
+                "/_test-legacy-shape/archetypes/" not in result.stdout
+            ), "Should not emit archetype markers for a signature with no archetypes dir"
         finally:
             import shutil
             shutil.rmtree(sig_dir, ignore_errors=True)
@@ -243,11 +251,14 @@ class TestEndToEndResolve:
         assert "Invalid user" in out
         assert "data.srcip" in out
 
-        # playbook.md content — starter hypothesis names + the lead name
-        assert "?monitoring-probe" in out
+        # playbook.md content — archetype catalog + lead name
+        assert "monitoring-probe" in out
         assert "authentication-history" in out
-        # Archetype content (external-bruteforce replaced the ?brute-force story)
+        # Archetype README content — one distinct phrase from each archetype story
         assert "External Brute-Force" in out
+        assert "Monitoring Probe" in out
+        assert "Credential Stuffing" in out
+        assert "Service Account Rotation" in out
 
         # checklist.md content
         assert "adversarial hypothesis" in out.lower()

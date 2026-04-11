@@ -100,10 +100,11 @@ def main() -> int:
     # 2. Signature playbook
     emit_file(playbook_path)
 
-    # 3. Archetypes (when present) — sorted for deterministic output
+    # 3. Archetypes (when present) — sorted for deterministic output.
+    # New layout: one directory per archetype, with README.md as the entry point.
     archetypes_dir = sig_dir / "archetypes"
     if archetypes_dir.is_dir():
-        for archetype_file in sorted(archetypes_dir.glob("*.md")):
+        for archetype_file in sorted(archetypes_dir.glob("*/README.md")):
             emit_file(archetype_file)
 
     # 4. Checklist (always)

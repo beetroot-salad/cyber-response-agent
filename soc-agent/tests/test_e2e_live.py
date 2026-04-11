@@ -180,9 +180,9 @@ class TestScreenResolve:
             f"Expected benign, got {fields.get('disposition')}"
         )
 
-        # Resolved requires matched_precedent
-        assert fields.get("matched_precedent"), (
-            "Resolved report must have matched_precedent"
+        # Resolved requires matched_archetype
+        assert fields.get("matched_archetype"), (
+            "Resolved report must have matched_archetype"
         )
 
     def test_screen_resolve_budget_tracked(self, live_alerts_ready, live_runs_dir):
@@ -290,18 +290,34 @@ class TestFullInvestigationResolve:
             f"Expected resolved or escalated, got {status}"
         )
 
-        # If resolved, verify precedent file exists
+        # If resolved, verify archetype exists (and the optional ticket snapshot,
+        # if one was cited).
         if status == "resolved":
-            precedent = fields.get("matched_precedent")
-            assert precedent, "Resolved report must have matched_precedent"
+            archetype = fields.get("matched_archetype")
+            assert archetype, "Resolved report must have matched_archetype"
 
-            precedent_path = (
+            archetype_readme = (
                 SOC_AGENT_ROOT / "knowledge" / "signatures" / "wazuh-rule-5710"
-                / "precedents" / precedent
+                / "archetypes" / archetype / "README.md"
             )
-            assert precedent_path.exists(), (
-                f"matched_precedent '{precedent}' does not exist at {precedent_path}"
+            assert archetype_readme.exists(), (
+                f"matched_archetype '{archetype}' README not found at "
+                f"{archetype_readme}"
             )
+
+            ticket_id = fields.get("matched_ticket_id")
+            if ticket_id:
+                ticket_filename = (
+                    ticket_id if ticket_id.endswith(".json") else f"{ticket_id}.json"
+                )
+                precedent_path = (
+                    SOC_AGENT_ROOT / "knowledge" / "signatures" / "wazuh-rule-5710"
+                    / "archetypes" / archetype / ticket_filename
+                )
+                assert precedent_path.exists(), (
+                    f"matched_ticket_id '{ticket_id}' not found at "
+                    f"{precedent_path}"
+                )
         else:
             # Escalated nagios probe — should have benign disposition
             assert fields.get("disposition") == "benign", (

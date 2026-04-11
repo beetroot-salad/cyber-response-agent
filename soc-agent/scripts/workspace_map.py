@@ -72,7 +72,6 @@ def main() -> int:
     print("**Skill-internal scripts** (relative to your shell cwd at startup, which is the soc-agent root):")
     print("- `scripts/resolve_imports.py` — bakes signature knowledge (loaded automatically)")
     print("- `scripts/setup_run.py` — creates the run dir (loaded automatically)")
-    print("- `scripts/search_precedents.py` — search/list precedents for a signature")
     print("- `hooks/scripts/write_state.py` — state machine transitions")
     print()
     print("For environment-specific tooling (SIEM CLIs, host inspection utilities), read the relevant `knowledge/environment/systems/{vendor}/SKILL.md` file.")

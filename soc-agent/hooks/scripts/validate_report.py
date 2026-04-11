@@ -98,64 +98,79 @@ def get_precedent_max_age(signature_id: str) -> int:
     return int(data.get("precedent_max_age_days", DEFAULT_MAX_AGE_DAYS))
 
 
-def validate_precedent_content(
-    matched_precedent: str, signature_id: str
-) -> list[str]:
-    """Load and validate precedent content: signature_id match + recency."""
-    errors = []
-    precedent_dir = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "precedents"
+def _precedent_path(
+    signature_id: str, matched_archetype: str, matched_ticket_id: str
+) -> Path:
+    """Resolve the filesystem path to a precedent snapshot under its archetype."""
+    archetype_dir = (
+        SOC_AGENT_ROOT
+        / "knowledge"
+        / "signatures"
+        / signature_id
+        / "archetypes"
+        / matched_archetype
     )
-    candidate = precedent_dir / matched_precedent
-    if not candidate.exists() and not matched_precedent.endswith(".json"):
-        candidate = precedent_dir / (matched_precedent + ".json")
+    filename = matched_ticket_id
+    if not filename.endswith(".json"):
+        filename = filename + ".json"
+    return archetype_dir / filename
+
+
+def validate_precedent_content(
+    matched_archetype: str,
+    matched_ticket_id: str,
+    signature_id: str,
+) -> list[str]:
+    """Load and validate precedent snapshot content: schema + recency +
+    archetype-matches-parent-dir cross-check."""
+    errors = []
+    candidate = _precedent_path(signature_id, matched_archetype, matched_ticket_id)
     if not candidate.exists():
         return []  # file-existence is checked separately
 
     try:
         data = json.loads(candidate.read_text())
     except (json.JSONDecodeError, OSError) as e:
-        errors.append(f"precedent '{matched_precedent}' is not valid JSON: {e}")
+        errors.append(
+            f"precedent '{matched_ticket_id}' is not valid JSON: {e}"
+        )
         return errors
 
-    # Check signature_id matches
-    prec_sig = data.get("signature_id", "")
-    if prec_sig != signature_id:
+    # Cross-check: archetype field must match parent directory name
+    prec_archetype = data.get("archetype", "")
+    if prec_archetype != matched_archetype:
         errors.append(
-            f"precedent signature_id '{prec_sig}' does not match "
-            f"report signature_id '{signature_id}'"
+            f"precedent '{matched_ticket_id}' archetype field "
+            f"'{prec_archetype}' does not match parent directory "
+            f"'{matched_archetype}'"
         )
 
-    # Check recency
-    validated_at = data.get("validated_at")
-    if not validated_at:
+    # Check recency against captured_at
+    captured_at = data.get("captured_at")
+    if not captured_at:
         errors.append(
-            f"precedent '{matched_precedent}' has no validated_at field"
+            f"precedent '{matched_ticket_id}' has no captured_at field"
         )
     else:
         max_age = get_precedent_max_age(signature_id)
-        fresh, msg = check_recency(validated_at, max_age)
+        fresh, msg = check_recency(captured_at, max_age)
         if not fresh:
-            errors.append(f"precedent '{matched_precedent}': {msg}")
+            errors.append(f"precedent '{matched_ticket_id}': {msg}")
 
     return errors
 
 
-def check_precedent_exists(matched_precedent: str, signature_id: str) -> bool:
-    """Check that the referenced precedent file actually exists."""
-    if not matched_precedent:
+def check_precedent_exists(
+    matched_archetype: str,
+    matched_ticket_id: str,
+    signature_id: str,
+) -> bool:
+    """Check that the referenced precedent snapshot file actually exists."""
+    if not matched_archetype or not matched_ticket_id:
         return False
-
-    precedent_dir = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "precedents"
-    )
-
-    candidate = precedent_dir / matched_precedent
-    if candidate.exists():
-        return True
-    if not matched_precedent.endswith(".json"):
-        return (precedent_dir / (matched_precedent + ".json")).exists()
-    return False
+    return _precedent_path(
+        signature_id, matched_archetype, matched_ticket_id
+    ).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -163,23 +178,28 @@ def check_precedent_exists(matched_precedent: str, signature_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def load_archetype_frontmatter(matched_archetype: str, signature_id: str) -> dict | None:
-    """Load and parse the YAML frontmatter of an archetype file.
+    """Load and parse the YAML frontmatter of an archetype README.
 
-    Returns None if the file does not exist or has no frontmatter.
+    Archetypes live at
+    `knowledge/signatures/{sig}/archetypes/{matched_archetype}/README.md`.
+    Returns None if the directory or README does not exist.
     """
-    archetype_dir = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "archetypes"
+    archetype_readme = (
+        SOC_AGENT_ROOT
+        / "knowledge"
+        / "signatures"
+        / signature_id
+        / "archetypes"
+        / matched_archetype
+        / "README.md"
     )
-    candidate = archetype_dir / matched_archetype
-    if not candidate.exists() and not matched_archetype.endswith(".md"):
-        candidate = archetype_dir / (matched_archetype + ".md")
-    if not candidate.exists():
+    if not archetype_readme.exists():
         return None
-    return parse_yaml_frontmatter(candidate.read_text())
+    return parse_yaml_frontmatter(archetype_readme.read_text())
 
 
 def check_archetype_exists(matched_archetype: str, signature_id: str) -> bool:
-    """Check that the referenced archetype file actually exists and parses."""
+    """Check that the referenced archetype directory + README exists and parses."""
     if not matched_archetype:
         return False
     return load_archetype_frontmatter(matched_archetype, signature_id) is not None
@@ -369,20 +389,24 @@ def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
                 f"for {severity} severity (requires >= {min_leads})"
             )
 
-    # Check: resolved requires either matched_archetype or matched_precedent
+    # Check: resolved requires
+    #   (1) matched_archetype pointing at a real archetype
+    #   (2) grounding — at least one of:
+    #         (a) archetype.required_anchors all confirmed, OR
+    #         (b) matched_ticket_id pointing at a real precedent snapshot
+    # When (a) is not available (archetype declares no required_anchors),
+    # (b) is mandatory. When (a) is available, (b) is optional extra
+    # confidence.
     if report.status == "resolved":
-        has_archetype = bool(report.matched_archetype)
-        has_precedent = bool(report.matched_precedent)
-
-        if not has_archetype and not has_precedent:
+        if not report.matched_archetype:
             errors.append(
-                "status=resolved requires matched_archetype or matched_precedent"
+                "status=resolved requires matched_archetype"
             )
-
-        if has_archetype:
-            if not check_archetype_exists(
+        else:
+            fm = load_archetype_frontmatter(
                 report.matched_archetype, report.signature_id
-            ):
+            )
+            if fm is None:
                 errors.append(
                     f"matched_archetype '{report.matched_archetype}' not found in "
                     f"knowledge/signatures/{report.signature_id}/archetypes/"
@@ -395,19 +419,35 @@ def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
                 )
                 errors.extend(anchor_errors)
 
-        if has_precedent:
-            if not check_precedent_exists(
-                report.matched_precedent, report.signature_id
-            ):
-                errors.append(
-                    f"matched_precedent '{report.matched_precedent}' not found in "
-                    f"knowledge/signatures/{report.signature_id}/precedents/"
-                )
-            else:
-                content_errors = validate_precedent_content(
-                    report.matched_precedent, report.signature_id
-                )
-                errors.extend(content_errors)
+                # Grounding enforcement: if the archetype declares no
+                # required_anchors, the resolution must be grounded by a
+                # matched_ticket_id instead.
+                required = fm.get("required_anchors") or []
+                if not required and not report.matched_ticket_id:
+                    errors.append(
+                        f"archetype '{report.matched_archetype}' declares no "
+                        f"required_anchors, so matched_ticket_id is required "
+                        f"as the grounding citation for status=resolved"
+                    )
+
+            if report.matched_ticket_id:
+                if not check_precedent_exists(
+                    report.matched_archetype,
+                    report.matched_ticket_id,
+                    report.signature_id,
+                ):
+                    errors.append(
+                        f"matched_ticket_id '{report.matched_ticket_id}' not found "
+                        f"under knowledge/signatures/{report.signature_id}/"
+                        f"archetypes/{report.matched_archetype}/"
+                    )
+                else:
+                    content_errors = validate_precedent_content(
+                        report.matched_archetype,
+                        report.matched_ticket_id,
+                        report.signature_id,
+                    )
+                    errors.extend(content_errors)
 
     return len(errors) == 0, errors, fields
 
@@ -428,18 +468,19 @@ def load_report_frontmatter(report_path: Path) -> dict | None:
     return fields
 
 
-def load_precedent(signature_id: str, matched_precedent: str) -> dict | None:
-    """Load the matched precedent JSON."""
-    precedent_dir = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "precedents"
+def load_precedent(
+    signature_id: str,
+    matched_archetype: str,
+    matched_ticket_id: str,
+) -> dict | None:
+    """Load the matched precedent snapshot JSON from inside the archetype dir."""
+    if not matched_archetype or not matched_ticket_id:
+        return None
+    candidate = _precedent_path(
+        signature_id, matched_archetype, matched_ticket_id
     )
-    candidate = precedent_dir / matched_precedent
     if candidate.exists():
         return json.loads(candidate.read_text())
-    if not matched_precedent.endswith(".json"):
-        candidate = precedent_dir / (matched_precedent + ".json")
-        if candidate.exists():
-            return json.loads(candidate.read_text())
     return None
 
 
@@ -472,16 +513,25 @@ def assemble_prompt(
     alert_data: str,
     investigation_log: str,
     report: str,
+    archetype: str | None,
     precedent: str | None,
     salt: str,
+    status: str = "resolved",
 ) -> str:
     """Assemble the judge prompt from the template and context.
 
-    If precedent is None, the prompt runs in no-precedent mode (4 criteria).
+    Two judge modes:
+    - `full`: status=resolved. SHAPE_MATCH + COMPLETENESS + GROUNDING_MATCH +
+       the three universal criteria. Pass/flag gates whether resolution stands.
+    - `escalation`: status=escalated. SHAPE_MATCH + COMPLETENESS still run
+       (advisory context for the human analyst) when shape was attempted,
+       plus the three universal criteria. The report stays escalated
+       regardless of verdict.
     """
     template = JUDGE_PROMPT_PATH.read_text()
 
-    # Wrap untrusted content with salted delimiters
+    # Wrap untrusted content with salted delimiters. The report is
+    # agent-generated (not external), so it is NOT salted.
     safe_alert = wrap_untrusted(alert_data, "alert-data", salt)
     safe_log = wrap_untrusted(investigation_log, "investigation-log", salt)
 
@@ -489,13 +539,27 @@ def assemble_prompt(
     prompt = prompt.replace("{investigation_log}", safe_log)
     prompt = prompt.replace("{report}", report)
 
+    if archetype is not None:
+        safe_archetype = wrap_untrusted(archetype, "archetype", salt)
+        prompt = prompt.replace("{archetype}", safe_archetype)
+    else:
+        prompt = prompt.replace(
+            "{archetype}",
+            "[No archetype cited in this report]",
+        )
+
     if precedent is not None:
         safe_precedent = wrap_untrusted(precedent, "precedent", salt)
         prompt = prompt.replace("{precedent}", safe_precedent)
-        prompt = prompt.replace("{judge_mode}", "full")
     else:
-        prompt = prompt.replace("{precedent}", "[No precedent — this is an escalated report]")
-        prompt = prompt.replace("{judge_mode}", "no-precedent")
+        prompt = prompt.replace(
+            "{precedent}",
+            "[No matched ticket — grounding comes from anchors alone, "
+            "or report is escalated]",
+        )
+
+    mode = "full" if status == "resolved" else "escalation"
+    prompt = prompt.replace("{judge_mode}", mode)
 
     return prompt
 
@@ -537,15 +601,40 @@ def parse_verdict(output: str) -> tuple[str, str]:
 def run_tier2(run_dir: Path, fields: dict) -> tuple[bool, str]:
     """Run Tier 2 semantic judge. Returns (passed, message)."""
     status = fields.get("status", "")
-    matched_precedent = fields.get("matched_precedent")
+    matched_archetype = fields.get("matched_archetype")
+    matched_ticket_id = fields.get("matched_ticket_id")
     signature_id = fields.get("signature_id", "")
 
-    # Load precedent if available (resolved reports always have one after Tier 1)
+    # Load precedent if the report cites a specific ticket under an archetype.
+    # matched_ticket_id is optional — many resolved reports match an
+    # archetype without a ticket citation, and escalated reports never have one.
     precedent_data = None
-    if matched_precedent:
-        precedent_data = load_precedent(signature_id, matched_precedent)
+    if matched_archetype and matched_ticket_id:
+        precedent_data = load_precedent(
+            signature_id, matched_archetype, matched_ticket_id
+        )
         if precedent_data is None:
-            return False, f"matched precedent '{matched_precedent}' could not be loaded"
+            return False, (
+                f"matched_ticket_id '{matched_ticket_id}' under archetype "
+                f"'{matched_archetype}' could not be loaded"
+            )
+
+    # Load the archetype README (story text) when an archetype is cited,
+    # so the judge can compare the report's narrative against the abstract
+    # pattern the archetype describes.
+    archetype_text: str | None = None
+    if matched_archetype:
+        archetype_readme = (
+            SOC_AGENT_ROOT
+            / "knowledge"
+            / "signatures"
+            / signature_id
+            / "archetypes"
+            / matched_archetype
+            / "README.md"
+        )
+        if archetype_readme.exists():
+            archetype_text = archetype_readme.read_text()
 
     # Load artifacts
     salt = get_run_salt(run_dir)
@@ -555,7 +644,15 @@ def run_tier2(run_dir: Path, fields: dict) -> tuple[bool, str]:
     precedent_text = json.dumps(precedent_data, indent=2) if precedent_data else None
 
     # Assemble and invoke
-    prompt = assemble_prompt(alert_text, investigation_text, report_text, precedent_text, salt)
+    prompt = assemble_prompt(
+        alert_text,
+        investigation_text,
+        report_text,
+        archetype_text,
+        precedent_text,
+        salt,
+        status=status,
+    )
     output, returncode = invoke_judge(prompt)
 
     if returncode != 0:

@@ -1,10 +1,20 @@
 ---
 ticket_id: SEC-2024-010
-signature_id: wazuh-rule-5710
+signature_id: wazuh-rule-100001
 status: resolved
 disposition: benign
 confidence: high
-matched_precedent: nonexistent-precedent.json
+matched_archetype: operator-runtime-debug
+matched_ticket_id: NONEXISTENT-TICKET
+trust_anchors_consulted:
+  - anchor: oncall-schedule
+    kind: org-authority
+    result: confirmed
+    citation: placeholder
+  - anchor: change-windows
+    kind: org-authority
+    result: confirmed
+    citation: placeholder
 leads_pursued: 2
 ---
 
@@ -12,4 +22,4 @@ leads_pursued: 2
 
 ## Summary
 
-Claims resolved but references a precedent that doesn't exist.
+Claims resolved but references a ticket that doesn't exist under the archetype.

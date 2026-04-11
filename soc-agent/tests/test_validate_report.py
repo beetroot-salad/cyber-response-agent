@@ -34,7 +34,7 @@ from hooks.scripts.validate_report import (
     validate_tier1,
     wrap_untrusted,
 )
-from schemas.precedent import DEFAULT_MAX_AGE_DAYS, check_recency, parse_validated_at
+from schemas.precedent import DEFAULT_MAX_AGE_DAYS, check_recency, parse_captured_at
 
 FIXTURES = SOC_AGENT_ROOT / "tests" / "fixtures" / "reports"
 
@@ -50,7 +50,6 @@ class TestReportFrontmatter:
             status="escalated",
             disposition="true_positive",
             confidence="high",
-            matched_precedent=None,
             leads_pursued=3,
         )
         defaults.update(overrides)
@@ -64,7 +63,8 @@ class TestReportFrontmatter:
         r = self._make_valid(
             status="resolved",
             disposition="benign",
-            matched_precedent="monitoring-probe-001.json",
+            matched_archetype="monitoring-probe",
+            matched_ticket_id="SEC-2024-001",
         )
         assert r.validate() == []
 
@@ -88,10 +88,20 @@ class TestReportFrontmatter:
         errors = r.validate()
         assert any("confidence" in e for e in errors)
 
-    def test_resolved_requires_precedent(self):
-        r = self._make_valid(status="resolved", matched_precedent=None)
+    def test_resolved_requires_archetype(self):
+        r = self._make_valid(status="resolved", matched_archetype=None)
         errors = r.validate()
-        assert any("matched_precedent" in e for e in errors)
+        assert any("matched_archetype" in e for e in errors)
+
+    def test_ticket_id_without_archetype_rejected(self):
+        r = self._make_valid(
+            status="resolved",
+            disposition="benign",
+            matched_archetype=None,
+            matched_ticket_id="SEC-2024-001",
+        )
+        errors = r.validate()
+        assert any("matched_ticket_id" in e for e in errors)
 
     def test_negative_leads(self):
         r = self._make_valid(leads_pursued=-1)
@@ -115,7 +125,6 @@ class TestParseFrontmatter:
             "status": "escalated",
             "disposition": "true_positive",
             "confidence": "high",
-            "matched_precedent": None,
             "leads_pursued": 3,
         }
         report, errors = parse_frontmatter(fields)
@@ -129,7 +138,6 @@ class TestParseFrontmatter:
             "status": "escalated",
             "disposition": "true_positive",
             "confidence": "high",
-            "matched_precedent": None,
             "leads_pursued": "3",
         }
         report, errors = parse_frontmatter(fields)
@@ -183,7 +191,12 @@ signature_id: wazuh-rule-5710
 status: resolved
 disposition: benign
 confidence: high
-matched_precedent: monitoring-probe-001.json
+matched_archetype: monitoring-probe
+trust_anchors_consulted:
+  - anchor: approved-monitoring-sources
+    kind: org-authority
+    result: confirmed
+    citation: playground monitoring-host cron
 leads_pursued: 1
 trace: "screen(monitoring-probe, auth-history) -> benign:monitoring-probe"
 ---
@@ -364,13 +377,36 @@ def fake_root(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _make_precedent_file(root: Path, sig: str, name: str, data: dict) -> Path:
-    """Helper: create a precedent JSON file under a fake SOC_AGENT_ROOT."""
-    prec_dir = root / "knowledge" / "signatures" / sig / "precedents"
-    prec_dir.mkdir(parents=True, exist_ok=True)
-    path = prec_dir / name
+def _make_precedent_file(
+    root: Path, sig: str, archetype: str, ticket_id: str, data: dict
+) -> Path:
+    """Helper: create a precedent JSON file under a fake SOC_AGENT_ROOT.
+
+    New layout: archetypes/{archetype}/{TICKET-ID}.json.
+    """
+    arch_dir = (
+        root / "knowledge" / "signatures" / sig / "archetypes" / archetype
+    )
+    arch_dir.mkdir(parents=True, exist_ok=True)
+    filename = ticket_id if ticket_id.endswith(".json") else f"{ticket_id}.json"
+    path = arch_dir / filename
     path.write_text(json.dumps(data))
     return path
+
+
+def _valid_precedent_dict(**overrides):
+    """Build a schema-valid precedent dict for use in fake_root tests."""
+    data = {
+        "ticket_id": "SEC-2026-001",
+        "archetype": "test-arch",
+        "captured_at": "2026-04-01",
+        "disposition": "benign",
+        "narrative": "Test precedent narrative.",
+        "alert": {"rule": {"id": "test"}},
+        "anchors_at_time": [],
+    }
+    data.update(overrides)
+    return data
 
 
 def _make_permissions_yaml(root: Path, sig: str, content: str) -> Path:
@@ -383,93 +419,115 @@ def _make_permissions_yaml(root: Path, sig: str, content: str) -> Path:
 
 
 class TestValidatePrecedentContent:
-    def test_matching_signature_and_recent(self):
-        """Valid precedent with matching signature_id and recent validated_at."""
+    def test_valid_precedent(self, fake_root):
+        """Valid precedent with matching archetype and recent captured_at."""
+        _make_precedent_file(
+            fake_root, "test-sig", "test-arch", "SEC-001",
+            _valid_precedent_dict(ticket_id="SEC-001"),
+        )
         errors = validate_precedent_content(
-            "monitoring-probe-001.json", "wazuh-rule-5710"
+            "test-arch", "SEC-001", "test-sig"
         )
         assert errors == []
 
-    def test_signature_id_mismatch(self, fake_root):
-        """Precedent with wrong signature_id is rejected."""
-        _make_precedent_file(fake_root, "test-sig", "test.json", {
-            "signature_id": "WRONG-SIG",
-            "validated_at": "2026-04-01",
-        })
-        errors = validate_precedent_content("test.json", "test-sig")
-        assert any("does not match" in e for e in errors)
+    def test_archetype_field_mismatch(self, fake_root):
+        """Precedent with archetype field that doesn't match parent dir is rejected."""
+        _make_precedent_file(
+            fake_root, "test-sig", "test-arch", "SEC-001",
+            _valid_precedent_dict(archetype="OTHER-ARCH"),
+        )
+        errors = validate_precedent_content(
+            "test-arch", "SEC-001", "test-sig"
+        )
+        assert any("does not match parent directory" in e for e in errors)
 
-    def test_missing_validated_at(self, fake_root):
-        """Precedent without validated_at is flagged."""
-        _make_precedent_file(fake_root, "test-sig", "test.json", {
-            "signature_id": "test-sig",
-        })
-        errors = validate_precedent_content("test.json", "test-sig")
-        assert any("validated_at" in e for e in errors)
+    def test_missing_captured_at(self, fake_root):
+        """Precedent without captured_at is flagged."""
+        data = _valid_precedent_dict()
+        del data["captured_at"]
+        _make_precedent_file(fake_root, "test-sig", "test-arch", "SEC-001", data)
+        errors = validate_precedent_content(
+            "test-arch", "SEC-001", "test-sig"
+        )
+        assert any("captured_at" in e for e in errors)
 
     def test_stale_precedent(self, fake_root):
         """Precedent older than max_age is rejected."""
-        _make_precedent_file(fake_root, "test-sig", "test.json", {
-            "signature_id": "test-sig",
-            "validated_at": "2020-01-01",
-        })
-        errors = validate_precedent_content("test.json", "test-sig")
+        _make_precedent_file(
+            fake_root, "test-sig", "test-arch", "SEC-001",
+            _valid_precedent_dict(captured_at="2020-01-01"),
+        )
+        errors = validate_precedent_content(
+            "test-arch", "SEC-001", "test-sig"
+        )
         assert any("days old" in e for e in errors)
 
     def test_malformed_json(self, fake_root):
         """Malformed precedent JSON is caught."""
-        prec_dir = fake_root / "knowledge" / "signatures" / "test-sig" / "precedents"
-        prec_dir.mkdir(parents=True)
-        (prec_dir / "test.json").write_text("not json {{{")
-        errors = validate_precedent_content("test.json", "test-sig")
+        arch_dir = (
+            fake_root / "knowledge" / "signatures" / "test-sig"
+            / "archetypes" / "test-arch"
+        )
+        arch_dir.mkdir(parents=True)
+        (arch_dir / "SEC-001.json").write_text("not json {{{")
+        errors = validate_precedent_content(
+            "test-arch", "SEC-001", "test-sig"
+        )
         assert any("not valid JSON" in e for e in errors)
 
     def test_multiple_errors_accumulated(self, fake_root):
-        """Both signature mismatch and missing validated_at are reported together."""
-        _make_precedent_file(fake_root, "test-sig", "test.json", {
-            "signature_id": "WRONG-SIG",
-            # no validated_at
-        })
-        errors = validate_precedent_content("test.json", "test-sig")
+        """Both archetype mismatch and missing captured_at are reported together."""
+        data = _valid_precedent_dict(archetype="WRONG-ARCH")
+        del data["captured_at"]
+        _make_precedent_file(fake_root, "test-sig", "test-arch", "SEC-001", data)
+        errors = validate_precedent_content(
+            "test-arch", "SEC-001", "test-sig"
+        )
         assert len(errors) >= 2
-        assert any("does not match" in e for e in errors)
-        assert any("validated_at" in e for e in errors)
+        assert any("does not match parent directory" in e for e in errors)
+        assert any("captured_at" in e for e in errors)
 
     def test_auto_extension_json(self, fake_root):
         """Finds precedent when called without .json extension."""
-        _make_precedent_file(fake_root, "test-sig", "probe.json", {
-            "signature_id": "test-sig",
-            "validated_at": "2026-04-01",
-        })
-        errors = validate_precedent_content("probe", "test-sig")
+        _make_precedent_file(
+            fake_root, "test-sig", "test-arch", "SEC-001.json",
+            _valid_precedent_dict(),
+        )
+        errors = validate_precedent_content(
+            "test-arch", "SEC-001", "test-sig"
+        )
         assert errors == []
 
     def test_nonexistent_file_returns_empty(self, fake_root):
         """Non-existent precedent returns [] (existence checked elsewhere)."""
-        errors = validate_precedent_content("missing.json", "test-sig")
+        errors = validate_precedent_content(
+            "test-arch", "missing", "test-sig"
+        )
         assert errors == []
 
     def test_custom_max_age_from_permissions(self, fake_root):
         """Custom precedent_max_age_days in permissions.yaml is respected."""
-        _make_precedent_file(fake_root, "strict-sig", "test.json", {
-            "signature_id": "strict-sig",
-            "validated_at": "2026-02-01",  # ~64 days ago
-        })
-        # 30-day max age should reject this
-        _make_permissions_yaml(fake_root, "strict-sig",
-            "precedent_max_age_days: 30\n"
+        _make_precedent_file(
+            fake_root, "strict-sig", "test-arch", "SEC-001",
+            _valid_precedent_dict(captured_at="2026-02-01"),  # ~70 days ago
         )
-        errors = validate_precedent_content("test.json", "strict-sig")
+        _make_permissions_yaml(
+            fake_root, "strict-sig", "precedent_max_age_days: 30\n"
+        )
+        errors = validate_precedent_content(
+            "test-arch", "SEC-001", "strict-sig"
+        )
         assert any("days old" in e for e in errors)
 
     def test_default_max_age_when_no_permissions(self, fake_root):
         """Falls back to DEFAULT_MAX_AGE_DAYS when no permissions.yaml."""
-        _make_precedent_file(fake_root, "no-config-sig", "test.json", {
-            "signature_id": "no-config-sig",
-            "validated_at": "2026-04-01",  # recent
-        })
-        # No permissions.yaml exists — should use default (90 days)
-        errors = validate_precedent_content("test.json", "no-config-sig")
+        _make_precedent_file(
+            fake_root, "no-config-sig", "test-arch", "SEC-001",
+            _valid_precedent_dict(captured_at="2026-04-01"),  # recent
+        )
+        errors = validate_precedent_content(
+            "test-arch", "SEC-001", "no-config-sig"
+        )
         assert errors == []
 
 
@@ -498,22 +556,22 @@ class TestPrecedentRecency:
         fresh, msg = check_recency("2026-04-05", max_age_days=0)
         assert not fresh
 
-    def test_parse_validated_at_date(self):
-        dt = parse_validated_at("2026-03-15")
+    def test_parse_captured_at_date(self):
+        dt = parse_captured_at("2026-03-15")
         assert dt.year == 2026
         assert dt.month == 3
 
-    def test_parse_validated_at_datetime(self):
-        dt = parse_validated_at("2026-03-15T10:30:00Z")
+    def test_parse_captured_at_datetime(self):
+        dt = parse_captured_at("2026-03-15T10:30:00Z")
         assert dt.hour == 10
 
-    def test_parse_validated_at_with_tz_offset(self):
-        dt = parse_validated_at("2026-03-15T10:30:00+02:00")
+    def test_parse_captured_at_with_tz_offset(self):
+        dt = parse_captured_at("2026-03-15T10:30:00+02:00")
         assert dt.hour == 10
 
-    def test_parse_validated_at_invalid_raises(self):
+    def test_parse_captured_at_invalid_raises(self):
         with pytest.raises(ValueError, match="invalid date format"):
-            parse_validated_at("not-a-date")
+            parse_captured_at("not-a-date")
 
 
 class TestGetPrecedentMaxAge:
@@ -559,16 +617,32 @@ class TestGetPrecedentMaxAge:
 
 
 class TestCheckPrecedentExists:
-    def test_existing_precedent(self):
+    def test_existing_precedent(self, fake_root):
+        _make_precedent_file(
+            fake_root, "test-sig", "test-arch", "SEC-001",
+            _valid_precedent_dict(),
+        )
         assert check_precedent_exists(
-            "monitoring-probe-001.json", "wazuh-rule-5710"
+            "test-arch", "SEC-001", "test-sig"
         ) is True
 
-    def test_nonexistent_precedent(self):
-        assert check_precedent_exists("does-not-exist.json", "wazuh-rule-5710") is False
+    def test_nonexistent_precedent(self, fake_root):
+        _make_precedent_file(
+            fake_root, "test-sig", "test-arch", "SEC-001",
+            _valid_precedent_dict(),
+        )
+        assert check_precedent_exists(
+            "test-arch", "does-not-exist", "test-sig"
+        ) is False
 
-    def test_nonexistent_signature(self):
-        assert check_precedent_exists("anything.json", "nonexistent-sig") is False
+    def test_nonexistent_archetype(self, fake_root):
+        assert check_precedent_exists(
+            "ghost-arch", "SEC-001", "test-sig"
+        ) is False
+
+    def test_empty_args_return_false(self, fake_root):
+        assert check_precedent_exists("", "SEC-001", "test-sig") is False
+        assert check_precedent_exists("test-arch", "", "test-sig") is False
 
 
 # --- Archetype + trust anchor validation ---
@@ -577,11 +651,11 @@ class TestCheckPrecedentExists:
 def _make_archetype_file(
     root: Path, sig: str, name: str, required_anchors: list
 ) -> Path:
-    """Helper: write an archetype .md file with the given required_anchors."""
-    arch_dir = root / "knowledge" / "signatures" / sig / "archetypes"
+    """Helper: write an archetype README under archetypes/{name}/README.md."""
+    arch_dir = root / "knowledge" / "signatures" / sig / "archetypes" / name
     arch_dir.mkdir(parents=True, exist_ok=True)
-    path = arch_dir / f"{name}.md"
-    anchors_yaml = "\n".join(f"  - {a}" for a in required_anchors) or "[]"
+    path = arch_dir / "README.md"
+    anchors_yaml = "\n".join(f"  - {a}" for a in required_anchors)
     if required_anchors:
         anchors_block = f"required_anchors:\n{anchors_yaml}"
     else:
@@ -591,7 +665,6 @@ def _make_archetype_file(
         f"archetype: {name}\n"
         f"signature_id: {sig}\n"
         f"{anchors_block}\n"
-        f"precedents: []\n"
         f"---\n\n"
         f"# {name}\n"
     )
@@ -609,24 +682,24 @@ class TestArchetypeValidation:
         assert "oncall-schedule" in fm["required_anchors"]
         assert "change-windows" in fm["required_anchors"]
 
-    def test_load_archetype_frontmatter_with_extension(self):
-        """Loads with explicit .md extension."""
-        fm = load_archetype_frontmatter(
-            "post-exploit-interactive.md", "wazuh-rule-100001"
-        )
+    def test_load_archetype_fake_root(self, fake_root):
+        """Loads an archetype README from a synthetic signature dir."""
+        _make_archetype_file(fake_root, "test-sig", "my-arch", ["a1"])
+        fm = load_archetype_frontmatter("my-arch", "test-sig")
         assert fm is not None
-        assert fm["required_anchors"] == []
+        assert fm["archetype"] == "my-arch"
+        assert fm["required_anchors"] == ["a1"]
 
-    def test_load_archetype_missing(self):
-        assert load_archetype_frontmatter("nonexistent", "wazuh-rule-100001") is None
+    def test_load_archetype_missing(self, fake_root):
+        assert load_archetype_frontmatter("nonexistent", "test-sig") is None
 
     def test_check_archetype_exists_real(self):
         assert check_archetype_exists(
             "operator-runtime-debug", "wazuh-rule-100001"
         ) is True
 
-    def test_check_archetype_exists_missing(self):
-        assert check_archetype_exists("nope", "wazuh-rule-100001") is False
+    def test_check_archetype_exists_missing(self, fake_root):
+        assert check_archetype_exists("nope", "test-sig") is False
 
     def test_anchors_all_confirmed(self, fake_root):
         _make_archetype_file(fake_root, "test-sig", "ok", ["a1", "a2"])
@@ -766,7 +839,6 @@ class TestReportFrontmatterArchetypeFields:
             status="resolved",
             disposition="benign",
             confidence="high",
-            matched_precedent=None,
             leads_pursued=2,
         )
         defaults.update(overrides)
@@ -776,14 +848,14 @@ class TestReportFrontmatterArchetypeFields:
         r = self._make_resolved(matched_archetype="some-arch")
         assert r.validate() == []
 
-    def test_resolved_with_neither_fails(self):
+    def test_resolved_with_archetype_missing_fails(self):
         r = self._make_resolved()
         errors = r.validate()
         assert any("matched_archetype" in e for e in errors)
 
-    def test_resolved_with_both_passes(self):
+    def test_resolved_with_archetype_and_ticket_passes(self):
         r = self._make_resolved(
-            matched_archetype="arch", matched_precedent="p.json"
+            matched_archetype="arch", matched_ticket_id="SEC-001"
         )
         assert r.validate() == []
 

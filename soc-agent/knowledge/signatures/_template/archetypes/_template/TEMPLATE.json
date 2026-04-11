@@ -1,0 +1,18 @@
+{
+  "ticket_id": "SEC-YYYY-NNN",
+  "archetype": "_template",
+  "captured_at": "2026-04-11",
+  "disposition": "benign",
+  "narrative": "One-paragraph summary of why this specific instance matched the archetype. Cite the concrete entities (srcip, srcuser, host, image, etc.) and the trust anchor responses that grounded the closure. This is what the judge compares against future alerts to decide whether the archetype + instance combination transfers.",
+  "alert": {
+    "_comment": "Raw alert snapshot as it was at ticket close — copy from alert.json."
+  },
+  "anchors_at_time": [
+    {
+      "anchor": "anchor-name",
+      "result": "confirmed",
+      "citation": "Concrete reference — ticket ID, operator name, deploy run ID, allowlist entry. Not placeholder text.",
+      "temporal": false
+    }
+  ]
+}

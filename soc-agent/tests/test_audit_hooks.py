@@ -274,7 +274,8 @@ signature_id: wazuh-rule-5710
 status: resolved
 disposition: benign
 confidence: high
-matched_precedent: monitoring-probe-001.json
+matched_archetype: monitoring-probe
+matched_ticket_id: SEC-2024-001
 leads_pursued: 4
 ---
 # Report body
@@ -296,7 +297,8 @@ leads_pursued: 4
         assert entry["ticket_id"] == "SEC-042"
         assert entry["status"] == "resolved"
         assert entry["leads_pursued"] == 4
-        assert entry["matched_precedent"] == "monitoring-probe-001.json"
+        assert entry["matched_archetype"] == "monitoring-probe"
+        assert entry["matched_ticket_id"] == "SEC-2024-001"
 
 
 # --- tag_tool_results ---

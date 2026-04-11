@@ -3,7 +3,6 @@ archetype: container-init-script
 signature_id: wazuh-rule-100001
 required_anchors:
   - image-baseline
-precedents: []
 ---
 
 # Container Init Script

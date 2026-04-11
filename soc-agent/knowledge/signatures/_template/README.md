@@ -18,11 +18,11 @@ Before writing any knowledge, study real data for this signature:
    - Common dispositions — what % were benign vs escalated?
    - Recurring patterns — same source IPs, usernames, time-of-day clusters?
 3. **Review closed tickets** — read analyst notes, resolution reasoning, and any false positive annotations
-4. **Identify distinct outcome clusters** — group tickets by what actually happened (monitoring probe, brute force, misconfiguration, etc.). These become your hypothesis catalog.
+4. **Identify distinct outcome clusters** — group tickets by what actually happened (monitoring probe, brute force, misconfiguration, etc.). Each cluster becomes an archetype.
 5. **Extract useful investigation tricks** — what queries or checks did analysts use to resolve quickly? What dead ends wasted time?
-6. **Select representative tickets** for precedents — pick 1-2 per outcome cluster that best illustrate the pattern
+6. **Select representative tickets per archetype** — 1-2 per cluster that best illustrate the pattern. These become precedent snapshots under the matching archetype directory.
 
-This research phase is the foundation. The context, playbook, and precedents should reflect what actually happens with this signature, not what might theoretically happen.
+This research phase is the foundation. The context, playbook, and archetypes should reflect what actually happens with this signature, not what might theoretically happen.
 
 ### 3. Fill in knowledge files
 
@@ -35,27 +35,49 @@ This research phase is the foundation. The context, playbook, and precedents sho
 
 **playbook.md:**
 - Update frontmatter (signature_id, last_updated)
-- Hypothesis catalog — from the outcome clusters you identified in research (must include at least one adversarial hypothesis)
-- Leads with per-hypothesis predictions — based on what queries/checks actually resolved past tickets
-- Screen patterns (optional, recommended) — identify the most common benign outcomes with clear, mechanical indicators. These enable fast resolution without the full investigation loop. Only include patterns where every indicator is unambiguous. Prioritize adding screen patterns during post-mortem review when you have real outcome data.
-- Escalation and auto-close criteria — derived from real resolution patterns
+- Archetype catalog — list one archetype per outcome cluster you identified in research (must include at least one adversarial archetype)
+- Starter lead order — the leads that discriminate between the archetypes cheaply
+- Screen table (optional, recommended) — fast-path patterns for the most common benign archetype. Only include a pattern if every indicator is unambiguous and every indicator is queryable via a real lead, not just alert-field matching
+- Scope — how far the investigation may range before escalating
 
-**precedents/:**
-- Copy `precedents/_template.json` to `precedents/{slug}.json` for each representative ticket
-- Fill from the real investigation flow, not hypothetical scenarios
+**archetypes/{archetype-name}/:**
+- Create one directory per archetype you identified in research
+- Inside each, write `README.md` describing the abstract story + required trust anchors (copy the shape of `archetypes/_template/README.md`)
+- Drop one JSON snapshot per representative ticket next to the README, named `{TICKET-ID}.json`. See `archetypes/_template/TEMPLATE.json` for the schema
+
+**Trust anchors (optional but recommended):**
+- Benign archetypes should declare `required_anchors` in frontmatter — these point at files under `../../environment/operations/{anchor-name}.md` that describe the org source of truth confirming the archetype in a specific instance
+- If an anchor you need doesn't exist yet, scaffold it under `environment/operations/` with the same shape as existing anchors
+- If no anchor is available for a benign archetype, the archetype cannot resolve to benign without `matched_ticket_id` — Tier 1 enforces this
 
 ## Directory structure after setup
 
 ```
 {signature-id}/
-├── context.md       # Signature reference (detection logic, threat model, FPs)
-├── playbook.md      # Hypothesis catalog, leads, escalation criteria
-└── precedents/      # Past resolved investigations (JSON)
-    └── {slug}.json
+├── context.md               # Signature reference (detection logic, threat model, FPs)
+├── playbook.md              # Archetype catalog, leads, screen table, escalation criteria
+└── archetypes/              # One subdirectory per recognized archetype
+    └── {archetype-name}/
+        ├── README.md        # Story + required_anchors + precedent pointer
+        └── {TICKET-ID}.json # One or more precedent snapshots (ticket cache)
 ```
+
+## The two-leg resolution model
+
+Closing an alert without human escalation requires **both**:
+
+1. **Shape** — the investigation's observed evidence fits an archetype story (documented in the archetype README).
+2. **Grounding** — at least one of:
+   - (a) the archetype's `required_anchors` all confirmed at investigation time, OR
+   - (b) a `matched_ticket_id` pointing at a valid precedent snapshot under the same archetype.
+
+If the archetype declares no `required_anchors`, (b) is mandatory. If the archetype declares required anchors, (a) is the primary path and (b) is supplementary confidence. An anchor confirmation that depended on time-bounded state (on-call window, change ticket, deploy run) is marked `temporal: true` in the precedent's `anchors_at_time` — temporal confirmations do not transfer forward in time and must be re-confirmed at the current investigation.
 
 ## References
 
-- v3 architecture: `docs/design-v3-architecture.md` sections 3.2 (context), 3.3 (playbook), 3.4 (precedents)
-- Example signature: `wazuh-rule-5710/`
+- v3 architecture: `docs/design-v3-architecture.md`
+- Archetype rewrite design: `docs/design-v3-hypothesis-archetype-rewrite.md`
+- Example signature: `wazuh-rule-5710/` (4 archetypes + 2 precedent snapshots)
 - Precedent schema: `schemas/precedent.py`
+- Report frontmatter schema: `schemas/report_frontmatter.py`
+- Trust anchor examples: `knowledge/environment/operations/`

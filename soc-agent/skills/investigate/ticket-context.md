@@ -134,7 +134,8 @@ ticket_context:
         run_id: "{id or null}"
         disposition: "{disposition or null}"
         confidence: "{confidence or null}"
-        matched_precedent: "{filename or null}"
+        matched_archetype: "{archetype-name or null}"
+        matched_ticket_id: "{SEC-YYYY-NNN or null}"
         summary: "{1-sentence summary of prior outcome or null}"
 
   maybe:
