@@ -42,10 +42,18 @@ Run through before calling an edit done. Quick pre-flight, not a replacement for
 - [ ] Any archetype resolving to non-escalation still declares its `required_anchors`?
 - [ ] Screen pattern match conditions not widened without regression evidence?
 
+## Query template tagging
+
+Only when a lead query template (`leads/{name}/templates/{vendor}.md`) was touched or added.
+
+- [ ] Ran `list_lead_tags.py --check <template>` and reviewed every flag as an explicit decision (reuse, introduce deliberately, or rename)?
+- [ ] Every tag is snake_case?
+- [ ] Tag-search probe ran with two Haiku runners on different framings, and the declared tags overlap the search terms from both runners — or the gap is an accepted narrowing, not an oversight?
+
 ## Validation
 
-- [ ] Deterministic checks ran clean (resolve_imports, schema tests, Grep cross-refs)?
-- [ ] Appropriate probes ran — reconstruction + comprehension always; coherence for multi-file; replay for destructive or signature-creation?
+- [ ] Deterministic checks ran clean (resolve_imports, schema tests, Grep cross-refs, tag vocabulary)?
+- [ ] Appropriate probes ran — reconstruction + comprehension always; coherence for multi-file; replay for destructive or signature-creation; tag-search when a query template changed?
 - [ ] Self-reflected on information loss, contradiction, and regression?
 - [ ] Stayed within the 10-probe sanity cap?
 - [ ] Surfaced unresolved concerns to the user instead of papering over them?

@@ -1,7 +1,7 @@
 ---
 lead: authentication-history
 vendor: wazuh
-tags: [auth, ssh, wazuh-alerts, profile]
+tags: [auth, ssh, wazuh_alerts, profile]
 entity_fields:
   ip: data.srcip
   user: data.srcuser
