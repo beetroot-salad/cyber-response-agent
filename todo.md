@@ -31,6 +31,130 @@
 
 ## Next — Reliability & Evaluation
 
+### Post-mortem surfaces screen misclassifications as improvement input
+
+Run #9 made this sharp: the alert the agent investigated was a real regularly-scheduled `monitoring_probe.sh` invocation at the `:30:02` cron slot — the canonical SEC-2024-001 shape — and the archetype precedent was pre-cached. In a well-tuned deployment, this *should* have been a SCREEN match resolving to benign/high in 3-5 minutes. Instead the SCREEN subagent returned `no_match` because the 5-min window contained an off-cadence stray (my manual trigger), and the full loop ran for 11 minutes and $2.28 before escalating the analyst with an accurate-but-verbose hand-off.
+
+**This is an improvement signal, not a bug**. In a realistic deployment, the operator will encounter it as: "why is my SOC agent burning $2/run on something it already has a precedent for?" The answer is almost always that the SCREEN table for the relevant signature is too narrow — it fails on edge cases the agent *could* recognize if the indicators were defined more precisely. This is exactly the kind of observation the `/investigate` post-mortem loop should catch and surface.
+
+**The post-mortem should flag every run where all three of these are true simultaneously:**
+
+1. **Disposition is "escalated / benign"** (or "escalated / inconclusive" with the analyst hand-off leading to a benign hypothesis) — i.e. the full investigation arrived at a recommendation the SCREEN path could theoretically have provided.
+2. **A precedent match was identified in CONTEXTUALIZE but NOT used for resolution** — either the precedent-scan subagent ranked a precedent as `strong` and the agent then refused the transfer, OR the agent reached ANALYZE with a `matched_archetype` candidate that was declined at CONCLUDE.
+3. **The archetype's trust anchor was refuted on a SHAPE violation, not a CONTENT violation** — i.e. the investigation failed the archetype not because the evidence contradicted the benign reading but because the observed shape (attempt count, timing cadence, username rotation, etc.) technically exceeded the archetype's confirmation-shape constraints.
+
+When all three fire, the post-mortem should output a structured finding like:
+
+```
+Screen-miss candidate:
+  signature: wazuh-rule-5710
+  archetype: monitoring-probe
+  precedent: SEC-2024-001 (strong match, refused at CONCLUDE)
+  refusal reason: attempt_count_5min=2 (shape violation on "single attempt, no retry burst")
+  stray event: 23:25:49.198Z srcuser=monitorprobe (off-cadence ~4m14s)
+  improvement candidates:
+    - relax the attempt_count_5min indicator from "exactly 1" to "≤ 2 AND cadence-consistent"
+    - add a cadence-jitter tolerance to approved-monitoring-sources anchor
+    - introduce a "scheduled-probe-with-jitter" sub-archetype
+  cost saved if screen had matched: ~$1.65 (run #9 $2.28 vs run #7 $0.63 SCREEN-resolved baseline)
+```
+
+- [ ] **Implement screen-miss detection in the investigation post-mortem.** Walk `runs/*/report.md` frontmatter + the `runs/*/audit.jsonl` outcome logs, filter for the three-condition pattern above, and emit a screen-miss report per signature. Should be runnable ad-hoc (`scripts/screen_miss_report.py --since 2026-04-01`) and also periodically (cron-friendly).
+- [ ] **Feed the output back into signature onboarding as structured input.** The `/author` skill already exists for authoring signature playbooks. Add a post-mortem intake step: when opening a playbook for revision, check for recent screen-miss reports for that signature and surface them as "the agent is fighting these shapes, should the SCREEN table be adjusted?" Do NOT auto-apply — this is an analyst-mediated loop, not a self-modifying one.
+- [ ] **Archetype refinement over rewriting.** When a screen-miss points at a shape-violation refusal, the fix is almost always *refining the archetype's declared confirmation shape* (or adding a sub-archetype for the observed variant), NOT relaxing the anchor's safety guarantees. The post-mortem output should suggest archetype-level changes, not anchor-level ones.
+
+Cross-reference: see `.claude/skills/evaluate/SKILL.md` run #9 entry for the canonical example. The `monitoring-probe` archetype is the first concrete candidate for this refinement loop — its current `attempt_count_5min: exactly 1` indicator is too brittle and will trip on any cron jitter, duplicate cron entry, or operator-manually-invoked probe, forcing the full loop on alerts the precedent already resolves.
+
+### Model-usage architecture: staged migration to Sonnet main agent (2026-04-12)
+
+Run #9 cost split: Opus 1M main **$1.86 (82%)**, Sonnet ticket-context subagent $0.29 (13%), Haiku precedent-scan + screen $0.13 (5%), total $2.28. The main-agent Opus share dominates; PR #34's subagent model pins already captured the easy subagent savings. Next lever: the main agent itself.
+
+**Research findings on whether Sonnet can be the main agent** (all citations in `code.claude.com/docs/en/agent-sdk/*`):
+
+1. **Subagent dispatch is NOT a cost problem on the main agent.** Per Agent SDK subagents doc: "Each subagent runs in its own fresh conversation. Intermediate tool calls and results stay inside the subagent; only its final message returns to the parent." Costs are billed independently. This means the main agent's Opus share in run #9 came from *its own investigation work* (reading knowledge, running queries, reasoning, writing investigation.md and report.md), NOT from orchestrating 3 subagents. The concern that "a Sonnet main agent will be overwhelmed by coordinating subagent spawns" is not architecturally grounded — dispatching 3 `Agent()` calls costs the main agent ~3 turns and no context budget beyond the returned summaries.
+
+2. **Hooks CAN inject initial context via `additionalContext`** on `SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` events, up to 10,000 chars (content over that gets auto-saved to a file and replaced with a preview pointer). This is the documented supported field.
+
+3. **Hooks CAN shell out to `claude --print` subprocesses** — this is the canonical pattern, already in use by the plugin's `validate_report.py` Tier 2 judge. 600s default hook timeout, `async: true` available. Nested sessions do NOT inherit parent MCP config / allowlist / settings automatically — they must be passed explicitly via CLI flags (as the judge already does).
+
+4. **"Pre-loaded subagent result" pattern is not explicitly named in docs** but all the building blocks interoperate. A `SessionStart` or `UserPromptSubmit` hook can synchronously spawn N parallel `claude --print` subprocesses, collect their results, and inject via `additionalContext` on the main agent's initial prompt.
+
+5. **`AgentDefinition.model` supports per-subagent model pins**, so "Opus as consultant called from Sonnet main" is a supported pattern — just declare a subagent with `model: "opus"` and call it only when deep reasoning is needed.
+
+6. **No published benchmarks** compare Sonnet vs Opus as the *orchestrator* in multi-subagent plugins. The capability risk for Sonnet maintaining state-machine discipline and adversarial-hypothesis holding across 30+ turns is real and **empirically untested**.
+
+**Staged migration plan.** Each stage is independently shippable; do not skip forward without measuring the previous stage's result.
+
+#### Stage 1 — Hook-based CONTEXTUALIZE preload (KEEP Opus main)
+
+Move the `ticket-context` and `precedent-scan` subagents out of main-agent dispatch. A new `hooks/scripts/contextualize_preload.py` runs on `SessionStart` (or `UserPromptSubmit` if SessionStart doesn't work through plugin.json command hooks), synchronously spawns two parallel `claude --print` subprocesses for ticket-context + precedent-scan, collects their results, and injects via `additionalContext`. SCREEN stays as a main-agent-dispatched `Agent()` call (it depends on CONTEXTUALIZE's narrative output, so it can't preload).
+
+- [ ] **Implement `contextualize_preload.py`** with parallel subprocess spawn (`asyncio.gather` or `concurrent.futures.ProcessPoolExecutor`), timeout handling, and structured `additionalContext` output keyed as `## Ticket Context` / `## Precedent Scan` sections.
+- [ ] **Register on SessionStart or UserPromptSubmit** in `plugin.json`. The hook must read the alert JSON (from the investigation's `alert.json` or the first user prompt's embedded payload) to know what to query.
+- [ ] **Shorten `skills/investigate/SKILL.md` CONTEXTUALIZE section** — remove the "dispatch these subagents in parallel" directive, replace with "the preloaded `## Ticket Context` and `## Precedent Scan` sections are already in your context; integrate them into the CONTEXTUALIZE narrative".
+- [ ] **Keep `ticket-context.md` and `precedent-scan.md` subagent prompts** — they become the input prompts to the subprocess invocation. No wasted work.
+- [ ] **Measure**: re-run evals. Expect -30-60s wall clock, -3 main-agent turns, -$0.15 to -$0.25 cost vs run #9. Same model, no capability risk.
+
+**Why this is worth doing even without a model flip**: the hook-based preload is also **more deterministic** than agent-driven dispatch. Tier 1 validation currently has a `check_ticket_context_spawned` guard because the main agent sometimes forgot to spawn the subagent. A hook-driven preload can't be skipped. Once Stage 1 ships, that soft gate becomes dead code and can be retired.
+
+#### Stage 2 — Sonnet drafts report.md, Opus reviews and edits
+
+Splits the CONCLUDE-phase report write between a cheap draft and an expensive review. Today the main Opus agent writes the entire report.md as its final turn in CONCLUDE — this is the single highest-output-token operation in the whole investigation (run #9 emitted ~29K output tokens total, a meaningful fraction of which was the report body).
+
+- [ ] **New subagent `report-drafter`** pinned to Sonnet. Reads `investigation.md` + `state.json` + `alert.json`, produces a first-draft `report.md` in the correct frontmatter schema.
+- [ ] **Main agent (still Opus) reads the draft and edits** via `Edit` rather than re-writing from scratch. The Tier 1 + Tier 2 judge hooks fire on the Edit the same way they fire on a Write, so the existing validation pipeline needs no change.
+- [ ] **Safety check**: if the report-drafter subagent fails to produce valid frontmatter or a Tier 2 judge rejects the post-edit version twice, fall back to the current path (main agent writes from scratch). This keeps Stage 2 risk-bounded — worst case is we pay the old price.
+- [ ] **Measure**: report-write cost reduction vs run #9's CONCLUDE phase cost. Expect 30-50% savings on the report-write operation specifically.
+
+**Why this lands before the main-agent flip**: the report write is the single highest-leverage target for incremental savings without flipping models. It also validates that Sonnet can produce structurally-correct output under our schema constraints, which de-risks Stage 4.
+
+#### Stage 3 — Sonnet writes hypothesis stories, Opus makes predictions
+
+HYPOTHESIZE-phase work splits into two different cognitive modes that map cleanly onto different models:
+
+- **Stories** are narrative descriptions of what a hypothesis *means* ("the source is a sanctioned monitoring probe firing on its declared ~10-minute cadence using an approved sentinel username"). Descriptive text, cheap output, no hard reasoning — Sonnet-friendly.
+- **Predictions** are the *testable implications* of the hypothesis that drive lead selection ("if this is true: exactly 1 attempt in the 5-min window, no retries within 60s, attempt_count_5min ≤ 1, source IP on the approved-monitoring-sources list, username in the monitoring-pattern set; if any of these fail, the hypothesis is refuted"). Hard reasoning about what evidence would discriminate between hypotheses — Opus-worthy.
+
+The split lets the cheap model do the verbose descriptive work (high output tokens, low reasoning load) and reserves the expensive model for the lead-discrimination question (low output tokens, high reasoning load).
+
+- [ ] **New subagent `hypothesis-story`** pinned to Sonnet. Given the CONTEXTUALIZE narrative + the playbook's candidate-hypothesis seed list, produces a structured story per hypothesis: background, what it explains, what it doesn't explain, how the analyst would colloquially describe it. Output: one `story.md` per hypothesis in the run dir.
+- [ ] **Main agent (still Opus) reads stories and generates testable predictions**. For each story, Opus produces the discriminating evidence list — exactly the `required_anchors` / `predictions` shape the archetype model already expects. Main agent then picks leads to confirm/refute based on the predictions, not the stories.
+- [ ] **Guard against Sonnet over-generation**: cap stories at 4-6 per run (the playbook seed count is already the natural limit). If the Sonnet drafter tries to generate new hypotheses outside the playbook seeds, reject and retry — new hypotheses should come from the main agent's evidence-driven reasoning, not from a drafter that's looking at the playbook.
+- [ ] **Measure**: HYPOTHESIZE phase output-token cost reduction vs run #9. Stories are where the verbose narrative lives; extracting them should visibly move the needle.
+
+**Why Stage 3 before the main-agent flip**: stories-vs-predictions is a natural cognitive-split test of whether Sonnet can handle the *descriptive* half of our workload safely. If it can, we have stronger evidence that Sonnet can handle the broader investigation work in Stage 4. If Sonnet produces garbage stories that poison the predictions, we learn that before betting the whole main agent on Sonnet.
+
+#### Stage 4 — Flip main agent to Sonnet (AFTER Stages 1-3 ship and measure cleanly)
+
+Do not attempt Stage 4 until:
+- Stages 1-3 are all merged and have at least 5 clean eval runs each showing no regression on: adversarial-hypothesis discipline, Tier 2 judge pass rate, state-machine phase progression, report schema validity.
+- The `/evaluate` skill's eval suite is larger than 1 run per configuration so comparisons are statistically meaningful (currently a single-run-per-config experiment, which is not enough).
+- The post-mortem screen-miss detection (above section) is implemented and has catalogued what fraction of "escalated benign" runs *should* have been SCREEN-resolved — this tells us how much of the capability risk is already absorbed by the SCREEN path and how much lands on the main agent.
+
+When ready:
+
+- [ ] **Change `claude` invocation in `eval_run.sh` and plugin.json** to pin the main agent to Sonnet. Use `--model sonnet` or the config equivalent.
+- [ ] **Re-run full eval suite** across both Scenario A (monitoring-probe, SCREEN fast-path) and Scenario B (monitoring-bait, full loop). Compare turn-by-turn against the Opus baselines (#5, #7, #9, and any Stage 1-3 baselines).
+- [ ] **Specific safety metrics to watch**:
+  - Adversarial hypothesis refutation timing (Sonnet may refute too quickly)
+  - State-machine bypass attempts (Sonnet may try to skip phases — hooks enforce externally, but bypass *attempts* are a signal)
+  - Tier 2 judge retry count per run (Sonnet may need more edits)
+  - Budget overruns (Sonnet may run longer to reach the same conclusion, partially offsetting cost savings)
+  - Lead-choice diagnosticity (Sonnet may pick less discriminating leads)
+- [ ] **Revert immediately** if any safety metric regresses meaningfully. Sonnet-main is a cost-saving move, not a load-bearing architectural change.
+
+#### Stage 5 — Opus consultant subagent (Sonnet main escalates to Opus for hard calls)
+
+Once Sonnet-main is stable, introduce a `deep-reason` subagent pinned to Opus that the Sonnet main agent calls at specific high-stakes decision points. This recovers capability on hard cases without paying Opus rates everywhere.
+
+- [ ] **Declare `deep-reason` subagent** with `model: "opus"` and a prompt focused on diagnostic-lead selection and evidence synthesis.
+- [ ] **Wire call-points** at specific SKILL.md decision moments:
+  - HYPOTHESIZE → GATHER transition when hypothesis count > 2 AND evidence is ambiguous
+  - GATHER → ANALYZE when a query returns ambiguous results that could support multiple hypotheses
+  - ANALYZE → CONCLUDE when the hypothesis ledger has no clear winner AND no clear escalation trigger
+- [ ] **Budget guard**: cap `deep-reason` to 2 invocations per run by default. Sonnet main should not be able to escalate to Opus unbounded — that's how we slide back toward Opus-everywhere without a measurable benefit.
+- [ ] **Measure**: compare full-eval cost with `deep-reason` vs without. If the consultant adds material cost without moving disposition-accuracy metrics, revert — it's a nice-to-have, not a load-bearing component.
+
 ### Subagent enforcement — stronger gating
 
 The Tier 1 ticket-context check (`validate_report.check_ticket_context_spawned`) catches missing spawns at conclude-time by walking `tool_audit.jsonl`. This is a soft gate: the agent only finds out it was wrong at the very end, then has to retry the report write. If observed in eval runs that the recovery is expensive (extra Tier 2 judge invocations, wall-clock blow-out, agent confusion about what went wrong), promote to a hard gate via a new PreToolUse hook:
