@@ -40,7 +40,7 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 | **Import Resolver** | `soc-agent/scripts/resolve_imports.py` | `!command` preprocessing: resolves signature knowledge |
 | **Validate Report Hook** | `soc-agent/hooks/scripts/validate_report.py` | PostToolUse hook (Write\|Edit): combined Tier 1 + Tier 2 validation |
 | **Judge Prompt** | `soc-agent/hooks/scripts/judge_prompt.md` | Prompt template for Tier 2 judge (5 criteria, two modes) |
-| **Write State Script** | `soc-agent/hooks/scripts/write_state.py` | State machine enforcement |
+| **Infer State Hook** | `soc-agent/hooks/scripts/infer_state.py` | PostToolUse hook: infers state transitions from investigation.md headers |
 | **Investigation Summary Hook** | `soc-agent/hooks/scripts/investigation_summary.py` | JSONL outcome log per completed investigation |
 | **Tool Call Audit Hook** | `soc-agent/hooks/scripts/audit_tool_calls.py` | PostToolUse: audit + trace JSONL split |
 
@@ -48,7 +48,7 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 
 - **Two-tier validation** — `validate_report.py` is a PostToolUse hook (Write|Edit) that fires when report.md is written. Tier 1 enforces structural constraints deterministically. Tier 2 uses Haiku via claude CLI to validate report consistency, precedent match validity, and evidence sufficiency. Runs in full mode (5 checks) for resolved reports with precedent, or no-precedent mode (4 checks) for escalated reports. Untrusted content (alert data, investigation log) is wrapped in per-run salted delimiters to prevent prompt injection.
 - **Hooks registered in plugin.json** — hooks only fire when the plugin is loaded, not during development
-- **State machine** (`write_state.py`) prevents phase skipping — agent must follow CONTEXTUALIZE→[SCREEN]→HYPOTHESIZE→GATHER→ANALYZE→(loop|CONCLUDE)
+- **State machine** (`infer_state.py` PostToolUse hook) prevents phase skipping — inferred from `## PHASE` headers in `investigation.md`, agent must follow CONTEXTUALIZE→[SCREEN]→HYPOTHESIZE→GATHER→ANALYZE→(loop|CONCLUDE)
 - **Two-leg resolution requirement** — `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding: every `required_anchors` entry confirmed OR `matched_ticket_id` citing a valid precedent snapshot inside that archetype directory. Archetypes with no required anchors must be grounded by `matched_ticket_id`
 - **Adversarial hypothesis** — agent must maintain at least one threat hypothesis until explicitly refuted
 
@@ -71,7 +71,8 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 │   │   └── scripts/
 │   │       ├── validate_report.py      # PostToolUse hook: combined Tier 1 + Tier 2 validation
 │   │       ├── judge_prompt.md         # Prompt template for Tier 2 judge
-│   │       ├── write_state.py          # State machine enforcement
+│   │       ├── infer_state.py          # PostToolUse hook: state transitions from investigation.md headers
+│   │       ├── write_state.py          # Manual/debugging state tool (no longer called by agent)
 │   │       ├── investigation_summary.py # Stop hook: JSONL outcome log
 │   │       └── audit_tool_calls.py     # PostToolUse: audit + trace JSONL split
 │   ├── knowledge/

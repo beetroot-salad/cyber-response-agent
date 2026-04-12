@@ -85,4 +85,4 @@ work above still runs — but the outcome is escalation, not auto-close.
 - **Stale temporal grounding:** A cached precedent's `anchors_at_time` entries marked `temporal: true` are historical facts that may no longer be true — on-call windows rotate, change tickets close, deploy runs roll back. The current investigation must re-confirm them against live anchors before the precedent's grounding transfers.
 - **Skipping leads:** Don't conclude after one lead unless it conclusively discriminates all hypotheses. Most investigations need 2-3 leads.
 - **Vague observations:** "The IP appears internal" — did you check? What range? Be specific.
-- **Forgetting state transitions:** Every phase change needs a `write_state.py` call. Missing one breaks the audit trail.
+- **Forgetting state transitions:** Every phase change needs a `## PHASE` section header in `investigation.md`. The `infer_state.py` hook validates transitions automatically — if you skip a phase or write headers out of order, the write will be rejected.

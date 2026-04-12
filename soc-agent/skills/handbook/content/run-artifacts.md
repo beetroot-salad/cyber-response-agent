@@ -66,8 +66,8 @@ This file is the **agent-owned log**. The structural record lives in `state.json
 
 ### `state.json`
 
-**Who writes:** `hooks/scripts/write_state.py`, called by the agent at every phase transition.
-**Who reads:** `write_state.py` (to validate the proposed transition), `validate_report.py` (to detect screen-resolved investigations), the agent (to check its current loop count).
+**Who writes:** the `infer_state.py` PostToolUse hook, triggered automatically when the agent writes `## PHASE` headers to `investigation.md`.
+**Who reads:** `infer_state.py` (to validate the proposed transition), `validate_report.py` (to detect screen-resolved investigations), the agent (to check its current loop count).
 
 ```json
 {
@@ -89,9 +89,9 @@ This file is the **agent-owned log**. The structural record lives in `state.json
 }
 ```
 
-The `history` array is append-only and records every phase the investigation has entered, in order. `write_state.py` uses it to count loops (number of `HYPOTHESIZE` entries) against `MAX_LOOPS = 7`, and `validate_report.py` uses `SCREEN in history and HYPOTHESIZE not in history` to detect screen-resolved investigations that are exempt from the minimum-leads-by-severity check.
+The `history` array is append-only and records every phase the investigation has entered, in order. `infer_state.py` uses it to count loops (number of `HYPOTHESIZE` entries) against `MAX_LOOPS = 7`, and `validate_report.py` uses `SCREEN in history and HYPOTHESIZE not in history` to detect screen-resolved investigations that are exempt from the minimum-leads-by-severity check.
 
-This file is **machine-owned**. The agent should never edit it directly — all updates go through `write_state.py` so the state machine can validate the transition. Attempting to edit `state.json` directly is a way to bypass safety, and it will lose against the PostToolUse audit hook even if it succeeds momentarily.
+This file is **machine-owned**. The agent should never edit it directly — all updates go through the `infer_state.py` hook (triggered by `investigation.md` writes) so the state machine can validate the transition. Attempting to edit `state.json` directly is a way to bypass safety, and it will lose against the PostToolUse audit hook even if it succeeds momentarily.
 
 ### `report.md`
 

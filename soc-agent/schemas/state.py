@@ -1,7 +1,7 @@
 """Investigation state machine schema and validation.
 
 Defines the legal phases and transitions for an investigation run.
-Used by hooks/scripts/write_state.py to enforce state machine integrity.
+Used by hooks/scripts/infer_state.py to enforce state machine integrity.
 """
 
 import json

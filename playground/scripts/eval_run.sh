@@ -153,7 +153,7 @@ stdbuf -oL -eL claude \
         "Bash(python3 scripts/workspace_map.py *)" \
         "Bash(python3 scripts/tools/wazuh_cli.py *)" \
         "Bash(python3 scripts/tools/host_query.py *)" \
-        "Bash(python3 hooks/scripts/write_state.py *)" \
+        "Bash(python3 hooks/scripts/write_state.py *)" \  # legacy: agent no longer calls this (infer_state hook), but kept for manual debugging
         "Bash(python3 /workspace/soc-agent/scripts/preflight.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/resolve_imports.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/setup_run.py *)" \
@@ -161,7 +161,7 @@ stdbuf -oL -eL claude \
         "Bash(python3 /workspace/soc-agent/scripts/workspace_map.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/tools/wazuh_cli.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/tools/host_query.py *)" \
-        "Bash(python3 /workspace/soc-agent/hooks/scripts/write_state.py *)" \
+        "Bash(python3 /workspace/soc-agent/hooks/scripts/write_state.py *)" \  # legacy: see above
         "mcp__wazuh__*" \
         "Task" \
         "Agent" \
