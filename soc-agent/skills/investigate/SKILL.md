@@ -123,6 +123,9 @@ This enforces legal transitions. If you get an error, you attempted an illegal t
 
 1. Review the **Signature Knowledge** section above — it contains the signature context, playbook (archetype catalog + leads), archetype READMEs, checklist, and any imported common knowledge
 2. Review the alert data you identified in Read the Alert
+
+When reading multiple knowledge or environment files, batch independent reads into a single turn using parallel tool calls. Do not issue sequential Reads for files that don't depend on each other.
+
 3. **Integrate preloaded context.** The `## Ticket Context` and `## Archetype Scan` sections were preloaded by the CONTEXTUALIZE hook before this prompt was processed. Full subagent outputs are saved to `{run_dir}/ticket_context.yaml` and `{run_dir}/archetype_scan.yaml`.
    - **Ticket context**: If `fast_resolve.recommended: true` and the cited prior investigation + precedent file exist and match, go directly to CONCLUDE; otherwise use `situation` / `definite` / `maybe` for hypothesis ranking.
    - **Archetype scan**: Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation.
