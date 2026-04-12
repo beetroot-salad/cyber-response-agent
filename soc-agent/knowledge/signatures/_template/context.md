@@ -26,6 +26,13 @@ What triggers this rule. Include the log pattern and example.
 | Field | JSON Path | Description | Example |
 |-------|-----------|-------------|---------|
 
+## Key Observables
+
+The fields that define this alert's identity — what makes THIS alert THIS alert. Used by subagents to extract the right entities for SIEM queries (ticket-context) and to compare shape against archetype stories (archetype-scan). Each entry names the observable, its JSON path, and why it matters for this signature.
+
+| Observable | JSON Path | Why It Matters |
+|-----------|-----------|----------------|
+
 ## Related Rules
 
 | Rule ID | Description | Relationship |
