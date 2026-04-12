@@ -51,14 +51,14 @@ Nov 15 02:30:00 server sshd[12345]: Invalid user testuser from 10.0.1.50 port 54
 
 ## Key Observables
 
-The fields that carry investigative weight for this signature — what makes them diagnostic for discriminating between archetypes.
+The fields that define this alert's identity — what makes THIS alert THIS alert. Used by subagents for entity extraction (ticket-context) and shape comparison (archetype-scan).
 
-| Observable | JSON Path | Diagnostic Role |
-|-----------|-----------|-----------------|
-| Attempted username | `data.srcuser` | Pattern (wordlist vs real-looking vs sentinel) discriminates between archetypes |
-| Source IP | `data.srcip` | Source trust classification (internal monitoring vs external unknown) is the primary risk axis |
-| Target host | `agent.name` | Scope — targeted vs spray-and-pray |
-| Timestamp | `timestamp` | Cadence analysis — single vs burst vs periodic |
+| Observable | JSON Path | Why It Matters |
+|-----------|-----------|----------------|
+| Attempted username | `data.srcuser` | Defines the target identity — pattern (wordlist vs real-looking vs sentinel) is the primary shape discriminator |
+| Source IP | `data.srcip` | Defines the actor — trust classification (internal monitoring vs external unknown) drives the risk axis |
+| Target host | `agent.name` | Defines scope — targeted vs spray-and-pray, singles out which host is under pressure |
+| Timestamp | `timestamp` | Defines temporal context — cadence (single vs burst vs periodic), correlation window anchor |
 
 ## Related Rules
 

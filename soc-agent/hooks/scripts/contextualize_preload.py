@@ -19,7 +19,7 @@ import os
 import re
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -72,14 +72,19 @@ def build_subagent_prompt(template_path: Path, substitutions: dict[str, str]) ->
     """Read a subagent prompt template and substitute variables.
 
     Returns (prompt_body, model) where model comes from frontmatter.
+    Raises ValueError if the template has no model declared in frontmatter.
     """
     text = template_path.read_text()
     fm = parse_yaml_frontmatter(text)
-    model = fm.get("model", "haiku")
+    model = fm.get("model")
+    if model is None:
+        raise ValueError(f"{template_path.name}: frontmatter missing required 'model' field")
 
     # Strip frontmatter from the body — everything after the closing ---
     parts = text.split("---", 2)
-    body = parts[2] if len(parts) >= 3 else text
+    if len(parts) < 3:
+        raise ValueError(f"{template_path.name}: missing frontmatter delimiters (expected --- ... ---)")
+    body = parts[2]
 
     for key, value in substitutions.items():
         body = body.replace(f"{{{key}}}", value)
@@ -136,7 +141,9 @@ def trim_ticket_context(raw: str) -> str:
     if not isinstance(data, dict):
         return raw
 
-    tc = data.get("ticket_context", data)
+    if "ticket_context" not in data:
+        return raw
+    tc = data["ticket_context"]
     if not isinstance(tc, dict):
         return raw
 
@@ -262,24 +269,27 @@ def main() -> int:
         "runs_dir": runs_dir,
     }
 
+    tc_prompt = tc_model = tc_build_error = None
+    as_prompt = as_model = as_build_error = None
+
     try:
         tc_prompt, tc_model = build_subagent_prompt(TICKET_CONTEXT_PROMPT, substitutions)
     except Exception as e:
+        tc_build_error = str(e)
         print(f"contextualize_preload: failed to build ticket-context prompt: {e}", file=sys.stderr)
-        tc_prompt, tc_model = None, None
 
     try:
         as_prompt, as_model = build_subagent_prompt(ARCHETYPE_SCAN_PROMPT, substitutions)
     except Exception as e:
+        as_build_error = str(e)
         print(f"contextualize_preload: failed to build archetype-scan prompt: {e}", file=sys.stderr)
-        as_prompt, as_model = None, None
 
     if tc_prompt is None and as_prompt is None:
         return 0
 
     # Spawn subagents in parallel
-    tc_output, tc_error = None, "prompt build failed"
-    as_output, as_error = None, "prompt build failed"
+    tc_output, tc_error = None, tc_build_error
+    as_output, as_error = None, as_build_error
 
     futures = {}
     with ThreadPoolExecutor(max_workers=2) as executor:

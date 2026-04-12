@@ -37,7 +37,11 @@ For each archetype README, extract:
 - **Boundary conditions** — what explicitly takes an alert OUT of this archetype
 - **Disposition pattern** — what disposition this archetype leads to (from the README's disposition rules)
 
-Then compare the current alert's shape against each archetype's story. Use the Key Observables from `context.md` to know which alert fields matter and extract their values from `alert.json`. Rank by **entity class similarity** — does the alert's source type, target type, and trigger shape match what the archetype describes?
+Then compare the current alert's shape against each archetype's story. Use the Key Observables from `context.md` to know which alert fields matter and extract their values from `alert.json`. Rank by similarity across these dimensions:
+
+- **Entity relationship** — does the source/target/identity class match? (e.g., internal monitoring host vs external unknown, sentinel username vs wordlist username)
+- **Volume and count** — does the alert count fit the archetype's expected pattern? (single attempt vs burst vs sustained campaign)
+- **Temporal pattern** — does the timing match? (periodic/cron-aligned vs one-shot vs rapid-fire cluster)
 
 ## Output
 

@@ -17,9 +17,9 @@ Read the following from the run directory:
 
 Read the signature's own reference material — this scopes your interpretation and names field-level quirks you need to read the alert correctly:
 
-- `knowledge/signatures/{signature_id}/context.md` — signature reference + threat model + field-name quirks for this signature type. Read the **Key Observables** section to know which alert fields carry investigative weight and why. If no Key Observables section exists, fall back to Alert Fields and Threat & Motivation.
+- `knowledge/signatures/{signature_id}/context.md` — signature reference + threat model + field-name quirks for this signature type. Read the **Alert Fields** table for the raw JSON paths you need to extract values from the alert. Read the **Key Observables** section to understand which of those fields define this alert's identity and why they matter. If no Key Observables section exists, fall back to Alert Fields and Threat & Motivation.
 
-Extract the **key entities** from the alert — the fields that carry investigative weight for this alert type. Use the Key Observables table from `context.md` to guide extraction. What counts as a key entity depends on the signature: it could be an IP, a username, a hostname, a process name, a service, or any combination. Identify:
+Extract the **key entities** from the alert — the fields that define this alert's identity. Use the Alert Fields table from `context.md` for JSON paths and the Key Observables table for which fields matter. What counts as a key entity depends on the signature: it could be an IP, a username, a hostname, a process name, a service, or any combination. Identify:
 
 - **Signature** — rule ID and description
 - **Timestamp** — when the alert fired
