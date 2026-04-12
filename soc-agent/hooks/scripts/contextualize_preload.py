@@ -113,98 +113,121 @@ def invoke_subagent(prompt: str, model: str, label: str) -> tuple[str, str | Non
         return "", f"{label}: timed out after {SUBPROCESS_TIMEOUT}s"
 
 
+def _count_inline_list(value: str) -> int:
+    """Count items in an inline YAML list like '["a", "b", "c"]'."""
+    value = value.strip()
+    if not value.startswith("[") or not value.endswith("]"):
+        return 1
+    inner = value[1:-1].strip()
+    if not inner:
+        return 0
+    return len(inner.split(","))
+
+
+# Lines to drop from definite entries (field name at list-item child indent)
+_DEFINITE_DROP = {"reasoning"}
+# Lines to drop from prior_investigation blocks
+_PRIOR_INV_DROP = {"run_id", "summary"}
+# Lines to drop from maybe entries
+_MAYBE_DROP = {"reasoning"}
+
+
 def trim_ticket_context(raw: str) -> str:
     """Trim ticket-context output for additionalContext injection.
 
-    Keeps: situation, definite (count instead of IDs, drops reasoning),
-    maybe (max 3, drops reasoning), fast_resolve (full).
-    """
-    # Try to parse as YAML-in-markdown (the output is a ```yaml block)
-    # If parsing fails, return raw — the main agent can still read it
-    try:
-        import yaml  # noqa: F811
-    except ImportError:
-        # No PyYAML — return raw output, trimming is best-effort
-        return raw
+    Line-level YAML filter — no external dependencies. Operates on the
+    predictable indentation structure of the ticket-context subagent output.
 
+    - situation: kept in full
+    - definite[].alert_ids: replaced with count
+    - definite[].reasoning: dropped (on disk)
+    - definite[].prior_investigation.{run_id,summary}: dropped
+    - maybe: capped at 3 entries, reasoning dropped
+    - fast_resolve: kept in full
+    """
     # Extract YAML block from markdown code fence if present
-    yaml_text = raw
+    text = raw
     fence_match = re.search(r"```ya?ml\s*\n(.*?)```", raw, re.DOTALL)
     if fence_match:
-        yaml_text = fence_match.group(1)
+        text = fence_match.group(1)
 
-    try:
-        data = yaml.safe_load(yaml_text)
-    except Exception:
-        return raw
+    lines = text.split("\n")
+    out: list[str] = []
 
-    if not isinstance(data, dict):
-        return raw
+    # Track which top-level section we're in (situation, definite, maybe, fast_resolve)
+    section = ""
+    maybe_item_count = 0
+    skip_until_indent = -1  # drop all lines at indent > this value
 
-    if "ticket_context" not in data:
-        return raw
-    tc = data["ticket_context"]
-    if not isinstance(tc, dict):
-        return raw
+    for line in lines:
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
 
-    trimmed = {}
+        # Reset skip if we've dedented past the skip threshold
+        if skip_until_indent >= 0 and indent <= skip_until_indent:
+            skip_until_indent = -1
 
-    # situation — keep in full
-    if "situation" in tc:
-        trimmed["situation"] = tc["situation"]
+        if skip_until_indent >= 0:
+            continue
 
-    # definite — count instead of IDs, drop reasoning
-    if "definite" in tc and isinstance(tc["definite"], list):
-        trimmed_definite = []
-        for entry in tc["definite"]:
-            if not isinstance(entry, dict):
+        # Detect top-level section transitions (indent 2 under ticket_context)
+        if indent <= 2 and stripped and not stripped.startswith("-"):
+            key = stripped.split(":")[0].strip()
+            if key in ("situation", "definite", "maybe", "fast_resolve"):
+                section = key
+                maybe_item_count = 0
+
+        # Extract field name from the line, stripping list-item "- " prefix
+        content = stripped[2:] if stripped.startswith("- ") else stripped
+        field = content.split(":")[0].strip() if ":" in content else ""
+
+        # Section-specific trimming
+        if section == "definite":
+            # Replace alert_ids with count
+            if field == "alert_ids":
+                value = content.split(":", 1)[1].strip()
+                count = _count_inline_list(value)
+                prefix = line[:indent]
+                if stripped.startswith("- "):
+                    prefix += "- "
+                out.append(f"{prefix}count: {count}")
                 continue
-            t = {}
-            if "alert_ids" in entry:
-                ids = entry["alert_ids"]
-                t["count"] = len(ids) if isinstance(ids, list) else 1
-            if "shared" in entry:
-                t["shared"] = entry["shared"]
-            if "first_seen" in entry:
-                t["first_seen"] = entry["first_seen"]
-            if "temporal_pattern" in entry:
-                t["temporal_pattern"] = entry["temporal_pattern"]
-            # prior_investigation — keep disposition, archetype, ticket_id only
-            pi = entry.get("prior_investigation", {})
-            if isinstance(pi, dict) and pi.get("exists"):
-                t["prior_investigation"] = {
-                    "exists": True,
-                    "disposition": pi.get("disposition"),
-                    "matched_archetype": pi.get("matched_archetype"),
-                    "matched_ticket_id": pi.get("matched_ticket_id"),
-                }
-            # reasoning — disk only (not included)
-            trimmed_definite.append(t)
-        trimmed["definite"] = trimmed_definite
 
-    # maybe — max 3 entries, drop reasoning
-    if "maybe" in tc and isinstance(tc["maybe"], list):
-        trimmed_maybe = []
-        for entry in tc["maybe"][:3]:
-            if not isinstance(entry, dict):
+            # Drop reasoning
+            if field in _DEFINITE_DROP:
+                skip_until_indent = indent
                 continue
-            t = {}
-            if "shared_entities" in entry:
-                t["shared_entities"] = entry["shared_entities"]
-            if "signature" in entry:
-                t["signature"] = entry["signature"]
-            # reasoning — disk only
-            trimmed_maybe.append(t)
-        trimmed["maybe"] = trimmed_maybe
 
-    # fast_resolve — keep in full (safety-critical)
-    if "fast_resolve" in tc:
-        trimmed["fast_resolve"] = tc["fast_resolve"]
+            # Inside prior_investigation: drop run_id, summary
+            if field in _PRIOR_INV_DROP:
+                skip_until_indent = indent
+                continue
 
-    try:
-        return yaml.dump({"ticket_context": trimmed}, default_flow_style=False, sort_keys=False)
-    except Exception:
-        return raw
+        elif section == "maybe":
+            # Count list items (lines starting with "- " at the list indent)
+            if stripped.startswith("- ") and indent >= 4:
+                maybe_item_count += 1
+                if maybe_item_count > 3:
+                    skip_until_indent = indent - 1
+                    continue
+
+            # Replace alert_ids with count (same as definite)
+            if field == "alert_ids":
+                value = content.split(":", 1)[1].strip()
+                count = _count_inline_list(value)
+                prefix = line[:indent]
+                if stripped.startswith("- "):
+                    prefix += "- "
+                out.append(f"{prefix}count: {count}")
+                continue
+
+            if field in _MAYBE_DROP:
+                skip_until_indent = indent
+                continue
+
+        out.append(line)
+
+    return "\n".join(out)
 
 
 def format_additional_context(

@@ -20,12 +20,6 @@ from hooks.scripts.contextualize_preload import (
 )
 
 
-def _has_yaml() -> bool:
-    try:
-        import yaml  # noqa: F401
-        return True
-    except ImportError:
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -169,111 +163,90 @@ ticket_context:
 
 
 class TestTrimTicketContext:
-    """Trim tests. PyYAML is optional — without it, trim returns raw (tested below)."""
+    """Line-level YAML trimmer — no external dependencies."""
 
-    def test_returns_raw_without_yaml(self):
-        """Without PyYAML, trimming is a no-op — raw output passes through."""
+    def test_replaces_alert_ids_with_count(self):
         result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
-        try:
-            import yaml  # noqa: F401
-        except ImportError:
-            # No PyYAML — raw passthrough is correct
-            assert result == SAMPLE_TICKET_CONTEXT_YAML
-            return
-        # PyYAML available — trimming happened, covered by tests below
+        assert "alert_ids:" not in result
+        assert "count: 3" in result
 
-    def test_returns_raw_on_invalid_yaml(self):
-        raw = "not: yaml: at: all: [[[broken"
-        result = trim_ticket_context(raw)
-        assert result == raw
-
-    def test_returns_raw_on_missing_ticket_context_key(self):
-        raw = "some_other_key:\n  data: value\n"
-        result = trim_ticket_context(raw)
-        # Without PyYAML: returns raw (no parsing attempt)
-        # With PyYAML: returns raw (ticket_context key missing)
-        assert result == raw
-
-    @pytest.mark.skipif(
-        not _has_yaml(), reason="PyYAML not installed"
-    )
-    def test_trims_alert_ids_to_count(self):
-        import yaml
-
-        result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
-        data = yaml.safe_load(result)
-        definite = data["ticket_context"]["definite"][0]
-        assert "alert_ids" not in definite
-        assert definite["count"] == 3
-
-    @pytest.mark.skipif(
-        not _has_yaml(), reason="PyYAML not installed"
-    )
     def test_drops_reasoning_from_definite(self):
-        import yaml
-
         result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
-        data = yaml.safe_load(result)
-        definite = data["ticket_context"]["definite"][0]
-        assert "reasoning" not in definite
+        assert "All from same monitoring host" not in result
 
-    @pytest.mark.skipif(
-        not _has_yaml(), reason="PyYAML not installed"
-    )
     def test_keeps_situation(self):
-        import yaml
-
         result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
-        data = yaml.safe_load(result)
-        assert "Three SSH" in data["ticket_context"]["situation"]
+        assert "Three SSH invalid user alerts" in result
 
-    @pytest.mark.skipif(
-        not _has_yaml(), reason="PyYAML not installed"
-    )
-    def test_prior_investigation_trimmed(self):
-        import yaml
-
+    def test_keeps_shared_and_temporal(self):
         result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
-        data = yaml.safe_load(result)
-        pi = data["ticket_context"]["definite"][0]["prior_investigation"]
-        assert pi["disposition"] == "benign"
-        assert pi["matched_archetype"] == "monitoring-probe"
-        assert pi["matched_ticket_id"] == "SEC-2024-001"
-        assert "summary" not in pi
-        assert "run_id" not in pi
+        assert "172.22.0.10" in result
+        assert "periodic" in result
 
-    @pytest.mark.skipif(
-        not _has_yaml(), reason="PyYAML not installed"
-    )
+    def test_drops_prior_investigation_run_id(self):
+        result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
+        assert "run-abc" not in result or "prior_run_id" in result
+        # run-abc appears in fast_resolve.prior_run_id (kept) but NOT in
+        # prior_investigation.run_id (dropped)
+        lines = result.split("\n")
+        for i, line in enumerate(lines):
+            if "run_id:" in line and "prior_run_id" not in line:
+                # This is the prior_investigation.run_id — should be gone
+                assert False, f"prior_investigation.run_id not trimmed: {line}"
+
+    def test_drops_prior_investigation_summary(self):
+        result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
+        assert "Resolved as approved monitoring probe" not in result
+
+    def test_keeps_prior_investigation_disposition(self):
+        result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
+        # disposition, matched_archetype, matched_ticket_id should survive
+        assert 'disposition: "benign"' in result
+        assert 'matched_archetype: "monitoring-probe"' in result
+        assert 'matched_ticket_id: "SEC-2024-001"' in result
+
     def test_maybe_capped_at_three(self):
-        import yaml
-
         result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
-        data = yaml.safe_load(result)
-        assert len(data["ticket_context"]["maybe"]) == 3
+        assert "Fourth maybe entry" not in result
+        assert "alert-7" not in result
 
-    @pytest.mark.skipif(
-        not _has_yaml(), reason="PyYAML not installed"
-    )
+    def test_maybe_drops_reasoning(self):
+        result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
+        assert "Same target but different signature" not in result
+        assert "Same source, successful login" not in result
+
+    def test_maybe_keeps_signature_and_entities(self):
+        result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
+        assert "5712" in result
+        assert "5501" in result
+        assert "shared_entities:" in result
+
     def test_fast_resolve_kept_in_full(self):
-        import yaml
-
         result = trim_ticket_context(SAMPLE_TICKET_CONTEXT_YAML)
-        data = yaml.safe_load(result)
-        fr = data["ticket_context"]["fast_resolve"]
-        assert fr["recommended"] is True
-        assert fr["risk_note"] == "none"
+        assert "recommended: true" in result
+        assert 'risk_note: "none"' in result
+        assert "prior_run_id:" in result
 
-    @pytest.mark.skipif(
-        not _has_yaml(), reason="PyYAML not installed"
-    )
     def test_extracts_from_code_fence(self):
-        import yaml
-
         fenced = "Some text\n```yaml\n" + SAMPLE_TICKET_CONTEXT_YAML + "```\nMore text"
         result = trim_ticket_context(fenced)
-        data = yaml.safe_load(result)
-        assert "ticket_context" in data
+        assert "count: 3" in result
+        assert "All from same monitoring host" not in result
+
+    def test_passthrough_on_non_ticket_context(self):
+        raw = "some_other_key:\n  data: value\n"
+        result = trim_ticket_context(raw)
+        assert result == raw
+
+    def test_count_single_alert_id(self):
+        yaml_text = (
+            "ticket_context:\n"
+            "  definite:\n"
+            '    - alert_ids: ["single-id"]\n'
+            '      shared: "test"\n'
+        )
+        result = trim_ticket_context(yaml_text)
+        assert "count: 1" in result
 
 
 # ---------------------------------------------------------------------------
