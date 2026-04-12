@@ -9,6 +9,8 @@ runs/
 ├── {run_id}/                  # one directory per investigation
 │   ├── alert.json             # sanitized alert input — who, what, when
 │   ├── meta.json              # run_id, signature_id, per-run salt
+│   ├── ticket_context.yaml    # preloaded SIEM correlation + fast-resolve assessment
+│   ├── archetype_scan.yaml    # preloaded archetype similarity rankings
 │   ├── investigation.md       # agent's narrative log (per-phase sections)
 │   ├── state.json             # state machine state (phase, history, timestamps)
 │   └── report.md              # final report — structured frontmatter + body
@@ -24,7 +26,7 @@ The runs directory path is configurable via `SOC_AGENT_RUNS_DIR`, defaulting to 
 ### `alert.json`
 
 **Who writes:** `scripts/setup_run.py` at the start of every investigation.
-**Who reads:** the main agent (CONTEXTUALIZE), ticket-context and screen subagents, Tier 2 judge.
+**Who reads:** the main agent (CONTEXTUALIZE), CONTEXTUALIZE preload hook subagents (ticket-context, archetype-scan), screen subagent, Tier 2 judge.
 
 The input alert, passed as a JSON string argument to `/investigate` and parsed at run setup. Before being written, `setup_run.py` recursively sanitizes every string value to:
 
@@ -54,6 +56,20 @@ Three fields:
 The `salt` is the injection defense primitive (Layer 2 — see `content/validation.md#prompt-injection-defense` for the full story). Every piece of untrusted content the plugin forwards to the Tier 2 judge gets wrapped in `<run-{salt}-{tag}>...</run-{salt}-{tag}>` delimiters. An attacker crafting a prompt-injection payload into an alert cannot know the salt at authoring time, so they cannot forge a closing delimiter to escape the wrapper.
 
 The salt is generated per run (`secrets.token_hex(8)`) specifically so it cannot leak into training data or documentation and become forgeable — static delimiters would eventually.
+
+### `ticket_context.yaml`
+
+**Who writes:** `scripts/contextualize_preload.py` (skill expansion `!command`, detached child).
+**Who reads:** the main agent during CONTEXTUALIZE — reads the file from disk.
+
+Full output from the ticket-context subagent. Contains SIEM correlation results: recent/related alert clusters, repeat detection, prior investigation matches, and fast-resolve assessment. The preload script forks a detached child during skill expansion so the command returns immediately; the file lands asynchronously (typically within 30–120s). The main agent reads it at the start of CONTEXTUALIZE and falls back to manual dispatch if the file is still missing by the end of the phase.
+
+### `archetype_scan.yaml`
+
+**Who writes:** `scripts/contextualize_preload.py` (skill expansion `!command`, detached child).
+**Who reads:** the main agent during CONTEXTUALIZE — reads the file from disk.
+
+Output from the archetype-scan subagent. Contains a similarity ranking of each archetype's story against the current alert, with required anchors and boundary conditions. Used by the main agent to seed hypothesis generation. Same async-delivery model as `ticket_context.yaml`.
 
 ### `investigation.md`
 
