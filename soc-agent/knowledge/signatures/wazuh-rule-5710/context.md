@@ -49,6 +49,17 @@ Nov 15 02:30:00 server sshd[12345]: Invalid user testuser from 10.0.1.50 port 54
 
 `data.dstuser` and `agent.name` are self-explanatory.
 
+## Key Observables
+
+The fields that carry investigative weight for this signature — what makes them diagnostic for discriminating between archetypes.
+
+| Observable | JSON Path | Diagnostic Role |
+|-----------|-----------|-----------------|
+| Attempted username | `data.srcuser` | Pattern (wordlist vs real-looking vs sentinel) discriminates between archetypes |
+| Source IP | `data.srcip` | Source trust classification (internal monitoring vs external unknown) is the primary risk axis |
+| Target host | `agent.name` | Scope — targeted vs spray-and-pray |
+| Timestamp | `timestamp` | Cadence analysis — single vs burst vs periodic |
+
 ## Related Rules
 
 | Rule ID | Description | Relationship |

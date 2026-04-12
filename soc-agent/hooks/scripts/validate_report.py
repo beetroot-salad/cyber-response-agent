@@ -294,17 +294,20 @@ def playbook_has_screen_section(signature_id: str) -> bool:
 
 
 def check_ticket_context_spawned(run_dir: Path) -> str | None:
-    """Verify a ticket-context subagent was spawned during this investigation.
+    """Verify ticket-context ran during this investigation.
 
-    SKILL.md §CONTEXTUALIZE requires spawning a ticket-context subagent (Task
-    tool) to handle cross-alert recurrence and prior-investigation checks.
-    Without it, recurring-pattern detection is structurally incomplete and the
-    main agent ends up doing those queries inline with weaker context.
+    The CONTEXTUALIZE preload hook writes ticket_context.yaml to the run
+    directory. If that file exists, the check passes (hook-preloaded path).
+    If not, falls back to scanning the audit log for a manual Agent/Task
+    dispatch of ticket-context (backward-compatible path).
 
-    Walks the per-run audit log for any Task call whose tool_input references
-    the ticket-context prompt path or contains ticket-context as a keyword.
     Returns None on pass, an error message on fail.
     """
+    # Primary: hook-preloaded output file
+    if (run_dir / "ticket_context.yaml").exists():
+        return None
+
+    # Fallback: check audit log for manual dispatch
     audit_path = run_dir.parent / "tool_audit.jsonl"
     if not audit_path.exists():
         # No audit log means the audit hook hasn't run (or isn't configured).
@@ -335,11 +338,9 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
 
     return (
         "This investigation did not record a ticket-context subagent "
-        "invocation in the audit log. The CONTEXTUALIZE phase delegates "
-        "cross-alert correlation (similar alerts, prior firings, related "
-        "activity on the same entities) to a ticket-context subagent so "
-        "that work doesn't crowd the main agent's reasoning context. "
-        "Spawn it now using the Agent tool with the prompt template at "
+        "invocation. The CONTEXTUALIZE preload hook normally writes "
+        "ticket_context.yaml to the run directory; if the hook failed, "
+        "dispatch the subagent manually using the prompt template at "
         "skills/investigate/ticket-context.md, then re-write report.md."
     )
 

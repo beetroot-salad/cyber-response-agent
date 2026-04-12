@@ -41,7 +41,7 @@ The loop is a finite-state machine with six phases and a hard limit on hypothesi
 
 | Phase | What happens | Can transition to |
 |---|---|---|
-| `CONTEXTUALIZE` | Load signature knowledge, parse alert, dispatch ticket-context + precedent-scan subagents in parallel, build resolution map | `SCREEN`, `HYPOTHESIZE`, `CONCLUDE` |
+| `CONTEXTUALIZE` | Load signature knowledge, parse alert, integrate preloaded ticket-context + archetype-scan, build resolution map | `SCREEN`, `HYPOTHESIZE`, `CONCLUDE` |
 | `SCREEN` *(optional)* | Cheap subagent attempts mechanical pattern match against known benign outcomes | `HYPOTHESIZE`, `CONCLUDE` |
 | `HYPOTHESIZE` | Form or update candidate explanations, select the most diagnostic lead | `GATHER` |
 | `GATHER` | Execute the selected lead(s), characterize raw observations | `ANALYZE` |
@@ -54,7 +54,7 @@ Full per-phase detail in `content/phases.md`.
 
 CONTEXTUALIZE is the only legal initial phase, and it has three legal next-hops:
 
-1. **CONCLUDE** — ticket-context fast-resolve. If the ticket-context subagent finds a recent prior investigation of the same pattern with `status=resolved` and `confidence=high`, and the current alert's entities and behavior match, the main agent validates the match and jumps straight to CONCLUDE with the prior precedent.
+1. **CONCLUDE** — ticket-context fast-resolve. If the preloaded ticket-context finds a recent prior investigation of the same pattern with `status=resolved` and `confidence=high`, and the current alert's entities and behavior match, the main agent validates the match and jumps straight to CONCLUDE with the prior precedent.
 2. **SCREEN** — if the signature's playbook has a `## Screen` section, try the mechanical fast-path.
 3. **HYPOTHESIZE** — otherwise, enter the full loop directly.
 

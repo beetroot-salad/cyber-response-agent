@@ -26,6 +26,13 @@ What triggers this rule. Include the log pattern and example.
 | Field | JSON Path | Description | Example |
 |-------|-----------|-------------|---------|
 
+## Key Observables
+
+The fields that carry investigative weight for this signature — not just what the fields are (that's Alert Fields above), but what makes them diagnostic for discriminating between archetypes.
+
+| Observable | JSON Path | Diagnostic Role |
+|-----------|-----------|-----------------|
+
 ## Related Rules
 
 | Rule ID | Description | Relationship |
