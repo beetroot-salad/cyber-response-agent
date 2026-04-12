@@ -44,7 +44,7 @@ def classify_bash(cmd: str) -> str:
         # uses both interchangeably.
         if "--query" in cmd or " -q " in cmd or cmd.endswith(" -q"):
             return "siem-query"
-        if "--health-check" in cmd:
+        if " health-check" in cmd:
             return "siem-health"
         return "siem-other"
     if "docker exec" in cmd:

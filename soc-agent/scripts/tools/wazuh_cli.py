@@ -5,13 +5,13 @@ Alert queries go to the Wazuh Indexer (OpenSearch) via opensearch-py.
 Health checks use both the indexer and the Wazuh Manager API.
 
 Usage:
-    python3 wazuh_cli.py --query 'rule.id:5710 AND data.srcip:10.0.0.5' \
+    python3 wazuh_cli.py query --query 'rule.id:5710 AND data.srcip:10.0.0.5' \
         --start 2026-04-04T10:00:00Z --window 1h
 
-    python3 wazuh_cli.py --query 'rule.groups:sshd' \
+    python3 wazuh_cli.py query --query 'rule.groups:sshd' \
         --start 2026-04-04T10:00:00Z --end 2026-04-04T12:00:00Z
 
-    python3 wazuh_cli.py --health-check
+    python3 wazuh_cli.py health-check
 
 Exit codes:
     0 — success
@@ -36,7 +36,7 @@ try:
 except ImportError:
     print(
         "error: opensearch-py is required for Wazuh indexer queries\n"
-        "Run: scripts/siem/setup.sh",
+        "Run: scripts/tools/setup.sh",
         file=sys.stderr,
     )
     sys.exit(2)
@@ -418,14 +418,25 @@ def build_parser():
     p = argparse.ArgumentParser(
         description="Wazuh SIEM CLI — execute queries with structured output",
     )
-    p.add_argument("--query", "-q", help="Lucene query string (OpenSearch syntax)")
-    p.add_argument("--start", help="Start time (ISO 8601 UTC)")
-    p.add_argument("--end", help="End time (ISO 8601 UTC, defaults to now)")
-    p.add_argument("--window", default="1h", help="Time window duration (e.g. 1h, 30m, 7d). Used when --end is omitted.")
-    p.add_argument("--limit", type=int, default=500, help="Max events to return (default: 500, max: 10000)")
-    p.add_argument("--raw", action="store_true", help="Output raw JSON instead of formatted text")
-    p.add_argument("--run-dir", help="Investigation run directory (reads salt from meta.json to wrap output in untrusted-data delimiters)")
-    p.add_argument("--health-check", action="store_true", help="Check connectivity and exit")
+    sub = p.add_subparsers(dest="subcommand", required=True)
+
+    q = sub.add_parser(
+        "query",
+        help="Run a Lucene query against the Wazuh indexer",
+    )
+    q.add_argument("--query", "-q", required=True, help="Lucene query string (OpenSearch syntax)")
+    q.add_argument("--start", help="Start time (ISO 8601 UTC)")
+    q.add_argument("--end", help="End time (ISO 8601 UTC, defaults to now)")
+    q.add_argument("--window", default="1h", help="Time window duration (e.g. 1h, 30m, 7d). Used when --end is omitted.")
+    q.add_argument("--limit", type=int, default=500, help="Max events to return (default: 500, max: 10000)")
+    q.add_argument("--raw", action="store_true", help="Output raw JSON instead of formatted text")
+    q.add_argument("--run-dir", help="Investigation run directory (reads salt from meta.json to wrap output in untrusted-data delimiters)")
+
+    sub.add_parser(
+        "health-check",
+        help="Verify connectivity to the Wazuh manager and indexer, then exit",
+    )
+
     return p
 
 
@@ -434,13 +445,11 @@ def main():
     args = parser.parse_args()
     config = load_config()
 
-    if args.health_check:
+    if args.subcommand == "health-check":
         health_check(config)
         return
 
-    if not args.query:
-        parser.error("--query is required (unless using --health-check)")
-
+    # query subcommand
     if args.end and not args.start:
         parser.error("--end without --start is not supported. Use --start/--end or --start/--window.")
 

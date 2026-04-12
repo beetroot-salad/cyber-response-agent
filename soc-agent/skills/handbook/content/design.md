@@ -56,7 +56,7 @@ CONTEXTUALIZE → [SCREEN] → HYPOTHESIZE → GATHER → ANALYZE → CONCLUDE
                     └────────── fast-path ───────────┘
 ```
 
-- **CONTEXTUALIZE** — read signature knowledge, parse alert, spawn Explore + ticket-context subagents, build a resolution map of available tools.
+- **CONTEXTUALIZE** — read signature knowledge, parse alert, dispatch ticket-context and precedent-scan subagents in parallel, build a resolution map of available tools.
 - **SCREEN** *(optional, if the playbook defines a `## Screen` section)* — a cheap subagent attempts a mechanical pattern match against known benign outcomes. Match → straight to CONCLUDE. No match → fall through to the full loop with evidence already gathered.
 - **HYPOTHESIZE** — generate or update candidate explanations, pick the most diagnostic lead.
 - **GATHER** — execute the lead (single or composite dispatch), characterize raw observations.

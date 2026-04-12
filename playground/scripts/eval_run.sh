@@ -57,12 +57,12 @@ fi
 REPO_ROOT=/workspace
 PLUGIN_DIR="$REPO_ROOT/soc-agent"
 MCP_CONFIG="$REPO_ROOT/.claude/mcp_config.json"
-WAZUH_CLI_VENV="$PLUGIN_DIR/scripts/siem/.venv/bin/python3"
+TOOLS_VENV="$PLUGIN_DIR/scripts/tools/.venv/bin/python3"
 FETCH_ALERT="$PLUGIN_DIR/scripts/fetch_alert.py"
 
-if [ ! -x "$WAZUH_CLI_VENV" ]; then
-    echo "error: wazuh cli venv not found at $WAZUH_CLI_VENV" >&2
-    echo "hint: run $PLUGIN_DIR/scripts/siem/setup.sh" >&2
+if [ ! -x "$TOOLS_VENV" ]; then
+    echo "error: tools venv not found at $TOOLS_VENV" >&2
+    echo "hint: run $PLUGIN_DIR/scripts/tools/setup.sh" >&2
     exit 2
 fi
 
@@ -75,12 +75,12 @@ fi
 # shellcheck disable=SC1090
 set -a; source "$REPO_ROOT/.env"; set +a
 
-# Activate the wazuh_cli venv so the agent's `python3 scripts/siem/wazuh_cli.py`
+# Activate the tools venv so the agent's `python3 scripts/tools/wazuh_cli.py`
 # invocations resolve to the venv interpreter (which has opensearchpy). System
 # python3 is missing the SIEM client deps, so without this every lead query
 # would crash on ModuleNotFoundError.
 # shellcheck disable=SC1091
-source "$PLUGIN_DIR/scripts/siem/.venv/bin/activate"
+source "$PLUGIN_DIR/scripts/tools/.venv/bin/activate"
 
 # ---------------------------------------------------------------------------
 # Run dir
@@ -98,7 +98,7 @@ echo "    dir: $EVAL_DIR"
 # ---------------------------------------------------------------------------
 
 echo "[+] Fetching alert (rule.id:$RULE_ID, window=$WINDOW, offset=$OFFSET)..."
-if ! "$WAZUH_CLI_VENV" "$FETCH_ALERT" "$RULE_ID" --window "$WINDOW" --offset "$OFFSET" > "$EVAL_DIR/alert.json"; then
+if ! "$TOOLS_VENV" "$FETCH_ALERT" "$RULE_ID" --window "$WINDOW" --offset "$OFFSET" > "$EVAL_DIR/alert.json"; then
     echo "error: fetch_alert.py failed" >&2
     exit 1
 fi
@@ -146,19 +146,21 @@ stdbuf -oL -eL claude \
         "Bash(cd *)" \
         "Bash(ls *)" \
         "Bash(pwd)" \
+        "Bash(python3 scripts/preflight.py *)" \
         "Bash(python3 scripts/resolve_imports.py *)" \
         "Bash(python3 scripts/setup_run.py *)" \
         "Bash(python3 scripts/search_precedents.py *)" \
         "Bash(python3 scripts/workspace_map.py *)" \
-        "Bash(python3 scripts/siem/wazuh_cli.py *)" \
-        "Bash(python3 scripts/host_query.py *)" \
+        "Bash(python3 scripts/tools/wazuh_cli.py *)" \
+        "Bash(python3 scripts/tools/host_query.py *)" \
         "Bash(python3 hooks/scripts/write_state.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/preflight.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/resolve_imports.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/setup_run.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/search_precedents.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/workspace_map.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/siem/wazuh_cli.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/host_query.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/tools/wazuh_cli.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/tools/host_query.py *)" \
         "Bash(python3 /workspace/soc-agent/hooks/scripts/write_state.py *)" \
         "mcp__wazuh__*" \
         "Task" \

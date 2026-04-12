@@ -54,13 +54,25 @@ Three aspects. `SKILL.md` has the operational detail; this section explains *why
 
 ### Deterministic checks
 
-No LLM. `resolve_imports.py`, schema pytest, Grep-based cross-ref checks. These catch a specific class of failure — dangling references, broken imports, malformed frontmatter — that a reader probe would also catch but less reliably and more expensively. Running deterministic first is a fast-fail: if the file is structurally broken, there's no point probing it.
+No LLM. `resolve_imports.py`, schema pytest, Grep-based cross-ref checks, `list_lead_tags.py` for tag vocabulary. These catch a specific class of failure — dangling references, broken imports, malformed frontmatter, tag drift — that a reader probe would also catch but less reliably and more expensively. Running deterministic first is a fast-fail: if the file is structurally broken, there's no point probing it.
+
+### Tag consistency for query templates
+
+Lead query templates (`leads/{name}/templates/{vendor}.md`) declare a flat `tags` list in frontmatter. The tag list is the discovery surface — the investigation agent greps sibling templates by tag overlap when constructing novel queries, so tag drift silently degrades discoverability. Three layers guard against drift:
+
+1. **Shared vocabulary via `list_lead_tags.py`.** A general utility under `scripts/tools/` that collects every existing tag across `leads/*/templates/*.md` and, in `--check` mode, reports tags on a target file that are new to the vocabulary or near-duplicates of an existing tag (`auth` vs `authentication`, `net` vs `network`). Near-duplicate detection is prefix-based — cheap and deliberately noisy, because a false positive is a short human decision and a false negative is a silent discoverability hole.
+2. **Snake_case convention.** The same script validates every tag against `^[a-z][a-z0-9_]*$`. Picking one convention and enforcing it deterministically is cheaper than arguing taste in review. Snake_case specifically because the rest of the KB's identifier surface (Python modules, anchor names) leans the same way.
+3. **Tag-search probe.** Haiku runners are spawned with fabricated investigation context and asked to *search* for the queries they need — never asked *what tags would you pick*. The framing matters: asking "what tags should this have" cues the subagent to reason about the tagging system, which produces tidy, theory-driven terms. Asking them to search in the middle of a realistic scenario surfaces the vocabulary a reader actually reaches for under pressure. Two runners with different scenarios give two independent vocabulary samples; zero overlap with the declared tags means the template is invisible to the exact investigations it serves.
+
+The three layers sit at different levels of the problem. The enum script enforces *consistency with what already exists*. The convention enforces *shape*. The search probe validates *discoverability from the reader's side* — whether the tags match the vocabulary a real investigator would produce. None of the three alone is sufficient: consistency without discoverability just perfectly preserves a bad vocabulary, and discoverability without consistency lets every new template invent its own dialect.
 
 ### Probes (evidence, not verdicts)
 
 Four Haiku probes. Each targets a specific failure mode. Each produces structured evidence, not a grade. **You are the only judge** — only the main agent has the edit intent and the full surrounding context, so only it can decide whether a probe's output reflects a real problem or an expected difference.
 
 This split matters. An earlier draft of this design had subagents "grade the edit," and the natural instinct was for the reviewer to contaminate its own judgment with the intent. Separating evidence from verdict removes that failure mode.
+
+**Tag-search** — observes the vocabulary a reader reaches for mid-investigation, framed as a search task rather than a tagging question. See "Tag consistency" above for the dispatch pattern and rationale; it's listed as a probe here because it produces evidence (search terms) that the main agent compares against the declared tags, same contract as every other probe.
 
 **Reconstruction** — the most important probe. The question it answers: *can a reader regenerate the real underlying artifact from the description?* For a `context.md`, that means writing the SIEM detection rule in native syntax. For an archetype README, the canonical alert JSON and a one-line closing reason. For a lead definition, the query the lead runs plus the fields it examines.
 

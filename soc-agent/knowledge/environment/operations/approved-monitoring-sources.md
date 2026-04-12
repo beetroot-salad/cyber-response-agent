@@ -71,7 +71,7 @@ of:
 
 1. The `(srcip, srcuser, target)` triple appears in the table above.
 2. The monitoring-host is operationally alive — verifiable via
-   `python3 /workspace/soc-agent/scripts/host_query.py --host monitoring-host service-status cron`
+   `python3 /workspace/soc-agent/scripts/tools/host_query.py --host monitoring-host service-status cron`
    and `package-installed openssh-client`.
 3. The observed SIEM history pattern for this srcip matches the declared
    cadence (single attempt every ~10 min over the last hour), from an

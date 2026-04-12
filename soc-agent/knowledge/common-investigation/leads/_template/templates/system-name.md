@@ -1,3 +1,14 @@
+---
+lead: {lead-name}
+vendor: {system}
+tags: [{layer1-tag}, {layer2-tag}, {layer3-source}, {analysis-tag}]
+entity_fields:
+  ip: {field_name}
+  user: {field_name}
+  host: {field_name}
+indexes: [{index-pattern}]
+---
+
 # {System} Query Template: {lead-name}
 
 ## Entity Field Mapping
@@ -19,7 +30,7 @@ Explain what this query scopes to and any important exclusions.
 ## Example Invocations
 
 ```bash
-python3 scripts/siem/{system}_cli.py \
+python3 scripts/tools/{system}_cli.py query \
   --query '{base query with concrete values}' \
   --start 2026-01-01T00:00:00Z --window 2h
 ```

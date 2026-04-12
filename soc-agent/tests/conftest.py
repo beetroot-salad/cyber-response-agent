@@ -217,7 +217,7 @@ def run_investigation_live(
 3. Follow the investigation loop as described in the skill
 4. At each phase, call write_state.py: python3 hooks/scripts/write_state.py {run_dir} <PHASE> {alert.get('ticket_id', 'UNKNOWN')} {signature_id}
 5. For SIEM queries, use wazuh_cli.py:
-   python3 scripts/siem/wazuh_cli.py --query '<lucene_query>' --start <iso_time> --window <duration> --run-dir {run_dir}
+   python3 scripts/tools/wazuh_cli.py query --query '<lucene_query>' --start <iso_time> --window <duration> --run-dir {run_dir}
 6. Write investigation.md and report.md to {run_dir}/
 7. The report.md MUST have YAML frontmatter with all required fields
 8. If SIEM queries fail or return errors, document the failure and escalate — do not guess at data
@@ -271,11 +271,11 @@ def run_investigation_live(
 # ---------------------------------------------------------------------------
 
 def _wazuh_health_check() -> bool:
-    """Run wazuh_cli.py --health-check. Returns True if healthy."""
+    """Run wazuh_cli.py health-check. Returns True if healthy."""
     try:
         result = subprocess.run(
-            [sys.executable, str(SOC_AGENT_ROOT / "scripts" / "siem" / "wazuh_cli.py"),
-             "--health-check"],
+            [sys.executable, str(SOC_AGENT_ROOT / "scripts" / "tools" / "wazuh_cli.py"),
+             "health-check"],
             capture_output=True, text=True, timeout=30,
             cwd=str(SOC_AGENT_ROOT),
         )
@@ -325,8 +325,8 @@ def _wait_for_alerts(query: str, min_count: int = 1, timeout: int = 90) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         result = subprocess.run(
-            [sys.executable, str(SOC_AGENT_ROOT / "scripts" / "siem" / "wazuh_cli.py"),
-             "--query", query, "--window", "15m", "--limit", "1", "--raw"],
+            [sys.executable, str(SOC_AGENT_ROOT / "scripts" / "tools" / "wazuh_cli.py"),
+             "query", "--query", query, "--window", "15m", "--limit", "1", "--raw"],
             capture_output=True, text=True, timeout=30,
             cwd=str(SOC_AGENT_ROOT),
         )

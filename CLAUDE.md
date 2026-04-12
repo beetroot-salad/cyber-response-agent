@@ -80,14 +80,13 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 │   │   │   ├── checklist.md       # Investigation self-check guide
 │   │   │   ├── leads/             # Reusable lead definitions + per-vendor query templates
 │   │   │   │   ├── {lead}/definition.md      # Methodology: what to characterize, pitfalls
-│   │   │   │   └── {lead}/templates/{vendor}.md  # Query template: field mapping + base query
+│   │   │   │   └── {lead}/templates/{vendor}.md  # Query template: tagged frontmatter + field mapping + base query
 │   │   │   └── lessons/           # Cross-cutting investigation lessons
-│   │   ├── environment/           # Org-specific deployment knowledge (4-layer model, see design-v3-tool-execution.md §10)
+│   │   ├── environment/           # Org-specific deployment knowledge (see design-v3-tool-execution.md §10 for the 4-layer mental model)
 │   │   │   ├── context/           # Classification heuristics (IP ranges, identity patterns, etc.)
-│   │   │   ├── operations/        # Layer 1→2: abstract operations → concrete operations + coverage gaps
-│   │   │   ├── sources/           # Layer 3: data sources — what they cover, access method, retention
-│   │   │   ├── access/            # Layer 4: tool constraints (CLI usage, Ansible rules, rate limits)
-│   │   │   └── systems/           # Vendor-specific field knowledge (quirks, query patterns, config)
+│   │   │   ├── data-sources/      # Abstract data-tag reference docs (what's queryable in this org)
+│   │   │   ├── operations/        # Per-anchor grounding recipes (how to confirm a required_anchor in this deployment)
+│   │   │   └── systems/           # Vendor-specific field knowledge (quirks, query patterns, config, discovery primitives)
 │   │   │       └── wazuh/         # Wazuh field quirks, query patterns, config.env
 │   │   └── signatures/
 │   │       ├── _template/         # Skeleton + onboarding guide for new signatures

@@ -32,7 +32,7 @@ from pathlib import Path
 
 # Reuse the wazuh_cli infrastructure for config + client + querying.
 SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR / "siem"))
+sys.path.insert(0, str(SCRIPT_DIR / "tools"))
 
 from wazuh_cli import (  # noqa: E402
     compute_time_range,

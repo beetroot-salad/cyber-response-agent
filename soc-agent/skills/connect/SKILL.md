@@ -2,7 +2,7 @@
 name: connect
 description: Connect a new security system (SIEM, EDR, identity, CMDB) to the agent. Interviews the user, generates an adapter CLI that implements the contract, tests it end-to-end, and scaffolds the environment knowledge the investigation loop needs. One system per invocation.
 argument-hint: "[system_name]"
-allowed-tools: Read Write Edit Glob Grep Bash(python3 scripts/preflight.py *) Bash(python3 scripts/tools/* health-check*) Bash(python3 scripts/tools/* query *) Bash(bash scripts/tools/*/setup.sh*) Bash(ls *) Bash(pwd) Bash(git status) Bash(git diff *) Bash(git checkout -b *) Bash(git add *)
+allowed-tools: Read Write Edit Glob Grep Bash(python3 scripts/preflight.py *) Bash(python3 scripts/tools/* health-check*) Bash(python3 scripts/tools/* query *) Bash(bash scripts/tools/setup.sh*) Bash(ls *) Bash(pwd) Bash(git status) Bash(git diff *) Bash(git checkout -b *) Bash(git add *)
 model: claude-sonnet-4-6
 ---
 
@@ -111,7 +111,7 @@ If you're unsure, pick `AdapterContract`. Most systems fit it, and forcing a loo
 - **Pass-through native query language.** Splunk adapter takes SPL, Elastic takes KQL, Wazuh takes Lucene. No abstraction, no translation. The agent already knows these languages from training; a translation layer is perpetual bug surface.
 - **Credentials from env vars only.** Non-secret config (endpoint, index, retention defaults) from `knowledge/environment/systems/{system}/config.env`. Secrets are injected by the shell. See "Where secrets live" below.
 - On missing config or missing secret env vars, print a specific hint pointing to the fix and exit 2.
-- On import failure (missing `opensearch-py`, `splunk-sdk`, etc.), print the setup command (`bash scripts/tools/{system}/setup.sh`) and exit 2.
+- On import failure (missing `opensearch-py`, `splunk-sdk`, etc.), print the setup command (`bash scripts/tools/setup.sh`) and exit 2.
 - If `--run-dir` is passed, read the salt from `{run_dir}/meta.json` and wrap output in `<run-{salt}-{system}-data>…</run-{salt}-{system}-data>`. Untrusted-data defense.
 - **Examples in `--help` are load-bearing.** Runtime agents pattern-match against whatever example you put in a subcommand's help text. Use *real* field names and values the user confirmed, not generic placeholders.
 
@@ -121,14 +121,16 @@ If you're unsure, pick `AdapterContract`. Most systems fit it, and forcing a loo
 
 Use stdlib (`urllib.request`, `json`, `ssl`, `argparse`) as the first choice. Reach for a vendor SDK only when the API genuinely needs one (SigV4 signing, streaming protocols, proprietary auth flows). A 300-line stdlib adapter is almost always better than pulling in a 50-dependency SDK.
 
-When external deps ARE needed, generate a per-integration venv:
+When external deps ARE needed, append them to the shared tools requirements file and re-run setup:
 
 ```
-scripts/tools/{system}/requirements.txt    — pinned deps (use >= floors, not ==)
-scripts/tools/{system}/setup.sh            — uv-first, venv fallback
+scripts/tools/requirements.txt    — one shared pinned-dep file for every adapter (use >= floors, not ==)
+scripts/tools/setup.sh            — uv-first, venv fallback; creates scripts/tools/.venv/
 ```
 
-`setup.sh` follows this pattern (identical to `scripts/siem/setup.sh`, the existing Wazuh example):
+The shared venv layout means all adapters (wazuh, host_query, and any new ones) run under `scripts/tools/.venv/bin/python3`. Adding a new adapter is: (1) write the CLI at `scripts/tools/{system}_cli.py` (or `{name}.py`), (2) append its pinned deps to `scripts/tools/requirements.txt`, (3) re-run `bash scripts/tools/setup.sh` to rebuild the shared venv. If a future adapter has dep conflicts with an existing one, that's the trigger to split into per-system venvs — not the default.
+
+`setup.sh` pattern:
 
 ```bash
 #!/usr/bin/env bash
@@ -147,9 +149,9 @@ fi
 echo "Done. Activate with: source $VENV_DIR/bin/activate"
 ```
 
-`uv` is preferred when present (fast, reproducible). Plain `venv + pip` is the fallback so the script works on systems without uv. **Never install system-wide.** The adapter's shebang or invocation always goes through its own venv.
+`uv` is preferred when present (fast, reproducible). Plain `venv + pip` is the fallback so the script works on systems without uv. **Never install system-wide.** Adapter invocations always go through the venv interpreter (preflight handles this detection automatically).
 
-**Reference example:** `scripts/siem/wazuh_cli.py` + `scripts/siem/setup.sh` — a working adapter shipped as a CI/test target against the devcontainer Wazuh stack. Copy its config loading, salt wrapping, and error-handling patterns. Do **not** copy its argparse shape — it's flag-based, and new adapters use subcommands per the contract.
+**Reference example:** `scripts/tools/wazuh_cli.py` — a working adapter shipped as a CI/test target against the devcontainer Wazuh stack. It uses the `query` / `health-check` subcommand contract already; copy its config loading, salt wrapping, error handling, and argparse shape directly.
 
 #### When in doubt, fetch the docs
 
@@ -273,7 +275,8 @@ git status
 git diff
 git checkout -b connect/{system}
 git add scripts/tools/{system}_cli.py \
-        scripts/tools/{system}/ \
+        scripts/tools/requirements.txt \
+        scripts/tools/setup.sh \
         knowledge/environment/systems/{system}/ \
         knowledge/environment/data-sources/
 # commit with a clear message, but DO NOT push, DO NOT merge
@@ -309,7 +312,7 @@ These exist to keep the skill in its lane, not to block a legitimate request. Wh
 - **Adapter at `scripts/tools/{system}_cli.py`.** This is where the investigation loop and preflight look for adapters. Override only if the user has an existing directory structure you're integrating into, and in that case add a symlink or a note in preflight's discovery path.
 - **Python.** See Phase 2. Override means opening a conversation about why, not picking another language silently.
 - **No lead templates or signature knowledge.** Those come from investigation experience and live under `knowledge/signatures/` owned by `/author`. If the user wants starter lead templates for a well-known system, suggest running `/author` afterwards — don't build them here.
-- **Don't rewrite the wazuh example.** `scripts/siem/wazuh_cli.py` is the plugin's reference/test example. Note a divergence from the contract if you see one; do not fix it here.
+- **Don't rewrite the wazuh example.** `scripts/tools/wazuh_cli.py` is the plugin's reference/test example. Note a divergence from the contract if you see one; do not fix it here.
 - **Adapter updates are a deliberate re-run.** If `{system}_cli.py` already exists when `/connect {system}` is invoked, stop and confirm the user wants to update before touching it.
 - **Consult `/handbook` on demand.** When you need KB layout, file shapes, or runtime rules, invoke `/handbook` rather than re-deriving them.
 

@@ -2,7 +2,7 @@
 name: author
 description: Edit the plugin knowledge base — signatures, archetypes, leads, environment knowledge, permissions. Validates via deterministic checks plus probe evidence plus a self-reflection step. Use for any edit under knowledge/ or config/signatures/.
 argument-hint: "<intent description>"
-allowed-tools: Read Write Edit Glob Grep Task Bash(python3 scripts/resolve_imports.py *) Bash(python3 -m pytest soc-agent/tests/test_kb_schema.py *) Bash(python3 -m pytest soc-agent/tests/test_resolve_imports.py *) Bash(git diff *) Bash(git status) Bash(ls *) Bash(pwd)
+allowed-tools: Read Write Edit Glob Grep Task Bash(python3 scripts/resolve_imports.py *) Bash(python3 scripts/tools/list_lead_tags.py *) Bash(python3 -m pytest soc-agent/tests/test_kb_schema.py *) Bash(python3 -m pytest soc-agent/tests/test_resolve_imports.py *) Bash(git diff *) Bash(git status) Bash(ls *) Bash(pwd)
 model: claude-sonnet-4-6
 ---
 
@@ -24,6 +24,7 @@ Figure out what the user wants, what files are involved, and what else the chang
 - If you don't know where a topic lives or how a runtime rule works, invoke `/handbook`. It's the source of truth for KB layout, the two-leg resolution model, the report judge, and the investigation loop. Don't re-derive that here.
 - **Check consolidation first.** Before creating a new file, ask whether the content belongs in an existing one — a sibling signature's archetype, a common lesson, a lead definition that's almost-but-not-quite what you need. New files are the last resort, not the default.
 - **Check KB boundaries.** Portable methodology → `common-investigation/`. Org-specific deployment knowledge → `environment/`. Per-signature content → `signatures/{id}/`. Environment details must not leak into `common-investigation/`; signature-specific logic must not leak into `environment/`.
+- **Query templates live under leads.** Runtime SIEM queries are stored as per-vendor templates at `common-investigation/leads/{lead}/templates/{vendor}.md`, discovered via frontmatter `tags`. Editing or adding a template means editing its tags — see the tag-vocabulary check and the tag-search probe under Validation.
 - **Find ripple files.** For each file you'll touch, Grep for other files that reference what you're changing — archetypes that name the hypothesis you're renaming, playbooks that list a lead you're removing, anchor files referenced by `required_anchors`, `permissions.yaml` entries tied to a `context.md` severity.
 - **Capture pre-edit state** per target file: `git diff HEAD -- <file>`. The reconstruction probe compares against this.
 
@@ -71,6 +72,11 @@ No LLM. Run first.
    - `@import:` atoms exist under `knowledge/common-investigation/lessons/`
    - Archetype `required_anchors` exist under `knowledge/environment/operations/`
    - `permissions.yaml` modes and tools are valid shapes
+4. **Tag vocabulary** for any touched lead query template:
+   ```bash
+   python3 scripts/tools/list_lead_tags.py --check <template-path>
+   ```
+   The script collects the tag vocabulary across all existing `leads/*/templates/*.md` frontmatter and reports, for the target file: tags that are new to the vocabulary, tags that are near-duplicates of existing ones (e.g., `auth` vs `authentication`), and tags that violate the `snake_case` convention. Treat every flagged tag as an edit decision — reuse the existing term if one fits, introduce the new term deliberately, or rename to snake_case. Never let the check pass by ignoring it.
 
 If any fail, fix and re-run before touching probes.
 
@@ -84,10 +90,11 @@ Spawn Haiku subagents via Task. Each probe reads one or more files and returns s
 | `comprehension.md` | Silent prescriptive weakening, internal contradiction, typo'd field names | Always |
 | `coherence.md` | Cross-file drift — do the files that should agree on a shared topic still say the same things? | Multi-file edits |
 | `replay.md` | Runtime behavior drift — does the edited playbook lead to the same 2-step investigation path for historical alerts? | Destructive edits; signature creation/rewrite |
+| `tag-search.md` | Tag discoverability — would a reader in the middle of an investigation naturally reach for this template using the tags you set? | Touched or new lead query templates |
 
 Total probe cap per edit: **10**. Sanity boundary, not a per-edit target. Going over 10 means you're stuck in a re-probing loop — surface the problem to the user rather than loop.
 
-Dispatch in parallel when probes are independent. Use `Task` with `subagent_type="general-purpose"` and `model="haiku"`. Substitute file paths, questions, topics, and alert JSON into the template before passing.
+Dispatch in parallel when probes are independent. Use `Task` with `subagent_type="general-purpose"` and `model="haiku"`. Substitute file paths, questions, topics, and alert JSON into the template before passing. The `tag-search.md` probe spawns multiple runners with different framings — its own file documents the dispatch pattern.
 
 ### Self-reflection
 

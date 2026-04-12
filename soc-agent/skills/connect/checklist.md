@@ -5,23 +5,23 @@ Walk through this before calling a connection done. Anything unchecked goes in t
 ## Adapter script
 
 - [ ] Written to `scripts/tools/{system}_cli.py`, not anywhere else.
-- [ ] Implements `health-check` and `query` as argparse **subcommands** (not flags like legacy `wazuh_cli.py`).
+- [ ] Implements `health-check` and `query` as argparse **subcommands** (same shape as the reference `scripts/tools/wazuh_cli.py`).
 - [ ] `query` accepts `<native_query>` as a positional argument plus `--start`, `--end`, `--limit`, `--raw`, `--run-dir`.
 - [ ] Exit codes match the contract: health-check {0, 1}; query {0, 1, 2}.
 - [ ] Native query language is passed through unmodified — no translation, no DSL, no field renaming.
 - [ ] Non-secret config loaded from `knowledge/environment/systems/{system}/config.env`, with environment variable overrides.
 - [ ] Secrets loaded from environment variables only. No pasted tokens anywhere in the script, config, or docstrings.
 - [ ] Missing-config and missing-secret errors print an actionable hint pointing to the fix, and exit 2.
-- [ ] Missing-dependency errors (import failures) print `bash scripts/tools/{system}/setup.sh` and exit 2.
+- [ ] Missing-dependency errors (import failures) print `bash scripts/tools/setup.sh` and exit 2.
 - [ ] `--run-dir` reads the salt from `meta.json` and wraps output in `<run-{salt}-{system}-data>…</run-{salt}-{system}-data>`.
 - [ ] `--raw` outputs JSON (wrapped in salt delimiters if `--run-dir` is set).
 
 ## Dependencies
 
 - [ ] Stdlib-only when feasible. Vendor SDKs only when the API genuinely needs them.
-- [ ] If deps are required: `scripts/tools/{system}/requirements.txt` has pinned versions, `scripts/tools/{system}/setup.sh` creates a venv and installs them.
+- [ ] If deps are required: new pinned entries appended to `scripts/tools/requirements.txt`; `scripts/tools/setup.sh` re-run to rebuild the shared `scripts/tools/.venv/`.
 - [ ] `setup.sh` is idempotent — safe to re-run.
-- [ ] The setup.sh pattern matches `scripts/siem/setup.sh` (uv-preferred, venv fallback).
+- [ ] The setup.sh pattern is uv-preferred with venv fallback (the existing `scripts/tools/setup.sh` already does this — do not replace it).
 
 ## Tests (Phase 3)
 
@@ -52,7 +52,7 @@ The bar here is **lean**, not comprehensive. Everything in this section grows th
 - [ ] Only `scripts/tools/` and `knowledge/environment/` have been edited. Hard limit: no touches to `hooks/`, `schemas/`, `skills/`, `knowledge/signatures/`, or `config/signatures/`.
 - [ ] No signature knowledge was created or modified. If the user wants starter signatures for this system, that's a follow-up `/author` run.
 - [ ] No lead templates (`knowledge/common-investigation/leads/{lead}/templates/{system}.md`) were created. Lead templates grow from investigation experience via post-mortem `/author` runs, not from connect-time API-doc reading.
-- [ ] `scripts/siem/wazuh_cli.py` (the reference example) was not touched.
+- [ ] `scripts/tools/wazuh_cli.py` (the reference example) was not touched.
 - [ ] If the user's request legitimately falls outside the default flow (unusual upstream, weird access topology, bespoke integration), that divergence is surfaced in the summary to the user for human review — not silently patched over, and not blocked outright.
 
 ## Preflight

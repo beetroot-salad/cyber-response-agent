@@ -79,7 +79,7 @@ Lead definition (definition.md)     — WHAT: methodology
 Query templates (templates/{vendor}.md) — HOW: field mappings + native query patterns
   "Entity field mapping, base query in native syntax, example CLI invocations"
 
-SIEM CLI (scripts/siem/{vendor}_cli.py) — EXECUTE: auth, HTTP, output formatting
+SIEM CLI (scripts/tools/{vendor}_cli.py) — EXECUTE: auth, HTTP, output formatting
   "Thin execution wrapper — the agent constructs queries, the CLI runs them"
 
 Environment (systems/{vendor}/)     — WHERE: system-specific config
@@ -100,7 +100,7 @@ playbook.md                    lead directory (common/leads/{lead}/)
                                       ↓ access method + CLI
                                  templates/{vendor}.md — query template in lead dir
                                       ↓ executed via
-                                 scripts/siem/{vendor}_cli.py — lean SIEM CLI
+                                 scripts/tools/{vendor}_cli.py — lean SIEM CLI
 ```
 
 ### 3.2 Lead directory structure
@@ -141,7 +141,7 @@ The execution layer is split into two parts:
 
 1. **Query templates** (`templates/{vendor}.md`) — per-lead, per-vendor knowledge artifacts that map the lead's investigative question to a concrete query. They contain entity field mappings, the base query in native syntax, and example CLI invocations. The agent reads these to understand *what to query and how*.
 
-2. **SIEM CLI** (`scripts/siem/{vendor}_cli.py`) — a thin, vendor-specific wrapper that handles authentication, HTTP, pagination, and output formatting. The agent constructs queries using the template's field mappings and passes them to the CLI. The CLI never interprets query semantics — it just runs what it's given.
+2. **SIEM CLI** (`scripts/tools/{vendor}_cli.py`) — a thin, vendor-specific wrapper that handles authentication, HTTP, pagination, and output formatting. The agent constructs queries using the template's field mappings and passes them to the CLI. The CLI never interprets query semantics — it just runs what it's given.
 
 This separation keeps query knowledge (which field to use, what filters to apply) in the lead directory where it belongs, while execution plumbing (auth, HTTP, output formatting) lives once in the CLI.
 
@@ -165,7 +165,7 @@ rule.groups:sshd AND {entity_field}:{entity_value}
 
 ## Example Invocations
 \`\`\`bash
-python3 scripts/siem/wazuh_cli.py \
+python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND data.srcip:10.0.0.5' \
   --start 2026-04-04T10:00:00Z --window 2h
 \`\`\`
@@ -181,20 +181,20 @@ The CLI accepts queries in the vendor's native syntax. It handles the plumbing:
 
 ```bash
 # Basic query with time window
-python3 scripts/siem/wazuh_cli.py \
+python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND data.srcip:10.0.1.50' \
   --start 2026-04-04T10:00:00Z --window 2h
 
 # Absolute time range
-python3 scripts/siem/wazuh_cli.py \
+python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND data.srcuser:admin' \
   --start 2026-04-04T08:00:00Z --end 2026-04-04T12:00:00Z
 
-# Health check (connectivity canary)
-python3 scripts/siem/wazuh_cli.py --health-check
+# Health check (connectivity canary — usually handled by preflight)
+python3 scripts/tools/wazuh_cli.py health-check
 
 # Raw JSON output for programmatic parsing
-python3 scripts/siem/wazuh_cli.py --query '...' --start ... --window 2h --raw
+python3 scripts/tools/wazuh_cli.py query --query '...' --start ... --window 2h --raw
 ```
 
 The CLI's formatted output includes built-in verification metadata:
@@ -218,12 +218,12 @@ The agent runs the same query with a shifted time window for comparison. The SIE
 
 ```bash
 # Alert window
-python3 scripts/siem/wazuh_cli.py \
+python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND data.srcip:10.0.1.50' \
   --start "$ALERT_TIME" --window 2h
 
 # Same query, 7 days earlier (agent computes the shifted time range)
-python3 scripts/siem/wazuh_cli.py \
+python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND data.srcip:10.0.1.50' \
   --start "$BASELINE_START" --window 2h
 ```
@@ -387,7 +387,7 @@ The subagent's resolution path (without resolution map — full resolution):
 4. Check for query template (common/leads/{lead}/templates/{vendor}.md)
    ├── EXISTS: Read template for field mappings + base query
    │           Construct query with entity values + time range
-   │           Execute via SIEM CLI (scripts/siem/{vendor}_cli.py)
+   │           Execute via SIEM CLI (scripts/tools/{vendor}_cli.py)
    │           Review verification metadata in output
    │           If suspect → debug protocol (§6.2) → try next source or ad-hoc
    └── DOES NOT EXIST: Ad-hoc query construction
@@ -678,11 +678,11 @@ ANALYZE phase (main agent)
 - **Lead definitions vs query knowledge?** — Both, colocated in lead directories. Definitions capture methodology (`definition.md`), query templates capture vendor-specific field mappings and patterns (`templates/{vendor}.md`). Playbooks add hypothesis context on top.
 - **How to validate results?** — Built-in verification metadata in SIEM CLI output (health check, unfiltered count, sample events) + formalized debug protocol.
 - **What happens when a lead doesn't exist?** — Fail fast (§3.5). Subagent returns available data sources; main agent reformulates or pivots.
-- **Where does query knowledge live?** — Templates inside lead directories (`common/leads/{lead}/templates/{vendor}.md`). SIEM CLI in `scripts/siem/`. Environment knowledge in `systems/{vendor}/`.
+- **Where does query knowledge live?** — Templates inside lead directories (`common/leads/{lead}/templates/{vendor}.md`). SIEM CLI in `scripts/tools/`. Environment knowledge in `systems/{vendor}/`.
 
 ### Still open
 
-1. **Cross-environment portability** — Templates are per-vendor. Goal: adding Splunk should require new `templates/splunk.md` per lead + `scripts/siem/splunk_cli.py` + `systems/splunk/` config, without touching definitions or playbooks. How much template content can be shared vs vendor-specific?
+1. **Cross-environment portability** — Templates are per-vendor. Goal: adding Splunk should require new `templates/splunk.md` per lead + `scripts/tools/splunk_cli.py` + `systems/splunk/` config, without touching definitions or playbooks. How much template content can be shared vs vendor-specific?
 
 2. **Parallel lead execution** — Multiple independent leads can run concurrently as separate subagents. What's the coordination model? Can one lead's early results cause another to abort? How does the main agent handle partial returns?
 
@@ -703,6 +703,22 @@ ANALYZE phase (main agent)
 ---
 
 ## 10. Data Resolution: From Investigative Question to Query
+
+### Current status (2026-04)
+
+The 4-layer model below is the **mental frame** for reasoning about how an abstract investigative question becomes a concrete query. In the running implementation, the layers are physically collapsed — the aspirational per-layer directory structure described later in this section was never populated as originally drawn, and the agent does not walk four files at runtime.
+
+What the implementation actually does today:
+
+- **Layers 2–5 are cached per lead × vendor** in `soc-agent/knowledge/common-investigation/leads/{lead}/templates/{vendor}.md`. Each template file is the resolution chain materialized for one lead against one SIEM: the concrete operation, the source/index, the access CLI, and the query text live together in one reviewable artifact. A flat `tags:` frontmatter field on each template carries the layer-1/2/3 classification directly (see `leads/_template/definition.md` for the schema), so templates are greppable by tag overlap when the agent is constructing novel queries from siblings.
+- **`knowledge/environment/operations/`** was repurposed during the archetype/trust-anchor rewrite. It now holds **per-anchor grounding recipes** ("how do I confirm the `approved-monitoring-sources` anchor in this deployment?"), not layer-1→2 abstract-to-concrete mappings. The renaming stuck because trust-anchor grounding is the concrete work the agent needed and the layer-1→2 files were never written.
+- **`knowledge/environment/sources/`** and **`knowledge/environment/access/`** (as separate directories) do not exist on disk. Their content, where it matters, lives inside the lead templates above and inside `knowledge/environment/systems/{vendor}/` (field quirks, query patterns, discovery primitives).
+- **System connectivity** is handled by the `/connect` preflight component (see `docs/design-v3-init-and-connect.md` and `soc-agent/scripts/preflight.py`). Preflight is deliberately a binary reachability check — it does not verify per-tag data freshness or index population. That's "unbounded problem" territory and the investigation methodology handles it downstream.
+- **Per-tag data freshness** is handled reactively. When a GATHER query returns suspect results (zero matches, stale latest event, unexpectedly low count), the `knowledge/common-investigation/leads/data-source-debug/definition.md` protocol walks an empirical discovery loop (source health → target presence → field sampling → progressive filtering) to distinguish a coverage gap from field-schema drift from genuine absence. It calls no SIEM metadata APIs — it just runs escalating queries and reads the results.
+
+**Why the collapse is defensible:** environments are stale. The rate at which "which SIEM holds SSH auth events" changes is measured in months, not minutes. Caching the resolve chain in per-template files, and fixing them when they break, costs less than walking a 4-file ladder on every query. The per-layer directory structure described in the rest of this section remains the **target state** if and when a second SIEM or overlapping coverage appears — at that point the agent needs to reason about *which* concrete operation / source / access method to pick without committing to a single lead/template up front, and the flat template model stops being sufficient.
+
+The subsections below describe the target state. Read them as the design the implementation can evolve into, not the shape of the repo today.
 
 ### The problem
 
@@ -866,7 +882,7 @@ covers: [ad-domain-auth, process-creation-4688, file-audit-4663, logon-type]
 # Splunk: Windows Security Index
 
 ## Access
-- **CLI:** `scripts/siem/splunk_cli.py`
+- **CLI:** `scripts/tools/splunk_cli.py`
 - **Index:** `index=windows_security`
 - **Retention:** 90 days
 
@@ -932,7 +948,7 @@ resolution:
       - name: "AD domain auth"
         sources:
           - source: splunk-windows-security
-            cli: scripts/siem/splunk_cli.py
+            cli: scripts/tools/splunk_cli.py
             health: healthy
             last_event: "2026-04-04T13:58:00Z"
           - source: dc-local-eventlog
@@ -942,14 +958,14 @@ resolution:
       - name: "SSH authentication"
         sources:
           - source: splunk-wazuh-sshd
-            cli: scripts/siem/wazuh_cli.py
+            cli: scripts/tools/wazuh_cli.py
             health: healthy
             last_event: "2026-04-04T13:57:00Z"
         coverage: "Linux hosts with Wazuh agent"
       - name: "Okta SSO"
         sources:
           - source: okta-api
-            cli: scripts/siem/okta_cli.py
+            cli: scripts/tools/okta_cli.py
             health: degraded
             notes: "API returning 429s intermittently"
         coverage: "SSO-enrolled apps"

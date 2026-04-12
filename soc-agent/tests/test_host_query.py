@@ -1,4 +1,4 @@
-"""Tests for the constrained host query CLI (scripts/host_query.py).
+"""Tests for the constrained host query CLI (scripts/tools/host_query.py).
 
 Focus areas:
   - The deny-list (the load-bearing safety property of file-stat).
@@ -18,9 +18,9 @@ from unittest.mock import patch
 
 import pytest
 
-# scripts/ isn't a package; insert it on sys.path so the import works.
+# scripts/tools/ isn't a package; insert it on sys.path so the import works.
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(SOC_AGENT_ROOT / "scripts"))
+sys.path.insert(0, str(SOC_AGENT_ROOT / "scripts" / "tools"))
 
 import host_query  # noqa: E402
 from host_query import (  # noqa: E402
