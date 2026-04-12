@@ -59,17 +59,17 @@ The salt is generated per run (`secrets.token_hex(8)`) specifically so it cannot
 
 ### `ticket_context.yaml`
 
-**Who writes:** `hooks/scripts/contextualize_preload.py` (UserPromptSubmit hook).
-**Who reads:** the main agent (CONTEXTUALIZE — trimmed summary injected via `additionalContext`, full output on disk).
+**Who writes:** `scripts/contextualize_preload.py` (skill expansion `!command`, detached child).
+**Who reads:** the main agent during CONTEXTUALIZE — reads the file from disk.
 
-Full output from the ticket-context subagent (Sonnet). Contains SIEM correlation results: recent/related alert clusters, repeat detection, prior investigation matches, and fast-resolve assessment. The hook injects a trimmed version into the agent's context (alert counts instead of full ID lists, reasoning dropped) and saves the full output here.
+Full output from the ticket-context subagent. Contains SIEM correlation results: recent/related alert clusters, repeat detection, prior investigation matches, and fast-resolve assessment. The preload script forks a detached child during skill expansion so the command returns immediately; the file lands asynchronously (typically within 30–120s). The main agent reads it at the start of CONTEXTUALIZE and falls back to manual dispatch if the file is still missing by the end of the phase.
 
 ### `archetype_scan.yaml`
 
-**Who writes:** `hooks/scripts/contextualize_preload.py` (UserPromptSubmit hook).
-**Who reads:** the main agent (CONTEXTUALIZE — injected via `additionalContext`).
+**Who writes:** `scripts/contextualize_preload.py` (skill expansion `!command`, detached child).
+**Who reads:** the main agent during CONTEXTUALIZE — reads the file from disk.
 
-Output from the archetype-scan subagent (Haiku). Contains a similarity ranking of each archetype's story against the current alert, with required anchors and boundary conditions. Used by the main agent to seed hypothesis generation.
+Output from the archetype-scan subagent. Contains a similarity ranking of each archetype's story against the current alert, with required anchors and boundary conditions. Used by the main agent to seed hypothesis generation. Same async-delivery model as `ticket_context.yaml`.
 
 ### `investigation.md`
 

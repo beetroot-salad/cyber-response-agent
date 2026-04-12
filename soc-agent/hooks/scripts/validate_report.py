@@ -296,10 +296,10 @@ def playbook_has_screen_section(signature_id: str) -> bool:
 def check_ticket_context_spawned(run_dir: Path) -> str | None:
     """Verify ticket-context ran during this investigation.
 
-    The CONTEXTUALIZE preload hook writes ticket_context.yaml to the run
-    directory. If that file exists, the check passes (hook-preloaded path).
+    The CONTEXTUALIZE preload script writes ticket_context.yaml to the run
+    directory during skill expansion. If that file exists, the check passes.
     If not, falls back to scanning the audit log for a manual Agent/Task
-    dispatch of ticket-context (backward-compatible path).
+    dispatch of ticket-context (fallback path).
 
     Returns None on pass, an error message on fail.
     """
@@ -338,8 +338,8 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
 
     return (
         "This investigation did not record a ticket-context subagent "
-        "invocation. The CONTEXTUALIZE preload hook normally writes "
-        "ticket_context.yaml to the run directory; if the hook failed, "
+        "invocation. The CONTEXTUALIZE preload script normally writes "
+        "ticket_context.yaml to the run directory; if it failed, "
         "dispatch the subagent manually using the prompt template at "
         "skills/investigate/ticket-context.md, then re-write report.md."
     )
