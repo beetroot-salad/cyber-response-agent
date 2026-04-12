@@ -5,8 +5,7 @@ Per-phase reference for the investigation loop. For the state machine and legal 
 Every phase has the same three responsibilities:
 
 1. **Do the phase's work** — load context, form a hypothesis, run a lead, weigh evidence, or write a report.
-2. **Append a section to `investigation.md`** — the narrative log the semantic judge reads.
-3. **Call `write_state.py`** — the state machine writes `state.json` and enforces legal transitions.
+2. **Append a `## PHASE` section to `investigation.md`** — the narrative log the semantic judge reads. The `infer_state.py` hook automatically detects the new section header, validates the transition, and updates `state.json`.
 
 If the state machine rejects a transition, the hook exits non-zero and the agent sees a tool failure. The agent must adjust its plan — there is no way to "talk around" the enforcement.
 

@@ -74,20 +74,15 @@ This hard limit exists for two reasons:
 
 ## State machine enforcement
 
-The loop is enforced by `hooks/scripts/write_state.py`, which the agent must call at every phase transition:
+The loop is enforced by the `infer_state.py` PostToolUse hook, which fires automatically when the agent writes `## PHASE` section headers to `investigation.md`. On each Write/Edit to `investigation.md` the hook:
 
-```bash
-python3 hooks/scripts/write_state.py <run_dir> <NEW_PHASE> [ticket_id] [signature_id]
-```
+1. Extracts all `## PHASE` headers from the file
+2. Compares against the recorded history in `state.json`
+3. For each new phase, looks up `TRANSITIONS[current_phase]` in `schemas/state.py` to check whether the proposed transition is legal
+4. Counts hypothesis loops in the history; rejects the transition if it would exceed `MAX_LOOPS`
+5. Writes the new state back to `state.json` with an updated timestamp and appended history
 
-On each call the script:
-
-1. Loads `state.json` from the run directory (or initializes a fresh state if missing)
-2. Looks up `TRANSITIONS[current_phase]` in `schemas/state.py` to check whether the proposed transition is legal
-3. Counts hypothesis loops in the history; rejects the transition if it would exceed `MAX_LOOPS`
-4. Writes the new state back to `state.json` with an updated timestamp and appended history
-
-If any check fails the script prints the error to stderr and exits with code 1, which the agent sees as a tool failure. The agent must then adjust its plan — you cannot "talk around" the state machine.
+If any check fails the hook exits with code 2, which blocks the write and feeds the error back to the agent. The agent must then adjust its plan — you cannot "talk around" the state machine.
 
 ## Legal transitions
 
@@ -115,7 +110,7 @@ The `HYPOTHESIZE → GATHER → ANALYZE` sequence is locked — you cannot skip 
 
 ## `state.json` shape
 
-Written by `write_state.py`, consumed by `validate_report.py` and by the agent when deciding whether it's in a new loop:
+Written by the `infer_state.py` hook, consumed by `validate_report.py` and by the agent when deciding whether it's in a new loop:
 
 ```json
 {

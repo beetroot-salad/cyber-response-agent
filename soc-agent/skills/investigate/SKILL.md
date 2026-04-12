@@ -20,11 +20,11 @@ argument-hint: "<signature_id> <alert_json>"
 
 ## Workspace Map
 
-A starting orientation derived from the on-disk knowledge tree. Your shell cwd at startup is the soc-agent root, so the script paths shown below are relative to it (e.g. `python3 hooks/scripts/write_state.py …` runs from there). When in doubt about a path, run `ls` or `pwd` — this map is a starting point, not an exhaustive index.
+A starting orientation derived from the on-disk knowledge tree. Your shell cwd at startup is the soc-agent root, so the script paths shown below are relative to it. When in doubt about a path, run `ls` or `pwd` — this map is a starting point, not an exhaustive index.
 
 !`cd ${CLAUDE_SKILL_DIR}/../.. && python3 scripts/workspace_map.py`
 
-Other files under `hooks/scripts/` (audit_tool_calls, budget_enforcer, validate_report, investigation_summary, frontmatter, tag_tool_results) are fired by the hook system, **not** invoked by you directly.
+Other files under `hooks/scripts/` (infer_state, audit_tool_calls, budget_enforcer, validate_report, investigation_summary, frontmatter, tag_tool_results) are fired by the hook system, **not** invoked by you directly.
 
 ---
 
@@ -110,14 +110,7 @@ Transitions:
 - ANALYZE → CONCLUDE (mechanism confirmed + verified + scoped, or escalation)
 ```
 
-A hard limit on hypothesis loops is enforced by the state machine. The write_state script reports your current loop count — if you're approaching the limit without convergence, escalate.
-
-At each phase transition, record state by running:
-```bash
-python3 hooks/scripts/write_state.py {run_dir} {PHASE} {identifier} {signature_id}
-```
-
-This enforces legal transitions. If you get an error, you attempted an illegal transition — adjust your approach.
+The state machine is enforced automatically — when you write a `## PHASE` section header to `investigation.md`, a hook validates the transition and updates `state.json`. If you attempt an illegal transition (e.g., writing `## GATHER` before `## HYPOTHESIZE`), the write will be rejected with an error. The hook also reports your current loop count. A hard limit on hypothesis loops is enforced — if you're approaching it without convergence, escalate.
 
 ---
 
@@ -139,11 +132,6 @@ When reading multiple knowledge or environment files, batch independent reads in
 
 4. **Environment readiness.** The `## Environment Readiness` section at the top of this skill is the preflight output — which configured adapters responded to `health-check`. For any system marked unreachable or degraded, scan `knowledge/common-investigation/leads/*/definition.md` for leads whose `data_tags` depend on that system and record them in `investigation.md` as affected (see the template below). Preflight is deliberately a connectivity check only; it does not verify per-index freshness. If a GATHER query later returns suspect results (zero matches, stale latest event, unexpectedly low count), follow `knowledge/common-investigation/leads/data-source-debug/definition.md` to diagnose whether it's a coverage gap, field-schema drift, or true absence.
 
-Write state:
-```bash
-python3 hooks/scripts/write_state.py {run_dir} CONTEXTUALIZE {identifier} {signature_id}
-```
-
 Write an initial section in `{run_dir}/investigation.md`:
 ```markdown
 ## CONTEXTUALIZE
@@ -164,12 +152,7 @@ Write an initial section in `{run_dir}/investigation.md`:
 
 **When to enter:** The playbook loaded in Signature Knowledge contains a `## Screen` section. If there is no Screen section, skip directly to HYPOTHESIZE.
 
-1. Write state:
-   ```bash
-   python3 hooks/scripts/write_state.py {run_dir} SCREEN
-   ```
-
-2. **Spawn the SCREEN subagent.** It runs the playbook's screen pattern table — checks each pattern's indicators against the alert, executes the specified leads, and returns a structured `screen_result: match | no_match` with the supporting observations.
+1. **Spawn the SCREEN subagent.** It runs the playbook's screen pattern table — checks each pattern's indicators against the alert, executes the specified leads, and returns a structured `screen_result: match | no_match` with the supporting observations.
    ```
    Agent(
      subagent_type="general-purpose",
@@ -253,11 +236,6 @@ The archetype scan from CONTEXTUALIZE step 3 already ranked the archetype storie
 
 #### Output
 
-Write state:
-```bash
-python3 hooks/scripts/write_state.py {run_dir} HYPOTHESIZE
-```
-
 Append to `{run_dir}/investigation.md`:
 ```markdown
 ## HYPOTHESIZE (loop {N})
@@ -311,11 +289,6 @@ For composite dispatch, additionally:
 - **Note cross-lead observations** — consistencies, contradictions, or patterns that span leads
 - **Do not skip leads** or change their methodology based on earlier results — each lead's "What to Characterize" requirements still apply in full
 
-Write state:
-```bash
-python3 hooks/scripts/write_state.py {run_dir} GATHER
-```
-
 Append to `{run_dir}/investigation.md`:
 ```markdown
 ## GATHER (loop {N})
@@ -367,11 +340,6 @@ When confirming a mechanism that implies prior stages (e.g., data exfiltration i
 
 This keeps your current investigation focused while ensuring nothing is lost.
 
-Write state:
-```bash
-python3 hooks/scripts/write_state.py {run_dir} ANALYZE
-```
-
 Append to `{run_dir}/investigation.md`:
 ```markdown
 ## ANALYZE (loop {N})
@@ -412,9 +380,13 @@ hypotheses:
    - If a precedent is cited, verify its `anchors_at_time` entries — any entry with `temporal: true` represents a confirmation that no longer transfers forward in time; the current investigation must show the equivalent anchor re-confirmed today
 6. Write `{run_dir}/report.md` with YAML frontmatter
 
-Write state:
-```bash
-python3 hooks/scripts/write_state.py {run_dir} CONCLUDE
+Append to `{run_dir}/investigation.md`:
+```markdown
+## CONCLUDE
+
+**Verdict:** {resolved|escalated} — {1-line rationale}
+**Confirmed hypothesis:** ?{name} | none
+**Trace:** {trace line}
 ```
 
 Write `{run_dir}/report.md`:
