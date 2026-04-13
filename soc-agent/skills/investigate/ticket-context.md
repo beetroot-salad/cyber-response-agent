@@ -1,6 +1,6 @@
 ---
 subagent_type: general-purpose
-model: sonnet
+model: haiku
 description: ticket-context for {identifier}
 ---
 

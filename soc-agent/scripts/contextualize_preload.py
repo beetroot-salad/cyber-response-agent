@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Preload ticket-context and archetype-scan during skill expansion.
+"""Preload archetype-scan during skill expansion.
 
 Called as a !command in SKILL.md after setup_run.py has created the run
-directory. Forks a detached child that spawns two claude subprocesses in
-parallel (ticket-context on Sonnet, archetype-scan on Haiku) and writes
-their outputs to `{run_dir}/ticket_context.yaml` and `archetype_scan.yaml`.
-The parent returns immediately so skill expansion is not blocked; the main
-agent reads the files from disk during CONTEXTUALIZE.
+directory. Forks a detached child that spawns a claude subprocess for
+archetype-scan (Haiku) and writes its output to
+`{run_dir}/archetype_scan.yaml`. The parent returns immediately so skill
+expansion is not blocked; the main agent reads the file from disk during
+CONTEXTUALIZE.
+
+Ticket-context is NOT preloaded — a preload race condition was observed
+under faster main-agent models where CONTEXTUALIZE read the file before
+the detached child had written it. Ticket-context is now dispatched
+inline by the main agent as a Haiku Agent() subagent during CONTEXTUALIZE
+(see `skills/investigate/SKILL.md` step 3).
 
 Usage: python3 scripts/contextualize_preload.py <signature_id>
 
@@ -21,7 +27,6 @@ import json
 import os
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -31,7 +36,6 @@ from pathlib import Path
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = SOC_AGENT_ROOT / "skills" / "investigate"
 
-TICKET_CONTEXT_PROMPT = SKILLS_DIR / "ticket-context.md"
 ARCHETYPE_SCAN_PROMPT = SKILLS_DIR / "archetype-scan.md"
 
 # ---------------------------------------------------------------------------
@@ -163,57 +167,20 @@ def invoke_subagent(
 def _run_subagents(
     run_path: Path,
     runs_dir: str,
-    tc_prompt: str | None,
-    tc_model: str | None,
-    tc_build_error: str | None,
     as_prompt: str | None,
     as_model: str | None,
     as_build_error: str | None,
 ) -> None:
-    """Run subagents and write output files. Called in a forked child process."""
-    # Ticket-context needs Bash for SIEM queries; archetype-scan is read-only.
-    # Allow both relative and absolute paths for the SIEM CLI.
-    tc_tools = [
-        "Bash(python3 scripts/tools/wazuh_cli.py *)",
-        f"Bash(python3 {SOC_AGENT_ROOT}/scripts/tools/wazuh_cli.py *)",
-    ]
+    """Run archetype-scan subagent and write output file. Called in a forked child process."""
     run_parent = [runs_dir]
 
-    tc_output, tc_error = None, tc_build_error
     as_output, as_error = None, as_build_error
 
-    futures = {}
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        if tc_prompt is not None:
-            futures["ticket-context"] = executor.submit(
-                invoke_subagent, tc_prompt, tc_model, "ticket-context",
-                tc_tools, run_parent,
-            )
-        if as_prompt is not None:
-            futures["archetype-scan"] = executor.submit(
-                invoke_subagent, as_prompt, as_model, "archetype-scan",
-                None, run_parent,
-            )
+    if as_prompt is not None:
+        as_output, as_error = invoke_subagent(
+            as_prompt, as_model, "archetype-scan", None, run_parent,
+        )
 
-        for label, future in futures.items():
-            try:
-                output, error = future.result(timeout=SUBPROCESS_TIMEOUT + 10)
-                if label == "ticket-context":
-                    tc_output, tc_error = output, error
-                else:
-                    as_output, as_error = output, error
-            except Exception as e:
-                if label == "ticket-context":
-                    tc_error = f"future error: {e}"
-                else:
-                    as_error = f"future error: {e}"
-
-    # Save outputs to disk — the main agent checks for these files
-    if tc_output:
-        try:
-            (run_path / "ticket_context.yaml").write_text(tc_output)
-        except OSError:
-            pass
     if as_output:
         try:
             (run_path / "archetype_scan.yaml").write_text(as_output)
@@ -237,27 +204,21 @@ def main() -> int:
     run_dir = str(run_path)
     runs_dir = str(run_path.parent)
 
-    # Build subagent prompts
+    # Build subagent prompt
     substitutions = {
         "run_dir": run_dir,
         "signature_id": signature_id,
         "runs_dir": runs_dir,
     }
 
-    tc_prompt = tc_model = tc_build_error = None
     as_prompt = as_model = as_build_error = None
-
-    try:
-        tc_prompt, tc_model = build_subagent_prompt(TICKET_CONTEXT_PROMPT, substitutions)
-    except Exception as e:
-        tc_build_error = str(e)
 
     try:
         as_prompt, as_model = build_subagent_prompt(ARCHETYPE_SCAN_PROMPT, substitutions)
     except Exception as e:
         as_build_error = str(e)
 
-    if tc_prompt is None and as_prompt is None:
+    if as_prompt is None:
         return 0
 
     # Fork the subagent work into a background process so the !command
@@ -265,9 +226,8 @@ def main() -> int:
     pid = os.fork()
     if pid > 0:
         # Parent: print status message (embedded in prompt) and exit.
-        print(f"Preload dispatched — ticket-context (Sonnet) and archetype-scan (Haiku) "
-              f"are running in the background. Output files will appear at "
-              f"`{run_dir}/ticket_context.yaml` and `{run_dir}/archetype_scan.yaml`.")
+        print(f"Preload dispatched — archetype-scan (Haiku) is running in the background. "
+              f"Output file will appear at `{run_dir}/archetype_scan.yaml`.")
         return 0
 
     # Child: detach from parent session so we survive the !command returning.
@@ -278,11 +238,7 @@ def main() -> int:
         sys.stderr = open(os.devnull, "w")
         sys.stdin = open(os.devnull, "r")
 
-        _run_subagents(
-            run_path, runs_dir,
-            tc_prompt, tc_model, tc_build_error,
-            as_prompt, as_model, as_build_error,
-        )
+        _run_subagents(run_path, runs_dir, as_prompt, as_model, as_build_error)
     except Exception:
         pass
     finally:

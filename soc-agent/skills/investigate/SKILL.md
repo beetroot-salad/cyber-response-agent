@@ -125,10 +125,20 @@ The state machine is enforced automatically — when you write a `## PHASE` sect
 
 When reading multiple knowledge or environment files, batch independent reads into a single turn using parallel tool calls. Do not issue sequential Reads for files that don't depend on each other.
 
-3. **Integrate preloaded context.** Read `{run_dir}/ticket_context.yaml` and `{run_dir}/archetype_scan.yaml` in parallel — these are preloaded during skill expansion and may land asynchronously.
-   - **Ticket context**: If `fast_resolve.recommended: true` and the cited prior investigation + precedent file exist and match, go directly to CONCLUDE; otherwise use `situation` / `definite` / `maybe` for hypothesis ranking.
-   - **Archetype scan**: Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation.
-   - **If a file is missing**, do the rest of CONTEXTUALIZE first to give it time to land, then re-check. If still missing, dispatch manually using the prompts at `skills/investigate/ticket-context.md` and `skills/investigate/archetype-scan.md`.
+3. **Gather preloaded + dispatched context.**
+
+   **Archetype scan** (preloaded) — read `{run_dir}/archetype_scan.yaml`. This is preloaded during skill expansion and may land asynchronously. Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation. If the file is missing, continue with the rest of CONTEXTUALIZE to give it time to land; if still missing at HYPOTHESIZE time, dispatch manually using `skills/investigate/archetype-scan.md`.
+
+   **Ticket context** (dispatch inline) — spawn the ticket-context subagent now. It queries the SIEM for related alerts, clusters them mechanically, and recommends whether fast-resolve is possible.
+   ```
+   Agent(
+     subagent_type="general-purpose",
+     model="haiku",
+     description="ticket-context for {identifier}",
+     prompt=<read skills/investigate/ticket-context.md, substitute {run_dir}, {runs_dir}, {signature_id} verbatim>
+   )
+   ```
+   The `model="haiku"` pin is required — ticket-context is mechanical clustering + structured output, not deep reasoning, and pinning Haiku keeps per-alert cost bounded regardless of main-agent model. When the subagent returns, integrate its findings into the CONTEXTUALIZE narrative: if `fast_resolve.recommended: true` and the cited prior investigation + precedent file exist and match, go directly to CONCLUDE; otherwise use `situation` / `definite` / `maybe` for hypothesis ranking.
 
 4. **Environment readiness.** The `## Environment Readiness` section at the top of this skill is the preflight output — which configured adapters responded to `health-check`. For any system marked unreachable or degraded, scan `knowledge/common-investigation/leads/*/definition.md` for leads whose `data_tags` depend on that system and record them in `investigation.md` as affected (see the template below). Preflight is deliberately a connectivity check only; it does not verify per-index freshness. If a GATHER query later returns suspect results (zero matches, stale latest event, unexpectedly low count), follow `knowledge/common-investigation/leads/data-source-debug/definition.md` to diagnose whether it's a coverage gap, field-schema drift, or true absence.
 
@@ -226,6 +236,10 @@ Then find where the stories **diverge most** across hypotheses. That divergence 
 
 **Absence is evidence.** A hypothesis predicts what you WILL find and what you WON'T find. If `?brute-force` predicts high volume and you see exactly 1 attempt, that's refuting evidence. Some mechanisms are defined by the conjunction of "event X present AND event Y absent" — actively verify both sides. Don't assume absence; query for it.
 
+**Quantify predictions relative to a baseline.** Prefer statistical framing to absolute thresholds — "within 1σ of historical cadence," "count in lowest decile for this signature," "rate consistent with approved-monitoring-sources baseline," ">3σ deviation from typical wordlist-scan volume." Relative predictions are environment-agnostic and make refutation shapes unambiguous. When no baseline exists, say so and state the refutation shape qualitatively ("refuted if success event observed in follow-up window"). Vague predictions ("consistent with monitoring activity") cannot be refuted and should be rewritten.
+
+**Pre-enumerate pitfalls per hypothesis.** For each hypothesis note 1–2 alert-specific traps that could make it look confirmed when it isn't — attacker-controllable signals (reverse DNS, user-agent), known false-positive patterns, or circumstantial observations easy to mistake for authoritative. These are alert-specific, not the static lead-level pitfalls from `leads/{lead}/definition.md`. Pitfalls are your pre-registered "how could I be wrong."
+
 If primary evidence sources are unavailable, consider secondary artifacts — the hypothesized activity would also leave traces in network traffic, authentication logs, file system changes, etc. Don't give up on a lead because the obvious data source is missing.
 
 Reference `knowledge/common-investigation/leads/` for lead methodology. Each lead is a directory containing `definition.md` (what to characterize, pitfalls) and optionally `templates/` (pre-built query templates per SIEM). If no lead directory exists for what you need, follow `leads/ad-hoc/definition.md`.
@@ -242,9 +256,11 @@ Append to `{run_dir}/investigation.md`:
 
 **Active hypotheses:** ?hypothesis-1, ?hypothesis-2
 **Selected lead:** {lead-name}
-**Predictions:**
+**Predictions:** (quantify relative to baseline where possible; see guidance above)
 - ?hypothesis-1: {expected observation}
+  - *Pitfalls:* {1–2 alert-specific traps}
 - ?hypothesis-2: {expected observation}
+  - *Pitfalls:* ...
 ```
 
 ### GATHER
@@ -312,11 +328,14 @@ For each surviving hypothesis, assign a weight:
 Cross-check your analysis against the investigation philosophy:
 - **Severity of tests:** Are your leads severe enough? A benign conclusion from weak tests should not produce high confidence. If you've only pursued leads where all hypotheses predict the same outcome, you haven't actually discriminated.
 - **Watch for the unexplained:** If your best hypothesis leaves significant observations unexplained, your hypothesis space may be incomplete — consider whether you've missed an actor type, pathway, or mechanism.
+- **Circumstantial vs authoritative:** Distinguish "evidence consistent with X" (circumstantial) from "authoritative source confirms X" (e.g. the sanction registry explicitly lists this IP, the change-management ticket is open with a confirmed operator, the query result directly answers the question). Do not promote circumstantial to authoritative. A `++` weight on a mechanism hypothesis tied to an anchored archetype requires authoritative confirmation; circumstantial consistency alone is at most `+`. A refutation shape being met does not automatically mean `--` — ask: "Was the test severe enough? Could the hypothesis still be true despite this evidence?" `--` means direct contradiction of a core prediction, not "looks unlikely."
 
 **Decision after ANALYZE:**
 - If hypotheses remain undifferentiated: → HYPOTHESIZE (select next lead)
 - If evidence contradicts all hypotheses: → CONCLUDE with escalation
 - If a mechanism hypothesis is confirmed (`++`): **verify and scope before concluding**
+
+**Premature CONCLUDE is a primary failure mode.** Do not conclude until BOTH: the adversarial hypothesis is explicitly refuted with `--` evidence (not just deprioritized, outweighed, or "unlikely given context"), AND at least one mechanism hypothesis has `++` authoritative confirmation OR the investigation is escalating with a clear escalation rationale. When the adversarial is cleared but no mechanism reaches `++`, the correct next action is HYPOTHESIZE (pursue anchor confirmation or a differentiating lead), not CONCLUDE. When the target is high-sensitivity (production DB, secrets store, identity provider) and the evidence is ambiguous, escalate — do not accept weak evidence as sufficient.
 
 #### Verification and Scoping
 

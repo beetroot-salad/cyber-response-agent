@@ -65,6 +65,102 @@ Screen-miss candidate:
 
 Cross-reference: see `.claude/skills/evaluate/SKILL.md` run #9 entry for the canonical example. The `monitoring-probe` archetype is the first concrete candidate for this refinement loop — its current `attempt_count_5min: exactly 1` indicator is too brittle and will trip on any cron jitter, duplicate cron entry, or operator-manually-invoked probe, forcing the full loop on alerts the precedent already resolves.
 
+### Sonnet-main eval sweep findings (2026-04-13)
+
+Findings surfaced by running 4 Sonnet-main evals (runs #11–#14 in `.claude/skills/evaluate/SKILL.md`) with the three new SKILL.md discipline cues (circumstantial-vs-authoritative, statistical predictions, pitfalls subsection). Keeping as distinct items because each is independently actionable regardless of the migration timeline.
+
+- [x] **Preload hook race condition fixed (2026-04-13).** `contextualize_preload.py` was forking a detached child to spawn both ticket-context and archetype-scan in the background; the main agent's first CONTEXTUALIZE read raced the detached writes. Opus was slow enough that files landed in time; Sonnet reads raced past. Fix: ticket-context is now dispatched inline by the main agent as a Haiku `Agent()` call (synchronous by construction, no race). Archetype-scan stays in preload because SKILL.md's graceful fallback handles the race. Validated in run #14.
+
+- [ ] **Forward-looking burst check on 5710 screen.** The `attempt_count_5min` indicator in `knowledge/signatures/wazuh-rule-5710/playbook.md` is backward-looking only ("5 minutes PRECEDING the alert"). For the first alert of a burst, the preceding window is empty so count=1 passes the screen — subsequent burst attempts never get queried. Add a second indicator: `attempts_from_source_60s_after <= 0` (forward-looking), so a burst's first alert correctly fails the screen. Low priority but worth doing before the next Sonnet-main eval cycle on bait-shape scenarios.
+
+- [ ] **Alert-selection determinism in `fetch_alert.py`.** Same scenario, two runs, different alert selected (first-of-burst vs mid-burst). Eval reproducibility requires a stable ordering. Options: (a) add a `--select {latest,earliest,first}` flag, default to `latest`; (b) respect `--offset N` so the eval harness can skip past the first-of-burst alert deliberately. Either works; latest is probably the right default because it matches what a human analyst would pick up. Affects eval reproducibility only, not the agent itself.
+
+- [ ] **Runtime Opus→Sonnet consultation design.** The 3-run Sonnet eval sweep produced one failure (run #11 on 100001: shallow GATHER query + hypothesis bundling + confident-wrong narrative) and three passes. The failure mode is signature-maturity-dependent, not model-capability-dependent — 5710 is mature and Sonnet matches Opus quality, 100001 has thin scaffolding and Sonnet collapsed. Belt-and-suspenders principle says: **keep the knowledge-maturation investment as primary defense, add a narrow runtime Opus consultation at 1–2 high-leverage points as a backstop**. Design decisions pending:
+  - **Consultation point 1 — HYPOTHESIZE → GATHER boundary (query construction + hypothesis completeness).** The 100001 failure was upstream at the query: Sonnet queried `rule.groups:falco AND container.id` without pulling `proc.name`, which stripped the sshd-vs-bash discriminator. Opus would have queried with `proc.name` surfaced because it knows the field is load-bearing for 100002 disambiguation. The consultation input is `{alert, active_hypotheses, selected_lead, lead_definition}` → Opus returns `{minimum_discriminating_fields_to_query, flagged_bundled_hypotheses, missing_mechanism_variants}`. This blocks the GATHER dispatch until Opus approves the query shape. Cost: ~1 Opus call per investigation, most expensive under caching.
+  - **Consultation point 2 — ANALYZE → CONCLUDE boundary (only when adversarial is being refuted on circumstantial evidence).** Not mandatory on every loop — gated by a hook-level check: "does the ANALYZE assessment assign `--` to the adversarial hypothesis based on anything other than an authoritative query result?" If yes, consult Opus before CONCLUDE; if no, allow the commit. This gate catches the "coherent confabulation" failure mode without the cost of always-on consultation.
+  - **What context Opus contributes**: (a) field schema awareness for SIEM queries (which fields carry the discriminators for which signatures), (b) mechanism-variant enumeration (splitting bundled hypotheses into testable distinct ones), (c) environment-knowledge integration (reading the ip-ranges / identity-patterns / variant documentation as Opus did unprompted in run #13).
+  - **Not included**: a CONCLUDE-side consultation that duplicates Tier 2 judge work. The judge already receives full investigation + report + archetype + precedent and runs 6 criteria; a pre-CONCLUDE Opus call would double-tax the same check.
+  - Defer implementation to the migration session. Design-only here.
+
+- [ ] **Real-world robustness caveats.** The 4 Sonnet runs were on a medium-quality harness (playground containers, manually triggered alerts, mature-for-this-eval signatures) with relatively short investigations (≤6 phases, ≤2 hypothesis loops). Production conditions that the eval sweep did NOT exercise and that are the most likely sources of Sonnet-specific failure:
+  - **Missing or degraded data sources** — Wazuh backlog, SIEM index gap, `data-source-debug` lead fires. Sonnet's query-formulation depth may or may not survive this. Opus #9's recovery on 9 denied/errored tool results in one run is the baseline to match.
+  - **Stale knowledge** — ip-ranges.md with terminated monitoring sources, anchor docs referencing deprecated tickets, `approved-monitoring-sources.md` out of sync with production. Sonnet may accept stale citations at face value where Opus would notice the mismatch.
+  - **Longer investigation loops** — 5+ hypothesis loops with verification and scoping cycles. The short-investigation hypothesis bundling we observed may compound over many loops; coherence decay over long contexts is an untested Sonnet failure mode.
+  - **Novel alert shapes** — alerts outside the playbook's archetype space that require genuine first-principles mechanism enumeration. Run #13's `?monitoring-bait-scenario` novel hypothesis was encouraging, but it was enabled by explicit environment-variant documentation. Truly-novel cases where no documentation grounds the variant are untested.
+  - **Ambiguous anchor confirmations** — the change-management ticket is in a weird state, the on-call schedule is in a transition, the approval cadence has a pending update. Sonnet's tendency to commit confidently may produce wrong grounding assertions here.
+  - **Rate-limited or noisy SIEM queries** — production indexes with 10×–100× the event volume of the playground. Subagent query-construction quality matters much more under high volume.
+  Path forward before production: eval sweep on a harder signature (100001 or a genuinely novel one) post-scaffolding-maturation, and at least one eval where we deliberately degrade a data source to see how Sonnet handles the fallback.
+
+### Past investigations as first-class investigation input (2026-04-13)
+
+Today the agent learns from past investigations only via hand-curated precedent snapshots under `archetypes/{name}/*.json` and the ticket-context subagent (which queries the ticketing system, not prior agent runs). The corpus of prior `runs/*/` with completed `report.md` + passing Tier 2 judge is currently unused — it's an audit trail, not a learning substrate. This is a structural gap: the agent's richest source of shape-matching signal (its own past work on similar alerts) is invisible to the hypothesis loop.
+
+This deserves its own PR once the Sonnet-main migration stabilizes. The work splits into two linked tracks:
+
+**Track A — past-runs as queryable evidence.**
+
+- [ ] **Define "successful run"** for past-run indexing. Minimum bar: `report.md` exists, Tier 1 passed, Tier 2 VERDICT:PASS, `status=resolved` with grounding leg satisfied. Escalated runs with clear analyst disposition (via a post-hoc feedback loop) could eventually qualify but not in v1. Store the eligibility flag in `runs/audit.jsonl` at run completion so the index doesn't have to re-compute it.
+- [ ] **Build a past-runs index.** Per signature, extract: entity set (srcip, srcuser, host, image family, …), trace line, matched_archetype, disposition, confidence, key `++`/`--` observations from the investigation log. Store as a flat index (SQLite or JSONL) keyed by signature_id + entity-class hash, so a query can land in <100ms without reading every run dir.
+- [ ] **Expose as a lead: `past-investigations`.** Follows the same shape as every other lead — a `leads/past-investigations/definition.md` + per-vendor templates (in this case a single template pointing at the local index). The lead takes the current alert's entity set as input, returns the top-N matching past runs ranked by entity similarity + recency + Tier 2 pass, plus a one-line summary of each. The main agent can select it at HYPOTHESIZE just like any other lead.
+- [ ] **Temporal staleness check** — past runs older than a threshold (or whose grounding leg depended on temporal anchors) should be flagged as "shape-transferable but grounding must be re-confirmed," matching the existing precedent-staleness logic in Tier 2 GROUNDING_MATCH.
+
+**Track B — strengthen the investigation language so past runs are comparable.**
+
+This is the harder half. For past runs to be queryable as pattern fuel, the structured content in `investigation.md` — hypothesis names, lead names, weight assessments, observation phrasing — needs to converge across runs. Today each run invents its own hypothesis names (`?compromise-followup` vs `?session-compromise` vs `?followup-success`), which makes cross-run matching fuzzy.
+
+- [ ] **Canonicalize hypothesis vocabulary per signature.** Each signature's playbook should define a canonical seed-hypothesis name set; the agent can refine descriptions but must not rename the seeds. Freeform novel hypotheses remain allowed but are flagged as "novel" so the cross-run matcher knows they aren't canonical.
+- [ ] **Canonicalize lead names.** `leads/` directory names are already the authoritative naming registry; enforce that investigation.md's "Selected lead:" field must match a directory entry exactly. A Layer 2 schema check (see "State Machine Transition Verification Criteria" — next design iteration) can enforce this deterministically.
+- [ ] **Structured observation snippets.** ANALYZE's `reasoning: "..."` field is today freeform prose. Adding a lightweight convention — "prediction: X, observation: Y, result: matches|contradicts|partial" — would make cross-run observation matching possible without an LLM in the loop. Non-trivial prompt change; defer until Track A shows value.
+- [ ] **Post-mortem feedback loop** — when a novel hypothesis wins in a run, the post-mortem should flag it as a candidate for promotion into the signature's canonical seed set. Analyst-mediated, not automatic (same model as the screen-miss detection above).
+
+**Why this matters for the Sonnet-main decision.** A stronger past-runs channel reduces the reasoning load on the main agent at HYPOTHESIZE — the agent is increasingly *matching* to prior work rather than *generating* from first principles. That shifts more of the weight toward pattern recognition (where Sonnet is competitive) and away from novel reasoning (where Opus wins). The cost lever compounds with the migration, but the migration should not wait for this work — they are independent.
+
+### Prompt-level cost reduction: reduce turns and output volume (2026-04-12)
+
+Analysis of run #9 transcript (full 6-phase loop, $2.28) and run #9-SCREEN (SCREEN-resolved, $0.89) reveals the main agent's cost is driven by **turn count × context size** (cache reads) and **output volume** (tool inputs, investigation.md, report.md). The agent generates 52K chars of output across 52 turns in the full loop; 80% is tool input (Write/Edit/Agent calls), 18% thinking, 3% text. The three largest output chunks are investigation.md edits (15.9K chars), report.md write (12.3K chars), and subagent prompts (5.9K chars).
+
+These levers are **orthogonal to the Sonnet migration** — they reduce the work done regardless of which model does it. Combined, they multiply with the model-tier savings below.
+
+| Configuration | SCREEN-resolved | Full loop |
+|---|---|---|
+| Current Opus baseline | $0.89 | $2.28 |
+| Opus + prompt levers | ~$0.50 | ~$1.30 |
+| Sonnet (no prompt levers) | ~$0.30 | ~$0.75 |
+| Sonnet + prompt levers | ~$0.18 | ~$0.45 |
+
+**SCREEN rate is the dominant cost variable.** At 500 alerts/day, the difference between 70% and 30% SCREEN rate exceeds $400/day — larger than any single optimization. Prompt levers and Sonnet migration matter most at scale when SCREEN rate is already high (>60%).
+
+#### Lever 1 — Compressed investigation.md format
+
+investigation.md is the agent's working document, consumed by itself and the Tier 2 judge. It currently uses full prose narratives (4K chars per ANALYZE section alone). The judge needs structured evidence and assessment weights (++/+/-/--), not prose — it checks INTERNAL_CONSISTENCY, EVIDENCE_SUFFICIENCY, and ADVERSARIAL_CHECK against the assessment YAML blocks and specific observations, not narrative quality.
+
+Switch SKILL.md phase templates to terse structured notation. Report.md (analyst-facing) stays verbose.
+
+- [ ] **Rewrite investigation.md templates in SKILL.md** to use compressed YAML-style notation. Each phase section should be ~30-50% of current size. Preserve: hypothesis names, assessment weights with 1-line reasoning, specific observations (IPs, counts, timestamps), lead names, and phase headers. Remove: narrative transitions, repeated context, explanatory prose.
+- [ ] **Verify Tier 2 judge still passes** on the compressed format — the judge prompt references "investigation log" and checks for assessment blocks and hypothesis outcomes. Run a manual test with a compressed investigation.md against the judge to confirm.
+
+Estimated savings: ~$0.15-0.20/run (60-70% less output tokens for investigation.md writes, plus reduced context growth for subsequent turns).
+
+#### Lever 2 — Batch parallel reads in CONTEXTUALIZE
+
+CONTEXTUALIZE currently consumes 18 turns in the full-loop run. Many are sequential Read calls for knowledge files (ip-ranges.md, identity-patterns.md, lead definitions) that could be issued as parallel tool calls in a single turn. Claude Code supports multiple tool calls per message.
+
+- [ ] **Add explicit batching instruction to SKILL.md CONTEXTUALIZE section**: "When reading multiple knowledge or environment files, batch independent reads into a single turn using parallel tool calls. Do not issue sequential Reads for files that don't depend on each other."
+
+Estimated savings: ~$0.15-0.25/run (3-5 fewer turns × ~$0.05/turn in cache reads).
+
+#### Lever 3 — Batch write_state with investigation.md writes
+
+Every phase transition currently takes two turns: one Bash call to `write_state.py`, then a separate Write/Edit to investigation.md. These are independent and can be batched into a single turn.
+
+- [ ] **Add explicit batching instruction to SKILL.md phase transitions**: "At each phase transition, issue the `write_state.py` Bash call and the investigation.md Edit as parallel tool calls in the same message."
+
+Estimated savings: ~$0.25-0.30/run (5-6 fewer turns × ~$0.05/turn).
+
+#### Lazy-load — evaluated and deferred
+
+Considered removing the investigation checklist (3.1K chars) and non-matching archetype stories (6.8K chars) from the base prompt and having the agent read them on demand. **Deferred**: the checklist frames the agent's investigative discipline from turn 1 (adversarial hypothesis maintenance, lead severity, grounding requirements). Removing it saves ~$0.23/run in cache reads but risks degrading investigation quality that the Tier 2 judge validates. The archetype stories similarly help COMPLETENESS — having all four in context helps the agent consider sibling archetypes without an extra read. The savings don't justify the quality risk.
+
 ### Model-usage architecture: staged migration to Sonnet main agent (2026-04-12)
 
 Run #9 cost split: Opus 1M main **$1.86 (82%)**, Sonnet ticket-context subagent $0.29 (13%), Haiku precedent-scan + screen $0.13 (5%), total $2.28. The main-agent Opus share dominates; PR #34's subagent model pins already captured the easy subagent savings. Next lever: the main agent itself.
