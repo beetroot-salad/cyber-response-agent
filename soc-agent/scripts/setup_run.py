@@ -20,6 +20,7 @@ import re
 import secrets
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
@@ -109,7 +110,12 @@ def main() -> int:
     alert_file.write_text(json.dumps(alert, indent=2))
 
     # Save meta.json (run metadata for hooks)
-    meta = {"run_id": run_id, "signature_id": signature_id, "salt": salt}
+    meta = {
+        "run_id": run_id,
+        "signature_id": signature_id,
+        "salt": salt,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
     meta_file = run_dir / "meta.json"
     meta_file.write_text(json.dumps(meta, indent=2))
 

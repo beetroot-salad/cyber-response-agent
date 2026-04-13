@@ -22,6 +22,7 @@ from schemas.retention import (  # noqa: E402
 from scripts.cleanup_runs import (  # noqa: E402
     clean_jsonl,
     clean_run_dirs,
+    get_run_timestamp,
     is_dir_expired,
     parse_jsonl_timestamp,
 )
@@ -32,7 +33,17 @@ from scripts.cleanup_runs import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def _make_run_dir(runs_dir: Path, name: str, age_days: float) -> Path:
-    """Create a fake run directory with a controlled mtime."""
+    """Create a fake run directory with a meta.json containing created_at."""
+    d = runs_dir / name
+    d.mkdir(parents=True)
+    (d / "alert.json").write_text("{}")
+    created_at = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
+    (d / "meta.json").write_text(json.dumps({"run_id": name, "created_at": created_at}))
+    return d
+
+
+def _make_run_dir_no_meta(runs_dir: Path, name: str, age_days: float) -> Path:
+    """Create a run directory without meta.json — exercises the mtime fallback."""
     d = runs_dir / name
     d.mkdir(parents=True)
     (d / "alert.json").write_text("{}")
@@ -127,10 +138,43 @@ class TestRetentionSchema:
 
 
 # ---------------------------------------------------------------------------
-# is_dir_expired
+# get_run_timestamp / is_dir_expired
 # ---------------------------------------------------------------------------
 
-class TestIsDirExpired:
+class TestGetRunTimestamp:
+    def test_reads_created_at_from_meta_json(self, tmp_path):
+        d = _make_run_dir(tmp_path, "run", age_days=50)
+        ts = get_run_timestamp(d)
+        # Should be ~50 days ago; allow a few seconds of test execution slack.
+        age = (datetime.now(timezone.utc) - ts).total_seconds()
+        assert 49.9 * 86400 < age < 50.1 * 86400
+
+    def test_falls_back_to_mtime_when_no_meta(self, tmp_path):
+        d = _make_run_dir_no_meta(tmp_path, "run", age_days=50)
+        ts = get_run_timestamp(d)
+        age = (datetime.now(timezone.utc) - ts).total_seconds()
+        assert 49.9 * 86400 < age < 50.1 * 86400
+
+    def test_falls_back_to_mtime_on_corrupt_meta(self, tmp_path):
+        d = _make_run_dir_no_meta(tmp_path, "run", age_days=50)
+        (d / "meta.json").write_text("not json")
+        # Writing meta.json updated the dir mtime — reset it so fallback is testable.
+        mtime = (datetime.now(timezone.utc) - timedelta(days=50)).timestamp()
+        os.utime(d, (mtime, mtime))
+        ts = get_run_timestamp(d)
+        age = (datetime.now(timezone.utc) - ts).total_seconds()
+        assert 49.9 * 86400 < age < 50.1 * 86400
+
+    def test_meta_takes_precedence_over_mtime(self, tmp_path):
+        # meta.json says 100 days old; mtime says 1 day old.
+        # get_run_timestamp should return the meta.json value.
+        d = _make_run_dir(tmp_path, "run", age_days=100)
+        recent_mtime = (datetime.now(timezone.utc) - timedelta(days=1)).timestamp()
+        os.utime(d, (recent_mtime, recent_mtime))
+        ts = get_run_timestamp(d)
+        age_days = (datetime.now(timezone.utc) - ts).days
+        assert age_days >= 99  # meta.json wins, not the recent mtime
+
     def test_old_dir_is_expired(self, tmp_path):
         d = _make_run_dir(tmp_path, "old", age_days=100)
         assert is_dir_expired(d, _cutoff(90)) is True
@@ -140,8 +184,7 @@ class TestIsDirExpired:
         assert is_dir_expired(d, _cutoff(90)) is False
 
     def test_boundary_is_strictly_less_than(self, tmp_path):
-        # A directory whose mtime equals the cutoff is NOT expired (strict <).
-        # We test with age slightly less than the cutoff.
+        # A run whose created_at equals the cutoff is NOT expired (strict <).
         d = _make_run_dir(tmp_path, "boundary", age_days=89.99)
         assert is_dir_expired(d, _cutoff(90)) is False
 

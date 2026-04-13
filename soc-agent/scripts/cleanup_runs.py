@@ -51,10 +51,37 @@ def get_runs_dir() -> Path:
     return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
 
 
+def get_run_timestamp(dir_path: Path) -> datetime:
+    """Return the best available timestamp for a run directory.
+
+    Prefers meta.json['created_at'] — written once by setup_run.py at run
+    creation and never modified, so it is immune to post-hoc edits, analyst
+    annotations, IDE temp files, or any other activity inside the run dir.
+
+    Falls back to directory mtime if meta.json is absent, unreadable, or
+    missing the field — covers runs created before this field was added and
+    any future format changes.
+    """
+    meta_path = dir_path / "meta.json"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            ts_str = meta.get("created_at")
+            if ts_str:
+                dt = datetime.fromisoformat(ts_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+        except Exception:
+            pass
+    # Fallback: directory mtime.  Less reliable (resets on any child write)
+    # but always available for runs that predate created_at.
+    return datetime.fromtimestamp(dir_path.stat().st_mtime, tz=timezone.utc)
+
+
 def is_dir_expired(dir_path: Path, cutoff: datetime) -> bool:
-    """Return True if dir_path's mtime is before cutoff (strictly less than)."""
-    mtime = datetime.fromtimestamp(dir_path.stat().st_mtime, tz=timezone.utc)
-    return mtime < cutoff
+    """Return True if the run directory's timestamp predates cutoff."""
+    return get_run_timestamp(dir_path) < cutoff
 
 
 def parse_jsonl_timestamp(line: str) -> datetime | None:
@@ -110,8 +137,8 @@ def clean_run_dirs(
 
         if is_dir_expired(entry, cutoff):
             if verbose:
-                mtime = datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc)
-                print(f"  [DELETE] {entry.name}  (mtime {mtime.date()})")
+                ts = get_run_timestamp(entry)
+                print(f"  [DELETE] {entry.name}  (ts {ts.date()})")
             if not dry_run:
                 try:
                     shutil.rmtree(entry)
@@ -122,8 +149,8 @@ def clean_run_dirs(
             deleted += 1
         else:
             if verbose:
-                mtime = datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc)
-                print(f"  [KEEP]   {entry.name}  (mtime {mtime.date()})")
+                ts = get_run_timestamp(entry)
+                print(f"  [KEEP]   {entry.name}  (ts {ts.date()})")
             skipped += 1
 
     return deleted, skipped
