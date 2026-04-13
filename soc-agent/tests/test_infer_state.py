@@ -470,3 +470,143 @@ class TestInferStateHook:
         state = load_state(run_dir)
         assert state["phase"] == "GATHER"
         assert state["history"] == ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER"]
+
+
+# ---------------------------------------------------------------------------
+# Bash-dispatched hook: agents that append via `cat >> investigation.md <<EOF`
+# ---------------------------------------------------------------------------
+
+
+def make_bash_hook_event(command: str) -> str:
+    """Create a PostToolUse JSON event for a Bash command."""
+    event = {
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "tool_use_id": "test-bash-001",
+        "session_id": "session-001",
+    }
+    return json.dumps(event)
+
+
+class TestBashDispatch:
+    """The agent sometimes appends to investigation.md via Bash heredoc
+    instead of Write/Edit. The hook must recognize the path in the command
+    string and re-parse the file on disk. Regression from 100110 eval where
+    Opus used `cat >> ... <<EOF` and state.json stayed stuck at CONTEXTUALIZE.
+    """
+
+    def _setup(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        run_dir = runs_dir / "run-bash"
+        run_dir.mkdir(parents=True)
+        write_meta(run_dir, run_id="run-bash")
+        return runs_dir, run_dir
+
+    def test_cat_heredoc_append(self, tmp_path):
+        """cat >> investigation.md <<EOF ... EOF triggers the hook."""
+        runs_dir, run_dir = self._setup(tmp_path)
+        inv = run_dir / "investigation.md"
+
+        # Seed: write CONTEXTUALIZE via Write first
+        inv.write_text("## CONTEXTUALIZE\nalert\n")
+        r1 = run_hook(make_hook_event(str(inv)), runs_dir)
+        assert r1.returncode == 0
+        assert load_state(run_dir)["history"] == ["CONTEXTUALIZE"]
+
+        # Now simulate the Bash heredoc append — the file on disk has the new
+        # content, and the Bash command string references the path.
+        inv.write_text(
+            "## CONTEXTUALIZE\nalert\n"
+            "## HYPOTHESIZE (loop 1)\npredictions\n"
+        )
+        command = f"cat >> {inv} <<'EOF'\n## HYPOTHESIZE (loop 1)\npredictions\nEOF"
+        r2 = run_hook(make_bash_hook_event(command), runs_dir)
+        assert r2.returncode == 0, f"stderr: {r2.stderr}"
+
+        state = load_state(run_dir)
+        assert state["phase"] == "HYPOTHESIZE"
+        assert state["history"] == ["CONTEXTUALIZE", "HYPOTHESIZE"]
+
+    def test_bash_full_walk_in_one_append(self, tmp_path):
+        """A single Bash append that adds multiple phases transitions cleanly."""
+        runs_dir, run_dir = self._setup(tmp_path)
+        inv = run_dir / "investigation.md"
+
+        inv.write_text("## CONTEXTUALIZE\nalert\n")
+        run_hook(make_hook_event(str(inv)), runs_dir)
+
+        inv.write_text(
+            "## CONTEXTUALIZE\nalert\n"
+            "## HYPOTHESIZE (loop 1)\nh\n"
+            "## GATHER (loop 1)\ng\n"
+            "## ANALYZE (loop 1)\na\n"
+            "## CONCLUDE\nend\n"
+        )
+        command = f"cat >> {inv} <<'EOF'\n## HYPOTHESIZE ...\nEOF"
+        r = run_hook(make_bash_hook_event(command), runs_dir)
+        assert r.returncode == 0, f"stderr: {r.stderr}"
+
+        state = load_state(run_dir)
+        assert state["phase"] == "CONCLUDE"
+        assert state["history"] == [
+            "CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE",
+        ]
+
+    def test_tee_append_path_form(self, tmp_path):
+        """`tee -a` is another common append form; the path extractor must match it."""
+        runs_dir, run_dir = self._setup(tmp_path)
+        inv = run_dir / "investigation.md"
+
+        inv.write_text("## CONTEXTUALIZE\nalert\n")
+        run_hook(make_hook_event(str(inv)), runs_dir)
+
+        inv.write_text(
+            "## CONTEXTUALIZE\nalert\n"
+            "## HYPOTHESIZE (loop 1)\nh\n"
+        )
+        command = f"echo '## HYPOTHESIZE (loop 1)' | tee -a {inv}"
+        r = run_hook(make_bash_hook_event(command), runs_dir)
+        assert r.returncode == 0, f"stderr: {r.stderr}"
+        assert load_state(run_dir)["history"] == ["CONTEXTUALIZE", "HYPOTHESIZE"]
+
+    def test_bash_without_investigation_md_is_ignored(self, tmp_path):
+        """A Bash command not touching investigation.md must not mutate state."""
+        runs_dir, run_dir = self._setup(tmp_path)
+        inv = run_dir / "investigation.md"
+        inv.write_text("## CONTEXTUALIZE\nalert\n")
+        run_hook(make_hook_event(str(inv)), runs_dir)
+        before = load_state(run_dir)
+
+        r = run_hook(make_bash_hook_event("ls -la /tmp"), runs_dir)
+        assert r.returncode == 0
+        after = load_state(run_dir)
+        assert before == after
+
+    def test_bash_path_outside_runs_dir_is_ignored(self, tmp_path):
+        """A Bash command referencing an investigation.md outside the runs dir is ignored."""
+        runs_dir, run_dir = self._setup(tmp_path)
+
+        # Reference a path that isn't inside runs_dir
+        r = run_hook(
+            make_bash_hook_event("cat >> /elsewhere/investigation.md <<EOF\nEOF"),
+            runs_dir,
+        )
+        assert r.returncode == 0
+        assert not (run_dir / "state.json").exists()
+
+    def test_bash_illegal_transition_blocked(self, tmp_path):
+        """If a Bash append introduces an illegal phase order, the hook rejects it."""
+        runs_dir, run_dir = self._setup(tmp_path)
+        inv = run_dir / "investigation.md"
+
+        # Seed with CONTEXTUALIZE via Write
+        inv.write_text("## CONTEXTUALIZE\nalert\n")
+        run_hook(make_hook_event(str(inv)), runs_dir)
+
+        # Simulate a Bash append that tries to skip from CONTEXTUALIZE to ANALYZE
+        inv.write_text(
+            "## CONTEXTUALIZE\nalert\n"
+            "## ANALYZE (loop 1)\nbad\n"
+        )
+        r = run_hook(make_bash_hook_event(f"cat >> {inv} <<EOF\nEOF"), runs_dir)
+        assert r.returncode == 2
