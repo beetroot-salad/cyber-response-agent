@@ -132,7 +132,7 @@ class TestBuildSubagentPrompt:
             prompt_path,
             {"run_dir": "/tmp/test", "signature_id": "test-sig", "runs_dir": "/tmp"},
         )
-        assert model == "sonnet"
+        assert model == "haiku"
         assert len(body) > 100
 
     def test_real_archetype_scan_prompt(self):
