@@ -408,7 +408,7 @@ class TestCleanJsonl:
 class TestMainIntegration:
     def _setup_runs_dir(self, tmp_path) -> dict:
         """Create a populated runs dir and return paths."""
-        _make_run_dir(tmp_path, "old-run", age_days=100)
+        _make_run_dir(tmp_path, "old-run", age_days=200)
         _make_run_dir(tmp_path, "new-run", age_days=5)
 
         audit = tmp_path / "audit.jsonl"
