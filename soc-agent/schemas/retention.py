@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 # Per-run UUID directories.  90 days covers post-incident review windows
 # while keeping disk use manageable at 100–1000 alerts/day.
-DEFAULT_RUN_MAX_AGE_DAYS = 90
+DEFAULT_RUN_MAX_AGE_DAYS = 180
 
 # audit.jsonl and tool_audit.jsonl — security compliance records.
 # 365 days (one year) matches common compliance requirements (SOC 2, ISO 27001).

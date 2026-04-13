@@ -4,7 +4,7 @@ How soc-agent run artifacts are aged out and which knobs control the window.
 
 ## Why retention matters
 
-Run directories and JSONL logs accumulate indefinitely without a cleanup policy. At 100–1000 alerts per day, run directories alone add up to 120 MB–1.2 GB per 90-day window. The three cross-run JSONL logs have different compliance profiles: `audit.jsonl` and `tool_audit.jsonl` are security compliance records that should survive for at least a year, while `tool_trace.jsonl` is read-only navigation noise with no compliance value and can be pruned aggressively. Each data type therefore has its own independent retention window.
+Run directories and JSONL logs accumulate indefinitely without a cleanup policy. At 100–1000 alerts per day, run directories alone add up to 240 MB–2.4 GB per 180-day window. The three cross-run JSONL logs have different compliance profiles: `audit.jsonl` and `tool_audit.jsonl` are security compliance records that should survive for at least a year, while `tool_trace.jsonl` is read-only navigation noise with no compliance value and can be pruned aggressively. Each data type therefore has its own independent retention window.
 
 See `content/run-artifacts.md` for a full description of what each artifact contains and which hook writes it.
 
@@ -12,7 +12,7 @@ See `content/run-artifacts.md` for a full description of what each artifact cont
 
 | Artifact | Controlled by | Default | Rationale |
 |---|---|---|---|
-| `runs/{uuid}/` dirs | `SOC_AGENT_RUN_MAX_AGE_DAYS` | 90 | Covers post-incident review; 1000/day stays under ~1.2 GB |
+| `runs/{uuid}/` dirs | `SOC_AGENT_RUN_MAX_AGE_DAYS` | 180 | Covers post-incident review; 1000/day stays under ~2.4 GB |
 | `runs/audit.jsonl` | `SOC_AGENT_AUDIT_MAX_AGE_DAYS` | 365 | Compliance record — one line per completed investigation |
 | `runs/tool_audit.jsonl` | `SOC_AGENT_AUDIT_MAX_AGE_DAYS` | 365 | Compliance record — state-changing tool calls |
 | `runs/tool_trace.jsonl` | `SOC_AGENT_TRACE_MAX_AGE_DAYS` | 30 | Debug noise only; no compliance value |
@@ -25,8 +25,8 @@ Incomplete or aborted run directories (those without a `report.md`) use the same
 
 Three optional environment variables control retention. All default to the values above when unset. The naming convention follows `SOC_AGENT_JUDGE_TIMEOUT_SECONDS` and `SOC_AGENT_JUDGE_MODEL`.
 
-**`SOC_AGENT_RUN_MAX_AGE_DAYS`** (default: `90`)
-Directories older than this many days are deleted. Age is measured by the directory's modification time in UTC. All age calculations use UTC throughout, consistent with the UTC timestamps written by the hooks — a 90-day window means entries older than 90 × 24 hours from the moment cleanup runs.
+**`SOC_AGENT_RUN_MAX_AGE_DAYS`** (default: `180`)
+Directories older than this many days are deleted. Age is measured by `meta.json`'s `created_at` timestamp (written once at run creation, immune to post-hoc edits), with a fallback to directory mtime for pre-existing runs. All age calculations use UTC throughout, consistent with the UTC timestamps written by the hooks — a 180-day window means entries older than 180 × 24 hours from the moment cleanup runs.
 
 **`SOC_AGENT_AUDIT_MAX_AGE_DAYS`** (default: `365`)
 JSONL lines with a `timestamp` field older than this are filtered from `audit.jsonl` and `tool_audit.jsonl`. 365 days matches common compliance requirements (SOC 2, ISO 27001 log retention guidance).
@@ -57,7 +57,7 @@ The script exits 0 on success (including dry-run) and 1 on fatal errors.
 - `--dry-run` never touches the filesystem.
 - Directories are only deleted if they are direct children of the runs directory, protecting against a misconfigured `SOC_AGENT_RUNS_DIR`.
 
-**Known limitation — JSONL race window:** The atomic rewrite does not prevent a concurrent hook append from being silently dropped. If a hook writes a new line to `audit.jsonl` in the millisecond interval between cleanup's read and its `os.replace`, that line will be lost. At daily-cron frequency the probability is low (~1% at 1000 alerts/day), and the full investigation log remains in the run directory for 90 days. Schedule cleanup during low-activity windows (e.g. 2am) to minimize exposure.
+**Known limitation — JSONL race window:** The atomic rewrite does not prevent a concurrent hook append from being silently dropped. If a hook writes a new line to `audit.jsonl` in the millisecond interval between cleanup's read and its `os.replace`, that line will be lost. At daily-cron frequency the probability is low (~1% at 1000 alerts/day), and the full investigation log remains in the run directory for 180 days. Schedule cleanup during low-activity windows (e.g. 2am) to minimize exposure.
 
 ## Scheduling
 
