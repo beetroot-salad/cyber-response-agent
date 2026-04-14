@@ -391,6 +391,16 @@ hypotheses:
 
 **Goal:** Write the final report with structured frontmatter.
 
+**Preconditions — enforced by hook on writing `## CONCLUDE`:**
+
+1. Leads pursued meets the minimum for signature severity (low:1, medium:2, high:3, critical:4), counted from `## GATHER` blocks in `investigation.md`.
+2. Read `skills/investigate/conclusion_checks.md` and answer every question that applies to your status.
+3. Write your answers to `{run_dir}/conclusion_checks.json` following the schema in that file. Each answer cites verbatim substrings from `investigation.md`; the hook checks each citation exists in the log.
+
+If any gate fails, the `## CONCLUDE` write is rejected and you return to the prior phase. Write `conclusion_checks.json` **before** writing the `## CONCLUDE` header to `investigation.md`.
+
+---
+
 1. Review the **Investigation Checklist** in the Signature Knowledge section above — verify every item before writing the report
 2. Generate a trace line summarizing the investigation path
    - For SCREEN-resolved investigations, use the format: `screen({pattern}, {leads}) → disposition:hypothesis`
