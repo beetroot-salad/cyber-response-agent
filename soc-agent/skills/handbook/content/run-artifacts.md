@@ -9,10 +9,9 @@ runs/
 ├── {run_id}/                  # one directory per investigation
 │   ├── alert.json             # sanitized alert input — who, what, when
 │   ├── meta.json              # run_id, signature_id, per-run salt
-│   ├── ticket_context.yaml    # preloaded SIEM correlation + fast-resolve assessment
-│   ├── archetype_scan.yaml    # preloaded archetype similarity rankings
 │   ├── investigation.md       # agent's narrative log (per-phase sections)
 │   ├── state.json             # state machine state (phase, history, timestamps)
+│   ├── conclusion_checks.json # pre-CONCLUDE self-check answers + citations
 │   └── report.md              # final report — structured frontmatter + body
 ├── audit.jsonl                # one JSON line per completed investigation
 ├── tool_audit.jsonl           # one JSON line per state-changing tool call
@@ -57,19 +56,7 @@ The `salt` is the injection defense primitive (Layer 2 — see `content/validati
 
 The salt is generated per run (`secrets.token_hex(8)`) specifically so it cannot leak into training data or documentation and become forgeable — static delimiters would eventually.
 
-### `ticket_context.yaml`
-
-**Who writes:** `scripts/contextualize_preload.py` (skill expansion `!command`, detached child).
-**Who reads:** the main agent during CONTEXTUALIZE — reads the file from disk.
-
-Full output from the ticket-context subagent. Contains SIEM correlation results: recent/related alert clusters, repeat detection, prior investigation matches, and fast-resolve assessment. The preload script forks a detached child during skill expansion so the command returns immediately; the file lands asynchronously (typically within 30–120s). The main agent reads it at the start of CONTEXTUALIZE and falls back to manual dispatch if the file is still missing by the end of the phase.
-
-### `archetype_scan.yaml`
-
-**Who writes:** `scripts/contextualize_preload.py` (skill expansion `!command`, detached child).
-**Who reads:** the main agent during CONTEXTUALIZE — reads the file from disk.
-
-Output from the archetype-scan subagent. Contains a similarity ranking of each archetype's story against the current alert, with required anchors and boundary conditions. Used by the main agent to seed hypothesis generation. Same async-delivery model as `ticket_context.yaml`.
+**Note on CONTEXTUALIZE subagent outputs.** Earlier versions of this plugin preloaded `ticket_context.yaml` and `archetype_scan.yaml` into the run directory via a background `!command` (`scripts/contextualize_preload.py`). That script has been retired — both subagents are now dispatched inline by the main agent during CONTEXTUALIZE and their outputs come back as `Agent()` tool results, not files on disk. No run-artifact entry exists for either YAML anymore because they're never written to the filesystem.
 
 ### `investigation.md`
 
@@ -105,7 +92,7 @@ This file is the **agent-owned log**. The structural record lives in `state.json
 }
 ```
 
-The `history` array is append-only and records every phase the investigation has entered, in order. `infer_state.py` uses it to count loops (number of `HYPOTHESIZE` entries) against `MAX_LOOPS = 7`, and `validate_report.py` uses `SCREEN in history and HYPOTHESIZE not in history` to detect screen-resolved investigations that are exempt from the minimum-leads-by-severity check.
+The `history` array is append-only and records every phase the investigation has entered, in order. `infer_state.py` uses it to count loops (number of `HYPOTHESIZE` entries) against `MAX_LOOPS = 7`, and `validate_conclude.py` + `validate_report.py` use `SCREEN in history and HYPOTHESIZE not in history` to detect screen-resolved investigations that are exempt from the CONCLUDE self-check and that must be backed by a playbook declaring a `## Screen` section.
 
 This file is **machine-owned**. The agent should never edit it directly — all updates go through the `infer_state.py` hook (triggered by `investigation.md` writes) so the state machine can validate the transition. Attempting to edit `state.json` directly is a way to bypass safety, and it will lose against the PostToolUse audit hook even if it succeeds momentarily.
 

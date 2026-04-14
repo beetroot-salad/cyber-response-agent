@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 DEFAULT_LIMITS = {
     "max_tool_calls": 150,
     "max_subagent_spawns": 10,
-    "wall_clock_timeout": 600,  # seconds
+    "wall_clock_timeout": 720,  # seconds — 12 min hard cap, warning at 75% (9 min)
 }
 
 # Fraction of each limit at which a warning is emitted.

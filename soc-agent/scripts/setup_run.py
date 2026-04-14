@@ -5,13 +5,13 @@ Usage: python3 scripts/setup_run.py <signature_id> <alert_json>
 
 Creates:
   {SOC_AGENT_RUNS_DIR:-runs}/{uuid}/alert.json
-  {SOC_AGENT_RUNS_DIR:-runs}/{uuid}/meta.json  (run_id, signature_id, salt)
+  {SOC_AGENT_RUNS_DIR:-runs}/{uuid}/meta.json  (run_id, signature_id, severity, salt)
 
 Prints run metadata to stdout for !command substitution in SKILL.md.
 
 Exit codes:
   0 — success
-  1 — invalid arguments or malformed alert JSON
+  1 — invalid arguments, malformed alert JSON, or missing/invalid signature severity
 """
 
 import json
@@ -24,6 +24,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(SOC_AGENT_ROOT))
+
+from hooks.scripts.frontmatter import parse_yaml_frontmatter
+from schemas.report_frontmatter import MIN_LEADS_BY_SEVERITY
 
 # ---------------------------------------------------------------------------
 # Static sanitization — protects human reviewers and structural plumbing.
@@ -72,6 +77,34 @@ def sanitize_alert(obj: object) -> object:
     return obj
 
 
+def read_signature_severity(signature_id: str) -> str:
+    """Read severity from signatures/{id}/context.md frontmatter.
+
+    Fail-fast: raises if the file is missing or the severity field is
+    absent or invalid. Severity is a per-signature contract that hooks
+    rely on at runtime — silently defaulting hides authoring bugs.
+    """
+    context_path = (
+        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "context.md"
+    )
+    if not context_path.exists():
+        raise SystemExit(
+            f"Error: signature '{signature_id}' has no context.md at {context_path}"
+        )
+    fm = parse_yaml_frontmatter(context_path.read_text())
+    severity = fm.get("severity")
+    if not severity:
+        raise SystemExit(
+            f"Error: {context_path} frontmatter is missing 'severity'"
+        )
+    if severity not in MIN_LEADS_BY_SEVERITY:
+        valid = sorted(MIN_LEADS_BY_SEVERITY.keys())
+        raise SystemExit(
+            f"Error: {context_path} severity={severity!r} is not one of {valid}"
+        )
+    return severity
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(f"Usage: {sys.argv[0]} <signature_id> <alert_json>", file=sys.stderr)
@@ -79,6 +112,11 @@ def main() -> int:
 
     signature_id = sys.argv[1]
     alert_json_str = sys.argv[2]
+
+    # Read + validate severity from the signature's context.md before any
+    # filesystem mutation, so a misconfigured signature fails loudly without
+    # leaving a half-built run directory behind.
+    severity = read_signature_severity(signature_id)
 
     # Parse alert JSON
     try:
@@ -113,6 +151,7 @@ def main() -> int:
     meta = {
         "run_id": run_id,
         "signature_id": signature_id,
+        "severity": severity,
         "salt": salt,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }

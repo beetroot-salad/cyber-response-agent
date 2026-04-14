@@ -26,11 +26,9 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.frontmatter import parse_yaml_frontmatter
+from hooks.scripts.run_context import get_runs_dir
 from schemas.precedent import check_recency, DEFAULT_MAX_AGE_DAYS
-from schemas.report_frontmatter import (
-    MIN_LEADS_BY_SEVERITY,
-    parse_frontmatter,
-)
+from schemas.report_frontmatter import parse_frontmatter
 
 JUDGE_PROMPT_PATH = Path(__file__).resolve().parent / "judge_prompt.md"
 JUDGE_MODEL = os.environ.get("SOC_AGENT_JUDGE_MODEL", "haiku")
@@ -40,16 +38,12 @@ JUDGE_MODEL = os.environ.get("SOC_AGENT_JUDGE_MODEL", "haiku")
 # Run directory identification (from PostToolUse event)
 # ---------------------------------------------------------------------------
 
-def get_runs_dir() -> Path:
-    """Get the runs directory. Configurable via SOC_AGENT_RUNS_DIR env var."""
-    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
-
-
 def extract_run_dir(hook_data: dict) -> Path | None:
-    """Extract the run directory from a PostToolUse event.
+    """Extract the run directory from a PostToolUse event targeting report.md.
 
-    Returns the parent directory if the tool wrote to a report.md
-    inside the runs directory. Returns None otherwise.
+    Note: this hook validates report.md, not investigation.md, so it can't
+    use the shared run_context.extract_run_dir helper (which is keyed on
+    investigation.md).
     """
     tool_input = hook_data.get("tool_input", {})
     file_path = tool_input.get("file_path", "")
@@ -60,13 +54,8 @@ def extract_run_dir(hook_data: dict) -> Path | None:
     if path.name != "report.md":
         return None
 
-    # Verify it's inside the runs directory
-    runs_dir = get_runs_dir()
-    try:
-        path.parent.relative_to(runs_dir)
-    except ValueError:
+    if path.parent.parent != get_runs_dir():
         return None
-
     return path.parent
 
 
@@ -250,21 +239,6 @@ def validate_archetype_anchors(
     return errors
 
 
-def get_signature_severity(signature_id: str) -> str:
-    """Get severity from context.md frontmatter. Default: medium."""
-    context_path = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "context.md"
-    )
-    if not context_path.exists():
-        return "medium"
-
-    with open(context_path) as f:
-        content = f.read()
-
-    fm = parse_yaml_frontmatter(content)
-    return fm.get("severity", "medium")
-
-
 def is_screen_resolved(run_dir: Path) -> bool:
     """Check if this investigation was resolved via the SCREEN phase.
 
@@ -293,58 +267,6 @@ def playbook_has_screen_section(signature_id: str) -> bool:
     return bool(re.search(r"^## Screen\b", content, re.MULTILINE))
 
 
-def check_ticket_context_spawned(run_dir: Path) -> str | None:
-    """Verify ticket-context ran during this investigation.
-
-    The CONTEXTUALIZE preload script writes ticket_context.yaml to the run
-    directory during skill expansion. If that file exists, the check passes.
-    If not, falls back to scanning the audit log for a manual Agent/Task
-    dispatch of ticket-context (fallback path).
-
-    Returns None on pass, an error message on fail.
-    """
-    # Primary: hook-preloaded output file
-    if (run_dir / "ticket_context.yaml").exists():
-        return None
-
-    # Fallback: check audit log for manual dispatch
-    audit_path = run_dir.parent / "tool_audit.jsonl"
-    if not audit_path.exists():
-        # No audit log means the audit hook hasn't run (or isn't configured).
-        # Don't fail validation in that case — the absence is its own signal
-        # but not actionable from here.
-        return None
-
-    try:
-        lines = audit_path.read_text().splitlines()
-    except OSError:
-        return None
-
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            ev = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if ev.get("tool_name") not in ("Task", "Agent"):
-            continue
-        # Inspect the tool_input as a serialized blob — the agent may put the
-        # ticket-context reference in the prompt, the description, or via the
-        # file path. Substring match handles all three.
-        blob = json.dumps(ev.get("tool_input", {})).lower()
-        if "ticket-context" in blob or "ticket_context" in blob:
-            return None
-
-    return (
-        "This investigation did not record a ticket-context subagent "
-        "invocation. The CONTEXTUALIZE preload script normally writes "
-        "ticket_context.yaml to the run directory; if it failed, "
-        "dispatch the subagent manually using the prompt template at "
-        "skills/investigate/ticket-context.md, then re-write report.md."
-    )
-
-
 def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
     """Run Tier 1 validation. Returns (passed, errors, frontmatter_fields)."""
     errors = []
@@ -365,30 +287,11 @@ def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
     run_dir = report_path.parent
     screen = is_screen_resolved(run_dir)
 
-    # Check: ticket-context subagent must have been spawned during CONTEXTUALIZE.
-    # This applies to all investigations regardless of screen-resolution, since
-    # CONTEXTUALIZE runs before SCREEN in the phase ordering.
-    ticket_ctx_error = check_ticket_context_spawned(run_dir)
-    if ticket_ctx_error:
-        errors.append(ticket_ctx_error)
-
-    # Check: leads_pursued meets minimum for severity
-    # Screen-resolved reports are exempt — their safety comes from
-    # precedent match + pattern match + judge validation
-    if screen:
-        if not playbook_has_screen_section(report.signature_id):
-            errors.append(
-                f"report is screen-resolved but playbook for "
-                f"'{report.signature_id}' has no ## Screen section"
-            )
-    else:
-        severity = get_signature_severity(report.signature_id)
-        min_leads = MIN_LEADS_BY_SEVERITY.get(severity, 2)
-        if report.leads_pursued < min_leads:
-            errors.append(
-                f"leads_pursued={report.leads_pursued} is below minimum "
-                f"for {severity} severity (requires >= {min_leads})"
-            )
+    if screen and not playbook_has_screen_section(report.signature_id):
+        errors.append(
+            f"report is screen-resolved but playbook for "
+            f"'{report.signature_id}' has no ## Screen section"
+        )
 
     # Check: resolved requires
     #   (1) matched_archetype pointing at a real archetype

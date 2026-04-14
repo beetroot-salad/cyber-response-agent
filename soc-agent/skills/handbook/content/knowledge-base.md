@@ -110,7 +110,7 @@ Keeping `config/signatures/` separate from `knowledge/signatures/` maintains a c
 
 Python dataclass validators that formalize the shape of the runtime artifacts. They're code, not documentation, but they're the authoritative source of truth for what's allowed.
 
-- **`report_frontmatter.py`** — `ReportFrontmatter` dataclass, `parse_frontmatter` helper, `MIN_LEADS_BY_SEVERITY` constant, enum validation (status, disposition, confidence, anchor kinds and results). Used by Tier 1 validation.
+- **`report_frontmatter.py`** — `ReportFrontmatter` dataclass, `parse_frontmatter` helper, enum validation (status, disposition, confidence, anchor kinds and results). Used by Tier 1 validation. A legacy `MIN_LEADS_BY_SEVERITY` constant is still defined here but is no longer enforced — the severity→min-leads floor was dropped from the CONCLUDE gate as empirically artificial (lead depth correlates with signature scaffolding and data availability, not with the severity label).
 - **`state.py`** — `Phase` enum, `TRANSITIONS` dict, `INITIAL_PHASE`, `MAX_LOOPS`, `validate_transition`, `count_loops`, `make_state`. Used by `infer_state.py` hook.
 - **`precedent.py`** — precedent JSON shape, `check_recency`, `DEFAULT_MAX_AGE_DAYS`. Used by Tier 1 validation.
 

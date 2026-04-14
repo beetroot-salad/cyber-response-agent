@@ -132,7 +132,7 @@ Written by the `infer_state.py` hook, consumed by `validate_report.py` and by th
 }
 ```
 
-`history` is an ordered list of every phase the investigation has entered. The validator checks this history at CONCLUDE time: for example, `validate_report.py` uses `SCREEN in history and HYPOTHESIZE not in history` to detect screen-resolved investigations, which are exempt from the minimum-leads check because their safety comes from the pattern match rather than multi-lead evidence.
+`history` is an ordered list of every phase the investigation has entered. The validator checks this history at CONCLUDE time: for example, `validate_report.py` uses `SCREEN in history and HYPOTHESIZE not in history` to detect screen-resolved investigations, which are exempt from the playbook-has-Screen-section cross-check because a screen-resolved outcome is only legal against a playbook that declares one.
 
 ## Termination rules
 
@@ -151,7 +151,7 @@ Unbounded loops invite two failure modes:
 1. **Drift** — the agent keeps pulling new leads that feel relevant but don't discriminate between surviving hypotheses. It burns budget without converging.
 2. **Gaming the safety check** — if loops were unlimited, the agent could technically satisfy "pursued enough leads" by running many low-severity leads, none of which actually refute threat hypotheses.
 
-The 7-loop cap makes both impossible. Combined with the minimum-leads-by-severity check (see `content/validation.md`) and the adversarial hypothesis rule, the loop has both a ceiling and a floor: you must pursue enough evidence to justify a resolution, and you cannot run more than a bounded number of rounds before escalating.
+The 7-loop cap makes both impossible. Combined with the CONCLUDE-transition self-check (see `content/validation.md`) and the adversarial hypothesis rule, the loop has both a ceiling and a floor: you must articulate refutation and grounding evidence before resolving, and you cannot run more than a bounded number of rounds before escalating.
 
 ## How `investigation.md` relates to the state machine
 

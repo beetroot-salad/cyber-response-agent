@@ -1,15 +1,1 @@
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Bash|Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /workspace/.claude/hooks/auto_allow.py"
-          }
-        ]
-      }
-    ]
-  }
-}
+{}

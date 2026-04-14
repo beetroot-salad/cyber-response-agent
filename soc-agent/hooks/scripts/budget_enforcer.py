@@ -29,12 +29,8 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.frontmatter import parse_yaml_frontmatter  # noqa: E402
+from hooks.scripts.run_context import get_runs_dir  # noqa: E402
 from schemas.budget import DEFAULT_LIMITS, WARNING_THRESHOLD, make_budget_state  # noqa: E402
-
-
-def get_runs_dir() -> Path:
-    """Get the runs directory. Configurable via SOC_AGENT_RUNS_DIR env var."""
-    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
 
 
 def parse_yaml_config(path: Path) -> dict:
