@@ -1,26 +1,38 @@
 #!/usr/bin/env python3
-"""PostToolUse hook: CONCLUDE transition verification gate.
+"""PreToolUse hook: CONCLUDE transition verification gate.
 
-Fires on Write/Edit of `investigation.md` (narrowed by `if` filters in
-plugin.json). When the file contains a `## CONCLUDE` header, enforces
-preconditions that the investigation is ready to close:
+Fires on Write/Edit targeting `investigation.md` (narrowed by `if`
+filters in plugin.json). Computes the *proposed* post-write text from
+the tool input (not the file on disk, which hasn't been updated yet),
+checks for a `## CONCLUDE` header, and enforces:
 
 1. ticket-context subagent was dispatched during CONTEXTUALIZE.
    Silent backstop — not surfaced in SKILL.md §CONCLUDE because by
    CONCLUDE time the damage is already done. Exists only so a broken
    preload surfaces somewhere.
-2. leads pursued meets the signature severity minimum, counted by
-   parsing `**Lead:**` / `**Leads:**` lines in `## GATHER` blocks.
-   Skipped for screen-resolved investigations (no GATHER blocks by
-   construction — their safety comes from SCREEN pattern match +
-   precedent + judge validation in validate_report.py).
-3. `conclusion_checks.json` exists in the run directory and covers
-   the expected question set for its declared status. Expected IDs
-   are parsed from `skills/investigate/conclusion_checks.md` so the
-   two stay in sync. Skipped for screen-resolved investigations.
-4. Every citation in `conclusion_checks.json` appears as a verbatim
-   substring in `investigation.md`. Prevents fabrication; does not
-   evaluate answer quality.
+2. `conclusion_checks.json` exists in the run directory and covers the
+   expected question set for its declared status. Every citation
+   appears as a verbatim substring in the proposed investigation.md
+   text. Expected question IDs come from
+   `skills/investigate/conclusion_checks.md` so the two stay in sync.
+
+   The self-check (gate 2) only fires when the investigation is
+   *struggling* or the signature's scaffolding is thin. Concretely:
+   - `loops >= 4` (forced iteration signals the agent is on weak
+     ground, regardless of signature maturity), OR
+   - `archetype_count < 2` for the signature (a playbook with one or
+     zero archetypes gives the agent no discriminative story to fit
+     evidence against, so the forced articulation earns its keep).
+
+   Screen-resolved investigations are exempt regardless — their
+   safety comes from SCREEN pattern match + precedent +
+   validate_report.py Tier 1/2.
+
+Running as PreToolUse means a rejection blocks the write before
+`infer_state.py` advances `state.json`. The agent can then fix the
+authoring gap and re-issue the write from the same pre-CONCLUDE phase,
+without the state machine confusion a rejected PostToolUse would
+cause.
 
 Exit codes:
     0 - Passed (or not a CONCLUDE-triggering write)
@@ -36,16 +48,20 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.investigation_parse import (
-    count_distinct_leads,
     has_conclude_header,
+    iter_phase_headers,
     is_screen_resolved,
 )
-from hooks.scripts.run_context import extract_run_dir
-from schemas.report_frontmatter import MIN_LEADS_BY_SEVERITY
+from hooks.scripts.run_context import extract_run_dir_from_path
 
 CONCLUSION_CHECKS_PROMPT = (
     SOC_AGENT_ROOT / "skills" / "investigate" / "conclusion_checks.md"
 )
+
+# Thresholds for firing the self-check. Raising either makes the check
+# stricter (fires more often); lowering makes it more permissive.
+MAX_LOOPS_BEFORE_SELF_CHECK = 4
+MIN_ARCHETYPES_FOR_MATURE_SCAFFOLDING = 2
 
 # Question headers in the prompt file: `### \`question_id\``
 QUESTION_HEADER_RE = re.compile(r"^### `([a-z_][a-z0-9_]*)`\s*$", re.MULTILINE)
@@ -58,17 +74,48 @@ STATUS_SECTION_RE = re.compile(
 
 
 # ---------------------------------------------------------------------------
-# meta.json access
+# Proposed-content resolution
 # ---------------------------------------------------------------------------
 
-def read_meta(run_dir: Path) -> dict:
-    meta_path = run_dir / "meta.json"
-    if not meta_path.exists():
-        return {}
-    try:
-        return json.loads(meta_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return {}
+def resolve_proposed_text(hook_data: dict) -> tuple[Path | None, str | None]:
+    """Return (run_dir, proposed_text) for a PreToolUse event targeting
+    investigation.md, or (None, None) if the event is unrelated.
+
+    For Write: `tool_input.content` is the full proposed file.
+    For Edit:  read the current file and apply `old_string → new_string`
+               (respecting `replace_all`).
+    """
+    tool_name = hook_data.get("tool_name", "")
+    tool_input = hook_data.get("tool_input", {})
+    file_path = tool_input.get("file_path", "")
+
+    run_dir = extract_run_dir_from_path(file_path)
+    if run_dir is None:
+        return None, None
+
+    if tool_name == "Write":
+        content = tool_input.get("content", "")
+        return run_dir, content if isinstance(content, str) else ""
+
+    if tool_name == "Edit":
+        inv_path = run_dir / "investigation.md"
+        if not inv_path.exists():
+            return None, None
+        try:
+            current = inv_path.read_text()
+        except OSError:
+            return None, None
+        old = tool_input.get("old_string", "")
+        new = tool_input.get("new_string", "")
+        if not isinstance(old, str) or not isinstance(new, str):
+            return None, None
+        if tool_input.get("replace_all"):
+            proposed = current.replace(old, new)
+        else:
+            proposed = current.replace(old, new, 1)
+        return run_dir, proposed
+
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -106,42 +153,75 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
             return None
 
     return (
-        "ticket-context subagent was not dispatched. The CONTEXTUALIZE "
-        "preload script normally writes ticket_context.yaml to the run "
-        "directory; if it failed, dispatch the subagent manually using "
-        "skills/investigate/ticket-context.md and re-write the CONCLUDE "
-        "header."
+        "ticket-context subagent was not dispatched during CONTEXTUALIZE. "
+        "The preload normally writes ticket_context.yaml to the run "
+        "directory; if that failed, dispatch the subagent manually using "
+        "skills/investigate/ticket-context.md before re-issuing this "
+        "CONCLUDE write. Next action: stay in CONCLUDE, run the subagent, "
+        "then retry the write."
     )
 
 
 # ---------------------------------------------------------------------------
-# Gate 2: leads pursued meets severity minimum
+# Self-check complexity gate
 # ---------------------------------------------------------------------------
 
-def check_leads_minimum(run_dir: Path, investigation_text: str) -> str | None:
-    meta = read_meta(run_dir)
-    severity = meta.get("severity")
-    if not severity:
-        # setup_run.py validates severity at run creation, so a missing
-        # value here means meta.json predates that validation or was
-        # written by a different harness. Don't fail the gate on that —
-        # surface it as a soft pass with no enforcement.
-        return None
-    min_leads = MIN_LEADS_BY_SEVERITY.get(severity)
-    if min_leads is None:
-        return None
-    count = count_distinct_leads(investigation_text)
-    if count < min_leads:
-        return (
-            f"leads pursued count={count} is below minimum for {severity} "
-            f"severity (requires >= {min_leads}). Return to HYPOTHESIZE and "
-            f"pursue additional diagnostic leads before concluding."
-        )
-    return None
+def count_hypothesize_loops(text: str) -> int:
+    """Number of `## HYPOTHESIZE` phase headers in the proposed text. This
+    matches `count_loops` over state.history but works against the proposed
+    investigation text directly, which the hook already has in hand."""
+    return sum(1 for p in iter_phase_headers(text) if p == "HYPOTHESIZE")
+
+
+def signature_archetype_count(signature_id: str) -> int:
+    """Number of archetype directories under the signature's knowledge tree.
+
+    An archetype is a subdirectory of `knowledge/signatures/{sig}/archetypes/`
+    that contains a README.md. Missing tree → 0.
+    """
+    if not signature_id:
+        return 0
+    arch_dir = (
+        SOC_AGENT_ROOT
+        / "knowledge"
+        / "signatures"
+        / signature_id
+        / "archetypes"
+    )
+    if not arch_dir.exists():
+        return 0
+    count = 0
+    for d in arch_dir.iterdir():
+        if d.is_dir() and (d / "README.md").exists():
+            count += 1
+    return count
+
+
+def should_run_self_check(run_dir: Path, proposed_text: str) -> bool:
+    """Fire the self-check when the investigation is struggling (many
+    hypothesis loops) or the signature's scaffolding is thin (few
+    archetypes). Mature signatures that resolve quickly are exempt — the
+    forced articulation adds little value when the agent is on strong
+    ground and the token cost isn't free.
+    """
+    loops = count_hypothesize_loops(proposed_text)
+    if loops >= MAX_LOOPS_BEFORE_SELF_CHECK:
+        return True
+    meta_path = run_dir / "meta.json"
+    signature_id = ""
+    if meta_path.exists():
+        try:
+            signature_id = json.loads(meta_path.read_text()).get("signature_id", "")
+        except (json.JSONDecodeError, OSError):
+            pass
+    archetype_count = signature_archetype_count(signature_id)
+    if archetype_count < MIN_ARCHETYPES_FOR_MATURE_SCAFFOLDING:
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
-# Gates 3 + 4: conclusion_checks.json
+# Gates 2 + 3: conclusion_checks.json
 # ---------------------------------------------------------------------------
 
 def load_expected_questions() -> dict[str, list[str]]:
@@ -159,53 +239,78 @@ def load_expected_questions() -> dict[str, list[str]]:
     return result
 
 
+_NEXT_ACTION_AUTHORING = (
+    "Next action: stay in CONCLUDE, fix conclusion_checks.json, retry the write."
+)
+
+
 def check_conclusion_file(run_dir: Path, investigation_text: str) -> str | None:
-    """Validate conclusion_checks.json shape, question set, and citations."""
+    """Validate conclusion_checks.json shape, question set, and citations.
+
+    Every rejection message ends with an explicit next-action line so the
+    agent knows where to go. All failures here are authoring issues — the
+    agent stays in the current phase and re-issues the write after fixing
+    the JSON. No phase change is needed.
+    """
     checks_path = run_dir / "conclusion_checks.json"
     if not checks_path.exists():
         return (
             "conclusion_checks.json not found in run directory. Read "
             "skills/investigate/conclusion_checks.md and write your answers "
-            "to conclusion_checks.json *before* writing the ## CONCLUDE header."
+            "to conclusion_checks.json *before* the ## CONCLUDE write. "
+            "Next action: stay in CONCLUDE, author the file, retry the write."
         )
 
     try:
         data = json.loads(checks_path.read_text())
     except (json.JSONDecodeError, OSError) as e:
-        return f"conclusion_checks.json is not valid JSON: {e}"
+        return (
+            f"conclusion_checks.json is not valid JSON: {e}. "
+            f"{_NEXT_ACTION_AUTHORING}"
+        )
 
     if not isinstance(data, dict):
         return (
             "conclusion_checks.json must be a JSON object with 'status' and "
-            "'checks' fields"
+            f"'checks' fields. {_NEXT_ACTION_AUTHORING}"
         )
 
     status = data.get("status")
     if status not in ("resolved", "escalated"):
         return (
             f"conclusion_checks.json 'status' must be 'resolved' or "
-            f"'escalated', got {status!r}"
+            f"'escalated', got {status!r}. {_NEXT_ACTION_AUTHORING}"
         )
 
     checks = data.get("checks")
     if not isinstance(checks, list):
-        return "conclusion_checks.json 'checks' must be a list"
+        return (
+            f"conclusion_checks.json 'checks' must be a list. "
+            f"{_NEXT_ACTION_AUTHORING}"
+        )
 
     expected = load_expected_questions()
     if status not in expected:
         return (
             f"conclusion_checks.md does not define a question set for "
-            f"status '{status}'"
+            f"status '{status}'. This is a skill-configuration bug, not an "
+            f"agent issue — escalate to the human operator."
         )
     expected_ids = set(expected[status])
 
     actual_ids: list[str] = []
     for i, entry in enumerate(checks):
         if not isinstance(entry, dict):
-            return f"conclusion_checks.json checks[{i}] must be an object"
+            return (
+                f"conclusion_checks.json checks[{i}] must be an object. "
+                f"{_NEXT_ACTION_AUTHORING}"
+            )
         qid = entry.get("question_id")
         if not qid:
-            return f"conclusion_checks.json checks[{i}] is missing 'question_id'"
+            return (
+                f"conclusion_checks.json checks[{i}] is missing 'question_id'. "
+                f"{_NEXT_ACTION_AUTHORING}"
+            )
         actual_ids.append(qid)
 
     actual_set = set(actual_ids)
@@ -214,41 +319,43 @@ def check_conclusion_file(run_dir: Path, investigation_text: str) -> str | None:
     if missing:
         return (
             f"conclusion_checks.json is missing required question(s) for "
-            f"status={status}: {sorted(missing)}"
+            f"status={status}: {sorted(missing)}. {_NEXT_ACTION_AUTHORING}"
         )
     if extra:
         return (
             f"conclusion_checks.json contains unexpected question(s): "
-            f"{sorted(extra)}. Valid for status={status}: {sorted(expected_ids)}"
+            f"{sorted(extra)}. Valid for status={status}: {sorted(expected_ids)}. "
+            f"{_NEXT_ACTION_AUTHORING}"
         )
 
-    # Gate 4: citation resolution
+    # Gate 3: citation resolution
     for entry in checks:
         qid = entry["question_id"]
         answer = entry.get("answer", "")
         if not isinstance(answer, str) or not answer.strip():
             return (
                 f"conclusion_checks.json question '{qid}' has empty or "
-                f"missing 'answer'"
+                f"missing 'answer'. {_NEXT_ACTION_AUTHORING}"
             )
         citations = entry.get("citations")
         if not isinstance(citations, list) or not citations:
             return (
                 f"conclusion_checks.json question '{qid}' must have a "
-                f"non-empty 'citations' list"
+                f"non-empty 'citations' list. {_NEXT_ACTION_AUTHORING}"
             )
         for j, citation in enumerate(citations):
             if not isinstance(citation, str) or not citation.strip():
                 return (
                     f"conclusion_checks.json question '{qid}' citation[{j}] "
-                    f"is empty or whitespace-only"
+                    f"is empty or whitespace-only. {_NEXT_ACTION_AUTHORING}"
                 )
             if citation not in investigation_text:
                 preview = citation[:80] + ("..." if len(citation) > 80 else "")
                 return (
                     f"conclusion_checks.json question '{qid}' citation not "
                     f"found in investigation.md: {preview!r}. Citations must "
-                    f"be verbatim substrings copied from the investigation log."
+                    f"be verbatim substrings copied from the investigation "
+                    f"log. {_NEXT_ACTION_AUTHORING}"
                 )
 
     return None
@@ -264,16 +371,11 @@ def main():
     except (json.JSONDecodeError, EOFError):
         sys.exit(0)
 
-    run_dir = extract_run_dir(hook_data)
-    if run_dir is None:
+    run_dir, proposed_text = resolve_proposed_text(hook_data)
+    if run_dir is None or proposed_text is None:
         sys.exit(0)
 
-    investigation_path = run_dir / "investigation.md"
-    if not investigation_path.exists():
-        sys.exit(0)
-
-    investigation_text = investigation_path.read_text()
-    if not has_conclude_header(investigation_text):
+    if not has_conclude_header(proposed_text):
         sys.exit(0)
 
     errors: list[str] = []
@@ -282,21 +384,17 @@ def main():
     if err:
         errors.append(err)
 
-    if is_screen_resolved(investigation_text):
-        # Screen-resolved runs go straight from SCREEN to CONCLUDE without a
-        # GATHER loop. The leads-floor and self-check questions both assume
-        # the hypothesis loop ran, so they don't apply. Safety for screen
-        # runs comes from SCREEN pattern match + precedent + the report
-        # validation Tier 1/2 hooks in validate_report.py.
-        pass
-    else:
-        err = check_leads_minimum(run_dir, investigation_text)
-        if err:
-            errors.append(err)
-
-        err = check_conclusion_file(run_dir, investigation_text)
-        if err:
-            errors.append(err)
+    if not is_screen_resolved(proposed_text):
+        # Fire the self-check when either (a) complexity says we need it,
+        # or (b) the agent authored conclusion_checks.json defensively — in
+        # the second case we validate what they wrote even though we would
+        # have exempted a missing file.
+        run_gate = should_run_self_check(run_dir, proposed_text)
+        file_present = (run_dir / "conclusion_checks.json").exists()
+        if run_gate or file_present:
+            err = check_conclusion_file(run_dir, proposed_text)
+            if err:
+                errors.append(err)
 
     if errors:
         print("CONCLUDE gate failed:", file=sys.stderr)

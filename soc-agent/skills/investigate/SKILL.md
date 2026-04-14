@@ -393,11 +393,19 @@ hypotheses:
 
 **Preconditions — enforced by hook on writing `## CONCLUDE`:**
 
-1. Leads pursued meets the minimum for signature severity (low:1, medium:2, high:3, critical:4), counted from `## GATHER` blocks in `investigation.md`. SCREEN-resolved investigations are exempt — the SCREEN pattern table provides the equivalent floor.
-2. Read `skills/investigate/conclusion_checks.md` and answer every question that applies to your status.
-3. Write your answers to `{run_dir}/conclusion_checks.json` following the schema in that file. Each answer cites verbatim substrings from `investigation.md`.
+1. Read `skills/investigate/conclusion_checks.md` and answer every question that applies to your status.
+2. Write your answers to `{run_dir}/conclusion_checks.json` following the schema in that file. Each answer cites verbatim substrings from `investigation.md`.
 
-If any gate fails, the `## CONCLUDE` write is rejected and you return to the prior phase. Write `conclusion_checks.json` **before** writing the `## CONCLUDE` header to `investigation.md`.
+**When the self-check fires.** The hook runs gate #2 when the investigation is *struggling* or the signature's scaffolding is *thin*:
+
+- **Struggling** — you've written 4 or more `## HYPOTHESIZE` sections (the forced iteration is itself a signal that the agent is on weak ground, regardless of signature maturity).
+- **Thin scaffolding** — the signature under `knowledge/signatures/{id}/archetypes/` contains fewer than 2 archetype directories (the playbook offers no discriminative story to fit evidence against, so the forced articulation earns its keep).
+
+If neither condition holds — i.e., the signature has 2+ archetypes AND you concluded in fewer than 4 loops — the self-check is skipped and you can go straight to writing `## CONCLUDE`. Authoring `conclusion_checks.json` anyway is fine; the hook will validate it if present.
+
+**SCREEN-resolved investigations** are exempt regardless — their safety comes from SCREEN pattern match + precedent + `validate_report.py`.
+
+The hook fires as **PreToolUse**, so a rejection blocks the write before state.json advances — fix whatever the hook named, then retry the same write from the same phase. Every error message ends with an explicit next-action line. When the self-check fires, author `conclusion_checks.json` **before** writing the `## CONCLUDE` header.
 
 ---
 

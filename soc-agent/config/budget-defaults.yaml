@@ -5,4 +5,4 @@
 
 max_tool_calls: 150
 max_subagent_spawns: 10
-wall_clock_timeout: 600
+wall_clock_timeout: 720

@@ -19,7 +19,11 @@ from hooks.scripts.investigation_parse import (
     has_conclude_header,
     is_screen_resolved,
 )
-from hooks.scripts.validate_conclude import load_expected_questions
+from hooks.scripts.validate_conclude import (
+    count_hypothesize_loops,
+    load_expected_questions,
+    signature_archetype_count,
+)
 
 HOOK_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "validate_conclude.py"
 
@@ -276,22 +280,39 @@ def _setup_run(
     return runs_dir, run_dir
 
 
-def _make_hook_event(file_path: str, tool_name: str = "Write") -> str:
+def _make_hook_event(
+    file_path: str,
+    tool_name: str = "Write",
+    content: str | None = None,
+    old_string: str = "",
+    new_string: str = "",
+) -> str:
+    """Build a PreToolUse event targeting `file_path`.
+
+    For Write events, the hook reads `tool_input.content` (the proposed
+    file body, not what's currently on disk). Tests default `content` to
+    the current on-disk body — `_setup_run` has already written the
+    desired investigation.md before the test calls this helper — so
+    existing tests continue to work without rewiring.
+
+    For Edit events, tests pass explicit `old_string` / `new_string`;
+    the hook simulates the replacement against the on-disk file.
+    """
+    tool_input: dict = {"file_path": file_path}
+    if tool_name == "Write":
+        if content is None:
+            try:
+                content = Path(file_path).read_text()
+            except OSError:
+                content = ""
+        tool_input["content"] = content
+    elif tool_name == "Edit":
+        tool_input["old_string"] = old_string
+        tool_input["new_string"] = new_string
     return json.dumps(
         {
             "tool_name": tool_name,
-            "tool_input": {"file_path": file_path, "content": ""},
-            "tool_use_id": "test-001",
-            "session_id": "session-001",
-        }
-    )
-
-
-def _make_bash_event(command: str) -> str:
-    return json.dumps(
-        {
-            "tool_name": "Bash",
-            "tool_input": {"command": command},
+            "tool_input": tool_input,
             "tool_use_id": "test-001",
             "session_id": "session-001",
         }
@@ -323,22 +344,24 @@ class TestHookHappyPath:
         result = _run_hook(event, runs_dir)
         assert result.returncode == 0, f"stderr: {result.stderr}"
 
-    def test_bash_append_event(self, tmp_path):
+    def test_edit_event_appending_conclude(self, tmp_path):
+        # Realistic Edit: on-disk investigation.md ends at ANALYZE (loop 2);
+        # the Edit replaces the full pre-CONCLUDE text with itself plus a
+        # trailing ## CONCLUDE section. The hook must simulate the
+        # replacement and see the resulting CONCLUDE header in the
+        # post-edit proposed text.
+        pre_conclude = VALID_INVESTIGATION.split("## CONCLUDE", 1)[0]
+        new_text = VALID_INVESTIGATION  # pre_conclude + CONCLUDE section
         runs_dir, run_dir = _setup_run(
-            tmp_path, conclusion_checks=_resolved_checks(VALID_INVESTIGATION)
-        )
-        event = _make_bash_event(
-            f"cat >> {run_dir / 'investigation.md'} <<EOF\n## CONCLUDE\nEOF"
-        )
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-
-    def test_edit_event(self, tmp_path):
-        runs_dir, run_dir = _setup_run(
-            tmp_path, conclusion_checks=_resolved_checks(VALID_INVESTIGATION)
+            tmp_path,
+            investigation_text=pre_conclude,
+            conclusion_checks=_resolved_checks(VALID_INVESTIGATION),
         )
         event = _make_hook_event(
-            str(run_dir / "investigation.md"), tool_name="Edit"
+            str(run_dir / "investigation.md"),
+            tool_name="Edit",
+            old_string=pre_conclude,
+            new_string=new_text,
         )
         result = _run_hook(event, runs_dir)
         assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -400,13 +423,6 @@ class TestHookNonTriggers:
         text_no_conclude = VALID_INVESTIGATION.replace("## CONCLUDE", "## ANALYZE (loop 3)")
         runs_dir, run_dir = _setup_run(tmp_path, investigation_text=text_no_conclude)
         event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0
-
-    def test_unrelated_bash_command(self, tmp_path):
-        runs_dir = tmp_path / "runs"
-        runs_dir.mkdir()
-        event = _make_bash_event("ls /tmp")
         result = _run_hook(event, runs_dir)
         assert result.returncode == 0
 
@@ -491,69 +507,15 @@ class TestGate1TicketContext:
         assert result.returncode == 0, f"stderr: {result.stderr}"
 
 
-class TestGate2LeadsMinimum:
-    def test_fails_with_one_lead_medium_severity(self, tmp_path):
-        thin_investigation = (
-            "## CONTEXTUALIZE\n\n"
-            "## HYPOTHESIZE (loop 1)\n\n"
-            "## GATHER (loop 1)\n**Lead:** authentication-history\n\n"
-            "## ANALYZE (loop 1)\n\n"
-            "## CONCLUDE\n**Verdict:** resolved\n"
-        )
-        checks = {
-            "status": "resolved",
-            "checks": [
-                {
-                    "question_id": qid,
-                    "answer": "...",
-                    "citations": ["authentication-history"],
-                }
-                for qid in [
-                    "adversarial_refuted",
-                    "plus_plus_refutation_attempt",
-                    "authoritative_vs_circumstantial",
-                    "dangling_evidence",
-                    "archetype_shape_match",
-                ]
-            ],
-        }
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=thin_investigation,
-            conclusion_checks=checks,
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "leads pursued" in result.stderr
-        assert "medium" in result.stderr
-
-    def test_passes_with_two_leads_medium_severity(self, tmp_path):
-        runs_dir, run_dir = _setup_run(
-            tmp_path, conclusion_checks=_resolved_checks(VALID_INVESTIGATION)
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-
-    def test_severity_read_from_meta_json(self, tmp_path):
-        # Crafted investigation has 2 distinct leads. Set severity=high
-        # in meta.json (requires 3) — the hook should reject.
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            conclusion_checks=_resolved_checks(VALID_INVESTIGATION),
-            severity="high",
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "high" in result.stderr
-        assert "leads pursued" in result.stderr
-
-
 class TestGate3ConclusionFile:
     def test_fails_when_file_missing(self, tmp_path):
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=None)
+        # Force the complexity gate to fire by pointing at a thin signature
+        # (wazuh-rule-550 has 1 archetype, below the maturity threshold of 2).
+        runs_dir, run_dir = _setup_run(
+            tmp_path,
+            conclusion_checks=None,
+            signature_id="wazuh-rule-550",
+        )
         event = _make_hook_event(str(run_dir / "investigation.md"))
         result = _run_hook(event, runs_dir)
         assert result.returncode == 2
@@ -730,3 +692,164 @@ Cannot discriminate ?brute-force from ?credential-stuffing.
         result = _run_hook(event, runs_dir)
         assert result.returncode == 2
         assert "unexpected question" in result.stderr or "missing required" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Complexity gate — when does the self-check actually fire?
+# ---------------------------------------------------------------------------
+
+
+class TestCountHypothesizeLoops:
+    def test_zero_loops(self):
+        assert count_hypothesize_loops("## CONTEXTUALIZE\n## CONCLUDE\n") == 0
+
+    def test_one_loop(self):
+        text = "## CONTEXTUALIZE\n## HYPOTHESIZE (loop 1)\n## GATHER (loop 1)\n## ANALYZE\n## CONCLUDE\n"
+        assert count_hypothesize_loops(text) == 1
+
+    def test_multiple_loops(self):
+        text = (
+            "## CONTEXTUALIZE\n"
+            "## HYPOTHESIZE (loop 1)\n## GATHER (loop 1)\n## ANALYZE (loop 1)\n"
+            "## HYPOTHESIZE (loop 2)\n## GATHER (loop 2)\n## ANALYZE (loop 2)\n"
+            "## HYPOTHESIZE (loop 3)\n## GATHER (loop 3)\n## ANALYZE (loop 3)\n"
+            "## CONCLUDE\n"
+        )
+        assert count_hypothesize_loops(text) == 3
+
+
+class TestSignatureArchetypeCount:
+    def test_5710_has_4_archetypes(self):
+        # wazuh-rule-5710 ships with credential-stuffing, external-bruteforce,
+        # monitoring-probe, service-account-rotation. If this breaks, a new
+        # archetype was added — update the test.
+        assert signature_archetype_count("wazuh-rule-5710") == 4
+
+    def test_thin_signature(self):
+        # wazuh-rule-550 ships with one archetype directory.
+        assert signature_archetype_count("wazuh-rule-550") == 1
+
+    def test_missing_signature(self):
+        assert signature_archetype_count("nonexistent-signature") == 0
+
+    def test_empty_id(self):
+        assert signature_archetype_count("") == 0
+
+
+class TestComplexityGateFiring:
+    """Tests that the self-check only fires under the documented conditions."""
+
+    def _thin_investigation(self, loops: int) -> str:
+        """Synthetic investigation text with exactly `loops` HYPOTHESIZE sections."""
+        parts = ["## CONTEXTUALIZE\n\n"]
+        for i in range(1, loops + 1):
+            parts.extend([
+                f"## HYPOTHESIZE (loop {i})\n\n",
+                f"## GATHER (loop {i})\n\n**Lead:** authentication-history\n\n",
+                f"## ANALYZE (loop {i})\n\n",
+            ])
+        parts.append("## CONCLUDE\n\n**Verdict:** escalated — test\n")
+        return "".join(parts)
+
+    def test_mature_fast_skips_self_check(self, tmp_path):
+        """5710 (4 archetypes) + 2 loops → self-check skipped, missing
+        conclusion_checks.json must NOT trigger a rejection."""
+        inv = self._thin_investigation(loops=2)
+        runs_dir, run_dir = _setup_run(
+            tmp_path,
+            investigation_text=inv,
+            conclusion_checks=None,
+            signature_id="wazuh-rule-5710",
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+
+    def test_struggling_loops_fires_self_check(self, tmp_path):
+        """5710 (4 archetypes) + 4 loops → self-check fires despite mature
+        scaffolding. Missing conclusion_checks.json → rejection."""
+        inv = self._thin_investigation(loops=4)
+        runs_dir, run_dir = _setup_run(
+            tmp_path,
+            investigation_text=inv,
+            conclusion_checks=None,
+            signature_id="wazuh-rule-5710",
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "conclusion_checks.json" in result.stderr
+
+    def test_thin_scaffolding_fires_self_check(self, tmp_path):
+        """550 (1 archetype) + 2 loops → self-check fires because scaffolding
+        is thin, regardless of loop count."""
+        inv = self._thin_investigation(loops=2)
+        runs_dir, run_dir = _setup_run(
+            tmp_path,
+            investigation_text=inv,
+            conclusion_checks=None,
+            signature_id="wazuh-rule-550",
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "conclusion_checks.json" in result.stderr
+
+    def test_mature_fast_but_file_present_still_validates(self, tmp_path):
+        """Defensive authoring: the agent wrote conclusion_checks.json even
+        though complexity gate wouldn't require it. The hook should validate
+        the file and catch broken citations."""
+        inv = self._thin_investigation(loops=2)
+        bad_checks = {
+            "status": "escalated",
+            "checks": [
+                {
+                    "question_id": "dangling_evidence",
+                    "answer": "All observations consistent.",
+                    "citations": ["this string is not in the log"],
+                },
+                {
+                    "question_id": "escalation_rationale",
+                    "answer": "Test.",
+                    "citations": ["## CONTEXTUALIZE"],
+                },
+            ],
+        }
+        runs_dir, run_dir = _setup_run(
+            tmp_path,
+            investigation_text=inv,
+            conclusion_checks=bad_checks,
+            signature_id="wazuh-rule-5710",
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "citation not found" in result.stderr
+
+    def test_mature_fast_with_valid_file(self, tmp_path):
+        """Defensive authoring with a valid file → hook passes."""
+        inv = self._thin_investigation(loops=2)
+        valid_checks = {
+            "status": "escalated",
+            "checks": [
+                {
+                    "question_id": "dangling_evidence",
+                    "answer": "All observations consistent.",
+                    "citations": ["## CONTEXTUALIZE"],
+                },
+                {
+                    "question_id": "escalation_rationale",
+                    "answer": "Test.",
+                    "citations": ["## ANALYZE"],
+                },
+            ],
+        }
+        runs_dir, run_dir = _setup_run(
+            tmp_path,
+            investigation_text=inv,
+            conclusion_checks=valid_checks,
+            signature_id="wazuh-rule-5710",
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
