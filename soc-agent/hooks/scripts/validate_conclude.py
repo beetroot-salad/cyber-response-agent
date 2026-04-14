@@ -11,10 +11,14 @@ checks for a `## CONCLUDE` header, and enforces:
    CONCLUDE time the damage is already done. Exists only so a broken
    preload surfaces somewhere.
 2. `conclusion_checks.json` exists in the run directory and covers the
-   expected question set for its declared status. Every citation
-   appears as a verbatim substring in the proposed investigation.md
-   text. Expected question IDs come from
-   `skills/investigate/conclusion_checks.md` so the two stay in sync.
+   expected question set for its declared status. Each citation is a
+   `{lines: "A-B", contains: "token"}` pair — the hook parses the
+   range, slices those lines from the proposed investigation.md text,
+   and checks that `contains` is a verbatim substring of that slice.
+   Prevents fabrication; cheaper and more paraphrase-tolerant than
+   matching a full sentence against the whole file. Expected question
+   IDs come from `skills/investigate/conclusion_checks.md` so the two
+   stay in sync.
 
    The self-check (gate 2) only fires when the investigation is
    *struggling* or the signature's scaffolding is thin. Concretely:
@@ -244,6 +248,41 @@ _NEXT_ACTION_AUTHORING = (
 )
 
 
+def parse_line_range(value: str) -> tuple[int, int] | None:
+    """Parse a `lines` field from a citation: either `"N"` (single line)
+    or `"A-B"` (inclusive range, 1-indexed). Returns (start, end) or None
+    on any parse error (non-integer, reversed range, non-positive)."""
+    if not isinstance(value, str):
+        return None
+    s = value.strip()
+    if not s:
+        return None
+    if "-" in s:
+        parts = s.split("-", 1)
+        try:
+            start = int(parts[0].strip())
+            end = int(parts[1].strip())
+        except ValueError:
+            return None
+    else:
+        try:
+            start = end = int(s)
+        except ValueError:
+            return None
+    if start < 1 or end < start:
+        return None
+    return (start, end)
+
+
+def extract_line_slice(text: str, start: int, end: int) -> str | None:
+    """Return lines [start..end] of `text` joined with newlines (1-indexed,
+    inclusive). Returns None if the range runs off the end of the text."""
+    lines = text.split("\n")
+    if end > len(lines):
+        return None
+    return "\n".join(lines[start - 1:end])
+
+
 def check_conclusion_file(run_dir: Path, investigation_text: str) -> str | None:
     """Validate conclusion_checks.json shape, question set, and citations.
 
@@ -328,7 +367,11 @@ def check_conclusion_file(run_dir: Path, investigation_text: str) -> str | None:
             f"{_NEXT_ACTION_AUTHORING}"
         )
 
-    # Gate 3: citation resolution
+    # Gate 3: citation resolution.
+    # Each citation is `{"lines": "N" or "A-B", "contains": "verbatim token"}`.
+    # The hook checks (a) the range parses and is within file bounds,
+    # (b) `contains` is a plain substring of the sliced line range.
+    max_line = investigation_text.count("\n") + 1
     for entry in checks:
         qid = entry["question_id"]
         answer = entry.get("answer", "")
@@ -344,18 +387,46 @@ def check_conclusion_file(run_dir: Path, investigation_text: str) -> str | None:
                 f"non-empty 'citations' list. {_NEXT_ACTION_AUTHORING}"
             )
         for j, citation in enumerate(citations):
-            if not isinstance(citation, str) or not citation.strip():
+            if not isinstance(citation, dict):
                 return (
                     f"conclusion_checks.json question '{qid}' citation[{j}] "
-                    f"is empty or whitespace-only. {_NEXT_ACTION_AUTHORING}"
+                    f"must be an object with 'lines' and 'contains' fields. "
+                    f"{_NEXT_ACTION_AUTHORING}"
                 )
-            if citation not in investigation_text:
-                preview = citation[:80] + ("..." if len(citation) > 80 else "")
+            lines_value = citation.get("lines")
+            rng = parse_line_range(lines_value) if isinstance(lines_value, str) else None
+            if rng is None:
                 return (
-                    f"conclusion_checks.json question '{qid}' citation not "
-                    f"found in investigation.md: {preview!r}. Citations must "
-                    f"be verbatim substrings copied from the investigation "
-                    f"log. {_NEXT_ACTION_AUTHORING}"
+                    f"conclusion_checks.json question '{qid}' citation[{j}] "
+                    f"'lines' must be a string like \"64\" or \"62-68\" "
+                    f"(1-indexed, start <= end). Got {lines_value!r}. "
+                    f"{_NEXT_ACTION_AUTHORING}"
+                )
+            start, end = rng
+            slice_text = extract_line_slice(investigation_text, start, end)
+            if slice_text is None:
+                return (
+                    f"conclusion_checks.json question '{qid}' citation[{j}] "
+                    f"'lines' range {start}-{end} is out of bounds "
+                    f"(investigation.md has {max_line} lines). "
+                    f"{_NEXT_ACTION_AUTHORING}"
+                )
+            contains = citation.get("contains")
+            if not isinstance(contains, str) or not contains.strip():
+                return (
+                    f"conclusion_checks.json question '{qid}' citation[{j}] "
+                    f"'contains' must be a non-empty string. "
+                    f"{_NEXT_ACTION_AUTHORING}"
+                )
+            if contains not in slice_text:
+                preview = contains[:80] + ("..." if len(contains) > 80 else "")
+                return (
+                    f"conclusion_checks.json question '{qid}' citation[{j}] "
+                    f"'contains' text not found within lines {start}-{end}: "
+                    f"{preview!r}. The token must be a VERBATIM substring of "
+                    f"the cited line range — copy-paste directly from "
+                    f"investigation.md, including backticks and punctuation. "
+                    f"{_NEXT_ACTION_AUTHORING}"
                 )
 
     return None

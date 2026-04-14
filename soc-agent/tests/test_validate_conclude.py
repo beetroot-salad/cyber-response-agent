@@ -21,11 +21,74 @@ from hooks.scripts.investigation_parse import (
 )
 from hooks.scripts.validate_conclude import (
     count_hypothesize_loops,
+    extract_line_slice,
     load_expected_questions,
+    parse_line_range,
     signature_archetype_count,
 )
 
 HOOK_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "validate_conclude.py"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: line range parsing + slicing
+# ---------------------------------------------------------------------------
+
+
+class TestParseLineRange:
+    def test_single_line(self):
+        assert parse_line_range("64") == (64, 64)
+
+    def test_inclusive_range(self):
+        assert parse_line_range("62-68") == (62, 68)
+
+    def test_whitespace_tolerant(self):
+        assert parse_line_range("  62 - 68  ") == (62, 68)
+
+    def test_single_equal_range(self):
+        assert parse_line_range("5-5") == (5, 5)
+
+    def test_non_numeric(self):
+        assert parse_line_range("abc") is None
+
+    def test_reversed_range(self):
+        assert parse_line_range("68-62") is None
+
+    def test_zero(self):
+        assert parse_line_range("0") is None
+
+    def test_negative(self):
+        assert parse_line_range("-5") is None
+
+    def test_empty(self):
+        assert parse_line_range("") is None
+        assert parse_line_range("   ") is None
+
+    def test_non_string(self):
+        assert parse_line_range(64) is None  # type: ignore[arg-type]
+        assert parse_line_range(None) is None  # type: ignore[arg-type]
+
+
+class TestExtractLineSlice:
+    TEXT = "line one\nline two\nline three\nline four\nline five\n"
+
+    def test_single_line(self):
+        assert extract_line_slice(self.TEXT, 2, 2) == "line two"
+
+    def test_range(self):
+        assert extract_line_slice(self.TEXT, 2, 4) == "line two\nline three\nline four"
+
+    def test_first_line(self):
+        assert extract_line_slice(self.TEXT, 1, 1) == "line one"
+
+    def test_out_of_bounds(self):
+        assert extract_line_slice(self.TEXT, 1, 100) is None
+
+    def test_range_exactly_at_eof(self):
+        # split('\n') on text ending in '\n' produces a trailing empty
+        # string, so len(lines) == 6. Line 5 (the last real content) is
+        # at index 4.
+        assert extract_line_slice(self.TEXT, 5, 5) == "line five"
 
 
 # ---------------------------------------------------------------------------
@@ -216,8 +279,9 @@ SCREEN_RESOLVED_INVESTIGATION = """\
 
 
 def _resolved_checks(investigation_text: str) -> dict:
-    """Build a valid conclusion_checks.json dict whose citations all appear
-    in the given investigation text."""
+    """Build a valid conclusion_checks.json dict whose citations resolve
+    against VALID_INVESTIGATION (line numbers are hardcoded to that text —
+    change both together)."""
     return {
         "status": "resolved",
         "checks": [
@@ -225,29 +289,37 @@ def _resolved_checks(investigation_text: str) -> dict:
                 "question_id": "adversarial_refuted",
                 "answer": "?brute-force predicted >50 attempts, observed 1.",
                 "citations": [
-                    "1 authentication attempt from 10.0.1.50",
-                    'weight: "--"',
+                    {"lines": "14", "contains": "1 authentication attempt from 10.0.1.50"},
+                    {"lines": "23", "contains": 'weight: "--"'},
                 ],
             },
             {
                 "question_id": "plus_plus_refutation_attempt",
                 "answer": "Ran source-reputation; a non-matching result would have refuted.",
-                "citations": ["source-reputation"],
+                "citations": [
+                    {"lines": "28-32", "contains": "source-reputation"},
+                ],
             },
             {
                 "question_id": "authoritative_vs_circumstantial",
                 "answer": "Authoritative: approved-monitoring-sources registry match.",
-                "citations": ["matches approved-monitoring-sources entry"],
+                "citations": [
+                    {"lines": "33", "contains": "matches approved-monitoring-sources entry"},
+                ],
             },
             {
                 "question_id": "dangling_evidence",
                 "answer": "All observations consistent.",
-                "citations": ["authoritative anchor confirms"],
+                "citations": [
+                    {"lines": "40", "contains": "authoritative anchor confirms"},
+                ],
             },
             {
                 "question_id": "archetype_shape_match",
                 "answer": "All features fit the monitoring-probe archetype.",
-                "citations": ["monitoring probe from approved source"],
+                "citations": [
+                    {"lines": "44", "contains": "monitoring probe from approved source"},
+                ],
             },
         ],
     }
@@ -553,7 +625,7 @@ class TestGate3ConclusionFile:
             {
                 "question_id": "not_a_real_question",
                 "answer": "noise",
-                "citations": ["CONCLUDE"],
+                "citations": [{"lines": "42", "contains": "CONCLUDE"}],
             }
         )
         runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
@@ -573,14 +645,31 @@ class TestGate3ConclusionFile:
 
 
 class TestGate4Citations:
-    def test_fails_on_fabricated_citation(self, tmp_path):
+    """Hybrid line-range + verbatim-token citation checks."""
+
+    def test_fails_on_contains_not_in_range(self, tmp_path):
         checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = ["this string is not in the log"]
+        checks["checks"][0]["citations"] = [
+            {"lines": "14", "contains": "this string is not in the log"}
+        ]
         runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
         event = _make_hook_event(str(run_dir / "investigation.md"))
         result = _run_hook(event, runs_dir)
         assert result.returncode == 2
-        assert "citation not found" in result.stderr
+        assert "not found within lines" in result.stderr
+
+    def test_fails_on_contains_in_other_lines_but_not_cited_range(self, tmp_path):
+        # "weight" appears on line 20 (++) and line 23 (--) — citing line
+        # 14 (an observation) and claiming "weight" is in it must fail.
+        checks = _resolved_checks(VALID_INVESTIGATION)
+        checks["checks"][0]["citations"] = [
+            {"lines": "14", "contains": 'weight: "--"'}
+        ]
+        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "not found within lines" in result.stderr
 
     def test_fails_on_empty_citations_list(self, tmp_path):
         checks = _resolved_checks(VALID_INVESTIGATION)
@@ -591,22 +680,95 @@ class TestGate4Citations:
         assert result.returncode == 2
         assert "non-empty" in result.stderr
 
-    def test_fails_on_whitespace_citation(self, tmp_path):
+    def test_fails_on_empty_contains(self, tmp_path):
         checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = ["   "]
+        checks["checks"][0]["citations"] = [{"lines": "14", "contains": "   "}]
         runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
         event = _make_hook_event(str(run_dir / "investigation.md"))
         result = _run_hook(event, runs_dir)
         assert result.returncode == 2
-        assert "empty or whitespace-only" in result.stderr
+        assert "'contains' must be a non-empty string" in result.stderr
 
-    def test_citation_with_comma_ok(self, tmp_path):
-        # Commas in citations are a property worth pinning down: JSON
-        # handles them cleanly (unlike the stdlib YAML frontmatter parser
-        # which was the rationale for choosing JSON for this file).
+    def test_fails_on_missing_contains(self, tmp_path):
+        checks = _resolved_checks(VALID_INVESTIGATION)
+        checks["checks"][0]["citations"] = [{"lines": "14"}]
+        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "'contains' must be a non-empty string" in result.stderr
+
+    def test_fails_on_malformed_lines(self, tmp_path):
         checks = _resolved_checks(VALID_INVESTIGATION)
         checks["checks"][0]["citations"] = [
-            "?monitoring-probe, ?brute-force"
+            {"lines": "abc", "contains": "whatever"}
+        ]
+        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "'lines' must be a string" in result.stderr
+
+    def test_fails_on_reversed_range(self, tmp_path):
+        checks = _resolved_checks(VALID_INVESTIGATION)
+        checks["checks"][0]["citations"] = [
+            {"lines": "25-14", "contains": "whatever"}
+        ]
+        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "'lines' must be a string" in result.stderr
+
+    def test_fails_on_out_of_bounds_range(self, tmp_path):
+        checks = _resolved_checks(VALID_INVESTIGATION)
+        checks["checks"][0]["citations"] = [
+            {"lines": "500", "contains": "CONCLUDE"}
+        ]
+        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "out of bounds" in result.stderr
+
+    def test_fails_on_string_citation_old_format(self, tmp_path):
+        # The hybrid schema rejects bare string citations from the old
+        # format — must be an object now.
+        checks = _resolved_checks(VALID_INVESTIGATION)
+        checks["checks"][0]["citations"] = ["1 authentication attempt"]
+        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "must be an object" in result.stderr
+
+    def test_single_line_citation(self, tmp_path):
+        checks = _resolved_checks(VALID_INVESTIGATION)
+        checks["checks"][0]["citations"] = [
+            {"lines": "14", "contains": "1 authentication attempt"}
+        ]
+        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+
+    def test_range_citation(self, tmp_path):
+        # Range spans ANALYZE loop 1 — token "weight" appears on lines 20 and 23.
+        checks = _resolved_checks(VALID_INVESTIGATION)
+        checks["checks"][0]["citations"] = [
+            {"lines": "16-24", "contains": 'weight: "--"'}
+        ]
+        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+
+    def test_contains_with_comma_ok(self, tmp_path):
+        # JSON handles commas cleanly — the comma in the contains string
+        # isn't a separator. Line 5 has "?monitoring-probe, ?brute-force".
+        checks = _resolved_checks(VALID_INVESTIGATION)
+        checks["checks"][0]["citations"] = [
+            {"lines": "5", "contains": "?monitoring-probe, ?brute-force"}
         ]
         runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
         event = _make_hook_event(str(run_dir / "investigation.md"))
@@ -659,13 +821,15 @@ Cannot discriminate ?brute-force from ?credential-stuffing.
                 {
                     "question_id": "dangling_evidence",
                     "answer": "All observations consistent.",
-                    "citations": ["no registry match"],
+                    "citations": [
+                        {"lines": "21", "contains": "no registry match"},
+                    ],
                 },
                 {
                     "question_id": "escalation_rationale",
                     "answer": "Two live hypotheses undecidable with current leads.",
                     "citations": [
-                        "Cannot discriminate ?brute-force from ?credential-stuffing"
+                        {"lines": "25", "contains": "Cannot discriminate ?brute-force from ?credential-stuffing"},
                     ],
                 },
             ],
@@ -806,12 +970,16 @@ class TestComplexityGateFiring:
                 {
                     "question_id": "dangling_evidence",
                     "answer": "All observations consistent.",
-                    "citations": ["this string is not in the log"],
+                    "citations": [
+                        {"lines": "1", "contains": "this string is not in the log"},
+                    ],
                 },
                 {
                     "question_id": "escalation_rationale",
                     "answer": "Test.",
-                    "citations": ["## CONTEXTUALIZE"],
+                    "citations": [
+                        {"lines": "1", "contains": "## CONTEXTUALIZE"},
+                    ],
                 },
             ],
         }
@@ -824,7 +992,7 @@ class TestComplexityGateFiring:
         event = _make_hook_event(str(run_dir / "investigation.md"))
         result = _run_hook(event, runs_dir)
         assert result.returncode == 2
-        assert "citation not found" in result.stderr
+        assert "not found within lines" in result.stderr
 
     def test_mature_fast_with_valid_file(self, tmp_path):
         """Defensive authoring with a valid file → hook passes."""
@@ -835,12 +1003,16 @@ class TestComplexityGateFiring:
                 {
                     "question_id": "dangling_evidence",
                     "answer": "All observations consistent.",
-                    "citations": ["## CONTEXTUALIZE"],
+                    "citations": [
+                        {"lines": "1", "contains": "## CONTEXTUALIZE"},
+                    ],
                 },
                 {
                     "question_id": "escalation_rationale",
                     "answer": "Test.",
-                    "citations": ["## ANALYZE"],
+                    "citations": [
+                        {"lines": "17", "contains": "## ANALYZE"},
+                    ],
                 },
             ],
         }

@@ -1,8 +1,6 @@
 # CONCLUDE Self-Check
 
-Read before writing `## CONCLUDE` to `investigation.md`. Answer every question that applies to your status. Write your answers to `{run_dir}/conclusion_checks.json` using the schema at the bottom of this file.
-
-Citations are verbatim substrings from `investigation.md`. Copy a distinctive chunk directly — a few words including the specific value, lead name, anchor, or grade are usually enough for a unique match.
+Read before writing `## CONCLUDE` to `investigation.md`. Answer every question that applies to your status. Write your answers to `{run_dir}/conclusion_checks.json` using the schema at the bottom of this file. Each citation is a line range from `investigation.md` plus a short **VERBATIM** token that must appear within those lines — copy-paste directly from the log, character for character (backticks, punctuation, whitespace). Do not retype or paraphrase.
 
 If a question reveals that you shouldn't be concluding yet, return to HYPOTHESIZE.
 
@@ -80,14 +78,16 @@ Write to `{run_dir}/conclusion_checks.json`:
       "question_id": "adversarial_refuted",
       "answer": "The ?brute-force hypothesis was refuted: it predicted >50 attempts but only 1 was observed.",
       "citations": [
-        "1 authentication attempt from 10.0.1.50",
-        "?brute-force:\n    weight: \"--\""
+        {"lines": "62", "contains": "1 authentication attempt from 10.0.1.50"},
+        {"lines": "78-82", "contains": "weight: \"--\""}
       ]
     },
     {
       "question_id": "plus_plus_refutation_attempt",
       "answer": "...",
-      "citations": ["..."]
+      "citations": [
+        {"lines": "95-100", "contains": "..."}
+      ]
     }
   ]
 }
@@ -97,6 +97,8 @@ Rules:
 
 - `status` is `resolved` or `escalated`.
 - `checks` contains one entry per required question for that status. Missing or extra question IDs are rejected.
-- Every citation string must be a substring present somewhere in `investigation.md` at the moment you write `## CONCLUDE`.
-- Empty or whitespace-only citations are rejected.
+- Each citation is an object with two fields:
+  - `lines` — either a single line `"64"` or an inclusive range `"62-68"`. 1-indexed, matches what the `Read` tool shows.
+  - `contains` — a short **VERBATIM** substring that must appear within the cited line range. Copy-paste character for character; do not retype or paraphrase. 2–10 words is usually enough.
+- Empty citation lists, empty `contains` strings, or out-of-bounds line ranges are rejected.
 - Write this file **before** writing `## CONCLUDE` to `investigation.md`.
