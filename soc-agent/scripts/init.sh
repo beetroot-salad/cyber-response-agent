@@ -136,5 +136,8 @@ Next steps:
 
   3. Once at least one system is connected, run /investigate on an alert.
 
+  4. Run `python3 scripts/cleanup_runs.py --dry-run` to preview retention
+     cleanup, or see /handbook retention for scheduling options.
+
 See docs/design-v3-init-and-connect.md for the full design.
 EOF
