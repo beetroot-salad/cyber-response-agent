@@ -1,7 +1,7 @@
 ---
 title: Evaluation plan: build screening test corpus and scoring pipeline
 status: backlog
-group: evaluation
+groups: evaluation
 ---
 
 Screening is the right starting point for evaluation (most common sub-flow, cheapest to evaluate, clear pass/fail).

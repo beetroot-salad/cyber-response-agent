@@ -1,7 +1,7 @@
 ---
 title: Screen-miss detection script (post-mortem)
 status: backlog
-group: reliability
+groups: reliability, evaluation
 ---
 
 Walk runs/*/report.md frontmatter + runs/*/audit.jsonl, filter for the three-condition pattern:

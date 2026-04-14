@@ -1,7 +1,7 @@
 ---
 title: Rewrite investigation.md phase templates in SKILL.md (compressed YAML-style notation)
 status: backlog
-group: cost
+groups: cost
 ---
 
 investigation.md is the agent's working document, consumed by itself and the Tier 2 judge. It currently uses full prose narratives (4K chars per ANALYZE section alone). The judge needs structured evidence and assessment weights (++/+/-/--), not prose.

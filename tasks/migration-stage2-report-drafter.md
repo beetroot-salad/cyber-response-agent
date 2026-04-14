@@ -1,7 +1,7 @@
 ---
 title: Migration Stage 2: Sonnet drafts report.md, Opus reviews and edits
 status: backlog
-group: sonnet
+groups: sonnet, cost
 ---
 
 Splits the CONCLUDE-phase report write between a cheap draft and an expensive review.

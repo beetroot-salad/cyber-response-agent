@@ -1,7 +1,7 @@
 ---
 title: Define "successful run" eligibility for past-run indexing
 status: backlog
-group: reliability
+groups: reliability, knowledge
 ---
 
 Minimum bar: report.md exists, Tier 1 passed, Tier 2 VERDICT:PASS, status=resolved with grounding leg satisfied.

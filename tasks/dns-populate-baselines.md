@@ -1,7 +1,7 @@
 ---
 title: Populate baseline content in existing lead definitions
 status: backlog
-group: dns
+groups: dns, knowledge
 ---
 
 The _template/definition.md now declares an optional baseline: frontmatter field and a ## Baseline section. Existing leads (recent-alert-correlation, network-analysis, authentication-history) still ship without baseline content.

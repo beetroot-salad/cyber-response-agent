@@ -1,7 +1,7 @@
 ---
 title: Runtime Opus→Sonnet consultation design (two call-points)
 status: backlog
-group: sonnet
+groups: sonnet, cost
 ---
 
 Belt-and-suspenders: keep knowledge-maturation investment as primary defense, add narrow runtime Opus consultation at 1–2 high-leverage points as a backstop.

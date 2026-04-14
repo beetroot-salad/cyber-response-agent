@@ -1,7 +1,7 @@
 ---
 title: Stronger subagent gating: PreToolUse hook enforces ticket-context spawn
 status: backlog
-group: state
+groups: state
 ---
 
 The Tier 1 ticket-context check (validate_report.check_ticket_context_spawned) catches missing spawns at conclude-time by walking tool_audit.jsonl. This is a soft gate: the agent only finds out it was wrong at the very end.

@@ -1,7 +1,7 @@
 ---
 title: Precedent-matching temporal awareness
 status: backlog
-group: archetype
+groups: archetype, v3-rewrite
 ---
 
 When the ticket-context subagent ranks past tickets as candidate precedents, it must filter out temporal anchor confirmations: a past ticket whose anchors_at_time included temporal: true entries (on-call windows, change tickets, deploy runs) does not transfer forward in time without re-confirmation.

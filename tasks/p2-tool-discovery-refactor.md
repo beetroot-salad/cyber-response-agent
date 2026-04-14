@@ -1,7 +1,7 @@
 ---
 title: Tool discovery refactor: split data availability from tool mechanics
 status: backlog
-group: phase-2
+groups: phase-2
 ---
 
 Split into two concerns:

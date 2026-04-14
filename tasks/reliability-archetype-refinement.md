@@ -1,7 +1,7 @@
 ---
 title: Archetype refinement guidance in post-mortem output (shape-violation analysis)
 status: backlog
-group: reliability
+groups: reliability, archetype
 ---
 
 When a screen-miss points at a shape-violation refusal, the fix is almost always refining the archetype's declared confirmation shape (or adding a sub-archetype for the observed variant), NOT relaxing the anchor's safety guarantees.

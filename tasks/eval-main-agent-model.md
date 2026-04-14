@@ -1,7 +1,7 @@
 ---
 title: Main-agent baseline cost lever: --model flag in eval_run.sh
 status: backlog
-group: evaluation
+groups: evaluation, sonnet, cost
 ---
 
 eval_run.sh does not pass --model to claude, so the main investigation loop runs at whatever the harness default is (observed: claude-opus-4-6[1m]).

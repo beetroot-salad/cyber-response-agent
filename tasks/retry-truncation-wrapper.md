@@ -1,7 +1,7 @@
 ---
 title: External retry-on-truncation wrapper for eval_run.sh
 status: backlog
-group: evaluation
+groups: evaluation, reliability
 ---
 
 Classes of "the CLI hangs up mid-investigation" bugs will keep happening (tool errors, transient API failures, hook misbehavior). The right structural fix is not to hunt them one by one.

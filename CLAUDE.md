@@ -125,8 +125,15 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 │
 ├── docs/                          # Design documentation
 ├── playground/                    # Container setup for testing
+├── tasks/                         # Kanban task files (one .md per task, frontmatter-driven)
+│   └── build.py                   # Renders board.html from tasks/*.md
+├── board.html                     # Generated kanban board — open in browser, no server
 └── .devcontainer/                 # Docker environment
 ```
+
+## Task Tracking
+
+Open work lives in `tasks/` — one markdown file per task with `title`, `status` (`backlog` / `todo` / `doing` / `done`), and `groups` (comma-separated tags) frontmatter. Body is free-form context. Run `python3 tasks/build.py` to regenerate `board.html`. A task may carry multiple group tags; each renders as its own badge. This replaced the legacy `todo.md` — open issues (state-machine bypass mitigation, validation-hook promotion, SCREEN cost-reduction workstream, Sonnet-migration stages, etc.) all live as task files now.
 
 ## Running Tests
 

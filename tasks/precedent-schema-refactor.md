@@ -1,7 +1,7 @@
 ---
 title: Refactor precedent schema: abstract environment out of key_indicators
 status: backlog
-group: knowledge
+groups: knowledge, archetype
 ---
 
 monitoring-probe-001.json has literal environment values (srcip: 10.0.1.50) baked into key_indicators and alert_data, which conflicts with the actual playground network (172.22.0.0/16) and doesn't generalize to any real deployment.

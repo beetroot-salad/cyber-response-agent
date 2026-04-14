@@ -1,7 +1,7 @@
 ---
 title: Ticket-context subagent: entity-set past-ticket query at CONTEXTUALIZE
 status: backlog
-group: archetype
+groups: archetype, v3-rewrite
 ---
 
 Extend the ticket-context subagent to query the ticketing system for past resolved tickets matching the current alert's entity set (srcip, srcuser, host, container image, etc.) — not just by signature or time window.

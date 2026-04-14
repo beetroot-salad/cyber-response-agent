@@ -1,7 +1,7 @@
 ---
 title: Canonicalize hypothesis vocabulary per signature
 status: backlog
-group: reliability
+groups: reliability, knowledge
 ---
 
 Each signature's playbook should define a canonical seed-hypothesis name set; the agent can refine descriptions but must not rename the seeds.
