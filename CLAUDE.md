@@ -254,8 +254,14 @@ When a required value is missing, unknown, or ambiguous — **fail immediately w
 ## Documentation
 
 Detailed documentation in `docs/`:
-- `playground-setup.md` — Complete environment setup guide
-- `design-v2.md` — System architecture and design decisions
+- `design-v3-overview.md` — System overview and design goals
+- `design-v3-architecture.md` — System architecture and component design
 - `design-v3-tool-execution.md` — Tool execution architecture: lead model, SIEM CLI, query templates, composite dispatch
-- `agent-execution-architecture.md` — Agent lifecycle details
-- `reproduction-agent-design.md` — Reproduction sandbox design
+- `design-v3-hypothesis-archetype-rewrite.md` — Hypothesis-driven investigation and archetype model
+- `design-v3-reproduction.md` — Reproduction sandbox design
+- `design-v3-init-and-connect.md` — Initialization and SIEM connection
+- `evaluation-and-chaos-design.md` — Evaluation harness and chaos engineering
+- `security-model.md` — Threat model and defense layers
+- `packaging.md` — Dependency and packaging strategy
+
+Pre-v3 docs are in `docs/archive/`.
