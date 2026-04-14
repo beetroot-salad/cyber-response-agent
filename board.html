@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Board — Cyber Response Agent</title>
+<style>
+:root {
+  --bg:           #f8f7f6;
+  --col-bg:       #ffffff;
+  --card-border:  #e5e3e0;
+  --card-hover:   #fafaf9;
+  --text:         #1a1917;
+  --text-muted:   #78716c;
+  --header-bg:    #1c1917;
+  --header-text:  #fafaf9;
+  --col-title:    #44403c;
+  --divider:      #e7e5e4;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 14px;
+}
+
+/* ── Header ── */
+header {
+  background: var(--header-bg);
+  color: var(--header-text);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+header h1 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a8a29e;
+}
+
+header span {
+  font-size: 13px;
+  font-weight: 500;
+  color: #fafaf9;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#toggle-done {
+  background: none;
+  border: 1px solid #57534e;
+  color: #a8a29e;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+#toggle-done:hover { border-color: #a8a29e; color: #fafaf9; }
+
+/* ── Board ── */
+.board {
+  display: flex;
+  gap: 14px;
+  padding: 18px 20px;
+  align-items: flex-start;
+  overflow-x: auto;
+  min-height: calc(100vh - 44px);
+}
+
+/* ── Column ── */
+.column {
+  background: var(--col-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  width: 272px;
+  min-width: 272px;
+  flex-shrink: 0;
+}
+
+.column-header {
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--divider);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.column-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--col-title);
+}
+
+.column-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: #f5f5f4;
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+
+.column-cards {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.empty-col {
+  padding: 18px 8px;
+  text-align: center;
+  font-size: 12px;
+  color: #c5c1bd;
+}
+
+/* ── Card ── */
+.card {
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 9px 11px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+  user-select: none;
+}
+
+.card:hover { background: var(--card-hover); border-color: #d4d0cb; }
+.card.no-body { cursor: default; }
+.card.no-body:hover { background: transparent; border-color: var(--card-border); }
+
+.card-title {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  margin-bottom: 7px;
+}
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+/* ── Badge ── */
+.badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.badge-mvp         { background: #fef3c7; color: #92400e; }
+.badge-archetype   { background: #ede9fe; color: #5b21b6; }
+.badge-reliability { background: #dbeafe; color: #1e40af; }
+.badge-cost        { background: #d1fae5; color: #065f46; }
+.badge-sonnet      { background: #cffafe; color: #164e63; }
+.badge-state       { background: #fee2e2; color: #991b1b; }
+.badge-knowledge   { background: #e0e7ff; color: #3730a3; }
+.badge-phase-2     { background: #f3f4f6; color: #4b5563; }
+.badge-evaluation  { background: #fef9c3; color: #713f12; }
+.badge-dns         { background: #ecfccb; color: #3f6212; }
+.badge-v3-rewrite  { background: #f1f5f9; color: #475569; }
+
+.expand-hint {
+  font-size: 10px;
+  color: #c5c1bd;
+  margin-left: auto;
+}
+
+/* ── Expanded body ── */
+.card-body {
+  display: none;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--divider);
+  font-size: 12px;
+  line-height: 1.65;
+  color: #57534e;
+  white-space: pre-wrap;
+  font-family: "SF Mono", ui-monospace, "Fira Code", Consolas, monospace;
+  overflow-x: auto;
+}
+
+.card.expanded .card-body { display: block; }
+.card.expanded .expand-hint { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <span>Cyber Response Agent</span>
+  <div class="header-right">
+    <h1>Board</h1>
+    <button id="toggle-done">Show done</button>
+  </div>
+</header>
+
+<div class="board" id="board"></div>
+
+<script>
+const TASKS = [{"id": "archetype-auto-extraction", "title": "Precedent auto-extraction pipeline from ticketing system", "status": "backlog", "group": "archetype", "body": "Currently KB precedent snapshots under archetypes/*/{TICKET-ID}.json are hand-curated. Long-term: build a sync pipeline that automatically captures snapshots from the real ticketing system when tickets close under an archetype.\n\nRequires deciding: which ticketing system (ServiceNow / Jira / Linear / ...), what fields map to the schema, how to mark temporal anchors at capture time."}, {"id": "archetype-entity-set-query", "title": "Ticket-context subagent: entity-set past-ticket query at CONTEXTUALIZE", "status": "backlog", "group": "archetype", "body": "Extend the ticket-context subagent to query the ticketing system for past resolved tickets matching the current alert's entity set (srcip, srcuser, host, container image, etc.) — not just by signature or time window.\n\nCONCLUDE should then be able to cite a specific matched_ticket_id grounded in a real past ticket, without a second subagent round-trip.\n\nRelated: the existing CONTEXTUALIZE precedent-scan subagent scans cached KB snapshots under archetypes/*/*.json, which are hand-curated. The ticketing-system query is the live source of truth that those snapshots cache."}, {"id": "archetype-temporal-awareness", "title": "Precedent-matching temporal awareness", "status": "backlog", "group": "archetype", "body": "When the ticket-context subagent ranks past tickets as candidate precedents, it must filter out temporal anchor confirmations: a past ticket whose anchors_at_time included temporal: true entries (on-call windows, change tickets, deploy runs) does not transfer forward in time without re-confirmation.\n\nThe skill at the matching step should surface \"this past ticket matches shape + entity class, BUT its grounding depended on temporal state that has since elapsed — the current investigation must re-confirm the equivalent anchor today.\"\n\nJudge Tier 2 already does this semantic check (GROUNDING_MATCH criterion); the skill side needs the same logic applied at match time to avoid surfacing stale matches as confident."}, {"id": "cost-batch-reads-contextualize", "title": "Batch parallel reads in CONTEXTUALIZE section of SKILL.md", "status": "backlog", "group": "cost", "body": "CONTEXTUALIZE currently consumes 18 turns in the full-loop run. Many are sequential Read calls for knowledge files (ip-ranges.md, identity-patterns.md, lead definitions) that could be issued as parallel tool calls in a single turn.\n\nAdd explicit batching instruction to SKILL.md CONTEXTUALIZE section: \"When reading multiple knowledge or environment files, batch independent reads into a single turn using parallel tool calls. Do not issue sequential Reads for files that don't depend on each other.\"\n\nEstimated savings: ~$0.15-0.25/run (3-5 fewer turns × ~$0.05/turn in cache reads)."}, {"id": "cost-batch-write-state", "title": "Batch write_state with investigation.md writes at each phase transition", "status": "backlog", "group": "cost", "body": "Every phase transition currently takes two turns: one Bash call to write_state.py, then a separate Write/Edit to investigation.md. These are independent and can be batched into a single turn.\n\nAdd explicit batching instruction to SKILL.md phase transitions: \"At each phase transition, issue the write_state.py Bash call and the investigation.md Edit as parallel tool calls in the same message.\"\n\nEstimated savings: ~$0.25-0.30/run (5-6 fewer turns × ~$0.05/turn)."}, {"id": "cost-compressed-investigation-md", "title": "Rewrite investigation.md phase templates in SKILL.md (compressed YAML-style notation)", "status": "backlog", "group": "cost", "body": "investigation.md is the agent's working document, consumed by itself and the Tier 2 judge. It currently uses full prose narratives (4K chars per ANALYZE section alone). The judge needs structured evidence and assessment weights (++/+/-/--), not prose.\n\nSwitch SKILL.md phase templates to terse structured notation. Each phase section should be ~30-50% of current size. Preserve: hypothesis names, assessment weights with 1-line reasoning, specific observations (IPs, counts, timestamps), lead names, and phase headers. Remove: narrative transitions, repeated context, explanatory prose.\n\nReport.md (analyst-facing) stays verbose.\n\nEstimated savings: ~$0.15-0.20/run (60-70% less output tokens for investigation.md writes, plus reduced context growth)."}, {"id": "cost-verify-tier2-compressed", "title": "Verify Tier 2 judge passes on compressed investigation.md format", "status": "backlog", "group": "cost", "body": "The judge prompt references \"investigation log\" and checks for assessment blocks and hypothesis outcomes. Run a manual test with a compressed investigation.md against the judge to confirm it still passes before shipping the compressed templates."}, {"id": "dns-cross-signature-anchors", "title": "Cross-signature environment anchor accessibility", "status": "backlog", "group": "dns", "body": "When investigating signature A, the agent currently only imports A's own playbook's @import'ed anchors. Ticket-context routinely surfaces alerts from signature B on the same entity (e.g. 100110 investigation sees 5710 SSH events from monitoring probes).\n\nThe 5710 approved-monitoring-sources.md anchor should be reachable during a 100110 investigation so the agent correctly filters those 5710 events as approved-baseline rather than treating them as possible initial-access.\n\nTwo design options:\n(a) Auto-load any anchor that's been cited as required by a signature whose events appear in ticket-context\n(b) Move common anchors from per-signature imports to a global/cross-signature layer\n\nThe boundary between \"signature-owned knowledge\" and \"environment-owned knowledge\" needs revisiting — the anchor is more environment than signature."}, {"id": "dns-host-state-baseline-lead", "title": "New host-state-baseline lead (FIM/rootcheck/port-change rate check)", "status": "backlog", "group": "dns", "body": "Create a dedicated lead for FIM/rootcheck/port-change rule families (rule.id:510, 550, 553, 554, 533 in Wazuh).\n\nThe failure mode: both models folded raw host-state counts (\"45 rootcheck events\") into DNS-alert dispositions without ever checking whether the rate is baseline for this host.\n\nA named lead makes the baseline check a reachable instruction instead of an ad-hoc query. Include a Wazuh template that runs the query + its 7-day shifted baseline in one pass."}, {"id": "dns-populate-baselines", "title": "Populate baseline content in existing lead definitions", "status": "backlog", "group": "dns", "body": "The _template/definition.md now declares an optional baseline: frontmatter field and a ## Baseline section. Existing leads (recent-alert-correlation, network-analysis, authentication-history) still ship without baseline content.\n\nPriority order:\n(a) recent-alert-correlation — most-used, drives the FIM/rootcheck volume-vs-baseline failure mode that Opus #2 hit\n(b) network-analysis — no templates dir at all yet\n(c) authentication-history — already has a Wazuh template, needs a baseline query alongside it\n\nEach lead needs shift-query patterns and σ-framed interpretation guidance."}, {"id": "done-budget-enforcement-hook", "title": "Budget enforcement hook (cap token/cost spend per investigation)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-claude-md-updated", "title": "CLAUDE.md updated for v3", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-common-leads-scaffolded", "title": "common/leads/ directory scaffolded", "status": "done", "group": "knowledge", "body": ""}, {"id": "done-contextualize-explore-subagent", "title": "CONTEXTUALIZE: Explore subagent for recent alerts (situational awareness, correlation)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-delete-v2-pipeline", "title": "Delete v2 pipeline (shell hooks, bash scoring, old tests)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-env-context", "title": "environment/context/ populated (IP ranges, identity patterns, criticality)", "status": "done", "group": "knowledge", "body": ""}, {"id": "done-env-data-sources", "title": "environment/data-sources/ populated (what data exists where)", "status": "done", "group": "knowledge", "body": ""}, {"id": "done-env-systems", "title": "environment/systems/ populated (Wazuh field quirks, query patterns)", "status": "done", "group": "knowledge", "body": ""}, {"id": "done-hooks-core", "title": "Hooks: validate_report, write_state, investigation_summary, audit_tool_calls", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-hooks-plugin-registration", "title": "Hook registration moved to plugin.json (not fired during development)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-input-sanitization-hooks", "title": "Input sanitization hooks (validate alert_json before investigation starts)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-investigation-checklist", "title": "Investigation checklist: self-check guide read at CONTEXTUALIZE, verified before CONCLUDE", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-investigator-5-phase-loop", "title": "Investigator agent: hypothesis-driven 5-phase loop (C→H→G→A→CONCLUDE)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-knowledge-base-migrated", "title": "Knowledge base migrated to v3 schema (context, playbook, precedents)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-lead-subagents-refactor", "title": "Lead subagents: each lead executed in isolated subagent context", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-llm-integration-tests", "title": "LLM integration tests: 6 passing (real Claude CLI invocation, full pipeline output)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-packaging-strategy", "title": "Packaging strategy finalized (stdlib-only core, optional dep groups, uv)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-precedent-alert-data", "title": "Precedent schema: alert_data field (raw alert for judge comparison + post-mortem seeding)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-preload-race-condition", "title": "Preload hook race condition fixed (contextualize_preload.py detached child vs Sonnet)", "status": "done", "group": "sonnet", "body": "contextualize_preload.py was forking a detached child to spawn ticket-context and archetype-scan in the background; the main agent's first CONTEXTUALIZE read raced the detached writes. Opus was slow enough that files landed in time; Sonnet reads raced past.\n\nFix: ticket-context is now dispatched inline by the main agent as a Haiku Agent() call (synchronous by construction, no race). Archetype-scan stays in preload because SKILL.md's graceful fallback handles the race. Validated in run #14."}, {"id": "done-python-schemas", "title": "Python schemas: report_frontmatter, state machine, precedent (dataclass validators)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-screen-phase", "title": "SCREEN phase: playbook-driven fast-path subagent before full investigation loop", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-sig-fim", "title": "Signature knowledge: FIM (Wazuh syscheck rule 550)", "status": "done", "group": "knowledge", "body": ""}, {"id": "done-sig-suspicious-dns", "title": "Signature knowledge: Suspicious DNS Query (Wazuh 100110+)", "status": "done", "group": "knowledge", "body": ""}, {"id": "done-sig-suspicious-process", "title": "Signature knowledge: Suspicious Process Execution (Falco/Wazuh 100001)", "status": "done", "group": "knowledge", "body": ""}, {"id": "done-signature-template-v3", "title": "Signature template updated for v3 vocabulary", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-telemetry-3-signatures", "title": "Telemetry infrastructure for FIM, process execution, DNS (workload scripts + decoders + rules)", "status": "done", "group": "knowledge", "body": ""}, {"id": "done-ticket-context-subagent", "title": "Ticket-context subagent for CONTEXTUALIZE (reusable across signatures)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-tier2-judge", "title": "Tier 2 semantic judge: Haiku validates report consistency via claude CLI", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-triage-skill", "title": "Triage skill: entry point, validates alert, spawns investigator", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-unit-tests", "title": "Unit tests: 72 passing (report validation, state transitions, KB schema, fixtures, e2e structural)", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-vendor-neutral", "title": "Vendor-neutral: no hardcoded SIEM mapping, works with any MCP tools", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "done-wazuh-as-examples", "title": "Wazuh content marked as example/testing reference", "status": "done", "group": "v3-rewrite", "body": ""}, {"id": "eval-main-agent-model", "title": "Main-agent baseline cost lever: --model flag in eval_run.sh", "status": "backlog", "group": "evaluation", "body": "eval_run.sh does not pass --model to claude, so the main investigation loop runs at whatever the harness default is (observed: claude-opus-4-6[1m]).\n\nSub-tasks:\n- Add --model sonnet to the claude invocation in playground/scripts/eval_run.sh\n- Run a matched eval pair (same alert, Opus vs Sonnet) and compare: disposition correctness, tool-call count, loop count, cost, wall clock\n- If Sonnet is comparable on quality, promote it to the default. Document the finding in .claude/skills/evaluate/SKILL.md quirks."}, {"id": "eval-screening-corpus", "title": "Evaluation plan: build screening test corpus and scoring pipeline", "status": "backlog", "group": "evaluation", "body": "Screening is the right starting point for evaluation (most common sub-flow, cheapest to evaluate, clear pass/fail).\n\nSub-tasks:\n- Build test corpus: ~10-20 alerts per signature covering pattern space (clear matches, near-misses, true negatives)\n- Define ground truth: expected screen_result, matched_pattern, and disposition per alert\n- Run screening subagent against corpus, collect structured output\n- Score: accuracy, false match rate, false no-match rate, output format compliance\n- Identify failure modes: which patterns break, which indicators are ambiguous, which prompts need tuning\n- After screening is solid: extend to ticket-context subagent, then full investigation loop"}, {"id": "invlang-canonicalize-hypotheses", "title": "Canonicalize hypothesis vocabulary per signature", "status": "backlog", "group": "reliability", "body": "Each signature's playbook should define a canonical seed-hypothesis name set; the agent can refine descriptions but must not rename the seeds.\n\nFreeform novel hypotheses remain allowed but are flagged as \"novel\" so the cross-run matcher knows they aren't canonical.\n\nNeeded for cross-run pattern matching to work without fuzzy disambiguation (?compromise-followup vs ?session-compromise vs ?followup-success)."}, {"id": "invlang-canonicalize-leads", "title": "Canonicalize lead names (enforce directory name match in investigation.md)", "status": "backlog", "group": "state", "body": "leads/ directory names are already the authoritative naming registry; enforce that investigation.md's \"Selected lead:\" field must match a directory entry exactly.\n\nA Layer 2 schema check (State Machine Transition Verification Criteria) can enforce this deterministically."}, {"id": "invlang-postmortem-loop", "title": "Post-mortem feedback loop: promote novel hypotheses to canonical seed sets", "status": "backlog", "group": "reliability", "body": "When a novel hypothesis wins in a run, the post-mortem should flag it as a candidate for promotion into the signature's canonical seed set.\n\nAnalyst-mediated, not automatic (same model as the screen-miss detection)."}, {"id": "invlang-structured-observations", "title": "Structured observation snippets in ANALYZE (prediction/observation/result convention)", "status": "backlog", "group": "reliability", "body": "ANALYZE's reasoning: \"...\" field is today freeform prose. Adding a lightweight convention — \"prediction: X, observation: Y, result: matches|contradicts|partial\" — would make cross-run observation matching possible without an LLM in the loop.\n\nNon-trivial prompt change; defer until Track A (past-runs index) shows value."}, {"id": "migration-stage1-preload", "title": "Migration Stage 1: hook-based CONTEXTUALIZE preload (keep Opus main)", "status": "backlog", "group": "sonnet", "body": "Move ticket-context and precedent-scan subagents out of main-agent dispatch. A new hooks/scripts/contextualize_preload.py runs on SessionStart (or UserPromptSubmit), synchronously spawns two parallel claude --print subprocesses for ticket-context + precedent-scan, collects their results, and injects via additionalContext as \"## Ticket Context\" / \"## Precedent Scan\" sections.\n\nSub-tasks:\n- Implement contextualize_preload.py with asyncio.gather or concurrent.futures.ProcessPoolExecutor, timeout handling, structured additionalContext output\n- Register on SessionStart or UserPromptSubmit in plugin.json; hook must read alert JSON from alert.json or first user prompt\n- Shorten SKILL.md CONTEXTUALIZE section — remove \"dispatch these subagents in parallel\" directive, replace with \"preloaded sections are already in your context; integrate them\"\n- Keep ticket-context.md and precedent-scan.md subagent prompts (become subprocess input prompts)\n- Measure: re-run evals. Expect -30-60s wall clock, -3 main-agent turns, -$0.15 to -$0.25 vs run #9\n\nSide effect: Tier 1's check_ticket_context_spawned guard becomes dead code once hook-driven preload can't be skipped."}, {"id": "migration-stage2-report-drafter", "title": "Migration Stage 2: Sonnet drafts report.md, Opus reviews and edits", "status": "backlog", "group": "sonnet", "body": "Splits the CONCLUDE-phase report write between a cheap draft and an expensive review.\n\nSub-tasks:\n- New subagent report-drafter pinned to Sonnet; reads investigation.md + state.json + alert.json, produces first-draft report.md in correct frontmatter schema\n- Main agent (still Opus) reads draft and edits via Edit rather than re-writing from scratch. Tier 1 + Tier 2 judge hooks fire on the Edit the same way they fire on a Write.\n- Safety check: if report-drafter fails to produce valid frontmatter OR Tier 2 judge rejects the post-edit version twice, fall back to current path (main agent writes from scratch)\n- Measure: report-write cost reduction vs run #9's CONCLUDE phase cost. Expect 30-50% savings on report-write specifically."}, {"id": "migration-stage3-hypothesis-story", "title": "Migration Stage 3: Sonnet writes hypothesis stories, Opus makes predictions", "status": "backlog", "group": "sonnet", "body": "HYPOTHESIZE-phase work splits into two cognitive modes:\n- Stories: narrative descriptions of what a hypothesis means (descriptive, cheap output, Sonnet-friendly)\n- Predictions: testable implications that drive lead selection (hard reasoning, Opus-worthy)\n\nSub-tasks:\n- New subagent hypothesis-story pinned to Sonnet. Given CONTEXTUALIZE narrative + playbook seed list, produces a structured story per hypothesis: background, what it explains, what it doesn't, how analyst would describe it. Output: story.md per hypothesis in the run dir.\n- Main agent (still Opus) reads stories and generates testable predictions — the discriminating evidence list (required_anchors / predictions shape). Then picks leads to confirm/refute based on predictions.\n- Guard: cap stories at 4-6 per run (playbook seed count is natural limit). If Sonnet drafter tries to generate hypotheses outside playbook seeds, reject and retry — novel hypotheses must come from main agent's evidence-driven reasoning.\n- Measure: HYPOTHESIZE phase output-token cost reduction vs run #9."}, {"id": "migration-stage4-flip-main", "title": "Migration Stage 4: flip main agent to Sonnet (after stages 1–3 are clean)", "status": "backlog", "group": "sonnet", "body": "Do not attempt until:\n- Stages 1–3 all merged and have at least 5 clean eval runs each showing no regression on: adversarial-hypothesis discipline, Tier 2 judge pass rate, state-machine phase progression, report schema validity\n- /evaluate eval suite is larger than 1 run per configuration\n- Post-mortem screen-miss detection is implemented and has catalogued what fraction of \"escalated benign\" runs should have been SCREEN-resolved\n\nSub-tasks:\n- Change claude invocation in eval_run.sh and plugin.json to pin main agent to Sonnet\n- Re-run full eval suite across Scenario A (monitoring-probe, SCREEN fast-path) and Scenario B (monitoring-bait, full loop)\n- Safety metrics to watch: adversarial hypothesis refutation timing, state-machine bypass attempts, Tier 2 judge retry count, budget overruns, lead-choice diagnosticity\n- Revert immediately if any safety metric regresses meaningfully"}, {"id": "migration-stage5-opus-consultant", "title": "Migration Stage 5: Opus consultant subagent (deep-reason, Sonnet escalates for hard calls)", "status": "backlog", "group": "sonnet", "body": "Once Sonnet-main is stable, introduce a deep-reason subagent pinned to Opus that the Sonnet main agent calls at specific high-stakes decision points.\n\nSub-tasks:\n- Declare deep-reason subagent with model: \"opus\" and a prompt focused on diagnostic-lead selection and evidence synthesis\n- Wire call-points at specific SKILL.md decision moments:\n  - HYPOTHESIZE → GATHER when hypothesis count > 2 AND evidence is ambiguous\n  - GATHER → ANALYZE when a query returns ambiguous results supporting multiple hypotheses\n  - ANALYZE → CONCLUDE when hypothesis ledger has no clear winner AND no clear escalation trigger\n- Budget guard: cap deep-reason to 2 invocations per run by default\n- Measure: compare full-eval cost with deep-reason vs without"}, {"id": "mvp-brute-force-scenario", "title": "Test brute-force alert scenario to validate escalation path", "status": "todo", "group": "mvp", "body": "Second alert scenario beyond monitoring-probe. Confirms the investigator handles the adversarial hypothesis correctly through a full loop when no benign archetype matches, and escalates cleanly."}, {"id": "mvp-e2e-live-test", "title": "Run end-to-end test with live Wazuh playground", "status": "todo", "group": "mvp", "body": "Validate the full investigation pipeline against real SIEM data. Bring up the playground stack, trigger an alert on target-endpoint, run /investigate, check report.md + Tier 2 judge pass."}, {"id": "mvp-plugin-invocation", "title": "Wire up triage as actual Claude Code plugin invocation", "status": "todo", "group": "mvp", "body": "Currently tested via prompt injection, not via `/soc-agent:triage`. Need to validate the full plugin command path including hook firing order and plugin.json manifest loading."}, {"id": "p2-act-mode", "title": "act mode: auto-close for mature signatures with high-confidence precedent matches", "status": "backlog", "group": "phase-2", "body": "MVP is recommend-only. act mode would enable auto-close actions for signatures where confidence is consistently high and precedent matches are strong.\n\nRequires mature signatures, proven Tier 2 judge reliability, and explicit opt-in per signature."}, {"id": "p2-audit-dashboard", "title": "Audit dashboard / analytics on investigation outcomes", "status": "backlog", "group": "phase-2", "body": "Analytics on runs/audit.jsonl: disposition breakdown by signature, cost trends, Tier 2 pass rate, SCREEN hit rate, mean time to resolution."}, {"id": "p2-context-window-mgmt", "title": "Context window management: migrate detailed investigation reasoning to a subagent", "status": "backlog", "group": "phase-2", "body": "Main agent holds: investigation flow, phase state, key findings, hypothesis table.\nReasoning subagent handles: detailed evidence analysis, hypothesis weighting, narrative construction.\n\nPrevents context exhaustion on complex multi-loop investigations."}, {"id": "p2-populate-env", "title": "Populate environment files with real org data (currently example/template content)", "status": "backlog", "group": "knowledge", "body": "environment/context/ and environment/systems/ contain example/template content. Needs real org data: actual IP ranges, real identity patterns, production system configs."}, {"id": "p2-populate-leads", "title": "Populate lead definitions in common/leads/ (authentication-history, network-analysis, etc.)", "status": "backlog", "group": "knowledge", "body": "common/leads/ is scaffolded but lead definitions are sparse. Priority order based on 100110 stress eval findings:\n1. recent-alert-correlation — most-used, drives FIM/rootcheck volume-vs-baseline failure mode\n2. network-analysis — no templates dir at all yet\n3. authentication-history — already has a Wazuh template, needs a baseline query alongside it"}, {"id": "p2-retention-policy", "title": "Retention policy for run data (configurable cleanup)", "status": "backlog", "group": "phase-2", "body": "runs/ accumulates investigation run dirs indefinitely. Add configurable cleanup policy (by age, by count, by status — e.g. keep all escalated, prune resolved after N days)."}, {"id": "p2-tool-discovery-refactor", "title": "Tool discovery refactor: split data availability from tool mechanics", "status": "backlog", "group": "phase-2", "body": "Split into two concerns:\n1. Data availability: main agent consults knowledge/environment/data-sources/ to know what questions can be answered\n2. Tool mechanics: lead subagent consults knowledge/environment/systems/ for query patterns\n\nAlso: not all tools are MCP — agent may need to call APIs via scripts."}, {"id": "past-runs-define-successful", "title": "Define \"successful run\" eligibility for past-run indexing", "status": "backlog", "group": "reliability", "body": "Minimum bar: report.md exists, Tier 1 passed, Tier 2 VERDICT:PASS, status=resolved with grounding leg satisfied.\n\nEscalated runs with clear analyst disposition (via a post-hoc feedback loop) could eventually qualify but not in v1.\n\nStore the eligibility flag in runs/audit.jsonl at run completion so the index doesn't have to re-compute it."}, {"id": "past-runs-index", "title": "Build past-runs index (SQLite/JSONL keyed by signature + entity-class hash)", "status": "backlog", "group": "reliability", "body": "Per signature, extract: entity set (srcip, srcuser, host, image family, …), trace line, matched_archetype, disposition, confidence, key ++/-- observations from the investigation log.\n\nStore as a flat index (SQLite or JSONL) keyed by signature_id + entity-class hash, so a query can land in <100ms without reading every run dir."}, {"id": "past-runs-lead", "title": "Expose past investigations as a lead (leads/past-investigations/)", "status": "backlog", "group": "reliability", "body": "Follows the same shape as every other lead: leads/past-investigations/definition.md + per-vendor templates (single template pointing at the local index).\n\nLead takes the current alert's entity set as input, returns the top-N matching past runs ranked by entity similarity + recency + Tier 2 pass, plus a one-line summary of each.\n\nMain agent can select it at HYPOTHESIZE just like any other lead."}, {"id": "past-runs-staleness", "title": "Temporal staleness check for past-run matches", "status": "backlog", "group": "reliability", "body": "Past runs older than a threshold (or whose grounding leg depended on temporal anchors) should be flagged as \"shape-transferable but grounding must be re-confirmed,\" matching the existing precedent-staleness logic in Tier 2 GROUNDING_MATCH."}, {"id": "precedent-schema-refactor", "title": "Refactor precedent schema: abstract environment out of key_indicators", "status": "backlog", "group": "knowledge", "body": "monitoring-probe-001.json has literal environment values (srcip: 10.0.1.50) baked into key_indicators and alert_data, which conflicts with the actual playground network (172.22.0.0/16) and doesn't generalize to any real deployment.\n\nSub-tasks:\n- Move literal values (IPs, hostnames, ticket-specific timestamps) out of key_indicators and alert_data\n- Introduce a sibling tickets/ directory per precedent containing the raw alerts that resolved via this story, so historical matching can work without the precedent file claiming specific values\n- key_indicators should carry semantic classifications (source_classification: internal-monitoring-host, username_classification: monitoring-pattern), matching the shape the new 5710 screen indicators already use\n- Update precedent.py schema validator + test_kb_schema.py accordingly\n- Migrate monitoring-probe-001.json and brute-force-001.json as first pass"}, {"id": "reliability-archetype-refinement", "title": "Archetype refinement guidance in post-mortem output (shape-violation analysis)", "status": "backlog", "group": "reliability", "body": "When a screen-miss points at a shape-violation refusal, the fix is almost always refining the archetype's declared confirmation shape (or adding a sub-archetype for the observed variant), NOT relaxing the anchor's safety guarantees.\n\nThe post-mortem output should suggest archetype-level changes, not anchor-level ones.\n\nFirst concrete candidate: monitoring-probe archetype's attempt_count_5min: \"exactly 1\" is too brittle — trips on cron jitter, duplicate cron entry, or manually invoked probe."}, {"id": "reliability-screen-miss-detection", "title": "Screen-miss detection script (post-mortem)", "status": "backlog", "group": "reliability", "body": "Walk runs/*/report.md frontmatter + runs/*/audit.jsonl, filter for the three-condition pattern:\n1. Disposition is \"escalated / benign\" (full loop arrived at what SCREEN could have provided)\n2. A precedent match was identified in CONTEXTUALIZE but NOT used for resolution\n3. Archetype trust anchor was refuted on a SHAPE violation, not a CONTENT violation\n\nEmit a structured screen-miss finding per signature with improvement candidates and estimated cost saved.\n\nRunnable ad-hoc: scripts/screen_miss_report.py --since 2026-04-01\nAlso cron-friendly.\n\nReference: see .claude/skills/evaluate/SKILL.md run #9 for the canonical example (monitoring-probe, attempt_count_5min=2, stray event at 23:25:49)."}, {"id": "reliability-screen-miss-onboarding", "title": "Feed screen-miss output into signature authoring (/author skill intake)", "status": "backlog", "group": "reliability", "body": "When opening a playbook for revision, check for recent screen-miss reports for that signature and surface them as \"the agent is fighting these shapes, should the SCREEN table be adjusted?\"\n\nDo NOT auto-apply — analyst-mediated loop, not self-modifying."}, {"id": "retry-truncation-wrapper", "title": "External retry-on-truncation wrapper for eval_run.sh", "status": "backlog", "group": "evaluation", "body": "Classes of \"the CLI hangs up mid-investigation\" bugs will keep happening (tool errors, transient API failures, hook misbehavior). The right structural fix is not to hunt them one by one.\n\nObserved in run #8: agent produced high-quality CONTEXTUALIZE + SCREEN, transitioned into HYPOTHESIZE, then called Read against knowledge/environment/operations/ (a directory). Tool returned EISDIR is_error=true, Stop hook fired, Claude Code loop closed the session — without feeding the tool error back to the model for another turn. $1.15 and 331s consumed, no report.md.\n\nWrapper design:\n- When claude --print exits, check if runs/<uuid>/report.md exists. If not, the run is truncated.\n- Walk runs/<uuid>/state.json (last phase), runs/<uuid>/investigation.md (phase sections populated), and transcript.jsonl tail to identify where the agent stopped.\n- Re-invoke claude with a continuation prompt that hands the agent the existing run dir and asks it to pick up from the recorded phase.\n- Continuation MUST NOT restart CONTEXTUALIZE — reads existing investigation.md + state.json and resumes at recorded phase.\n- Hard cap on retry count (e.g. 2) to avoid infinite loops on genuine dead-ends.\n- Log every retry to runs/<uuid>/retry.jsonl.\n\nAlso: file Claude Code feedback on the termination-after-tool-error observation."}, {"id": "sonnet-alert-determinism", "title": "Alert-selection determinism in fetch_alert.py", "status": "backlog", "group": "sonnet", "body": "Same scenario, two runs, different alert selected (first-of-burst vs mid-burst). Eval reproducibility requires stable ordering.\n\nOptions:\n- Add --select {latest,earliest,first} flag, default to latest\n- Respect --offset N so eval harness can skip past the first-of-burst alert deliberately\n\nlatest is probably the right default (matches what a human analyst would pick up). Affects eval reproducibility only, not the agent itself."}, {"id": "sonnet-burst-check-5710", "title": "Forward-looking burst check on 5710 screen indicator", "status": "backlog", "group": "sonnet", "body": "The attempt_count_5min indicator in wazuh-rule-5710/playbook.md is backward-looking only (\"5 minutes PRECEDING the alert\"). For the first alert of a burst, the preceding window is empty so count=1 passes the screen — subsequent burst attempts never get queried.\n\nAdd a second indicator: attempts_from_source_60s_after <= 0 (forward-looking), so a burst's first alert correctly fails the screen.\n\nLow priority but worth doing before the next Sonnet-main eval cycle on bait-shape scenarios."}, {"id": "sonnet-opus-consultation", "title": "Runtime Opus→Sonnet consultation design (two call-points)", "status": "backlog", "group": "sonnet", "body": "Belt-and-suspenders: keep knowledge-maturation investment as primary defense, add narrow runtime Opus consultation at 1–2 high-leverage points as a backstop.\n\n**Consultation point 1 — HYPOTHESIZE → GATHER boundary (query construction + hypothesis completeness)**\nInput: {alert, active_hypotheses, selected_lead, lead_definition}\nOpus returns: {minimum_discriminating_fields_to_query, flagged_bundled_hypotheses, missing_mechanism_variants}\nThis blocks the GATHER dispatch until Opus approves the query shape.\n\n**Consultation point 2 — ANALYZE → CONCLUDE boundary (only when adversarial is being refuted on circumstantial evidence)**\nHook-level gate: \"does the ANALYZE assessment assign -- to the adversarial hypothesis based on anything other than an authoritative query result?\" If yes → consult Opus before CONCLUDE. Gate catches \"coherent confabulation\" without always-on consultation cost.\n\n**What Opus contributes**: field schema awareness for SIEM queries; mechanism-variant enumeration (splitting bundled hypotheses); environment-knowledge integration.\n\n**Not included**: a CONCLUDE-side consultation that duplicates Tier 2 judge work.\n\nDefer implementation to migration session. Design-only here."}, {"id": "sonnet-robustness-caveats", "title": "Sonnet robustness caveats: eval sweep gaps to cover before production", "status": "backlog", "group": "sonnet", "body": "The 4 Sonnet runs were on a medium-quality harness with relatively short investigations (≤6 phases, ≤2 hypothesis loops). Production conditions NOT exercised:\n\n- Missing or degraded data sources (Wazuh backlog, SIEM index gap, data-source-debug lead fires)\n- Stale knowledge (ip-ranges.md with terminated monitoring sources, anchor docs referencing deprecated tickets)\n- Longer investigation loops (5+ hypothesis loops; coherence decay over long contexts)\n- Novel alert shapes outside playbook archetype space requiring first-principles enumeration\n- Ambiguous anchor confirmations (change ticket in weird state, on-call schedule in transition)\n- Rate-limited or noisy SIEM queries (production indexes with 10×–100× event volume)\n\nPath forward before production: eval sweep on a harder signature (100001 or novel) post-scaffolding-maturation, plus at least one eval with deliberately degraded data source."}, {"id": "state-bypass-mitigation", "title": "State machine bypass: decide and implement mitigation strategy", "status": "backlog", "group": "state", "body": "The state machine is enforcement-by-convention, not enforcement-by-isolation. When write_state.py is unavailable (blocked by allowlist, unavailable env, etc.), the agent can and does write state.json directly via Write, bypassing phase-ordering checks entirely.\n\nThe Tier 1 validation in validate_report.py catches malformed reports but does not catch faked state history.\n\nPick one mitigation:\n\nOption A: PreToolUse hook gates Write against any path matching */state.json inside a run dir, allowing only invocations originating from write_state.py. Cleanest but requires identifying the invoker, which PreToolUse may not surface.\n\nOption B: Move state out of a file the agent can write. Use sqlite db or a write-only socket that only write_state.py knows how to address.\n\nOption C: Accept the soft-boundary model and document explicitly in docs/security-model.md that the safety guarantee is \"well-aligned agent + structural validation of outputs\" rather than \"process-isolated state machine.\"\n\nThe decision matters more than the implementation. Current behavior is \"looks isolated but isn't,\" which is the worst of both worlds."}, {"id": "state-subagent-enforcement", "title": "Stronger subagent gating: PreToolUse hook enforces ticket-context spawn", "status": "backlog", "group": "state", "body": "The Tier 1 ticket-context check (validate_report.check_ticket_context_spawned) catches missing spawns at conclude-time by walking tool_audit.jsonl. This is a soft gate: the agent only finds out it was wrong at the very end.\n\nIf observed in eval runs that recovery is expensive (extra Tier 2 judge invocations, wall-clock blow-out, agent confusion), promote to a hard gate:\n\nPreToolUse blocking hook: after N tool calls (N≈5), reject any further tool call until a Task call referencing ticket-context has been recorded. Error message points agent at SKILL.md §CONTEXTUALIZE step 3 with the Task template.\n\nCaveats:\n- PreToolUse hooks fire before EVERY tool call — must be cheap (read-only, no LLM). Cache the \"ticket-context spawned\" boolean per session_id.\n- Risk: blocking too aggressively can fight the agent if it needs a few read calls before spawning. Tune N based on observed eval data.\n- Consider extending same pattern for precedent-scan subagent if eval data shows it being skipped."}, {"id": "state-transition-criteria", "title": "State machine transition verification criteria (7 transitions)", "status": "backlog", "group": "state", "body": "Add actionable verification gates to each transition so write_state.py can reject transitions where the agent hasn't done meaningful work. Currently enforces legal transitions but not quality of work within a phase.\n\nCriteria to define per transition (gather eval data first, then enforce):\n\n- CONTEXTUALIZE → SCREEN/HYPOTHESIZE: Did investigation.md get written? Contains alert observables, entity extraction, and resolution map?\n- SCREEN → CONCLUDE: Does screen output contain screen_result: match, a named matched_pattern, and a valid matched_precedent file? Were required leads actually run?\n- SCREEN → HYPOTHESIZE: Does screen output contain screen_result: no_match with a reason? Is evidence from screen leads carried forward?\n- HYPOTHESIZE → GATHER: Does investigation.md contain at least one ?hypothesis with status active? Is there a selected lead with predictions?\n- GATHER → ANALYZE: Was at least one tool call made? Does investigation.md contain raw observations (not just \"no results\")?\n- ANALYZE → HYPOTHESIZE (loop): Does investigation.md contain assessment weights (++/+/-/--)? Is there a stated reason for another loop?\n- ANALYZE → CONCLUDE: Is there exactly one ++ hypothesis? Are all adversarial hypotheses explicitly -- refuted with reasoning? Does investigation meet min-leads-by-severity?\n\nApproach: instrument → identify failure modes → define thresholds → implement incrementally. Start with structural checks (file exists, field present), defer semantic checks."}];
+
+const ALWAYS_COLS = [
+  { id: "backlog", label: "Backlog" },
+  { id: "todo",    label: "Todo"    },
+  { id: "doing",   label: "Doing"   },
+];
+
+let showDone = false;
+
+function esc(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function renderCard(task) {
+  const card = document.createElement("div");
+  const hasBody = !!task.body;
+  card.className = "card" + (hasBody ? "" : " no-body");
+
+  const badge = task.group
+    ? `<span class="badge badge-${esc(task.group)}">${esc(task.group)}</span>`
+    : "";
+  const hint = hasBody ? `<span class="expand-hint">···</span>` : "";
+  const body = hasBody ? `<div class="card-body">${esc(task.body)}</div>` : "";
+
+  card.innerHTML = `
+    <div class="card-title">${esc(task.title)}</div>
+    <div class="card-meta">${badge}${hint}</div>
+    ${body}
+  `;
+
+  if (hasBody) {
+    card.addEventListener("click", () => card.classList.toggle("expanded"));
+  }
+  return card;
+}
+
+function renderBoard() {
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+
+  const cols = showDone
+    ? [...ALWAYS_COLS, { id: "done", label: "Done" }]
+    : ALWAYS_COLS;
+
+  for (const col of cols) {
+    const tasks = TASKS.filter(t => t.status === col.id);
+
+    const colEl = document.createElement("div");
+    colEl.className = "column";
+    colEl.innerHTML = `
+      <div class="column-header">
+        <span class="column-title">${col.label}</span>
+        <span class="column-count">${tasks.length}</span>
+      </div>
+      <div class="column-cards" id="col-${col.id}"></div>
+    `;
+    board.appendChild(colEl);
+
+    const cardsEl = colEl.querySelector(".column-cards");
+    if (tasks.length === 0) {
+      cardsEl.innerHTML = '<div class="empty-col">—</div>';
+    } else {
+      tasks.forEach(t => cardsEl.appendChild(renderCard(t)));
+    }
+  }
+}
+
+document.getElementById("toggle-done").addEventListener("click", () => {
+  showDone = !showDone;
+  document.getElementById("toggle-done").textContent = showDone ? "Hide done" : "Show done";
+  renderBoard();
+});
+
+renderBoard();
+</script>
+</body>
+</html>
