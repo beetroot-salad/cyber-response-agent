@@ -127,9 +127,18 @@ def resolve_proposed_text(hook_data: dict) -> tuple[Path | None, str | None]:
 # ---------------------------------------------------------------------------
 
 def check_ticket_context_spawned(run_dir: Path) -> str | None:
-    """Return None on pass, error message on fail. Primary check is the
-    preloaded `ticket_context.yaml`; fallback scans the audit log for a
-    manual Task/Agent dispatch of the ticket-context subagent."""
+    """Return None on pass, error message on fail.
+
+    The ticket-context subagent is dispatched inline by the main agent
+    during CONTEXTUALIZE (see SKILL.md §CONTEXTUALIZE step 3). The
+    primary detection path is the audit log scan below, which looks for
+    a Task/Agent call matching the ticket-context subagent prompt.
+
+    The `ticket_context.yaml` file check is kept as a legacy/test
+    convenience — tests can set it as a fast "ticket-context ran" marker
+    without building an audit log. Production flow no longer writes the
+    file (no preload script).
+    """
     if (run_dir / "ticket_context.yaml").exists():
         return None
 
@@ -158,8 +167,9 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
 
     return (
         "ticket-context subagent was not dispatched during CONTEXTUALIZE. "
-        "The preload normally writes ticket_context.yaml to the run "
-        "directory; if that failed, dispatch the subagent manually using "
+        "The main agent is expected to spawn it inline via Agent() as "
+        "described in SKILL.md §CONTEXTUALIZE step 3; the audit log "
+        "has no matching Task/Agent call. Dispatch the subagent using "
         "skills/investigate/ticket-context.md before re-issuing this "
         "CONCLUDE write. Next action: stay in CONCLUDE, run the subagent, "
         "then retry the write."

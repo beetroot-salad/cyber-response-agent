@@ -130,7 +130,7 @@ When reading multiple knowledge or environment files, batch independent reads in
      prompt=<read skills/investigate/archetype-scan.md, substitute {run_dir}, {signature_id}, {runs_dir} verbatim>
    )
    ```
-   When the subagent returns, read its `archetype_scan` ranked list. Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation. If the subagent returned no useful output (malformed YAML, empty ranking), continue with the rest of CONTEXTUALIZE — archetypes are a useful prior, not required.
+   When the subagent returns, read its `archetype_scan` ranked list AND its `adversarial_archetype` entry. Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation. Record both in `investigation.md` §CONTEXTUALIZE (see template below) — the adversarial archetype is the citable surface the CONCLUDE self-check's `archetype_shape_match` question asks about, so you need it in writing. If the subagent returned no useful output (malformed YAML, empty ranking), continue with the rest of CONTEXTUALIZE — archetypes are a useful prior, not required.
 
    **Ticket context** — queries the SIEM for related alerts, clusters them mechanically, and recommends whether fast-resolve is possible.
    ```
@@ -157,7 +157,8 @@ Write an initial section in `{run_dir}/investigation.md`:
 **Key observables:** {investigation-relevant values from alert}
 **Playbook hypotheses:** ?hypothesis-1, ?hypothesis-2, ...
 **Available leads:** lead-1, lead-2, ...
-**Archetype matches:** {summary from archetype-scan}
+**Archetype matches:** {ranked list from archetype-scan, one line each: name (strength) — key features}
+**Adversarial archetype:** {name} — {one-line reason why a real threat would hide inside this archetype, and how the current alert does or doesn't resemble it}
 **Data environment:** {reachable systems per preflight; any degraded systems and the leads they affect}
 ```
 

@@ -45,7 +45,7 @@ Then compare the current alert's shape against each archetype's story. Use the K
 
 ## Output
 
-Return a ranked list:
+Return a ranked list plus an explicit adversarial archetype:
 
 ```yaml
 archetype_scan:
@@ -54,9 +54,18 @@ archetype_scan:
     required_anchors: [{anchor-name}, ...]
     story_match: "{strong|moderate|weak} — {why: which observable features match or diverge}"
     boundary_note: "{what would disqualify this match, or null}"
+
+adversarial_archetype:
+  archetype: {archetype-name}
+  disposition_pattern: "{typically escalate | true_positive | etc.}"
+  required_anchors: [{anchor-name}, ...]
+  story_match: "{strong|moderate|weak} — {why this alert resembles the adversarial story, if at all}"
+  reason: "{why this is the archetype a real threat would most plausibly hide inside, for this signature}"
 ```
 
-Rank from strongest match to weakest. If an archetype is clearly irrelevant (story describes a completely different pattern), you may omit it with a brief note at the end.
+**Ranking rules** — rank the main list from strongest match to weakest. If an archetype is clearly irrelevant (story describes a completely different pattern), you may omit it with a brief note at the end.
+
+**Adversarial archetype rules** — always include `adversarial_archetype`, even when the best match is strongly benign. Pick the archetype that represents the worst-case threat outcome in this signature's catalog (e.g., `credential-stuffing` or `external-bruteforce` for 5710, `post-exploit-interactive` for 100001). If the signature has no explicitly adversarial archetype, pick the archetype whose `disposition_pattern` is most severe and set `story_match` to describe how the current alert does or doesn't resemble it. This field exists so the main agent can cite the adversarial comparison at CONCLUDE time without re-reading the READMEs.
 
 ## Rules
 

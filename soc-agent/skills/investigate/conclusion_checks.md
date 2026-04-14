@@ -42,13 +42,13 @@ If any observation is unexplained or contradictory, you cannot resolve — retur
 
 ### `archetype_shape_match`
 
-Two parts:
+Two parts, both citable against content already in `investigation.md` (your CONTEXTUALIZE `**Archetype matches:**` and `**Adversarial archetype:**` lines, or your own ANALYZE discussion of the match — you do not need to re-read the archetype README from disk):
 
-1. **Matched archetype coverage.** Does the matched archetype's story describe every notable feature of this alert? Cite the archetype feature you compared against. If features don't fit, escalate as a novel variant — do not force-close.
+1. **Matched archetype coverage.** Does the matched archetype's story describe every notable feature of this alert? If features don't fit, escalate as a novel variant — do not force-close. Cite a line from CONTEXTUALIZE or ANALYZE that records the match strength and the features compared.
 
-2. **Adversarial archetype distinguished.** Name the adversarial archetype closest in shape to this alert (the one a real threat would most plausibly hide inside) and cite the feature that distinguishes it from the matched archetype. If no feature distinguishes them, the matched archetype isn't load-bearing — escalate.
+2. **Adversarial archetype distinguished.** What's the closest adversarial archetype (the one a real threat would most plausibly hide inside), and does the current alert resemble it? Your CONTEXTUALIZE `**Adversarial archetype:**` line already records this from the archetype-scan subagent's output — cite it. If there's no separation between the matched archetype and the adversarial one, the matched archetype isn't load-bearing — escalate.
 
-**Answer shape:** matched archetype name + coverage citation, adversarial archetype name + distinguishing feature citation.
+**Answer shape:** matched archetype name + coverage citation (from your own CONTEXTUALIZE/ANALYZE), adversarial archetype name + adversarial-line citation (from CONTEXTUALIZE).
 
 ---
 
