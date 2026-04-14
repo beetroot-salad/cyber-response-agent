@@ -23,7 +23,7 @@ from hooks.scripts.audit_tool_calls import (
     truncate,
 )
 from hooks.scripts.frontmatter import parse_yaml_frontmatter
-from hooks.scripts.investigation_summary import find_latest_run
+from hooks.scripts.investigation_summary import find_latest_run, sum_transcript_tokens
 
 
 # --- truncate ---
@@ -263,9 +263,65 @@ class TestFindLatestRun:
             assert result == has_report
 
 
+class TestSumTranscriptTokens:
+    def test_sums_assistant_usage(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("\n".join([
+            json.dumps({"type": "human", "message": {"content": "hello"}}),
+            json.dumps({"type": "assistant", "message": {"usage": {
+                "input_tokens": 100, "output_tokens": 50,
+                "cache_creation_input_tokens": 20, "cache_read_input_tokens": 10,
+            }}}),
+            json.dumps({"type": "assistant", "message": {"usage": {
+                "input_tokens": 200, "output_tokens": 80,
+                "cache_creation_input_tokens": 0, "cache_read_input_tokens": 30,
+            }}}),
+        ]) + "\n")
+        result = sum_transcript_tokens(str(transcript))
+        assert result["input_tokens"] == 300
+        assert result["output_tokens"] == 130
+        assert result["cache_creation_input_tokens"] == 20
+        assert result["cache_read_input_tokens"] == 40
+
+    def test_missing_file_returns_zeros(self):
+        result = sum_transcript_tokens("/nonexistent/path.jsonl")
+        assert result == {
+            "input_tokens": 0, "output_tokens": 0,
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+        }
+
+    def test_ignores_non_assistant_records(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "human", "message": {"usage": {"input_tokens": 999}}}) + "\n"
+        )
+        result = sum_transcript_tokens(str(transcript))
+        assert result["input_tokens"] == 0
+
+    def test_skips_malformed_lines(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            "not json\n"
+            + json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 5, "output_tokens": 3, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}}) + "\n"
+        )
+        result = sum_transcript_tokens(str(transcript))
+        assert result["input_tokens"] == 5
+
+    def test_missing_usage_key_treated_as_zero(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "assistant", "message": {}}) + "\n"
+        )
+        result = sum_transcript_tokens(str(transcript))
+        assert result == {
+            "input_tokens": 0, "output_tokens": 0,
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+        }
+
+
 class TestInvestigationSummaryMain:
-    def test_writes_summary_entry(self, tmp_path):
-        run_dir = tmp_path / "run-001"
+    def _make_run(self, tmp_path, run_name="run-001", meta=True):
+        run_dir = tmp_path / run_name
         run_dir.mkdir()
         (run_dir / "report.md").write_text(
             """---
@@ -281,7 +337,18 @@ leads_pursued: 4
 # Report body
 """
         )
-        (run_dir / "state.json").write_text(json.dumps({"run_id": "run-001"}))
+        (run_dir / "state.json").write_text(json.dumps({"run_id": run_name}))
+        if meta:
+            (run_dir / "meta.json").write_text(json.dumps({
+                "run_id": run_name,
+                "signature_id": "wazuh-rule-5710",
+                "salt": "deadbeef01234567",
+                "created_at": "2026-04-14T10:00:00+00:00",
+            }))
+        return run_dir
+
+    def test_writes_summary_entry(self, tmp_path):
+        self._make_run(tmp_path)
 
         with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
             with patch("sys.stdin", StringIO("")):
@@ -299,6 +366,70 @@ leads_pursued: 4
         assert entry["leads_pursued"] == 4
         assert entry["matched_archetype"] == "monitoring-probe"
         assert entry["matched_ticket_id"] == "SEC-2024-001"
+
+    def test_includes_timestamps(self, tmp_path):
+        self._make_run(tmp_path)
+
+        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
+            with patch("sys.stdin", StringIO("")):
+                with pytest.raises(SystemExit):
+                    from hooks.scripts.investigation_summary import main
+                    main()
+
+        entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
+        assert entry["start_timestamp"] == "2026-04-14T10:00:00+00:00"
+        assert "end_timestamp" in entry
+        assert "timestamp" not in entry
+
+    def test_start_timestamp_none_without_meta(self, tmp_path):
+        self._make_run(tmp_path, meta=False)
+
+        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
+            with patch("sys.stdin", StringIO("")):
+                with pytest.raises(SystemExit):
+                    from hooks.scripts.investigation_summary import main
+                    main()
+
+        entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
+        assert entry["start_timestamp"] is None
+
+    def test_token_counts_from_transcript(self, tmp_path):
+        self._make_run(tmp_path)
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "assistant", "message": {"usage": {
+                "input_tokens": 500, "output_tokens": 200,
+                "cache_creation_input_tokens": 100, "cache_read_input_tokens": 50,
+            }}}) + "\n"
+        )
+        payload = json.dumps({"transcript_path": str(transcript)})
+
+        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
+            with patch("sys.stdin", StringIO(payload)):
+                with pytest.raises(SystemExit):
+                    from hooks.scripts.investigation_summary import main
+                    main()
+
+        entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
+        assert entry["input_tokens"] == 500
+        assert entry["output_tokens"] == 200
+        assert entry["cache_creation_input_tokens"] == 100
+        assert entry["cache_read_input_tokens"] == 50
+
+    def test_token_counts_zero_without_transcript(self, tmp_path):
+        self._make_run(tmp_path)
+
+        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
+            with patch("sys.stdin", StringIO("")):
+                with pytest.raises(SystemExit):
+                    from hooks.scripts.investigation_summary import main
+                    main()
+
+        entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
+        assert entry["input_tokens"] == 0
+        assert entry["output_tokens"] == 0
+        assert entry["cache_creation_input_tokens"] == 0
+        assert entry["cache_read_input_tokens"] == 0
 
 
 # --- tag_tool_results ---
