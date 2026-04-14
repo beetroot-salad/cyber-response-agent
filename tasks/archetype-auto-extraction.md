@@ -1,7 +1,7 @@
 ---
 title: Precedent auto-extraction pipeline from ticketing system
 status: backlog
-group: archetype
+groups: archetype, knowledge
 ---
 
 Currently KB precedent snapshots under archetypes/*/{TICKET-ID}.json are hand-curated. Long-term: build a sync pipeline that automatically captures snapshots from the real ticketing system when tickets close under an archetype.

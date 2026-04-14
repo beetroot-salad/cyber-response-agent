@@ -1,7 +1,7 @@
 ---
 title: Migration Stage 1: hook-based CONTEXTUALIZE preload (keep Opus main)
 status: backlog
-group: sonnet
+groups: sonnet, cost
 ---
 
 Move ticket-context and precedent-scan subagents out of main-agent dispatch. A new hooks/scripts/contextualize_preload.py runs on SessionStart (or UserPromptSubmit), synchronously spawns two parallel claude --print subprocesses for ticket-context + precedent-scan, collects their results, and injects via additionalContext as "## Ticket Context" / "## Precedent Scan" sections.

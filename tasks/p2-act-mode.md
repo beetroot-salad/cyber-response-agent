@@ -1,7 +1,7 @@
 ---
 title: act mode: auto-close for mature signatures with high-confidence precedent matches
 status: backlog
-group: phase-2
+groups: phase-2
 ---
 
 MVP is recommend-only. act mode would enable auto-close actions for signatures where confidence is consistently high and precedent matches are strong.

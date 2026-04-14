@@ -38,11 +38,14 @@ def parse_task(path: Path) -> dict | None:
         print(f"  skip {path.name}: no title", file=sys.stderr)
         return None
 
+    groups_raw = meta.get("groups", "").strip()
+    groups = [g.strip() for g in groups_raw.split(",") if g.strip()]
+
     return {
         "id": path.stem,
         "title": title,
         "status": meta.get("status", "backlog"),
-        "group": meta.get("group", ""),
+        "groups": groups,
         "body": text[m.end() :].strip(),
     }
 
@@ -142,6 +145,7 @@ header span {
   align-items: flex-start;
   overflow-x: auto;
   min-height: calc(100vh - 44px);
+  justify-content: safe center;
 }
 
 /* ── Column ── */
@@ -300,9 +304,9 @@ function renderCard(task) {
   const hasBody = !!task.body;
   card.className = "card" + (hasBody ? "" : " no-body");
 
-  const badge = task.group
-    ? `<span class="badge badge-${esc(task.group)}">${esc(task.group)}</span>`
-    : "";
+  const badge = (task.groups || [])
+    .map(g => `<span class="badge badge-${esc(g)}">${esc(g)}</span>`)
+    .join("");
   const hint = hasBody ? `<span class="expand-hint">···</span>` : "";
   const body = hasBody ? `<div class="card-body">${esc(task.body)}</div>` : "";
 

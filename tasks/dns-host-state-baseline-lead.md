@@ -1,7 +1,7 @@
 ---
 title: New host-state-baseline lead (FIM/rootcheck/port-change rate check)
 status: backlog
-group: dns
+groups: dns, knowledge
 ---
 
 Create a dedicated lead for FIM/rootcheck/port-change rule families (rule.id:510, 550, 553, 554, 533 in Wazuh).

@@ -1,7 +1,7 @@
 ---
 title: State machine bypass: decide and implement mitigation strategy
 status: backlog
-group: state
+groups: state
 ---
 
 The state machine is enforcement-by-convention, not enforcement-by-isolation. When write_state.py is unavailable (blocked by allowlist, unavailable env, etc.), the agent can and does write state.json directly via Write, bypassing phase-ordering checks entirely.

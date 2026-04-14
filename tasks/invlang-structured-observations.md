@@ -1,7 +1,7 @@
 ---
 title: Structured observation snippets in ANALYZE (prediction/observation/result convention)
 status: backlog
-group: reliability
+groups: reliability, knowledge
 ---
 
 ANALYZE's reasoning: "..." field is today freeform prose. Adding a lightweight convention — "prediction: X, observation: Y, result: matches|contradicts|partial" — would make cross-run observation matching possible without an LLM in the loop.

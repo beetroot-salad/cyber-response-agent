@@ -167,7 +167,6 @@ If either is removed, the agent will likely go back to inline screening. Treat b
 - `soc-agent/knowledge/environment/systems/wazuh/SKILL.md` — Wazuh CLI invocation patterns and example queries
 - `soc-agent/knowledge/environment/systems/target-endpoint/SKILL.md` — `host_query.py` CLI documentation and the answer-key deny-list
 - `soc-agent/hooks/scripts/validate_report.py` — Tier 1 + Tier 2 validation logic, including the ticket-context spawn check
-- `todo.md` — open issues including state-machine-bypass mitigation, stronger validation hook (PreToolUse blocking), and the SCREEN cost-reduction workstream
 
 ## When to update this skill
 

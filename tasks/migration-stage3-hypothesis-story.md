@@ -1,7 +1,7 @@
 ---
 title: Migration Stage 3: Sonnet writes hypothesis stories, Opus makes predictions
 status: backlog
-group: sonnet
+groups: sonnet, cost
 ---
 
 HYPOTHESIZE-phase work splits into two cognitive modes:

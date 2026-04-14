@@ -1,7 +1,7 @@
 ---
 title: Populate lead definitions in common/leads/ (authentication-history, network-analysis, etc.)
 status: backlog
-group: knowledge
+groups: knowledge
 ---
 
 common/leads/ is scaffolded but lead definitions are sparse. Priority order based on 100110 stress eval findings:

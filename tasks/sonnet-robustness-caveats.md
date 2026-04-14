@@ -1,7 +1,7 @@
 ---
 title: Sonnet robustness caveats: eval sweep gaps to cover before production
 status: backlog
-group: sonnet
+groups: sonnet, reliability
 ---
 
 The 4 Sonnet runs were on a medium-quality harness with relatively short investigations (≤6 phases, ≤2 hypothesis loops). Production conditions NOT exercised:

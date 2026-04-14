@@ -1,7 +1,7 @@
 ---
 title: Migration Stage 4: flip main agent to Sonnet (after stages 1–3 are clean)
 status: backlog
-group: sonnet
+groups: sonnet, cost
 ---
 
 Do not attempt until:

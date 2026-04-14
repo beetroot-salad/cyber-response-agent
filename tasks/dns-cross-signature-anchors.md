@@ -1,7 +1,7 @@
 ---
 title: Cross-signature environment anchor accessibility
 status: backlog
-group: dns
+groups: dns, knowledge
 ---
 
 When investigating signature A, the agent currently only imports A's own playbook's @import'ed anchors. Ticket-context routinely surfaces alerts from signature B on the same entity (e.g. 100110 investigation sees 5710 SSH events from monitoring probes).
