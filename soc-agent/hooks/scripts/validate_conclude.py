@@ -202,11 +202,24 @@ def signature_archetype_count(signature_id: str) -> int:
 
 
 def should_run_self_check(run_dir: Path, proposed_text: str) -> bool:
-    """Fire the self-check when the investigation is struggling (many
+    """TEMPORARILY always True — we want empirical data on the self-check's
+    value and cost on every investigation, not just struggling ones. The
+    complexity-gated version is preserved below as reference for when we
+    turn it back on.
+
+    Previous behavior (loops < MAX AND archetype_count >= MIN → skip) is
+    retained in the `_complexity_gate_disabled_fire_always` helper for
+    reference and future re-enable.
+    """
+    return True
+
+
+def _complexity_gate_disabled_fire_always(run_dir: Path, proposed_text: str) -> bool:
+    """Reference implementation of the complexity gate — not wired up.
+
+    Fire the self-check when the investigation is struggling (many
     hypothesis loops) or the signature's scaffolding is thin (few
-    archetypes). Mature signatures that resolve quickly are exempt — the
-    forced articulation adds little value when the agent is on strong
-    ground and the token cost isn't free.
+    archetypes). Kept for when we want to re-enable the skip path.
     """
     loops = count_hypothesize_loops(proposed_text)
     if loops >= MAX_LOOPS_BEFORE_SELF_CHECK:

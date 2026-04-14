@@ -901,7 +901,9 @@ class TestSignatureArchetypeCount:
 
 
 class TestComplexityGateFiring:
-    """Tests that the self-check only fires under the documented conditions."""
+    """The complexity gate is TEMPORARILY disabled (always fires). Tests
+    below reflect the always-fire behavior; reference logic preserved in
+    `_complexity_gate_disabled_fire_always` for when we re-enable."""
 
     def _thin_investigation(self, loops: int) -> str:
         """Synthetic investigation text with exactly `loops` HYPOTHESIZE sections."""
@@ -915,9 +917,9 @@ class TestComplexityGateFiring:
         parts.append("## CONCLUDE\n\n**Verdict:** escalated — test\n")
         return "".join(parts)
 
-    def test_mature_fast_skips_self_check(self, tmp_path):
-        """5710 (4 archetypes) + 2 loops → self-check skipped, missing
-        conclusion_checks.json must NOT trigger a rejection."""
+    def test_mature_fast_still_fires_self_check(self, tmp_path):
+        """Gate disabled: even 5710 (4 archetypes) + 2 loops → self-check
+        fires. Missing conclusion_checks.json → rejection."""
         inv = self._thin_investigation(loops=2)
         runs_dir, run_dir = _setup_run(
             tmp_path,
@@ -927,7 +929,8 @@ class TestComplexityGateFiring:
         )
         event = _make_hook_event(str(run_dir / "investigation.md"))
         result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert result.returncode == 2
+        assert "conclusion_checks.json" in result.stderr
 
     def test_struggling_loops_fires_self_check(self, tmp_path):
         """5710 (4 archetypes) + 4 loops → self-check fires despite mature
@@ -959,10 +962,10 @@ class TestComplexityGateFiring:
         assert result.returncode == 2
         assert "conclusion_checks.json" in result.stderr
 
-    def test_mature_fast_but_file_present_still_validates(self, tmp_path):
-        """Defensive authoring: the agent wrote conclusion_checks.json even
-        though complexity gate wouldn't require it. The hook should validate
-        the file and catch broken citations."""
+    def test_defensive_authoring_still_validates(self, tmp_path):
+        """Defensive authoring: the agent wrote conclusion_checks.json with
+        broken citations. The hook validates the file and catches the error,
+        regardless of complexity-gate state."""
         inv = self._thin_investigation(loops=2)
         bad_checks = {
             "status": "escalated",
@@ -994,8 +997,8 @@ class TestComplexityGateFiring:
         assert result.returncode == 2
         assert "not found within lines" in result.stderr
 
-    def test_mature_fast_with_valid_file(self, tmp_path):
-        """Defensive authoring with a valid file → hook passes."""
+    def test_valid_file_passes(self, tmp_path):
+        """Valid conclusion_checks.json → hook passes regardless of gate state."""
         inv = self._thin_investigation(loops=2)
         valid_checks = {
             "status": "escalated",
