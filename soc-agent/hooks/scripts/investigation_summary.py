@@ -36,20 +36,54 @@ def find_latest_run() -> Path | None:
     return run_dirs[0] if run_dirs else None
 
 
-def sum_transcript_tokens(transcript_path: str) -> dict:
-    """Sum token usage from Claude Code session transcript JSONL.
+TOKEN_KEYS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+)
 
-    Each assistant message in the transcript carries a usage dict with
-    input_tokens, output_tokens, cache_creation_input_tokens, and
-    cache_read_input_tokens. Returns zeroed dict on any failure.
-    """
-    counts = {
+
+def _empty_stats() -> dict:
+    return {
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_creation_input_tokens": 0,
         "cache_read_input_tokens": 0,
+        "models": [],
+        "total_cost_usd": None,
     }
+
+
+def extract_transcript_stats(transcript_path: str) -> dict:
+    """Extract tokens, models, and cost from a Claude Code session transcript.
+
+    Two transcript formats handled:
+
+    1. **stream-json** (as tee'd by eval_run.sh with --output-format stream-json):
+       ends with a `type: "result"` record that carries the authoritative
+       accumulated `usage` dict and `total_cost_usd`. One record, complete
+       truth — preferred whenever present.
+
+    2. **Persisted session transcript** (~/.claude/projects/<project>/<uuid>.jsonl):
+       no result record. Each assistant message is emitted once per content
+       block with the same `message.id`, and every duplicate carries the
+       same final `usage` snapshot — so a naive sum across records double-
+       counts. Dedupe by `message.id` (last occurrence wins), then sum.
+
+    Models are collected as a sorted distinct list regardless of format —
+    single-element in the common case, multi-element if the user ran /model
+    mid-session or a subagent used a different model.
+
+    Returns the empty-stats dict on any failure; never raises.
+    """
+    stats = _empty_stats()
     try:
+        result_usage = None
+        result_cost = None
+        models = set()
+        per_msg_usage = {}  # message.id -> latest usage dict seen
+
         with open(transcript_path) as f:
             for line in f:
                 line = line.strip()
@@ -59,13 +93,38 @@ def sum_transcript_tokens(transcript_path: str) -> dict:
                     record = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if record.get("type") == "assistant":
-                    usage = record.get("message", {}).get("usage", {})
-                    for key in counts:
-                        counts[key] += usage.get(key, 0)
+
+                rtype = record.get("type")
+                if rtype == "result":
+                    usage = record.get("usage")
+                    if isinstance(usage, dict):
+                        result_usage = usage
+                    cost = record.get("total_cost_usd")
+                    if isinstance(cost, (int, float)):
+                        result_cost = cost
+                elif rtype == "assistant":
+                    msg = record.get("message", {})
+                    model = msg.get("model")
+                    if model:
+                        models.add(model)
+                    msg_id = msg.get("id")
+                    usage = msg.get("usage")
+                    if msg_id and isinstance(usage, dict):
+                        per_msg_usage[msg_id] = usage
+
+        stats["models"] = sorted(models)
+        stats["total_cost_usd"] = result_cost
+
+        if result_usage is not None:
+            for key in TOKEN_KEYS:
+                stats[key] = result_usage.get(key, 0)
+        else:
+            for usage in per_msg_usage.values():
+                for key in TOKEN_KEYS:
+                    stats[key] += usage.get(key, 0)
     except Exception:
         pass
-    return counts
+    return stats
 
 
 def main():
@@ -99,13 +158,11 @@ def main():
         except Exception:
             pass
 
-    transcript_path = payload.get("transcript_path")
-    tokens = sum_transcript_tokens(transcript_path) if transcript_path else {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": 0,
-    }
+    # SOC_AGENT_TRANSCRIPT_PATH takes precedence so eval_run.sh can point at
+    # the tee'd full transcript — under --no-session-persistence, the Stop
+    # hook payload's transcript_path is a 1-line ai-title stub.
+    transcript_path = os.environ.get("SOC_AGENT_TRANSCRIPT_PATH") or payload.get("transcript_path")
+    stats = extract_transcript_stats(transcript_path) if transcript_path else _empty_stats()
 
     entry = {
         "run_id": state.get("run_id", run_dir.name),
@@ -119,7 +176,7 @@ def main():
         "leads_pursued": frontmatter.get("leads_pursued", 0),
         "start_timestamp": start_timestamp,
         "end_timestamp": datetime.now(timezone.utc).isoformat(),
-        **tokens,
+        **stats,
     }
 
     audit_path = get_runs_dir() / "audit.jsonl"
