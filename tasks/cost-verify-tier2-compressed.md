@@ -1,6 +1,6 @@
 ---
 title: Verify Tier 2 judge passes on compressed investigation.md format
-status: backlog
+status: deferred
 groups: cost
 ---
 

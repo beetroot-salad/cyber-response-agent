@@ -1,7 +1,7 @@
 ---
-title: Wire up triage as actual Claude Code plugin invocation
-status: todo
+title: Wire up investigate as actual Claude Code plugin invocation
+status: done
 groups: mvp
 ---
 
-Currently tested via prompt injection, not via `/soc-agent:triage`. Need to validate the full plugin command path including hook firing order and plugin.json manifest loading.
+`playground/scripts/eval_run.sh` loads the plugin via `--plugin-dir "$PLUGIN_DIR"` and invokes it as `/investigate $SIGNATURE_ID '$ALERT_JSON'`. All hook firing order, plugin.json manifest loading, and MCP config are exercised end-to-end on every eval run.

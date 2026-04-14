@@ -236,17 +236,20 @@ header span {
   text-transform: uppercase;
 }
 
-.badge-mvp         { background: #fef3c7; color: #92400e; }
-.badge-archetype   { background: #ede9fe; color: #5b21b6; }
-.badge-reliability { background: #dbeafe; color: #1e40af; }
-.badge-cost        { background: #d1fae5; color: #065f46; }
-.badge-sonnet      { background: #cffafe; color: #164e63; }
-.badge-state       { background: #fee2e2; color: #991b1b; }
-.badge-knowledge   { background: #e0e7ff; color: #3730a3; }
-.badge-phase-2     { background: #f3f4f6; color: #4b5563; }
-.badge-evaluation  { background: #fef9c3; color: #713f12; }
-.badge-dns         { background: #ecfccb; color: #3f6212; }
-.badge-v3-rewrite  { background: #f1f5f9; color: #475569; }
+.badge-mvp              { background: #fef3c7; color: #92400e; }
+.badge-archetype        { background: #ede9fe; color: #5b21b6; }
+.badge-reliability      { background: #dbeafe; color: #1e40af; }
+.badge-cost             { background: #d1fae5; color: #065f46; }
+.badge-sonnet-migration { background: #cffafe; color: #164e63; }
+.badge-state            { background: #fee2e2; color: #991b1b; }
+.badge-knowledge        { background: #e0e7ff; color: #3730a3; }
+.badge-phase-2          { background: #f3f4f6; color: #4b5563; }
+.badge-evaluation       { background: #fef9c3; color: #713f12; }
+.badge-dns              { background: #ecfccb; color: #3f6212; }
+.badge-v3-rewrite       { background: #f1f5f9; color: #475569; }
+.badge-post-mortem      { background: #ffe4e6; color: #9f1239; }
+.badge-past-runs        { background: #fae8ff; color: #86198f; }
+.badge-invlang          { background: #fef2f2; color: #7c2d12; }
 
 .expand-hint {
   font-size: 10px;

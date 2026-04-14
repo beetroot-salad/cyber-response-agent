@@ -1,12 +1,13 @@
 ---
-title: Migration Stage 5: Opus consultant subagent (deep-reason, Sonnet escalates for hard calls)
-status: backlog
-groups: sonnet, cost
+title: Opus consultant subagent (deep-reason, Sonnet escalates for hard calls)
+status: todo
+groups: sonnet-migration, cost
 ---
 
 Once Sonnet-main is stable, introduce a deep-reason subagent pinned to Opus that the Sonnet main agent calls at specific high-stakes decision points.
 
 Sub-tasks:
+
 - Declare deep-reason subagent with model: "opus" and a prompt focused on diagnostic-lead selection and evidence synthesis
 - Wire call-points at specific SKILL.md decision moments:
   - HYPOTHESIZE → GATHER when hypothesis count > 2 AND evidence is ambiguous
