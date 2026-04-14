@@ -18,11 +18,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.frontmatter import parse_yaml_frontmatter  # noqa: E402, F401
-
-
-def get_runs_dir() -> Path:
-    """Get the runs directory. Configurable via SOC_AGENT_RUNS_DIR env var."""
-    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
+from hooks.scripts.run_context import get_runs_dir  # noqa: E402
 
 
 def find_latest_run() -> Path | None:

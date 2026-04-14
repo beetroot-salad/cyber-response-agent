@@ -27,14 +27,14 @@ import sys
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(SOC_AGENT_ROOT))
+
+from hooks.scripts.run_context import get_runs_dir  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Run directory + salt resolution
 # ---------------------------------------------------------------------------
-
-def get_runs_dir() -> Path:
-    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
 
 
 def find_active_run() -> Path | None:

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """PostToolUse hook: CONCLUDE transition verification gate.
 
-Fires on Write/Edit/Bash events targeting `investigation.md`. When the
-file contains a `## CONCLUDE` header, enforces preconditions that the
-investigation is ready to close:
+Fires on Write/Edit of `investigation.md` (narrowed by `if` filters in
+plugin.json). When the file contains a `## CONCLUDE` header, enforces
+preconditions that the investigation is ready to close:
 
 1. ticket-context subagent was dispatched during CONTEXTUALIZE.
    Silent backstop — not surfaced in SKILL.md §CONCLUDE because by
@@ -11,10 +11,13 @@ investigation is ready to close:
    preload surfaces somewhere.
 2. leads pursued meets the signature severity minimum, counted by
    parsing `**Lead:**` / `**Leads:**` lines in `## GATHER` blocks.
+   Skipped for screen-resolved investigations (no GATHER blocks by
+   construction — their safety comes from SCREEN pattern match +
+   precedent + judge validation in validate_report.py).
 3. `conclusion_checks.json` exists in the run directory and covers
    the expected question set for its declared status. Expected IDs
    are parsed from `skills/investigate/conclusion_checks.md` so the
-   two stay in sync.
+   two stay in sync. Skipped for screen-resolved investigations.
 4. Every citation in `conclusion_checks.json` appears as a verbatim
    substring in `investigation.md`. Prevents fabrication; does not
    evaluate answer quality.
@@ -25,7 +28,6 @@ Exit codes:
 """
 
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -33,26 +35,17 @@ from pathlib import Path
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from hooks.scripts.frontmatter import parse_yaml_frontmatter
+from hooks.scripts.investigation_parse import (
+    count_distinct_leads,
+    has_conclude_header,
+    is_screen_resolved,
+)
+from hooks.scripts.run_context import extract_run_dir
 from schemas.report_frontmatter import MIN_LEADS_BY_SEVERITY
 
 CONCLUSION_CHECKS_PROMPT = (
     SOC_AGENT_ROOT / "skills" / "investigate" / "conclusion_checks.md"
 )
-
-# Regex to extract an investigation.md path from a Bash command string.
-# Stops at shell metacharacters and whitespace.
-BASH_INV_PATH_RE = re.compile(r"([^\s'\"<>|&;()`$]*investigation\.md)")
-
-# `## CONCLUDE` header, anchored to line start with a trailing word boundary
-# so `## CONCLUDED` or other suffixes don't trigger.
-CONCLUDE_HEADER_RE = re.compile(r"^## CONCLUDE\b", re.MULTILINE)
-
-# Each `## GATHER ...` block, captured up to the next `## ` header or EOF.
-GATHER_SECTION_RE = re.compile(r"^## GATHER\b.*?(?=^## |\Z)", re.MULTILINE | re.DOTALL)
-
-# `**Lead:** name` or `**Leads:** a, b, c` — the value runs to end of line.
-LEAD_LINE_RE = re.compile(r"^\*\*Leads?:\*\*\s*(.+)$", re.MULTILINE)
 
 # Question headers in the prompt file: `### \`question_id\``
 QUESTION_HEADER_RE = re.compile(r"^### `([a-z_][a-z0-9_]*)`\s*$", re.MULTILINE)
@@ -65,71 +58,17 @@ STATUS_SECTION_RE = re.compile(
 
 
 # ---------------------------------------------------------------------------
-# Run directory identification (mirrors infer_state.py)
+# meta.json access
 # ---------------------------------------------------------------------------
 
-def get_runs_dir() -> Path:
-    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
-
-
-def extract_run_dir(hook_data: dict) -> Path | None:
-    """Extract the run directory from a PostToolUse event targeting
-    investigation.md. Returns None if the event is unrelated."""
-    tool_input = hook_data.get("tool_input", {})
-    tool_name = hook_data.get("tool_name", "")
-
-    file_path_str: str | None = None
-
-    if tool_name in ("Write", "Edit"):
-        fp = tool_input.get("file_path", "")
-        if fp:
-            file_path_str = fp
-    elif tool_name == "Bash":
-        command = tool_input.get("command", "")
-        if "investigation.md" not in command:
-            return None
-        m = BASH_INV_PATH_RE.search(command)
-        if m:
-            file_path_str = m.group(1)
-
-    if not file_path_str:
-        return None
-
-    path = Path(file_path_str)
-    if path.name != "investigation.md":
-        return None
-
-    runs_dir = get_runs_dir()
-    try:
-        path.parent.relative_to(runs_dir)
-    except ValueError:
-        return None
-
-    return path.parent
-
-
-def read_signature_id(run_dir: Path) -> str:
+def read_meta(run_dir: Path) -> dict:
     meta_path = run_dir / "meta.json"
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text())
-            return meta.get("signature_id", "")
-        except (json.JSONDecodeError, KeyError):
-            pass
-    return ""
-
-
-def get_signature_severity(signature_id: str) -> str:
-    """Read severity from `context.md` frontmatter. Default: medium."""
-    if not signature_id:
-        return "medium"
-    context_path = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "context.md"
-    )
-    if not context_path.exists():
-        return "medium"
-    fm = parse_yaml_frontmatter(context_path.read_text())
-    return fm.get("severity") or "medium"
+    if not meta_path.exists():
+        return {}
+    try:
+        return json.loads(meta_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -179,35 +118,19 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
 # Gate 2: leads pursued meets severity minimum
 # ---------------------------------------------------------------------------
 
-def count_leads_from_investigation(investigation_text: str) -> int:
-    """Count distinct named leads across all `## GATHER` blocks.
-
-    Parses each GATHER block for `**Lead:** X` or `**Leads:** a, b, c`
-    lines and collects the names into a set. Composite dispatches
-    contribute each named lead separately.
-    """
-    leads_seen: set[str] = set()
-    for block_match in GATHER_SECTION_RE.finditer(investigation_text):
-        block = block_match.group(0)
-        for lead_match in LEAD_LINE_RE.finditer(block):
-            names = lead_match.group(1).strip()
-            # The skill template has `**Lead:** lead-name` or
-            # `**Leads:** a, b, c (for composite)` — strip any trailing
-            # parenthetical comment and split on commas.
-            if "(" in names:
-                names = names.split("(", 1)[0]
-            for name in names.split(","):
-                name = name.strip().strip("*").strip()
-                if name:
-                    leads_seen.add(name)
-    return len(leads_seen)
-
-
 def check_leads_minimum(run_dir: Path, investigation_text: str) -> str | None:
-    signature_id = read_signature_id(run_dir)
-    severity = get_signature_severity(signature_id)
-    min_leads = MIN_LEADS_BY_SEVERITY.get(severity, 2)
-    count = count_leads_from_investigation(investigation_text)
+    meta = read_meta(run_dir)
+    severity = meta.get("severity")
+    if not severity:
+        # setup_run.py validates severity at run creation, so a missing
+        # value here means meta.json predates that validation or was
+        # written by a different harness. Don't fail the gate on that —
+        # surface it as a soft pass with no enforcement.
+        return None
+    min_leads = MIN_LEADS_BY_SEVERITY.get(severity)
+    if min_leads is None:
+        return None
+    count = count_distinct_leads(investigation_text)
     if count < min_leads:
         return (
             f"leads pursued count={count} is below minimum for {severity} "
@@ -350,7 +273,7 @@ def main():
         sys.exit(0)
 
     investigation_text = investigation_path.read_text()
-    if not CONCLUDE_HEADER_RE.search(investigation_text):
+    if not has_conclude_header(investigation_text):
         sys.exit(0)
 
     errors: list[str] = []
@@ -359,13 +282,21 @@ def main():
     if err:
         errors.append(err)
 
-    err = check_leads_minimum(run_dir, investigation_text)
-    if err:
-        errors.append(err)
+    if is_screen_resolved(investigation_text):
+        # Screen-resolved runs go straight from SCREEN to CONCLUDE without a
+        # GATHER loop. The leads-floor and self-check questions both assume
+        # the hypothesis loop ran, so they don't apply. Safety for screen
+        # runs comes from SCREEN pattern match + precedent + the report
+        # validation Tier 1/2 hooks in validate_report.py.
+        pass
+    else:
+        err = check_leads_minimum(run_dir, investigation_text)
+        if err:
+            errors.append(err)
 
-    err = check_conclusion_file(run_dir, investigation_text)
-    if err:
-        errors.append(err)
+        err = check_conclusion_file(run_dir, investigation_text)
+        if err:
+            errors.append(err)
 
     if errors:
         print("CONCLUDE gate failed:", file=sys.stderr)

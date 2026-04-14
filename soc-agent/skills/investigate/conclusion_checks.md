@@ -2,14 +2,9 @@
 
 Read before writing `## CONCLUDE` to `investigation.md`. Answer every question that applies to your status. Write your answers to `{run_dir}/conclusion_checks.json` using the schema at the bottom of this file.
 
-A PostToolUse hook validates the file when you write `## CONCLUDE`. The hook checks:
+Citations are verbatim substrings from `investigation.md`. Copy a distinctive chunk directly — a few words including the specific value, lead name, anchor, or grade are usually enough for a unique match.
 
-- Every required question for your status is answered.
-- Every citation you give appears as a verbatim substring in `investigation.md`.
-
-The hook does **not** judge whether your answers are correct. It does verify that your citations point at real content. Fabricated citations fail the gate and block the CONCLUDE write. Write honest answers — if a question reveals that you shouldn't be concluding yet, return to HYPOTHESIZE.
-
-Citations are verbatim substrings from `investigation.md`. Copy a distinctive chunk directly — a few words including the specific value, lead name, or grade are usually enough for a unique match.
+If a question reveals that you shouldn't be concluding yet, return to HYPOTHESIZE.
 
 ---
 
@@ -33,27 +28,29 @@ For the hypothesis you graded `++`, name one check you ran that **would** have r
 
 ### `authoritative_vs_circumstantial`
 
-Is the `++` grade backed by **authoritative** evidence (a named trust anchor confirming, a registry entry, an operator in a change ticket, a direct policy source), or by **circumstantial** consistency (pattern match, timing, naming)?
+Name the trust anchor your `++` grade rests on and cite where it was consulted. A trust anchor is a named entry in an archetype's `required_anchors`, a precedent ticket ID inside the matched archetype, or a system of record (registry, change ticket, policy source) explicitly authorized for this signature.
 
-Circumstantial `++` is the failure mode the skill names explicitly: "Do not promote circumstantial to authoritative." If your `++` rests on circumstantial evidence, downgrade to `+` and either find an authoritative anchor or escalate.
+If your `++` rests only on circumstantial consistency (pattern match, timing, naming) with no named anchor, downgrade to `+` and either find an authoritative anchor or escalate. "Do not promote circumstantial to authoritative."
 
-**Answer shape:** classify the evidence (authoritative or circumstantial), cite the anchor consultation or the circumstantial observation, state whether the grade is justified.
+**Answer shape:** name the anchor (anchor name, ticket ID, or system of record), cite the GATHER/ANALYZE line where it was consulted, state the result.
 
 ### `dangling_evidence`
 
-Does your confirmed hypothesis explain **every** significant observation in the investigation log? List any observation that doesn't fit and explain why it doesn't invalidate the verdict. If none, state so and cite the ANALYZE block where coverage was reviewed.
+Every significant observation in the investigation log must be consistent with your confirmed hypothesis. Cite the ANALYZE block where coverage was reviewed.
 
-Dangling evidence is a strong signal the hypothesis space is incomplete — the most common failure mode is a `++` hypothesis that explains the main event but not surrounding observations the investigation surfaced.
+If any observation is unexplained or contradictory, you cannot resolve — return to HYPOTHESIZE to expand the hypothesis space, or escalate. There is no "list exceptions" path here: dangling evidence is a stop condition, not a footnote.
 
-**Answer shape:** list unexplained observations (or "none") with citations.
+**Answer shape:** cite the ANALYZE block that confirms full coverage.
 
 ### `archetype_shape_match`
 
-Does the matched archetype's story describe every notable feature of this alert, or only the major ones? List any feature the archetype doesn't cover and explain why it doesn't invalidate the match.
+Two parts:
 
-The archetype catalog is a pattern-recognition cache, not the source of truth. Forcing an alert into the closest archetype when the evidence has features the archetype doesn't describe is the failure mode the skill explicitly names. If features don't fit, escalate as a novel variant rather than force-close.
+1. **Matched archetype coverage.** Does the matched archetype's story describe every notable feature of this alert? Cite the archetype feature you compared against. If features don't fit, escalate as a novel variant — do not force-close.
 
-**Answer shape:** list non-matching features (or "full match") and cite the archetype feature you're comparing against.
+2. **Adversarial archetype distinguished.** Name the adversarial archetype closest in shape to this alert (the one a real threat would most plausibly hide inside) and cite the feature that distinguishes it from the matched archetype. If no feature distinguishes them, the matched archetype isn't load-bearing — escalate.
+
+**Answer shape:** matched archetype name + coverage citation, adversarial archetype name + distinguishing feature citation.
 
 ---
 
@@ -100,6 +97,6 @@ Rules:
 
 - `status` is `resolved` or `escalated`.
 - `checks` contains one entry per required question for that status. Missing or extra question IDs are rejected.
-- Every citation string must be a substring present somewhere in `investigation.md` at the moment you write `## CONCLUDE`. Plain substring match — copy distinctive chunks directly from the log.
+- Every citation string must be a substring present somewhere in `investigation.md` at the moment you write `## CONCLUDE`.
 - Empty or whitespace-only citations are rejected.
-- Write this file **before** writing `## CONCLUDE` to `investigation.md`. The hook fires on the CONCLUDE header write and rejects it if this file is missing.
+- Write this file **before** writing `## CONCLUDE` to `investigation.md`.

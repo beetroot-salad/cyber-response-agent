@@ -393,9 +393,9 @@ hypotheses:
 
 **Preconditions — enforced by hook on writing `## CONCLUDE`:**
 
-1. Leads pursued meets the minimum for signature severity (low:1, medium:2, high:3, critical:4), counted from `## GATHER` blocks in `investigation.md`.
+1. Leads pursued meets the minimum for signature severity (low:1, medium:2, high:3, critical:4), counted from `## GATHER` blocks in `investigation.md`. SCREEN-resolved investigations are exempt — the SCREEN pattern table provides the equivalent floor.
 2. Read `skills/investigate/conclusion_checks.md` and answer every question that applies to your status.
-3. Write your answers to `{run_dir}/conclusion_checks.json` following the schema in that file. Each answer cites verbatim substrings from `investigation.md`; the hook checks each citation exists in the log.
+3. Write your answers to `{run_dir}/conclusion_checks.json` following the schema in that file. Each answer cites verbatim substrings from `investigation.md`.
 
 If any gate fails, the `## CONCLUDE` write is rejected and you return to the prior phase. Write `conclusion_checks.json` **before** writing the `## CONCLUDE` header to `investigation.md`.
 

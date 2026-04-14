@@ -19,6 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(SOC_AGENT_ROOT))
+
+from hooks.scripts.run_context import get_runs_dir  # noqa: E402
 
 # Maximum length for any single field value in the audit entry.
 # Prevents multi-MB Write/Edit content from bloating the log.
@@ -26,11 +29,6 @@ MAX_FIELD_LEN = 2000
 
 # Read-only tools go to tool_trace.jsonl; everything else to tool_audit.jsonl.
 TRACE_TOOLS = {"Read", "Glob", "Grep"}
-
-
-def get_runs_dir() -> Path:
-    """Get the runs directory. Configurable via SOC_AGENT_RUNS_DIR env var."""
-    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
 
 
 def truncate(value: str, max_len: int = MAX_FIELD_LEN) -> str:

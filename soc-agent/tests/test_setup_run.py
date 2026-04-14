@@ -91,7 +91,7 @@ class TestHappyPath:
         assert uuid_pattern.match(run_dir.name), f"Expected UUID, got: {run_dir.name}"
 
     def test_writes_meta_json(self, tmp_path):
-        """meta.json should be created with run_id, signature_id, and salt."""
+        """meta.json should be created with run_id, signature_id, severity, and salt."""
         result = run_setup(runs_dir=str(tmp_path))
         assert result.returncode == 0
         run_dir = list(tmp_path.iterdir())[0]
@@ -100,6 +100,7 @@ class TestHappyPath:
         meta = json.loads(meta_file.read_text())
         assert "run_id" in meta
         assert meta["signature_id"] == "wazuh-rule-5710"
+        assert meta["severity"] == "medium"
         assert "salt" in meta
         assert len(meta["salt"]) == 16  # secrets.token_hex(8)
 
@@ -168,6 +169,15 @@ class TestErrorHandling:
     def test_empty_string_fails(self, tmp_path):
         result = run_setup(alert_json="", runs_dir=str(tmp_path))
         assert result.returncode == 1
+
+    def test_unknown_signature_fails_fast(self, tmp_path):
+        result = run_setup(
+            signature_id="nonexistent-sig-xyz", runs_dir=str(tmp_path)
+        )
+        assert result.returncode == 1
+        assert "context.md" in result.stderr
+        # No run directory should be created on severity-resolution failure
+        assert len(list(tmp_path.iterdir())) == 0
 
 
 class TestAlertVariations:

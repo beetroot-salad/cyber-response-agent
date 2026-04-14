@@ -17,84 +17,20 @@ Exit codes:
 """
 
 import json
-import os
-import re
 import sys
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
+from hooks.scripts.investigation_parse import iter_phase_headers
+from hooks.scripts.run_context import extract_run_dir
 from schemas.state import (
     MAX_LOOPS,
-    Phase,
     count_loops,
     make_state,
     validate_transition,
 )
-
-# Regex to extract phase names from ## headers.
-# Matches: ## CONTEXTUALIZE, ## HYPOTHESIZE (loop 3), ## SCREEN, etc.
-_PHASE_NAMES = "|".join(p.value for p in Phase)
-PHASE_HEADER_RE = re.compile(rf"^## ({_PHASE_NAMES})\b", re.MULTILINE)
-
-# Regex to extract an investigation.md path from a Bash command string.
-# Stops at shell metacharacters and whitespace — handles `cat >> /run/investigation.md <<EOF`,
-# `echo ... >> /run/investigation.md`, `tee -a /run/investigation.md`, etc.
-BASH_INV_PATH_RE = re.compile(r"([^\s'\"<>|&;()`$]*investigation\.md)")
-
-
-# ---------------------------------------------------------------------------
-# Run directory identification (from PostToolUse event)
-# ---------------------------------------------------------------------------
-
-def get_runs_dir() -> Path:
-    """Get the runs directory. Configurable via SOC_AGENT_RUNS_DIR env var."""
-    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
-
-
-def extract_run_dir(hook_data: dict) -> Path | None:
-    """Extract the run directory from a PostToolUse event.
-
-    For Write/Edit, reads tool_input.file_path directly.
-    For Bash, parses tool_input.command for an investigation.md path —
-    this catches agents that append to investigation.md via
-    `cat >> .../investigation.md <<EOF`, `tee -a`, `echo >>`, etc.
-
-    Returns the parent directory if the path points into the runs
-    directory. Returns None otherwise.
-    """
-    tool_input = hook_data.get("tool_input", {})
-    tool_name = hook_data.get("tool_name", "")
-
-    file_path_str: str | None = None
-
-    if tool_name in ("Write", "Edit"):
-        fp = tool_input.get("file_path", "")
-        if fp:
-            file_path_str = fp
-    elif tool_name == "Bash":
-        command = tool_input.get("command", "")
-        if "investigation.md" not in command:
-            return None
-        m = BASH_INV_PATH_RE.search(command)
-        if m:
-            file_path_str = m.group(1)
-
-    if not file_path_str:
-        return None
-
-    path = Path(file_path_str)
-    if path.name != "investigation.md":
-        return None
-
-    runs_dir = get_runs_dir()
-    try:
-        path.parent.relative_to(runs_dir)
-    except ValueError:
-        return None
-
-    return path.parent
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +45,7 @@ def extract_phases(file_path: Path) -> list[str]:
     """
     if not file_path.exists():
         return []
-    text = file_path.read_text()
-    return PHASE_HEADER_RE.findall(text)
+    return list(iter_phase_headers(file_path.read_text()))
 
 
 # ---------------------------------------------------------------------------

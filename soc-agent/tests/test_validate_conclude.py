@@ -1,8 +1,7 @@
 """Tests for the CONCLUDE transition verification hook.
 
-Tests validate_conclude.py: helper functions (lead counting, expected
-question parsing) and the hook end-to-end via subprocess, simulating
-PostToolUse events piped to stdin.
+Tests validate_conclude.py: the helper imports it depends on, and the
+hook end-to-end via subprocess simulating PostToolUse events on stdin.
 """
 
 import json
@@ -15,16 +14,18 @@ import pytest
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from hooks.scripts.validate_conclude import (
-    count_leads_from_investigation,
-    load_expected_questions,
+from hooks.scripts.investigation_parse import (
+    count_distinct_leads,
+    has_conclude_header,
+    is_screen_resolved,
 )
+from hooks.scripts.validate_conclude import load_expected_questions
 
 HOOK_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "validate_conclude.py"
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: count_leads_from_investigation
+# Unit tests: count_distinct_leads (via investigation_parse)
 # ---------------------------------------------------------------------------
 
 
@@ -36,7 +37,7 @@ class TestCountLeads:
             "## GATHER (loop 1)\n\n**Lead:** authentication-history\nquery stuff\n"
             "## ANALYZE (loop 1)\nstuff\n"
         )
-        assert count_leads_from_investigation(text) == 1
+        assert count_distinct_leads(text) == 1
 
     def test_multiple_blocks_distinct_leads(self):
         text = (
@@ -45,21 +46,21 @@ class TestCountLeads:
             "## GATHER (loop 2)\n**Lead:** source-reputation\n\n"
             "## ANALYZE (loop 2)\n"
         )
-        assert count_leads_from_investigation(text) == 2
+        assert count_distinct_leads(text) == 2
 
     def test_composite_dispatch(self):
         text = (
             "## GATHER (loop 1)\n**Leads:** auth-history, data-access, network-flows\n"
             "## ANALYZE (loop 1)\n"
         )
-        assert count_leads_from_investigation(text) == 3
+        assert count_distinct_leads(text) == 3
 
     def test_composite_with_parenthetical(self):
         text = (
             "## GATHER (loop 1)\n**Leads:** a, b, c (for composite)\n"
             "## ANALYZE (loop 1)\n"
         )
-        assert count_leads_from_investigation(text) == 3
+        assert count_distinct_leads(text) == 3
 
     def test_duplicate_leads_counted_once(self):
         text = (
@@ -68,15 +69,42 @@ class TestCountLeads:
             "## GATHER (loop 2)\n**Lead:** auth-history\n"
             "## ANALYZE (loop 2)\n"
         )
-        assert count_leads_from_investigation(text) == 1
+        assert count_distinct_leads(text) == 1
 
     def test_no_gather_blocks(self):
         text = "## CONTEXTUALIZE\n## SCREEN\n## CONCLUDE\n"
-        assert count_leads_from_investigation(text) == 0
+        assert count_distinct_leads(text) == 0
 
     def test_gather_without_lead_marker(self):
         text = "## GATHER (loop 1)\nsome query\n## ANALYZE (loop 1)\n"
-        assert count_leads_from_investigation(text) == 0
+        assert count_distinct_leads(text) == 0
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: is_screen_resolved
+# ---------------------------------------------------------------------------
+
+
+class TestIsScreenResolved:
+    def test_screen_only_no_gather(self):
+        text = "## CONTEXTUALIZE\n## SCREEN\n**Result:** match\n## CONCLUDE\n"
+        assert is_screen_resolved(text) is True
+
+    def test_screen_with_gather_block(self):
+        text = (
+            "## CONTEXTUALIZE\n## SCREEN\n## HYPOTHESIZE (loop 1)\n"
+            "## GATHER (loop 1)\n**Lead:** auth-history\n"
+            "## ANALYZE (loop 1)\n## CONCLUDE\n"
+        )
+        assert is_screen_resolved(text) is False
+
+    def test_full_loop_no_screen(self):
+        text = (
+            "## CONTEXTUALIZE\n## HYPOTHESIZE (loop 1)\n"
+            "## GATHER (loop 1)\n**Lead:** auth-history\n"
+            "## ANALYZE (loop 1)\n## CONCLUDE\n"
+        )
+        assert is_screen_resolved(text) is False
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +194,23 @@ hypotheses:
 """
 
 
+SCREEN_RESOLVED_INVESTIGATION = """\
+## CONTEXTUALIZE
+
+**Alert:** SEC-003
+
+## SCREEN
+
+**Result:** match
+**Leads run:** authentication-history (no anomalies), source-reputation (approved)
+**Outcome:** proceeding to CONCLUDE
+
+## CONCLUDE
+
+**Verdict:** resolved — known monitoring probe pattern
+"""
+
+
 def _resolved_checks(investigation_text: str) -> dict:
     """Build a valid conclusion_checks.json dict whose citations all appear
     in the given investigation text."""
@@ -192,7 +237,7 @@ def _resolved_checks(investigation_text: str) -> dict:
             },
             {
                 "question_id": "dangling_evidence",
-                "answer": "No unexplained observations.",
+                "answer": "All observations consistent.",
                 "citations": ["authoritative anchor confirms"],
             },
             {
@@ -209,6 +254,7 @@ def _setup_run(
     investigation_text: str = VALID_INVESTIGATION,
     conclusion_checks: dict | None = None,
     signature_id: str = "wazuh-rule-5710",
+    severity: str = "medium",
     with_ticket_context: bool = True,
 ) -> tuple[Path, Path]:
     """Create a runs_dir + run_dir with the artifacts a passing run needs."""
@@ -216,9 +262,10 @@ def _setup_run(
     runs_dir.mkdir()
     run_dir = runs_dir / "run-test"
     run_dir.mkdir()
-    (run_dir / "meta.json").write_text(
-        json.dumps({"run_id": "run-test", "signature_id": signature_id})
-    )
+    meta = {"run_id": "run-test", "signature_id": signature_id}
+    if severity is not None:
+        meta["severity"] = severity
+    (run_dir / "meta.json").write_text(json.dumps(meta))
     (run_dir / "investigation.md").write_text(investigation_text)
     if with_ticket_context:
         (run_dir / "ticket_context.yaml").write_text("situation: ok\n")
@@ -297,6 +344,50 @@ class TestHookHappyPath:
         assert result.returncode == 0, f"stderr: {result.stderr}"
 
 
+class TestScreenResolved:
+    """Screen-resolved runs skip the leads-floor and conclusion_checks gates."""
+
+    def test_screen_resolved_passes_without_conclusion_checks(self, tmp_path):
+        runs_dir, run_dir = _setup_run(
+            tmp_path,
+            investigation_text=SCREEN_RESOLVED_INVESTIGATION,
+            conclusion_checks=None,
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+
+    def test_screen_resolved_passes_with_zero_leads(self, tmp_path):
+        # SCREEN_RESOLVED_INVESTIGATION has no GATHER blocks (lead count=0)
+        # but the hook must not enforce the medium-severity floor of 2.
+        runs_dir, run_dir = _setup_run(
+            tmp_path,
+            investigation_text=SCREEN_RESOLVED_INVESTIGATION,
+            conclusion_checks=None,
+            severity="critical",  # would normally require 4 leads
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+
+    def test_screen_resolved_still_checks_ticket_context(self, tmp_path):
+        runs_dir, run_dir = _setup_run(
+            tmp_path,
+            investigation_text=SCREEN_RESOLVED_INVESTIGATION,
+            conclusion_checks=None,
+            with_ticket_context=False,
+        )
+        # Audit log present but contains no ticket-context dispatch — gate 1
+        # fires even for screen-resolved runs.
+        (runs_dir / "tool_audit.jsonl").write_text(
+            json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}) + "\n"
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "ticket-context" in result.stderr
+
+
 class TestHookNonTriggers:
     def test_no_investigation_md(self, tmp_path):
         runs_dir = tmp_path / "runs"
@@ -329,6 +420,18 @@ class TestHookNonTriggers:
         result = _run_hook(event, runs_dir)
         assert result.returncode == 0
 
+    def test_nested_subdir_rejected(self, tmp_path):
+        # extract_run_dir requires investigation.md to live in a direct
+        # child of runs_dir. Anything deeper is treated as unrelated.
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        nested = runs_dir / "run-x" / "subdir"
+        nested.mkdir(parents=True)
+        (nested / "investigation.md").write_text("## CONCLUDE\n")
+        event = _make_hook_event(str(nested / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 0
+
 
 class TestGate1TicketContext:
     def test_fails_when_ticket_context_missing(self, tmp_path):
@@ -355,9 +458,6 @@ class TestGate1TicketContext:
         assert "ticket-context" in result.stderr
 
     def test_silent_pass_when_no_audit_log(self, tmp_path):
-        """Without an audit log and without ticket_context.yaml, the check
-        silently passes — there is no signal to work with, and the hook
-        deliberately does not fail in that case."""
         runs_dir, run_dir = _setup_run(
             tmp_path,
             conclusion_checks=_resolved_checks(VALID_INVESTIGATION),
@@ -435,6 +535,20 @@ class TestGate2LeadsMinimum:
         event = _make_hook_event(str(run_dir / "investigation.md"))
         result = _run_hook(event, runs_dir)
         assert result.returncode == 0, f"stderr: {result.stderr}"
+
+    def test_severity_read_from_meta_json(self, tmp_path):
+        # Crafted investigation has 2 distinct leads. Set severity=high
+        # in meta.json (requires 3) — the hook should reject.
+        runs_dir, run_dir = _setup_run(
+            tmp_path,
+            conclusion_checks=_resolved_checks(VALID_INVESTIGATION),
+            severity="high",
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir)
+        assert result.returncode == 2
+        assert "high" in result.stderr
+        assert "leads pursued" in result.stderr
 
 
 class TestGate3ConclusionFile:
@@ -582,7 +696,7 @@ Cannot discriminate ?brute-force from ?credential-stuffing.
             "checks": [
                 {
                     "question_id": "dangling_evidence",
-                    "answer": "No unexplained observations.",
+                    "answer": "All observations consistent.",
                     "citations": ["no registry match"],
                 },
                 {

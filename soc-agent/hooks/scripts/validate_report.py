@@ -26,6 +26,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.frontmatter import parse_yaml_frontmatter
+from hooks.scripts.run_context import get_runs_dir
 from schemas.precedent import check_recency, DEFAULT_MAX_AGE_DAYS
 from schemas.report_frontmatter import parse_frontmatter
 
@@ -37,16 +38,12 @@ JUDGE_MODEL = os.environ.get("SOC_AGENT_JUDGE_MODEL", "haiku")
 # Run directory identification (from PostToolUse event)
 # ---------------------------------------------------------------------------
 
-def get_runs_dir() -> Path:
-    """Get the runs directory. Configurable via SOC_AGENT_RUNS_DIR env var."""
-    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
-
-
 def extract_run_dir(hook_data: dict) -> Path | None:
-    """Extract the run directory from a PostToolUse event.
+    """Extract the run directory from a PostToolUse event targeting report.md.
 
-    Returns the parent directory if the tool wrote to a report.md
-    inside the runs directory. Returns None otherwise.
+    Note: this hook validates report.md, not investigation.md, so it can't
+    use the shared run_context.extract_run_dir helper (which is keyed on
+    investigation.md).
     """
     tool_input = hook_data.get("tool_input", {})
     file_path = tool_input.get("file_path", "")
@@ -57,13 +54,8 @@ def extract_run_dir(hook_data: dict) -> Path | None:
     if path.name != "report.md":
         return None
 
-    # Verify it's inside the runs directory
-    runs_dir = get_runs_dir()
-    try:
-        path.parent.relative_to(runs_dir)
-    except ValueError:
+    if path.parent.parent != get_runs_dir():
         return None
-
     return path.parent
 
 
