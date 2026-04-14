@@ -1,6 +1,6 @@
 ---
 title: Forward-looking burst check on 5710 screen indicator
-status: backlog
+status: deferred
 groups: sonnet-migration
 ---
 

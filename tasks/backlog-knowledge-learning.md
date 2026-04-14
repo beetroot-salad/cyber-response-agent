@@ -1,12 +1,13 @@
 ---
 title: Post-investigation knowledge learning loop (precedents, lessons, pruning)
 status: backlog
-groups: knowledge, phase-2
+groups: knowledge, post-mortem
 ---
 
 Post-investigation knowledge updates: new precedents captured from closed tickets, lessons learned appended to `knowledge/common-investigation/lessons/`.
 
 Constraints:
+
 - Impose increasing costs per token appended to lessons/utilities to avoid unbounded growth of prompt context
 - Mechanism for pruning stale knowledge (time-based decay, citation-based eviction, or analyst-mediated review)
 

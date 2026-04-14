@@ -1,8 +1,10 @@
 ---
 title: Batch write_state with investigation.md writes at each phase transition
-status: backlog
+status: deferred
 groups: cost
 ---
+
+write_State isn't used by the investigation agent; state transitions are infered
 
 Every phase transition currently takes two turns: one Bash call to write_state.py, then a separate Write/Edit to investigation.md. These are independent and can be batched into a single turn.
 

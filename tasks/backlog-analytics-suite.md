@@ -1,7 +1,7 @@
 ---
 title: Analytics suite — high-volume alert detection, fatigue metrics, auto-close tracking
 status: backlog
-groups: phase-2
+groups: optional, analytics
 ---
 
 High-volume alert detection: track alert frequency per signature over time windows.

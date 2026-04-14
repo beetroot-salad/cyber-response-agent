@@ -1,7 +1,7 @@
 ---
 title: Batch parallel reads in CONTEXTUALIZE section of SKILL.md
 status: backlog
-groups: cost
+groups: todo
 ---
 
 CONTEXTUALIZE currently consumes 18 turns in the full-loop run. Many are sequential Read calls for knowledge files (ip-ranges.md, identity-patterns.md, lead definitions) that could be issued as parallel tool calls in a single turn.
