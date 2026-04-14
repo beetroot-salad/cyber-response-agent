@@ -1,10 +1,12 @@
 ---
-title: Migration Stage 3: Sonnet writes hypothesis stories, Opus makes predictions
+title: Migration Stage 3 (deferred): Sonnet writes hypothesis stories, Opus makes predictions
 status: backlog
-groups: sonnet, cost
+groups: sonnet-migration, cost
 ---
 
-HYPOTHESIZE-phase work splits into two cognitive modes:
+**Deferred — superseded by the direct main-agent flip.** Phase-by-phase partial migration is no longer the plan. The decision doc (2026-04-13 session) concluded that the "Sonnet main + phase-specific splits" approach is over-engineered; the active plan is to flip the whole main agent to Sonnet once signature scaffolding matures (migration-stage4-flip-main). Kept as reference in case a partial fallback is needed if the direct flip regresses.
+
+Original design — HYPOTHESIZE-phase work splits into two cognitive modes:
 - Stories: narrative descriptions of what a hypothesis means (descriptive, cheap output, Sonnet-friendly)
 - Predictions: testable implications that drive lead selection (hard reasoning, Opus-worthy)
 

@@ -1,7 +1,7 @@
 ---
 title: Expose past investigations as a lead (leads/past-investigations/)
 status: backlog
-groups: reliability, knowledge
+groups: reliability, knowledge, past-runs
 ---
 
 Follows the same shape as every other lead: leads/past-investigations/definition.md + per-vendor templates (single template pointing at the local index).

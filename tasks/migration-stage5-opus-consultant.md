@@ -1,7 +1,7 @@
 ---
-title: Migration Stage 5: Opus consultant subagent (deep-reason, Sonnet escalates for hard calls)
+title: Opus consultant subagent (deep-reason, Sonnet escalates for hard calls)
 status: backlog
-groups: sonnet, cost
+groups: sonnet-migration, cost
 ---
 
 Once Sonnet-main is stable, introduce a deep-reason subagent pinned to Opus that the Sonnet main agent calls at specific high-stakes decision points.

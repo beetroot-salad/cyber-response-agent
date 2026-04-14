@@ -1,7 +1,7 @@
 ---
 title: Build past-runs index (SQLite/JSONL keyed by signature + entity-class hash)
 status: backlog
-groups: reliability, knowledge
+groups: reliability, knowledge, past-runs
 ---
 
 Per signature, extract: entity set (srcip, srcuser, host, image family, …), trace line, matched_archetype, disposition, confidence, key ++/-- observations from the investigation log.

@@ -1,7 +1,7 @@
 ---
 title: Preload hook race condition fixed (contextualize_preload.py detached child vs Sonnet)
 status: done
-groups: sonnet
+groups: sonnet-migration
 ---
 
 contextualize_preload.py was forking a detached child to spawn ticket-context and archetype-scan in the background; the main agent's first CONTEXTUALIZE read raced the detached writes. Opus was slow enough that files landed in time; Sonnet reads raced past.

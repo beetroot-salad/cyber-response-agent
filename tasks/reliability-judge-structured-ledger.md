@@ -1,7 +1,7 @@
 ---
 title: Judge INTERNAL_CONSISTENCY against structured hypothesis ledger, not prose
 status: backlog
-groups: reliability, state
+groups: reliability, state, invlang
 ---
 
 The judge now checks for composite/rollup grades and analyst-handoff drift via prose inspection of investigation.md + report.md. This is fragile — a model that writes prose carefully can evade it.

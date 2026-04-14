@@ -1,7 +1,7 @@
 ---
 title: Alert-selection determinism in fetch_alert.py
 status: backlog
-groups: sonnet, evaluation
+groups: sonnet-migration, evaluation
 ---
 
 Same scenario, two runs, different alert selected (first-of-burst vs mid-burst). Eval reproducibility requires stable ordering.

@@ -1,11 +1,11 @@
 ---
 title: Tool discovery refactor: split data availability from tool mechanics
-status: backlog
+status: done
 groups: phase-2
 ---
 
-Split into two concerns:
-1. Data availability: main agent consults knowledge/environment/data-sources/ to know what questions can be answered
-2. Tool mechanics: lead subagent consults knowledge/environment/systems/ for query patterns
+Landed as two separate entry points:
+- `scripts/preflight.py` — checks live status of configured systems at run start.
+- `soc-agent/skills/connect/` — onboarding skill for wiring new systems into `knowledge/environment/`.
 
-Also: not all tools are MCP — agent may need to call APIs via scripts.
+The data-availability vs tool-mechanics split is realised through the 4-layer environment model documented in `docs/design-v3-tool-execution.md §10`: `environment/data-sources/` (abstract data tags the main agent consults), `environment/systems/` (vendor-specific query mechanics the lead subagents consult), `environment/context/` (classification heuristics), and `environment/operations/` (per-anchor grounding recipes).
