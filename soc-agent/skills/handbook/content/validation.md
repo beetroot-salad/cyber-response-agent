@@ -1,25 +1,55 @@
-# Two-Tier Report Validation
+# Three-Layer CONCLUDE Validation
 
 How the plugin verifies that a finished investigation is actually safe to close.
 
-## Why two tiers
+## Why three layers
 
-The `CONCLUDE` phase is the only way an investigation exits, and it always writes `report.md`. That file is the ground truth the ticketing system acts on — if it says `status=resolved`, downstream automation treats the alert as closed. Getting that decision wrong is the worst failure mode the plugin has.
+The `CONCLUDE` phase is the only way an investigation exits, and it ends with writing `report.md`. That file is the ground truth the ticketing system acts on — if it says `status=resolved`, downstream automation treats the alert as closed. Getting that decision wrong is the worst failure mode the plugin has.
 
-Two distinct failure modes need two distinct checks:
+Three distinct failure modes need three distinct checks:
 
-- **Structural mistakes** (wrong frontmatter, missing precedent file, not enough leads) are crisp, deterministic, and must never be subject to LLM judgment. A missing field is a missing field — no amount of reasoning makes it acceptable.
+- **Pre-close authoring discipline** (the agent claims to have refuted the adversarial hypothesis, but didn't articulate which lead produced the `--` grade; claims a `++` without naming a refutation attempt; doesn't distinguish the matched archetype from the closest adversarial one). These fail early — they produce bad reports if not caught before the `## CONCLUDE` header lands in investigation.md.
+- **Structural mistakes in the report artifact** (wrong frontmatter, missing precedent file, archetype directory doesn't exist) are crisp, deterministic, and must never be subject to LLM judgment. A missing field is a missing field — no amount of reasoning makes it acceptable.
 - **Semantic mistakes** (the report claims a hypothesis was refuted but the log shows no refuting evidence; the adversarial check was skipped; the precedent was matched on the wrong grounds) require reading the full investigation log and applying judgment. Deterministic rules can't catch these.
 
-So the plugin runs **Tier 1** (deterministic Python) and **Tier 2** (semantic judge via a separate Claude call) in sequence. Both must pass before the investigation is considered complete.
+So the plugin runs **Layer 0** (pre-close self-check via `validate_conclude.py`, PreToolUse on `investigation.md`), **Tier 1** (deterministic report-artifact validation via `validate_report.py`, PostToolUse on `report.md`), and **Tier 2** (semantic judge via a separate Claude call, also in `validate_report.py`). All three must pass before the investigation is considered complete.
 
-Both tiers live in the same hook: `hooks/scripts/validate_report.py`, registered as a `PostToolUse` hook on `Write|Edit`. It fires whenever any Write or Edit tool call is made, inspects `tool_input.file_path`, and runs only if the write targeted `report.md` inside the runs directory. Non-report writes exit 0 immediately.
+On failure any layer prints its errors to stderr and exits with code 2, which the agent sees as a tool failure and must resolve before the investigation can terminate. Layer 0's PreToolUse semantics are particularly important: a rejected `## CONCLUDE` write never advances `state.json`, so the agent can fix the authoring gap and re-issue the same write from the same phase with zero state-machine recovery.
 
-On failure either tier prints its errors to stderr and exits with code 2, which the agent sees as a tool failure and must resolve before the investigation can terminate.
+## Layer 0: CONCLUDE transition gate (`validate_conclude.py`)
 
-## Tier 1: Deterministic validation
+Runs as a **PreToolUse** hook on `Write|Edit` to `investigation.md`, narrowed by `if Write(*/investigation.md)` / `if Edit(*/investigation.md)` filters in `plugin.json`. The hook computes the proposed post-write text from `tool_input.content` (Write) or simulates `old_string → new_string` (Edit) against the on-disk file, then checks whether the proposed text contains a `## CONCLUDE` header. Non-CONCLUDE writes exit 0 immediately.
 
-Fast, dependency-free, runs on every report write. Its job is to confirm that the report is structurally legal — everything that can be checked without understanding the narrative.
+### What Layer 0 checks
+
+1. **Ticket-context subagent was dispatched** during CONTEXTUALIZE. The ticket-context subagent is dispatched inline by the main agent via `Agent(prompt=<skills/investigate/ticket-context.md>)`; the audit log records Task/Agent calls, and the check passes if any matches the ticket-context prompt signature. A legacy `ticket_context.yaml` file-existence check is retained for test convenience but is no longer the production detection path.
+
+2. **`conclusion_checks.json` exists in the run directory** (unless this is a screen-resolved investigation, detected by the presence of a `## SCREEN` block and the absence of any `## GATHER` block in the proposed investigation text). Screen-resolved runs are exempt from the self-check — their safety comes from the SCREEN pattern match + precedent + Tier 1/2 in the report path.
+
+3. **The file's question set matches the prompt.** `validate_conclude.py` reads `skills/investigate/conclusion_checks.md` at hook fire time and extracts the expected question IDs per status (`resolved` / `escalated`). The file's `checks` array must cover exactly those IDs — no missing, no extra. This keeps the prompt and the hook in sync without requiring a separate schema file.
+
+4. **Every citation resolves as a verbatim substring inside its cited line range.** Citations use the hybrid format `{"lines": "N" or "A-B", "contains": "verbatim token"}`. The hook parses the range, extracts those lines from the proposed investigation.md text, and checks that `contains` is a plain-substring match of that slice. This format is cheaper to author than a full-sentence substring AND paraphrase-tolerant (the agent picks a short distinguishing token rather than copying an entire sentence verbatim), while still preventing fabrication — the token must be inside the cited range, not just anywhere in the file.
+
+Each error message ends with an explicit `Next action:` line so the agent knows whether to stay in CONCLUDE and fix the authoring or whether a deeper problem requires going back to HYPOTHESIZE.
+
+### The self-check question set
+
+`skills/investigate/conclusion_checks.md` defines the questions the agent must answer in `conclusion_checks.json` before `## CONCLUDE` can land:
+
+- **Resolved** status — five questions covering adversarial refutation, `++` refutation attempt, authoritative-vs-circumstantial grading, dangling evidence coverage, and archetype shape match (matched archetype coverage + adversarial archetype distinguished).
+- **Escalated** status — two questions covering dangling evidence and escalation rationale.
+
+The `archetype_shape_match` question asks the agent to name both the matched archetype and the closest adversarial one, citing lines from their own CONTEXTUALIZE / ANALYZE content. The `archetype-scan` subagent always populates an `adversarial_archetype` field in its output so the main agent has a citable surface without needing to re-read archetype README files from disk.
+
+### The complexity gate (temporarily disabled)
+
+`validate_conclude.py` contains a `should_run_self_check` function that decides whether Layer 0's gates 2-4 fire. The design intent is: fire on investigations that are *struggling* (loops ≥ 4) OR operate on *thin scaffolding* (signature has < 2 archetype directories), and skip on mature-signature + quick-converging runs where the self-check adds little value over the token cost.
+
+**As of the current revision this function always returns `True`** — the skip path is temporarily disabled so we can collect empirical data on the self-check's value and cost on every investigation. The gated version is preserved as `_complexity_gate_disabled_fire_always` for easy re-enable once we have evidence the skip is safe.
+
+## Tier 1: Deterministic report-artifact validation (`validate_report.py`)
+
+Fast, dependency-free, runs as a **PostToolUse** hook on `Write|Edit` to `report.md`. Its job is to confirm that the report artifact is structurally legal — everything that can be checked without understanding the narrative. Investigation-level checks (ticket-context dispatch, self-check authoring) belong to Layer 0 and do not run here.
 
 ### What Tier 1 checks
 
@@ -31,22 +61,11 @@ Pulled from `validate_report.py::validate_tier1` and `schemas/report_frontmatter
 
 3. **Enum values legal.** `status` ∈ `{resolved, escalated}`. `disposition` ∈ `{benign, false_positive, true_positive, inconclusive}`. `confidence` ∈ `{high, medium, low}`. `trust_anchors_consulted[*].kind` ∈ the allowed anchor kinds. `trust_anchors_consulted[*].result` ∈ the allowed anchor results.
 
-4. **Minimum leads by severity** (skipped for screen-resolved reports — see below). The signature's `context.md` frontmatter provides `severity`; `MIN_LEADS_BY_SEVERITY` in `schemas/report_frontmatter.py` defines the floor:
+4. **Screen-resolved structural consistency.** If `state.json` history contains `SCREEN` but not `HYPOTHESIZE` (fast-path), the playbook for the signature must actually have a `## Screen` section — a screen-resolved outcome is impossible without one.
 
-   | severity | min leads |
-   |---|---|
-   | low | 1 |
-   | medium | 2 |
-   | high | 3 |
-   | critical | 4 |
+5. **Resolved → archetype required.** `status=resolved` must set `matched_archetype`. A resolved report without one is rejected outright — the shape leg of the two-leg model is non-negotiable.
 
-   A report with `leads_pursued` below the floor is rejected. This is the "investigation depth" safety guarantee.
-
-5. **Screen-resolved exemption.** If `state.json` history contains `SCREEN` but not `HYPOTHESIZE`, the investigation took the fast-path and is exempt from the minimum-leads floor. Its safety guarantee is the mechanical pattern match, not multi-lead evidence. In exchange, the playbook must actually have a `## Screen` section — if it doesn't, the report is rejected because a screen-resolved outcome is impossible without one.
-
-6. **Resolved → archetype required.** `status=resolved` must set `matched_archetype`. A resolved report without one is rejected outright — the shape leg of the two-leg model is non-negotiable.
-
-7. **Resolved → grounding required.** At least one grounding leg must be satisfied:
+6. **Resolved → grounding required.** At least one grounding leg must be satisfied:
    - **Anchor grounding**: every entry in the archetype's `required_anchors` frontmatter list must appear in `trust_anchors_consulted` with `result == "confirmed"`. A required anchor that was skipped, unavailable, or refuted is rejected.
    - **Precedent grounding**: `matched_ticket_id` names a precedent snapshot inside the matched archetype's directory.
    - **Archetypes with empty `required_anchors`**: `matched_ticket_id` is **mandatory** — a resolved report citing such an archetype without a precedent ticket reference is rejected. There is no path to resolution without at least one of these two groundings.
@@ -111,6 +130,16 @@ The salt is per-run because static delimiters would eventually leak into trainin
 
 ## Failure handling
 
+On a Layer 0 failure the hook prints:
+
+```
+CONCLUDE gate failed:
+  - {error 1}
+  - {error 2}
+```
+
+to stderr and exits 2. Because Layer 0 is PreToolUse, the rejected write never happens — `state.json` stays at the pre-CONCLUDE phase and the agent can fix the authoring (typically by rewriting `conclusion_checks.json`) and re-issue the same `## CONCLUDE` write from the same phase. Every error message ends with an explicit `Next action:` line ("stay in CONCLUDE, fix conclusion_checks.json, retry the write" for authoring failures, "return to HYPOTHESIZE" for evidence-gap failures).
+
 On any Tier 1 failure the hook prints:
 
 ```
@@ -133,7 +162,7 @@ Full judge output:
 
 and exits 2. The full judge block gives the agent per-criterion feedback so it can identify which dimension failed.
 
-The investigation is **not over** until a valid report is on disk. An agent that writes an invalid report and tries to hand off anyway will be stopped by this hook.
+The investigation is **not over** until all three layers pass. An agent that writes an invalid report or tries to CONCLUDE without a valid self-check will be stopped.
 
 ## What's deliberately missing
 
@@ -141,3 +170,4 @@ The investigation is **not over** until a valid report is on disk. An agent that
 - **No self-validation.** The judge is a separate Claude call, not the investigation agent reviewing its own work. The whole point is an independent perspective.
 - **No soft pass.** There is no "judge said FLAG but it's probably fine." `FLAG` fails the hook, full stop. The agent must either fix the report or change its disposition (e.g., from `resolved` to `escalated`) until the judge is satisfied.
 - **No per-criterion override.** A single `FLAG` on any criterion fails the whole report. Partial passes don't exist — safety checks compose as an AND, not an OR.
+- **No LLM evaluation of self-check answer quality.** Layer 0 only verifies that citations resolve (anti-fabrication) and that the expected question set is covered — it never reasons about whether an answer is *correct*. That's Tier 2's job, because running a judge on every CONCLUDE write would double the cost of the validation layer without proportionate safety benefit.

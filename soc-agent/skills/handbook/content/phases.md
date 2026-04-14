@@ -76,7 +76,7 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 **Outcome:** {proceeding to CONCLUDE | falling through to HYPOTHESIZE — reason}
 ```
 
-**Safety note:** A screen-resolved report is exempt from the minimum-leads-by-severity check at Tier 1 validation. Its safety comes from the pattern match, not from multi-lead evidence. Tier 1 also verifies that `state.json` history contains `SCREEN` but not `HYPOTHESIZE`, and that the playbook actually has a `## Screen` section — attempting to game the exemption is caught by the hook.
+**Safety note:** A screen-resolved report is exempt from the CONCLUDE-transition self-check (Layer 0) and from the playbook-has-Screen-section Tier-1 cross-check — the latter verifies that a report claiming the fast-path actually targets a playbook that declares a `## Screen` section. Screen-resolved safety comes from the mechanical pattern match + precedent + Tier 2 judge.
 
 ## HYPOTHESIZE
 
