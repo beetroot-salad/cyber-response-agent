@@ -127,6 +127,12 @@ fi
 # soc-agent run dir lives inside the eval dir so it's also isolated
 export SOC_AGENT_RUNS_DIR="$EVAL_DIR/runs"
 
+# Point the Stop hook (investigation_summary.py) at the tee'd transcript.
+# --no-session-persistence means the path Claude Code passes into the hook
+# is a 1-line ai-title stub, not the full transcript — this env var
+# overrides it so token and model counts actually populate in audit.jsonl.
+export SOC_AGENT_TRANSCRIPT_PATH="$EVAL_DIR/transcript.jsonl"
+
 cd "$EVAL_DIR"
 
 # The skill expects the full signature_id (matching the directory name under

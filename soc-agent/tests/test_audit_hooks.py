@@ -23,7 +23,10 @@ from hooks.scripts.audit_tool_calls import (
     truncate,
 )
 from hooks.scripts.frontmatter import parse_yaml_frontmatter
-from hooks.scripts.investigation_summary import find_latest_run, sum_transcript_tokens
+from hooks.scripts.investigation_summary import (
+    extract_transcript_stats,
+    find_latest_run,
+)
 
 
 # --- truncate ---
@@ -263,60 +266,160 @@ class TestFindLatestRun:
             assert result == has_report
 
 
-class TestSumTranscriptTokens:
-    def test_sums_assistant_usage(self, tmp_path):
+class TestExtractTranscriptStats:
+    EMPTY = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "models": [],
+        "total_cost_usd": None,
+    }
+
+    def test_result_record_is_authoritative(self, tmp_path):
+        """stream-json transcripts end with a `type: result` record that
+        carries authoritative totals — it must win over per-message sums
+        even when assistant records are also present."""
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text("\n".join([
-            json.dumps({"type": "human", "message": {"content": "hello"}}),
-            json.dumps({"type": "assistant", "message": {"usage": {
-                "input_tokens": 100, "output_tokens": 50,
-                "cache_creation_input_tokens": 20, "cache_read_input_tokens": 10,
-            }}}),
-            json.dumps({"type": "assistant", "message": {"usage": {
-                "input_tokens": 200, "output_tokens": 80,
-                "cache_creation_input_tokens": 0, "cache_read_input_tokens": 30,
-            }}}),
+            # Per-msg records with clearly wrong (low) numbers that must be ignored
+            json.dumps({"type": "assistant", "message": {
+                "id": "msg_1", "model": "claude-sonnet-4-6",
+                "usage": {"input_tokens": 1, "output_tokens": 1,
+                          "cache_creation_input_tokens": 1, "cache_read_input_tokens": 1},
+            }}),
+            json.dumps({"type": "assistant", "message": {
+                "id": "msg_2", "model": "claude-sonnet-4-6",
+                "usage": {"input_tokens": 1, "output_tokens": 1,
+                          "cache_creation_input_tokens": 1, "cache_read_input_tokens": 1},
+            }}),
+            # Authoritative result record
+            json.dumps({"type": "result", "usage": {
+                "input_tokens": 18, "output_tokens": 11632,
+                "cache_creation_input_tokens": 55762, "cache_read_input_tokens": 639513,
+            }, "total_cost_usd": 0.7127}),
         ]) + "\n")
-        result = sum_transcript_tokens(str(transcript))
-        assert result["input_tokens"] == 300
-        assert result["output_tokens"] == 130
-        assert result["cache_creation_input_tokens"] == 20
-        assert result["cache_read_input_tokens"] == 40
 
-    def test_missing_file_returns_zeros(self):
-        result = sum_transcript_tokens("/nonexistent/path.jsonl")
-        assert result == {
-            "input_tokens": 0, "output_tokens": 0,
-            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
-        }
+        stats = extract_transcript_stats(str(transcript))
+        assert stats["input_tokens"] == 18
+        assert stats["output_tokens"] == 11632
+        assert stats["cache_creation_input_tokens"] == 55762
+        assert stats["cache_read_input_tokens"] == 639513
+        assert stats["total_cost_usd"] == 0.7127
+        assert stats["models"] == ["claude-sonnet-4-6"]
+
+    def test_dedupe_by_message_id_when_no_result_record(self, tmp_path):
+        """Persisted transcripts have no `result` record and emit each
+        assistant message once per content block — all copies carry the
+        same final usage snapshot. Summing naively double-counts; dedupe
+        by message.id first."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("\n".join([
+            # msg_1 emitted 3 times (text + tool_use + final) — same numbers each copy
+            json.dumps({"type": "assistant", "message": {
+                "id": "msg_1", "model": "claude-opus-4-6",
+                "usage": {"input_tokens": 100, "output_tokens": 50,
+                          "cache_creation_input_tokens": 20, "cache_read_input_tokens": 10},
+            }}),
+            json.dumps({"type": "assistant", "message": {
+                "id": "msg_1", "model": "claude-opus-4-6",
+                "usage": {"input_tokens": 100, "output_tokens": 50,
+                          "cache_creation_input_tokens": 20, "cache_read_input_tokens": 10},
+            }}),
+            json.dumps({"type": "assistant", "message": {
+                "id": "msg_1", "model": "claude-opus-4-6",
+                "usage": {"input_tokens": 100, "output_tokens": 50,
+                          "cache_creation_input_tokens": 20, "cache_read_input_tokens": 10},
+            }}),
+            # msg_2 emitted once
+            json.dumps({"type": "assistant", "message": {
+                "id": "msg_2", "model": "claude-opus-4-6",
+                "usage": {"input_tokens": 200, "output_tokens": 80,
+                          "cache_creation_input_tokens": 0, "cache_read_input_tokens": 30},
+            }}),
+        ]) + "\n")
+
+        stats = extract_transcript_stats(str(transcript))
+        assert stats["input_tokens"] == 300  # 100 + 200, not 3×100 + 200
+        assert stats["output_tokens"] == 130
+        assert stats["cache_creation_input_tokens"] == 20
+        assert stats["cache_read_input_tokens"] == 40
+        assert stats["total_cost_usd"] is None
+        assert stats["models"] == ["claude-opus-4-6"]
+
+    def test_multiple_models_sorted(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("\n".join([
+            json.dumps({"type": "assistant", "message": {
+                "id": "m1", "model": "claude-sonnet-4-6", "usage": {},
+            }}),
+            json.dumps({"type": "assistant", "message": {
+                "id": "m2", "model": "claude-haiku-4-5-20251001", "usage": {},
+            }}),
+            json.dumps({"type": "assistant", "message": {
+                "id": "m3", "model": "claude-sonnet-4-6", "usage": {},
+            }}),
+        ]) + "\n")
+        stats = extract_transcript_stats(str(transcript))
+        assert stats["models"] == ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"]
+
+    def test_missing_file_returns_empty_stats(self):
+        assert extract_transcript_stats("/nonexistent/path.jsonl") == self.EMPTY
 
     def test_ignores_non_assistant_records(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
-            json.dumps({"type": "human", "message": {"usage": {"input_tokens": 999}}}) + "\n"
+            json.dumps({"type": "human", "message": {
+                "id": "x", "model": "ignored",
+                "usage": {"input_tokens": 999, "output_tokens": 999,
+                          "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+            }}) + "\n"
         )
-        result = sum_transcript_tokens(str(transcript))
-        assert result["input_tokens"] == 0
+        stats = extract_transcript_stats(str(transcript))
+        assert stats == self.EMPTY
 
     def test_skips_malformed_lines(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
             "not json\n"
-            + json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 5, "output_tokens": 3, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}}) + "\n"
+            + json.dumps({"type": "assistant", "message": {
+                "id": "m1", "model": "claude-opus-4-6",
+                "usage": {"input_tokens": 5, "output_tokens": 3,
+                          "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+            }}) + "\n"
         )
-        result = sum_transcript_tokens(str(transcript))
-        assert result["input_tokens"] == 5
+        stats = extract_transcript_stats(str(transcript))
+        assert stats["input_tokens"] == 5
+        assert stats["output_tokens"] == 3
+        assert stats["models"] == ["claude-opus-4-6"]
 
-    def test_missing_usage_key_treated_as_zero(self, tmp_path):
+    def test_assistant_without_id_skipped_in_sum_path(self, tmp_path):
+        """Records without message.id can't be deduped safely — skip them
+        in the sum path. (They shouldn't occur in real transcripts.)"""
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
-            json.dumps({"type": "assistant", "message": {}}) + "\n"
+            json.dumps({"type": "assistant", "message": {
+                "model": "claude-opus-4-6",
+                "usage": {"input_tokens": 999, "output_tokens": 999,
+                          "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+            }}) + "\n"
         )
-        result = sum_transcript_tokens(str(transcript))
-        assert result == {
-            "input_tokens": 0, "output_tokens": 0,
-            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
-        }
+        stats = extract_transcript_stats(str(transcript))
+        assert stats["input_tokens"] == 0
+        assert stats["models"] == ["claude-opus-4-6"]  # model is still collected
+
+    def test_result_record_without_cost(self, tmp_path):
+        """Result record may appear without total_cost_usd — cost stays None."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "result", "usage": {
+                "input_tokens": 10, "output_tokens": 20,
+                "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+            }}) + "\n"
+        )
+        stats = extract_transcript_stats(str(transcript))
+        assert stats["output_tokens"] == 20
+        assert stats["total_cost_usd"] is None
 
 
 class TestInvestigationSummaryMain:
@@ -393,15 +496,22 @@ leads_pursued: 4
         entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
         assert entry["start_timestamp"] is None
 
-    def test_token_counts_from_transcript(self, tmp_path):
+    def test_stats_from_stream_json_result_record(self, tmp_path):
+        """Eval-style transcript: authoritative `type: result` record,
+        total_cost_usd captured."""
         self._make_run(tmp_path)
         transcript = tmp_path / "session.jsonl"
-        transcript.write_text(
-            json.dumps({"type": "assistant", "message": {"usage": {
-                "input_tokens": 500, "output_tokens": 200,
+        transcript.write_text("\n".join([
+            json.dumps({"type": "assistant", "message": {
+                "id": "msg_1", "model": "claude-sonnet-4-6",
+                "usage": {"input_tokens": 1, "output_tokens": 1,
+                          "cache_creation_input_tokens": 1, "cache_read_input_tokens": 1},
+            }}),
+            json.dumps({"type": "result", "usage": {
+                "input_tokens": 500, "output_tokens": 11632,
                 "cache_creation_input_tokens": 100, "cache_read_input_tokens": 50,
-            }}}) + "\n"
-        )
+            }, "total_cost_usd": 0.4321}),
+        ]) + "\n")
         payload = json.dumps({"transcript_path": str(transcript)})
 
         with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
@@ -412,11 +522,82 @@ leads_pursued: 4
 
         entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
         assert entry["input_tokens"] == 500
-        assert entry["output_tokens"] == 200
+        assert entry["output_tokens"] == 11632
         assert entry["cache_creation_input_tokens"] == 100
         assert entry["cache_read_input_tokens"] == 50
+        assert entry["total_cost_usd"] == 0.4321
+        assert entry["models"] == ["claude-sonnet-4-6"]
 
-    def test_token_counts_zero_without_transcript(self, tmp_path):
+    def test_stats_from_persisted_transcript_dedupe(self, tmp_path):
+        """Persisted-session transcript: no `result` record, duplicate
+        message.id entries must be deduped."""
+        self._make_run(tmp_path)
+        transcript = tmp_path / "session.jsonl"
+        # msg_1 emitted twice (same snapshot), msg_2 once — expected sum
+        # is 600 input / 250 output, not 1100 / 450.
+        def m(mid, inp, out):
+            return json.dumps({"type": "assistant", "message": {
+                "id": mid, "model": "claude-opus-4-6",
+                "usage": {"input_tokens": inp, "output_tokens": out,
+                          "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+            }})
+        transcript.write_text("\n".join([
+            m("msg_1", 500, 200),
+            m("msg_1", 500, 200),
+            m("msg_2", 100, 50),
+        ]) + "\n")
+        payload = json.dumps({"transcript_path": str(transcript)})
+
+        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
+            with patch("sys.stdin", StringIO(payload)):
+                with pytest.raises(SystemExit):
+                    from hooks.scripts.investigation_summary import main
+                    main()
+
+        entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
+        assert entry["input_tokens"] == 600
+        assert entry["output_tokens"] == 250
+        assert entry["total_cost_usd"] is None
+        assert entry["models"] == ["claude-opus-4-6"]
+
+    def test_env_var_transcript_path_takes_precedence(self, tmp_path):
+        """SOC_AGENT_TRANSCRIPT_PATH overrides the payload's transcript_path
+        so eval_run.sh can point at the tee'd full transcript under
+        --no-session-persistence (where the payload path is a 1-line stub)."""
+        self._make_run(tmp_path)
+
+        stub = tmp_path / "stub.jsonl"
+        stub.write_text(
+            json.dumps({"type": "ai-title", "aiTitle": "x"}) + "\n"
+        )
+        full = tmp_path / "full.jsonl"
+        full.write_text(
+            json.dumps({"type": "result", "usage": {
+                "input_tokens": 777, "output_tokens": 42,
+                "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+            }, "total_cost_usd": 0.123}) + "\n"
+            + json.dumps({"type": "assistant", "message": {
+                "id": "m", "model": "claude-sonnet-4-6", "usage": {},
+            }}) + "\n"
+        )
+        payload = json.dumps({"transcript_path": str(stub)})
+
+        with patch.dict("os.environ", {
+            "SOC_AGENT_RUNS_DIR": str(tmp_path),
+            "SOC_AGENT_TRANSCRIPT_PATH": str(full),
+        }):
+            with patch("sys.stdin", StringIO(payload)):
+                with pytest.raises(SystemExit):
+                    from hooks.scripts.investigation_summary import main
+                    main()
+
+        entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
+        assert entry["input_tokens"] == 777
+        assert entry["output_tokens"] == 42
+        assert entry["total_cost_usd"] == 0.123
+        assert entry["models"] == ["claude-sonnet-4-6"]
+
+    def test_stats_empty_without_transcript(self, tmp_path):
         self._make_run(tmp_path)
 
         with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
@@ -430,6 +611,8 @@ leads_pursued: 4
         assert entry["output_tokens"] == 0
         assert entry["cache_creation_input_tokens"] == 0
         assert entry["cache_read_input_tokens"] == 0
+        assert entry["models"] == []
+        assert entry["total_cost_usd"] is None
 
 
 # --- tag_tool_results ---
