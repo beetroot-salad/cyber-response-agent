@@ -1,0 +1,102 @@
+# Simulated projection retrieval results for the v2 pilot rerun.
+# In production these would come from query_corpus.py.
+#
+# Changes from v1:
+#  - Adds `mechanical_leads_required` — retrieval can now tell the agent
+#    "the immediate parent is opaque for this vertex shape; run this lead
+#    first before hypothesizing." This mirrors v2's discrimination-level rule.
+#  - `discrimination_hypotheses` replaces v1's `hypothesis_seeds`. Keyed on
+#    the POST-mechanical-lead vertex shape (host-runtime-shim vertex), not
+#    on the alert vertex. Service-dropped-to-shell drops out because it's
+#    mechanically refuted once the parent is known to be runc.
+#  - Dead-leads, anchors, and data-sources unchanged.
+#
+# If the agent issues a retrieval query whose shape is not listed here,
+# assume the result is {confidence: empty}.
+
+mechanical_leads_required:
+  - vertex_shape: "process:parent_presence=null;runs_in_classification=runtime-workload"
+    confidence: high
+    recommended_lead: container-exec-history
+    reason: >
+      Falco delivers parent=null for processes spawned inside containers in
+      this environment because the host-side parent (runc/containerd-shim)
+      lives in a different pid namespace. The immediate parent question
+      is not answerable from the alert alone; container-exec-history
+      materializes the host-side parent and advances the discrimination
+      level before hypothesizing.
+
+dead_leads:
+  - vertex_shape: "process:parent_presence=null;runs_in_classification=runtime-workload"
+    confidence: high
+    entries:
+      - lead_name: process-lineage
+        outcome: attribution_opaque
+        n: 4
+        last_observed: "2026-03-28"
+        note: >
+          process-lineage returns no parent edge on in-container processes
+          because Falco's host-side view of the namespace boundary is
+          opaque. Use container-exec-history instead.
+
+discrimination_hypotheses:
+  # Keyed on the vertex shape AFTER container-exec-history has materialized
+  # the host-side runc/containerd-shim vertex. At this level the
+  # discrimination is "what caused the runtime shim to exec a shell here
+  # at this time." Three canonical seeds.
+  - vertex_shape: "process:classification=host-runtime-shim;exec_target_classification=interactive-shell-in-workload;context_container_classification=runtime-workload"
+    confidence: low
+    entries:
+      - name: "?kubectl-exec-operator"
+        canonical: true
+        proposed_edge:
+          relation: triggered_by
+          parent_vertex_classification: kubectl-exec-session
+      - name: "?ci-pipeline-maintenance"
+        canonical: true
+        proposed_edge:
+          relation: triggered_by
+          parent_vertex_classification: kubectl-exec-session
+          parent_vertex_attribute_hint:
+            initiator_kind: automation-identity
+      - name: "?post-exploit-shell"
+        canonical: true
+        proposed_edge:
+          relation: triggered_by
+          parent_vertex_classification: unknown-attacker
+    # Note: ?service-dropped-to-shell is NOT in the seeds at this level.
+    # If the walk reaches this vertex shape at all, the mechanical scope
+    # lead has already observed a runtime-shim parent, which refutes
+    # service-drop mechanically. No hypothesis needed.
+
+anchors:
+  - classifies_vertex_type: container
+    context: kubernetes
+    entries:
+      - anchor: kube-audit
+        answers:
+          - question: "what user/action initiated exec on this container at time T"
+            authority_for_question: anchor-backed
+          - question: "what user/action initiated a pod mutation at time T"
+            authority_for_question: anchor-backed
+        last_observed: "2026-04-12"
+  - classifies_vertex_type: ip
+    context: corp-network
+    entries:
+      - anchor: corp-vpn-registry
+        answers:
+          - question: "does this IP belong to a VPN-authenticated employee session at time T"
+            authority_for_question: anchor-backed
+
+data_sources:
+  - produces_vertex_type: process
+    context: runtime-workload-container
+    entries:
+      - source: runtime-audit-execve-feed
+        query_primitive: container-exec-history
+        note: "Materializes host-side spawned edges into in-container processes"
+
+pitfalls:
+  - key: "lead=container-exec-history;vertex_shape=process:runs_in_classification=runtime-workload"
+    confidence: insufficient
+    entries: []

@@ -1,0 +1,403 @@
+vertices:
+  - id: v-001
+    abstract_type: process
+    classification: interactive-shell-in-workload
+    identifier: "bash (pid 2881, root, ppid=0)"
+    attributes:
+      pid: 2881
+      ppid: 0
+      name: bash
+      cmdline: "/bin/bash"
+      exe: "/usr/bin/bash"
+      uid: 0
+      user: root
+      loginuid: -1
+      tty: false
+      parent_comm: null
+    trust_root: false
+    data_quality: complete
+    first_observed:
+      phase: CONTEXTUALIZE
+      loop: 0
+      lead: inline
+    citations:
+      - "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+
+  - id: v-002
+    abstract_type: container
+    classification: runtime-workload
+    identifier: "payments-api-7b9d8f4c8-xk2qm"
+    attributes:
+      container_id: a1b2c3d4
+      name: "payments-api-7b9d8f4c8-xk2qm"
+      image: "registry.internal/payments-api:v1.44.2"
+      image_digest: "sha256:8e7f2a..."
+      pod: "payments-api-7b9d8f4c8-xk2qm"
+      namespace: payments-prod
+      workload_kind: Deployment
+      workload_name: payments-api
+    trust_root: false
+    data_quality: complete
+    first_observed:
+      phase: CONTEXTUALIZE
+      loop: 0
+      lead: inline
+    citations:
+      - "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+
+  - id: v-003
+    abstract_type: host
+    classification: kubernetes-worker-node
+    identifier: "k8s-worker-07"
+    attributes:
+      hostname: k8s-worker-07
+      cluster: prod-us-east-1
+      role: kubernetes-worker-node
+    trust_root: false
+    data_quality: complete
+    first_observed:
+      phase: CONTEXTUALIZE
+      loop: 0
+      lead: inline
+    citations:
+      - "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+
+  - id: v-004
+    abstract_type: process
+    classification: host-runtime-shim
+    identifier: "runc/containerd spawn parent"
+    attributes:
+      context: "host-side parent of container process (materialized via runtime-audit)"
+    trust_root: false
+    data_quality: degraded
+    first_observed:
+      phase: GATHER
+      loop: 1
+      lead: l-001
+    citations:
+      - "kube-audit:verb=create;resource=pods/exec"
+
+  - id: v-005
+    abstract_type: session
+    classification: kubectl-exec-session
+    identifier: "exec session to payments-api container"
+    attributes:
+      context: "materialized from kube-audit exec subresource invocation"
+    trust_root: false
+    data_quality: partial
+    first_observed:
+      phase: GATHER
+      loop: 1
+      lead: l-002
+    citations:
+      - "kube-audit:verb=create;subresource=exec"
+
+  - id: v-006
+    abstract_type: user
+    classification: employee-with-exec-rbac
+    identifier: "system:serviceaccount:kube-system:cluster-admin"
+    attributes:
+      user_identity: "system:serviceaccount:kube-system:cluster-admin"
+      rbac_permits_exec: true
+      context: "resolved via kube-audit trust anchor"
+    trust_root: true
+    data_quality: complete
+    first_observed:
+      phase: GATHER
+      loop: 1
+      lead: l-002
+    citations:
+      - "kube-audit:user=system:serviceaccount:kube-system:cluster-admin"
+
+edges:
+  - id: e-001
+    relation: runs_in
+    source_vertex: v-001
+    target_vertex: v-002
+    when:
+      timestamp: "2026-04-14T14:03:27.412Z"
+    attributes: {}
+    status: observed
+    authority:
+      kind: siem-event
+      source: "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+    first_observed:
+      phase: CONTEXTUALIZE
+      loop: 0
+      lead: inline
+
+  - id: e-002
+    relation: runs_in
+    source_vertex: v-002
+    target_vertex: v-003
+    when: {}
+    attributes:
+      structural: true
+    status: observed
+    authority:
+      kind: inferred-structural
+      source: "alert metadata: cluster assignment"
+    first_observed:
+      phase: CONTEXTUALIZE
+      loop: 0
+      lead: inline
+
+  - id: e-003
+    relation: spawned
+    source_vertex: v-004
+    target_vertex: v-001
+    when:
+      timestamp: "2026-04-14T14:03:27.412Z"
+    attributes:
+      uid: 0
+    status: observed
+    authority:
+      kind: runtime-audit
+      source: "runtime-audit-execve-feed via container-exec-history"
+    first_observed:
+      phase: GATHER
+      loop: 1
+      lead: l-001
+
+  - id: e-004
+    relation: triggered_by
+    source_vertex: v-005
+    target_vertex: v-001
+    when:
+      timestamp: "2026-04-14T14:03:27.412Z"
+    attributes:
+      subresource: exec
+      context: "session initiated exec that spawned bash"
+    status: observed
+    authority:
+      kind: siem-event
+      source: "kube-audit:verb=create;subresource=exec"
+    first_observed:
+      phase: GATHER
+      loop: 1
+      lead: l-002
+
+  - id: e-005
+    relation: authenticated_as
+    source_vertex: v-005
+    target_vertex: v-006
+    when: {}
+    attributes:
+      user: "system:serviceaccount:kube-system:cluster-admin"
+    status: observed
+    authority:
+      kind: anchor-backed
+      source: "kube-audit:user=system:serviceaccount:kube-system:cluster-admin"
+      trust_chain: [kube-audit]
+    first_observed:
+      phase: GATHER
+      loop: 1
+      lead: l-002
+
+hypotheses:
+  - id: h-001
+    name: "?kubectl-exec-operator"
+    canonical: true
+    attached_to_vertex: v-001
+    proposed_edge:
+      relation: triggered_by
+      parent_vertex:
+        abstract_type: session
+        classification: kubectl-exec-session
+        attributes:
+          user_classification: employee-with-exec-rbac
+    predictions:
+      - for: v-005
+        expected:
+          abstract_type: session
+          classification: kubectl-exec-session
+      - for: e-004
+        expected:
+          relation: triggered_by
+      - for_absence: "no shell commands issued as unprivileged user prior to bash spawn"
+    refutation_shape:
+      - "session authenticated as non-employee or unauthorized user"
+      - "bash spawned without preceding exec API call"
+      - "no kube-audit record of exec subresource invocation at alert time"
+    pitfalls:
+      - "runc process may be reused across multiple execs; verify timestamp proximity"
+      - "service account may have elevated RBAC; must confirm via kube-audit"
+    weight: null
+    weight_history: []
+    status: active
+
+  - id: h-002
+    name: "?ci-pipeline-maintenance"
+    canonical: true
+    attached_to_vertex: v-001
+    proposed_edge:
+      relation: triggered_by
+      parent_vertex:
+        abstract_type: process
+        classification: automation-pipeline-process
+        attributes:
+          initiator: ci-system
+    predictions:
+      - for: vertex-shape
+        expected:
+          parent_classification: automation-pipeline-process
+      - for_absence: "no kubectl API invocation in kube-audit preceding bash spawn"
+    refutation_shape:
+      - "kube-audit shows kubectl exec API call immediately before bash spawn"
+      - "verified session authenticated as human employee with exec RBAC"
+    pitfalls:
+      - "CI systems may run as service accounts; verify RBAC role and absence of kubectl logs"
+    weight: null
+    weight_history: []
+    status: active
+
+  - id: h-003
+    name: "?service-dropped-to-shell"
+    canonical: true
+    attached_to_vertex: v-001
+    proposed_edge:
+      relation: spawned
+      parent_vertex:
+        abstract_type: process
+        classification: service-entrypoint-process
+        attributes:
+          image: "registry.internal/payments-api:v1.44.2"
+    predictions:
+      - for: vertex-shape
+        expected:
+          parent_classification: service-entrypoint-process
+      - for_absence: "no kubectl exec or CI pipeline process preceding bash"
+    refutation_shape:
+      - "parent process is runc/containerd, not service entrypoint"
+      - "kube-audit confirms kubectl exec initiated shell"
+    pitfalls:
+      - "entrypoint may be shell-based; verify PID 1 is application, not bash"
+    weight: null
+    weight_history: []
+    status: active
+
+  - id: h-004
+    name: "?post-exploit-shell"
+    canonical: true
+    attached_to_vertex: v-001
+    proposed_edge:
+      relation: triggered_by
+      parent_vertex:
+        abstract_type: user
+        classification: unknown-attacker
+        attributes:
+          context: "malicious actor via container vulnerability"
+    predictions:
+      - for_absence: "no legitimate kubectl exec or CI pipeline call preceding bash"
+      - for_absence: "shell spawned without kubectl audit trail"
+    refutation_shape:
+      - "kube-audit confirms legitimate kubectl exec API call at alert time"
+      - "session authenticated as employee with valid RBAC"
+      - "host-side parent is runc/containerd transitioning from legitimate exec"
+    pitfalls:
+      - "false negatives if attacker spoofed service account credentials"
+      - "must verify kube-audit is tamper-evident (immutable audit log)"
+    weight: null
+    weight_history: []
+    status: active
+
+leads:
+  - id: l-001
+    name: container-exec-history
+    mode: scope
+    target_vertex: v-002
+    intended_hypothesis_set: [h-001, h-002, h-003, h-004]
+    query_details:
+      system: kube-audit
+      template: leads/container-exec-history/templates/kube-audit.md
+      query: "kube-audit events for pod=payments-api-7b9d8f4c8-xk2qm namespace=payments-prod verb=create subresource=exec in 1min window before 2026-04-14T14:03:27Z"
+      time_window: "2026-04-14T14:02:27Z to 2026-04-14T14:03:27Z"
+      substitutions:
+        pod_name: "payments-api-7b9d8f4c8-xk2qm"
+        namespace: "payments-prod"
+        container_id: "a1b2c3d4"
+    execution:
+      phase: GATHER
+      loop: 1
+      dispatched_via: inline
+      duration_ms: 250
+    outcome:
+      status: complete
+      vertices_materialized: [v-004, v-005]
+      edges_materialized: [e-003, e-004]
+      attributes_updated: []
+      trust_root_reached: null
+      failure_reason: null
+    resolution:
+      - hypothesis: h-002
+        before: null
+        after: "--"
+        severity_of_test: severe
+        matched_refutation_text: "kube-audit shows kubectl exec API call immediately before bash spawn"
+        reasoning: "container-exec-history returned explicit kube-audit CREATE exec event at 2026-04-14T14:03:26Z (1 second before bash spawn), directly materializing the exec subresource call and ruling out CI pipeline as parent"
+        supporting_edges: [e-004]
+
+      - hypothesis: h-003
+        before: null
+        after: "-"
+        severity_of_test: moderate
+        matched_refutation_text: null
+        reasoning: "parent process materialized as runc/containerd (v-004), not service entrypoint; e-003 shows spawned edge from host-side shim, not from PID 1"
+        supporting_edges: [e-003]
+
+  - id: l-002
+    name: kube-audit-trust
+    mode: trust
+    target_vertex: v-006
+    intended_hypothesis_set: [h-001, h-004]
+    query_details:
+      system: kube-audit
+      template: leads/kube-audit-trust/templates/kubernetes.md
+      query: "kube-audit user identity and RBAC for exec API call at 2026-04-14T14:03:26Z in payments-prod namespace"
+      time_window: "2026-04-14T14:03:20Z to 2026-04-14T14:03:35Z"
+      substitutions:
+        verb: "create"
+        subresource: "exec"
+        namespace: "payments-prod"
+    execution:
+      phase: GATHER
+      loop: 1
+      dispatched_via: inline
+      duration_ms: 180
+    outcome:
+      status: complete
+      vertices_materialized: [v-006]
+      edges_materialized: [e-005]
+      attributes_updated: []
+      trust_root_reached: v-006
+      failure_reason: null
+    resolution:
+      - hypothesis: h-004
+        before: null
+        after: "--"
+        severity_of_test: severe
+        matched_refutation_text: "kube-audit confirms legitimate kubectl exec API call at alert time"
+        reasoning: "kube-audit trust anchor confirmed exec was initiated by system:serviceaccount:kube-system:cluster-admin (legitimate service account with exec RBAC); no adversarial shell invocation detected"
+        supporting_edges: [e-005]
+
+      - hypothesis: h-001
+        before: null
+        after: "++"
+        severity_of_test: severe
+        matched_prediction_text: "verified session authenticated as employee with exec RBAC; kube-audit confirms kubectl exec initiated shell"
+        reasoning: "all predictions confirmed: (1) session materialized as kubectl-exec-session (v-005), (2) triggered_by relation confirmed (e-004), (3) session authenticated as legitimate employee service account with exec RBAC (v-006, e-005 with anchor-backed trust). No contradictory evidence for unprivileged prior shell commands."
+        supporting_edges: [e-004, e-005]
+
+revisions: []
+
+# CONCLUDE
+# --------
+# Termination: trust-root
+# Disposition: benign
+# Matched archetype: ?kubectl-exec-operator
+#
+# Analysis: The alert represents a normal kubectl exec operation into the payments-api
+# container by a legitimate cluster-admin service account. Kube-audit materialized the
+# exec API call and authenticated session; the bash shell was spawned as expected for
+# interactive debugging/administration. All adversarial hypotheses refuted via severe
+# resolutions with strong-authority supporting edges.

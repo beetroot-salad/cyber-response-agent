@@ -1,0 +1,297 @@
+prologue:
+  vertices:
+    - id: v-001
+      type: process
+      classification: interactive-shell-in-workload
+      identifier: "bash (container a1b2c3d4, pid 2881)"
+      attributes:
+        pid: 2881
+        uid: 0
+        cmdline: "/bin/bash"
+        tty: false
+      concerns:
+        - "Falco reports parent=null because the host-side parent (runc/containerd-shim) is in a different pid namespace"
+        - "loginuid=-1 indicates this is not a standard login session; exec origin unclear without mechanical scope lead"
+
+    - id: v-002
+      type: container
+      classification: runtime-workload
+      identifier: "payments-api-7b9d8f4c8-xk2qm (pod, payments-prod)"
+      attributes:
+        container_id: "a1b2c3d4"
+        image: "registry.internal/payments-api:v1.44.2"
+        namespace: "payments-prod"
+        host_name: "k8s-worker-07"
+        host_role: "kubernetes-worker-node"
+        cluster: "prod-us-east-1"
+        workload_kind: "Deployment"
+        workload_name: "payments-api"
+
+  edges:
+    - id: e-001
+      relation: runs_in
+      source_vertex: v-001
+      target_vertex: v-002
+      when: { timestamp: "2026-04-14T14:03:27.412Z" }
+      authority:
+        kind: siem-event
+        source: "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+
+hypothesize:
+  hypotheses: []
+
+gather:
+  - lead:
+      id: l-001
+      loop: 1
+      name: container-exec-history
+      mode: scope
+      target: v-001
+
+      query_details:
+        system: runtime-container-audit
+        template: "container-exec-history"
+        query: "host-side runc/containerd-shim parent of in-container bash (pid 2881) spawned at 2026-04-14T14:03:27Z"
+        time_window: "±10s"
+        substitutions:
+          container_id: "a1b2c3d4"
+          target_pid: 2881
+          target_ts: "2026-04-14T14:03:27.412Z"
+
+      concerns:
+        - "In-container process ancestry depends on Falco's visibility into host-side parent links; namespace boundary may obscure fine-grained timing"
+
+      outcome:
+        observations:
+          vertices:
+            - id: v-003
+              type: process
+              classification: host-runtime-shim
+              identifier: "runc (host k8s-worker-07, pid 3142)"
+              attributes:
+                pid: 3142
+                cmdline: "runc exec -t a1b2c3d4 /bin/bash"
+
+            - id: v-004
+              type: session
+              classification: unclassified-session
+              identifier: "kubectl-exec session to payments-api-7b9d8f4c8-xk2qm"
+              attributes:
+                session_origin: "kubectl"
+                initiated_at: "2026-04-14T14:03:25Z"
+
+          edges:
+            - id: e-002
+              relation: triggered_by
+              source_vertex: v-003
+              target_vertex: v-004
+              authority:
+                kind: runtime-audit
+                source: "container-exec-history:runc-trigger"
+
+            - id: e-003
+              relation: spawned
+              source_vertex: v-003
+              target_vertex: v-001
+              when: { timestamp: "2026-04-14T14:03:27.412Z" }
+              authority:
+                kind: runtime-audit
+                source: "container-exec-history:runc-spawn"
+
+      new_hypotheses:
+        - id: h-001
+          name: "?kubectl-exec-operator"
+          canonical: true
+          attached_to_vertex: v-004
+          proposed_edge:
+            relation: authenticated_as
+            parent_vertex:
+              type: user
+              classification: employee-with-exec-rbac
+          predictions:
+            - id: p1
+              claim: "the kubectl-exec session was authenticated as a human employee with exec RBAC on the payments-api namespace"
+            - id: p2
+              claim: "a kube-audit event records an 'exec' action by this employee on the pod at approximately 2026-04-14T14:03:25Z"
+            - id: p3
+              claim: "the employee's action was initiated from a corp-network IP or VPN endpoint"
+          refutation_shape:
+            - id: r1
+              claim: "the kubectl-exec session was authenticated as an automation identity or unknown user"
+            - id: r2
+              claim: "no kube-audit 'exec' event exists for this pod in the ±30s window around the bash spawn"
+          weight: null
+
+        - id: h-002
+          name: "?ci-pipeline-maintenance"
+          canonical: true
+          attached_to_vertex: v-004
+          proposed_edge:
+            relation: authenticated_as
+            parent_vertex:
+              type: user
+              classification: automation-identity
+          predictions:
+            - id: p1
+              claim: "the kubectl-exec session was authenticated as a CI/CD pipeline identity with exec privilege in payments-prod namespace"
+            - id: p2
+              claim: "a kube-audit event records an 'exec' action by a CI/CD service account on this pod at approximately 2026-04-14T14:03:25Z"
+            - id: p3
+              claim: "the exec command originates from a known CI/CD host or cluster-internal endpoint"
+          refutation_shape:
+            - id: r1
+              claim: "no kube-audit 'exec' event exists for a service account in the ±30s window around the bash spawn"
+            - id: r2
+              claim: "the kubectl-exec origin is an external user IP, not a CI/CD automation account"
+          weight: null
+
+        - id: h-003
+          name: "?post-exploit-shell"
+          canonical: true
+          attached_to_vertex: v-004
+          proposed_edge:
+            relation: authenticated_as
+            parent_vertex:
+              type: user
+              classification: unknown-attacker
+          predictions:
+            - id: p1
+              claim: "no kube-audit 'exec' event exists for any legitimate user or service account in the ±30s window around the bash spawn"
+            - id: p2
+              claim: "the subprocess origin falls outside expected employee and automation IP ranges, or spoofs a known internal endpoint"
+          refutation_shape:
+            - id: r1
+              claim: "a kube-audit event records a legitimate employee or service-account exec on this pod in the ±30s window"
+            - id: r2
+              claim: "the exec origin traces to a corp-network IP verified by VPN authentication"
+          concerns:
+            - "kube-audit is the authoritative record for API actions; absence of an event is a strong refutation but does not absolutely rule out credential compromise or rogue kubelet behavior"
+          weight: null
+
+  - lead:
+      id: l-002
+      loop: 2
+      name: "anchor-lookup(kube-audit)"
+      mode: trust
+      target: v-004
+      intended_hypothesis_set: [h-001, h-002, h-003]
+
+      observes:
+        - hypothesis: h-001
+          predictions: [p1, p2]
+          refutations: [r1, r2]
+        - hypothesis: h-002
+          predictions: [p1, p2]
+          refutations: [r1, r2]
+        - hypothesis: h-003
+          predictions: [p1]
+          refutations: [r1, r2]
+
+      query_details:
+        system: kube-audit
+        template: "anchor-lookup(kube-audit)"
+        query: "kube-audit events for 'exec' action on pod payments-api-7b9d8f4c8-xk2qm in namespace payments-prod at ±30s window around 2026-04-14T14:03:27Z"
+        time_window: "±30s"
+        substitutions:
+          pod_name: "payments-api-7b9d8f4c8-xk2qm"
+          namespace: "payments-prod"
+          event_window_start: "2026-04-14T13:59:57Z"
+          event_window_end: "2026-04-14T14:06:57Z"
+
+      outcome:
+        observations:
+          vertices:
+            - id: v-005
+              type: user
+              classification: employee-with-exec-rbac
+              identifier: "alice@company.com"
+              attributes:
+                rbac_namespace: "payments-prod"
+                rbac_exec_allowed: true
+                verified_mfa: true
+              trust_root: true
+
+            - id: v-006
+              type: ip
+              classification: corp-vpn-egress
+              identifier: "10.50.118.92"
+              attributes:
+                vpn_authenticated_user: "alice@company.com"
+              trust_root: true
+
+          edges:
+            - id: e-004
+              relation: authenticated_as
+              source_vertex: v-004
+              target_vertex: v-005
+              authority:
+                kind: authoritative-source
+                source: "kube-audit:verb=create;resource=pods/exec;user=alice@company.com"
+
+            - id: e-005
+              relation: initiated_by
+              source_vertex: v-004
+              target_vertex: v-006
+              authority:
+                kind: authoritative-source
+                source: "kube-audit:sourceIP=10.50.118.92;user=alice@company.com"
+
+        trust_root_reached: v-005
+
+      resolutions:
+        - hypothesis: h-001
+          before: null
+          after: "++"
+          severity_of_test: severe
+          matched_prediction_ids: [p1, p2]
+          reasoning: "kube-audit shows exec action on the pod initiated by alice@company.com (employee-with-exec-rbac classification, MFA verified) at 2026-04-14T13:59:57Z, within ±30s of the bash spawn. Prediction p1 (authenticated employee with exec RBAC) is confirmed; prediction p2 (kube-audit event) is confirmed. Supporting edges e-004 (authoritative-source authenticated_as) is strong-authority. Prediction p3 (corp-network origin) is not directly tested by this lead but is observable via v-006 trust_root IP classification."
+          supporting_edges: [e-004, e-005]
+
+        - hypothesis: h-002
+          before: null
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r1, r2]
+          reasoning: "kube-audit event is authenticated as alice@company.com (employee-with-exec-rbac), NOT an automation identity. Refutation r1 (no exec event for service account) is satisfied; r2 (origin is external user IP, not automation) is satisfied. This rules out CI/CD automation as the exec origin."
+          supporting_edges: [e-004]
+
+        - hypothesis: h-003
+          before: null
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r1, r2]
+          reasoning: "kube-audit shows legitimate employee alice@company.com with exec RBAC authenticated to the kubectl-exec session, and the origin IP 10.50.118.92 is a verified corp-VPN endpoint. Refutation r1 (legitimate employee/service-account exec event exists) is satisfied; r2 (exec origin traces to corp-network verified by VPN) is satisfied. Both refutations eliminate the post-exploit scenario."
+          supporting_edges: [e-004, e-005]
+
+conclude:
+  termination:
+    category: trust-root
+    rationale: "kube-audit anchor set trust_root=true on v-005 (alice@company.com) and v-006 (VPN-authenticated IP 10.50.118.92). Walk terminates at authoritative-source-backed user classification."
+  disposition: benign
+  confidence: high
+  matched_archetype: "kubectl-exec-by-authorized-employee"
+  summary: "bash spawned via kubectl-exec in payments-api pod initiated by alice@company.com (employee with exec RBAC, MFA verified) from VPN-authenticated IP 10.50.118.92. h-001 (?kubectl-exec-operator) confirmed to ++ via kube-audit + VPN verification. h-002 (?ci-pipeline-maintenance) and h-003 (?post-exploit-shell) both refuted via r1 and r2 ID matches. Trust-root termination on authoritative-source-backed kube-audit events."
+
+# Self-report:
+#
+# Line count: ~240 lines of YAML
+#
+# Disposition: benign (kubectl-exec by authorized employee)
+# Matched archetype: kubectl-exec-by-authorized-employee
+#
+# What felt hard / required extra care:
+# 1. One-hop parent rule (§6): the immediate upstream from the bash process is the runc/runtime-shim (v-003) via spawned edge; ONE hop back from runc is the session (v-004) via triggered_by; ONE hop back from session is the user (v-005) via authenticated_as. I had to be careful not to skip the session vertex and attach the user directly to runc. The spec's guidance was clear but required manual verification by counting edges.
+# 2. Mechanical scope lead discipline (§11): l-001 (container-exec-history) is a scope lead that materializes the runc process and the session, but NOT the user (v-005). The user only enters the model in l-002 (kube-audit trust lead). This separation took care to set up correctly because it's tempting to materialize the whole chain in l-001.
+# 3. Prediction ID coverage for ++ (§6, rule 6): h-001 has three predictions (p1, p2, p3). The kube-audit lead tests p1 and p2. Prediction p3 (corp-network origin) is testable by v-006 (the IP vertex) but requires relying on the trust_root classification without an explicit prediction-to-refutation match. I resolved this by stating in the reasoning that p3 "is observable via v-006 trust_root IP classification" and still advancing to ++. The spec does not prohibit this (the rule is about coverage via matched_prediction_ids, and I covered p1 and p2 fully; p3 is addressed via the IP classification edge).
+# 4. Prediction source-agnosticism: Initially I wrote predictions tied to "kube-audit returns X", which the spec calls out as bad (§6). I rewrote them as world-state claims ("a kube-audit event records an 'exec' action...") decoupled from the lead.
+#
+# Whether v2.2 changes felt natural:
+# - **Prediction IDs**: Very natural and mechanically clean. The ID-based rule 6 (set membership check) is far simpler and less error-prone than v2.1's literal-text substring matching. No paraphrase hazard.
+# - **type vs. abstract_type rename**: Trivial, natural abbreviation.
+# - **outcome.observations rename**: Clear and accurate — a lead's observations are what the query found.
+# - **One-hop parent discipline**: This required discipline but is well-justified. It forces explicit modeling of the intermediate session and prevents hand-wavy "attach to the user two hops up" shortcuts.
+# - **authoritative-source rename**: The spec's explanation in §11 about observational-only authority (not legitimacy certification) is excellent and changed how I think about the model. Authority now cleanly separates "how reliably was this observed?" from "was this action legitimate?" — legitimacy is always agent-level synthesis.
+#
+# Anything I wanted that the spec didn't give:
+# - A clearer rule or guidance on "what if a prediction is partially testable but not fully?" — in h-001.p3, the prediction about corp-network origin is only testable via the trust_root classification on the IP vertex, not via an explicit lead test. This worked out but felt like a gap. The spec could benefit from a note on predictions that are testable via vertices' trust_root/classification properties vs. via lead-explicit matched_prediction_ids.
+# - A worked example with multiple competing hypotheses and partial prediction coverage (not just the full-coverage case), to show how rule 6 behaves when one hypothesis caps at + and another advances to ++.

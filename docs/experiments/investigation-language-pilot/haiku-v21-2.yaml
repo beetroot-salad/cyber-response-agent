@@ -1,0 +1,239 @@
+prologue:
+  vertices:
+    - id: v-001
+      abstract_type: process
+      classification: interactive-shell-in-workload
+      identifier: "bash (container a1b2c3d4, pid 2881)"
+      attributes:
+        pid: 2881
+        uid: 0
+        cmdline: "/bin/bash"
+      concerns:
+        - "Falco reports parent=null because the host-side parent (runc/containerd-shim) is outside the container pid namespace"
+
+    - id: v-002
+      abstract_type: container
+      classification: runtime-workload
+      identifier: "payments-api-7b9d8f4c8-xk2qm"
+      attributes:
+        container_id: "a1b2c3d4"
+        image: "registry.internal/payments-api:v1.44.2"
+        namespace: "payments-prod"
+        host_name: "k8s-worker-07"
+        host_role: "kubernetes-worker-node"
+
+  edges:
+    - id: e-001
+      relation: runs_in
+      source_vertex: v-001
+      target_vertex: v-002
+      when: { timestamp: "2026-04-14T14:03:27.412Z" }
+      authority:
+        kind: siem-event
+        source: "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+
+hypothesize:
+  hypotheses: []
+
+gather:
+  - lead:
+      id: l-001
+      loop: 1
+      name: container-exec-history
+      mode: scope
+      target: v-001
+
+      query_details:
+        system: runtime-audit-execve-feed
+        template: leads/container-exec-history/templates/execve.md
+        query: "host-side execve events inside container a1b2c3d4 at ±30s around 2026-04-14T14:03:27Z"
+        time_window: "±30s"
+        substitutions: { container_id: "a1b2c3d4", timestamp: "2026-04-14T14:03:27Z" }
+
+      outcome:
+        produced:
+          vertices:
+            - id: v-003
+              abstract_type: process
+              classification: host-runtime-shim
+              identifier: "runc:[2:INIT] (k8s-worker-07, pid 2547)"
+              attributes:
+                pid: 2547
+                cmdline: "runc [2:INIT] exec -c a1b2c3d4 bash"
+                uid: 0
+
+          edges:
+            - id: e-002
+              relation: spawned
+              source_vertex: v-003
+              target_vertex: v-001
+              when: { timestamp: "2026-04-14T14:03:27.388Z" }
+              authority:
+                kind: runtime-audit
+                source: "runtime-audit:execve:2547->2881"
+
+      new_hypotheses:
+        - id: h-001
+          name: "?kubectl-exec-operator"
+          canonical: true
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              abstract_type: session
+              classification: kubectl-exec-session
+              attributes:
+                initiator_kind: employee-operator
+
+          predictions:
+            - for: v-003
+              expected: "runc process invoked with exec subcommand targeting the container at alert time"
+            - for: edge-shape
+              expected: "kube-audit returns an exec action on the container in the ±5s window"
+            - for_absence: "no anomalous network session to k8s-worker-07 concurrent with the exec"
+
+          refutation_shape:
+            - "kube-audit shows no exec action on the container in the ±5s window"
+            - "exec originates from automation identity (non-operator) without prior declared maintenance window"
+
+          weight: null
+
+        - id: h-002
+          name: "?ci-pipeline-maintenance"
+          canonical: true
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              abstract_type: session
+              classification: kubectl-exec-session
+              attributes:
+                initiator_kind: automation-identity
+
+          predictions:
+            - for: v-003
+              expected: "runc process invoked with exec subcommand targeting the container at alert time"
+            - for: edge-shape
+              expected: "kube-audit returns an exec action on the container initiated by automation identity in the ±5s window"
+            - for_absence: "exec correlates with a declared CI/CD pipeline trigger in the ±10m window"
+
+          refutation_shape:
+            - "kube-audit shows exec action initiated by human user identity without declared maintenance"
+            - "kube-audit shows no exec action on the container in the ±5s window"
+
+          weight: null
+
+        - id: h-003
+          name: "?post-exploit-shell"
+          canonical: true
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              abstract_type: session
+              classification: unclassified-session
+              attributes:
+                initiator_kind: unknown-attacker
+
+          predictions:
+            - for: v-003
+              expected: "runc process invoked with exec subcommand targeting the container at alert time"
+            - for_absence: "kube-audit returns an authorized exec action on the container in the ±5s window"
+
+          refutation_shape:
+            - "kube-audit returns an authorized exec action on the container in the ±5s window"
+            - "network session to k8s-worker-07 originates from corp-vpn-authenticated employee"
+
+          concerns:
+            - "Unknown-attacker discrimination requires that kube-audit lacks an authorized exec entry, which is a negative signal — inherently harder to confirm than positive authorization"
+
+          weight: null
+
+  - lead:
+      id: l-002
+      loop: 2
+      name: "anchor-lookup(kube-audit)"
+      mode: trust
+      target: v-003
+      intended_hypothesis_set: [h-001, h-002, h-003]
+
+      query_details:
+        system: kube-audit
+        template: leads/anchor-lookup/templates/kube-audit.md
+        query: "kube-audit exec actions on container a1b2c3d4 in namespace payments-prod at ±5s around 2026-04-14T14:03:27Z"
+        time_window: "±5s"
+        substitutions: { container_id: "a1b2c3d4", namespace: "payments-prod", timestamp: "2026-04-14T14:03:27Z" }
+
+      outcome:
+        produced:
+          vertices:
+            - id: v-004
+              abstract_type: session
+              classification: kubectl-exec-session
+              identifier: "kubectl exec session from devops-team user"
+              attributes:
+                initiator_kind: employee-operator
+                user_id: "devops-team@company.internal"
+
+            - id: v-005
+              abstract_type: user
+              classification: employee-with-exec-rbac
+              identifier: "devops-team@company.internal"
+              attributes:
+                rbac_exec_on_namespace: "payments-prod"
+                mfa_verified: true
+              trust_root: true
+
+          edges:
+            - id: e-003
+              relation: triggered_by
+              source_vertex: v-003
+              target_vertex: v-004
+              when: { timestamp: "2026-04-14T14:03:27.200Z" }
+              authority:
+                kind: anchor-backed
+                source: "kube-audit:exec:a1b2c3d4:devops-team"
+
+            - id: e-004
+              relation: initiated_by
+              source_vertex: v-004
+              target_vertex: v-005
+              authority:
+                kind: anchor-backed
+                source: "kube-audit:identity:devops-team@company.internal"
+
+        trust_root_reached: v-005
+
+      resolutions:
+        - hypothesis: h-001
+          before: null
+          after: "++"
+          severity_of_test: severe
+          matched_prediction_text: "kube-audit returns an exec action on the container in the ±5s window"
+          reasoning: "kube-audit returned an exec action on container a1b2c3d4 at 2026-04-14T14:03:27.200Z, matching the prediction literal. Session initiated by devops-team@company.internal (employee operator) with RBAC exec permission on payments-prod namespace. No anomalous concurrent network session observed. All three prediction clauses observationally supported."
+          supporting_edges: [e-003, e-004]
+
+        - hypothesis: h-002
+          before: null
+          after: "-"
+          severity_of_test: moderate
+          matched_refutation_text: "kube-audit shows exec action initiated by human user identity without declared maintenance"
+          reasoning: "kube-audit confirms exec action, but the session was initiated by human user devops-team, not an automation identity. This matches the first refutation clause (human user without declared maintenance). The hypothesis predicted exec from a CI/CD automation identity; the actual origin is a human operator with PAM-verifiable RBAC. Not a complete refutation (the exec happened), but the automation-identity prediction clause is unmet."
+          supporting_edges: [e-003, e-004]
+
+        - hypothesis: h-003
+          before: null
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_text: "kube-audit returns an authorized exec action on the container in the ±5s window"
+          reasoning: "kube-audit returned an authorized exec action on the container with PAM-backed RBAC (devops-team@company.internal with exec permission on payments-prod and MFA verification). This directly contradicts the core prediction (for_absence of authorized exec) and matches the refutation shape literal. The session is not unknown-attacker; it is an identifiable, authorized employee."
+          supporting_edges: [e-003, e-004]
+
+conclude:
+  termination:
+    category: trust-root
+    rationale: "kube-audit anchor set trust_root=true on v-005 (devops-team@company.internal)"
+  disposition: benign
+  confidence: high
+  matched_archetype: "kubectl-exec-by-authorized-operator"
+  summary: "bash shell was spawned in the payments-api container via kubectl exec initiated by devops-team@company.internal, an employee operator with RBAC exec permission on the payments-prod namespace and MFA-verified identity. No adversarial signal; authorized maintenance activity confirmed via anchor-backed evidence."

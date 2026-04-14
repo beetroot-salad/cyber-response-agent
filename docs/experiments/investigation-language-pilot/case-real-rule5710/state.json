@@ -1,0 +1,18 @@
+{
+  "run_id": "0fc5a550-2f58-49ab-a41f-0ce964f966bc",
+  "ticket_id": "",
+  "signature_id": "wazuh-rule-5710",
+  "phase": "CONCLUDE",
+  "history": [
+    "CONTEXTUALIZE",
+    "SCREEN",
+    "HYPOTHESIZE",
+    "GATHER",
+    "ANALYZE",
+    "HYPOTHESIZE",
+    "GATHER",
+    "ANALYZE",
+    "CONCLUDE"
+  ],
+  "updated_at": "2026-04-14T03:43:31.483744+00:00"
+}
