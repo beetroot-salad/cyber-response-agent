@@ -1,6 +1,7 @@
 ---
 name: lead-name-here
 data_tags: [tag1, tag2]
+baseline: optional       # optional | required | not-applicable — whether the lead's output is interpretable without a baseline comparison
 ---
 
 ## Goal
@@ -23,6 +24,22 @@ data_tags: [tag1, tag2]
      burned past investigations or would mislead an experienced analyst. -->
 
 - Pitfall description — why it's misleading and how to detect it.
+
+## Baseline
+
+<!-- Optional. Fill in when the lead's output is only interpretable in
+     comparison to a typical rate for this entity — i.e., when
+     "observed N events" says nothing until you know whether N is
+     high, low, or normal.
+
+     Skip this section (or set `baseline: not-applicable` in frontmatter)
+     for binary checks like file hash reputation, known-bad IP lookups,
+     or allowlist membership — anything where absolute counts directly
+     answer the question. -->
+
+- **When needed:** Which hypotheses or evidence shapes require a baseline before they can be graded. "Is 84 rootcheck events per 4h alarming?" only has an answer relative to this host's typical rate.
+- **Shift query:** The baseline query pattern. Usually the same query executed against a shifted time window (e.g., `--start` shifted `7d` earlier, same `--window` duration). Vendor-specific syntax lives in the lead's `templates/` directory.
+- **Interpretation:** What counts as "above baseline" (prefer σ-framing — `>3σ deviation`, `15× baseline rate`, `count in top decile for this signature` — over absolute thresholds). Relative framing is environment-agnostic and makes refutation shapes unambiguous.
 
 ## Templates
 

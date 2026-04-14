@@ -148,18 +148,39 @@ transfer; OR the disposition diverges without explanation.
 
 ### 4. INTERNAL_CONSISTENCY
 
-Does the report's conclusion (status, disposition, confidence) follow
-from the investigation log? Check that:
+Does the report's conclusion follow from the investigation log, and is
+the report *internally* coherent across its own sections? Check that:
 
 - Hypothesis outcomes in the report match the assessments in the log.
 - The disposition aligns with which hypothesis was confirmed.
-- The confidence level is justified by the strength of evidence (`++`
-  vs `+`).
+- The confidence level is justified by the strength of evidence.
+  `confidence: high` requires at least one `++` grade backing a
+  confirmed hypothesis. `true_positive / high` with no `++` in the log
+  is a FLAG regardless of how convinced the narrative sounds.
+- **No rollup grades.** An umbrella or composite hypothesis
+  (`?compromise-confirmed`, `?malicious-activity`, `?host-is-bad`) is
+  graded on its own evidence, not on the disjunction of its component
+  mechanism hypotheses. If the log shows sibling mechanisms all at
+  `+` and a parent class at `++`, that is a rollup — the parent's
+  grade was lifted by sibling evidence rather than its own. FLAG.
+- **Analyst handoff consistency.** The `For Analyst` section (What We
+  Know / What We Don't Know / Suggested Next Steps) must not contradict
+  the ANALYZE reasoning. If ANALYZE refuted a hypothesis at `--`, the
+  `Suggested Next Steps` cannot list that hypothesis as a live
+  follow-up. If ANALYZE cited a set of events as baseline noise
+  ("uniformly distributed, not spiking with the alert"), the handoff
+  cannot turn around and list the same events as hunt leads. Phase
+  drift between ANALYZE and handoff is a FLAG even if each phase is
+  individually coherent — it means the agent's reasoning shifted
+  between writing the two sections.
 
 FLAG if: the report claims a hypothesis was refuted but the log shows
-no refuting evidence, OR the disposition contradicts the confirmed
-hypothesis, OR confidence is `high` but the backing assessments are
-weak (`+`/`-` only, no `++`/`--`).
+no refuting evidence; OR the disposition contradicts the confirmed
+hypothesis; OR `confidence: high` has no `++` grade backing the
+confirmed hypothesis; OR an umbrella/composite hypothesis is graded
+above the strongest of its component mechanism hypotheses; OR the
+`For Analyst` section reanimates a hypothesis ANALYZE refuted, or
+treats as anomalous an observation ANALYZE characterized as baseline.
 
 ### 5. EVIDENCE_SUFFICIENCY
 
