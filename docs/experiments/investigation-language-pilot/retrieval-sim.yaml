@@ -1,0 +1,76 @@
+# Simulated projection retrieval results — pre-materialized for the experiment.
+# In production these would come from query_corpus.py. For this pilot, we are
+# measuring the write burden of the companion schema, not retrieval correctness,
+# so all retrieval queries the agent would issue return the canned results below.
+#
+# If the agent (you) issues a retrieval query whose shape is not listed here,
+# assume the result is {confidence: empty} and reason from first principles.
+
+dead_leads:
+  - vertex_shape: "process:parent_presence=null;runs_in_classification=runtime-workload"
+    confidence: high
+    entries:
+      - lead_name: process-lineage
+        outcome: attribution_opaque
+        n: 4
+        last_observed: "2026-03-28"
+        note: >
+          Falco delivers parent=null for processes spawned inside containers in this
+          environment because the host-side parent (runc/containerd) is a different
+          pid namespace from what Falco observes. process-lineage returns no parent edge.
+          Use container-exec-history (scope lead against the container vertex) instead:
+          it materializes the host-side runc process and the spawned edge into the
+          container process via the runtime-audit-execve-feed.
+
+hypothesis_seeds:
+  - vertex_shape: "process:abstract_type=process;runs_in_classification=runtime-workload;parent_presence=null"
+    confidence: low
+    entries:
+      - name: "?kubectl-exec-operator"
+        canonical: true
+        parent_classification: "employee-with-exec-rbac"
+        relation: "triggered_by"
+      - name: "?ci-pipeline-maintenance"
+        canonical: true
+        parent_classification: "automation-pipeline"
+        relation: "triggered_by"
+      - name: "?service-dropped-to-shell"
+        canonical: true
+        parent_classification: "service-entrypoint-process"
+        relation: "spawned"
+      - name: "?post-exploit-shell"
+        canonical: true
+        parent_classification: "unknown-attacker"
+        relation: "triggered_by"
+
+anchors:
+  - classifies_vertex_type: container
+    context: kubernetes
+    entries:
+      - anchor: kube-audit
+        answers:
+          - question: "what user/action initiated exec on this container at time T"
+            authority_for_question: anchor-backed
+          - question: "what user/action initiated a pod mutation at time T"
+            authority_for_question: anchor-backed
+        last_observed: "2026-04-12"
+  - classifies_vertex_type: ip
+    context: corp-network
+    entries:
+      - anchor: corp-vpn-registry
+        answers:
+          - question: "does this IP belong to a VPN-authenticated employee session at time T"
+            authority_for_question: anchor-backed
+
+data_sources:
+  - produces_vertex_type: process
+    context: runtime-workload-container
+    entries:
+      - source: runtime-audit-execve-feed
+        query_primitive: container-exec-history
+        note: "Materializes host-side spawned edges into in-container processes"
+
+pitfalls:
+  - key: "lead=container-exec-history;vertex_shape=process:runs_in_classification=runtime-workload"
+    confidence: insufficient
+    entries: []

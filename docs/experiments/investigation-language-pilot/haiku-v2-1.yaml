@@ -1,0 +1,258 @@
+prologue:
+  vertices:
+    - id: v-001
+      abstract_type: process
+      classification: interactive-shell-in-workload
+      identifier: "bash (container a1b2c3d4, pid 2881)"
+      attributes:
+        pid: 2881
+        ppid: 0
+        uid: 0
+        user: root
+        cmdline: "/bin/bash"
+        tty: false
+      source_lead: inline
+      citations: ["falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"]
+
+    - id: v-002
+      abstract_type: container
+      classification: runtime-workload
+      identifier: "payments-api-7b9d8f4c8-xk2qm (payments-prod)"
+      attributes:
+        container_id: a1b2c3d4
+        image: "registry.internal/payments-api:v1.44.2"
+        namespace: payments-prod
+        pod_name: payments-api-7b9d8f4c8-xk2qm
+        workload_kind: Deployment
+        workload_name: payments-api
+        host_name: k8s-worker-07
+        host_role: kubernetes-worker-node
+      data_quality_note: "Falco reports parent=null for in-container processes because the host-side parent (runc/containerd-shim) lives in a different pid namespace"
+      source_lead: inline
+      citations: ["falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"]
+
+  edges:
+    - id: e-001
+      relation: runs_in
+      source_vertex: v-001
+      target_vertex: v-002
+      when:
+        timestamp: "2026-04-14T14:03:27.412Z"
+      authority:
+        kind: siem-event
+        source: "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+      source_lead: inline
+
+hypothesize:
+  hypotheses: []
+
+gather:
+  - lead:
+      id: l-001
+      loop: 1
+      name: container-exec-history
+      mode: scope
+      target: v-001
+      intended_hypothesis_set: []
+      query_details:
+        system: runtime-audit-execve-feed
+        template: "leads/container-exec-history/templates/container-spawn.md"
+        query: "Host-side exec lineage into container a1b2c3d4 at 2026-04-14T14:03:27Z ±30s"
+        time_window: "±30s"
+        substitutions:
+          container_id: a1b2c3d4
+          timestamp: "2026-04-14T14:03:27Z"
+      execution:
+        duration_ms: 280
+      outcome:
+        status: complete
+        produced:
+          vertices:
+            - id: v-003
+              abstract_type: process
+              classification: host-runtime-shim
+              identifier: "runc (host k8s-worker-07, pid 1847)"
+              attributes:
+                pid: 1847
+                ppid: 1821
+                cmdline: "runc --root /run/containerd/runc/k8s.io exec -c a1b2c3d4 bash"
+                executable: runc
+              source_lead: l-001
+              citations: ["runtime-audit:execve:1847"]
+
+            - id: v-004
+              abstract_type: session
+              classification: kubectl-exec-session
+              identifier: "kubectl-exec session for payments-api-7b9d8f4c8-xk2qm"
+              attributes:
+                exec_target: a1b2c3d4
+              source_lead: l-001
+              citations: ["runtime-audit:execve:1847"]
+
+          edges:
+            - id: e-002
+              relation: spawned
+              source_vertex: v-003
+              target_vertex: v-001
+              when:
+                timestamp: "2026-04-14T14:03:27.412Z"
+              authority:
+                kind: runtime-audit
+                source: "runtime-audit:execve:1847"
+              source_lead: l-001
+
+            - id: e-003
+              relation: triggered_by
+              source_vertex: v-003
+              target_vertex: v-004
+              authority:
+                kind: inferred-structural
+                source: "runtime-audit:execve:1847"
+              source_lead: l-001
+
+      new_hypotheses:
+        - id: h-001
+          name: "?kubectl-exec-operator"
+          canonical: true
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              abstract_type: session
+              classification: kubectl-exec-session
+          predictions:
+            - for: v-004
+              expected: "kubectl-exec-session authenticates to an employee user with exec RBAC on this workload"
+            - for_absence: "no concurrent anomalous network activity from the exec session origin"
+          refutation_shape:
+            - "exec session authenticates to an unknown-attacker classification"
+            - "no kube-audit record linking the exec to an RBAC-authorized user"
+          weight: null
+
+        - id: h-002
+          name: "?ci-pipeline-maintenance"
+          canonical: true
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              abstract_type: session
+              classification: kubectl-exec-session
+              attributes:
+                initiator_kind: automation-identity
+          predictions:
+            - for: v-004
+              expected: "kubectl-exec-session initiates from an automation identity (CI/CD system, operator framework, etc.)"
+            - for: edge-shape
+              expected: "a kube-audit record shows the exec triggered by a service account or bot credential"
+          refutation_shape:
+            - "exec session authenticates to a human employee identity instead of automation"
+            - "no service-account or bot-credential signature in kube-audit"
+          weight: null
+
+        - id: h-003
+          name: "?post-exploit-shell"
+          canonical: true
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              abstract_type: session
+              classification: unknown-attacker
+          predictions:
+            - for_absence: "no legitimate kube-audit record showing RBAC-authorized exec initiation"
+          refutation_shape:
+            - "kube-audit shows a legitimate employee or automation identity with exec RBAC initiated the exec"
+            - "exec originated from known internal automation or developer identity"
+          weight: null
+
+  - lead:
+      id: l-002
+      loop: 2
+      name: anchor-lookup(kube-audit)
+      mode: trust
+      target: v-004
+      intended_hypothesis_set: [h-001, h-002, h-003]
+      query_details:
+        system: kube-audit
+        template: "leads/anchor-lookup/templates/kube-audit.md"
+        query: "kube-audit exec events for container a1b2c3d4 in payments-prod at 2026-04-14T14:03:27Z ±5m"
+        time_window: "±5m"
+        substitutions:
+          container_id: a1b2c3d4
+          namespace: payments-prod
+          timestamp: "2026-04-14T14:03:27Z"
+      execution:
+        duration_ms: 210
+      outcome:
+        status: complete
+        produced:
+          vertices:
+            - id: v-005
+              abstract_type: user
+              classification: employee-with-exec-rbac
+              identifier: "alice@acme.internal"
+              attributes:
+                identity_type: employee
+                rbac_exec_permissions: true
+                mfa_verified: true
+              trust_root: true
+              source_lead: l-002
+              citations: ["kube-audit:verb=exec:user=alice@acme.internal:timestamp=2026-04-14T14:03:25Z"]
+
+          edges:
+            - id: e-004
+              relation: authenticated_as
+              source_vertex: v-004
+              target_vertex: v-005
+              when:
+                timestamp: "2026-04-14T14:03:25Z"
+              authority:
+                kind: anchor-backed
+                source: "kube-audit:verb=exec:user=alice@acme.internal"
+              source_lead: l-002
+
+            - id: e-005
+              relation: triggered_by
+              source_vertex: v-004
+              target_vertex: v-005
+              authority:
+                kind: anchor-backed
+                source: "kube-audit:verb=exec:user=alice@acme.internal"
+              source_lead: l-002
+
+        trust_root_reached: v-005
+
+      resolutions:
+        - hypothesis: h-001
+          before: null
+          after: "++"
+          severity_of_test: severe
+          matched_prediction_text: "kubectl-exec-session authenticates to an employee user with exec RBAC on this workload"
+          reasoning: "kube-audit returned alice@acme.internal, classified employee-with-exec-rbac, with verified MFA and exec RBAC permissions on this workload. Anchor-backed supporting edge e-004. All prediction clauses observationally supported."
+          supporting_edges: [e-004, e-005]
+
+        - hypothesis: h-002
+          before: null
+          after: "-"
+          severity_of_test: moderate
+          matched_refutation_text: "exec session authenticates to a human employee identity instead of automation"
+          reasoning: "kube-audit shows alice@acme.internal as the initiator with employee classification and MFA. This refutes the automation-identity expectation of h-002, though does not rule out a compromised employee account."
+          supporting_edges: [e-004]
+
+        - hypothesis: h-003
+          before: null
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_text: "kube-audit shows a legitimate employee or automation identity with exec RBAC initiated the exec"
+          reasoning: "kube-audit returned alice@acme.internal with employee-with-exec-rbac classification, MFA-verified, with a matching authorization record. This is a literal match to h-003's refutation_shape entry and directly contradicts the unknown-attacker premise of h-003."
+          supporting_edges: [e-004, e-005]
+
+conclude:
+  termination:
+    category: trust-root
+    rationale: "kube-audit anchor set trust_root=true on v-005 (alice@acme.internal), authoritatively terminating the backward walk."
+  disposition: benign
+  confidence: high
+  matched_archetype: kubectl-exec-by-authorized-employee
+  summary: "Bash shell spawned in payments-api container via kubectl exec initiated by alice@acme.internal, an MFA-verified employee with RBAC exec permissions on the Deployment. No adversarial signal; trust-root termination on anchor-backed user classification. Consistent with operator maintenance or debugging workflow."

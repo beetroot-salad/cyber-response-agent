@@ -1,0 +1,44 @@
+{
+  "alert_id": "FALCO-2026-04-14-140327-a1b2c3d4",
+  "timestamp": "2026-04-14T14:03:27.412Z",
+  "source": "falco",
+  "rule": {
+    "id": "shell-in-container",
+    "name": "Terminal shell in container",
+    "priority": "WARNING",
+    "description": "A shell was spawned inside a container",
+    "source": "syscall"
+  },
+  "host": {
+    "name": "k8s-worker-07",
+    "cluster": "prod-us-east-1",
+    "role": "kubernetes-worker-node"
+  },
+  "container": {
+    "id": "a1b2c3d4",
+    "short_id": "a1b2c3d4",
+    "name": "payments-api-7b9d8f4c8-xk2qm",
+    "image": "registry.internal/payments-api:v1.44.2",
+    "image_digest": "sha256:8e7f2a...",
+    "pod": "payments-api-7b9d8f4c8-xk2qm",
+    "namespace": "payments-prod",
+    "workload_kind": "Deployment",
+    "workload_name": "payments-api"
+  },
+  "process": {
+    "name": "bash",
+    "cmdline": "/bin/bash",
+    "exe": "/usr/bin/bash",
+    "pid": 2881,
+    "ppid": 0,
+    "uid": 0,
+    "user": "root",
+    "loginuid": -1,
+    "tty": false,
+    "parent_comm": null,
+    "parent_cmdline": null
+  },
+  "output": "Shell spawned in container (user=root user_loginuid=-1 container_id=a1b2c3d4 container_name=payments-api-7b9d8f4c8-xk2qm image=registry.internal/payments-api:v1.44.2 proc=bash proc_cmdline=/bin/bash proc_pid=2881 proc_ppid=0 proc_tty=0 parent=<null>)",
+  "tags": ["container", "shell", "mitre_execution", "T1059"],
+  "raw_event_ref": "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+}

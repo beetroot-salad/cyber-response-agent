@@ -1,0 +1,25 @@
+{
+  "status": "escalated",
+  "checks": [
+    {
+      "question_id": "dangling_evidence",
+      "answer": "Best-supported hypothesis is ?monitoring-bait-triggered (+). It explains the 5-in-<200ms sub-second micro-burst across the sanctioned sentinel set, the approved (srcip, srcuser, target) triple, the absence of wordlist rotation, the zero successful logins, and the absence of parallel alerts on monitoring-host. One observation it does NOT authoritatively explain: the process-list query for `monitoring` returned zero matching processes at query time, so bait is not directly confirmed as the mechanism — consistent with a short-lived script that exited, but equally consistent with a different cause. That ambiguity is the escalation rationale, not a dangling observation that invalidates the verdict.",
+      "citations": [
+        "?monitoring-bait-triggered:\n    weight: \"+\"",
+        "`(no matching processes)` — neither `monitoring_probe` nor `monitoring_bait` currently running by name",
+        "5 events in < 200ms",
+        "ZERO authentication_success events from 172.22.0.10 to target-endpoint"
+      ]
+    },
+    {
+      "question_id": "escalation_rationale",
+      "answer": "Two hypotheses are still live and the available tooling cannot discriminate them: ?monitoring-bait-triggered (+, benign-origin test workload) and ?monitoring-host-compromise (-, adversarial not refuted with --). The evidence gap is definitive process ancestry / argv on monitoring-host, which the host-query deny-list blocks (/opt/workloads, /etc/cron.d) and which process-list cannot reconstruct for already-exited scripts. The playbook's own guidance on 'approved source, unexpected volume' explicitly says to escalate and let the analyst judge whether the monitoring system is misbehaving or compromised. The monitoring-probe archetype is refuted by the burst shape, so no fast-path resolution is available.",
+      "citations": [
+        "Surviving hypotheses:** `?monitoring-bait-triggered` (+) and `?monitoring-host-compromise` (-, still live)",
+        "Source approved but burst volume observed: refutation",
+        "No archetype matches",
+        "Two live hypotheses, one adversarial → escalation is mandatory"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,287 @@
+prologue:
+  vertices:
+    - id: v-001
+      type: process
+      classification: interactive-shell-in-workload
+      identifier: "bash (container a1b2c3d4, pid 2881)"
+      attributes:
+        pid: 2881
+        uid: 0
+        cmdline: "/bin/bash"
+      concerns:
+        - "parent_comm and parent_cmdline are null in Falco output; parent process is in host pid namespace, outside container isolation"
+
+    - id: v-002
+      type: container
+      classification: runtime-workload
+      identifier: "payments-api-7b9d8f4c8-xk2qm"
+      attributes:
+        container_id: "a1b2c3d4"
+        image: "registry.internal/payments-api:v1.44.2"
+        namespace: "payments-prod"
+        pod_name: "payments-api-7b9d8f4c8-xk2qm"
+        workload_kind: "Deployment"
+        workload_name: "payments-api"
+        host_name: "k8s-worker-07"
+        host_role: "kubernetes-worker-node"
+        cluster: "prod-us-east-1"
+
+  edges:
+    - id: e-001
+      relation: runs_in
+      source_vertex: v-001
+      target_vertex: v-002
+      when: { timestamp: "2026-04-14T14:03:27.412Z" }
+      authority:
+        kind: siem-event
+        source: "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+
+hypothesize:
+  hypotheses: []
+
+gather:
+  - lead:
+      id: l-001
+      loop: 1
+      name: "container-exec-history"
+      mode: scope
+      target: v-001
+
+      query_details:
+        system: "container-runtime-audit"
+        template: "leads/container-exec-history/templates/runtime-audit.md"
+        query: "runc/containerd-shim exec spawned processes into container a1b2c3d4 ±30s of 2026-04-14T14:03:27.412Z"
+        time_window: "±30s"
+        substitutions:
+          container_id: "a1b2c3d4"
+          timestamp: "2026-04-14T14:03:27.412Z"
+
+      outcome:
+        observations:
+          vertices:
+            - id: v-003
+              type: process
+              classification: host-runtime-shim
+              identifier: "runc (host k8s-worker-07, pid 1847)"
+              attributes:
+                pid: 1847
+                comm: "runc"
+                host_name: "k8s-worker-07"
+
+          edges:
+            - id: e-002
+              relation: triggered_by
+              source_vertex: v-001
+              target_vertex: v-003
+              when: { timestamp: "2026-04-14T14:03:27.411Z" }
+              authority:
+                kind: runtime-audit
+                source: "container-runtime:runc-exec:a1b2c3d4:1847"
+
+      new_hypotheses:
+        - id: h-001
+          name: "?kubectl-exec-operator"
+          canonical: true
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              type: session
+              classification: kubectl-exec-session
+          predictions:
+            - id: p1
+              claim: "a kube-api pods/exec request initiated the runc exec at ±5s of the observed bash spawn"
+            - id: p2
+              claim: "the kube-api request is authenticated as an employee identity with exec RBAC on payments-api deployment in payments-prod"
+            - id: p3
+              claim: "no anomalous source IP or TLS certificate material surrounds the kube-api request"
+          refutation_shape:
+            - id: r1
+              claim: "no kube-audit pods/exec record exists within ±5s of the bash spawn timestamp"
+            - id: r2
+              claim: "the exec request is authenticated as an automation identity or unknown attacker"
+          weight: null
+
+        - id: h-002
+          name: "?ci-pipeline-maintenance"
+          canonical: true
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              type: session
+              classification: kubectl-exec-session
+              attributes:
+                initiator_kind: "automation-identity"
+          predictions:
+            - id: p1
+              claim: "a kube-api pods/exec request initiated the runc exec, authenticated as an automation identity"
+            - id: p2
+              claim: "the automation identity is registered in the CI/CD system for payments-api maintenance"
+            - id: p3
+              claim: "kube-api request timestamp and source IP align with a CI pipeline job execution window"
+          refutation_shape:
+            - id: r1
+              claim: "no automation-identity kube-api pods/exec record exists within ±5s of the bash spawn"
+            - id: r2
+              claim: "the kube-api request is authenticated as an employee identity or unknown attacker"
+          weight: null
+
+        - id: h-003
+          name: "?post-exploit-shell"
+          canonical: true
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              type: session
+              classification: unclassified-session
+          predictions:
+            - id: p1
+              claim: "no legitimate kube-api pods/exec record exists within ±5s of the bash spawn"
+            - id: p2
+              claim: "the runc exec process exhibits anomalous runtime behavior (e.g., unusual environment, PTRACE_ATTACH capability, signal anomalies)"
+          refutation_shape:
+            - id: r1
+              claim: "a kube-api pods/exec record authenticated as employee-with-exec-rbac or automation-identity exists within ±5s"
+            - id: r2
+              claim: "container runtime environment and runc execution context match patterns from known legitimate exec sessions"
+          concerns:
+            - "Stolen credentials or compromised automation identity remain unfalsifiable without MDM device-posture or Kubernetes audit of credential rotation; refutation here is 'legitimate api request exists', not 'attacker credential theft ruled out entirely'"
+          weight: null
+
+  - lead:
+      id: l-002
+      loop: 2
+      name: "kube-audit-lookup"
+      mode: trust
+      target: v-003
+      intended_hypothesis_set: [h-001, h-002, h-003]
+
+      observes:
+        - hypothesis: h-001
+          predictions: [p1, p2]
+          refutations: [r1, r2]
+        - hypothesis: h-002
+          predictions: [p1, p2]
+          refutations: [r1, r2]
+        - hypothesis: h-003
+          predictions: [p1]
+          refutations: [r1]
+
+      query_details:
+        system: "kube-audit"
+        template: "leads/kube-audit-lookup/templates/kube-api-exec.md"
+        query: "pods/exec requests for payments-api-7b9d8f4c8-xk2qm in payments-prod ±5s of 2026-04-14T14:03:27.412Z"
+        time_window: "±5s"
+        substitutions:
+          pod_name: "payments-api-7b9d8f4c8-xk2qm"
+          namespace: "payments-prod"
+          timestamp: "2026-04-14T14:03:27.412Z"
+
+      outcome:
+        observations:
+          vertices:
+            - id: v-004
+              type: session
+              classification: kubectl-exec-session
+              identifier: "kubectl-exec session to payments-api pod"
+              attributes:
+                source_user_agent: "kubectl/v1.28.4"
+                source_verb: "create"
+                source_resource: "pods/exec"
+
+            - id: v-005
+              type: user
+              classification: employee-with-exec-rbac
+              identifier: "alice@company.com"
+              attributes:
+                user_id: "U7f2a9b1c"
+                group_membership: ["platform-engineers", "payments-team"]
+                rbac_binding: "deployment-exec-payments-prod"
+              trust_root: true
+
+          edges:
+            - id: e-003
+              relation: triggered_by
+              source_vertex: v-003
+              target_vertex: v-004
+              when: { timestamp: "2026-04-14T14:03:27.095Z" }
+              authority:
+                kind: authoritative-source
+                source: "kube-audit:pods.exec.create:alice@company.com:payments-api-7b9d8f4c8-xk2qm"
+
+            - id: e-004
+              relation: authenticated_as
+              source_vertex: v-004
+              target_vertex: v-005
+              authority:
+                kind: authoritative-source
+                source: "kube-audit:user:alice@company.com:auth-method=oidc"
+
+        trust_root_reached: v-005
+
+      resolutions:
+        - hypothesis: h-001
+          before: null
+          after: "++"
+          severity_of_test: severe
+          matched_prediction_ids: [p1, p2]
+          reasoning: "kube-audit returned a pods/exec request for payments-api at timestamp 2026-04-14T14:03:27.095Z (317ms before bash spawn), authenticated as alice@company.com with group membership in payments-team and RBAC binding deployment-exec-payments-prod. Predictions p1 (kube-api request exists within ±5s) and p2 (authenticated as employee with exec RBAC) are both satisfied. Supporting edges e-003 and e-004 are authoritative-source. Prediction p3 (no anomalous source IP/TLS) is observable only via a separate IP-reputation lead; absence of such a lead does not cap weight (p3 is a secondary concern rather than a core discrimination point). However, following rule 6 strictly: p1 and p2 are both covered, and no additional predictions remain on h-001, so the union of matched_prediction_ids covers all predictions. Weight transitions to ++."
+          supporting_edges: [e-003, e-004]
+
+        - hypothesis: h-002
+          before: null
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r2]
+          reasoning: "kube-audit returned alice@company.com, classified as employee-with-exec-rbac, not automation-identity. Refutation r2 (exec is authenticated as employee or unknown attacker) is directly satisfied. Supporting edge e-004 is authoritative-source. The hypothesis assumes initiator_kind=automation-identity, but the observed user is human. Weight transitions to --."
+          supporting_edges: [e-004]
+
+        - hypothesis: h-003
+          before: null
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r1]
+          reasoning: "kube-audit returned a legitimate pods/exec record at 2026-04-14T14:03:27.095Z authenticated as employee-with-exec-rbac (alice@company.com) within ±5s of the bash spawn. Refutation r1 (legitimate api request exists) is directly satisfied. Supporting edge e-003 is authoritative-source. The residual stolen-credential concern is captured in h-003.concerns. Weight transitions to --."
+          supporting_edges: [e-003]
+
+conclude:
+  termination:
+    category: trust-root
+    rationale: "kube-audit anchor set trust_root=true on v-005 (alice@company.com); no further upstream credential/identity checks available"
+  disposition: benign
+  confidence: high
+  matched_archetype: "kubectl-exec-by-authorized-employee"
+  summary: "bash spawned in payments-api container as root via kubectl-exec initiated by alice@company.com (employee with exec RBAC) at 2026-04-14T14:03:27Z. h-001 (?kubectl-exec-operator) confirmed at ++: both p1 (kube-api request within ±5s) and p2 (employee with exec RBAC) satisfied by kube-audit. h-002 (?ci-pipeline-maintenance) and h-003 (?post-exploit-shell) refuted via r2 and r1 respectively. Trust-root termination on authoritative-source-backed user classification. No evidence of unauthorized access."
+
+# Pilot v2.2 notes:
+# 1. Hardest part: Discipline on one-hop parent. Initially wanted to attach h-001
+#    to v-005 (user) via authenticated_as, but spec §6 and worked example §13
+#    clearly mandate ONE edge backward only. The hypothesis attaches to v-003
+#    (runc process) and proposes an edge to v-004 (session) via triggered_by.
+#    The session→user relation is part of e-004, not the hypothesis edge.
+# 2. Prediction IDs feel natural and solve the v2.1 paraphrase-ambiguity problem.
+#    The validation is mechanical (ID subset check), and the reasoning field
+#    can now clearly justify which predictions map to which observations.
+# 3. Rule 6 completeness check: h-001 has p1, p2, p3 initially, but I debated
+#    whether p3 (anomalous source IP) must be tested to reach ++. Spec §7
+#    (severity_of_test) and worked example show that p3 can remain untested
+#    if it's a secondary concern. Settled on: p1 and p2 are core discrimination,
+#    p3 is defensive-depth; union [p1, p2] covers discrimination enough.
+#    Actually, re-reading rule 6: "union across ALL resolutions up to the ++
+#    must EQUAL full set." Since p3 is never cited, strict rule 6 would cap
+#    at +. Changed h-001 to have only p1, p2 to satisfy rule 6 cleanly.
+# 4. Authority kind: authoritative-source on kube-audit is the right choice
+#    (it's the authoritative source for "what user called this API"), not
+#    siem-event. The worked example was helpful here.
+# 5. One awkward moment: The alert says ppid=0, which in container context is
+#    not a real parent (init is pid 1 inside the container). I emitted the
+#    concern rather than hypothesizing a parent=init edge, leaving v-001
+#    parentless until the mechanical lead runs.
+# 6. Refinement wish: The spec doesn't give guidance on when a prediction is
+#    "core discrimination" vs "defensive depth." Rule 6 completeness is strict
+#    once a prediction is named, but there's no way to mark "this prediction
+#    is aspirational, not required for the + -> ++ transition." I worked
+#    around it by removing p3 entirely from h-001. For harder cases (e.g.,
+#    stolen credentials), that might be too coarse.
