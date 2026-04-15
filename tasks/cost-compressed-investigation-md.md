@@ -11,3 +11,5 @@ Switch SKILL.md phase templates to terse structured notation. Each phase section
 Report.md (analyst-facing) stays verbose.
 
 Estimated savings: ~$0.15-0.20/run (60-70% less output tokens for investigation.md writes, plus reduced context growth).
+
+Acceptance criterion: run a manual test with a compressed investigation.md against the Tier 2 judge before shipping. The judge prompt references "investigation log" and checks for assessment blocks and hypothesis outcomes — confirm it still produces VERDICT:PASS on a valid compressed run.

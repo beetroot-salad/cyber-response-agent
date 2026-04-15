@@ -1,7 +1,7 @@
 ---
 title: Per-signature ticket-context demote list (high-baseline noise rule families)
 status: backlog
-groups: dns, knowledge
+groups: knowledge, ticket-context
 ---
 
 Signatures should declare a `ticket_context_demote: [rule_id, ...]` field in the playbook frontmatter, listing rule families that are known high-baseline noise for this signature's investigations (e.g. 100110 playbook demotes 510/550/553/554/533).

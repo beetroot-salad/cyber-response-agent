@@ -1,7 +1,7 @@
 ---
 title: Opus consultant subagent (deep-reason, Sonnet escalates for hard calls)
 status: todo
-groups: sonnet-migration, cost
+groups: cost, phase-2
 ---
 
 Once Sonnet-main is stable, introduce a deep-reason subagent pinned to Opus that the Sonnet main agent calls at specific high-stakes decision points.

@@ -1,5 +1,5 @@
 ---
-title: Precedent auto-extraction pipeline from ticketing system
+title: Archetype auto-extraction pipeline from ticketing system
 status: backlog
 groups: archetype, knowledge, post-mortem
 ---
