@@ -24,6 +24,7 @@ The remaining common patterns are listed as starter hypotheses.
 | `syscheck.changed_attributes` | Which attributes changed: size, perm, owner, hash, mtime |
 | `syscheck.diff` | Content diff — only present when `report_changes=yes` in the agent config |
 | `syscheck.uid_after` / `syscheck.gname_after` | New owner and group after the change |
+| `syscheck.inode_before` / `syscheck.inode_after` | Inode number before and after; equal values indicate no real change (database rebuild artifact) |
 
 When `syscheck.diff` is **absent** for a sensitive file, the agent
 cannot characterize the change content and should escalate — do not
@@ -113,6 +114,11 @@ correlate with prior alerts on the same host.
   changes.** A new setuid bit is far more concerning than a hash
   change with unchanged permissions. The `change-attributes` lead
   should call out permission and ownership deltas explicitly.
+- **Inode-only changes with `inode_before == inode_after` are a
+  database rebuild artifact**, not a real modification. This pattern
+  occurs when Wazuh reinitialises its syscheck database after a
+  server restart (rule 502) and should not be treated as a file
+  change event.
 
 ## Scope
 
