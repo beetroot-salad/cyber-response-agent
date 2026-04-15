@@ -8,3 +8,5 @@ common/leads/ is scaffolded but lead definitions are sparse. Priority order base
 1. recent-alert-correlation — most-used, drives FIM/rootcheck volume-vs-baseline failure mode
 2. network-analysis — no templates dir at all yet
 3. authentication-history — already has a Wazuh template, needs a baseline query alongside it
+
+Each lead also needs baseline content: shift-query patterns and σ-framed interpretation guidance (the `_template/definition.md` baseline: frontmatter field and ## Baseline section are in place; existing leads still ship without this content).

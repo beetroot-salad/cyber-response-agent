@@ -1,6 +1,6 @@
 ---
 title: Flip main agent to Sonnet
-status: todo
+status: done
 groups: sonnet-migration, cost
 ---
 

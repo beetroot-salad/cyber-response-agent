@@ -1,7 +1,7 @@
 ---
 title: State machine transition verification criteria (7 transitions)
 status: todo
-groups: reliability, sonnet-migration
+groups: reliability, state
 ---
 
 Add actionable verification gates to each transition so write_state.py can reject transitions where the agent hasn't done meaningful work. Currently enforces legal transitions but not quality of work within a phase.
