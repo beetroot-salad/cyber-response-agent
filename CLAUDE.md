@@ -216,6 +216,7 @@ Multi-container stack (`.devcontainer/docker-compose.yml`):
 | **wazuh.manager** | SIEM alert correlation |
 | **wazuh.indexer** | Elasticsearch for events |
 | **wazuh.dashboard** | Web UI |
+| **ticket-server** | Stateful FastAPI mock ticketing API (playground only) |
 
 ### Managing Containers
 
