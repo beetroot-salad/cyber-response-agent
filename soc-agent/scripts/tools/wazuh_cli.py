@@ -36,7 +36,7 @@ try:
 except ImportError:
     print(
         "error: opensearch-py is required for Wazuh indexer queries\n"
-        "Run: scripts/tools/setup.sh",
+        "Run: uv sync --extra wazuh  (from soc-agent/)",
         file=sys.stderr,
     )
     sys.exit(2)
