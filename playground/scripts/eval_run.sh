@@ -149,7 +149,7 @@ echo
 # stdbuf to keep the tee buffer flushing in real time
 # Main-agent model — override via SOC_EVAL_MODEL env var (e.g. SOC_EVAL_MODEL=sonnet)
 stdbuf -oL -eL claude \
-    --model "${SOC_EVAL_MODEL:-opus}" \
+    --model "${SOC_EVAL_MODEL:-sonnet}" \
     --allowedTools \
         "Bash(cd *)" \
         "Bash(ls *)" \
