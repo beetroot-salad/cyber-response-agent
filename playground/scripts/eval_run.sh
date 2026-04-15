@@ -113,12 +113,15 @@ echo "    alert: [$ALERT_TS] $ALERT_DESC"
 # single quotes — see PROMPT below. We strip insignificant whitespace via
 # json.dumps separators to keep the prompt smaller; internal spaces inside
 # string values still survive (and require the single-quote wrap).
-ALERT_JSON=$(python3 -c "import json,sys; print(json.dumps(json.load(open('$EVAL_DIR/alert.json')), separators=(',',':')))")
-if printf '%s' "$ALERT_JSON" | grep -q "'"; then
-    echo "error: alert JSON contains a literal single-quote, which would break the single-quoted prompt arg" >&2
-    echo "       (consider switching to base64 encoding if this becomes recurring)" >&2
-    exit 1
-fi
+# full_log is dropped: it duplicates the structured syscheck/data fields and
+# always contains literal single-quotes in FIM events (e.g. 'Old md5sum was: ...')
+# which would break the single-quoted shell argument.
+ALERT_JSON=$(python3 -c "
+import json, sys
+a = json.load(open('$EVAL_DIR/alert.json'))
+a.pop('full_log', None)
+print(json.dumps(a, separators=(',',':')))
+")
 
 # ---------------------------------------------------------------------------
 # Invoke claude in isolated mode with transcript capture

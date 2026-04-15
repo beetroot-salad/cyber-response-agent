@@ -14,6 +14,18 @@ A knowledge edit is not just "change some text." It's changing the content the i
 
 The design rationale is in `${CLAUDE_SKILL_DIR}/design.md`. Read it when you need to ground a decision about scope or validation philosophy.
 
+## Common operation modes
+
+Most invocations fall into one of three shapes. Treat these as scope anchors, not a state machine:
+
+| Mode | What changes | Gate |
+|---|---|---|
+| **New signature** | `context.md`, `playbook.md`, `config/signatures/{id}/permissions.yaml` | No hard gate; SIEM data improves quality but isn't required |
+| **Add archetype** | New `archetypes/{name}/README.md`; playbook archetype table | **Requires a run_dir** — see ground rules. Do not derive archetypes from domain knowledge or hypotheses alone. |
+| **Tweak** | Targeted edit to context, playbook, or archetype based on a case or user feedback | Scope tightly; one logical unit per invocation |
+
+**One logical unit per invocation.** Don't one-shot five archetypes. Each archetype is a separate unit; do one, validate, stop. The same applies to context + playbook: write them together (they're a pair), then stop.
+
 ## Workflow
 
 ### Scope and understand
@@ -22,13 +34,13 @@ Figure out what the user wants, what files are involved, and what else the chang
 
 - Use Glob and Grep. Don't guess paths from memory.
 - If you don't know where a topic lives or how a runtime rule works, invoke `/handbook`. It's the source of truth for KB layout, the two-leg resolution model, the report judge, and the investigation loop. Don't re-derive that here.
+- **Read before writing.** For every file you plan to edit, read it in full before drafting any change. Understand what's already there — what it claims, what it omits, what it links to. Skipping this step is the single most common source of contradictions and missed ripple effects.
+- **Decide upfront whether a plan is warranted.** Multi-file edits, destructive operations, or first-time signature onboarding want an explicit written plan before acting. A single-sentence tweak does not. Use plan mode for anything where a misstep would require significant re-work.
 - **Check consolidation first.** Before creating a new file, ask whether the content belongs in an existing one — a sibling signature's archetype, a common lesson, a lead definition that's almost-but-not-quite what you need. New files are the last resort, not the default.
 - **Check KB boundaries.** Portable methodology → `common-investigation/`. Org-specific deployment knowledge → `environment/`. Per-signature content → `signatures/{id}/`. Environment details must not leak into `common-investigation/`; signature-specific logic must not leak into `environment/`.
 - **Query templates live under leads.** Runtime SIEM queries are stored as per-vendor templates at `common-investigation/leads/{lead}/templates/{vendor}.md`, discovered via frontmatter `tags`. Editing or adding a template means editing its tags — see the tag-vocabulary check and the tag-search probe under Validation.
-- **Find ripple files.** For each file you'll touch, Grep for other files that reference what you're changing — archetypes that name the hypothesis you're renaming, playbooks that list a lead you're removing, anchor files referenced by `required_anchors`, `permissions.yaml` entries tied to a `context.md` severity.
+- **Find ripple files.** For each file you'll touch, Grep for other files that reference what you're changing — archetypes that name the hypothesis you're renaming, playbooks that list a lead you're removing, anchor files referenced by `required_anchors`, `permissions.yaml` entries tied to a `context.md` severity. **When adding an archetype, the playbook's archetype table is always a ripple file.**
 - **Capture pre-edit state** per target file: `git diff HEAD -- <file>`. The reconstruction probe compares against this.
-
-Decide whether an explicit plan is warranted. Non-trivial scope, multi-file edits, destructive operations, or first-time signature onboarding all want a written plan before you act. A single-sentence tweak to a playbook does not. Err on the side of fewer steps for small work — this skill is not a state machine.
 
 ### Read context
 
@@ -37,6 +49,11 @@ Read the files you'll edit, the adjacent files that shape them (sibling signatur
 ### Edit
 
 Write tight. Avoid verbose phrasing, avoid padding, avoid restating what the reader already knows. Every claim should carry weight; every constraint should be load-bearing. Tight knowledge is better knowledge — it gets read, the load-bearing words stand out, and the agent at runtime wastes less context on hedging.
+
+Specific traps to avoid in archetype READMEs:
+- **Don't repeat routing logic.** If a precedence rule (e.g., "sensitive-file-tampering takes precedence by path") applies to multiple archetypes, state it once in the playbook — not in every archetype that might overlap.
+- **Don't re-describe trust anchor confirmation.** Each archetype's Trust Anchors section should state the question the anchor answers and the job-type constraint for this archetype. It should not re-document the anchor's confirmation protocol — that lives in `environment/operations/{anchor}.md`.
+- **Use absolute paths.** FIM alerts surface absolute paths. Tilde notation (`~/.bashrc`) won't match a real alert path and misleads the agent.
 
 ### Validate
 
@@ -89,7 +106,7 @@ Spawn Haiku subagents via Task. Each probe reads one or more files and returns s
 | `reconstruction.md` | Information loss — can a reader rebuild the underlying artifact (SIEM query, alert shape, archetype story, query template) from the edited file? | Always |
 | `comprehension.md` | Silent prescriptive weakening, internal contradiction, typo'd field names | Always |
 | `coherence.md` | Cross-file drift — do the files that should agree on a shared topic still say the same things? | Multi-file edits |
-| `replay.md` | Runtime behavior drift — does the edited playbook lead to the same 2-step investigation path for historical alerts? | Destructive edits; signature creation/rewrite |
+| `replay.md` | Runtime behavior drift — does the edited playbook lead to the same 2-step investigation path for historical alerts? | Destructive edits; signature creation/rewrite; **new archetype** (verifies playbook table was updated and new archetype is reachable from the playbook) |
 | `tag-search.md` | Tag discoverability — would a reader in the middle of an investigation naturally reach for this template using the tags you set? | Touched or new lead query templates |
 
 Total probe cap per edit: **10**. Sanity boundary, not a per-edit target. Going over 10 means you're stuck in a re-probing loop — surface the problem to the user rather than loop.
@@ -110,6 +127,7 @@ If all three come back clean, accept the edit. If any surfaces an unresolved con
 
 ## Ground rules
 
+- **Archetypes require a run_dir.** Do not create archetypes from domain knowledge, playbook hypotheses, or intuition. An archetype that didn't emerge from at least one real investigation run is speculative: it has no grounding, its `required_anchors` are untested, and it cannot be used to resolve alerts — it only adds context noise. If asked to create an archetype without a run_dir or investigation artifact, refuse and explain why.
 - **Every non-trivial claim grounded.** Each substantive claim references a concrete source: a past ticket, a handbook rule, an existing sibling pattern, or user-provided material. If you can't cite it, flag the gap rather than invent grounding.
 - **No fabricating history.** If a task calls for historical data you don't have (archetypes based on recurring patterns, precedents based on real tickets), say so and mark sections TODO. Inventing history is the one failure mode the safety net can't catch.
 - **Fail loud on ambiguity.** If a field location, intent, or rule is unclear, surface it rather than guess. Same rule as the rest of the plugin.

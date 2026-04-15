@@ -7,6 +7,7 @@ Run through before calling an edit done. Quick pre-flight, not a replacement for
 - [ ] Every file I said I'd change actually changed?
 - [ ] Every ripple file I identified is either touched or explicitly deferred with a stated reason?
 - [ ] No files left in a half-edited state?
+- [ ] If I created or renamed an archetype: did the playbook's archetype table get updated?
 
 ## Consolidation
 
