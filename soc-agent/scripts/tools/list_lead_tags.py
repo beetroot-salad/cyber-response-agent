@@ -32,6 +32,7 @@ DEFAULT_KB_ROOT = REPO_ROOT / "knowledge"
 
 
 def parse_frontmatter(path: Path) -> dict:
+    import yaml
     text = path.read_text()
     if not text.startswith("---\n"):
         return {}
@@ -40,30 +41,9 @@ def parse_frontmatter(path: Path) -> dict:
         return {}
     block = text[4:end]
     try:
-        import yaml  # type: ignore
         return yaml.safe_load(block) or {}
-    except ImportError:
-        return _parse_frontmatter_fallback(block)
-
-
-def _parse_frontmatter_fallback(block: str) -> dict:
-    """Minimal YAML parser for the subset used in template frontmatter.
-
-    Handles flat scalar keys and one-line flow-style lists like `tags: [a, b]`.
-    """
-    out: dict = {}
-    for line in block.splitlines():
-        if ":" not in line or line.startswith(" "):
-            continue
-        key, _, value = line.partition(":")
-        key = key.strip()
-        value = value.strip()
-        if value.startswith("[") and value.endswith("]"):
-            inner = value[1:-1].strip()
-            out[key] = [v.strip() for v in inner.split(",") if v.strip()] if inner else []
-        else:
-            out[key] = value
-    return out
+    except yaml.YAMLError:
+        return {}
 
 
 def collect_templates(kb_root: Path) -> list[Path]:

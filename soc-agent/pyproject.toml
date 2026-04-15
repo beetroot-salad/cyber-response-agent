@@ -3,7 +3,9 @@ name = "soc-agent"
 version = "0.1.0"
 description = "Hypothesis-driven security alert triage agent"
 requires-python = ">=3.11"
-dependencies = []  # Core is stdlib-only — by design
+dependencies = [
+    "pyyaml>=6.0",
+]
 
 [project.optional-dependencies]
 # Investigation-language query tool (scripts/invlang/)

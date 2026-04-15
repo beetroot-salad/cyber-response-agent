@@ -6,8 +6,6 @@ soc-agent run with `--output-format stream-json --include-hook-events`) and
 prints a structured postmortem covering wall clock, tool call breakdown,
 SIEM queries, subagent spawns, hook events, denials, and final disposition.
 
-The script is stdlib-only — runs anywhere a recent python3 is available.
-
 Usage:
     analyze_run.py <eval_dir>            # full report
     analyze_run.py <eval_dir> --terse    # high-level metrics only
@@ -27,6 +25,8 @@ import sys
 from collections import Counter, OrderedDict
 from datetime import datetime
 from pathlib import Path
+
+import yaml
 
 DENIED_PHRASES = (
     "requires approval",
@@ -429,14 +429,17 @@ def section_disposition(run_dir: Path | None) -> None:
         print()
         return
     text = report.read_text()
-    # Extract YAML frontmatter
+    # Extract and parse YAML frontmatter
     if text.startswith("---"):
         end = text.find("\n---", 3)
         if end != -1:
-            for line in text[3:end].splitlines():
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    print(f"  {line}")
+            block = text[3:end]
+            try:
+                fm = yaml.safe_load(block) or {}
+                for k, v in fm.items():
+                    print(f"  {k}: {v}")
+            except yaml.YAMLError:
+                pass
     print()
 
 
