@@ -1,0 +1,737 @@
+# v2.3 companion — A.4 S3 list burst from shared service role
+# Alert: CT-2026-04-14-003847 | company-customer-exports ListObjectsV2 burst
+# Translated from walk-a4.yaml under v2.3 spec.
+# Schema: spec-condensed-v2.3.md
+#
+# Translation notes (compact):
+# - Action-as-vertex: v-004 is a new `command` vertex for the S3 list burst.
+#   The burst's aggregate shape (17 calls over 172s) lives on v-004's attributes
+#   because the SIEM's alert fires on the burst itself as a single detection
+#   event; modeling one command per call would explode the graph without
+#   discrimination value.
+# - Type vocab: host → endpoint, remote-endpoint → storage, user → identity.
+#   anchor-source → removed (v2.2 v-004, v-009, v-010, v-011 all disappear).
+# - All four anchor leads (l-001, l-004, l-005, l-008) now use
+#   outcome.trust_anchor_result with the 5-field writer block including as_of.
+#   l-005 (ec2-instance-integrity) is the load-bearing partial-authority case.
+# - Termination: severity-ceiling + ceiling_test kind=out-of-band-human-contact.
+# - canonical: true removed from all hypotheses (v2.3 change #1).
+# - Hypothesis IDs stay flat. v2.3 §13's worked example refines A.4-like cases
+#   into lean → hierarchical children; I preserve this walk's original flat
+#   hypothesis set for fidelity. See design discussion at end of companion.
+# - §10 widening tension: hypotheses h-001/h-002/h-003 all use triggered_by
+#   from a session source, which §10 narrowly declares as `process → process|session`.
+#   §13's worked example uses the same `session → command` shape, so we treat
+#   §10 as needing a widening pass and follow §13's reference.
+
+# ---------------------------------------------------------------------------
+# PROLOGUE — CONTEXTUALIZE
+# ---------------------------------------------------------------------------
+
+prologue:
+  vertices:
+    - id: v-001
+      type: session
+      classification: iam-role-session
+      # v2.3 §9 adds iam-role-session as a first-class session classification —
+      # no more {type}:{slug} provisional.
+      identifier: "AssumedRole/data-pipeline-svc (session i-0a1b2c3d @2026-04-14T01:58:22Z)"
+      attributes:
+        role_arn: "arn:aws:iam::123456789012:role/data-pipeline-svc"
+        session_name: "i-0a1b2c3d"
+        session_start: "2026-04-14T01:58:22Z"
+        source_ip: "10.42.17.88"
+        mfa_authenticated: false
+        role_sharing_note: "~30 batch jobs share this role via instance-profile"
+      concerns:
+        - "EC2 instance-profile sessions carry no MFA by design; mfa_authenticated=false is expected and carries no discriminating signal"
+        - "iam-session-origination-chain lead is attribution-opaque on EC2 instance profiles — the IAM chain terminates at the instance profile attachment and does not reveal the human identity at the IAM layer"
+      citations: ["cloudtrail:event=CT-2026-04-14-003847"]
+
+    - id: v-002
+      type: endpoint
+      classification: production-server
+      identifier: "i-0a1b2c3d (us-east-1b)"
+      attributes:
+        kind: ec2-instance
+        instance_type: "c5.2xlarge"
+        instance_id: "i-0a1b2c3d"
+        private_ip: "10.42.17.88"
+        availability_zone: "us-east-1b"
+        iam_instance_profile: "arn:aws:iam::123456789012:instance-profile/data-pipeline-svc"
+      citations: ["cloudtrail:event=CT-2026-04-14-003847:ec2_context"]
+
+    - id: v-003
+      type: storage
+      classification: customer-pii-store
+      identifier: "s3://company-customer-exports"
+      attributes:
+        kind: object-store
+        provider: aws-s3
+        bucket: "company-customer-exports"
+        bucket_classification: "customer-pii"
+        region: "us-east-1"
+        account_id: "123456789012"
+        atypical_access_note: "outside role data-pipeline-svc's documented access pattern (typical_buckets: company-internal-reports, company-etl-staging)"
+      citations: ["cloudtrail:event=CT-2026-04-14-003847:resource"]
+
+    - id: v-004
+      type: command
+      classification: s3-list-call
+      # Action-as-vertex: the CloudTrail alert fires on a burst of 17
+      # ListObjectsV2 calls as a single detection event. The burst is modeled
+      # as ONE command vertex whose attributes carry the aggregate shape; the
+      # alert's native unit is "this burst happened", not "these 17 individual
+      # API calls happened".
+      identifier: "ListObjectsV2 burst (17 calls, 02:14:51–02:17:43Z) by data-pipeline-svc → company-customer-exports"
+      attributes:
+        api_name: "s3:ListObjectsV2"
+        event_count: 17
+        window_start: "2026-04-14T02:14:51Z"
+        window_end: "2026-04-14T02:17:43Z"
+        window_duration_seconds: 172
+        bucket_name: "company-customer-exports"
+        prefix: ""
+        max_keys: 1000
+        user_agent: "aws-sdk-python/1.34.6 Python/3.11.8 Linux/5.15.0-1051-aws"
+        source_ip: "10.42.17.88"
+        status: "succeeded"
+      concerns:
+        - "no GetObject calls accompanied the list burst — this is a pure list scan, suggesting catalog-building or automated discovery rather than data retrieval"
+      citations: ["cloudtrail:event=CT-2026-04-14-003847"]
+
+  edges:
+    - id: e-001
+      relation: executed_in
+      source_vertex: v-004
+      target_vertex: v-001
+      when:
+        start: "2026-04-14T02:14:51Z"
+        end: "2026-04-14T02:17:43Z"
+      authority:
+        kind: authoritative-source
+        source: "cloudtrail:event=CT-2026-04-14-003847:userIdentity.sessionContext"
+
+    - id: e-002
+      relation: targeted
+      source_vertex: v-004
+      target_vertex: v-003
+      when:
+        start: "2026-04-14T02:14:51Z"
+        end: "2026-04-14T02:17:43Z"
+      authority:
+        kind: authoritative-source
+        source: "cloudtrail:event=CT-2026-04-14-003847:resources"
+
+    - id: e-003
+      relation: initiated_by
+      source_vertex: v-001
+      target_vertex: v-002
+      when: { timestamp: "2026-04-14T01:58:22Z" }
+      authority:
+        kind: inferred-structural
+        # source_ip on v-001 matches v-002's private_ip; this is a structural
+        # inference from co-located IP, not a first-class CloudTrail attestation.
+        # If h-004 (stolen credential used externally) holds, this inference
+        # is wrong — the same edge would be refuted later.
+        source: "cloudtrail:event=CT-2026-04-14-003847:sourceIPAddress=10.42.17.88 matches v-002.private_ip"
+
+# ---------------------------------------------------------------------------
+# HYPOTHESIZE
+# ---------------------------------------------------------------------------
+
+hypothesize:
+  hypotheses:
+    - id: h-001
+      name: "?scheduled-batch-run"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: triggered_by
+        parent_vertex:
+          type: command
+          classification: scheduled-job-invocation
+          attributes:
+            mechanism: "a registered batch job in the job-scheduler assumed data-pipeline-svc and issued the S3 list burst as part of a documented ETL step on customer-pii"
+      predictions:
+        - id: p1
+          claim: "a registered nightly batch job consuming data-pipeline-svc is scheduled to run in the 01:00–05:00 UTC window and is documented to access company-customer-exports"
+        - id: p2
+          claim: "the S3 list calls use a prefix or key pattern consistent with a documented ETL step for this bucket"
+        - id: p3
+          claim: "no concurrent SSH session from a human operator is present on i-0a1b2c3d at the time of the list burst"
+      refutation_shape:
+        - id: r1
+          claim: "the job scheduler has no registered job for data-pipeline-svc that accesses company-customer-exports"
+        - id: r2
+          claim: "an interactive SSH session from a named operator is active on i-0a1b2c3d during the list burst window"
+
+    - id: h-002
+      name: "?ad-hoc-operator-run"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: triggered_by
+        parent_vertex:
+          type: session
+          classification: ssh-session
+          attributes:
+            mechanism: "a named employee on a compliant MFA-verified device SSH'd into i-0a1b2c3d and manually invoked aws-cli commands that assumed the instance-profile role and issued the S3 list burst"
+            source_user_classification: employee-with-exec-rbac
+      predictions:
+        - id: p1
+          claim: "an interactive SSH session authenticated as a named employee is active on i-0a1b2c3d during the list burst window"
+        - id: p2
+          claim: "the operator has a documented change ticket or team communication justifying access to company-customer-exports at this time"
+        - id: p3
+          claim: "the S3 list calls are attributable to commands run in the operator's bash session (visible in process tree)"
+      refutation_shape:
+        - id: r1
+          claim: "no SSH session from a named employee is present on i-0a1b2c3d during the list burst"
+        - id: r2
+          claim: "out-of-band confirmation from the attributed operator that no manual session occurred on i-0a1b2c3d at this time"
+      concerns:
+        - "human presence confirmed via SSH session is necessary but not sufficient; the authorization evidence (p2) requires change-management or communication verification that no automated anchor can directly provide"
+        - "r2 is an out-of-band refutation shape — confirmation requires direct human contact, outside the agent's tool envelope. The ceiling mechanism is r2's unreachability."
+
+    - id: h-003
+      name: "?compromised-instance"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: triggered_by
+        parent_vertex:
+          type: process
+          classification: unclassified-process
+          attributes:
+            mechanism: "an attacker process running on the compromised EC2 instance used the instance-profile credential locally to assume the role and issue the S3 list burst; the burst is attacker reconnaissance on a PII bucket"
+            attacker_controlled: true
+      predictions:
+        - id: p1
+          claim: "anomalous processes (not attributable to running batch jobs or a named operator's SSH session process tree) are present on i-0a1b2c3d at the time of the burst"
+        - id: p2
+          claim: "ec2-instance-integrity returns a finding indicating unauthorized modification or active attacker tooling on i-0a1b2c3d"
+      refutation_shape:
+        - id: r1
+          claim: "ec2-instance-integrity returns clean on i-0a1b2c3d AND the list calls are fully attributable to a named operator's process tree"
+      concerns:
+        - "ec2-instance-integrity is partial-authority for the full 'is this instance compromised at any layer' question — it covers disk/file integrity and IMDSv2 but not in-memory implants or kernel rootkits. A clean return caps this hypothesis at - not --."
+        - "r1 is a conjunction; in v2.3 the validator only checks ID existence, so the AND is semantic, not structural. Partial conjunction satisfaction still caps at -."
+
+    - id: h-004
+      name: "?compromised-iam-credential"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: initiated_by
+        parent_vertex:
+          type: endpoint
+          classification: external-endpoint
+          attributes:
+            mechanism: "the instance-profile credential was extracted from i-0a1b2c3d and is being used from an external (attacker-controlled) host, making the role session appear to originate at v-002 while the actual caller is elsewhere"
+            external_attacker_infrastructure: true
+      predictions:
+        - id: p1
+          claim: "the source IP for the S3 API calls (10.42.17.88) is NOT the registered private IP of i-0a1b2c3d, indicating the credential is being used from an external host"
+        - id: p2
+          claim: "concurrent CloudTrail activity from the same role session appears from multiple distinct source IPs"
+        - id: p3
+          claim: "the instance i-0a1b2c3d is reachable and healthy but shows no SSH session or process activity correlated with the list burst timing"
+      refutation_shape:
+        - id: r1
+          claim: "all S3 API calls originate from i-0a1b2c3d's registered private IP AND concurrent SSH session activity on the instance is correlated with the burst timing"
+      concerns:
+        - "source IP verification (p1) is immediately testable from CloudTrail; if the IP matches, this hypothesis weakens but is not refuted (instance could be the pivot point)"
+        - "full refutation requires out-of-band confirmation that the credential was not exported — no anchor can directly observe this"
+
+# ---------------------------------------------------------------------------
+# GATHER
+# ---------------------------------------------------------------------------
+
+gather:
+  - lead:
+      id: l-001
+      loop: 1
+      name: "anchor-lookup(job-scheduler)"
+      mode: trust
+      target: v-001
+      intended_hypothesis_set: [h-001]
+      observes:
+        - hypothesis: h-001
+          predictions: [p1, p2]
+          refutations: [r1]
+      query_details:
+        system: job-scheduler
+        template: "leads/anchor-lookup/templates/job-scheduler.md"
+        query: "registered jobs for role data-pipeline-svc accessing bucket company-customer-exports, active in nightly window 01:00-05:00 UTC"
+        time_window: "nightly batch window 01:00–05:00 UTC 2026-04-14"
+        substitutions:
+          role: "data-pipeline-svc"
+          bucket: "company-customer-exports"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+        trust_anchor_result:
+          anchor_id: job-scheduler
+          kind: job-scheduler
+          result: refuted
+          as_of: "2026-04-14T02:18:00Z"   # current-state anchor: static registry lookup at query time
+          authority_for_question: full
+          # Full authority for "is there a registered job?" — the scheduler's
+          # registry is the single source of truth for this specific question.
+      concerns:
+        - "job scheduler registry may not capture ad-hoc scripts run directly on the instance without scheduler registration — absence of a registered job does not rule out cron or manual invocation"
+      resolutions:
+        - hypothesis: h-001
+          before: null
+          after: "-"
+          severity_of_test: severe
+          matched_refutation_ids: [r1]
+          reasoning: |
+            job-scheduler returned no registered job for role=data-pipeline-svc
+            accessing bucket=company-customer-exports in any window. r1 (no
+            registered job) directly satisfied. p2 (documented ETL prefix pattern)
+            is not testable without a job to compare against. Weight transitions
+            to -; not -- because unregistered cron/ad-hoc invocations remain
+            possible and the scheduler registry is not exhaustive for them.
+          supporting_edges: [e-001, e-002]
+
+  - lead:
+      id: l-002
+      loop: 1
+      name: "scope(instance, concurrent-ssh)"
+      mode: scope
+      target: v-002
+      observes:
+        - hypothesis: h-001
+          refutations: [r2]
+        - hypothesis: h-002
+          predictions: [p1]
+      query_details:
+        system: cloudwatch-logs
+        template: "leads/scope/templates/ssh-session.md"
+        query: "SSH sessions on i-0a1b2c3d active during 2026-04-14T02:14:00Z to 02:18:00Z"
+        time_window: "2026-04-14T02:10:00Z – 02:20:00Z"
+        substitutions:
+          instance_id: "i-0a1b2c3d"
+      outcome:
+        observations:
+          vertices:
+            - id: v-005
+              type: session
+              classification: ssh-session
+              identifier: "ssh-session pts/0 on i-0a1b2c3d"
+              attributes:
+                authenticated_user: "marcus@company.com"
+                session_start: "2026-04-14T02:08:33Z"
+                session_end: null
+                source_ip: "10.20.5.147"
+                tty: "pts/0"
+              concerns:
+                - "authenticated_user is an attribute at this stage; elevating to an identity vertex requires a subsequent trust lead (l-004 vpn-mfa). Mechanical-leads-stay-within-data-source rule (§12 rule 11)."
+          edges:
+            - id: e-004
+              relation: initiated_by
+              source_vertex: v-005
+              target_vertex: v-002
+              when: { timestamp: "2026-04-14T02:08:33Z" }
+              authority:
+                kind: runtime-audit
+                source: "cloudwatch-logs:sshd:auth:i-0a1b2c3d:2026-04-14T02:08:33Z"
+      resolutions:
+        - hypothesis: h-001
+          before: "-"
+          after: "--"
+          severity_of_test: moderate
+          matched_refutation_ids: [r2]
+          reasoning: |
+            an interactive SSH session (v-005) is active on i-0a1b2c3d during
+            the list burst window, authenticated as marcus@company.com. r2
+            (interactive SSH session during burst) is directly met. Combined
+            with l-001's no-registered-job, h-001 is now -- — no scheduled-batch
+            story remains.
+          supporting_edges: [e-004]
+        - hypothesis: h-002
+          before: null
+          after: "+"
+          severity_of_test: moderate
+          matched_prediction_ids: [p1]
+          reasoning: |
+            v-005 materializes an active SSH session during the burst window
+            authenticated (at the sshd layer) as marcus@company.com. p1
+            (interactive SSH session as named employee) is met at the sshd-audit
+            level; identity elevation pending trust lead l-004. Weight: +.
+          supporting_edges: [e-004]
+
+  - lead:
+      id: l-003
+      loop: 1
+      name: "scope(instance, process-tree)"
+      mode: scope
+      target: v-002
+      observes:
+        - hypothesis: h-002
+          predictions: [p3]
+        - hypothesis: h-004
+          refutations: [r1]
+      query_details:
+        system: cloudwatch-logs
+        template: "leads/scope/templates/process-tree.md"
+        query: "process tree on i-0a1b2c3d in 2026-04-14T02:08:00Z to 02:20:00Z filtered to pts/0 session"
+        time_window: "2026-04-14T02:08:00Z – 02:20:00Z"
+        substitutions:
+          instance_id: "i-0a1b2c3d"
+          session: "pts/0"
+      outcome:
+        observations:
+          vertices:
+            - id: v-006
+              type: process
+              classification: interactive-shell-in-workload
+              identifier: "bash pts/0 on i-0a1b2c3d (marcus's session)"
+              attributes:
+                cmdline: "-bash"
+                tty: "pts/0"
+                pid: 18341
+            - id: v-007
+              type: process
+              classification: operator-tool-invocation
+              identifier: "aws s3 ls s3://company-customer-exports (pid 18802)"
+              attributes:
+                cmdline: "aws s3 ls s3://company-customer-exports --recursive"
+                pid: 18802
+                parent_pid: 18341
+          edges:
+            - id: e-005
+              relation: spawned
+              source_vertex: v-006
+              target_vertex: v-007
+              when: { timestamp: "2026-04-14T02:14:49Z" }
+              authority:
+                kind: runtime-audit
+                source: "cloudwatch-logs:proc:execve:i-0a1b2c3d:18802"
+            - id: e-006
+              relation: triggered_by
+              source_vertex: v-006
+              target_vertex: v-005
+              # §10: triggered_by: process → process | session. This matches
+              # the catalog directly.
+              authority:
+                kind: runtime-audit
+                source: "cloudwatch-logs:sshd:pts0:i-0a1b2c3d"
+      resolutions:
+        - hypothesis: h-002
+          before: "+"
+          after: "+"
+          severity_of_test: moderate
+          matched_prediction_ids: [p3]
+          reasoning: |
+            aws cli invocation (v-007) is a child of marcus's bash (v-006),
+            which is triggered_by the ssh-session (v-005). p3 (S3 list calls
+            attributable to the operator's process tree) is met. Weight stays
+            at + — p2 (authorization context) not yet tested.
+          supporting_edges: [e-005, e-006]
+        - hypothesis: h-004
+          before: null
+          after: "-"
+          severity_of_test: moderate
+          matched_refutation_ids: [r1]
+          reasoning: |
+            the aws cli process chain on i-0a1b2c3d is attributable to marcus's
+            interactive session during the burst window — consistent with the
+            "instance is the actual caller" half of r1. Weight: - not --
+            because credential export could still be concurrent with marcus's
+            legitimate session; full refutation would require out-of-band
+            verification of credential containment.
+          supporting_edges: [e-005, e-006]
+
+  - lead:
+      id: l-004
+      loop: 2
+      name: "anchor-lookup(vpn-mfa)"
+      mode: trust
+      target: v-005
+      intended_hypothesis_set: [h-002]
+      observes:
+        - hypothesis: h-002
+          predictions: [p1]
+      query_details:
+        system: vpn-mfa-logs
+        template: "leads/anchor-lookup/templates/vpn-mfa.md"
+        query: "MFA verification and device posture for marcus@company.com at source IP 10.20.5.147, window 2026-04-14T01:55:00Z to 02:10:00Z"
+        time_window: "2026-04-14T01:55:00Z – 02:10:00Z"
+        substitutions:
+          user: "marcus@company.com"
+          source_ip: "10.20.5.147"
+      outcome:
+        observations:
+          vertices:
+            - id: v-008
+              type: identity
+              classification: employee-with-exec-rbac
+              identifier: "marcus@company.com"
+              attributes:
+                kind: user
+                provider: corp-sso
+                email: "marcus@company.com"
+                mfa_method: "macbook-marcus-2023 push"
+                device_mdm_enrolled: true
+                device_compliance: "compliant"
+                device_id: "macbook-marcus-2023"
+                vpn_session_source: "10.20.5.147"
+              trust_root: true
+              concerns:
+                - "MFA and MDM confirm marcus authenticated from his enrolled device; this does not certify that marcus authorized the specific S3 access or that his intent was benign"
+          edges:
+            - id: e-007
+              relation: authenticated_as
+              source_vertex: v-005
+              target_vertex: v-008
+              when: { timestamp: "2026-04-14T02:07:51Z" }
+              authority:
+                kind: authoritative-source
+                source: "vpn-mfa-logs:mfa:marcus@company.com:2026-04-14T02:07:51Z"
+        trust_anchor_result:
+          anchor_id: vpn-mfa
+          kind: vpn-mfa
+          result: confirmed
+          as_of: "2026-04-14T02:07:51Z"   # event anchor: MFA verification event time
+          authority_for_question: full
+          # Full authority for "did marcus authenticate via MFA from a compliant
+          # device at this time?" — vpn-mfa is the system of record for this
+          # specific observation question.
+        trust_root_reached: v-008
+      resolutions:
+        - hypothesis: h-002
+          before: "+"
+          after: "+"
+          severity_of_test: severe
+          matched_prediction_ids: [p1]
+          reasoning: |
+            vpn-mfa confirmed marcus@company.com MFA'd from MDM-compliant device
+            macbook-marcus-2023 at 02:07:51Z (42 seconds before the SSH session
+            started at 02:08:33Z). p1 (interactive SSH session as named employee)
+            is elevated from sshd-audit level (l-002) to authoritative-source via
+            e-007. Weight stays at + — p2 (change-context / authorization) still
+            not tested and will be tested by l-008 change-management.
+          supporting_edges: [e-007]
+
+  - lead:
+      id: l-005
+      loop: 2
+      name: "anchor-lookup(ec2-instance-integrity)"
+      mode: trust
+      target: v-002
+      intended_hypothesis_set: [h-003]
+      observes:
+        - hypothesis: h-003
+          refutations: [r1]
+      query_details:
+        system: ec2-instance-integrity
+        template: "leads/anchor-lookup/templates/ec2-integrity.md"
+        query: "instance integrity check for i-0a1b2c3d: IMDSv2 audit, file integrity baseline, recent auth events"
+        time_window: "2026-04-14T00:00:00Z – 02:20:00Z"
+        substitutions:
+          instance_id: "i-0a1b2c3d"
+      concerns:
+        - "ec2-instance-integrity covers disk/file integrity and IMDSv2 audit. It does NOT cover in-memory implants, kernel-level rootkits, or container escape into the host namespace. Authority is partial for the question 'is this instance compromised at any layer.'"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+        trust_anchor_result:
+          anchor_id: ec2-instance-integrity
+          kind: ec2-instance-integrity
+          result: confirmed
+          as_of: "2026-04-14T02:19:30Z"   # event anchor: the integrity scan's snapshot time
+          authority_for_question: partial
+          # Partial — covers disk/file/IMDSv2 but not in-memory implants or
+          # kernel rootkits. Validator rule 16: partial-authority caps weight
+          # transitions driven by this anchor at -/+.
+      resolutions:
+        - hypothesis: h-003
+          before: null
+          after: "-"
+          severity_of_test: moderate
+          matched_refutation_ids: [r1]
+          reasoning: |
+            ec2-instance-integrity returned clean on all observable layers (disk,
+            file, IMDSv2 enforcement, recent auth events show only marcus's SSH at
+            02:08:33Z). Combined with l-003's process-tree attribution confirming
+            the list calls are attributable to marcus's session, both conjuncts of
+            r1 are met at the observation level. **Validator rule 16 cap:**
+            authority_for_question is partial — the anchor does not cover in-memory
+            implants or kernel rootkits, so the hypothesis cannot advance past -
+            regardless of prediction coverage. h-003 caps at -.
+          supporting_edges: [e-005]
+
+  - lead:
+      id: l-006
+      loop: 2
+      name: "scope(marcus, concurrent-communication)"
+      mode: scope
+      target: v-008
+      observes:
+        - hypothesis: h-002
+          predictions: [p2]
+      query_details:
+        system: slack-audit
+        template: "leads/scope/templates/concurrent-communication.md"
+        query: "Slack messages from marcus@company.com in window 2026-04-14T02:00:00Z to 02:25:00Z in any #ops or #data channels"
+        time_window: "2026-04-14T02:00:00Z – 02:25:00Z"
+        substitutions:
+          user: "marcus@company.com"
+      concerns:
+        - "empty Slack result does not rule out communication in other channels (Teams, email, phone); absence of comms is weak negative evidence, not strong refutation"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+      resolutions:
+        - hypothesis: h-002
+          before: "+"
+          after: "+"
+          severity_of_test: weak
+          reasoning: |
+            no Slack messages from marcus in #ops or #data channels during the
+            ±11 minute window around the burst. Weak negative evidence against
+            p2 (change ticket or comms justification). Does not refute — p2 is
+            satisfied by EITHER a change ticket OR comms, and change-management
+            lookup is still pending (l-008). Weight holds at +.
+          supporting_edges: []
+
+  - lead:
+      id: l-007
+      loop: 2
+      name: "scope(marcus, s3-access-history, 30d)"
+      mode: scope
+      target: v-008
+      observes:
+        - hypothesis: h-002
+          predictions: [p2]
+      query_details:
+        system: cloudtrail
+        template: "leads/scope/templates/s3-access-history.md"
+        query: "CloudTrail S3 events for the role session attributable to marcus@company.com (via SSH session correlation on i-0a1b2c3d) on bucket company-customer-exports, last 30 days"
+        time_window: "2026-03-15T00:00:00Z – 2026-04-14T02:17:43Z"
+        substitutions:
+          user: "marcus@company.com"
+          bucket: "company-customer-exports"
+      concerns:
+        - "CloudTrail records role-session activity, not marcus directly — correlation to marcus depends on the SSH-session / process-tree chain established by l-002 and l-003"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+      resolutions:
+        - hypothesis: h-002
+          before: "+"
+          after: "+"
+          severity_of_test: moderate
+          reasoning: |
+            first-ever access to company-customer-exports by any session
+            attributable to marcus in 30 days. Relevant to p2 as a concerning
+            data point — an ad-hoc operator touching a PII bucket for the first
+            time in 30 days without a corresponding change ticket is unusual but
+            not inherently refuting. If marcus was asked to investigate this
+            bucket for the first time, first-ever access is consistent with the
+            hypothesis. Weight holds at + and feeds the ceiling rationale: this
+            fact makes out-of-band confirmation more important, not less.
+          supporting_edges: []
+
+  - lead:
+      id: l-008
+      loop: 2
+      name: "anchor-lookup(change-management)"
+      mode: trust
+      target: v-008
+      intended_hypothesis_set: [h-002]
+      observes:
+        - hypothesis: h-002
+          predictions: [p2]
+      query_details:
+        system: change-management
+        template: "leads/anchor-lookup/templates/change-management.md"
+        query: "change tickets assigned to or mentioning marcus@company.com with data-pipeline-svc or company-customer-exports, window 2026-04-13T00:00:00Z to 2026-04-14T02:25:00Z"
+        time_window: "2026-04-13T00:00:00Z – 2026-04-14T02:25:00Z"
+        substitutions:
+          user: "marcus@company.com"
+          bucket: "company-customer-exports"
+          role: "data-pipeline-svc"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+        trust_anchor_result:
+          anchor_id: change-management
+          kind: change-management
+          result: no-data
+          as_of: "2026-04-14T02:21:00Z"   # current-state anchor: ticket registry queried at lookup time
+          authority_for_question: full
+          # Full authority for "is there a ticket?" — the ticket system is the
+          # single source of truth for its own contents.
+      resolutions:
+        - hypothesis: h-002
+          before: "+"
+          after: "+"
+          severity_of_test: moderate
+          reasoning: |
+            change-management returned no tickets linking marcus to
+            company-customer-exports in the 26-hour window. p2 is composed of
+            (change ticket) OR (comms) — both halves now tested empty (l-006
+            for comms, l-008 for tickets). p2 is unmet. Rule 6: the full
+            prediction set {p1, p2, p3} on h-002 cannot be covered without p2,
+            so weight cannot advance to ++. h-002 caps at +. This is the
+            severity-ceiling trigger: p2 requires out-of-band confirmation
+            (direct contact with marcus) that no in-scope anchor can provide.
+          supporting_edges: []
+
+# ---------------------------------------------------------------------------
+# CONCLUDE
+# ---------------------------------------------------------------------------
+
+conclude:
+  termination:
+    category: severity-ceiling
+    rationale: |
+      All in-scope severe and moderate leads have run. h-002 (?ad-hoc-operator-run)
+      caps at + — p1 (human presence) and p3 (process-tree attribution) are met,
+      but p2 (change-context) is unmet and no in-scope anchor can provide it
+      without out-of-band contact with marcus. h-003 (?compromised-instance) caps
+      at - because ec2-instance-integrity is partial-authority (rule 16). h-004
+      (?compromised-iam-credential) caps at - — the source IP matches the
+      instance's private IP and marcus's process tree accounts for the calls,
+      but full refutation requires out-of-band credential-containment verification.
+      No adversarial hypothesis reaches --, no benign hypothesis reaches ++, and
+      the discriminating test (did marcus intentionally access this bucket?)
+      cannot be answered by any in-scope anchor.
+  ceiling_test:
+    kind: out-of-band-human-contact
+    subject: "marcus@company.com"
+  ceiling_rationale: |
+    Adversarial refutation and benign confirmation both require out-of-band
+    confirmation from marcus@company.com that the S3 list burst was intentional
+    and authorized. No anchor in the available set can substitute: change-management
+    returned no ticket, Slack returned no comms, first-ever-access was a fact not a
+    verdict, and the instance integrity check is partial-authority for compromise
+    detection. The agent has exhausted the in-scope severe lead set. The one test
+    that would resolve the case — direct contact with marcus to confirm or deny
+    intent and authorization — is outside the automated investigation boundary.
+  disposition: unclear
+  confidence: medium
+  matched_archetype: null
+  summary: |
+    IAM role data-pipeline-svc performed 17 ListObjectsV2 calls on
+    company-customer-exports (PII-classified, outside role's typical access
+    pattern) in a 172-second burst at 02:17 UTC. Process tree and SSH session
+    scope confirm the calls are attributable to marcus@company.com's interactive
+    session on i-0a1b2c3d, authenticated via MFA from a compliant MDM device
+    42 seconds before the session started. No scheduled batch job
+    (job-scheduler: refuted), no change ticket (change-management: no-data), no
+    Slack comms, first-ever marcus access to this bucket in 30 days.
+    ec2-instance-integrity returned clean but is partial-authority for the full
+    compromise question (rule 16 caps h-003 at -). h-001 (?scheduled-batch-run)
+    refuted at -- by the combination of no-registered-job and active human
+    session. h-002 (?ad-hoc-operator-run) caps at + (human presence confirmed,
+    authorization context unmet). h-003 and h-004 cap at -. Severity-ceiling
+    termination: direct confirmation from marcus is required to close the case.
+    Escalate to analyst with recommendation to contact marcus and, if confirmed
+    benign, create an archetype for ad-hoc operator data investigation on
+    PII-classified buckets.
