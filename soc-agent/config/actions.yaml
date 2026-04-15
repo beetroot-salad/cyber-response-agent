@@ -18,5 +18,6 @@ schema_version: "1.0"
 # ticketing system.
 actions:
   close_ticket:
-    connector: scripts/tools/stub_ticket_cli.py
+    connector: scripts/tools/playground_ticket_cli.py
     required_env_vars: []
+    config_env: knowledge/environment/systems/playground-ticket/config.env

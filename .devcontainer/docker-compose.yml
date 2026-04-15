@@ -139,6 +139,22 @@ services:
     depends_on:
       - wazuh.manager
 
+  # Ticket server (stateful FastAPI mock — playground-only, in-memory store).
+  # Used by end-to-end investigation validation when we want real
+  # create→close→verify round-trips instead of the no-op stub_ticket_cli.
+  ticket-server:
+    build:
+      context: ../playground/ticket-server
+      dockerfile: Dockerfile
+    container_name: ticket-server
+    hostname: ticket-server
+    volumes:
+      - ../playground/ticket-server/seed:/app/seed:ro
+    networks:
+      - response-network
+    ports:
+      - "8080:8080"
+
 networks:
   response-network:
     name: response-network
