@@ -610,3 +610,87 @@ class TestBashDispatch:
         )
         r = run_hook(make_bash_hook_event(f"cat >> {inv} <<EOF\nEOF"), runs_dir)
         assert r.returncode == 2
+
+
+# ---------------------------------------------------------------------------
+# Session mapping: infer_state writes .sessions/{session_id}.json eagerly
+# ---------------------------------------------------------------------------
+
+
+class TestSessionMapping:
+    def _setup(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        run_dir = runs_dir / "run-mapping"
+        run_dir.mkdir()
+        write_meta(run_dir, run_id="run-mapping", signature_id="wazuh-rule-5710")
+        return runs_dir, run_dir
+
+    def test_writes_mapping_on_first_investigation_write(self, tmp_path):
+        """infer_state writes the session→run mapping when investigation.md is first written."""
+        runs_dir, run_dir = self._setup(tmp_path)
+        inv = run_dir / "investigation.md"
+        inv.write_text("## CONTEXTUALIZE\nalert\n")
+
+        session_id = "sess-mapping-test"
+        event = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(inv), "content": "## CONTEXTUALIZE\nalert\n"},
+            "tool_use_id": "tu-1",
+            "session_id": session_id,
+        })
+        result = run_hook(event, runs_dir)
+        assert result.returncode == 0
+
+        mapping_path = runs_dir / ".sessions" / f"{session_id}.json"
+        assert mapping_path.exists(), "session mapping file should have been written"
+        data = json.loads(mapping_path.read_text())
+        assert data["run_dir"] == str(run_dir)
+        assert data["signature_id"] == "wazuh-rule-5710"
+
+    def test_mapping_is_idempotent(self, tmp_path):
+        """Writing investigation.md twice for the same session must not overwrite a valid mapping."""
+        runs_dir, run_dir = self._setup(tmp_path)
+        inv = run_dir / "investigation.md"
+        session_id = "sess-idempotent"
+
+        inv.write_text("## CONTEXTUALIZE\nalert\n")
+        event1 = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(inv), "content": "## CONTEXTUALIZE\nalert\n"},
+            "session_id": session_id,
+        })
+        run_hook(event1, runs_dir)
+
+        # Read the created_at from the first write
+        mapping_path = runs_dir / ".sessions" / f"{session_id}.json"
+        first_created_at = json.loads(mapping_path.read_text())["created_at"]
+
+        # Second write
+        inv.write_text("## CONTEXTUALIZE\nalert\n## HYPOTHESIZE\nhyp\n")
+        event2 = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(inv), "content": "## CONTEXTUALIZE\nalert\n## HYPOTHESIZE\nhyp\n"},
+            "session_id": session_id,
+        })
+        run_hook(event2, runs_dir)
+
+        second_created_at = json.loads(mapping_path.read_text())["created_at"]
+        assert first_created_at == second_created_at, "mapping should not be overwritten for same run_dir"
+
+    def test_no_mapping_without_session_id(self, tmp_path):
+        """If the hook payload has no session_id, no mapping file is created."""
+        runs_dir, run_dir = self._setup(tmp_path)
+        inv = run_dir / "investigation.md"
+        inv.write_text("## CONTEXTUALIZE\nalert\n")
+
+        event = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(inv), "content": "## CONTEXTUALIZE\nalert\n"},
+            # no session_id
+        })
+        run_hook(event, runs_dir)
+
+        sessions_dir = runs_dir / ".sessions"
+        if sessions_dir.exists():
+            assert list(sessions_dir.iterdir()) == [], "no mapping files should be written"

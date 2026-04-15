@@ -15,6 +15,11 @@ Used by:
     - /connect Phase 2 as a template
     - preflight.py action-adapter probe
 
+One ticket per invocation. Batch closing is not supported — the ActionContract
+is designed for single-target dispatch (the Stop-stage hook dispatches one call
+per investigation run, which corresponds to exactly one ticket). Callers that
+need to close multiple tickets must invoke the CLI once per ticket.
+
 Usage:
     python3 stub_ticket_cli.py health-check
     python3 stub_ticket_cli.py close --ticket-id SEC-1 \\
@@ -178,7 +183,11 @@ def build_parser() -> argparse.ArgumentParser:
         "close",
         help="Close a ticket. Defaults to --dry-run; --execute writes.",
     )
-    c.add_argument("--ticket-id", required=True, help="Ticket identifier to close")
+    c.add_argument(
+        "--ticket-id",
+        required=True,
+        help="Single ticket identifier to close (one per invocation; batch not supported)",
+    )
     c.add_argument("--reason", required=True, help="One-line close reason")
     c.add_argument("--author", required=True, help="Author string (e.g. soc-agent v3.4.0)")
     c.add_argument(

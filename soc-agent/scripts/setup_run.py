@@ -158,6 +158,15 @@ def main() -> int:
     meta_file = run_dir / "meta.json"
     meta_file.write_text(json.dumps(meta, indent=2))
 
+    # Eagerly write session→run mapping so Stop-stage hooks can resolve
+    # the run directory via the fast path without a racy mtime scan.
+    # CLAUDE_SESSION_ID is set by the Claude Code harness in the !command
+    # environment; when present this completely eliminates the slow path.
+    session_id = os.environ.get("CLAUDE_SESSION_ID", "")
+    if session_id:
+        from hooks.scripts.run_context import write_session_mapping
+        write_session_mapping(session_id, run_dir, signature_id, runs_base)
+
     # Output for skill substitution
     print(f"Run directory: {run_dir}")
     print(f"Run ID: {run_id}")

@@ -17,7 +17,6 @@ schema_version: "1.0"
 # the connector path and required env vars when the user wires a real
 # ticketing system.
 actions:
-  # close_ticket:
-  #   connector: scripts/tools/stub_ticket_cli.py
-  #   required_env_vars: []
-  #   config_env: knowledge/environment/systems/stub-ticket/config.env
+  close_ticket:
+    connector: scripts/tools/stub_ticket_cli.py
+    required_env_vars: []

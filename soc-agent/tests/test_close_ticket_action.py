@@ -363,3 +363,45 @@ class TestFailures:
         assert len(entries) == 1
         assert entries[0]["status"] == "failure"
         assert "timeout" in (entries[0]["error"] or "")
+
+
+# ---------------------------------------------------------------------------
+# Security: path traversal
+# ---------------------------------------------------------------------------
+
+
+class TestPathTraversal:
+    def test_traversal_path_is_rejected(self, runs_dir, tmp_path, monkeypatch):
+        """A connector path like ../../bin/evil must be rejected before subprocess."""
+        run_dir = _make_run(runs_dir, signature_id="test-sig")
+        fake_root = _write_permissions(monkeypatch, tmp_path, "test-sig")
+
+        # Write an actions.yaml with a traversal path
+        (fake_root / "config").mkdir(exist_ok=True)
+        (fake_root / "config" / "actions.yaml").write_text(
+            "schema_version: \"1.0\"\n"
+            "actions:\n"
+            "  close_ticket:\n"
+            "    connector: ../../etc/passwd\n"
+        )
+        (fake_root / ".claude-plugin").mkdir(exist_ok=True)
+        (fake_root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"version": "3.4.0-test"})
+        )
+        _make_session(runs_dir, "sess-traversal", run_dir, "test-sig")
+
+        # Should not spawn a subprocess — must log failure with path-escape error
+        subprocess_calls = []
+        monkeypatch.setattr(
+            close_ticket_action.subprocess,
+            "run",
+            lambda *a, **kw: subprocess_calls.append(a) or None,
+        )
+
+        close_ticket_action.main({"session_id": "sess-traversal"})
+
+        assert len(subprocess_calls) == 0, "subprocess must not be called for traversal path"
+        entries = _read_audit(runs_dir)
+        assert len(entries) == 1
+        assert entries[0]["status"] == "failure"
+        assert "escapes" in (entries[0]["error"] or "")

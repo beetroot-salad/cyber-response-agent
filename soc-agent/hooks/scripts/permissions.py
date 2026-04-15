@@ -115,7 +115,9 @@ def _fallback_parse(text: str) -> dict:
 def _coerce(val: str):
     """Best-effort scalar coercion for fallback parser."""
     val = val.strip()
-    if val.startswith(("'", '"')) and val.endswith(("'", '"')):
+    # Only strip quotes when both delimiters match (same character).
+    # Checking startswith+endswith alone would accept mismatched pairs like 'foo".
+    if len(val) >= 2 and val[0] in ("'", '"') and val[0] == val[-1]:
         return val[1:-1]
     if val.lower() in ("true", "yes"):
         return True

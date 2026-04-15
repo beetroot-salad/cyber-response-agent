@@ -62,13 +62,20 @@ def _append_audit(entry: dict) -> None:
         f.write(json.dumps(entry) + "\n")
 
 
-def _skip(
-    run_id: str,
-    signature_id: str,
-    ticket_id: str,
-    reason: str,
+def _log_event(
+    status: str,
+    *,
+    run_id: str | None = None,
+    signature_id: str | None = None,
+    ticket_id: str | None = None,
     connector: str | None = None,
+    skip_reason: str | None = None,
+    exit_code: int | None = None,
+    duration_ms: int = 0,
+    response_summary: str | None = None,
+    error: str | None = None,
 ) -> None:
+    """Append a structured audit entry with all required fields."""
     _append_audit(
         {
             "timestamp": _now_iso(),
@@ -77,14 +84,31 @@ def _skip(
             "action": "close_ticket",
             "ticket_id": ticket_id,
             "connector": connector,
-            "status": "skipped",
-            "skip_reason": reason,
+            "status": status,
+            "skip_reason": skip_reason,
             "dry_run": False,
-            "exit_code": None,
-            "duration_ms": 0,
-            "response_summary": None,
-            "error": None,
+            "exit_code": exit_code,
+            "duration_ms": duration_ms,
+            "response_summary": response_summary,
+            "error": error,
         }
+    )
+
+
+def _skip(
+    run_id: str,
+    signature_id: str,
+    ticket_id: str,
+    reason: str,
+    connector: str | None = None,
+) -> None:
+    _log_event(
+        "skipped",
+        run_id=run_id,
+        signature_id=signature_id,
+        ticket_id=ticket_id,
+        connector=connector,
+        skip_reason=reason,
     )
 
 
@@ -136,12 +160,15 @@ def _plugin_version() -> str:
     return version if isinstance(version, str) and version else "unknown"
 
 
-def _connector_python(connector_path: Path) -> str:
-    """Pick the python interpreter for running an adapter — prefer the shared venv."""
-    venv_python = connector_path.parent / ".venv" / "bin" / "python"
-    if venv_python.is_file():
-        return str(venv_python)
-    return "python3"
+def _connector_python() -> str:
+    """Return the Python interpreter to use for connector subprocesses.
+
+    Uses the same interpreter that's running this hook so stdlib availability
+    is consistent. Vendor connectors that need extra packages are expected to
+    manage their own dependencies (e.g. via a requirements.txt or setup step
+    documented in their knowledge/environment/systems/{vendor}/ directory).
+    """
+    return sys.executable
 
 
 # ---------------------------------------------------------------------------
@@ -178,26 +205,14 @@ def _preconditions_hold(frontmatter: dict) -> bool:
 
 def main(payload: dict) -> None:
     """Dispatch close_ticket after a Stop event. Never raises."""
+    session_id = payload.get("session_id") if isinstance(payload, dict) else None
     try:
         _main(payload)
     except Exception as exc:  # noqa: BLE001 — top-level safety net
         try:
-            _append_audit(
-                {
-                    "timestamp": _now_iso(),
-                    "run_id": None,
-                    "signature_id": None,
-                    "action": "close_ticket",
-                    "ticket_id": None,
-                    "connector": None,
-                    "status": "failure",
-                    "skip_reason": None,
-                    "dry_run": False,
-                    "exit_code": None,
-                    "duration_ms": 0,
-                    "response_summary": None,
-                    "error": f"close_ticket_action exception: {exc!r}"[:200],
-                }
+            _log_event(
+                "failure",
+                error=f"close_ticket_action exception (session={session_id}): {exc!r}"[:200],
             )
         except Exception:
             pass
@@ -252,24 +267,32 @@ def _main(payload: dict) -> None:
         return
 
     connector_rel = binding["connector"]
-    connector_path = SOC_AGENT_ROOT / connector_rel
+    # Normalize ".." components without following symlinks so a legitimate
+    # connector that is a symlink (pointing outside the tree) still works,
+    # while a traversal path like "../../bin/evil" is caught.
+    import os as _os
+    connector_path = Path(_os.path.normpath(SOC_AGENT_ROOT / connector_rel))
+
+    # Reject paths that escape the plugin root via ".." components.
+    if not connector_path.is_relative_to(SOC_AGENT_ROOT):
+        _log_event(
+            "failure",
+            run_id=run_id,
+            signature_id=signature_id,
+            ticket_id=ticket_id,
+            connector=connector_rel,
+            error=f"connector path escapes plugin root: {connector_rel}",
+        )
+        return
+
     if not connector_path.exists():
-        _append_audit(
-            {
-                "timestamp": _now_iso(),
-                "run_id": run_id,
-                "signature_id": signature_id,
-                "action": "close_ticket",
-                "ticket_id": ticket_id,
-                "connector": connector_rel,
-                "status": "failure",
-                "skip_reason": None,
-                "dry_run": False,
-                "exit_code": None,
-                "duration_ms": 0,
-                "response_summary": None,
-                "error": f"connector not found: {connector_rel}",
-            }
+        _log_event(
+            "failure",
+            run_id=run_id,
+            signature_id=signature_id,
+            ticket_id=ticket_id,
+            connector=connector_rel,
+            error=f"connector not found: {connector_rel}",
         )
         return
 
@@ -282,7 +305,7 @@ def _main(payload: dict) -> None:
         f"Investigation: {run_id}; archetype: {matched_archetype}"
     )
 
-    python_exe = _connector_python(connector_path)
+    python_exe = _connector_python()
     cmd = [
         python_exe,
         str(connector_path),
@@ -311,65 +334,42 @@ def _main(payload: dict) -> None:
         )
     except subprocess.TimeoutExpired:
         duration_ms = int((time.monotonic() - start) * 1000)
-        _append_audit(
-            {
-                "timestamp": _now_iso(),
-                "run_id": run_id,
-                "signature_id": signature_id,
-                "action": "close_ticket",
-                "ticket_id": ticket_id,
-                "connector": connector_rel,
-                "status": "failure",
-                "skip_reason": None,
-                "dry_run": False,
-                "exit_code": None,
-                "duration_ms": duration_ms,
-                "response_summary": None,
-                "error": f"timeout after {SUBPROCESS_TIMEOUT_SECONDS}s",
-            }
+        _log_event(
+            "failure",
+            run_id=run_id,
+            signature_id=signature_id,
+            ticket_id=ticket_id,
+            connector=connector_rel,
+            duration_ms=duration_ms,
+            error=f"timeout after {SUBPROCESS_TIMEOUT_SECONDS}s",
         )
         return
     except Exception as exc:  # noqa: BLE001
         duration_ms = int((time.monotonic() - start) * 1000)
-        _append_audit(
-            {
-                "timestamp": _now_iso(),
-                "run_id": run_id,
-                "signature_id": signature_id,
-                "action": "close_ticket",
-                "ticket_id": ticket_id,
-                "connector": connector_rel,
-                "status": "failure",
-                "skip_reason": None,
-                "dry_run": False,
-                "exit_code": None,
-                "duration_ms": duration_ms,
-                "response_summary": None,
-                "error": f"subprocess error: {exc!r}"[:200],
-            }
+        _log_event(
+            "failure",
+            run_id=run_id,
+            signature_id=signature_id,
+            ticket_id=ticket_id,
+            connector=connector_rel,
+            duration_ms=duration_ms,
+            error=f"subprocess error: {exc!r}"[:200],
         )
         return
 
     duration_ms = int((time.monotonic() - start) * 1000)
     stdout = (result.stdout or "").strip()
     stderr = (result.stderr or "").strip()
-    status = "success" if result.returncode == 0 else "failure"
-    _append_audit(
-        {
-            "timestamp": _now_iso(),
-            "run_id": run_id,
-            "signature_id": signature_id,
-            "action": "close_ticket",
-            "ticket_id": ticket_id,
-            "connector": connector_rel,
-            "status": status,
-            "skip_reason": None,
-            "dry_run": False,
-            "exit_code": result.returncode,
-            "duration_ms": duration_ms,
-            "response_summary": stdout[:200] if stdout else None,
-            "error": stderr[:200] if stderr else None,
-        }
+    _log_event(
+        "success" if result.returncode == 0 else "failure",
+        run_id=run_id,
+        signature_id=signature_id,
+        ticket_id=ticket_id,
+        connector=connector_rel,
+        exit_code=result.returncode,
+        duration_ms=duration_ms,
+        response_summary=stdout[:200] if stdout else None,
+        error=stderr[:200] if stderr else None,
     )
 
 

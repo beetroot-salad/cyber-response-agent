@@ -7,23 +7,18 @@ schema_version: "2.0"
 
 # Operating mode
 #   recommend — agent investigates and outputs a recommendation (MVP)
-#   act       — agent can execute mitigation actions via mitigation skill
+#   act       — close-ticket dispatch via Stop-stage hook (see handbook/act-mode.md)
 mode:
-  allowed: [recommend]
-  default: recommend
+  allowed: [recommend, act]
+  default: act
 
-# Mitigation actions (enforced by the mitigation skill, not the investigation agent)
+# Mitigation actions — connectors bound in config/actions.yaml
 #
-# The investigation agent has full read/query access and is not restricted here.
-# Only *actions* (mitigations) are gated per-signature.
-#
-# Per action:
-#   auto    — execute without human approval (requires mode: act)
-#   approve — execute only after human approval via Claude Code permission prompt (requires mode: act)
-# Unlisted actions are denied. Denied actions return a structured response to
-# the agent so it can adapt (e.g., escalate or investigate from a different angle).
+# close_ticket is dispatched by hooks/scripts/close_ticket_action.py at Stop
+# for grounded high-confidence resolved reports.
 mitigation:
   actions:
+    close_ticket: auto
     block_ip: auto
     disable_user: approve
 
