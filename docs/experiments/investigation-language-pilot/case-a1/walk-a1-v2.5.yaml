@@ -1,0 +1,341 @@
+# v2.3 companion — A.1 shell-in-container (extracted from reference-v2.3.md)
+# Alert: FALCO-2026-04-14-140327-a1b2c3d4
+# Source: reference-v2.3.md yaml block, which carries the Sonnet reference
+# walk + friction log alongside this companion.
+
+# Structured companion v2.4 for FALCO-2026-04-14-140327-a1b2c3d4
+# Walk: CONTEXTUALIZE → (deferred HYPOTHESIZE) → GATHER loops 1-2 → CONCLUDE
+# Schema: investigation-language v2.4
+
+prologue:
+  vertices:
+    - id: v-001
+      type: process
+      classification: interactive-shell-in-workload
+      identifier: "bash (container a1b2c3d4, pid 2881)"
+      attributes:
+        pid: 2881
+        ppid: 0
+        uid: 0
+        loginuid: -1
+        tty: false
+        cmdline: "/bin/bash"
+      concerns:
+        - "Falco reports parent=null because the host-side parent is outside the container pid namespace; container-exec-history scope lead required before hypothesizing"
+      citations:
+        - "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+
+    - id: v-002
+      type: container
+      classification: runtime-workload
+      identifier: "payments-api-7b9d8f4c8-xk2qm"
+      attributes:
+        container_id: a1b2c3d4
+        image: "registry.internal/payments-api:v1.44.2"
+        pod: "payments-api-7b9d8f4c8-xk2qm"
+        namespace: "payments-prod"
+        workload_kind: Deployment
+        workload_name: payments-api
+        # D2: host context as container attributes. The host (k8s-worker-07) is
+        # not the focus of this investigation; the container is. Under v2.3 this
+        # is still the right call, but the spec doesn't tightly define the
+        # threshold.
+        host_name: "k8s-worker-07"
+        host_role: "kubernetes-worker-node"
+        cluster: "prod-us-east-1"
+      citations:
+        - "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+
+  edges:
+    - id: e-001
+      relation: runs_in
+      source_vertex: v-001
+      target_vertex: v-002
+      when: { timestamp: "2026-04-14T14:03:27.412Z" }
+      authority:
+        kind: siem-event
+        source: "falco:event=b8e2c4d9-0abf-4d2e-9a71-cc1ea8df2d44"
+
+# Immediate parent of v-001 is opaque (parent=null in Falco output because
+# the host-side parent lives in a different pid namespace). Discrimination
+# deferred until l-001 materializes the host-side parent.
+hypothesize:
+  hypotheses: []
+
+gather:
+  - lead:
+      id: l-001
+      loop: 1
+      name: container-exec-history
+      target: v-002
+      # D1: Falco's execve observation is modeled as a process entity (v-003) plus a
+      # spawned edge (e-002), NOT as a command vertex + targeted edge. A process is
+      # an entity with a lifetime, not a one-shot action. The v2.3 §10 mention of
+      # "file-write events" under `command+targeted` is inconsistent with this choice
+      # and should be clarified.
+      query_details:
+        system: runtime-audit-execve-feed
+        template: "leads/container-exec-history/templates/execve-feed.md"
+        query: "execve events where cgroup_container_id=a1b2c3d4 AND t ∈ [14:03:22, 14:03:32]"
+        time_window: "±5s around alert"
+        substitutions:
+          container_id: "a1b2c3d4"
+          t: "2026-04-14T14:03:27.412Z"
+      outcome:
+        observations:
+          # Mechanical lead materializes only what the execve feed directly observes:
+          # the host-side runc process and the spawned edge into the container.
+          # The kubectl-exec session and initiating identity are NOT materialized here
+          # — those are observable only via kube-audit (l-002).
+          vertices:
+            - id: v-003
+              type: process
+              classification: host-runtime-shim
+              identifier: "runc:[2:INIT] (host k8s-worker-07)"
+              attributes:
+                comm: "runc:[2:INIT]"
+                cmdline: "runc init"
+                host: "k8s-worker-07"
+                runtime: "containerd"
+                host_pid: 184733
+              citations:
+                - "runtime-audit-execve-feed:host=k8s-worker-07:event=execve-184733"
+          edges:
+            - id: e-002
+              relation: spawned
+              source_vertex: v-003
+              target_vertex: v-001
+              when: { timestamp: "2026-04-14T14:03:27.398Z" }
+              attributes:
+                uid: 0
+              authority:
+                kind: runtime-audit
+                source: "runtime-audit-execve-feed:host=k8s-worker-07:event=execve-184733"
+
+      # Discrimination level advances from v-001 (bash) to v-003 (runc).
+      # Three hypothesis seeds per retrieval-sim, each written LEAN (1-2 predictions
+      # minimal). No `canonical` field under v2.3.
+      #
+      # D3: Lean methodology tension — retrieval-sim suggests three canonical names,
+      # lean ethos would collapse them or refine hierarchically. I kept three named
+      # hypotheses to preserve cross-case retrieval matching, and wrote each lean.
+      new_hypotheses:
+        - id: h-001
+          name: "?kubectl-exec-operator"
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              type: session
+              classification: kubectl-exec-session
+          predictions:
+            - id: p1
+              claim: "a kube-api pods/exec request targeting container a1b2c3d4 exists in the ±5s window, initiated by an identity classified as employee-with-exec-rbac"
+            - id: p2
+              claim: "the source IP of that kube-api call classifies as corp-vpn-egress or internal-corp-network"
+          refutation_shape:
+            - id: r1
+              claim: "no pods/exec request for container a1b2c3d4 appears in kube-audit in the ±5s window"
+            - id: r2
+              claim: "the pods/exec initiator classifies as automation-identity, not employee-with-exec-rbac"
+          weight: null
+
+        - id: h-002
+          name: "?ci-pipeline-maintenance"
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              type: session
+              classification: kubectl-exec-session
+              attributes:
+                initiator_kind: automation-identity
+          predictions:
+            - id: p1
+              claim: "a kube-api pods/exec request targeting container a1b2c3d4 exists in the ±5s window, initiated by an identity classified as automation-identity (service account or CI bot)"
+            - id: p2
+              claim: "the source of the kube-api call is an internal-cluster-node or build-infrastructure endpoint"
+          refutation_shape:
+            - id: r1
+              claim: "no pods/exec request for container a1b2c3d4 appears in kube-audit in the ±5s window"
+            - id: r2
+              claim: "the pods/exec initiator classifies as employee-with-exec-rbac, not automation-identity"
+          weight: null
+
+        # D5: adversarial hypothesis with a single absence-claim prediction.
+        # The framing is awkward — the refutation_shape (positive observation)
+        # carries the information, the prediction is its negation.
+        - id: h-003
+          name: "?post-exploit-shell"
+          attached_to_vertex: v-003
+          proposed_edge:
+            relation: triggered_by
+            parent_vertex:
+              type: session
+              classification: unclassified-session
+              attributes:
+                attacker_controlled: true
+          predictions:
+            - id: p1
+              claim: "no legitimate kube-api pods/exec record matches the shape of an authenticated employee-with-exec-rbac initiator from a corp-network source; either no record exists or the initiator and source are unsanctioned"
+          refutation_shape:
+            - id: r1
+              claim: "kube-audit returns a pods/exec request for container a1b2c3d4 authenticated as employee-with-exec-rbac from a corp-vpn-egress or internal-corp-network source"
+          concerns:
+            - "stolen-credential bypass is unfalsifiable without MDM trust-chain evidence; refutation here is 'no current evidence of credential compromise', not 'credential theft ruled out'"
+          weight: null
+
+  - lead:
+      id: l-002
+      loop: 2
+      name: "anchor-lookup(kube-audit)"
+      target: v-003
+      tests: [h-001, h-002, h-003]
+      observes:
+        - hypothesis: h-001
+          predictions: [p1, p2]
+          refutations: [r1, r2]
+        - hypothesis: h-002
+          predictions: [p1, p2]
+          refutations: [r1, r2]
+        - hypothesis: h-003
+          predictions: [p1]
+          refutations: [r1]
+      query_details:
+        system: kube-audit
+        template: "leads/anchor-lookup/templates/kube-audit-exec.md"
+        query: "kube-audit entries: subresource=pods/exec AND target_container=a1b2c3d4 AND t ∈ [14:03:22, 14:03:32]"
+        time_window: "±5s around alert"
+        substitutions:
+          container_id: "a1b2c3d4"
+          t: "2026-04-14T14:03:27.412Z"
+      outcome:
+        observations:
+          vertices:
+            - id: v-004
+              type: session
+              classification: kubectl-exec-session
+              identifier: "kubectl-exec alice→payments-api-7b9d8f4c8-xk2qm @14:03:25Z"
+              attributes:
+                subresource: "pods/exec"
+                target_pod: "payments-api-7b9d8f4c8-xk2qm"
+                target_container: "a1b2c3d4"
+                kube_api_request_id: "7c1f8a22-kube-audit"
+                client_user_agent: "kubectl/v1.28.3"
+                rbac_role: "service-debug-operator"
+              citations:
+                - "kube-audit:request-id=7c1f8a22"
+
+            # v-005 uses the new `identity` type (was `user` in v2.2).
+            - id: v-005
+              type: identity
+              classification: employee-with-exec-rbac
+              identifier: "alice@company.com"
+              attributes:
+                kind: user                         # new v2.3: kind attribute
+                provider: corp-sso                 # new v2.3: provider attribute
+                email: "alice@company.com"
+                rbac_role_on_workload: "service-debug-operator"
+                employment_status: "active"
+              trust_root: true
+              citations:
+                - "kube-audit:request-id=7c1f8a22"
+                - "hr-directory:alice@company.com"
+
+            - id: v-006
+              type: ip
+              classification: corp-vpn-egress
+              identifier: "corp-vpn-east-gw-3 (10.200.14.77)"
+              attributes:
+                ip: "10.200.14.77"
+                vpn_session_id: "vpn-sess-9f3e1b"
+                mfa_verified: true
+              citations:
+                - "kube-audit:request-id=7c1f8a22"
+                - "corp-vpn-registry:vpn-sess-9f3e1b"
+
+          edges:
+            - id: e-003
+              relation: triggered_by
+              source_vertex: v-003
+              target_vertex: v-004
+              when: { timestamp: "2026-04-14T14:03:25.810Z" }
+              attributes:
+                kube_api_request_id: "7c1f8a22-kube-audit"
+              authority:
+                kind: authoritative-source
+                source: "kube-audit:request-id=7c1f8a22"
+
+            - id: e-004
+              relation: authenticated_as
+              source_vertex: v-004
+              target_vertex: v-005
+              when: { timestamp: "2026-04-14T14:03:25.810Z" }
+              attributes:
+                auth_mechanism: "kube-apiserver-bearer-token"
+                sso_backed: true
+              authority:
+                kind: authoritative-source
+                source: "kube-audit:request-id=7c1f8a22"
+
+            - id: e-005
+              relation: initiated_by
+              source_vertex: v-004
+              target_vertex: v-006
+              when: { timestamp: "2026-04-14T14:03:25.810Z" }
+              attributes:
+                client_ip: "10.200.14.77"
+                network_path: "corp-vpn-east → kube-apiserver-ingress"
+              authority:
+                kind: authoritative-source
+                source: "kube-audit:request-id=7c1f8a22"
+
+        # D4: every field in structured_fields below is already carried in
+        # v-004/v-005/v-006 attributes and classifications. The writer types
+        # the same facts twice. Recommend: distiller derives structured_fields
+        # from observations; remove from writer-side schema.
+        trust_anchor_result:
+          anchor_id: kube-audit
+          kind: kube-audit
+          result: confirmed
+          as_of: "2026-04-14T14:03:25.810Z"   # event anchor: audit-log event time
+          authority_for_question: full
+          # structured_fields dict removed (v2.3 spec change): substantive anchor
+          # return is already materialized as v-004/v-005/v-006 + e-003/e-004/e-005
+          # in the graph; the dict was pure duplication.
+
+        trust_root_reached: v-005
+
+      resolutions:
+        - hypothesis: h-001
+          before: null
+          after: "++"
+          severity_of_test: severe
+          matched_prediction_ids: [p1, p2]
+          reasoning: "kube-audit returned exec request 7c1f8a22 at 14:03:25.810Z targeting container a1b2c3d4, authenticated as alice@company.com (employee-with-exec-rbac via SSO+service-debug-operator RBAC). p1 (pods/exec request + employee-with-exec-rbac initiator) satisfied via v-004+v-005+e-004. p2 (corp-network source) satisfied via v-006+e-005 (10.200.14.77 classifies corp-vpn-egress, MFA-verified). Both prediction IDs covered; authority_for_question=full; strong-authority grounding via e-003/e-004/e-005 (all authoritative-source). Weight transitions to ++."
+          supporting_edges: [e-003, e-004, e-005]
+
+        - hypothesis: h-002
+          before: null
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r2]
+          reasoning: "kube-audit initiator is alice@company.com, classified employee-with-exec-rbac — not automation-identity. r2 directly satisfied. Supporting edge e-004 is authoritative-source. Weight transitions to --."
+          supporting_edges: [e-004]
+
+        - hypothesis: h-003
+          before: null
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r1]
+          reasoning: "kube-audit returned a pods/exec request for container a1b2c3d4 authenticated as alice@company.com (employee-with-exec-rbac) from 10.200.14.77 (corp-vpn-egress, MFA-verified). r1 fully satisfied — all three clauses (exec record present, sanctioned employee initiator, corp network source) met on authoritative-source edges e-003/e-004/e-005. Residual stolen-credential concern remains in h-003.concerns; not falsified without MDM trust-chain evidence."
+          supporting_edges: [e-003, e-004, e-005]
+
+conclude:
+  termination:
+    category: trust-root
+    rationale: "kube-audit (authority_for_question=full) classified v-005 (alice@company.com) as employee-with-exec-rbac with trust_root=true; backward traversal halts at v-005 — further traversal would require SSO/IdP logs not in scope"
+  disposition: benign
+  confidence: high
+  matched_archetype: kubectl-exec-by-authorized-operator
+  summary: "Bash was spawned in runtime-workload payments-api-...-xk2qm by host-side runc (runtime-audit, e-002) because kube-apiserver received a pods/exec request from alice@company.com over corp VPN with service-debug-operator RBAC (kube-audit, request 7c1f8a22). h-001 (?kubectl-exec-operator) confirmed ++ with full prediction coverage and authoritative-source grounding. h-002 (?ci-pipeline-maintenance) refuted -- via r2 (human initiator, not automation). h-003 (?post-exploit-shell) refuted -- via r1 (sanctioned exec path). Trust-root termination at v-005. Residual stolen-credential concern tracked in h-003.concerns."

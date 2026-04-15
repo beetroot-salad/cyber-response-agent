@@ -1,16 +1,18 @@
-"""Query primitive for investigation-language v2.3 companions.
+"""Query primitive for investigation-language v2.5 companions.
 
-Loads companion YAML files and answers the seven retrieval-query classes
+Loads companion YAML files and answers the eight retrieval-query classes
 from query-script-design.md against the corpus in-memory. Raw YAML is the
 source of truth; no indexes, no database, no projection layer. Polars is
-used on-demand for aggregation projections (classes 2 and 5).
+used on-demand for aggregation projections (classes 2, 5, and 8).
 
 Run `uv run python scripts/query.py` for the demo.
 """
 
 from __future__ import annotations
 
+import argparse
 import fnmatch
+import json
 import re
 import sys
 from dataclasses import dataclass, field
@@ -37,10 +39,10 @@ YAML_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
 # spec worked examples, and retrieval sims are excluded even though they parse
 # as companions. Updated deliberately when a new translation lands.
 PILOT_CORPUS_FILES = (
-    "case-a1/walk-a1-v2.3.yaml",
-    "case-a4/walk-a4-v2.3.yaml",
-    "case-m365/walk-m365-v2.3.yaml",
-    "case-real-rule5710/companion-v2.3.yaml",
+    "case-a1/walk-a1-v2.5.yaml",
+    "case-a4/walk-a4-v2.5.yaml",
+    "case-m365/walk-m365-v2.5.yaml",
+    "case-real-rule5710/companion-v2.5.yaml",
 )
 
 
@@ -320,33 +322,45 @@ def dead_lead_lookup(
 # Class 5 — lead sequence pattern
 # ---------------------------------------------------------------------------
 
-def _strip_redundant_mode_prefix(name: str, mode: str) -> str:
-    """Strip a `mode(args)` outer wrapper when it duplicates the trace's mode.
+def _infer_lead_type(lead: dict[str, Any]) -> str:
+    """Infer lead type from outcome content (v2.5 — no mode field).
 
-    `scope(instance, concurrent-ssh)` with mode=scope → `instance, concurrent-ssh`
-    but leaves `anchor-lookup(job-scheduler)` with mode=trust unchanged because
-    the `anchor-lookup` prefix carries information beyond the mode.
+    trust:   trust_anchor_result present
+    refine:  attribute_updates only (no observations vertices/edges)
+    scope:   observations with vertices or edges, or empty outcome
+    fail:    failure_reason present
     """
-    prefix = f"{mode}("
-    if name.startswith(prefix) and name.endswith(")"):
-        return name[len(prefix):-1]
-    return name
+    outcome = lead.get("outcome") or {}
+    if outcome.get("failure_reason"):
+        return "fail"
+    if outcome.get("trust_anchor_result"):
+        return "trust"
+    obs = outcome.get("observations") or {}
+    if outcome.get("attribute_updates"):
+        # attribute_updates present — refining lead regardless of empty observations
+        if not (obs.get("vertices") or obs.get("edges")):
+            return "refine"
+    return "scope"
 
 
 def _lead_sequence(c: Companion) -> str:
     parts = []
     for lead in c.leads:
-        mode = lead.get("mode", "?")
-        name = _strip_redundant_mode_prefix(lead.get("name", "?"), mode)
+        name = lead.get("name", "?")
         outcome = lead.get("outcome") or {}
         tar = outcome.get("trust_anchor_result") or {}
         fr = outcome.get("failure_reason")
-        if mode == "trust" and tar:
+        lead_type = _infer_lead_type(lead)
+        if lead_type == "trust":
             parts.append(f"trust({tar.get('anchor_id', name)}:{tar.get('result', '?')})")
-        elif fr:
-            parts.append(f"{mode}({name}:FAIL={fr})")
+        elif lead_type == "fail":
+            parts.append(f"{name}:FAIL={fr}")
+        elif lead_type == "refine":
+            # prefix only if name doesn't already carry it (backward-compat with old scope(...) names)
+            parts.append(name if name.startswith("refine(") else f"refine({name})")
         else:
-            parts.append(f"{mode}({name})")
+            # scope — emit name bare; old scope(inner) names remain legible without double-wrapping
+            parts.append(name)
     terminal = _conclude_field(c.conclude, "termination", "category") or "?"
     disposition = c.conclude.get("disposition", "?")
     parts.append(f"{terminal}:{disposition}")
@@ -487,29 +501,363 @@ def prose_substring(
 
 
 # ---------------------------------------------------------------------------
-# Demo main — exercises every query class against the pilot corpus
+# Class 8 — lead effectiveness
 # ---------------------------------------------------------------------------
+
+_WEIGHT_NUMERIC: dict[Any, int] = {
+    None: 0,
+    "++": 2,
+    "+": 1,
+    "-": -1,
+    "--": -2,
+}
+
+
+def _abs_delta(before: Any, after: Any) -> float:
+    """Absolute weight movement for a single resolution."""
+    return abs(_WEIGHT_NUMERIC.get(after, 0) - _WEIGHT_NUMERIC.get(before, 0))
+
+
+def _lead_effectiveness_rows(
+    corpus: list[Companion],
+    patterns: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    """Core aggregation shared by lead_effectiveness and lead_effectiveness_for_hypothesis.
+
+    patterns — zero or more fnmatch patterns; ALL must match a hypothesis name for its
+               resolution to count (conjunction). Empty tuple = match everything.
+    """
+    from math import log1p
+
+    def matches(h_name: str) -> bool:
+        return all(fnmatch.fnmatchcase(h_name, p) for p in patterns)
+
+    per_name: dict[str, list[float]] = {}
+    for c in corpus:
+        # id → name map covering both HYPOTHESIZE declarations and new_hypotheses in leads
+        h_names: dict[str, str] = {h["id"]: h.get("name", "") for h in c.iter_new_hypotheses()}
+
+        for lead in c.leads:
+            resolutions = lead.get("resolutions", []) or []
+            if patterns:
+                # restrict to resolutions whose hypothesis name matches all patterns
+                deltas = [
+                    _abs_delta(r.get("before"), r.get("after"))
+                    for r in resolutions
+                    if matches(h_names.get(r.get("hypothesis", ""), ""))
+                ]
+                if not deltas:
+                    continue  # lead didn't touch any matching hypothesis
+            else:
+                deltas = [
+                    _abs_delta(r.get("before"), r.get("after")) for r in resolutions
+                ]
+
+            lead_mean = sum(deltas) / len(deltas) if deltas else 0.0
+            per_name.setdefault(lead.get("name", "?"), []).append(lead_mean)
+
+    rows = []
+    for name, corpus_deltas in sorted(per_name.items()):
+        count = len(corpus_deltas)
+        mean_delta = sum(corpus_deltas) / count
+        rows.append(
+            {
+                "lead_name": name,
+                "count": count,
+                "mean_abs_weight_delta": round(mean_delta, 3),
+                "effectiveness": round(log1p(count) * mean_delta, 4),
+            }
+        )
+    rows.sort(key=lambda r: r["effectiveness"], reverse=True)
+    return rows
+
+
+def lead_effectiveness(corpus: list[Companion]) -> dict[str, Any]:
+    """Score each lead name by log1p(count) × mean_abs_weight_delta across all hypotheses.
+
+    count            — number of times a lead with this name appears in the corpus
+    mean_abs_weight  — mean |numeric(after) - numeric(before)| across all resolutions
+                       fired by leads sharing that name; leads with no resolutions
+                       contribute delta=0 to the mean
+    effectiveness    — log1p(count) × mean_abs_weight_delta
+                       (log1p avoids zeroing singleton leads; rewards frequent leads
+                       that move weight strongly)
+    """
+    rows = _lead_effectiveness_rows(corpus)
+    return {"hits": rows, "count": len(rows)}
+
+
+def lead_effectiveness_for_hypothesis(
+    corpus: list[Companion],
+    *patterns: str,
+) -> dict[str, Any]:
+    """Lead effectiveness restricted to hypotheses matching ALL supplied fnmatch patterns.
+
+    Each pattern is matched against the hypothesis name (e.g. '?*compromise*').
+    Multiple patterns are AND-ed: a resolution counts only if its hypothesis name
+    satisfies every pattern simultaneously. Leads that never touched a matching
+    hypothesis are excluded entirely.
+
+    Examples:
+      lead_effectiveness_for_hypothesis(corpus, '?*compromise*')
+          → leads that moved any hypothesis whose name contains 'compromise'
+      lead_effectiveness_for_hypothesis(corpus, '?*monitoring*', '?*compromise*')
+          → leads that moved a hypothesis matching BOTH (e.g. '?monitoring-host-compromise')
+    """
+    if not patterns:
+        raise ValueError("supply at least one fnmatch pattern")
+    rows = _lead_effectiveness_rows(corpus, patterns)
+    return {"hits": rows, "count": len(rows), "patterns": list(patterns)}
+
+
+# ---------------------------------------------------------------------------
+# Enumeration
+# ---------------------------------------------------------------------------
+
+_ENUM_CHOICES = ("leads", "anchors", "archetypes", "hypotheses", "dispositions")
+
+
+def enumerate_corpus(corpus: list[Companion], kind: str) -> dict[str, Any]:
+    """List distinct values of a corpus dimension.
+
+    kind — one of: leads, anchors, archetypes, hypotheses, dispositions
+    """
+    values: set[str] = set()
+    for c in corpus:
+        if kind == "leads":
+            for lead in c.leads:
+                values.add(lead.get("name", "?"))
+        elif kind == "anchors":
+            for lead in c.leads:
+                tar = (lead.get("outcome") or {}).get("trust_anchor_result")
+                if tar and tar.get("anchor_id"):
+                    values.add(tar["anchor_id"])
+        elif kind == "archetypes":
+            a = c.conclude.get("matched_archetype")
+            if a:
+                values.add(a)
+        elif kind == "hypotheses":
+            for h in c.iter_new_hypotheses():
+                name = h.get("name")
+                if name:
+                    values.add(name)
+        elif kind == "dispositions":
+            d = c.conclude.get("disposition")
+            if d:
+                values.add(d)
+        else:
+            raise ValueError(f"unknown kind {kind!r}; choose from {_ENUM_CHOICES}")
+    return {"kind": kind, "values": sorted(values), "count": len(values)}
+
+
+# ---------------------------------------------------------------------------
+# CLI — argparse + demo runner
+# ---------------------------------------------------------------------------
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="query.py",
+        description="""
+Investigation-language v2.5 query tool.
+
+Without --class or --enumerate, runs the full demo across all 8 classes.
+
+QUERY CLASSES
+  1  coarse-case-lookup     Filter cases by disposition/termination/archetype/confidence
+  2  anchor-calibration     Distribution of anchor results × authority → disposition
+  3  refinement-chains      Hypothesis refinement tree shapes per case
+  4  dead-leads             Leads that errored or returned degraded data
+  5  lead-sequence          Serialize gather blocks as trace strings; filter by substring
+  6  hypothesis-wildcard    fnmatch on hypothesis names; filter by final weight
+  7  prose-substring        Substring scan across all prose fields
+  8  lead-effectiveness     Score leads by log1p(count) × mean_abs_weight_delta;
+                            optionally restrict to hypotheses matching fnmatch patterns
+
+ENUMERATION
+  --enumerate leads|anchors|archetypes|hypotheses|dispositions
+      List all distinct values of the chosen dimension across the corpus.
+      Useful for discovering valid filter arguments before running a query.
+
+OUTPUT
+  Default: human-readable.  --json: one JSON object per line (hits array).
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    p.add_argument(
+        "--class", dest="query_class", type=int, choices=range(1, 9), metavar="N",
+        help="Run a single query class (1–8) instead of the full demo.",
+    )
+    p.add_argument(
+        "--enumerate", dest="enumerate", choices=_ENUM_CHOICES, metavar="KIND",
+        help="List distinct values: leads | anchors | archetypes | hypotheses | dispositions",
+    )
+    p.add_argument("--json", action="store_true", help="Emit JSON output instead of prose.")
+
+    # Class 1
+    g1 = p.add_argument_group("class 1 — coarse case lookup")
+    g1.add_argument("--disposition", help="Filter by disposition (benign|unclear|true_positive)")
+    g1.add_argument("--termination", dest="termination_category", help="Filter by termination category (trust-root|severity-ceiling)")
+    g1.add_argument("--confidence", help="Filter by confidence (high|medium|low)")
+    g1.add_argument("--archetype", dest="matched_archetype", help="Filter by matched_archetype exact value")
+    g1.add_argument("--ceiling-kind", dest="ceiling_test_kind", help="Filter by ceiling_test.kind (tool-unavailable|out-of-band-human-contact)")
+
+    # Class 2
+    g2 = p.add_argument_group("class 2 — anchor calibration")
+    g2.add_argument("--anchor-id", help="Filter by anchor_id")
+    g2.add_argument("--result", help="Filter by anchor result (confirmed|refuted|partial|no-data)")
+    g2.add_argument("--authority", dest="authority_for_question", help="Filter by authority_for_question (full|partial)")
+
+    # Class 4
+    g4 = p.add_argument_group("class 4 — dead-lead lookup")
+    g4.add_argument("--system", help="Filter by query_details.system")
+    g4.add_argument("--failure-reason", dest="failure_reason", help="Filter by failure_reason")
+
+    # Class 5
+    g5 = p.add_argument_group("class 5 — lead sequence")
+    g5.add_argument("--contains", help="Filter traces containing this substring")
+
+    # Class 6
+    g6 = p.add_argument_group("class 6 — hypothesis wildcard")
+    g6.add_argument("--pattern", help="fnmatch pattern against hypothesis names (e.g. '?*compromise*')")
+    g6.add_argument("--weight", dest="final_weight", help="Filter by final weight (++|+|-|--)")
+
+    # Class 7
+    g7 = p.add_argument_group("class 7 — prose substring")
+    g7.add_argument("--phrase", help="Substring to search across all prose fields")
+    g7.add_argument("--case-sensitive", action="store_true")
+
+    # Class 8
+    g8 = p.add_argument_group("class 8 — lead effectiveness")
+    g8.add_argument(
+        "--hypothesis", dest="hypothesis_patterns", nargs="+", metavar="PATTERN",
+        help="One or more fnmatch patterns (AND-ed conjunction) to restrict scoring to "
+             "hypotheses whose name matches all patterns. "
+             "E.g. --hypothesis '?*compromise*'  or  --hypothesis '?*monitoring*' '?*compromise*'",
+    )
+
+    return p
+
 
 def _print_section(title: str) -> None:
     print(f"\n{'=' * 72}\n{title}\n{'=' * 72}")
 
 
-def _print_result(label: str, result: dict[str, Any], limit: int = 6) -> None:
+def _print_result(label: str, result: dict[str, Any], limit: int = 6, as_json: bool = False) -> None:
+    if as_json:
+        print(json.dumps(result))
+        return
     print(f"\n--- {label} → {result['count']} hit(s) ---")
-    for key in ("hits", "distribution"):
+    for key in ("hits", "distribution", "values"):
         if key not in result:
             continue
         items = result[key][:limit]
         for item in items:
-            # compact one-line rendering
             print(f"  {item}")
         if len(result[key]) > limit:
             print(f"  ... ({len(result[key]) - limit} more)")
 
 
+def _run_class(n: int, corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    if n == 1:
+        return coarse_case_lookup(
+            corpus,
+            disposition=args.disposition,
+            termination_category=args.termination_category,
+            confidence=args.confidence,
+            matched_archetype=args.matched_archetype,
+            ceiling_test_kind=args.ceiling_test_kind,
+        )
+    if n == 2:
+        return anchor_calibration(
+            corpus,
+            anchor_id=args.anchor_id,
+            result=args.result,
+            authority_for_question=args.authority_for_question,
+        )
+    if n == 3:
+        return refinement_chain_shapes(corpus)
+    if n == 4:
+        return dead_lead_lookup(corpus, system=args.system, failure_reason=args.failure_reason)
+    if n == 5:
+        return lead_sequence_pattern(corpus, contains=args.contains)
+    if n == 6:
+        if not args.pattern:
+            print("error: --class 6 requires --pattern", file=sys.stderr)
+            sys.exit(1)
+        return hypothesis_name_wildcard(
+            corpus, args.pattern,
+            final_weight=args.final_weight,
+            disposition=args.disposition,
+        )
+    if n == 7:
+        if not args.phrase:
+            print("error: --class 7 requires --phrase", file=sys.stderr)
+            sys.exit(1)
+        return prose_substring(corpus, args.phrase, case_sensitive=args.case_sensitive)
+    if n == 8:
+        if args.hypothesis_patterns:
+            return lead_effectiveness_for_hypothesis(corpus, *args.hypothesis_patterns)
+        return lead_effectiveness(corpus)
+    raise ValueError(f"unknown class {n}")
+
+
+def _run_demo(corpus: list[Companion], as_json: bool) -> None:
+    _print_section("Class 1 — coarse case lookup")
+    _print_result("severity-ceiling + unclear", coarse_case_lookup(corpus, termination_category="severity-ceiling", disposition="unclear"), as_json=as_json)
+    _print_result("tool-unavailable ceiling", coarse_case_lookup(corpus, ceiling_test_kind="tool-unavailable"), as_json=as_json)
+
+    _print_section("Class 2 — anchor calibration")
+    _print_result("all anchors — distribution", anchor_calibration(corpus), as_json=as_json)
+    _print_result("partial-authority anchors", anchor_calibration(corpus, authority_for_question="partial"), as_json=as_json)
+
+    _print_section("Class 3 — refinement chain shapes")
+    all_chains = refinement_chain_shapes(corpus)
+    _print_result("all chains", all_chains, limit=20, as_json=as_json)
+    refined_only = {"hits": [h for h in all_chains["hits"] if h["max_depth"] > 1], "count": 0}
+    refined_only["count"] = len(refined_only["hits"])
+    _print_result("roots that refined (depth > 1)", refined_only, as_json=as_json)
+
+    _print_section("Class 4 — dead-lead lookup")
+    _print_result("all dead leads", dead_lead_lookup(corpus), as_json=as_json)
+
+    _print_section("Class 5 — lead sequence pattern")
+    _print_result("all traces", lead_sequence_pattern(corpus), as_json=as_json)
+    _print_result("severity-ceiling traces", lead_sequence_pattern(corpus, contains="severity-ceiling"), as_json=as_json)
+
+    _print_section("Class 6 — hypothesis name wildcard")
+    _print_result("?*compromise*", hypothesis_name_wildcard(corpus, "?*compromise*"), as_json=as_json)
+    _print_result("?*monitoring* weight=--", hypothesis_name_wildcard(corpus, "?*monitoring*", final_weight="--"), as_json=as_json)
+
+    _print_section("Class 7 — prose substring")
+    _print_result("'partial-authority'", prose_substring(corpus, "partial-authority"), as_json=as_json)
+    _print_result("'burst'", prose_substring(corpus, "burst"), as_json=as_json)
+
+    _print_section("Class 8 — lead effectiveness")
+    _print_result("all leads", lead_effectiveness(corpus), limit=15, as_json=as_json)
+    _print_result("?*compromise* hypotheses", lead_effectiveness_for_hypothesis(corpus, "?*compromise*"), as_json=as_json)
+    _print_result("?*monitoring* ∧ ?*compromise*", lead_effectiveness_for_hypothesis(corpus, "?*monitoring*", "?*compromise*"), as_json=as_json)
+
+
 def main() -> int:
+    parser = _build_parser()
+    args = parser.parse_args()
+
     corpus = load_corpus(PILOT_ROOT)
-    _print_section(f"Corpus: {len(corpus)} companion(s) loaded from {PILOT_ROOT}")
+
+    if args.enumerate:
+        result = enumerate_corpus(corpus, args.enumerate)
+        _print_result(f"enumerate({args.enumerate})", result, limit=200, as_json=args.json)
+        return 0
+
+    if args.query_class is not None:
+        result = _run_class(args.query_class, corpus, args)
+        label = f"class {args.query_class}"
+        _print_result(label, result, limit=200, as_json=args.json)
+        return 0
+
+    # Full demo
+    _print_section(f"Corpus: {len(corpus)} companion(s) from {PILOT_ROOT}")
     for c in corpus:
         print(f"  {c.case_id:30} {c.source_path.relative_to(PILOT_ROOT)}")
         print(
@@ -519,80 +867,10 @@ def main() -> int:
             f"termination={c.conclude.get('termination', {}).get('category')}  "
             f"disposition={c.conclude.get('disposition')}"
         )
-
     if not corpus:
         print("No companions found.")
         return 1
-
-    _print_section("Class 1 — coarse case lookup")
-    _print_result(
-        "severity-ceiling + unclear",
-        coarse_case_lookup(corpus, termination_category="severity-ceiling", disposition="unclear"),
-    )
-    _print_result(
-        "tool-unavailable ceiling",
-        coarse_case_lookup(corpus, ceiling_test_kind="tool-unavailable"),
-    )
-
-    _print_section("Class 2 — anchor calibration")
-    _print_result("all anchors — distribution", anchor_calibration(corpus))
-    _print_result(
-        "approved-monitoring-sources only",
-        anchor_calibration(corpus, anchor_id="approved-monitoring-sources"),
-    )
-    _print_result(
-        "partial-authority anchors",
-        anchor_calibration(corpus, authority_for_question="partial"),
-    )
-
-    _print_section("Class 3 — refinement chain shapes")
-    _print_result("refinement shapes across corpus", refinement_chain_shapes(corpus), limit=20)
-    # Highlight: roots that actually refined (max_depth > 1)
-    refined_only = {
-        "hits": [h for h in refinement_chain_shapes(corpus)["hits"] if h["max_depth"] > 1],
-        "count": 0,
-    }
-    refined_only["count"] = len(refined_only["hits"])
-    _print_result("roots that refined (max_depth > 1)", refined_only)
-
-    _print_section("Class 4 — dead-lead lookup")
-    _print_result("all dead leads", dead_lead_lookup(corpus))
-    _print_result(
-        "host_query adapter errors",
-        dead_lead_lookup(corpus, system="host_query", failure_reason="adapter-error"),
-    )
-
-    _print_section("Class 5 — lead sequence pattern")
-    _print_result("all traces", lead_sequence_pattern(corpus))
-    _print_result(
-        "traces touching severity-ceiling",
-        lead_sequence_pattern(corpus, contains="severity-ceiling"),
-    )
-
-    _print_section("Class 6 — name wildcard")
-    _print_result(
-        "?*compromise*",
-        hypothesis_name_wildcard(corpus, "?*compromise*"),
-    )
-    _print_result(
-        "?*monitoring* weight=--",
-        hypothesis_name_wildcard(corpus, "?*monitoring*", final_weight="--"),
-    )
-    _print_result(
-        "?*self*|?*legitimate* (no matches expected — verifies negative case)",
-        hypothesis_name_wildcard(corpus, "?*self*"),
-    )
-
-    _print_section("Class 7 — prose substring")
-    _print_result(
-        "'partial-authority'",
-        prose_substring(corpus, "partial-authority"),
-    )
-    _print_result(
-        "'burst'",
-        prose_substring(corpus, "burst"),
-    )
-
+    _run_demo(corpus, as_json=args.json)
     return 0
 
 

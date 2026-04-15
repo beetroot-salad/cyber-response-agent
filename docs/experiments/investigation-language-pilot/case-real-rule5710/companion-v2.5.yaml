@@ -1,0 +1,814 @@
+# v2.3 companion — Real Rule-5710 Investigation (EDGE-AS-OBSERVATION)
+# Case: 1776137449.1265639 — wazuh-rule-5710 (SSH invalid user sensu from 172.22.0.10)
+# Translated from companion-v2.3.yaml (command-vertex) under the edge-as-observation model.
+#
+# Deltas from companion-v2.3.yaml (command-vertex):
+#
+# 1. NO `command` vertex for the SSH auth attempt. The failed auth is modeled
+#    as a single `attempted_auth` edge from v-001 (source endpoint, partial
+#    knowledge) to v-002 (target endpoint), with status: refuted and attributes
+#    carrying the auth attempt details (username_attempted, src_port, wazuh_rule).
+#
+# 2. `ip` type dropped. v-001 becomes `endpoint` with classification
+#    unknown-endpoint and `knowledge: partial` in attributes — per the
+#    partial-knowledge-endpoint convention. The source IP lives as an
+#    attribute identifier, not as a distinct type.
+#
+# 3. No separate identity vertex for the attempted username "sensu". The
+#    sentinel-pattern classification lives on the edge's concerns + attributes.
+#    An identity vertex would be semantically wrong: "sensu" is a claimed
+#    username in a failed attempt, not an identity that authenticated.
+#
+# 4. Proposed relation additions for §10:
+#    - `attempted_auth: endpoint | process | session → endpoint`
+#      (source-endpoint attempted an auth interaction with target-endpoint;
+#      can also be used when a known process or session made the attempt)
+#
+# 5. Hypotheses h-001..h-004 attach to v-001 (source endpoint). Proposed_edge
+#    uses `runs_on` traversed backward: v-001 (endpoint) ←runs_on— process|session
+#    (the hypothetical upstream actor on the source endpoint). Under the one-hop
+#    rule this is valid because the edge type matches §10's canonical direction
+#    (process → endpoint) while the traversal walks backward from attached_to.
+#
+# 6. h-005 (compromise-followup) attaches to v-002 (target endpoint). Its
+#    proposed upstream is a future ssh-session that initiated_by v-002 —
+#    the mandatory adversarial "a successful auth happens next" scenario.
+#
+# 7. Rule 4 strong-authority supporting edge: e-001 (the attempted_auth
+#    observation with siem-event authority) anchors every strong refutation.
+#
+# 8. SCREEN remains at loop:0, unchanged from the command-vertex version
+#    (v2.3 still has no SCREEN slot in the schema).
+
+# ---------------------------------------------------------------------------
+# PROLOGUE — CONTEXTUALIZE
+# ---------------------------------------------------------------------------
+
+prologue:
+  vertices:
+    - id: v-001
+      type: endpoint
+      classification: unknown-endpoint
+      identifier: "172.22.0.10 (playground monitoring host, partial knowledge)"
+      attributes:
+        knowledge: partial
+        ip: "172.22.0.10"
+        role_hint: "playground monitoring host container"
+        classification_source: "environment/context/ip-ranges.md"
+      concerns:
+        - "only the source IP is directly observed from the wazuh alert; compute substrate and process-level forensics are unavailable to the agent for this endpoint"
+      citations: ["siem:event=1776137449.1265639"]
+
+    - id: v-002
+      type: endpoint
+      classification: production-server
+      identifier: "target-endpoint"
+      attributes:
+        kind: container-host
+        agent_name: "target-endpoint"
+        agent_id: "002"
+        ip: "172.22.0.2"
+      citations: ["siem:event=1776137449.1265639"]
+
+  edges:
+    - id: e-001
+      relation: attempted_auth
+      # Proposed §10 entry: attempted_auth: endpoint|process|session → endpoint.
+      # Represents an observed authentication attempt from the source to the
+      # target. status: refuted captures the failed outcome directly; no
+      # session vertex is established because the auth didn't succeed.
+      source_vertex: v-001
+      target_vertex: v-002
+      when: { timestamp: "2026-04-14T03:30:49.588Z" }
+      status: refuted
+      attributes:
+        protocol: ssh
+        system: sshd
+        username_attempted: "sensu"
+        username_classification: "monitoring-pattern sentinel (per environment/context/identity-patterns.md)"
+        src_port: 42202
+        wazuh_rule: "5710"
+        firedtimes: 7
+        full_log: "Apr 14 03:30:49 target-endpoint sshd[6843]: Invalid user sensu from 172.22.0.10 port 42202"
+        outcome: "failed (invalid user)"
+      authority:
+        kind: siem-event
+        source: "siem:wazuh-rule-5710:event=1776137449.1265639"
+      concerns:
+        - "rule.firedtimes=7 is a rule-level counter, NOT a per-source attempt count — real attempt count requires authentication-history lead"
+        - "this edge represents the triggering alert event; the full sub-200ms burst and surrounding traffic are captured by l-004's aggregate observation edge"
+
+# ---------------------------------------------------------------------------
+# HYPOTHESIZE — loop 1
+# ---------------------------------------------------------------------------
+#
+# SCREEN modeling: v2.3 has no schema-level SCREEN slot. SCREEN leads are
+# modeled as loop:0 in the gather section.
+#
+# Hypothesis attachments: h-001..h-004 attach to v-001 (source endpoint).
+# Each proposes a hypothetical upstream actor — a process or session that
+# runs_on v-001 and caused the observed attempted_auth. Under the §6 one-hop
+# rule, `runs_on` traversed backward from v-001 (endpoint) to a process|session
+# parent is a valid one-hop shape; the §10 canonical direction stays
+# process → endpoint.
+#
+# h-005 (mandatory adversarial) attaches to v-002 (target endpoint) and
+# proposes a future successful-auth session that would initiated_by v-002.
+
+hypothesize:
+  hypotheses:
+    - id: h-001
+      name: "?monitoring-loop-broken"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: runs_on
+        parent_vertex:
+          type: process
+          classification: automation-pipeline-process
+          attributes:
+            mechanism: "cron-driven monitoring probe on 172.22.0.10 stuck in a retry loop"
+      predictions:
+        - id: p1
+          claim: "authentication attempts from 172.22.0.10 cluster on a SINGLE sentinel username, not a rotation across the full sentinel set"
+        - id: p2
+          claim: "the burst cadence is persistent / repetitive rather than a single discrete event"
+        - id: p3
+          claim: "cron is alive on monitoring-host and monitoring_probe process is visible or recently exited"
+        - id: p4
+          claim: "no successful authentication from 172.22.0.10 to target-endpoint"
+      refutation_shape:
+        - id: r1
+          claim: "attempts from 172.22.0.10 rotate across MULTIPLE distinct sentinel usernames within the burst window"
+        - id: r2
+          claim: "burst is a single isolated event with normal cadence on both sides"
+      concerns:
+        - "cron-driven loop could still look periodic inside the burst; cadence violation is the sole anomaly"
+
+    - id: h-002
+      name: "?monitoring-bait-triggered"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: runs_on
+        parent_vertex:
+          type: process
+          classification: automation-pipeline-process
+          attributes:
+            mechanism: "manually-triggered monitoring_bait.sh workload on 172.22.0.10 (adversarial-evaluation variant, documented in ip-ranges.md)"
+      predictions:
+        - id: p1
+          claim: "authentication attempts use only sanctioned sentinel usernames (bait reuses monitoring identities by design)"
+        - id: p2
+          claim: "burst is a single discrete event, not sustained — cadence resumes within one sanctioned tick after the burst"
+        - id: p3
+          claim: "no successful authentication from 172.22.0.10 to target-endpoint"
+        - id: p4
+          claim: "no non-5710 alerts on monitoring-host in the preceding hours (no compromise precursors)"
+        - id: p5
+          claim: "cron is alive on monitoring-host (host is a live scheduled-job environment)"
+      refutation_shape:
+        - id: r1
+          claim: "username rotation includes names OUTSIDE the sanctioned sentinel set"
+        - id: r2
+          claim: "burst activity is sustained (not a single discrete event) or cadence does not resume after the burst"
+        - id: r3
+          claim: "a successful authentication from 172.22.0.10 follows the burst"
+      concerns:
+        - "monitoring_bait.sh and a compromise-that-mimics-bait are observationally near-identical — disambiguator is absence of compromise precursors, not presence of bait name alone"
+        - "if the bait process has already exited at query time, process-list absence cannot refute this hypothesis"
+        - "file-stat on /opt/workloads/ and /etc/cron.d/ are deny-listed, blocking direct script verification"
+
+    - id: h-003
+      name: "?monitoring-host-compromise"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: runs_on
+        parent_vertex:
+          type: process
+          classification: unclassified-process
+          attributes:
+            mechanism: "adversary with access to 172.22.0.10 running an attacker-owned process that makes auth attempts using the approved source's sentinel username pool to evade detection"
+            attacker_controlled: true
+      predictions:
+        - id: p1
+          claim: "username rotation includes names OUTSIDE the sentinel set, OR"
+        - id: p2
+          claim: "burst activity is sustained over the full observation window, OR"
+        - id: p3
+          claim: "a successful authentication from 172.22.0.10 follows the burst, OR"
+        - id: p4
+          claim: "non-5710 alerts (file-integrity, rootkit, process-anomaly) on monitoring-host precede or accompany the burst"
+      refutation_shape:
+        - id: r1
+          claim: "zero non-5710 alerts on monitoring-host across a multi-hour window AND no successful authentication AND no username rotation outside sentinel set AND no sustained burst"
+      concerns:
+        - "adversary may deliberately stay within the sentinel set to exploit the approved-source trust relationship"
+        - "absence of compromise indicators is not a direct contradiction — early-stage compromise may not yet produce parallel telemetry"
+        - "process-list on monitoring-host returns command names only (no argv, no parent, no start time) — cannot audit deep host state"
+        - "file-stat on /opt/workloads/ and /etc/cron.d/ deny-listed — cannot verify process ancestry"
+        - "mandatory adversarial — distiller recognizes this from the ?*-compromise name pattern + unfalsifiability concerns"
+
+    - id: h-004
+      name: "?internal-credential-guessing"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: runs_on
+        parent_vertex:
+          type: session
+          classification: ssh-session
+          attributes:
+            mechanism: "an authenticated operator on 172.22.0.10 manually attempting SSH logins to target-endpoint from an interactive shell (typo recovery, misconfigured client)"
+      predictions:
+        - id: p1
+          claim: "authentication attempts use real-looking or wordlist-common usernames (not exclusively monitoring sentinels)"
+        - id: p2
+          claim: "attempt volume is low (not a rapid sub-second burst)"
+      refutation_shape:
+        - id: r1
+          claim: "ALL observed usernames across the full window are sanctioned monitoring sentinels — no real-looking or wordlist names"
+        - id: r2
+          claim: "attempt pattern is a sub-second multi-sentinel burst, incompatible with manual typo-recovery"
+
+    - id: h-005
+      name: "?compromise-followup"
+      attached_to_vertex: v-002
+      # Mandatory adversarial. Attaches to v-002 (target endpoint) with a
+      # proposed future successful-auth session. The session's initiated_by
+      # direction is session → endpoint, so the one-hop backward from v-002
+      # gives a session parent.
+      proposed_edge:
+        relation: initiated_by
+        parent_vertex:
+          type: session
+          classification: ssh-session
+          attributes:
+            mechanism: "one of the burst attempts (or a subsequent attempt) leads to a successful SSH login from 172.22.0.10 to target-endpoint"
+            outcome: "authenticated"
+            adversarial_successor: true
+      predictions:
+        - id: p1
+          claim: "at least one authentication_success event (wazuh rule 5501 or 5715) from 172.22.0.10 against target-endpoint occurs within the burst window + 5 minutes forward"
+      refutation_shape:
+        - id: r1
+          claim: "zero authentication_success events from 172.22.0.10 against target-endpoint across the full burst window and a forward window of at least 5 minutes"
+      concerns:
+        - "mandatory adversarial hypothesis — must be explicitly refuted before considering benign disposition"
+        - "SCREEN checked 60s forward; must extend forward window to ≥5 minutes for authoritative refutation"
+
+# ---------------------------------------------------------------------------
+# GATHER
+# ---------------------------------------------------------------------------
+
+gather:
+  # ---- SCREEN leads (loop 0) ----
+
+  - lead:
+      id: l-001
+      loop: 0
+      name: "screen-source-username-classification"
+      target: v-001
+      query_details:
+        system: "environment-knowledge"
+        template: "leads/source-classification + leads/username-classification"
+        query: "classify 172.22.0.10 via ip-ranges.md; classify 'sensu' via identity-patterns.md"
+        time_window: "static lookup"
+      concerns:
+        - "static lookup against environment docs — not a live query; authoritative for classification but does not confirm current behavior"
+      outcome:
+        attribute_updates:
+          - vertex: v-001
+            updates:
+              classification: external-sanctioned-automation
+              attributes:
+                classification_source: "environment/context/ip-ranges.md"
+        # No new graph entities — the classification annotations attach to
+        # v-001's attributes and to e-001's concerns via citation references.
+
+  - lead:
+      id: l-002
+      loop: 0
+      name: "screen-approved-monitoring-sources-anchor"
+      target: v-001
+      tests: [h-002, h-003]
+      query_details:
+        system: "environment-knowledge"
+        template: "knowledge/environment/operations/approved-monitoring-sources.md"
+        query: "lookup (172.22.0.10, sensu, target-endpoint) in approved-monitoring-sources table; check cadence requirement"
+        time_window: "static lookup + runtime cadence check"
+        substitutions:
+          srcip: "172.22.0.10"
+          srcuser: "sensu"
+          target: "target-endpoint"
+          observed_attempt_count_5min: 6
+          expected_attempt_count_5min: 1
+      concerns:
+        - "approved-monitoring-sources table confirms the identity triple but the table's own failure-mode guidance triggers: 'source approved but burst volume observed → refutation; escalate as approved source, unexpected volume'"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+        trust_anchor_result:
+          anchor_id: approved-monitoring-sources
+          kind: approved-monitoring-sources
+          result: refuted
+          as_of: "2026-04-14T03:30:49Z"
+          authority_for_question: partial
+      resolutions:
+        - hypothesis: h-002
+          before: null
+          after: "+"
+          severity_of_test: moderate
+          matched_prediction_ids: [p1]
+          reasoning: |
+            anchor confirms the (172.22.0.10, sensu, target-endpoint) triple
+            is on the approved sentinel table — identity consistent with h-002's
+            p1 (bait uses sanctioned identities). The burst shape is also
+            consistent with h-002's discrete-injection prediction but p2/p3/p4/p5
+            are not yet tested. Moderate severity, caps at + per rule 16
+            (partial authority).
+          supporting_edges: [e-001]
+        - hypothesis: h-003
+          before: null
+          after: "-"
+          severity_of_test: moderate
+          matched_refutation_ids: [r1]
+          reasoning: |
+            anchor's cadence failure-mode weakly refutes ?monitoring-host-compromise
+            in the sense that the fast-path monitoring-probe confirmation is
+            unavailable. The anchor does NOT directly refute compromise — an
+            adversary inside an approved source would produce the same identity-triple
+            pattern. Weight transitions to - (not --) because partial-authority
+            anchor cannot close the adversarial hypothesis.
+          supporting_edges: [e-001]
+
+  - lead:
+      id: l-003
+      loop: 0
+      name: "screen-authentication-history"
+      target: v-002
+      observes:
+        - hypothesis: h-002
+          predictions: [p3]
+        - hypothesis: h-005
+          refutations: [r1]
+      query_details:
+        system: "wazuh"
+        template: "leads/authentication-history/templates/wazuh.md"
+        query: "wazuh 5710 events from 172.22.0.10 against target-endpoint, 5 min preceding + 60 sec following alert"
+        time_window: "2026-04-14T03:25:49Z–03:31:49Z"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+      # No resolutions at loop 0 — SCREEN discrimination set not yet formed.
+      # Observations feed HYPOTHESIZE and are tested further by l-004 at loop 1.
+
+  # ---- LOOP 1 leads ----
+
+  - lead:
+      id: l-004
+      loop: 1
+      name: "authentication-history-extended"
+      target: v-002
+      observes:
+        - hypothesis: h-001
+          refutations: [r1]
+        - hypothesis: h-002
+          predictions: [p1, p3]
+        - hypothesis: h-003
+          refutations: [r1]
+        - hypothesis: h-004
+          refutations: [r1, r2]
+        - hypothesis: h-005
+          refutations: [r1]
+      query_details:
+        system: "wazuh"
+        template: "leads/authentication-history/templates/wazuh.md"
+        query: "data.srcip:172.22.0.10 AND agent.name:target-endpoint, all rule 5710, 1h before + 5m after alert"
+        time_window: "2026-04-14T02:30:49Z–03:35:49Z"
+      outcome:
+        observations:
+          vertices: []
+          edges:
+            # Aggregate observation: the full 1h window's attempted_auth pattern,
+            # expressed as a single edge with count + distinct_usernames on it.
+            # This is the scale-of-reasoning principle in practice: the SIEM
+            # returns a set of events, and the aggregate shape (rotation,
+            # burst, cadence) is what the investigation reasons about.
+            - id: e-002
+              relation: attempted_auth
+              source_vertex: v-001
+              target_vertex: v-002
+              when:
+                start: "2026-04-14T02:30:49Z"
+                end: "2026-04-14T03:35:49Z"
+              status: refuted
+              attributes:
+                protocol: ssh
+                event_count: 10
+                distinct_usernames: [sensu, healthcheck, monitorprobe, nagios, zabbix]
+                username_count: 5
+                all_usernames_sentinel: true
+                successful_logins_5m_forward: 0
+                burst_detail:
+                  window: "03:30:49.481Z – 03:30:49.588Z"
+                  event_count: 5
+                  duration_ms_upper_bound: 200
+                  username_cycling: true
+                hourly_distribution: { "02h": 2, "03h": 8 }
+              authority:
+                kind: siem-event
+                source: "wazuh:rule=5710:event-window=l1-extended"
+      resolutions:
+        - hypothesis: h-001
+          before: null
+          after: "-"
+          severity_of_test: moderate
+          matched_refutation_ids: [r1]
+          reasoning: |
+            wazuh returned 10 rule-5710 events over 02:30:49Z–03:35:49Z,
+            5 distinct sentinel usernames cycling in a sub-200ms burst at
+            03:30:49 (see e-002.attributes.burst_detail). A retry loop stuck
+            on a single sentinel would cluster on ONE username; the 5-name
+            rotation contradicts that shape. r1 matched.
+          supporting_edges: [e-001, e-002]
+        - hypothesis: h-004
+          before: null
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r1, r2]
+          reasoning: |
+            all 5 observed usernames across the 1h window are sanctioned
+            monitoring sentinels — zero wordlist-common or real-looking names.
+            Sub-200ms burst of 5 sentinels is incompatible with manual typo
+            recovery. r1 (all-sentinel) and r2 (sub-second burst) directly
+            refuted by SIEM observation (e-002).
+          supporting_edges: [e-001, e-002]
+        - hypothesis: h-005
+          before: null
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r1]
+          reasoning: |
+            zero authentication_success events (wazuh rule 5501/5715) from
+            172.22.0.10 to target-endpoint across the full 1h preceding + 5 min
+            forward window (e-002.attributes.successful_logins_5m_forward: 0).
+            r1 directly refuted: the "a successful auth follows the burst"
+            prediction is contradicted by direct observation over the forward
+            window.
+          supporting_edges: [e-001, e-002]
+        - hypothesis: h-002
+          before: "+"
+          after: "+"
+          severity_of_test: moderate
+          matched_prediction_ids: [p1, p3]
+          reasoning: |
+            all 5 observed usernames are sanctioned sentinels (p1 confirmed);
+            zero successful logins in the 5m forward window (p3 confirmed).
+            Weight stays at + — p2 (burst is single discrete event) is consistent
+            with observations so far but needs a longer baseline; p4, p5 tested
+            by later leads.
+          supporting_edges: [e-002]
+
+  - lead:
+      id: l-005
+      loop: 1
+      name: "recent-alert-correlation-4h"
+      target: v-001
+      observes:
+        - hypothesis: h-002
+          predictions: [p4]
+        - hypothesis: h-003
+          refutations: [r1]
+      query_details:
+        system: "wazuh"
+        template: "leads/recent-alert-correlation/templates/wazuh.md"
+        query: "agent.name:monitoring-host OR data.srcip:172.22.0.10, any signature, last 4h"
+        time_window: "2026-04-13T23:30:49Z–2026-04-14T03:30:49Z"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+      # NOTE: l-005's aggregate facts (19 events, 0 non-5710, 0 FIM/rootkit/
+      # process-anomaly/success alerts) inform the resolution reasoning without
+      # materializing a new edge. e-002 from l-004 already captures the aggregate
+      # attempted_auth pattern on v-001→v-002; l-005's finding is the ABSENCE
+      # of other-signature events, which is not a new edge but a negative
+      # observation referenced in reasoning.
+      resolutions:
+        - hypothesis: h-003
+          before: "-"
+          after: "-"
+          severity_of_test: moderate
+          matched_refutation_ids: [r1]
+          reasoning: |
+            wazuh returned 19 events across the 4h window, all rule 5710 from
+            172.22.0.10. Zero non-5710 alerts on monitoring-host or this srcip —
+            no FIM (55x), no rootkit, no process-anomaly, no brute-force
+            composite (5712), no successful auth (5501/5715). The r1
+            collective-absence condition is partially met, but absence ≠
+            refutation when FIM coverage on monitoring-host is unverified.
+            Weight stays at -, adversarially live.
+          supporting_edges: [e-001, e-002]
+        - hypothesis: h-002
+          before: "+"
+          after: "+"
+          severity_of_test: moderate
+          matched_prediction_ids: [p4]
+          reasoning: |
+            zero non-5710 alerts on monitoring-host across the 4h window — no
+            compromise precursors. p4 confirmed. Weight stays at +; p5 (cron
+            alive) tested by l-007.
+          supporting_edges: [e-002]
+
+  - lead:
+      id: l-006
+      loop: 1
+      name: "process-lineage-host-query-monitoring"
+      target: v-001
+      observes:
+        - hypothesis: h-002
+          predictions: [p5]
+      query_details:
+        system: "host_query"
+        template: "leads/process-lineage/templates/host_query.md"
+        query: "host_query --host monitoring-host process-list monitoring"
+        time_window: "point-in-time"
+      concerns:
+        - "point-in-time query — short-lived scripts may have already exited; absence-of-name cannot refute either bait or probe"
+        - "process-list returns command names only — no argv, no parent PID, no start time; insufficient for process ancestry"
+        - "file-stat on /opt/workloads/ deny-listed — cannot read script contents or modification times"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+      resolutions:
+        - hypothesis: h-002
+          before: "+"
+          after: "+"
+          severity_of_test: weak
+          matched_prediction_ids: []
+          reasoning: |
+            host_query returned no live monitoring_bait or monitoring_probe
+            process — consistent with a short-lived script that already exited
+            after the burst. Absence cannot refute h-002 (bait may have exited)
+            nor confirm it. No weight change; contributes to the 'unverifiable
+            by available tooling' context driving the severity-ceiling
+            escalation.
+          supporting_edges: []
+
+  - lead:
+      id: l-007
+      loop: 1
+      name: "service-status-host-query-cron"
+      target: v-001
+      observes:
+        - hypothesis: h-002
+          predictions: [p5]
+      query_details:
+        system: "host_query"
+        template: "leads/service-status/templates/host_query.md"
+        query: "host_query --host monitoring-host service-status cron"
+        time_window: "point-in-time"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+      resolutions:
+        - hypothesis: h-002
+          before: "+"
+          after: "+"
+          severity_of_test: weak
+          matched_prediction_ids: [p5]
+          reasoning: |
+            host_query returned 'cron: active (sysv)' — the probe driver is
+            alive on monitoring-host, operationally a live scheduled-job
+            environment. p5 confirmed at weak severity; also weakly negative
+            for h-003 (a sophisticated compromise would likely leave cron
+            alive anyway).
+          supporting_edges: []
+
+  - lead:
+      id: l-008
+      loop: 1
+      name: "connection-list-host-query-monitoring"
+      target: v-001
+      query_details:
+        system: "host_query"
+        template: "leads/connection-list/templates/host_query.md"
+        query: "host_query --host monitoring-host connection-list"
+        time_window: "point-in-time"
+      concerns:
+        - "adapter error rc=127 — not retried; other leads (l-004, l-005) cover the same discriminating questions"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+        failure_reason: adapter-error
+
+  # ---- LOOP 2 leads ----
+
+  - lead:
+      id: l-009
+      loop: 2
+      name: "authentication-history-24h-baseline"
+      target: v-002
+      observes:
+        - hypothesis: h-001
+          refutations: [r1, r2]
+        - hypothesis: h-002
+          predictions: [p2]
+        - hypothesis: h-003
+          refutations: [r1]
+        - hypothesis: h-004
+          refutations: [r1]
+        - hypothesis: h-005
+          refutations: [r1]
+      query_details:
+        system: "wazuh"
+        template: "leads/authentication-history/templates/wazuh.md"
+        query: "data.srcip:172.22.0.10 AND agent.name:target-endpoint, --window 24h"
+        time_window: "2026-04-13T03:30:49Z–2026-04-14T03:30:49Z"
+      concerns:
+        - "24h baseline contains a 9-hour gap 2026-04-13T17:00Z–2026-04-14T01:00Z (unexplained; noted for completeness, not load-bearing for the verdict)"
+      outcome:
+        observations:
+          vertices: []
+          edges:
+            # Finer-grained baseline edge over the 24h window. e-002 was the
+            # 1h+5m window; e-003 is the 24h window. Same source/target pair,
+            # different observation windows, different aggregate shapes.
+            # Both edges coexist — each represents the observation at its
+            # specific window.
+            - id: e-003
+              relation: attempted_auth
+              source_vertex: v-001
+              target_vertex: v-002
+              when:
+                start: "2026-04-13T03:30:49Z"
+                end: "2026-04-14T03:40:02Z"
+              status: refuted
+              attributes:
+                protocol: ssh
+                event_count: 93
+                distinct_usernames: [sensu, healthcheck, monitorprobe, zabbix, nagios]
+                username_count: 5
+                all_usernames_sentinel: true
+                username_distribution:
+                  sensu: 22
+                  healthcheck: 20
+                  monitorprobe: 19
+                  zabbix: 18
+                  nagios: 14
+                distribution_pattern: "near-uniform round-robin across 5 sanctioned sentinels"
+                successful_logins_24h: 0
+                post_burst_event:
+                  timestamp: "2026-04-14T03:40:02.131Z"
+                  username: "healthcheck"
+                  delta_from_burst_s: 553
+                  interpretation: "single tick ~9 min after burst — matches sanctioned cadence"
+              authority:
+                kind: siem-event
+                source: "wazuh:rule=5710:event-window=l2-24h"
+      resolutions:
+        - hypothesis: h-001
+          before: "-"
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r1, r2]
+          reasoning: |
+            24h baseline (e-003) shows 93 events with near-uniform round-robin
+            rotation through all 5 sentinel usernames. A retry loop would cluster
+            on one name — r1 directly refuted. Sanctioned cadence resumed at
+            03:40:02Z (healthcheck, ~9m after the burst), matching the sanctioned
+            interval — the burst is a single isolated event. r2 directly
+            refuted. Strong refutation.
+          supporting_edges: [e-001, e-003]
+        - hypothesis: h-004
+          before: "--"
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r1]
+          reasoning: |
+            24h baseline reaffirms: all 93 events cycle through exactly the 5
+            sanctioned sentinel usernames; zero wordlist-common or real-looking
+            names across a full day of observations. r1 further supported. No
+            weight change — already refuted.
+          supporting_edges: [e-001, e-003]
+        - hypothesis: h-005
+          before: "--"
+          after: "--"
+          severity_of_test: severe
+          matched_refutation_ids: [r1]
+          reasoning: |
+            24h baseline reaffirms: zero authentication_success events from
+            172.22.0.10 across the full 24h window + 5 min forward. r1 further
+            supported with higher authority (larger window). No weight change.
+          supporting_edges: [e-001, e-003]
+        - hypothesis: h-002
+          before: "+"
+          after: "+"
+          severity_of_test: moderate
+          matched_prediction_ids: [p2]
+          reasoning: |
+            24h baseline confirms p2: the burst is a single discrete event at
+            03:30:49Z, with sanctioned single-attempt cadence on both sides.
+            Post-burst tick at 03:40:02Z (healthcheck, ~9m after) matches the
+            sanctioned interval exactly. All predictions p1–p5 are now
+            individually met; authoritative mechanism grounding remains
+            unavailable (deny-listed tooling), so weight stays at + per
+            concerns: no authoritative anchor for this hypothesis.
+          supporting_edges: [e-003]
+        - hypothesis: h-003
+          before: "-"
+          after: "-"
+          severity_of_test: moderate
+          matched_refutation_ids: [r1]
+          reasoning: |
+            24h baseline further weakens h-003: ongoing compromise would
+            persist the shape-violation past the single burst OR show earlier
+            anomalies in the 24h window. Neither present — pattern resumes
+            sanctioned cadence at the next tick. BUT: a patient attacker
+            emitting one burst then waiting is still shape-compatible, and
+            tooling cannot audit monitoring-host process state deeply enough.
+            Weight stays at -, adversarially live.
+          supporting_edges: [e-001, e-003]
+
+  - lead:
+      id: l-010
+      loop: 2
+      name: "ad-hoc-listening-sockets-target"
+      target: v-002
+      observes:
+        - hypothesis: h-003
+          refutations: [r1]
+      query_details:
+        system: "host_query"
+        template: "leads/ad-hoc-host-inspection"
+        query: "host_query --host target-endpoint listening-sockets"
+        time_window: "point-in-time"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+      resolutions:
+        - hypothesis: h-003
+          before: "-"
+          after: "-"
+          severity_of_test: moderate
+          matched_refutation_ids: [r1]
+          reasoning: |
+            host_query returned only sshd:22 (tcp and tcp6) as externally-exposed
+            listeners on target-endpoint, plus local DNS stubs. No backdoor
+            listeners, no alternate auth ports, no reverse-shell endpoint.
+            Consistent with r1's partial-conditions clause (no compromise
+            indicators on target side). Does not advance to -- — target socket
+            state doesn't speak to monitoring-host compromise state.
+          supporting_edges: []
+
+# ---------------------------------------------------------------------------
+# CONCLUDE
+# ---------------------------------------------------------------------------
+
+conclude:
+  termination:
+    category: severity-ceiling
+    rationale: |
+      Two mechanism hypotheses remain live after exhausting available leads:
+      ?monitoring-bait-triggered (+, benign-origin test workload; all 5
+      predictions individually met but no authoritative mechanism grounding)
+      and ?monitoring-host-compromise (-, adversarially live, not refutable
+      with --). The evidence gap is definitive process ancestry / argv on
+      monitoring-host, which the host-query deny-list blocks and which
+      process-list cannot reconstruct for already-exited scripts. The
+      approved-monitoring-sources anchor explicitly requires escalation for
+      'approved source, unexpected volume'.
+  ceiling_test:
+    kind: tool-unavailable
+    subject: "host_query file-stat on /opt/workloads/ and /etc/cron.d/; process-list argv+parent on monitoring-host"
+  ceiling_rationale: |
+    host_query tooling deny-list blocks file-stat on /opt/workloads/ and
+    /etc/cron.d/; process-list returns command names only (no argv, no
+    parent, no start time). These gaps are the precise evidence class
+    needed to distinguish ?monitoring-bait-triggered from
+    ?monitoring-host-compromise. The investigation cannot advance h-003 to
+    -- without process ancestry, and process ancestry is unavailable from
+    the tooling the agent can reach.
+  disposition: unclear
+  confidence: medium
+  matched_archetype: null
+  summary: |
+    SSH invalid-user alert from the sanctioned playground monitoring host
+    (172.22.0.10) exhibited a sub-200ms burst of 5 sentinel-username
+    attempts at 03:30:49Z, violating the monitoring-probe archetype's
+    cadence requirement. The observed activity is modeled as three
+    attempted_auth edges from v-001 (source endpoint, partial knowledge)
+    to v-002 (target-endpoint): e-001 (the triggering alert event), e-002
+    (1h+5m window aggregate), e-003 (24h baseline aggregate). 24h baseline
+    confirms sanctioned single-attempt cadence on both sides of the burst;
+    cadence resumed cleanly at the next tick (03:40:02Z, healthcheck).
+    h-001 (?monitoring-loop-broken), h-004 (?internal-credential-guessing),
+    and h-005 (?compromise-followup) refuted at --. h-002
+    (?monitoring-bait-triggered) caps at + (all predictions met but no
+    authoritative mechanism grounding). h-003 (?monitoring-host-compromise)
+    caps at - (partial-authority anchor + tool-unavailable for process
+    ancestry). Severity-ceiling termination: tool-unavailable ceiling test.

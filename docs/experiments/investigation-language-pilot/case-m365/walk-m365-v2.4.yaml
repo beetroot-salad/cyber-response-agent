@@ -1,0 +1,466 @@
+# v2.3 companion — M365 malicious inbox forwarding rule (EDGE-AS-OBSERVATION)
+# Alert: m365-alert-9f3a2c | New-InboxRule on alice.chen@company.com mailbox
+# Translated from walk-m365-v2.3.yaml (command-vertex) under the
+# edge-as-observation model.
+#
+# Deltas from walk-m365-v2.3.yaml (command-vertex):
+#
+# 1. NO `command` vertex for the New-InboxRule observation. The rule
+#    creation is modeled as a single `modified` edge from v-002 (OWA
+#    session) to v-005 (mailbox storage), with attributes carrying the
+#    rule details (rule_name, forward_to, delete_message, etc.).
+#
+# 2. `modified` is a proposed §10 relation addition:
+#    modified: session | process → storage | database | identity | file
+#    Represents a configuration/state change by an actor on a target entity.
+#    This is the cloud-control-plane equivalent of `wrote` for OS-level FS.
+#
+# 3. All four hypotheses attach to v-002 (OWA session) — the session is
+#    what we're investigating the provenance of. h-001 and h-002 are the
+#    lean top-level pair; h-001 refines into h-001-001 and h-001-002 after
+#    l-001 materializes the unrecognized-device signal.
+#
+# 4. Client IP (203.0.113.45, Bucharest) is a partial-knowledge endpoint
+#    vertex (v-003), per the endpoint-with-partial-knowledge convention.
+#    No raw `ip` type.
+#
+# 5. Rule 4 strong-authority supporting edge: e-003 (the modified edge
+#    carrying the New-InboxRule observation) anchors the strong resolutions.
+#
+# 6. Scale-of-reasoning: the "burst" question doesn't apply here (a single
+#    rule creation, count=1), so aggregation attributes are absent. The
+#    observation is a single action, one edge with attributes.
+
+# ---------------------------------------------------------------------------
+# PROLOGUE — CONTEXTUALIZE
+# ---------------------------------------------------------------------------
+
+prologue:
+  vertices:
+    - id: v-001
+      type: identity
+      classification: employee-without-exec-rbac
+      identifier: "alice.chen@company.com"
+      attributes:
+        kind: user
+        provider: azure-ad
+        upn: "alice.chen@company.com"
+        display_name: "Alice Chen"
+        department: "finance-ops"
+        manager: "raj.patel@company.com"
+        role_assignments: ["Finance Operations", "SAP-Read"]
+      concerns:
+        - "mailbox classified internal-confidential; finance-ops users typically have access to sensitive financial correspondence"
+
+    - id: v-002
+      type: session
+      classification: unclassified-session
+      identifier: "OWA session alice.chen @14:32:11Z"
+      attributes:
+        kind: owa-web-session
+        client_type: "OutlookWebApp"
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64) Chrome/126.0.0.0"
+        azure_ad_session_id: "7788ff..."
+        session_id: "b2f91a4c-..."
+        signed_in_at_sshd_layer: "2026-04-14T14:32:11Z"
+
+    - id: v-003
+      type: endpoint
+      classification: unknown-endpoint
+      identifier: "203.0.113.45 (client endpoint, partial knowledge)"
+      attributes:
+        knowledge: partial
+        ip: "203.0.113.45"
+        geo_city: "Bucharest"
+        geo_country: "Romania"
+      concerns:
+        - "user_usual_country per alert envelope is United States; Romania origin is a geographic anomaly for this account"
+        - "only the client IP and geo-enrichment are known from the Entra audit record; device identity and compliance posture require vpn-mfa/mdm trust leads"
+
+    - id: v-005
+      type: storage
+      classification: internal-restricted-store
+      identifier: "alice.chen@company.com mailbox"
+      attributes:
+        kind: file
+        provider: microsoft-365-exchange
+        sensitivity: "internal-confidential"
+        owner: "alice.chen@company.com"
+
+  edges:
+    - id: e-001
+      relation: authenticated_as
+      source_vertex: v-002
+      target_vertex: v-001
+      authority:
+        kind: authoritative-source
+        source: "m365-defender:alert=m365-alert-9f3a2c:unified-audit-log"
+
+    - id: e-002
+      relation: initiated_by
+      source_vertex: v-002
+      target_vertex: v-003
+      authority:
+        kind: siem-event
+        source: "m365-defender:alert=m365-alert-9f3a2c:session.client_ip"
+
+    - id: e-003
+      relation: modified
+      # Proposed §10 addition: modified: session | process → storage | database
+      # | identity | file. The action-as-edge replacement for
+      # command(cloud-api-call) + targeted in the command-vertex walk.
+      # New-InboxRule is a configuration change on the mailbox, performed
+      # within the OWA session.
+      source_vertex: v-002
+      target_vertex: v-005
+      when: { timestamp: "2026-04-14T14:32:11Z" }
+      attributes:
+        api_name: "New-InboxRule"
+        rule_name: "System"
+        forward_to: "outside-dropoff@protonmail.com"
+        delete_message: true
+        stop_processing_rules: true
+        conditions: "ALL incoming messages"
+        status: succeeded
+      authority:
+        kind: authoritative-source
+        source: "m365-defender:alert=m365-alert-9f3a2c:unified-audit-log"
+      concerns:
+        - "this rule silently exfiltrates all inbound mail to an external (protonmail) address; the delete_message + stop_processing_rules combination is an attacker-shaped pattern known from BEC playbooks"
+
+# ---------------------------------------------------------------------------
+# HYPOTHESIZE — loop 0 (lean)
+# ---------------------------------------------------------------------------
+#
+# Two lean hypotheses attach to v-002 (the OWA session). Each captures
+# a single discrimination claim about who was behind the session. h-001
+# refines into h-001-001 and h-001-002 at loop 1 when l-001 materializes
+# the unrecognized-device signal from Entra.
+
+hypothesize:
+  hypotheses:
+    - id: h-001
+      name: "?legitimate-user-action"
+      attached_to_vertex: v-002
+      explains:
+        edges: [e-003]  # e-003 (modified: v-002 → v-005) — why was the forwarding rule created?
+      proposed_edge:
+        relation: initiated_by
+        parent_vertex:
+          type: endpoint
+          classification: corporate-laptop
+          attributes:
+            mechanism: "alice was physically at her compliant device and intentionally created the forwarding rule; the geo-anomaly reflects a travel or remote-access scenario with her real device"
+      predictions:
+        - id: p1
+          claim: "the session authenticated with MFA from a device and network path consistent with alice.chen's established usage pattern"
+      refutation_shape:
+        - id: r1
+          claim: "the session showed no MFA, originated from an unrecognized device, or showed a conditional-access failure"
+      concerns:
+        - "LEAN hypothesis — refines into h-001-001 (self-configured-unmanaged) vs h-001-002 (mfa-phished) if Entra shows an unrecognized device"
+
+    - id: h-002
+      name: "?account-takeover-session"
+      attached_to_vertex: v-002
+      explains:
+        edges: [e-003]  # e-003 (modified: v-002 → v-005) — why was the forwarding rule created?
+      proposed_edge:
+        relation: initiated_by
+        parent_vertex:
+          type: endpoint
+          classification: unknown-endpoint
+          attributes:
+            mechanism: "an attacker in possession of alice's credentials (password + session cookie OR intercepted MFA) authenticated from attacker infrastructure"
+            attacker_infrastructure: true
+      predictions:
+        - id: p1
+          claim: "the session origin, device, or auth context shows an anomaly inconsistent with alice.chen's historical pattern"
+      refutation_shape:
+        - id: r1
+          claim: "the session was authenticated with MFA from alice.chen's known MDM-managed device on a typical network path"
+      concerns:
+        - "account takeover cannot be fully ruled out by MFA alone if MFA was phished or the session cookie was intercepted; refutation here means 'no current technical indicator of compromise', not 'ATO ruled out'"
+
+# ---------------------------------------------------------------------------
+# GATHER
+# ---------------------------------------------------------------------------
+
+gather:
+  - lead:
+      id: l-001
+      loop: 1
+      name: "anchor-lookup(entra-id-sign-in-log)"
+      mode: trust
+      target: v-002
+      intended_hypothesis_set: [h-001, h-002]
+      observes:
+        - hypothesis: h-001
+          predictions: [p1]
+          refutations: [r1]
+        - hypothesis: h-002
+          predictions: [p1]
+          refutations: [r1]
+      query_details:
+        system: entra-id
+        template: "leads/anchor-lookup/templates/entra-id-sign-in.md"
+        query: "Entra ID sign-in events for alice.chen@company.com around 2026-04-14T14:32:11Z"
+        time_window: "2026-04-14T14:00:00Z – 14:40:00Z"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+          # No new graph entities — the sign-in observation elaborates
+          # attributes of the existing v-002 (OWA session) and v-003 (client
+          # endpoint) via the trust_anchor_result and its authority_for_question
+          # ruling. The "unrecognized device" signal is load-bearing and
+          # lives in the resolution reasoning + the anchor result enum.
+        trust_anchor_result:
+          anchor_id: entra-id-sign-in-log
+          kind: entra-id-sign-in-log
+          result: partial
+          as_of: "2026-04-14T14:31:55Z"
+          authority_for_question: partial
+      concerns:
+        - "Entra sign-in confirmed MFA (push approval) but the device_id in the sign-in record is NOT in the MDM-Intune registry for alice's enrolled devices — an unrecognized device signal"
+      # h-001 (?legitimate-user-action) was lean. MFA succeeded but device is
+      # unrecognized — evidence splits into: did alice act on an unmanaged
+      # device (travel laptop, personal device), vs did an attacker phish
+      # alice's MFA? Refine into hierarchical children; shelve the parent.
+      shelved: [h-001]
+      new_hypotheses:
+        - id: h-001-001
+          name: "?user-self-configured-unmanaged-device"
+          attached_to_vertex: v-002
+          explains:
+            edges: [e-003]  # e-003 (modified: v-002 → v-005) — why was the forwarding rule created?
+            # Note: l-001 materialized no new graph edges; the children continue
+            # explaining the original observation (e-003) rather than a newly
+            # materialized edge. Both children are competing Q2 hypotheses
+            # answering "who was behind v-002 given the unrecognized-device signal?"
+          proposed_edge:
+            relation: initiated_by
+            parent_vertex:
+              type: endpoint
+              classification: unknown-endpoint
+              attributes:
+                knowledge: partial
+                user_owned: true
+                mechanism: "alice owns an unenrolled personal device (travel laptop, home PC) and used it to legitimately set up mail forwarding — perhaps during a vacation or device migration"
+          predictions:
+            - id: p1
+              claim: "alice.chen has accessed M365 from other non-corp devices in the past 30 days, establishing a travel/personal-device pattern"
+            - id: p2
+              claim: "alice can confirm she created the rule with a documented operational reason (even if informal)"
+          refutation_shape:
+            - id: r1
+              claim: "no prior non-corp device access for alice AND alice denies creating the rule"
+          concerns:
+            - "this hypothesis is benign; the refutation requires out-of-band contact with alice"
+
+        - id: h-001-002
+          name: "?mfa-phished-account-takeover"
+          attached_to_vertex: v-002
+          explains:
+            edges: [e-003]  # e-003 (modified: v-002 → v-005) — why was the forwarding rule created?
+            # Note: l-001 materialized no new graph edges; the children continue
+            # explaining the original observation (e-003) rather than a newly
+            # materialized edge. Both children are competing Q2 hypotheses
+            # answering "who was behind v-002 given the unrecognized-device signal?"
+          proposed_edge:
+            relation: initiated_by
+            parent_vertex:
+              type: endpoint
+              classification: unknown-endpoint
+              attributes:
+                knowledge: partial
+                attacker_infrastructure: true
+                mechanism: "an adversary-in-the-middle proxy intercepted alice's MFA, or her session cookie was stolen, allowing the attacker to authenticate from their own infrastructure and appear to Entra as 'alice with MFA success'"
+          predictions:
+            - id: p1
+              claim: "the device_id is absent from any enrolled Alice endpoint in MDM, AND alice's other recent sessions originated from expected US IPs on compliant devices"
+          refutation_shape:
+            - id: r1
+              claim: "alice regularly authenticates from non-corp devices internationally, or the device_id resolves to one of her known personal/travel devices"
+          concerns:
+            - "MFA phishing (adversary-in-the-middle proxy) can pass MFA checks; Entra sign-in success does not rule out AiTM. Refutation here is 'no technical indicator', not 'AiTM ruled out'"
+      resolutions:
+        - hypothesis: h-002
+          before: null
+          after: "-"
+          severity_of_test: moderate
+          matched_refutation_ids: [r1]
+          reasoning: |
+            Entra confirmed MFA success and risk_state: none. Conditional
+            access passed. r1 partially satisfied: MFA from the credential
+            side is consistent with the real user. BUT device_id is
+            unrecognized and device_compliant: false — the 'known
+            MDM-managed device' clause of r1 is NOT satisfied. Cannot
+            advance to --. Weight: -. Rule 16: trust_anchor_result's
+            authority_for_question is partial — weight cannot advance past -
+            on this lead alone. h-002 is superseded by h-001-002 which
+            captures the same adversarial claim with the refined evidence
+            pattern; h-002 remains live as the top-level adversarial
+            placeholder.
+          supporting_edges: [e-003]
+
+  - lead:
+      id: l-002
+      loop: 1
+      name: "anchor-lookup(mdm-intune)"
+      mode: trust
+      target: v-003
+      intended_hypothesis_set: [h-001-001, h-001-002]
+      observes:
+        - hypothesis: h-001-001
+          predictions: [p1]
+        - hypothesis: h-001-002
+          predictions: [p1]
+          refutations: [r1]
+      query_details:
+        system: mdm-intune
+        template: "leads/anchor-lookup/templates/mdm-intune.md"
+        query: "device registry for alice.chen@company.com — list all enrolled devices, compliance status, last-seen; also query device_id from l-001 specifically"
+        time_window: "current"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+        trust_anchor_result:
+          anchor_id: mdm-intune
+          kind: mdm-intune
+          result: refuted
+          as_of: "2026-04-14T14:33:00Z"
+          authority_for_question: full
+      resolutions:
+        - hypothesis: h-001-001
+          before: null
+          after: "-"
+          severity_of_test: severe
+          matched_refutation_ids: [r1]
+          reasoning: |
+            MDM-Intune reports zero devices enrolled for alice.chen matching
+            the Entra sign-in device_id. Alice's three enrolled corp devices
+            (two US Windows laptops, one iOS) are all US-registered. The
+            'recent access from other unmanaged devices' baseline (p1) cannot
+            be confirmed — no baseline of unmanaged-device use exists. r1's
+            condition (no history of unmanaged access) is satisfied. Weight: -.
+            Not -- because MDM only covers corp-managed devices; a genuinely
+            personal device alice owns but never enrolled would be invisible
+            to MDM.
+          supporting_edges: [e-003]
+        - hypothesis: h-001-002
+          before: null
+          after: "+"
+          severity_of_test: severe
+          matched_prediction_ids: [p1]
+          reasoning: |
+            MDM-Intune confirmed the session device is not any of alice's
+            enrolled corp or personal devices, AND her normal sessions
+            originate from enrolled US-based devices. p1 supported: device_id
+            absent from MDM, alice's other sessions on compliant US devices —
+            consistent with an unauthorized actor on an unmanaged endpoint.
+            Rule 16: authority_for_question is full. Weight advances to +.
+            Not ++ because the absence of a device registration is consistent
+            with alice owning an unenrolled personal device — not strictly
+            impossible without out-of-band confirmation.
+          supporting_edges: [e-003]
+
+  - lead:
+      id: l-003
+      loop: 2
+      name: "anchor-lookup(mail-forwarding-policy-registry)"
+      mode: trust
+      target: v-001
+      intended_hypothesis_set: [h-001-001, h-001-002]
+      observes:
+        - hypothesis: h-001-001
+          predictions: [p2]
+        - hypothesis: h-001-002
+          predictions: [p1]
+      query_details:
+        system: mail-forwarding-policy-registry
+        template: "leads/anchor-lookup/templates/mail-policy.md"
+        query: "is external mail forwarding permitted for alice.chen@company.com (Finance Operations / SAP-Read roles)?"
+        time_window: "current"
+      outcome:
+        observations:
+          vertices: []
+          edges: []
+        trust_anchor_result:
+          anchor_id: mail-forwarding-policy-registry
+          kind: mail-forwarding-policy-registry
+          result: refuted
+          as_of: "2026-04-14T14:33:30Z"
+          authority_for_question: full
+      resolutions:
+        - hypothesis: h-001-001
+          before: "-"
+          after: "--"
+          severity_of_test: moderate
+          matched_refutation_ids: [r1]
+          reasoning: |
+            policy registry confirms external mail forwarding is prohibited
+            for Finance Operations. No legitimate self-setup reason exists —
+            alice cannot have had an authorized operational reason to create
+            this rule. Even if alice created it herself, doing so would be a
+            policy violation with no legitimate use case. r1 satisfied: the
+            benign self-setup story requires a policy exception that does
+            not exist. h-001-001 advances to --.
+          supporting_edges: [e-003]
+        - hypothesis: h-001-002
+          before: "+"
+          after: "++"
+          severity_of_test: moderate
+          matched_prediction_ids: [p1]
+          reasoning: |
+            policy registry confirms no legitimate use case for this rule
+            for alice's role — the rule is inherently anomalous regardless
+            of who created it. Combined with the unrecognized device (l-002),
+            this satisfies all predictions for h-001-002: device absent from
+            MDM (p1 confirmed in l-002), alice's normal sessions are US/
+            compliant (p1 confirmed in l-002), and the forwarding action is
+            organizationally unauthorized (policy anchor, full authority).
+            Rule 6: p1 is the only prediction; union of matched_prediction_ids
+            = {p1} = full set. Weight advances to ++. Strong refutation of
+            the benign side (h-001-001 at --) + strong confirmation on the
+            adversarial side closes the case at trust-root.
+          supporting_edges: [e-003]
+
+# ---------------------------------------------------------------------------
+# CONCLUDE
+# ---------------------------------------------------------------------------
+
+conclude:
+  termination:
+    category: trust-root
+    rationale: |
+      h-001-002 (?mfa-phished-account-takeover) reached ++ via two
+      full-authority anchors: MDM-Intune (device absent from alice's enrolled
+      set, full authority for 'is this device enrolled') and
+      mail-forwarding-policy-registry (external forwarding prohibited for
+      this role, full authority for 'is this rule permitted'). h-001-001
+      (?user-self-configured-unmanaged-device) reached -- (same two anchors
+      refute the benign side). h-002 (?account-takeover-session, top-level
+      adversarial) remains at - but is superseded by h-001-002 which reached
+      ++ on the refined chain. Adversarial hypothesis h-001-002 confirmed
+      at ++. Trust-root termination.
+  disposition: true_positive
+  confidence: high
+  matched_archetype: "mfa-phished-account-takeover-exfil-staging"
+  summary: |
+    alice.chen@company.com's mailbox had an external forwarding rule
+    (to outside-dropoff@protonmail.com, hiding forwarded messages via
+    delete_message + stop_processing_rules) created from an unrecognized
+    device geo-located in Bucharest, Romania. The observation is modeled
+    as a single `modified` edge (e-003) from v-002 (OWA session) to v-005
+    (mailbox storage), with the New-InboxRule api details as edge attributes.
+    Entra sign-in confirmed MFA success but flagged the device as unenrolled.
+    MDM-Intune confirmed the device is not in alice's enrolled set.
+    Mail-forwarding-policy-registry confirmed external forwarding is
+    prohibited for Finance Operations. h-001-001
+    (?user-self-configured-unmanaged-device) refuted at --; h-001-002
+    (?mfa-phished-account-takeover) confirmed at ++. Disposition:
+    true_positive. Recommended action: disable the forwarding rule
+    immediately, revoke alice's active sessions, initiate account recovery
+    workflow, escalate to IR for scope determination.
