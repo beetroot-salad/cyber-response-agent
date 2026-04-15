@@ -23,10 +23,7 @@ from hooks.scripts.audit_tool_calls import (
     truncate,
 )
 from hooks.scripts.frontmatter import parse_yaml_frontmatter
-from hooks.scripts.investigation_summary import (
-    extract_transcript_stats,
-    find_latest_run,
-)
+from hooks.scripts.investigation_summary import extract_transcript_stats
 
 
 # --- truncate ---
@@ -226,46 +223,6 @@ leads_pursued: 3
         assert parse_yaml_frontmatter("") == {}
 
 
-class TestFindLatestRun:
-    def test_no_runs_dir(self, tmp_path):
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path / "nope")}):
-            assert find_latest_run() is None
-
-    def test_empty_runs_dir(self, tmp_path):
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            assert find_latest_run() is None
-
-    def test_finds_latest_by_mtime(self, tmp_path):
-        import time
-
-        # Create two run dirs with reports, ensuring different mtimes
-        run_old = tmp_path / "run-old"
-        run_old.mkdir()
-        (run_old / "report.md").write_text("---\nstatus: resolved\n---\n")
-
-        time.sleep(0.05)
-
-        run_new = tmp_path / "run-new"
-        run_new.mkdir()
-        (run_new / "report.md").write_text("---\nstatus: escalated\n---\n")
-
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            result = find_latest_run()
-            assert result == run_new
-
-    def test_ignores_dirs_without_report(self, tmp_path):
-        no_report = tmp_path / "run-no-report"
-        no_report.mkdir()
-
-        has_report = tmp_path / "run-has-report"
-        has_report.mkdir()
-        (has_report / "report.md").write_text("---\nstatus: resolved\n---\n")
-
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            result = find_latest_run()
-            assert result == has_report
-
-
 class TestExtractTranscriptStats:
     EMPTY = {
         "input_tokens": 0,
@@ -423,6 +380,8 @@ class TestExtractTranscriptStats:
 
 
 class TestInvestigationSummaryMain:
+    """main() now takes a payload dict. session_id anchors run resolution."""
+
     def _make_run(self, tmp_path, run_name="run-001", meta=True):
         run_dir = tmp_path / run_name
         run_dir.mkdir()
@@ -450,15 +409,15 @@ leads_pursued: 4
             }))
         return run_dir
 
-    def test_writes_summary_entry(self, tmp_path):
-        self._make_run(tmp_path)
+    def _invoke_main(self, tmp_path, payload_dict):
+        from hooks.scripts.investigation_summary import main
 
         with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            with patch("sys.stdin", StringIO("")):
-                with pytest.raises(SystemExit) as exc_info:
-                    from hooks.scripts.investigation_summary import main
-                    main()
-                assert exc_info.value.code == 0
+            main(payload_dict)
+
+    def test_writes_summary_entry(self, tmp_path):
+        self._make_run(tmp_path)
+        self._invoke_main(tmp_path, {"session_id": "sess-writes"})
 
         audit_file = tmp_path / "audit.jsonl"
         assert audit_file.exists()
@@ -472,29 +431,18 @@ leads_pursued: 4
 
     def test_includes_timestamps(self, tmp_path):
         self._make_run(tmp_path)
-
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            with patch("sys.stdin", StringIO("")):
-                with pytest.raises(SystemExit):
-                    from hooks.scripts.investigation_summary import main
-                    main()
+        self._invoke_main(tmp_path, {"session_id": "sess-ts"})
 
         entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
         assert entry["start_timestamp"] == "2026-04-14T10:00:00+00:00"
         assert "end_timestamp" in entry
         assert "timestamp" not in entry
 
-    def test_start_timestamp_none_without_meta(self, tmp_path):
-        self._make_run(tmp_path, meta=False)
-
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            with patch("sys.stdin", StringIO("")):
-                with pytest.raises(SystemExit):
-                    from hooks.scripts.investigation_summary import main
-                    main()
-
-        entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
-        assert entry["start_timestamp"] is None
+    def test_no_entry_without_session_id(self, tmp_path):
+        """Without a session_id in the payload, there's nothing to resolve."""
+        self._make_run(tmp_path)
+        self._invoke_main(tmp_path, {})
+        assert not (tmp_path / "audit.jsonl").exists()
 
     def test_stats_from_stream_json_result_record(self, tmp_path):
         """Eval-style transcript: authoritative `type: result` record,
@@ -512,13 +460,11 @@ leads_pursued: 4
                 "cache_creation_input_tokens": 100, "cache_read_input_tokens": 50,
             }, "total_cost_usd": 0.4321}),
         ]) + "\n")
-        payload = json.dumps({"transcript_path": str(transcript)})
 
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            with patch("sys.stdin", StringIO(payload)):
-                with pytest.raises(SystemExit):
-                    from hooks.scripts.investigation_summary import main
-                    main()
+        self._invoke_main(
+            tmp_path,
+            {"session_id": "sess-stream", "transcript_path": str(transcript)},
+        )
 
         entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
         assert entry["input_tokens"] == 500
@@ -533,8 +479,6 @@ leads_pursued: 4
         message.id entries must be deduped."""
         self._make_run(tmp_path)
         transcript = tmp_path / "session.jsonl"
-        # msg_1 emitted twice (same snapshot), msg_2 once — expected sum
-        # is 600 input / 250 output, not 1100 / 450.
         def m(mid, inp, out):
             return json.dumps({"type": "assistant", "message": {
                 "id": mid, "model": "claude-opus-4-6",
@@ -546,13 +490,11 @@ leads_pursued: 4
             m("msg_1", 500, 200),
             m("msg_2", 100, 50),
         ]) + "\n")
-        payload = json.dumps({"transcript_path": str(transcript)})
 
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            with patch("sys.stdin", StringIO(payload)):
-                with pytest.raises(SystemExit):
-                    from hooks.scripts.investigation_summary import main
-                    main()
+        self._invoke_main(
+            tmp_path,
+            {"session_id": "sess-dedupe", "transcript_path": str(transcript)},
+        )
 
         entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
         assert entry["input_tokens"] == 600
@@ -580,16 +522,14 @@ leads_pursued: 4
                 "id": "m", "model": "claude-sonnet-4-6", "usage": {},
             }}) + "\n"
         )
-        payload = json.dumps({"transcript_path": str(stub)})
+
+        from hooks.scripts.investigation_summary import main
 
         with patch.dict("os.environ", {
             "SOC_AGENT_RUNS_DIR": str(tmp_path),
             "SOC_AGENT_TRANSCRIPT_PATH": str(full),
         }):
-            with patch("sys.stdin", StringIO(payload)):
-                with pytest.raises(SystemExit):
-                    from hooks.scripts.investigation_summary import main
-                    main()
+            main({"session_id": "sess-env", "transcript_path": str(stub)})
 
         entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
         assert entry["input_tokens"] == 777
@@ -599,12 +539,7 @@ leads_pursued: 4
 
     def test_stats_empty_without_transcript(self, tmp_path):
         self._make_run(tmp_path)
-
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            with patch("sys.stdin", StringIO("")):
-                with pytest.raises(SystemExit):
-                    from hooks.scripts.investigation_summary import main
-                    main()
+        self._invoke_main(tmp_path, {"session_id": "sess-empty"})
 
         entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
         assert entry["input_tokens"] == 0

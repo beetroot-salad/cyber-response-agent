@@ -25,6 +25,7 @@ from pathlib import Path
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
+from hooks.scripts import permissions as permissions_module
 from hooks.scripts.frontmatter import parse_yaml_frontmatter
 from hooks.scripts.run_context import get_runs_dir
 from schemas.precedent import check_recency, DEFAULT_MAX_AGE_DAYS
@@ -64,27 +65,12 @@ def extract_run_dir(hook_data: dict) -> Path | None:
 # ---------------------------------------------------------------------------
 
 def get_precedent_max_age(signature_id: str) -> int:
-    """Load precedent_max_age_days from permissions.yaml, or use default."""
-    perms_path = (
-        SOC_AGENT_ROOT / "config" / "signatures" / signature_id / "permissions.yaml"
-    )
-    if not perms_path.exists():
-        return DEFAULT_MAX_AGE_DAYS
-    try:
-        import yaml
-        data = yaml.safe_load(perms_path.read_text()) or {}
-    except Exception:
-        # yaml not available or parse error — use default
-        # Fall back to simple key scanning for stdlib-only envs
-        try:
-            for line in perms_path.read_text().splitlines():
-                line = line.strip()
-                if line.startswith("precedent_max_age_days:"):
-                    return int(line.split(":", 1)[1].strip())
-        except (ValueError, IndexError):
-            pass
-        return DEFAULT_MAX_AGE_DAYS
-    return int(data.get("precedent_max_age_days", DEFAULT_MAX_AGE_DAYS))
+    """Load precedent_max_age_days from permissions.yaml, or use default.
+
+    Delegates to hooks.scripts.permissions, passing our SOC_AGENT_ROOT so
+    tests that monkeypatch this module's root still hit the expected file.
+    """
+    return permissions_module.get_precedent_max_age(signature_id, root=SOC_AGENT_ROOT)
 
 
 def _precedent_path(

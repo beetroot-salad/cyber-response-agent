@@ -24,7 +24,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.investigation_parse import iter_phase_headers
-from hooks.scripts.run_context import extract_run_dir
+from hooks.scripts.run_context import extract_run_dir, get_runs_dir, write_session_mapping
 from schemas.state import (
     MAX_LOOPS,
     count_loops,
@@ -181,6 +181,22 @@ def main():
         sys.exit(0)
 
     run_dir = extract_run_dir(hook_data)
+
+    # Belt-and-suspenders: write session→run mapping on the first
+    # investigation.md write if setup_run.py didn't already do it
+    # (i.e. CLAUDE_SESSION_ID wasn't available at !command time).
+    session_id = hook_data.get("session_id", "")
+    if run_dir is not None and session_id:
+        signature_id = ""
+        meta_path = run_dir / "meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                signature_id = meta.get("signature_id", "")
+            except Exception:
+                pass
+        write_session_mapping(session_id, run_dir, signature_id, get_runs_dir())
+
     if run_dir is None:
         sys.exit(0)
 

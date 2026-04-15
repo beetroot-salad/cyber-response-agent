@@ -6,7 +6,7 @@ under `scripts/tools/{system}_cli.py` — not imported as modules. These
 ABCs exist for documentation and contract-compliance testing, not runtime
 dispatch.
 
-Two contract shapes:
+Three contract shapes:
 
 - `AdapterContract` — query-oriented systems. SIEMs, EDRs, log stores,
   anything that exposes "run a query in my native language, get matching
@@ -17,10 +17,29 @@ Two contract shapes:
   hands over a key (hostname, user ID, IOC hash) and gets a single record
   (or nothing). There's no query language — just a key field and a value.
 
+- `ActionContract` — state-changing systems. Ticketing platforms, firewall
+  management consoles, EDR isolation endpoints, IAM disable APIs. These
+  systems are invoked downstream of an investigation's conclusion (via the
+  Stop-stage action hook), not during evidence gathering. The base is
+  deliberately thin: every action family has a different verb surface
+  (ticketing uses `close`, firewalls use `block`, EDRs use `isolate`), so
+  the only abstract method on the base is `health_check`. Each family's
+  concrete shape lives in a reference stub + family-specific flag and
+  subcommand constants (see `stub_ticket_cli.py` for the canonical
+  ticketing-family example).
+
+  **Dry-run-first contract.** Every action verb must default to dry-run:
+  omitting `--execute` is always a dry-run, and only the Stop-stage hook
+  dispatch code path ever passes `--execute`. Preflight and `/connect`'s
+  test phase exercise the dry-run path, so production writes are
+  unreachable until a caller explicitly opts in.
+
 Most connected systems implement `AdapterContract`. Implement `LookupContract`
 when the upstream API is fundamentally lookup-shaped and forcing it into a
 query DSL would be lossy (e.g., a CMDB where you call `GET /assets/{id}`
-not `POST /query`).
+not `POST /query`). Implement `ActionContract` when the system is
+write-shaped and only reachable post-investigation — not something the
+investigation loop should ever touch for evidence gathering.
 
 CLI subcommand shapes:
 
@@ -31,6 +50,11 @@ CLI subcommand shapes:
     # LookupContract
     python3 scripts/tools/{system}_cli.py health-check
     python3 scripts/tools/{system}_cli.py lookup <key_field> <key_value> [--raw] [--run-dir DIR]
+
+    # ActionContract — ticketing family (close_ticket)
+    python3 scripts/tools/{system}_cli.py health-check
+    python3 scripts/tools/{system}_cli.py close --ticket-id ID --reason STR --author STR \
+        --documentation STR [--run-dir DIR] [--dry-run|--execute]
 
 See `docs/design-v3-init-and-connect.md` §3 for the query contract rationale
 and §7 (open questions) for the lookup discussion.
@@ -88,6 +112,30 @@ class QueryResult:
     total_hits: Optional[int] = None
     truncated: bool = False
     query_echo: str = ""
+
+
+@dataclass
+class ActionResult:
+    """Generic result shape returned by every action verb.
+
+    action:    the verb name, e.g. "close_ticket", "block_ip", "isolate_host".
+    target:    the thing acted on — ticket ID, IP address, hostname, user ID.
+    dry_run:   True if this was a dry-run (no upstream write).
+    success:   True if the action completed (or would complete, in dry-run).
+    error:     optional; populated on upstream failure, None on success.
+    detail:    optional structured extras — upstream response body, timing,
+               echoes of the submitted payload. JSON-serializable.
+
+    This shape is generic across action families (ticketing, firewall,
+    EDR isolation). Family-specific detail goes in `detail`, not new fields.
+    """
+
+    action: str
+    target: str
+    dry_run: bool
+    success: bool
+    error: Optional[str] = None
+    detail: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -221,6 +269,37 @@ class LookupContract(ABC):
         ...
 
 
+class ActionContract(ABC):
+    """Interface for state-changing systems (ticketing, firewall, EDR isolation).
+
+    Actions are invoked **downstream** of an investigation's conclusion,
+    not during evidence gathering. The Stop-stage action hook reads
+    report.md, evaluates preconditions, looks up the connector binding in
+    `config/actions.yaml`, and dispatches to a concrete adapter here.
+
+    The base is deliberately thin. The only operation universal across
+    every action family is connectivity, so that's the only abstract
+    method. Concrete action verbs are vendor-family-specific — ticketing
+    adapters expose `close`, firewall adapters expose `block`, EDR
+    adapters expose `isolate`, IAM adapters expose `disable`, etc. Each
+    family's shape is captured by a concrete reference stub plus the
+    family-specific flag and subcommand constants below (see
+    `stub_ticket_cli.py` for the canonical ticketing-family example).
+
+    **Dry-run-first contract.** Every action verb must default to dry-run.
+    Omitting `--execute` is always a dry-run and must short-circuit before
+    any upstream write. Only the Stop-stage dispatch code path ever passes
+    `--execute`; `/connect`'s test phase and `preflight.py` always invoke
+    the dry-run path. This makes production writes unreachable until a
+    caller explicitly opts in.
+    """
+
+    @abstractmethod
+    def health_check(self) -> HealthResult:
+        """Binary connectivity check. Same contract as AdapterContract.health_check."""
+        ...
+
+
 # ---------------------------------------------------------------------------
 # Contract compliance: what `/connect` and preflight.py verify
 # ---------------------------------------------------------------------------
@@ -239,6 +318,33 @@ REQUIRED_QUERY_FLAGS = ("--start", "--end", "--limit", "--raw", "--run-dir")
 #: Flags the `lookup` subcommand must accept. Lookup has no time window
 #: or limit — one key, one record.
 REQUIRED_LOOKUP_FLAGS = ("--raw", "--run-dir")
+
+#: Subcommands every ActionContract-shaped CLI must expose, regardless of
+#: action family. Family-specific verbs are added on top of this (see the
+#: ticketing-family constants below).
+REQUIRED_ACTION_SUBCOMMANDS = ("health-check",)
+
+#: Flags every action verb must support, regardless of family. `--run-dir`
+#: lets the adapter wrap output in salted untrusted-data delimiters when
+#: invoked inside an investigation run; `--dry-run` is the default safe
+#: shape; `--execute` is the explicit opt-in that makes writes reachable.
+REQUIRED_ACTION_FLAGS_UNIVERSAL = ("--run-dir", "--dry-run", "--execute")
+
+#: Ticketing-family extension: a ticketing-shaped ActionContract must also
+#: expose `close`. Used by preflight and `/connect` when the connector is
+#: bound to `close_ticket` in `config/actions.yaml`.
+REQUIRED_TICKETING_SUBCOMMANDS = ("health-check", "close")
+
+#: Flags the ticketing-family `close` verb must expose, in addition to the
+#: universal action flags. `--ticket-id` identifies the row; `--reason`,
+#: `--author`, and `--documentation` are constructed mechanically from
+#: `report.md` frontmatter by the Stop-stage hook.
+REQUIRED_TICKETING_CLOSE_FLAGS = (
+    "--ticket-id",
+    "--reason",
+    "--author",
+    "--documentation",
+)
 
 #: Back-compat alias — older code references the query-shape subcommands
 #: as "the" required subcommands. Kept so external scripts don't break.
