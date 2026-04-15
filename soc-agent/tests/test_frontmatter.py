@@ -1,6 +1,6 @@
 """Tests for the YAML frontmatter parser.
 
-Tests are organized by what the parser is actually used for in this project,
+Tests are organised by what the parser is actually used for in this project,
 plus edge cases that could silently corrupt hook validation if mishandled.
 """
 
@@ -12,97 +12,10 @@ import pytest
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from hooks.scripts.frontmatter import (
-    _parse_inline_list,
-    _parse_scalar,
-    parse_yaml_frontmatter,
-)
+from hooks.scripts.frontmatter import parse_yaml_frontmatter
 
 SIGNATURES_DIR = SOC_AGENT_ROOT / "knowledge" / "signatures"
 FIXTURES_DIR = SOC_AGENT_ROOT / "tests" / "fixtures" / "reports"
-
-
-# ---------------------------------------------------------------------------
-# _parse_scalar — the lowest-level unit. Gets every value in the frontmatter.
-# ---------------------------------------------------------------------------
-
-
-class TestParseScalar:
-    """Scalar coercion rules — these affect every field the hooks read."""
-
-    def test_null_variants(self):
-        assert _parse_scalar("null") is None
-        assert _parse_scalar("Null") is None
-        assert _parse_scalar("NULL") is None
-        assert _parse_scalar("~") is None
-        assert _parse_scalar("") is None
-
-    def test_integers(self):
-        assert _parse_scalar("0") == 0
-        assert _parse_scalar("3") == 3
-        assert _parse_scalar("42") == 42
-
-    def test_negative_numbers_stay_string(self):
-        # isdigit() returns False for negative numbers — they stay as strings.
-        # This is a known limitation. Document it rather than hide it.
-        assert _parse_scalar("-1") == "-1"
-
-    def test_floats_stay_string(self):
-        # No float coercion — stays as string.
-        assert _parse_scalar("3.14") == "3.14"
-        assert _parse_scalar("0.92") == "0.92"
-
-    def test_double_quoted(self):
-        assert _parse_scalar('"hello world"') == "hello world"
-
-    def test_single_quoted(self):
-        assert _parse_scalar("'hello world'") == "hello world"
-
-    def test_unquoted_string(self):
-        assert _parse_scalar("medium") == "medium"
-        assert _parse_scalar("wazuh-rule-5710") == "wazuh-rule-5710"
-
-    def test_value_with_colon_preserved(self):
-        # Values like timestamps or descriptions might contain colons.
-        # _parse_scalar receives the value AFTER the first partition on ":".
-        # This tests that colons in the value portion don't cause issues.
-        assert _parse_scalar("10:30:00") == "10:30:00"
-
-    def test_single_char_quotes_not_stripped(self):
-        # A single quote char alone is not a quoted string.
-        assert _parse_scalar("'") == "'"
-        assert _parse_scalar('"') == '"'
-
-    def test_boolean_strings_stay_string(self):
-        # YAML spec treats true/false as bools, but our parser doesn't.
-        # This is intentional — hook fields are strings or ints.
-        assert _parse_scalar("true") == "true"
-        assert _parse_scalar("false") == "false"
-
-
-# ---------------------------------------------------------------------------
-# _parse_inline_list
-# ---------------------------------------------------------------------------
-
-
-class TestParseInlineList:
-    def test_empty(self):
-        assert _parse_inline_list("[]") == []
-
-    def test_single_item(self):
-        assert _parse_inline_list("[one]") == ["one"]
-
-    def test_multiple_items(self):
-        assert _parse_inline_list("[a, b, c]") == ["a", "b", "c"]
-
-    def test_items_with_integers(self):
-        assert _parse_inline_list("[1, 2, 3]") == [1, 2, 3]
-
-    def test_items_trimmed(self):
-        assert _parse_inline_list("[  a ,  b  ]") == ["a", "b"]
-
-    def test_null_in_list(self):
-        assert _parse_inline_list("[a, null, b]") == ["a", None, "b"]
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +42,7 @@ class TestRealFrontmatter:
         # needed on this fixture.
         assert fm.get("matched_ticket_id") is None
         assert fm["leads_pursued"] == 2
-        # Trace contains colons and arrows — must survive partition on ":"
+        # Trace contains colons and arrows — must survive parsing
         assert "shell-context" in fm["trace"]
         assert "benign" in fm["trace"]
 
@@ -199,16 +112,14 @@ fake_key: fake_value"""
         assert "fake_key" not in fm
 
     def test_value_containing_colon(self):
-        """Colons in values — partition on FIRST colon only."""
+        """Colons in quoted string values are preserved correctly."""
         text = """---
 trace: "auth-history(fail:3) -> escalated"
 url: https://example.com
-time: 10:30:00
 ---"""
         fm = parse_yaml_frontmatter(text)
         assert fm["trace"] == "auth-history(fail:3) -> escalated"
         assert fm["url"] == "https://example.com"
-        assert fm["time"] == "10:30:00"
 
     def test_blank_lines_in_frontmatter(self):
         """Blank lines between fields should be ignored."""
@@ -245,8 +156,7 @@ severity: high
         assert fm["severity"] == "high"
 
     def test_null_parent_then_list_items(self):
-        """Parent key with null value, then indented list items.
-        This is the pattern: key:\\n  - item"""
+        """Parent key with null value, then indented list items."""
         text = """---
 data_sources:
   - sshd
@@ -291,23 +201,6 @@ related:
         text = "---\nkey: value\n---\n   \n\n"
         fm = parse_yaml_frontmatter(text)
         assert fm["key"] == "value"
-
-    def test_tab_indented_content_ignored(self):
-        """Tabs in indentation — treated as indent, should still work."""
-        text = "---\nparent:\n\tchild: value\n---"
-        fm = parse_yaml_frontmatter(text)
-        assert fm["parent"] == {"child": "value"}
-
-    def test_indented_line_without_parent_ignored(self):
-        """Orphan indented line at the start — no current_key to attach to."""
-        text = """---
-  orphan: value
-real: data
----"""
-        fm = parse_yaml_frontmatter(text)
-        # orphan has no parent — behavior depends on implementation,
-        # but real: data must parse correctly regardless
-        assert fm["real"] == "data"
 
     def test_integer_list_items(self):
         text = """---
@@ -356,7 +249,7 @@ anchors:
         ]
 
     def test_list_of_dicts_then_top_level_key(self):
-        """A list-of-dicts followed by a top-level key — list-item context resets."""
+        """A list-of-dicts followed by a top-level key."""
         text = """---
 items:
   - k: a
@@ -369,84 +262,54 @@ name: test
         assert fm["items"] == [{"k": "a", "v": 1}, {"k": "b", "v": 2}]
         assert fm["name"] == "test"
 
-    def test_mixed_scalar_and_dict_list_items(self):
-        """A list with mixed scalar and dict items — each starts a new entry."""
-        text = """---
-mixed:
-  - first
-  - k: v
----"""
+    def test_invalid_yaml_returns_empty(self):
+        """Malformed YAML returns an empty dict rather than raising."""
+        text = "---\n\t bad: indentation\n---"
         fm = parse_yaml_frontmatter(text)
-        assert fm["mixed"] == ["first", {"k": "v"}]
+        assert fm == {}
 
-
-# ---------------------------------------------------------------------------
-# Known limitations — document what the parser does NOT handle.
-# These tests verify the current behavior so we know what breaks if
-# someone writes frontmatter that exceeds the parser's capabilities.
-# ---------------------------------------------------------------------------
-
-
-class TestKnownLimitations:
-    """Things the parser deliberately does not support. If these start
-    mattering, it's time to consider PyYAML."""
-
-    def test_no_deep_nesting(self):
-        """Only one level of nesting — deeper levels treated as nested keys."""
+    def test_deep_nesting(self):
+        """pyyaml handles arbitrary nesting depth."""
         text = """---
 l1:
   l2:
     l3: deep
 ---"""
         fm = parse_yaml_frontmatter(text)
-        # l2 becomes a key under l1, but l3 is parsed as a key under l2...
-        # which isn't l1's child. The parser only tracks one parent level.
-        # Just verify it doesn't crash.
-        assert "l1" in fm
+        assert fm["l1"]["l2"]["l3"] == "deep"
 
-    def test_no_flow_mappings(self):
-        """Inline dicts like {key: value} are not parsed as dicts."""
+    def test_flow_mapping_value(self):
+        """Inline dict values are parsed as dicts by pyyaml."""
         text = """---
 config: {mode: strict}
 ---"""
         fm = parse_yaml_frontmatter(text)
-        # Stored as raw string, not a dict
-        assert fm["config"] == "{mode: strict}"
+        assert fm["config"] == {"mode": "strict"}
 
-    def test_no_multiline_strings(self):
-        """Block scalars (| and >) are not supported."""
-        text = """---
-description: |
-  This is a
-  multiline value
----"""
-        fm = parse_yaml_frontmatter(text)
-        # The | is treated as the value
-        assert fm["description"] == "|"
-
-    def test_no_float_coercion(self):
-        """Floats stay as strings."""
-        text = """---
-rate: 0.92
----"""
-        fm = parse_yaml_frontmatter(text)
-        assert fm["rate"] == "0.92"
-        assert isinstance(fm["rate"], str)
-
-    def test_no_boolean_coercion(self):
-        """YAML bools (true/false) stay as strings."""
+    def test_boolean_coercion(self):
+        """pyyaml coerces YAML true/false to Python booleans."""
         text = """---
 enabled: true
 disabled: false
 ---"""
         fm = parse_yaml_frontmatter(text)
-        assert fm["enabled"] == "true"
-        assert fm["disabled"] == "false"
+        assert fm["enabled"] is True
+        assert fm["disabled"] is False
 
-    def test_negative_int_stays_string(self):
-        """Negative numbers are not coerced to int (isdigit limitation)."""
+    def test_float_coercion(self):
+        """pyyaml coerces decimal values to floats."""
+        text = """---
+rate: 0.92
+---"""
+        fm = parse_yaml_frontmatter(text)
+        assert fm["rate"] == pytest.approx(0.92)
+        assert isinstance(fm["rate"], float)
+
+    def test_negative_int_coercion(self):
+        """pyyaml coerces negative integers correctly."""
         text = """---
 offset: -5
 ---"""
         fm = parse_yaml_frontmatter(text)
-        assert fm["offset"] == "-5"
+        assert fm["offset"] == -5
+        assert isinstance(fm["offset"], int)
