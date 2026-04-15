@@ -65,16 +65,20 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 │   │       └── screen.md          # Subagent prompt for SCREEN fast pattern matching
 │   ├── scripts/
 │   │   ├── resolve_imports.py     # !command resolver: signature knowledge → stdout
-│   │   └── siem/
-│   │       └── wazuh_cli.py       # Wazuh SIEM CLI: auth, HTTP, query execution, output formatting
+│   │   └── tools/
+│   │       ├── wazuh_cli.py          # Wazuh SIEM CLI: auth, HTTP, query execution, output formatting
+│   │       └── stub_ticket_cli.py    # Reference ActionContract ticketing connector (dry-run-first)
 │   ├── hooks/
 │   │   └── scripts/
-│   │       ├── validate_report.py      # PostToolUse hook: combined Tier 1 + Tier 2 validation
-│   │       ├── judge_prompt.md         # Prompt template for Tier 2 judge
-│   │       ├── infer_state.py          # PostToolUse hook: state transitions from investigation.md headers
-│   │       ├── write_state.py          # Manual/debugging state tool (no longer called by agent)
-│   │       ├── investigation_summary.py # Stop hook: JSONL outcome log
-│   │       └── audit_tool_calls.py     # PostToolUse: audit + trace JSONL split
+│   │       ├── validate_report.py       # PostToolUse hook: combined Tier 1 + Tier 2 validation
+│   │       ├── judge_prompt.md          # Prompt template for Tier 2 judge
+│   │       ├── infer_state.py           # PostToolUse hook: state transitions from investigation.md headers
+│   │       ├── write_state.py           # Manual/debugging state tool (no longer called by agent)
+│   │       ├── stop_handler.py          # Stop hook: composes investigation_summary + close_ticket_action
+│   │       ├── investigation_summary.py # Stop-stage step: JSONL outcome log
+│   │       ├── close_ticket_action.py   # Stop-stage step: deterministic act-mode close dispatch
+│   │       ├── permissions.py           # Shared permissions.yaml loader (mode, mitigation actions)
+│   │       └── audit_tool_calls.py      # PostToolUse: audit + trace JSONL split
 │   ├── knowledge/
 │   │   ├── common-investigation/  # Portable investigation methodology
 │   │   │   ├── SKILL.md           # Common investigation knowledge
@@ -256,7 +260,7 @@ When a required value is missing, unknown, or ambiguous — **fail immediately w
 
 - Wazuh API not accessible from localhost (use `wazuh-manager:55000` from within Docker network)
 - Falco generates alerts for healthcheck operations (expected behavior)
-- `act` mode not yet implemented (MVP is recommend-only)
+- `act` mode implemented for `close_ticket` only; additional action verbs (`block_ip`, `disable_user`, `isolate_host`) not yet supported. Graduation is per-signature via `permissions.yaml`; see `soc-agent/skills/handbook/content/act-mode.md`.
 
 ## Documentation
 

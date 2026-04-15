@@ -59,6 +59,7 @@ KNOWLEDGE_DIR = SOC_AGENT_DIR / "knowledge"
 SYSTEMS_DIR = KNOWLEDGE_DIR / "environment" / "systems"
 DATA_SOURCES_DIR = KNOWLEDGE_DIR / "environment" / "data-sources"
 SIGNATURES_DIR = KNOWLEDGE_DIR / "signatures"
+ACTIONS_CONFIG_PATH = SOC_AGENT_DIR / "config" / "actions.yaml"
 
 HEALTH_CHECK_TIMEOUT_SEC = 15
 
@@ -207,6 +208,86 @@ def run_health_check(cli_path: Path) -> tuple[bool, str | None]:
     return False, first_line[:200]
 
 
+def _load_actions_config() -> dict:
+    """Load config/actions.yaml. Returns an empty dict on any failure.
+
+    Only used to detect which adapters are bound to an action and therefore
+    should be probed with the action-family dry-run.
+    """
+    if not ACTIONS_CONFIG_PATH.exists():
+        return {}
+    text = ACTIONS_CONFIG_PATH.read_text()
+    try:
+        import yaml  # type: ignore
+    except Exception:
+        return {}
+    try:
+        data = yaml.safe_load(text) or {}
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _action_connector_paths(actions_config: dict) -> set[Path]:
+    """Return resolved adapter paths referenced by config/actions.yaml."""
+    paths: set[Path] = set()
+    actions = actions_config.get("actions")
+    if not isinstance(actions, dict):
+        return paths
+    for entry in actions.values():
+        if not isinstance(entry, dict):
+            continue
+        connector = entry.get("connector")
+        if not isinstance(connector, str) or not connector:
+            continue
+        paths.add((SOC_AGENT_DIR / connector).resolve())
+    return paths
+
+
+def run_ticketing_close_probe(cli_path: Path) -> tuple[bool, str | None]:
+    """Dry-run probe for ticketing-family action adapters.
+
+    Invokes `close --ticket-id PROBE-0 --dry-run ...`. The contract says
+    dry-run short-circuits before any upstream lookup, so this probe must
+    succeed even if PROBE-0 does not exist.
+    """
+    python = _adapter_python(cli_path)
+    cmd = [
+        python,
+        str(cli_path),
+        "close",
+        "--ticket-id",
+        "PROBE-0",
+        "--reason",
+        "preflight",
+        "--author",
+        "preflight",
+        "--documentation",
+        "preflight",
+        "--dry-run",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=HEALTH_CHECK_TIMEOUT_SEC,
+            cwd=str(SOC_AGENT_DIR),
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"close --dry-run timed out after {HEALTH_CHECK_TIMEOUT_SEC}s"
+    except FileNotFoundError as e:
+        return False, f"python3 missing: {e}"
+
+    if result.returncode == 0:
+        return True, None
+    stderr = (result.stderr or result.stdout or "").strip().splitlines()
+    first_line = stderr[0] if stderr else f"exit {result.returncode}"
+    return False, first_line[:200]
+
+
 def check_knowledge(system: str) -> list[str]:
     """Return list of missing knowledge artifacts for a system (empty = ok).
 
@@ -236,9 +317,23 @@ def check_knowledge(system: str) -> list[str]:
 
 def check_systems() -> list[SystemStatus]:
     adapters = discover_adapters()
+    actions_config = _load_actions_config()
+    action_adapters = _action_connector_paths(actions_config)
+
     statuses: list[SystemStatus] = []
     for name, cli_path in adapters:
         connected, err = run_health_check(cli_path)
+
+        # If this adapter is bound to an action in config/actions.yaml, also
+        # run the family-specific dry-run probe. Currently only the ticketing
+        # family (close_ticket) is supported; add new probes alongside new
+        # action verbs.
+        if connected and cli_path.resolve() in action_adapters:
+            ok, probe_err = run_ticketing_close_probe(cli_path)
+            if not ok:
+                connected = False
+                err = probe_err
+
         gaps = check_knowledge(name)
         statuses.append(
             SystemStatus(

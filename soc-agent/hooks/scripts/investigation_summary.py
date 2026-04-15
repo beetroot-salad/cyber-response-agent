@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Stop hook: Append investigation outcome summary to runs/audit.jsonl.
 
-Reads the most recent completed run and appends a JSONL entry with the
-investigation verdict (status, disposition, confidence, precedent match,
-timestamps, and token usage).
+Resolves the run directory via session_id from the Stop payload and appends
+a JSONL entry with the investigation verdict (status, disposition,
+confidence, precedent match, timestamps, and token usage).
 
 Exit codes:
     0 - Always (summary logging should never block the agent)
@@ -19,21 +19,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.frontmatter import parse_yaml_frontmatter  # noqa: E402, F401
-from hooks.scripts.run_context import get_runs_dir  # noqa: E402
-
-
-def find_latest_run() -> Path | None:
-    """Find the most recent run directory with a report.md."""
-    runs_dir = get_runs_dir()
-    if not runs_dir.exists():
-        return None
-
-    run_dirs = sorted(
-        [d for d in runs_dir.iterdir() if d.is_dir() and (d / "report.md").exists()],
-        key=lambda d: d.stat().st_mtime,
-        reverse=True,
-    )
-    return run_dirs[0] if run_dirs else None
+from hooks.scripts.run_context import get_runs_dir, resolve_run_dir  # noqa: E402
 
 
 TOKEN_KEYS = (
@@ -127,22 +113,32 @@ def extract_transcript_stats(transcript_path: str) -> dict:
     return stats
 
 
-def main():
-    payload = {}
-    try:
-        payload = json.loads(sys.stdin.read())
-    except Exception:
-        pass
+def main(payload: dict | None = None) -> None:
+    """Append an audit entry for the current run. Never raises.
 
-    run_dir = find_latest_run()
+    Accepts the Stop payload dict. When called directly from __main__,
+    the payload is read from stdin. Either way, session_id anchors the
+    run-directory resolution so concurrent runs don't cross-contaminate.
+    """
+    if payload is None:
+        payload = {}
+
+    session_id = payload.get("session_id") if isinstance(payload, dict) else None
+    runs_dir = get_runs_dir()
+
+    run_dir: Path | None = None
+    if session_id:
+        run_dir, _ = resolve_run_dir(session_id, runs_dir)
     if run_dir is None:
-        sys.exit(0)
+        return
 
     report_path = run_dir / "report.md"
+    if not report_path.exists():
+        return
     with open(report_path) as f:
         frontmatter = parse_yaml_frontmatter(f.read())
 
-    state = {}
+    state: dict = {}
     state_path = run_dir / "state.json"
     if state_path.exists():
         with open(state_path) as f:
@@ -179,13 +175,19 @@ def main():
         **stats,
     }
 
-    audit_path = get_runs_dir() / "audit.jsonl"
+    audit_path = runs_dir / "audit.jsonl"
     audit_path.parent.mkdir(parents=True, exist_ok=True)
     with open(audit_path, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
-    sys.exit(0)
-
 
 if __name__ == "__main__":
-    main()
+    raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+    try:
+        cli_payload = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        cli_payload = {}
+    if not isinstance(cli_payload, dict):
+        cli_payload = {}
+    main(cli_payload)
+    sys.exit(0)

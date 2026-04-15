@@ -12,21 +12,28 @@ mode:
   allowed: [recommend]
   default: recommend
 
-# Mitigation actions (enforced by the mitigation skill, not the investigation agent)
+# Mitigation actions (enforced by the Stop-stage action hook, not the
+# investigation agent)
 #
-# The investigation agent has full read/query access and is not restricted here.
-# Only *actions* (mitigations) are gated per-signature.
+# The investigation agent has full read/query access and is not restricted
+# here. Only *actions* (mitigations) are gated per-signature.
 #
 # Per action:
 #   auto    — execute without human approval (requires mode: act)
 #   approve — execute only after human approval via Claude Code permission prompt
-# Unlisted actions are denied. Denied actions return a structured response to
-# the agent so it can adapt (e.g., escalate or investigate from a different angle).
+# Unlisted actions are denied. Denied actions are logged to
+# runs/action_audit.jsonl with skip_reason=action_not_enabled.
 #
-# Common actions: block_ip, disable_user, isolate_host, revoke_session, kill_process
+# Which connector handles each action is bound globally in
+# config/actions.yaml — this file just says whether *this* signature opts
+# into running the action after a grounded high-confidence resolution.
+#
+# Common actions: close_ticket, block_ip, disable_user, isolate_host,
+# revoke_session, kill_process
 mitigation:
   actions: {}
   # Examples:
+  #   close_ticket: auto    # post-investigation auto-close; see config/actions.yaml
   #   block_ip: auto
   #   disable_user: approve
   #   isolate_host: approve

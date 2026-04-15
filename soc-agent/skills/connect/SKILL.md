@@ -98,12 +98,13 @@ cat schemas/adapter_contract.py
 
 #### Pick the contract shape
 
-The contract has two shapes. Pick based on the system:
+The contract has three shapes. Pick based on the system:
 
 - **`AdapterContract`** (query-shaped) — the common case. SIEMs, EDRs, log stores, anything with a native query language and time-bounded results. Subcommands: `health-check`, `query <native_query>`. The query string passes through unmodified.
 - **`LookupContract`** (lookup-shaped) — CMDBs, asset DBs, identity/HR systems, threat intel enrichment. The upstream is fundamentally keyed by identifier (`GET /assets/{id}`), not by query DSL. Subcommands: `health-check`, `lookup <key_field> <key_value>`.
+- **`ActionContract`** (action-shaped) — state-changing systems where the investigation agent's conclusion is actionable: ticketing platforms, firewall/EDR write APIs, IAM disable endpoints, notification sinks. These are invoked **downstream** of an investigation's conclusion by the Stop-stage action hook, not during evidence gathering. Subcommands: `health-check` plus a family-specific verb — ticketing adapters expose `close`, firewalls expose `block`, EDR isolates expose `isolate`, etc. The reference ticketing-family example is `scripts/tools/stub_ticket_cli.py`; copy its shape when generating a real vendor ticketing connector.
 
-If you're unsure, pick `AdapterContract`. Most systems fit it, and forcing a lookup-shaped API into it is usually cleaner than the reverse.
+If you're unsure, pick `AdapterContract`. Most systems fit it, and forcing a lookup-shaped API into it is usually cleaner than the reverse. Only pick `ActionContract` when the system is fundamentally write-shaped and only reachable *after* an investigation concludes.
 
 #### Key constraints you're binding yourself to
 
@@ -114,6 +115,7 @@ If you're unsure, pick `AdapterContract`. Most systems fit it, and forcing a loo
 - On import failure (missing `opensearch-py`, `splunk-sdk`, etc.), print the setup command (`bash scripts/tools/setup.sh`) and exit 2.
 - If `--run-dir` is passed, read the salt from `{run_dir}/meta.json` and wrap output in `<run-{salt}-{system}-data>…</run-{salt}-{system}-data>`. Untrusted-data defense.
 - **Examples in `--help` are load-bearing.** Runtime agents pattern-match against whatever example you put in a subcommand's help text. Use *real* field names and values the user confirmed, not generic placeholders.
+- **Action adapters are dry-run-first.** Every action verb (`close`, `block`, `isolate`, ...) must default to dry-run: omitting `--execute` always short-circuits before any upstream write. You never pass `--execute` from this skill — not in Phase 3, not in preflight, not during manual testing. Only the production Stop-stage hook (`hooks/scripts/close_ticket_action.py`) ever passes it. The dry-run path must short-circuit *before* any lookup, so probes like `close --ticket-id PROBE-0 --dry-run` are safe even when the ticket doesn't exist.
 
 #### Language, dependencies, packaging
 
@@ -205,6 +207,37 @@ Read the output and triage each ambiguity into one of three buckets:
 
 The probe produces evidence, not a verdict. Your judgment is what separates "Day-1 obvious" from "will-learn-later". When in doubt, lean toward leaving things out — the scaffold is meant to be grown, not polished.
 
+#### 3.4 Action adapter test path
+
+Skip this subsection unless the adapter is `ActionContract`-shaped. This is the replacement for 3.1 + 3.2 for action adapters — the query probe in 3.2 doesn't apply, and the health check in 3.1 isn't enough on its own.
+
+**Hard prerequisite.** You must refuse to run this test phase unless the user can hand you a **non-production** ticketing (or firewall, or EDR) sandbox URL plus whatever env vars are required. Production targets are out of scope for `/connect` — if the user doesn't have a non-prod instance, stop here and tell them they need one before they can ship act mode. The plugin does not provision sandboxes for you.
+
+Two tests, in order:
+
+1. **Health check.** Same shape as 3.1:
+   ```bash
+   python3 scripts/tools/{system}_cli.py health-check
+   ```
+   Must exit 0 with a `connected: true` JSON payload.
+
+2. **Dry-run verb.** For a ticketing adapter, the dry-run shape is:
+   ```bash
+   python3 scripts/tools/{system}_cli.py close \
+       --ticket-id <sandbox-ticket-id> \
+       --reason "connect-test" \
+       --author "connect-test" \
+       --documentation "connect-test" \
+       --dry-run
+   ```
+   Must exit 0 with an `ActionResult` JSON payload showing `dry_run: true, success: true`. The payload should describe what *would* happen — the ticket ID the adapter would close, the body it would submit — without actually writing. If the adapter refuses because the sandbox ticket doesn't exist, that's fine: the dry-run must short-circuit before any lookup, so probing with a fake ID is explicitly supported.
+
+   For other action families, substitute the family verb and required flags (see `schemas/adapter_contract.py` for the constants). A firewall adapter would run `block --target 198.51.100.0/24 --dry-run`; an EDR would run `isolate --hostname web-01 --dry-run`.
+
+**Never pass `--execute`.** The Stop-stage hook is the one and only code path that writes. If you catch yourself typing `--execute`, stop — you're in the wrong phase.
+
+If either test fails, iterate on the adapter or the config and try again. Don't skip to Phase 4 with a red action test.
+
 ### Phase 4: Scaffold environment knowledge
 
 The adapter runs. Now record just enough environment knowledge for `/author` to build on later and for `/investigate` to compose its first queries without grepping around. The bar is **lean**, not comprehensive.
@@ -253,6 +286,26 @@ For each data type the system covers (from Phase 1 question 3), append a **short
 
 A four-line bullet is the target. Deeper coverage documentation grows via post-mortem as investigations reveal gaps and edge cases. If a matching data-type file doesn't exist yet, create one modeled on a sibling file.
 
+#### Action adapters: update `config/actions.yaml`
+
+Skip this subsection unless the adapter is `ActionContract`-shaped.
+
+`config/actions.yaml` is the global dispatch binding: it says which connector script handles each action verb. The Stop-stage hook reads it at dispatch time, so a new action adapter is invisible to act mode until you add its entry here.
+
+For a ticketing adapter that implements `close_ticket`, the entry looks like:
+
+```yaml
+actions:
+  close_ticket:
+    connector: scripts/tools/{system}_cli.py
+    required_env_vars: [{SYSTEM}_TOKEN]
+    config_env: knowledge/environment/systems/{system}/config.env
+```
+
+Only add the action verbs the adapter actually implements — don't speculatively enable `block_ip` or `disable_user` just because the vendor could theoretically support them. One verb per entry, only the ones you just tested.
+
+Per-signature opt-in still happens in `config/signatures/{sig}/permissions.yaml` (via `mitigation.actions.close_ticket: auto`), so adding a binding here doesn't flip any signature into act mode — it just makes the binding available.
+
 #### What you do NOT scaffold
 
 - **Signature knowledge.** `/connect` does not touch `knowledge/signatures/`. That's `/author`'s job.
@@ -279,6 +332,8 @@ git add scripts/tools/{system}_cli.py \
         scripts/tools/setup.sh \
         knowledge/environment/systems/{system}/ \
         knowledge/environment/data-sources/
+# Action adapters only — also stage the global action dispatch binding:
+# git add config/actions.yaml
 # commit with a clear message, but DO NOT push, DO NOT merge
 ```
 
@@ -302,7 +357,7 @@ These exist to keep the skill in its lane, not to block a legitimate request. Wh
 ### Hard limits (non-negotiable)
 
 - **Never handle credentials.** Tokens, passwords, API keys, pasted cURL commands containing auth headers — all forbidden. If the user tries to share one, stop and remind them where it belongs (env var or vault). Repeat if necessary. This is the single most important property of the whole flow.
-- **Never edit other skills' territory.** No writes to `knowledge/signatures/`, `config/signatures/`, `hooks/`, `schemas/`, `skills/` (other than reading `schemas/adapter_contract.py`). Those belong to `/author` or the plugin maintainers. If the task genuinely requires touching them, stop and tell the user to run the appropriate skill or open a PR by hand.
+- **Never edit other skills' territory.** No writes to `knowledge/signatures/`, `config/signatures/`, `hooks/`, `schemas/`, or `skills/` (other than reading `schemas/adapter_contract.py`). Those belong to `/author` or the plugin maintainers. The one exception inside `config/` is `config/actions.yaml` — it's the global dispatch binding for action adapters and is explicitly write-allowed during Phase 4 when the adapter is `ActionContract`-shaped. If the task genuinely requires touching anything else in those territories, stop and tell the user to run the appropriate skill or open a PR by hand.
 - **Fail loud on ambiguity.** Never silently substitute a default, a placeholder, or a guessed value for something the user didn't confirm. Surface the ambiguity and ask.
 
 ### Defaults (right for most connections, overrideable with cause)

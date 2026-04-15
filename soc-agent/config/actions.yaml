@@ -1,0 +1,23 @@
+schema_version: "1.0"
+
+# Global action-to-connector bindings.
+#
+# Each action names exactly one connector script (from scripts/tools/) that
+# implements ActionContract from schemas/adapter_contract.py. Per-signature
+# opt-in still happens in config/signatures/{sig}/permissions.yaml — this
+# file just says "which connector handles this action family" globally.
+#
+# Connector contract (see schemas/adapter_contract.py):
+#   - health-check subcommand exits 0 when reachable
+#   - family-specific verb (close, block, isolate, ...) defaults to dry-run
+#   - --execute is required to actually write; only the Stop-stage action
+#     hook ever passes it
+#
+# Ship this file with the action block commented out. `/connect` fills in
+# the connector path and required env vars when the user wires a real
+# ticketing system.
+actions:
+  # close_ticket:
+  #   connector: scripts/tools/stub_ticket_cli.py
+  #   required_env_vars: []
+  #   config_env: knowledge/environment/systems/stub-ticket/config.env

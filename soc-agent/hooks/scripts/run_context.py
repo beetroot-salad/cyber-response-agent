@@ -1,12 +1,15 @@
 """Shared run-directory resolution for hooks and scripts.
 
-Hooks need to answer two recurring questions: "where is the runs directory?"
-and "given a PostToolUse event, which run directory (if any) is it touching?"
-This module is the single source of truth for both.
+Hooks need to answer three recurring questions: "where is the runs directory?",
+"given a PostToolUse event, which run directory (if any) is it touching?", and
+"given a Stop-stage session_id, which run does it belong to?". This module is
+the single source of truth for all three.
 """
 
+import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -67,3 +70,84 @@ def extract_run_dir(hook_data: dict) -> Path | None:
         return extract_run_dir_from_path(m.group(1))
 
     return None
+
+
+def _find_unmapped_active_run(runs_dir: Path, sessions_dir: Path) -> Path | None:
+    """Find the most recent run dir with meta.json that has no session mapping.
+
+    A run is considered active if it has no state.json or its phase is not
+    CONCLUDE. Runs that already have a session mapping file pointing to them
+    are excluded.
+    """
+    mapped_run_dirs: set[str] = set()
+    if sessions_dir.exists():
+        for sf in sessions_dir.iterdir():
+            if sf.suffix == ".json":
+                try:
+                    data = json.loads(sf.read_text())
+                    mapped_run_dirs.add(data.get("run_dir", ""))
+                except Exception:
+                    continue
+
+    candidates = []
+    for d in runs_dir.iterdir():
+        if not d.is_dir() or not (d / "meta.json").exists():
+            continue
+        if str(d) in mapped_run_dirs:
+            continue
+        state_path = d / "state.json"
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text())
+                if state.get("phase") == "CONCLUDE":
+                    continue
+            except Exception:
+                pass
+        candidates.append(d)
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda d: d.stat().st_mtime)
+
+
+def resolve_run_dir(session_id: str, runs_dir: Path) -> tuple[Path | None, str]:
+    """Map a session_id to its investigation run directory.
+
+    Returns (run_dir, signature_id) or (None, "") if no active run found.
+
+    On first call for a session, creates the mapping file by associating
+    the session with the most recent unmapped active run. Session-anchored
+    resolution is stable under concurrent runs where an mtime-based fallback
+    is not.
+    """
+    sessions_dir = runs_dir / ".sessions"
+    mapping_path = sessions_dir / f"{session_id}.json"
+
+    if mapping_path.exists():
+        try:
+            data = json.loads(mapping_path.read_text())
+            run_dir = Path(data["run_dir"])
+            if run_dir.exists():
+                return run_dir, data.get("signature_id", "")
+        except Exception:
+            pass
+
+    run_dir = _find_unmapped_active_run(runs_dir, sessions_dir)
+    if run_dir is None:
+        return None, ""
+
+    signature_id = ""
+    try:
+        meta = json.loads((run_dir / "meta.json").read_text())
+        signature_id = meta.get("signature_id", "")
+    except Exception:
+        pass
+
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    mapping_path.write_text(json.dumps({
+        "run_dir": str(run_dir),
+        "signature_id": signature_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }))
+
+    return run_dir, signature_id
