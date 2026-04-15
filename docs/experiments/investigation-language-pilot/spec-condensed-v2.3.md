@@ -71,7 +71,7 @@ gets smaller, more general, and more action-centric.
 
 6. **`outcome.trust_anchor_result`** on trust-mode leads. A small
    structured field at the lead level carrying the anchor's verdict.
-   Four writer fields only: `{anchor_id, kind, result,
+   Five writer fields only: `{anchor_id, kind, result, as_of,
    authority_for_question}`. **No `structured_fields` dict** — the
    normalized per-anchor projection that distillers want is derived
    from `observations` + a per-anchor schema in `anchor_manifest.yaml`,
@@ -81,10 +81,13 @@ gets smaller, more general, and more action-centric.
    materializes the substantive anchor return as graph entities in
    `observations.vertices/edges`; `trust_anchor_result` carries only
    what's not already in the graph: anchor identity, the verdict
-   enum, and the per-question authority cap. **`authority_for_question:
-   partial`** expresses partial-authority anchor returns (e.g.,
-   `ec2-instance-integrity` covers disk + IMDSv2 but not in-memory
-   implants). Closes the rule-5710 fidelity gap and A.4 R-3/R-6.
+   enum, the timestamp the verdict is authoritative about, and the
+   per-question authority cap. **`authority_for_question: partial`**
+   expresses scope-partial anchor returns (e.g., `ec2-instance-integrity`
+   covers disk + IMDSv2 but not in-memory implants); **`as_of`**
+   expresses temporal validity independently (an hr-directory lookup
+   against a 14-hour-stale sync is full-scope but temporally-stale).
+   Closes the rule-5710 fidelity gap and A.4 R-3/R-6.
 
 7. **`conclude.ceiling_test`** for severity-ceiling termination.
    `{kind: out-of-band-human-contact | tool-unavailable |
@@ -105,10 +108,11 @@ gets smaller, more general, and more action-centric.
 (`anchor-source`), +5 vertex types (`endpoint`, `identity`, `storage`,
 `database`, `network-device`), +2 relations (`targeted`, `identified_as`),
 +1 vertex field (`placeholder`), +2 lead/conclude fields
-(`trust_anchor_result` (4 writer fields), `ceiling_test`). The schema
-is roughly the same size but generalizes farther, is more action-centric,
-handles unknown lifecycle endpoints honestly via placeholder vertices,
-and pushes retrieval load to the distiller where it belongs.
+(`trust_anchor_result` (5 writer fields: anchor_id, kind, result, as_of,
+authority_for_question), `ceiling_test`). The schema is roughly the
+same size but generalizes farther, is more action-centric, handles
+unknown lifecycle endpoints honestly via placeholder vertices, and
+pushes retrieval load to the distiller where it belongs.
 
 ---
 
@@ -266,6 +270,50 @@ prologue:
 (`api_name`, `sql_summary`, `status`). The `targeted` edge links the
 action to what it acted on (the database). The session it executed in
 is added by mechanical scope leads, not in the prologue.
+
+### Scale of reasoning — pick the granularity the investigation works at
+
+Vertices in the companion are not "the smallest observable unit" — they
+are the unit at which the investigation **reasons**. `process`, `session`,
+`endpoint`, `container`, `database` are all valid granularities; the
+right choice depends on what the investigation is trying to answer.
+
+- If the question is "which binary ran this?" → `process`.
+- If the question is "who had a shell on this box?" → `session`.
+- If the question is "which host is compromised?" → `endpoint`.
+- If the question is "which query touched this table?" → the query is
+  an observation on the `database` (an edge or attribute), not a new
+  entity.
+
+Fine-grained observations that *support* the reasoning but aren't the
+unit of reasoning belong as attributes or as finer-grained vertices
+that **compose with** the primary one via containment relations
+(`runs_on`, `runs_in`, `executed_in`, `triggered_by`). They don't
+*replace* it.
+
+**Scale can change across loops.** A scope lead may materialize a
+process tree (finer) inside a previously-materialized session
+(coarser); both levels coexist in the graph, linked by containment
+relations. Decompose to a finer scale only when evidence forces the
+distinction — pre-decomposing fragments the graph without
+discrimination value, and retroactive refinement via hierarchical
+hypothesis IDs is the canonical v2.3 pattern for this.
+
+**Aggregation is an attribute, not a vertex decomposition.** When an
+observation describes N occurrences of something (17 ListObjectsV2
+calls over a 172-second window; 93 auth events over 24 hours), the
+aggregate belongs on a single vertex or edge with `count` + `window_*`
+attributes. Do NOT materialize one vertex per occurrence. The SIEM's
+native unit is the alert (a single detection event, even when the
+alert describes aggregate activity); model at that unit, not finer.
+
+**Cartography analogy.** A world map renders an island as opaque; a
+city map shows streets; a building floor plan shows rooms. All three
+are valid representations of the same land — the right one depends on
+what question is being asked. The companion follows the same rule:
+pick the scale that matches the investigation's reasoning, decompose
+when evidence forces it, and accept that coarse-grained entities are
+not "lies of omission" — they're just the right level of resolution.
 
 ### When to use `command` + `targeted` vs entity + edge verb
 
@@ -587,6 +635,7 @@ gather:
           anchor_id: <string>
           kind: <anchor-name>
           result: confirmed | refuted | partial | no-data
+          as_of: <iso-timestamp>
           authority_for_question: full | partial
         trust_root_reached: v-{id}             # omit when null
         failure_reason: <string>               # omit unless error/degraded
@@ -610,7 +659,7 @@ gather:
 A small structured anchor-verdict record at the lead level. **Required
 for `mode: trust` leads that consulted an anchor**, with one exception:
 trust leads where the anchor query failed (in which case
-`failure_reason` is set instead). Four fields:
+`failure_reason` is set instead). Five fields:
 
 - **`anchor_id`** — stable identifier matching `anchor_manifest.yaml`
   entries.
@@ -625,6 +674,29 @@ trust leads where the anchor query failed (in which case
   - `partial` — the anchor's answer is non-empty but covers only some
     of the question.
   - `no-data` — the anchor returned no record (silent on the question).
+- **`as_of`** — ISO-8601 timestamp the anchor's answer is
+  **authoritative about** (not the query time, unless those happen
+  to coincide). Three cases cover every anchor class:
+  - **Event anchor** (answers "did X happen at time T?") — `as_of`
+    is the event timestamp. Example: `vpn-mfa` returning marcus's
+    MFA → `as_of: "2026-04-14T02:13:50Z"` (the MFA event time).
+  - **Current-state anchor** (answers "is property X true now?") —
+    `as_of` is the query time, or the snapshot timestamp if the
+    anchor returns one. Example: `mdm-intune` listing enrolled
+    devices → `as_of: "2026-04-14T14:32:30Z"` (query time).
+  - **Slowly-changing reference** (answers "was policy/status X as
+    of its last sync?") — `as_of` is the reference's last-modified
+    or last-sync time, NOT the query time. Example: `hr-directory`
+    employment status → `as_of: "2026-04-14T00:00:00Z"` (last HRIS
+    sync, even if queried at 14:30). A stale reference is a real
+    reasoning concern; encoding query time here would hide it.
+
+  Writers record staleness explicitly: if `as_of` is materially
+  older than the event being investigated, add a `concerns[]` entry
+  on the lead (or on the resolution) naming the gap. No validator
+  rule caps weight on staleness in v2.3 — it's a reasoning signal
+  that the writer makes visible.
+
 - **`authority_for_question`** — `full` or `partial`.
   - **`partial` means the anchor is authoritative for the data it
     returned but does not cover all aspects of the question being
@@ -634,6 +706,10 @@ trust leads where the anchor query failed (in which case
     partial-authority. **Capping rule (validator rule 16):** a `partial`
     authority anchor cannot push a hypothesis past `-` (or past `+`)
     on its own, even with a clean return.
+  - **`authority_for_question` and `as_of` are orthogonal.** Scope
+    (spatial) and freshness (temporal) are independent: a full-scope
+    anchor can be temporally stale, and a partial-scope anchor can
+    be temporally fresh. Encode them separately; don't collapse.
 
 **The substantive anchor return goes in `observations`, not here.**
 If the anchor answers "who initiated this kube-api call?" with
@@ -1121,6 +1197,7 @@ gather:
           anchor_id: job-scheduler
           kind: job-scheduler
           result: refuted
+          as_of: "2026-04-14T02:17:30Z"   # query time (current-state anchor — "is there a job registered now?")
           authority_for_question: full
       resolutions:
         - hypothesis: h-001
@@ -1282,6 +1359,7 @@ gather:
           anchor_id: vpn-mfa
           kind: vpn-mfa
           result: confirmed
+          as_of: "2026-04-14T02:13:50Z"   # MFA event time (event anchor — when marcus actually touched his YubiKey)
           authority_for_question: full
       resolutions:
         - hypothesis: h-002-001
@@ -1323,6 +1401,7 @@ gather:
           anchor_id: change-management
           kind: change-management
           result: no-data
+          as_of: "2026-04-14T02:18:10Z"   # query time (current-state anchor over an open-ticket index)
           authority_for_question: full
       resolutions:
         - hypothesis: h-002-001
@@ -1360,6 +1439,7 @@ gather:
           anchor_id: ec2-instance-integrity
           kind: ec2-instance-integrity
           result: confirmed
+          as_of: "2026-04-14T02:15:00Z"      # scan snapshot timestamp (event anchor — the integrity scan result is about this moment)
           authority_for_question: partial    # covers disk + IMDSv2; not in-memory implants
       resolutions:
         - hypothesis: h-003
@@ -1402,11 +1482,15 @@ conclude:
    vendor specifics. EC2 → `endpoint` with `kind: ec2-instance`;
    postgres RDS → `database` with `kind: postgres`; the IAM role →
    `identity` with `kind: role`.
-6. **`trust_anchor_result` is a 4-field verdict block** on all four
-   trust leads: `{anchor_id, kind, result, authority_for_question}`.
-   `job-scheduler` returned `refuted/full`; `vpn-mfa` returned
-   `confirmed/full`; `change-management` returned `no-data/full`;
-   `ec2-instance-integrity` returned `confirmed/partial`. **No
+6. **`trust_anchor_result` is a 5-field verdict block** on all four
+   trust leads: `{anchor_id, kind, result, as_of, authority_for_question}`.
+   `job-scheduler` returned `refuted/full` as-of query time; `vpn-mfa`
+   returned `confirmed/full` as-of the MFA event time (02:13:50Z, three
+   minutes before the RDS query — fresh); `change-management` returned
+   `no-data/full` as-of query time; `ec2-instance-integrity` returned
+   `confirmed/partial` as-of the scan snapshot time. `as_of` is
+   **orthogonal** to `authority_for_question` — scope and freshness are
+   independent, and both land in this worked example. **No
    `structured_fields` dict** — substantive anchor returns live in
    `observations` when they describe graph entities (e.g., l-003
    materializes `v-008: session(mfa-session)` + e-007 to carry
@@ -1419,7 +1503,7 @@ conclude:
 7. **Partial-authority cap fires** on l-005: even though the anchor
    returned clean, `authority_for_question: partial` caps h-003 at -
    (validator rule 16). The cap is mechanical and structurally visible
-   from the 4-field `trust_anchor_result` alone — the distiller can
+   from the 5-field `trust_anchor_result` alone — the distiller can
    detect "confirmed verdict + partial authority + weight capped at
    ±1" without parsing reasoning prose.
 8. **`ceiling_test`** in conclude: `kind: out-of-band-human-contact,
@@ -1495,9 +1579,11 @@ NOT add fields for these. They are explicitly distiller projects:
   every field was duplicated from observation vertex attributes. The
   distiller projects per-anchor normalized retrieval indices from
   `observations` + a per-anchor projection schema declared in
-  `anchor_manifest.yaml`. What the writer types is a 4-field verdict
-  block (`{anchor_id, kind, result, authority_for_question}`); the
-  substantive anchor return is in the graph.
+  `anchor_manifest.yaml`. What the writer types is a 5-field verdict
+  block (`{anchor_id, kind, result, as_of, authority_for_question}`);
+  the substantive anchor return is in the graph. Freshness buckets
+  relative to the event time are a distiller projection computed from
+  `as_of`, not a writer field.
 
 The schema does not bear retrieval load that the distiller can compute
 once at case close. This is the central design choice of v2.3.
