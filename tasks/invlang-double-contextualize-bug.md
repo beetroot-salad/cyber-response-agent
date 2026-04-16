@@ -1,6 +1,6 @@
 ---
 title: Investigate double-CONTEXTUALIZE hook rejection in run 20260416-052335-rule100001
-status: backlog
+status: done
 groups: reliability, hooks, invlang
 ---
 
@@ -35,3 +35,17 @@ H2 would be a correctness bug: the hook should detect only phase headers that ap
 - Transcript: `/tmp/cra-eval/20260416-052335-rule100001/transcript.jsonl`
 - Hook events: look for `PostToolUse:Edit` events with non-zero exit in the analyzer output
 - Run: `20260416-052335-rule100001`
+
+## Resolution
+
+**Root cause: H1.** The agent wrote `## CONTEXTUALIZE` (correct), then edited it to `## PHASE: CONTEXTUALIZE\n\n## CONTEXTUALIZE` (confused about format), then tried to undo that — replacing `## PHASE: CONTEXTUALIZE` with `## CONTEXTUALIZE`, which left two `## CONTEXTUALIZE` headers in the file. `infer_state.py` (PostToolUse, full-file scan) correctly rejected the duplicate. H2 was not the bug: full-file scanning is intentional.
+
+**Fixes shipped in PR #60:**
+
+1. **`infer_state_pre.py`** — new PreToolUse hook that simulates the post-write file content (Write: uses `content` directly; Edit: reads current file + applies `old_string→new_string`) and blocks the tool call with exit 2 before the file is modified. The exact bad Edit from this run would now be blocked before it lands.
+
+2. **`SKILL.md`** — phase headers must be exactly `## PHASENAME` with no prefix or suffix (was `## PHASE section header`, which the agent misread as a literal `## PHASE:` prefix).
+
+3. **`validate_phase_sequence()`** extracted from `infer_state.py` as an importable function shared by both hooks.
+
+**Regression caught in eval run #21:** removing `Bash` from the PostToolUse infer_state matcher caused `state.json` to stall at HYPOTHESIZE when the agent used `cat >>` heredocs for GATHER/ANALYZE/CONCLUDE. Restored `Bash` to the matcher before shipping.
