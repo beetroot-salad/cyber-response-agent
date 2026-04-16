@@ -22,12 +22,18 @@ from .queries import (
     coarse_case_lookup,
     dead_lead_lookup,
     enumerate_corpus,
+    enumerate_hypothesis_tree,
     hypothesis_name_wildcard,
+    independent_datasource_metric,
+    lead_discrimination_score,
     lead_effectiveness,
     lead_effectiveness_for_hypothesis,
+    lead_pair_synergy,
     lead_sequence_pattern,
+    post_failure_recovery,
     prose_substring,
     refinement_chain_shapes,
+    weight_reversal_mining,
 )
 
 __all__ = [
@@ -36,7 +42,7 @@ __all__ = [
     "PILOT_CORPUS_FILES",
     "conclude_field",
     "load_corpus",
-    # queries
+    # queries — classes 1–8 (original)
     "ENUM_CHOICES",
     "anchor_calibration",
     "coarse_case_lookup",
@@ -48,4 +54,12 @@ __all__ = [
     "lead_sequence_pattern",
     "prose_substring",
     "refinement_chain_shapes",
+    # queries — axis 1 additions
+    "enumerate_hypothesis_tree",
+    "lead_discrimination_score",
+    # queries — classes 9–12 (axis 2)
+    "weight_reversal_mining",
+    "lead_pair_synergy",
+    "post_failure_recovery",
+    "independent_datasource_metric",
 ]
