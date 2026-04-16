@@ -208,7 +208,7 @@ header {
   align-items: flex-start;
   overflow-x: auto;
   min-height: calc(100vh - 78px);
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 /* ── Column — wide, 2-col card grid ──────────────────────────────────── */
