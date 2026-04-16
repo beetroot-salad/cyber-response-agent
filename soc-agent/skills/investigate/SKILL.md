@@ -104,7 +104,7 @@ Transitions:
 - ANALYZE → CONCLUDE (mechanism confirmed + verified + scoped, or escalation)
 ```
 
-The state machine is enforced automatically — when you write a `## PHASE` section header to `investigation.md`, a hook validates the transition and updates `state.json`. If you attempt an illegal transition (e.g., writing `## GATHER` before `## HYPOTHESIZE`), the write will be rejected with an error. The hook also reports your current loop count. A hard limit on hypothesis loops is enforced — if you're approaching it without convergence, escalate.
+The state machine is enforced automatically — when you write a phase section header to `investigation.md`, a hook validates the transition and updates `state.json`. Phase headers must be exactly `## PHASENAME` with no prefix or suffix — e.g. `## CONTEXTUALIZE`, `## HYPOTHESIZE`, `## GATHER`, `## ANALYZE`, `## SCREEN`, `## CONCLUDE`. If you attempt an illegal transition (e.g., writing `## GATHER` before `## HYPOTHESIZE`), the write will be blocked. The hook also reports your current loop count. A hard limit on hypothesis loops is enforced — if you're approaching it without convergence, escalate.
 
 ---
 

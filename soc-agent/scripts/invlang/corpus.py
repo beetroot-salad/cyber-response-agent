@@ -38,16 +38,20 @@ def _corpus_root() -> Path:
 # ---------------------------------------------------------------------------
 
 COMPANION_TOP_LEVEL = {"prologue", "hypothesize", "gather", "conclude"}
+# v2.6: hypothesize is optional when screen_result: match short-circuits the loop.
+_COMPANION_REQUIRED_KEYS = {"prologue", "gather", "conclude"}
 
 YAML_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
 
-# Pilot corpus allowlist — deliberate: only finalized v2.5 translations.
+# Pilot corpus allowlist — deliberate: only finalized v2.5/v2.6 translations.
 # Update when a new case lands. Paths are relative to the corpus root.
 PILOT_CORPUS_FILES: tuple[str, ...] = (
     "case-a1/walk-a1-v2.5.yaml",
     "case-a4/walk-a4-v2.5.yaml",
     "case-m365/walk-m365-v2.5.yaml",
     "case-real-rule5710/companion-v2.5.yaml",
+    "case-ssh-brute/companion-v2.5.yaml",
+    "case-ssh-cron/companion-v2.5.yaml",
 )
 
 
@@ -102,7 +106,8 @@ def conclude_field(conclude: dict[str, Any], *path: str) -> Any:
 
 
 def _looks_like_companion(doc: Any) -> bool:
-    return isinstance(doc, dict) and COMPANION_TOP_LEVEL.issubset(doc.keys())
+    # hypothesize is optional in v2.6 when screen_result: match short-circuits the loop
+    return isinstance(doc, dict) and _COMPANION_REQUIRED_KEYS.issubset(doc.keys())
 
 
 def _case_id_from_path(path: Path) -> str:

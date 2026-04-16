@@ -4,6 +4,12 @@ status: doing
 groups: invlang, knowledge
 ---
 
+## Status
+
+- **Item 1 — Retrieval improvements**: done. `--top N` global flag with natural default sort per class; `--enum-tree` hypothesis hierarchy; `--discriminate-between` discrimination score (Class 8 extension); `--reversals-only` filter on Class 9; wrong-flag warning when `--hypothesis` is passed to Class 9; improved help with QUICK START and PATTERNS sections.
+- **Item 2 — New query classes**: done. Class 9 (weight-reversal mining + `is_true_reversal` field), Class 10 (lead pair synergy), Class 11 (post-failure recovery map), Class 12 (independent datasource metric). Two new corpus companions added (case-ssh-brute, case-ssh-cron) expanding pilot corpus 4→6 cases; corpus loader updated for v2.6 SCREEN-matched companions (optional `hypothesize` block).
+- **Item 3 — Natural language fallback**: not started.
+
 ## Axes
 
 ### 1. Retrieval improvements to existing classes

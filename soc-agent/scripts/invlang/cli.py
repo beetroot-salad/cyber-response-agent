@@ -23,12 +23,18 @@ from .queries import (
     coarse_case_lookup,
     dead_lead_lookup,
     enumerate_corpus,
+    enumerate_hypothesis_tree,
     hypothesis_name_wildcard,
+    independent_datasource_metric,
+    lead_discrimination_score,
     lead_effectiveness,
     lead_effectiveness_for_hypothesis,
+    lead_pair_synergy,
     lead_sequence_pattern,
+    post_failure_recovery,
     prose_substring,
     refinement_chain_shapes,
+    weight_reversal_mining,
 )
 
 
@@ -44,7 +50,14 @@ def _print_result(label: str, result: dict[str, Any], limit: int = 6, as_json: b
     if as_json:
         print(json.dumps(result))
         return
-    print(f"\n--- {label} → {result['count']} hit(s) ---")
+    count_val = result.get("count", "?")
+    # When --top sliced the hits below count, note it in the header.
+    hits = result.get("hits", [])
+    if isinstance(count_val, int) and len(hits) < count_val:
+        header_suffix = f" [showing top {len(hits)} of {count_val}]"
+    else:
+        header_suffix = ""
+    print(f"\n--- {label} → {count_val} hit(s){header_suffix} ---")
     for key in ("hits", "distribution", "values"):
         if key not in result:
             continue
@@ -53,6 +66,22 @@ def _print_result(label: str, result: dict[str, Any], limit: int = 6, as_json: b
             print(f"  {item}")
         if len(result[key]) > limit:
             print(f"  ... ({len(result[key]) - limit} more)")
+    if "tree" in result:
+        tree = result["tree"]
+        print(f"\n  Tree ({len(tree)} root(s), {count_val} total hypotheses):")
+        for root_id, children in tree.items():
+            print(f"    {root_id}: {[c['id'] for c in children] or '(leaf)'}")
+
+
+def _apply_top(result: dict[str, Any], top: int | None) -> dict[str, Any]:
+    """Slice hits (and distribution) to at most top items."""
+    if top is None:
+        return result
+    out = dict(result)
+    for key in ("hits", "distribution", "values"):
+        if key in out and isinstance(out[key], list):
+            out[key] = out[key][:top]
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -63,45 +92,88 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="invlang-query",
         description="""
-Investigation-language v2.5 query tool.
+Investigation-language query tool (v2.6 corpus).
 
-Without --class or --enumerate, runs the full demo across all 8 classes.
+Without --class or --enumerate, runs the full demo across all 12 classes.
+
+QUICK START
+  --enumerate hypotheses          see all hypothesis names (run this before using patterns)
+  --enumerate archetypes          see outcome clusters seen in past cases
+  --class 1                       list all cases with disposition/confidence/archetype
+  --class 8                       rank leads by effectiveness across the corpus
+  --class 9 --reversals-only      pitfalls: hypotheses that looked right then got refuted
 
 QUERY CLASSES
-  1  coarse-case-lookup     Filter cases by disposition/termination/archetype/confidence
-  2  anchor-calibration     Distribution of anchor results × authority → disposition
-  3  refinement-chains      Hypothesis refinement tree shapes per case
-  4  dead-leads             Leads that errored or returned degraded data
-  5  lead-sequence          Serialize gather blocks as trace strings; filter by substring
+  1  coarse-case-lookup     Filter cases by disposition / termination / archetype / confidence
+  2  anchor-calibration     Distribution of (anchor result × authority) → disposition
+  3  refinement-chains      Hypothesis refinement tree shapes: depth and branching per root
+  4  dead-leads             Leads that errored or returned degraded data (loop order)
+  5  lead-sequence          Full investigation trace per case; filter by substring
   6  hypothesis-wildcard    fnmatch on hypothesis names; filter by final weight
-  7  prose-substring        Substring scan across all prose fields
-  8  lead-effectiveness     Score leads by log1p(count) × mean_abs_weight_delta;
-                            optionally restrict to hypotheses matching fnmatch patterns
+  7  prose-substring        Substring scan across all prose fields (reasoning, summaries, concerns)
+  8  lead-effectiveness     Rank leads by log1p(count) × mean_abs_weight_delta
+                              --hypothesis PATTERN [PATTERN …]  restrict to matching hypotheses
+                              --discriminate-between P1 P2       signed lift: moves P1 up, P2 down
+  9  weight-reversal        Resolutions where weight moved from positive/null to negative
+                              --hyp-pattern PATTERN  filter to matching hypotheses
+                              --reversals-only       show only is_true_reversal=True rows
+                                                     (before ∈ {+,++}, excludes null→negative)
+  10 lead-pair-synergy      Composite dispatches: does the pair move more weight than either alone?
+  11 post-failure-recovery  After a dead lead, what lead came next and how effective was it?
+  12 datasource-metric      Distinct system count per case; distribution by termination × disposition
 
 ENUMERATION
   --enumerate leads|anchors|archetypes|hypotheses|dispositions
-      List all distinct values of the chosen dimension across the corpus.
-      Useful for discovering valid filter arguments before running a query.
+      List distinct values of a corpus dimension.
+  --enum-tree
+      Parent-child hierarchy of hypothesis IDs (inferred from h-001-002-003 ID structure).
+
+PATTERNS
+  Hypothesis names start with '?'. Patterns use fnmatch syntax.
+  The leading '?' in the pattern matches the literal '?' that begins every hypothesis name.
+
+    ?*scanner*        matches  ?opportunistic-scanner, ?network-scanner-bot, …
+    ?*brute*          matches  ?targeted-brute-force, ?brute-force-external, …
+    ?*monitoring*     matches  ?monitoring-probe, ?internal-monitoring-loop, …
+
+  Flag assignment — the same pattern syntax, different flags per class:
+    --pattern PATTERN                         class 6  (hypothesis wildcard)
+    --hypothesis PATTERN [PATTERN …]          class 8  (filter lead effectiveness)
+    --hyp-pattern PATTERN                     class 9  (filter weight-reversal rows)
+    --discriminate-between PATTERN1 PATTERN2  class 8  (discrimination score between two groups)
+
+  Run --enumerate hypotheses first to see the exact vocabulary in this corpus.
+
+GLOBAL OPTIONS
+  --top N   Return at most N results (applied after class-specific default sort).
 
 CORPUS
-  Default corpus: docs/experiments/investigation-language-pilot/ (PILOT_CORPUS_FILES).
-  Override root directory via INVLANG_CORPUS_ROOT env var.
+  Default: docs/experiments/investigation-language-pilot/ (PILOT_CORPUS_FILES).
+  Override: set INVLANG_CORPUS_ROOT env var.
 
 OUTPUT
-  Default: human-readable.  --json: one JSON object per line.
+  Default: human-readable.  --json: emit one JSON object per invocation.
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     p.add_argument(
-        "--class", dest="query_class", type=int, choices=range(1, 9), metavar="N",
-        help="Run a single query class (1–8) instead of the full demo.",
+        "--class", dest="query_class", type=int, choices=range(1, 13), metavar="N",
+        help="Run a single query class (1–12) instead of the full demo.",
     )
     p.add_argument(
         "--enumerate", dest="enumerate", choices=ENUM_CHOICES, metavar="KIND",
         help="List distinct values: leads | anchors | archetypes | hypotheses | dispositions",
     )
+    p.add_argument(
+        "--enum-tree", dest="enum_tree", action="store_true",
+        help="Return parent-child hierarchy of hypothesis IDs across the corpus.",
+    )
     p.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable output.")
+    p.add_argument(
+        "--top", dest="top", type=int, default=None, metavar="N",
+        help="Return at most N results (applied after class-specific default sort).",
+    )
 
     g1 = p.add_argument_group("class 1 — coarse case lookup")
     g1.add_argument("--disposition", help="benign | unclear | true_positive")
@@ -115,7 +187,7 @@ OUTPUT
     g2.add_argument("--result", help="confirmed | refuted | partial | no-data")
     g2.add_argument("--authority", dest="authority_for_question", help="full | partial")
 
-    g4 = p.add_argument_group("class 4 — dead-lead lookup")
+    g4 = p.add_argument_group("class 4 / class 11 — dead-lead lookup / post-failure recovery")
     g4.add_argument("--system", help="Filter by query_details.system")
     g4.add_argument("--failure-reason", dest="failure_reason",
                     help="adapter-error | attribution-opaque | partial-coverage | permission-denied | timeout | other")
@@ -123,9 +195,17 @@ OUTPUT
     g5 = p.add_argument_group("class 5 — lead sequence")
     g5.add_argument("--contains", help="Filter traces containing this substring")
 
-    g6 = p.add_argument_group("class 6 — hypothesis wildcard")
-    g6.add_argument("--pattern", help="fnmatch pattern, e.g. '?*compromise*'")
-    g6.add_argument("--weight", dest="final_weight", help="++ | + | - | --")
+    g6 = p.add_argument_group("class 6 / class 9 — hypothesis wildcard / weight-reversal")
+    g6.add_argument("--pattern", help="fnmatch pattern, e.g. '?*compromise*' (class 6)")
+    g6.add_argument("--weight", dest="final_weight", help="++ | + | - | -- (class 6)")
+    g6.add_argument("--hyp-pattern", dest="hyp_pattern",
+                    help="fnmatch pattern to filter hypothesis names (class 9). "
+                         "Note: use --hypothesis (not --hyp-pattern) for class 8.")
+    g6.add_argument(
+        "--reversals-only", dest="reversals_only", action="store_true",
+        help="(class 9) Show only true reversals: hypotheses that were positively weighted "
+             "(+ or ++) before going negative. Excludes null→negative first-scores.",
+    )
 
     g7 = p.add_argument_group("class 7 — prose substring")
     g7.add_argument("--phrase", help="Substring to scan across all prose fields")
@@ -136,6 +216,11 @@ OUTPUT
         "--hypothesis", dest="hypothesis_patterns", nargs="+", metavar="PATTERN",
         help="One or more fnmatch patterns (AND-ed). "
              "E.g. --hypothesis '?*compromise*'  or  --hypothesis '?*monitoring*' '?*compromise*'",
+    )
+    g8.add_argument(
+        "--discriminate-between", dest="discriminate_between", nargs=2, metavar="PATTERN",
+        help="Two fnmatch patterns. Scores each lead by mean(signed_delta_H1 - signed_delta_H2) "
+             "across cases where both patterns are present.",
     )
 
     return p
@@ -179,9 +264,30 @@ def _run_class(n: int, corpus: list[Companion], args: argparse.Namespace) -> dic
             sys.exit(1)
         return prose_substring(corpus, args.phrase, case_sensitive=args.case_sensitive)
     if n == 8:
+        if args.discriminate_between:
+            p1, p2 = args.discriminate_between
+            return lead_discrimination_score(corpus, p1, p2)
         if args.hypothesis_patterns:
             return lead_effectiveness_for_hypothesis(corpus, *args.hypothesis_patterns)
         return lead_effectiveness(corpus)
+    if n == 9:
+        if getattr(args, "hypothesis_patterns", None):
+            print(
+                "note: --hypothesis is the class 8 flag. "
+                "Use --hyp-pattern to filter hypothesis names in class 9.",
+                file=sys.stderr,
+            )
+        return weight_reversal_mining(
+            corpus,
+            hypothesis_pattern=getattr(args, "hyp_pattern", None),
+            reversals_only=getattr(args, "reversals_only", False),
+        )
+    if n == 10:
+        return lead_pair_synergy(corpus)
+    if n == 11:
+        return post_failure_recovery(corpus, system=args.system, failure_reason=args.failure_reason)
+    if n == 12:
+        return independent_datasource_metric(corpus, disposition=args.disposition)
     raise ValueError(f"unknown class {n}")
 
 
@@ -224,6 +330,19 @@ def _run_demo(corpus: list[Companion], as_json: bool) -> None:
     _print_result("all leads", lead_effectiveness(corpus), limit=15, as_json=as_json)
     _print_result("?*compromise* hypotheses", lead_effectiveness_for_hypothesis(corpus, "?*compromise*"), as_json=as_json)
     _print_result("?*monitoring* ∧ ?*compromise*", lead_effectiveness_for_hypothesis(corpus, "?*monitoring*", "?*compromise*"), as_json=as_json)
+    _print_result("discriminate ?*monitoring* vs ?*brute*", lead_discrimination_score(corpus, "?*monitoring*", "?*brute*"), as_json=as_json)
+
+    _print_section("Class 9 — weight-reversal mining")
+    _print_result("all reversals", weight_reversal_mining(corpus), as_json=as_json)
+
+    _print_section("Class 10 — lead pair synergy")
+    _print_result("synergistic pairs", lead_pair_synergy(corpus), as_json=as_json)
+
+    _print_section("Class 11 — post-failure recovery")
+    _print_result("recovery map", post_failure_recovery(corpus), as_json=as_json)
+
+    _print_section("Class 12 — independent data source metric")
+    _print_result("system count per case", independent_datasource_metric(corpus), limit=20, as_json=as_json)
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +355,11 @@ def main() -> int:
 
     corpus = load_corpus()
 
+    if args.enum_tree:
+        result = enumerate_hypothesis_tree(corpus)
+        _print_result("hypothesis-tree", result, limit=200, as_json=args.json)
+        return 0
+
     if args.enumerate:
         result = enumerate_corpus(corpus, args.enumerate)
         _print_result(f"enumerate({args.enumerate})", result, limit=200, as_json=args.json)
@@ -243,6 +367,7 @@ def main() -> int:
 
     if args.query_class is not None:
         result = _run_class(args.query_class, corpus, args)
+        result = _apply_top(result, args.top)
         _print_result(f"class {args.query_class}", result, limit=200, as_json=args.json)
         return 0
 
