@@ -81,20 +81,19 @@ def load_or_bootstrap_state(run_dir: Path) -> dict:
     }
 
 
-def infer_transitions(run_dir: Path, observed_phases: list[str]) -> None:
-    """Validate and apply new transitions inferred from investigation.md headers.
+def validate_phase_sequence(
+    observed_phases: list[str],
+    history: list[str],
+    current_phase: str | None,
+) -> tuple[list[str], list[str], str | None]:
+    """Validate new phase transitions without writing state.
 
-    Compares observed_phases against the current state.json history. For each
-    new phase, validates the transition and updates state. Raises SystemExit(2)
-    on the first illegal transition.
+    Compares observed_phases against the known history. Calls sys.exit(2) on
+    the first violation. On success returns (new_phases, updated_history,
+    updated_phase) — new_phases is empty if there were no new headers.
+
+    Importable by infer_state_pre.py so the validation logic stays in one place.
     """
-    state = load_or_bootstrap_state(run_dir)
-    history = state.get("history", [])
-    current_phase = state.get("phase")
-
-    # Verify that existing history matches the prefix of observed phases.
-    # If they diverge, the agent rewrote or reordered sections — that's an error.
-    # Also catches the case where phases were removed (observed shorter than history).
     if len(observed_phases) < len(history):
         print(
             f"Phase sections were removed from investigation.md: "
@@ -114,21 +113,17 @@ def infer_transitions(run_dir: Path, observed_phases: list[str]) -> None:
             )
             sys.exit(2)
 
-    # Find new phases: the tail of observed_phases beyond what's in history.
     if len(observed_phases) == len(history):
-        # No new phases — edit didn't add a section header. Nothing to do.
-        return
+        return [], history, current_phase
 
     new_phases = observed_phases[len(history):]
 
-    # Validate each new transition in sequence
     for new_phase in new_phases:
         valid, error = validate_transition(current_phase, new_phase)
         if not valid:
             print(f"Illegal state transition: {error}", file=sys.stderr)
             sys.exit(2)
 
-        # Check loop count before allowing HYPOTHESIZE
         tentative_history = history + [new_phase]
         loops = count_loops(tentative_history)
         if loops > MAX_LOOPS:
@@ -139,9 +134,29 @@ def infer_transitions(run_dir: Path, observed_phases: list[str]) -> None:
             )
             sys.exit(2)
 
-        # Transition accepted — advance
         history = tentative_history
         current_phase = new_phase
+
+    return new_phases, history, current_phase
+
+
+def infer_transitions(run_dir: Path, observed_phases: list[str]) -> None:
+    """Validate and apply new transitions inferred from investigation.md headers.
+
+    Delegates validation to validate_phase_sequence (which exits on error),
+    then writes state.json and prints feedback on success.
+    """
+    state = load_or_bootstrap_state(run_dir)
+    history = state.get("history", [])
+    current_phase = state.get("phase")
+
+    new_phases, history, current_phase = validate_phase_sequence(
+        observed_phases, history, current_phase
+    )
+
+    if not new_phases:
+        # No new phases — edit didn't add a section header. Nothing to do.
+        return
 
     # Write updated state
     state_dict = make_state(
@@ -159,8 +174,6 @@ def infer_transitions(run_dir: Path, observed_phases: list[str]) -> None:
     # Feedback to agent
     loops = count_loops(history)
     if len(new_phases) == 1:
-        prev = new_phases[0]
-        # Show the transition that just happened
         from_label = history[-2] if len(history) >= 2 else "(init)"
         print(f"State: {from_label} -> {current_phase} (loop {loops}/{MAX_LOOPS})")
     else:

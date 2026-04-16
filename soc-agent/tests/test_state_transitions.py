@@ -1,9 +1,10 @@
 """Tests for investigation state machine transitions.
 
-Tests the state.py schema and write_state.py logic.
+Tests the state.py schema, write_state.py logic, and infer_state_pre.py hook.
 """
 
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -378,3 +379,152 @@ class TestWriteStateScript:
         state = json.loads((run_dir / "state.json").read_text())
         assert state["phase"] == "CONCLUDE"
         assert state["history"] == phases
+
+
+# --- infer_state_pre.py PreToolUse hook ---
+
+
+def _run_pre_hook(
+    hook_data: dict, runs_dir: Path | None = None
+) -> subprocess.CompletedProcess:
+    script = SOC_AGENT_ROOT / "hooks" / "scripts" / "infer_state_pre.py"
+    env = None
+    if runs_dir is not None:
+        import os
+        env = {**os.environ, "SOC_AGENT_RUNS_DIR": str(runs_dir)}
+    return subprocess.run(
+        [sys.executable, str(script)],
+        input=json.dumps(hook_data),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def _write_hook_data(file_path: Path, content: str) -> dict:
+    return {
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(file_path), "content": content},
+        "session_id": "test-session",
+    }
+
+
+def _edit_hook_data(
+    file_path: Path, old_string: str, new_string: str, replace_all: bool = False
+) -> dict:
+    return {
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": str(file_path),
+            "old_string": old_string,
+            "new_string": new_string,
+            "replace_all": replace_all,
+        },
+        "session_id": "test-session",
+    }
+
+
+class TestInferStatePre:
+    def _setup_run(self, tmp_path) -> tuple[Path, Path, Path]:
+        """Create a minimal run dir. Returns (run_dir, inv_path, runs_dir)."""
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        run_dir = runs_dir / "run-test"
+        run_dir.mkdir()
+        (run_dir / "meta.json").write_text(json.dumps({
+            "run_id": "run-test",
+            "signature_id": "wazuh-rule-test",
+        }))
+        inv = run_dir / "investigation.md"
+        return run_dir, inv, runs_dir
+
+    def test_write_initial_contextualize_passes(self, tmp_path):
+        run_dir, inv, runs_dir = self._setup_run(tmp_path)
+        result = _run_pre_hook(
+            _write_hook_data(inv, "## CONTEXTUALIZE\n\nsome content"),
+            runs_dir=runs_dir,
+        )
+        assert result.returncode == 0
+
+    def test_write_duplicate_contextualize_blocked(self, tmp_path):
+        """The exact bug from run 20260416-052335-rule100001: duplicate ## CONTEXTUALIZE
+        created by a botched edit must be blocked before the file lands."""
+        run_dir, inv, runs_dir = self._setup_run(tmp_path)
+
+        # Simulate state after the first valid write (CONTEXTUALIZE in state.json)
+        state = {
+            "run_id": "run-test",
+            "ticket_id": "",
+            "signature_id": "wazuh-rule-test",
+            "phase": "CONTEXTUALIZE",
+            "history": ["CONTEXTUALIZE"],
+        }
+        (run_dir / "state.json").write_text(json.dumps(state))
+
+        # Write the file with one CONTEXTUALIZE so the Edit simulation has something to read
+        inv.write_text("## CONTEXTUALIZE\n\nsome content\n")
+
+        # Simulate the bad Edit: "## CONTEXTUALIZE" → "## CONTEXTUALIZE\n\n## CONTEXTUALIZE"
+        hook = _edit_hook_data(
+            inv,
+            old_string="## CONTEXTUALIZE",
+            new_string="## CONTEXTUALIZE\n\n## CONTEXTUALIZE",
+        )
+        result = _run_pre_hook(hook, runs_dir=runs_dir)
+        assert result.returncode == 2
+        assert "CONTEXTUALIZE -> CONTEXTUALIZE" in result.stderr
+
+    def test_edit_adding_hypothesize_passes(self, tmp_path):
+        run_dir, inv, runs_dir = self._setup_run(tmp_path)
+        state = {
+            "run_id": "run-test",
+            "ticket_id": "",
+            "signature_id": "wazuh-rule-test",
+            "phase": "CONTEXTUALIZE",
+            "history": ["CONTEXTUALIZE"],
+        }
+        (run_dir / "state.json").write_text(json.dumps(state))
+        inv.write_text("## CONTEXTUALIZE\n\nsome content\n")
+
+        hook = _edit_hook_data(
+            inv,
+            old_string="some content",
+            new_string="some content\n\n## HYPOTHESIZE (loop 1)\n\nhypotheses here",
+        )
+        result = _run_pre_hook(hook, runs_dir=runs_dir)
+        assert result.returncode == 0
+
+    def test_edit_illegal_skip_blocked(self, tmp_path):
+        """Skipping GATHER (going HYPOTHESIZE→ANALYZE directly) is blocked."""
+        run_dir, inv, runs_dir = self._setup_run(tmp_path)
+        state = {
+            "run_id": "run-test",
+            "ticket_id": "",
+            "signature_id": "wazuh-rule-test",
+            "phase": "HYPOTHESIZE",
+            "history": ["CONTEXTUALIZE", "HYPOTHESIZE"],
+        }
+        (run_dir / "state.json").write_text(json.dumps(state))
+        inv.write_text("## CONTEXTUALIZE\n\n## HYPOTHESIZE (loop 1)\n\nhypotheses\n")
+
+        hook = _edit_hook_data(
+            inv,
+            old_string="hypotheses",
+            new_string="hypotheses\n\n## ANALYZE (loop 1)\n\nanalysis",
+        )
+        result = _run_pre_hook(hook, runs_dir=runs_dir)
+        assert result.returncode == 2
+        assert "HYPOTHESIZE -> ANALYZE" in result.stderr
+
+    def test_non_investigation_file_ignored(self, tmp_path):
+        other = tmp_path / "report.md"
+        result = _run_pre_hook(_write_hook_data(other, "## CONTEXTUALIZE\n"))
+        assert result.returncode == 0
+
+    def test_edit_old_string_absent_passes(self, tmp_path):
+        """If old_string isn't in the file the Edit will fail anyway — pre hook exits 0."""
+        run_dir, inv, runs_dir = self._setup_run(tmp_path)
+        inv.write_text("## CONTEXTUALIZE\n\nsome content\n")
+        hook = _edit_hook_data(inv, old_string="not present", new_string="## GATHER\n")
+        result = _run_pre_hook(hook, runs_dir=runs_dir)
+        assert result.returncode == 0
