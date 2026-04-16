@@ -41,11 +41,15 @@ def parse_task(path: Path) -> dict | None:
     groups_raw = meta.get("groups", "").strip()
     groups = [g.strip() for g in groups_raw.split(",") if g.strip()]
 
+    depends_raw = meta.get("depends_on", "").strip()
+    depends_on = [d.strip() for d in depends_raw.split(",") if d.strip()]
+
     return {
         "id": path.stem,
         "title": title,
         "status": meta.get("status", "backlog"),
         "groups": groups,
+        "depends_on": depends_on,
         "body": text[m.end() :].strip(),
     }
 
@@ -211,13 +215,13 @@ header {
   justify-content: center;
 }
 
-/* ── Column — wide, 2-col card grid ──────────────────────────────────── */
+/* ── Column ───────────────────────────────────────────────────────────── */
 .column {
   background: var(--col-bg);
   border: 1px solid var(--card-border);
   border-radius: 8px;
-  width: 568px;
-  min-width: 568px;
+  width: 270px;
+  min-width: 220px;
   flex-shrink: 0;
 }
 
@@ -249,7 +253,7 @@ header {
 .column-cards {
   padding: 5px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 4px;
 }
 
@@ -350,6 +354,30 @@ header {
 }
 .card.expanded .card-body { display: block; }
 .card.expanded .expand-hint { display: none; }
+
+/* ── Dependency highlighting (on hover) ───────────────────────────────── */
+/* dep-upstream = cards this task depends on (needs) */
+.card.dep-upstream { border-color: #34d399 !important; box-shadow: 0 0 0 1px #34d399; }
+/* dep-downstream = cards that depend on this task */
+.card.dep-downstream { border-color: #fb923c !important; box-shadow: 0 0 0 1px #fb923c; }
+
+.dep-indicator {
+  font-size: 10px;
+  color: #a8a29e;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.dep-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #a8a29e;
+  flex-shrink: 0;
+}
 
 /* ── Modal ────────────────────────────────────────────────────────────── */
 #modal-overlay {
@@ -514,6 +542,11 @@ header {
         <div class="form-hint">Comma-separated</div>
       </div>
       <div class="form-group">
+        <label class="form-label" for="f-depends">Depends on</label>
+        <input id="f-depends" type="text" placeholder="task-id-1, task-id-2">
+        <div class="form-hint">Comma-separated task IDs (filename without .md)</div>
+      </div>
+      <div class="form-group">
         <label class="form-label" for="f-body">Body</label>
         <textarea id="f-body" placeholder="Optional description…"></textarea>
         <div class="form-hint">Ctrl+Enter to save</div>
@@ -611,7 +644,10 @@ async function idbSet(key, val) {
 // ── File system ────────────────────────────────────────────────────────────
 function taskToMarkdown(t) {
   const g  = (t.groups || []).join(', ');
-  let md = `---\ntitle: ${t.title}\nstatus: ${t.status}\ngroups: ${g}\n---`;
+  const d  = (t.depends_on || []).join(', ');
+  let md = `---\ntitle: ${t.title}\nstatus: ${t.status}\ngroups: ${g}`;
+  if (d) md += `\ndepends_on: ${d}`;
+  md += `\n---`;
   if (t.body) md += '\n\n' + t.body;
   return md;
 }
@@ -702,6 +738,7 @@ function openModal(task = null) {
   document.getElementById('f-title').value   = task?.title             ?? '';
   document.getElementById('f-status').value  = task?.status            ?? 'backlog';
   document.getElementById('f-groups').value  = (task?.groups ?? []).join(', ');
+  document.getElementById('f-depends').value = (task?.depends_on ?? []).join(', ');
   document.getElementById('f-body').value    = task?.body              ?? '';
   document.getElementById('btn-delete').classList.toggle('hidden', !task);
   document.getElementById('modal-overlay').classList.remove('hidden');
@@ -714,7 +751,8 @@ function closeModal() {
 
 // ── Tag bar ────────────────────────────────────────────────────────────────
 function renderTagBar() {
-  const visibleTasks = showDone ? tasks : tasks.filter(t => t.status !== 'done');
+  // Never include done tasks in the filter bar regardless of showDone
+  const visibleTasks = tasks.filter(t => t.status !== 'done');
   const visibleTags = new Set(visibleTasks.flatMap(t => t.groups || []));
   // Drop any active filters that are no longer visible
   for (const tag of [...activeTags]) {
@@ -746,17 +784,31 @@ function renderTagBar() {
 
 // ── Card ───────────────────────────────────────────────────────────────────
 function renderCard(task) {
-  const hasBody = !!task.body;
-  const dimmed  = activeTags.size > 0 && !(task.groups || []).some(g => activeTags.has(g));
+  const hasBody  = !!task.body;
+  const isDone   = task.status === 'done';
+  const dimmed   = activeTags.size > 0 && !(task.groups || []).some(g => activeTags.has(g));
+  const deps     = task.depends_on || [];
 
   const card = document.createElement('div');
   card.className = 'card' + (hasBody ? '' : ' no-body') + (dimmed ? ' dimmed' : '');
   card.dataset.id = task.id;
 
-  const badges = (task.groups || []).map(g => {
+  // Don't show group badges for done tasks
+  const badges = isDone ? '' : (task.groups || []).map(g => {
     const { bg, fg } = tagColor(g);
     return `<span class="badge" style="background:${bg};color:${fg}" data-tag="${esc(g)}">${esc(g)}</span>`;
   }).join('');
+
+  // Dependency indicator
+  let depHTML = '';
+  if (deps.length > 0) {
+    const depTitles = deps.map(id => {
+      const t = tasks.find(x => x.id === id);
+      return t ? esc(t.title) : esc(id);
+    });
+    const label = depTitles.length === 1 ? depTitles[0] : depTitles.length + ' deps';
+    depHTML = `<div class="dep-indicator" title="Depends on: ${depTitles.join(', ')}"><span class="dep-dot"></span>${label}</div>`;
+  }
 
   card.innerHTML = `
     <div class="card-top">
@@ -767,6 +819,7 @@ function renderCard(task) {
       ${badges}
       ${hasBody ? '<span class="expand-hint">···</span>' : ''}
     </div>
+    ${depHTML}
     ${hasBody ? `<div class="card-body">${esc(task.body)}</div>` : ''}
   `;
 
@@ -795,6 +848,27 @@ function renderCard(task) {
     if (!dirHandle) { toast('Connect a folder to edit tasks', 'error'); return; }
     openModal(task);
   });
+
+  // Dependency hover highlighting
+  if (deps.length > 0 || tasks.some(t => (t.depends_on || []).includes(task.id))) {
+    card.addEventListener('mouseenter', () => {
+      // Highlight tasks this card depends on (green)
+      deps.forEach(depId => {
+        const el = document.querySelector(`.card[data-id="${depId}"]`);
+        if (el) el.classList.add('dep-upstream');
+      });
+      // Highlight tasks that depend on this card (orange)
+      tasks.filter(t => (t.depends_on || []).includes(task.id)).forEach(t => {
+        const el = document.querySelector(`.card[data-id="${t.id}"]`);
+        if (el) el.classList.add('dep-downstream');
+      });
+    });
+    card.addEventListener('mouseleave', () => {
+      document.querySelectorAll('.dep-upstream, .dep-downstream').forEach(el => {
+        el.classList.remove('dep-upstream', 'dep-downstream');
+      });
+    });
+  }
 
   return card;
 }
@@ -838,20 +912,22 @@ document.getElementById('task-form').addEventListener('submit', async e => {
   e.preventDefault();
   if (!dirHandle) { toast('Connect a folder first', 'error'); return; }
 
-  const title  = document.getElementById('f-title').value.trim();
-  const status = document.getElementById('f-status').value;
-  const groups = document.getElementById('f-groups').value
+  const title     = document.getElementById('f-title').value.trim();
+  const status    = document.getElementById('f-status').value;
+  const groups    = document.getElementById('f-groups').value
     .split(',').map(s => s.trim()).filter(Boolean);
-  const body   = document.getElementById('f-body').value.trim();
+  const depends_on = document.getElementById('f-depends').value
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const body      = document.getElementById('f-body').value.trim();
   if (!title) return;
 
   try {
     if (editingTask) {
-      Object.assign(editingTask, { title, status, groups, body });
+      Object.assign(editingTask, { title, status, groups, depends_on, body });
       await fsWrite(editingTask);
       toast('Saved');
     } else {
-      const task = { id: uniqueId(title), title, status, groups, body };
+      const task = { id: uniqueId(title), title, status, groups, depends_on, body };
       await fsWrite(task);
       tasks.push(task);
       toast('Task created');
