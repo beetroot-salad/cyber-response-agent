@@ -57,12 +57,12 @@ fi
 REPO_ROOT=/workspace
 PLUGIN_DIR="$REPO_ROOT/soc-agent"
 MCP_CONFIG="$REPO_ROOT/.claude/mcp_config.json"
-TOOLS_VENV="$PLUGIN_DIR/scripts/tools/.venv/bin/python3"
+TOOLS_VENV="$PLUGIN_DIR/.venv/bin/python3"
 FETCH_ALERT="$PLUGIN_DIR/scripts/fetch_alert.py"
 
 if [ ! -x "$TOOLS_VENV" ]; then
-    echo "error: tools venv not found at $TOOLS_VENV" >&2
-    echo "hint: run $PLUGIN_DIR/scripts/tools/setup.sh" >&2
+    echo "error: soc-agent venv not found at $TOOLS_VENV" >&2
+    echo "hint: cd $PLUGIN_DIR && uv sync --extra dev" >&2
     exit 2
 fi
 

@@ -12,16 +12,14 @@ Walk through this before calling a connection done. Anything unchecked goes in t
 - [ ] Non-secret config loaded from `knowledge/environment/systems/{system}/config.env`, with environment variable overrides.
 - [ ] Secrets loaded from environment variables only. No pasted tokens anywhere in the script, config, or docstrings.
 - [ ] Missing-config and missing-secret errors print an actionable hint pointing to the fix, and exit 2.
-- [ ] Missing-dependency errors (import failures) print `bash scripts/tools/setup.sh` and exit 2.
+- [ ] Missing-dependency errors (import failures) print `uv sync --extra {system}  (from soc-agent/)` and exit 2.
 - [ ] `--run-dir` reads the salt from `meta.json` and wraps output in `<run-{salt}-{system}-data>…</run-{salt}-{system}-data>`.
 - [ ] `--raw` outputs JSON (wrapped in salt delimiters if `--run-dir` is set).
 
 ## Dependencies
 
 - [ ] Stdlib-only when feasible. Vendor SDKs only when the API genuinely needs them.
-- [ ] If deps are required: new pinned entries appended to `scripts/tools/requirements.txt`; `scripts/tools/setup.sh` re-run to rebuild the shared `scripts/tools/.venv/`.
-- [ ] `setup.sh` is idempotent — safe to re-run.
-- [ ] The setup.sh pattern is uv-preferred with venv fallback (the existing `scripts/tools/setup.sh` already does this — do not replace it).
+- [ ] If deps are required: a `[{system}]` extra added to `soc-agent/pyproject.toml` and mirrored into `[dev]`; `uv sync --extra dev` re-run to rebuild `soc-agent/.venv/`.
 
 ## Tests (Phase 3)
 
