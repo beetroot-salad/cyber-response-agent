@@ -13,6 +13,10 @@ query = [
     "pyyaml>=6.0",
     "polars>=1.0",
 ]
+# Wazuh SIEM connector (scripts/tools/wazuh_cli.py)
+wazuh = [
+    "opensearch-py>=3.0",
+]
 dev = [
     "pytest>=9.0",
     "pytest-asyncio",
@@ -23,9 +27,10 @@ dev = [
     "ipython",
     "debugpy",
     "httpx",
-    # pull query deps into dev as well
+    # pull query + wazuh deps into dev as well
     "pyyaml>=6.0",
     "polars>=1.0",
+    "opensearch-py>=3.0",
 ]
 [tool.setuptools]
 packages = []  # Not a traditional package — scripts are invoked directly

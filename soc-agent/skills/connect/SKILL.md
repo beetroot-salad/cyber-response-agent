@@ -2,7 +2,7 @@
 name: connect
 description: Connect a new security system (SIEM, EDR, identity, CMDB) to the agent. Interviews the user, generates an adapter CLI that implements the contract, tests it end-to-end, and scaffolds the environment knowledge the investigation loop needs. One system per invocation.
 argument-hint: "[system_name]"
-allowed-tools: Read Write Edit Glob Grep Bash(python3 scripts/preflight.py *) Bash(python3 scripts/tools/* health-check*) Bash(python3 scripts/tools/* query *) Bash(bash scripts/tools/setup.sh*) Bash(ls *) Bash(pwd) Bash(git status) Bash(git diff *) Bash(git checkout -b *) Bash(git add *)
+allowed-tools: Read Write Edit Glob Grep Bash(python3 scripts/preflight.py *) Bash(python3 scripts/tools/* health-check*) Bash(python3 scripts/tools/* query *) Bash(uv sync *) Bash(ls *) Bash(pwd) Bash(git status) Bash(git diff *) Bash(git checkout -b *) Bash(git add *)
 model: claude-sonnet-4-6
 ---
 
@@ -112,7 +112,7 @@ If you're unsure, pick `AdapterContract`. Most systems fit it, and forcing a loo
 - **Pass-through native query language.** Splunk adapter takes SPL, Elastic takes KQL, Wazuh takes Lucene. No abstraction, no translation. The agent already knows these languages from training; a translation layer is perpetual bug surface.
 - **Credentials from env vars only.** Non-secret config (endpoint, index, retention defaults) from `knowledge/environment/systems/{system}/config.env`. Secrets are injected by the shell. See "Where secrets live" below.
 - On missing config or missing secret env vars, print a specific hint pointing to the fix and exit 2.
-- On import failure (missing `opensearch-py`, `splunk-sdk`, etc.), print the setup command (`bash scripts/tools/setup.sh`) and exit 2.
+- On import failure (missing `opensearch-py`, `splunk-sdk`, etc.), print the setup command (`uv sync --extra {system}  (from soc-agent/)`) and exit 2.
 - If `--run-dir` is passed, read the salt from `{run_dir}/meta.json` and wrap output in `<run-{salt}-{system}-data>…</run-{salt}-{system}-data>`. Untrusted-data defense.
 - **Examples in `--help` are load-bearing.** Runtime agents pattern-match against whatever example you put in a subcommand's help text. Use *real* field names and values the user confirmed, not generic placeholders.
 - **Action adapters are dry-run-first.** Every action verb (`close`, `block`, `isolate`, ...) must default to dry-run: omitting `--execute` always short-circuits before any upstream write. You never pass `--execute` from this skill — not in Phase 3, not in preflight, not during manual testing. Only the production Stop-stage hook (`hooks/scripts/close_ticket_action.py`) ever passes it. The dry-run path must short-circuit *before* any lookup, so probes like `close --ticket-id PROBE-0 --dry-run` are safe even when the ticket doesn't exist.
@@ -123,35 +123,20 @@ If you're unsure, pick `AdapterContract`. Most systems fit it, and forcing a loo
 
 Use stdlib (`urllib.request`, `json`, `ssl`, `argparse`) as the first choice. Reach for a vendor SDK only when the API genuinely needs one (SigV4 signing, streaming protocols, proprietary auth flows). A 300-line stdlib adapter is almost always better than pulling in a 50-dependency SDK.
 
-When external deps ARE needed, append them to the shared tools requirements file and re-run setup:
+When external deps ARE needed, add them as a named extra in `soc-agent/pyproject.toml` and sync:
 
+```toml
+# soc-agent/pyproject.toml
+[project.optional-dependencies]
+{system} = ["vendor-sdk>=x.y"]   # new entry
+dev      = [..., "vendor-sdk>=x.y"]  # also pull into dev
 ```
-scripts/tools/requirements.txt    — one shared pinned-dep file for every adapter (use >= floors, not ==)
-scripts/tools/setup.sh            — uv-first, venv fallback; creates scripts/tools/.venv/
-```
-
-The shared venv layout means all adapters (wazuh, host_query, and any new ones) run under `scripts/tools/.venv/bin/python3`. Adding a new adapter is: (1) write the CLI at `scripts/tools/{system}_cli.py` (or `{name}.py`), (2) append its pinned deps to `scripts/tools/requirements.txt`, (3) re-run `bash scripts/tools/setup.sh` to rebuild the shared venv. If a future adapter has dep conflicts with an existing one, that's the trigger to split into per-system venvs — not the default.
-
-`setup.sh` pattern:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_DIR="$SCRIPT_DIR/.venv"
-REQ_FILE="$SCRIPT_DIR/requirements.txt"
-
-if command -v uv >/dev/null 2>&1; then
-    uv venv "$VENV_DIR" -q
-    uv pip install -q -p "$VENV_DIR/bin/python3" -r "$REQ_FILE"
-else
-    python3 -m venv "$VENV_DIR"
-    "$VENV_DIR/bin/python3" -m pip install -q -r "$REQ_FILE"
-fi
-echo "Done. Activate with: source $VENV_DIR/bin/activate"
+uv sync --extra dev   # from soc-agent/ — rebuilds the shared .venv
 ```
 
-`uv` is preferred when present (fast, reproducible). Plain `venv + pip` is the fallback so the script works on systems without uv. **Never install system-wide.** Adapter invocations always go through the venv interpreter (preflight handles this detection automatically).
+All adapters run under `soc-agent/.venv/bin/python3` (preflight resolves this automatically). Adding a new adapter is: (1) write the CLI at `scripts/tools/{system}_cli.py`, (2) add a `[{system}]` extra to `pyproject.toml`, (3) add it to `[dev]` as well, (4) run `uv sync --extra dev` to rebuild. The lockfile (`uv.lock`) is committed and pins exact versions.
 
 **Reference example:** `scripts/tools/wazuh_cli.py` — a working adapter shipped as a CI/test target against the devcontainer Wazuh stack. It uses the `query` / `health-check` subcommand contract already; copy its config loading, salt wrapping, error handling, and argparse shape directly.
 
@@ -328,8 +313,8 @@ git status
 git diff
 git checkout -b connect/{system}
 git add scripts/tools/{system}_cli.py \
-        scripts/tools/requirements.txt \
-        scripts/tools/setup.sh \
+        pyproject.toml \
+        uv.lock \
         knowledge/environment/systems/{system}/ \
         knowledge/environment/data-sources/
 # Action adapters only — also stage the global action dispatch binding:

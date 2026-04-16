@@ -170,13 +170,13 @@ def discover_adapters() -> list[tuple[str, Path]]:
 def _adapter_python(cli_path: Path) -> str:
     """Python interpreter for running the given adapter CLI.
 
-    Adapters live under `scripts/tools/` with a shared `scripts/tools/.venv/`
-    created by `scripts/tools/setup.sh`. The venv carries vendor deps
-    (e.g. opensearch-py for wazuh_cli). Prefer `{cli_path.parent}/.venv/bin/python`
-    when present; fall back to system `python3` otherwise (tests, CI,
-    environments without a venv).
+    All adapters share the soc-agent project venv at `soc-agent/.venv/`,
+    managed by `uv sync --extra dev` (deps declared in pyproject.toml extras).
+    Resolves from the adapter path up to the soc-agent root. Falls back to
+    system `python3` for CI or environments without a venv.
     """
-    venv_python = cli_path.parent / ".venv" / "bin" / "python"
+    # cli_path is scripts/tools/{name}.py — walk up two levels to soc-agent root
+    venv_python = cli_path.parent.parent.parent / ".venv" / "bin" / "python"
     if venv_python.is_file():
         return str(venv_python)
     return "python3"

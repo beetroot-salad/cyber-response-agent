@@ -220,11 +220,10 @@ class TestHealthCheck:
         assert hq["knowledge_gaps"] == []
 
     def test_uses_adapter_local_venv_python_when_present(self, fake_root):
-        """If a `.venv/bin/python` exists alongside the adapter (e.g.
-        scripts/tools/.venv/), preflight must invoke the CLI with that
-        interpreter, not the system python3. Real wazuh_cli depends on
-        opensearch-py installed only in scripts/tools/.venv — using
-        system python3 misses it and reports a spurious ModuleNotFoundError."""
+        """If a `.venv/bin/python` exists at the soc-agent root (two levels above
+        scripts/tools/), preflight must invoke the CLI with that interpreter, not
+        the system python3. All adapter deps (e.g. opensearch-py for wazuh_cli)
+        are declared as pyproject.toml extras and installed into the shared venv."""
         adapter_dir = fake_root / "scripts" / "tools"
         marker = fake_root / "marker.txt"
         cli = adapter_dir / "marker_cli.py"
@@ -243,8 +242,8 @@ class TestHealthCheck:
         cli.chmod(0o755)
         make_system_docs(fake_root, "marker")
 
-        # Symlink an adapter-local .venv/bin/python to the current interpreter.
-        venv_bin = adapter_dir / ".venv" / "bin"
+        # Symlink the soc-agent root .venv/bin/python to the current interpreter.
+        venv_bin = fake_root / ".venv" / "bin"
         venv_bin.mkdir(parents=True)
         venv_python = venv_bin / "python"
         venv_python.symlink_to(sys.executable)

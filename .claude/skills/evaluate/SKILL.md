@@ -28,7 +28,7 @@ Evaluates the `soc-agent:investigate` skill against one real Wazuh alert from th
 
    Verify the alert landed:
    ```bash
-   /workspace/soc-agent/scripts/tools/.venv/bin/python3 \
+   /workspace/soc-agent/.venv/bin/python3 \
      /workspace/soc-agent/scripts/fetch_alert.py <rule_id> --window 5m
    ```
 

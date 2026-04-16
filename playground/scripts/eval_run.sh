@@ -57,12 +57,12 @@ fi
 REPO_ROOT=/workspace
 PLUGIN_DIR="$REPO_ROOT/soc-agent"
 MCP_CONFIG="$REPO_ROOT/.claude/mcp_config.json"
-TOOLS_VENV="$PLUGIN_DIR/scripts/tools/.venv/bin/python3"
+TOOLS_VENV="$PLUGIN_DIR/.venv/bin/python3"
 FETCH_ALERT="$PLUGIN_DIR/scripts/fetch_alert.py"
 
 if [ ! -x "$TOOLS_VENV" ]; then
-    echo "error: tools venv not found at $TOOLS_VENV" >&2
-    echo "hint: run $PLUGIN_DIR/scripts/tools/setup.sh" >&2
+    echo "error: soc-agent venv not found at $TOOLS_VENV" >&2
+    echo "hint: cd $PLUGIN_DIR && uv sync --extra dev" >&2
     exit 2
 fi
 
@@ -75,12 +75,12 @@ fi
 # shellcheck disable=SC1090
 set -a; source "$REPO_ROOT/.env"; set +a
 
-# Activate the tools venv so the agent's `python3 scripts/tools/wazuh_cli.py`
-# invocations resolve to the venv interpreter (which has opensearchpy). System
-# python3 is missing the SIEM client deps, so without this every lead query
-# would crash on ModuleNotFoundError.
+# Activate the soc-agent venv so `python3 scripts/tools/wazuh_cli.py`
+# invocations resolve to the venv interpreter (which has opensearch-py).
+# Deps are declared as extras in pyproject.toml; install with:
+#   cd soc-agent && uv sync --extra dev
 # shellcheck disable=SC1091
-source "$PLUGIN_DIR/scripts/tools/.venv/bin/activate"
+source "$PLUGIN_DIR/.venv/bin/activate"
 
 # ---------------------------------------------------------------------------
 # Run dir

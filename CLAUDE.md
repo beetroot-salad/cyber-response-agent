@@ -139,6 +139,10 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 
 Open work lives in `tasks/` — one markdown file per task with `title`, `status` (`backlog` / `todo` / `doing` / `done`), and `groups` (comma-separated tags) frontmatter. Body is free-form context. Run `python3 tasks/build.py` to regenerate `board.html`. A task may carry multiple group tags; each renders as its own badge. This replaced the legacy `todo.md` — open issues (state-machine bypass mitigation, validation-hook promotion, SCREEN cost-reduction workstream, Sonnet-migration stages, etc.) all live as task files now.
 
+## Python Environment
+
+All deps are declared as extras in `soc-agent/pyproject.toml` and installed into a single venv at `soc-agent/.venv`. Run `cd soc-agent && uv sync --extra dev` to create or update it; invoke scripts and tests via `soc-agent/.venv/bin/python3` (or activate with `source soc-agent/.venv/bin/activate`).
+
 ## Running Tests
 
 ```bash
