@@ -108,6 +108,31 @@ The state machine is enforced automatically — when you write a phase section h
 
 ---
 
+## Corpus Guidance
+
+Past investigations are a trail map for this mountain. When you face uncertainty — about which hypothesis is worth pursuing, which lead is most likely to discriminate, whether a pattern you're seeing has led others astray before — querying the corpus gives you the paths others took: which routes were fast, which required tools you don't have, and where explorers got stuck or reversed course.
+
+Use the corpus query subagent at any phase when you need this grounding. Dispatch shorthand — **`corpus-query("…")`** expands to:
+
+```
+Agent(
+  subagent_type="general-purpose",
+  model="sonnet",
+  prompt=<read skills/investigate/query-past-investigations.md,
+          substitute {question}="…", {structured_params}="none">
+)
+```
+
+**When to query:**
+- *Before committing to a lead* — "which leads have been most effective at discriminating `?*brute-force*` hypotheses?" saves you from selecting a dead end
+- *When a hypothesis feels shaky* — "have any investigations seen this hypothesis type reverse from positive to negative, and what triggered it?" surfaces the specific pitfall patterns
+- *When a lead fails* — "after a failed `auth-history` query, what did other investigations run next and how effective was it?"
+- *When scoping feels uncertain* — "how many independent data sources do investigations typically use before concluding on this class of alert?"
+
+The subagent returns its findings alongside the code or query it executed. Treat the results as strong priors, not certainties — the pilot corpus is small (N≈6 cases) and patterns carry more signal on recurring question shapes than on precise counts.
+
+---
+
 ## Phase Instructions
 
 ### CONTEXTUALIZE

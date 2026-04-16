@@ -2,6 +2,7 @@
 title: Wire the investigation language and is-query interface to the main investigate flow
 status: doing
 groups: invlang, investigate
+depends_on: improving-query-script
 ---
 
 ## Design decision: investigation.md vs. companion.yaml
