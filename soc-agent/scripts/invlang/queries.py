@@ -1,8 +1,9 @@
 """Investigation-language query classes 1–12 and corpus enumeration.
 
 Each function takes a corpus (list[Companion]) and returns a dict with
-at minimum a 'count' key and a 'hits' or 'values' list. All functions
-are side-effect-free and safe to call from the CLI or programmatically.
+at minimum a 'count' key and a 'hits' or 'values' list. Most functions
+are side-effect-free; a few emit warnings to stderr when results are empty
+and the caller is likely querying against the wrong vocabulary.
 
 Classes:
   1  coarse_case_lookup            — filter by conclude-block fields
@@ -22,6 +23,7 @@ Classes:
 from __future__ import annotations
 
 import fnmatch
+import sys
 from math import log1p
 from typing import Any, Iterator
 
@@ -471,6 +473,12 @@ def lead_effectiveness_for_hypothesis(
     if not patterns:
         raise ValueError("supply at least one fnmatch pattern")
     rows = _lead_effectiveness_rows(corpus, patterns)
+    if not rows:
+        print(
+            f"warning: no leads touched hypotheses matching all of {list(patterns)}. "
+            "Run --enumerate hypotheses to see the full hypothesis vocabulary in this corpus.",
+            file=sys.stderr,
+        )
     return {"hits": rows, "count": len(rows), "patterns": list(patterns)}
 
 
@@ -532,6 +540,14 @@ def lead_discrimination_score(
             "case_count": case_count,
         })
     rows.sort(key=lambda r: abs(r["discrimination_score"]), reverse=True)
+    if not rows:
+        print(
+            f"warning: no cases contain hypotheses matching both {pattern1!r} and {pattern2!r}.\n"
+            "  Patterns use fnmatch syntax against hypothesis names (which start with '?').\n"
+            "  Example: --discriminate-between '?*scanner*' '?*targeted*'\n"
+            "  Run --enumerate hypotheses to see the exact vocabulary in this corpus.",
+            file=sys.stderr,
+        )
     return {"hits": rows, "count": len(rows), "pattern1": pattern1, "pattern2": pattern2}
 
 
@@ -547,6 +563,7 @@ def weight_reversal_mining(
     corpus: list[Companion],
     *,
     hypothesis_pattern: str | None = None,
+    reversals_only: bool = False,
 ) -> dict[str, Any]:
     """Find resolutions where hypothesis weight moved from positive to negative.
 
@@ -554,7 +571,9 @@ def weight_reversal_mining(
     These reversals surface pitfall text — evidence that appeared supportive but
     turned out not to be. Useful for pre-registering pitfalls at HYPOTHESIZE time.
 
-    Optional hypothesis_pattern: fnmatch filter on hypothesis name.
+    hypothesis_pattern  — fnmatch filter on hypothesis name.
+    reversals_only      — when True, return only rows where is_true_reversal=True
+                          (before ∈ {+, ++}), excluding null→negative first-scores.
     Default sort: (hypothesis_name, case_id) asc.
     """
     hits = []
@@ -570,6 +589,9 @@ def weight_reversal_mining(
                 h_name = h_names.get(h_id, "")
                 if hypothesis_pattern is not None and not fnmatch.fnmatchcase(h_name, hypothesis_pattern):
                     continue
+                is_true_reversal = before in {"+", "++"}
+                if reversals_only and not is_true_reversal:
+                    continue
                 hits.append({
                     "case_id": c.case_id,
                     "lead_id": lead.get("id"),
@@ -579,6 +601,7 @@ def weight_reversal_mining(
                     "hypothesis_name": h_name,
                     "before": before,
                     "after": after,
+                    "is_true_reversal": is_true_reversal,
                     "reasoning": r.get("reasoning", ""),
                     "severity_of_test": r.get("severity_of_test"),
                 })
@@ -593,10 +616,11 @@ def weight_reversal_mining(
 def lead_pair_synergy(corpus: list[Companion]) -> dict[str, Any]:
     """For composite dispatches (same loop), measure whether lead pairs discriminate more together.
 
-    Synergy = combined_signed_delta_on_shared_hypotheses
-              - max(individual_A_delta, individual_B_delta)
+    Synergy = abs(combined_delta) - max(abs(individual_A_delta), abs(individual_B_delta))
 
-    Positive synergy: the pair together moves the hypothesis more than either alone.
+    Positive synergy: the pair together produces more total evidence movement than the stronger
+    lead alone (both leads reinforce in the same direction).
+    Negative synergy: the pair partially cancels (leads pull in opposite directions).
     Aggregated across corpus as mean per (lead_a, lead_b) pair.
 
     Default sort: mean_synergy desc.
@@ -637,7 +661,7 @@ def lead_pair_synergy(corpus: list[Companion]) -> dict[str, Any]:
                         delta_a = _signed_delta(ra.get("before"), ra.get("after"))
                         delta_b = _signed_delta(rb.get("before"), rb.get("after"))
                         combined = delta_a + delta_b
-                        synergy = combined - max(abs(delta_a), abs(delta_b))
+                        synergy = abs(combined) - max(abs(delta_a), abs(delta_b))
                         pair_data.setdefault(pair_key, []).append(
                             (synergy, h_names.get(h_id, h_id))
                         )
@@ -727,6 +751,12 @@ def post_failure_recovery(
             -(r["mean_effectiveness_of_next"] or 0),
         )
     )
+    if rows and all(r["case_count"] == 1 for r in rows):
+        print(
+            "warning: all recovery patterns are based on a single case each (case_count=1). "
+            "Patterns may not generalize — expand the corpus for more reliable recovery maps.",
+            file=sys.stderr,
+        )
     return {"hits": rows, "count": len(rows)}
 
 

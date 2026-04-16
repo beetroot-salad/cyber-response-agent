@@ -23,7 +23,7 @@ import pytest
 # Ensure scripts/ is on the path so `invlang` package is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from invlang.corpus import Companion
+from invlang.corpus import Companion, _looks_like_companion
 from invlang.queries import (
     anchor_calibration,
     coarse_case_lookup,
@@ -499,6 +499,48 @@ class TestWeightReversalMining:
     def test_empty_corpus(self):
         assert weight_reversal_mining([])["count"] == 0
 
+    def test_reversals_only_excludes_null_to_negative(self):
+        """--reversals-only must exclude null→negative first-scores."""
+        corpus = self._reversal_corpus()
+        result = weight_reversal_mining(corpus, reversals_only=True)
+        h_ids = {h["hypothesis_id"] for h in result["hits"]}
+        # h-001 (++→--) and h-002 (+→-) are true reversals
+        assert "h-001" in h_ids
+        assert "h-002" in h_ids
+        # h-003 (null→-) is NOT a true reversal — excluded
+        assert "h-003" not in h_ids
+
+    def test_reversals_only_false_includes_all(self):
+        """Default (reversals_only=False) still includes null→negative rows."""
+        corpus = self._reversal_corpus()
+        result = weight_reversal_mining(corpus, reversals_only=False)
+        h_ids = {h["hypothesis_id"] for h in result["hits"]}
+        assert "h-003" in h_ids
+
+    def test_is_true_reversal_from_confirmed_positive(self):
+        """before in {'+', '++'} → is_true_reversal=True (was explicitly confirmed)."""
+        lead = make_lead("l-001", "auth-history", loop=1, resolutions=[
+            make_resolution("h-001", "++", "--"),   # True reversal: was ++
+            make_resolution("h-002", "+", "-"),     # True reversal: was +
+            make_resolution("h-003", None, "-"),    # Not a true reversal: first scored negative
+        ])
+        corpus = [make_companion("c1", [
+            make_hypothesis("h-001", "?a"),
+            make_hypothesis("h-002", "?b"),
+            make_hypothesis("h-003", "?c"),
+        ], [lead])]
+        result = weight_reversal_mining(corpus)
+        by_id = {h["hypothesis_id"]: h for h in result["hits"]}
+        assert by_id["h-001"]["is_true_reversal"] is True
+        assert by_id["h-002"]["is_true_reversal"] is True
+        assert by_id["h-003"]["is_true_reversal"] is False
+
+    def test_is_true_reversal_field_present_on_all_hits(self):
+        """Every hit must carry the is_true_reversal field."""
+        corpus = self._reversal_corpus()
+        result = weight_reversal_mining(corpus)
+        assert all("is_true_reversal" in h for h in result["hits"])
+
 
 # ---------------------------------------------------------------------------
 # Axis 2: lead_pair_synergy (Class 10)
@@ -572,7 +614,7 @@ class TestLeadPairSynergy:
             make_resolution("h-001", None, "++"),
         ])
         lead_b = make_lead("l-002", "lead-b", loop=1, resolutions=[
-            make_resolution("h-001", "++", "++"),  # no additional change, combined = +2 - max(2,0) = 0
+            make_resolution("h-001", "++", "++"),  # no additional change: abs(2+0) - max(2,0) = 0
         ])
         # No-synergy pair in loop 2
         lead_c = make_lead("l-003", "lead-c", loop=2, resolutions=[
@@ -591,6 +633,47 @@ class TestLeadPairSynergy:
         result = lead_pair_synergy(corpus)
         synergies = [h["mean_synergy"] for h in result["hits"]]
         assert synergies == sorted(synergies, reverse=True)
+
+    def test_opposing_sign_is_anti_synergistic(self):
+        """Leads that pull the same hypothesis in opposite directions have negative synergy."""
+        # lead_a: None → ++ (delta +2); lead_b: ++ → None/-- (delta -2)
+        # combined = 0; abs(0) - max(2,2) = -2
+        lead_a = make_lead("l-001", "lead-a", loop=1, resolutions=[
+            make_resolution("h-001", None, "++"),  # delta +2
+        ])
+        lead_b = make_lead("l-002", "lead-b", loop=1, resolutions=[
+            make_resolution("h-001", "++", "--"),  # delta -4: abs(combined)=abs(-2)=2; max=4 → -2
+        ])
+        corpus = [make_companion("c1", [make_hypothesis("h-001", "?test")], [lead_a, lead_b])]
+        result = lead_pair_synergy(corpus)
+        assert result["count"] == 1
+        # combined = +2 + (-4) = -2; abs(-2) - max(2,4) = 2 - 4 = -2
+        assert result["hits"][0]["mean_synergy"] < 0
+
+    def test_both_negative_is_synergistic(self):
+        """Both leads push hypothesis negative — they reinforce each other, positive synergy."""
+        lead_a = make_lead("l-001", "lead-a", loop=1, resolutions=[
+            make_resolution("h-001", None, "--"),  # delta -2
+        ])
+        lead_b = make_lead("l-002", "lead-b", loop=1, resolutions=[
+            make_resolution("h-001", "--", "--"),  # delta 0 (already at --)
+        ])
+        corpus = [make_companion("c1", [make_hypothesis("h-001", "?test")], [lead_a, lead_b])]
+        result = lead_pair_synergy(corpus)
+        # combined = -2 + 0 = -2; abs(-2) - max(2,0) = 2 - 2 = 0 (no extra synergy, not anti)
+        assert result["hits"][0]["mean_synergy"] == 0.0
+
+        # Two leads both contributing -2 each
+        lead_c = make_lead("l-003", "lead-c", loop=2, resolutions=[
+            make_resolution("h-001", None, "--"),  # delta -2
+        ])
+        lead_d = make_lead("l-004", "lead-d", loop=2, resolutions=[
+            make_resolution("h-001", None, "--"),  # delta -2
+        ])
+        corpus2 = [make_companion("c2", [make_hypothesis("h-001", "?test")], [lead_c, lead_d])]
+        result2 = lead_pair_synergy(corpus2)
+        # combined = -4; abs(-4) - max(2,2) = 4 - 2 = 2  → positive synergy
+        assert result2["hits"][0]["mean_synergy"] == pytest.approx(2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -810,6 +893,7 @@ class TestRunClassDispatch:
             hypothesis_patterns=None,
             discriminate_between=None,
             hyp_pattern=None,
+            reversals_only=False,
             top=None,
             json=False,
         )
@@ -819,6 +903,25 @@ class TestRunClassDispatch:
     def test_class_9_returns_hits(self):
         result = _run_class(9, self._corpus(), self._args())
         assert "hits" in result
+
+    def test_class_9_wrong_flag_warning(self, capsys):
+        """Passing --hypothesis (class 8 flag) with --class 9 emits a note to stderr."""
+        _run_class(9, self._corpus(), self._args(hypothesis_patterns=["?*test*"]))
+        captured = capsys.readouterr()
+        assert "--hyp-pattern" in captured.err
+
+    def test_class_9_reversals_only_dispatch(self):
+        lead = make_lead("l-001", "auth-history", loop=1, resolutions=[
+            make_resolution("h-001", "++", "--"),  # true reversal
+            make_resolution("h-002", None, "-"),   # not a true reversal
+        ])
+        corpus = [make_companion("c1", [
+            make_hypothesis("h-001", "?a"),
+            make_hypothesis("h-002", "?b"),
+        ], [lead])]
+        result = _run_class(9, corpus, self._args(reversals_only=True))
+        assert all(h["is_true_reversal"] for h in result["hits"])
+        assert result["count"] == 1
 
     def test_class_10_returns_hits(self):
         result = _run_class(10, self._corpus(), self._args())
@@ -860,3 +963,62 @@ class TestRunClassDispatch:
         result_top2 = _apply_top(result, 2)
         assert len(result_top2["hits"]) == 2
         assert result_top2["hits"][0]["confidence"] == "high"
+
+
+# ---------------------------------------------------------------------------
+# Corpus loading: SCREEN-matched companions (v2.6 — missing hypothesize block)
+# ---------------------------------------------------------------------------
+
+class TestScreenMatchedCompanion:
+    def test_looks_like_companion_without_hypothesize(self):
+        """v2.6 SCREEN-matched companions omit hypothesize — corpus loader must accept them."""
+        doc = {
+            "prologue": {"vertices": [], "edges": []},
+            "gather": [],
+            "conclude": {"termination": {"category": "trust-root"}, "disposition": "benign"},
+        }
+        assert _looks_like_companion(doc) is True
+
+    def test_looks_like_companion_with_hypothesize(self):
+        """Standard v2.5 companions with hypothesize still accepted."""
+        doc = {
+            "prologue": {"vertices": [], "edges": []},
+            "hypothesize": {"hypotheses": []},
+            "gather": [],
+            "conclude": {"termination": {"category": "trust-root"}, "disposition": "benign"},
+        }
+        assert _looks_like_companion(doc) is True
+
+    def test_screen_matched_companion_has_empty_hypotheses(self):
+        """SCREEN-matched in-memory Companion (no hypothesize key) yields empty hypotheses list."""
+        body = {
+            "prologue": {"vertices": [], "edges": []},
+            "gather": [],
+            "conclude": {
+                "termination": {"category": "trust-root", "rationale": "screen matched"},
+                "disposition": "benign",
+                "confidence": "high",
+                "matched_archetype": "misconfigured-automation",
+            },
+        }
+        c = Companion(case_id="screen-case", source_path=Path("."), body=body)
+        assert c.hypotheses == []
+        assert list(c.iter_new_hypotheses()) == []
+
+    def test_screen_matched_companion_usable_in_class_1(self):
+        """SCREEN-matched companion (no hypothesize) loads into corpus and queries work."""
+        body = {
+            "prologue": {"vertices": [], "edges": []},
+            "gather": [],
+            "conclude": {
+                "termination": {"category": "trust-root", "rationale": "screen matched"},
+                "disposition": "benign",
+                "confidence": "high",
+                "matched_archetype": "misconfigured-automation",
+            },
+        }
+        c = Companion(case_id="screen-case", source_path=Path("."), body=body)
+        from invlang.queries import coarse_case_lookup
+        result = coarse_case_lookup([c], disposition="benign")
+        assert result["count"] == 1
+        assert result["hits"][0]["matched_archetype"] == "misconfigured-automation"
