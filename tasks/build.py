@@ -715,7 +715,13 @@ function closeModal() {
 
 // ── Tag bar ────────────────────────────────────────────────────────────────
 function renderTagBar() {
-  const allTags = [...new Set(tasks.flatMap(t => t.groups || []))].sort();
+  const visibleTasks = showDone ? tasks : tasks.filter(t => t.status !== 'done');
+  const visibleTags = new Set(visibleTasks.flatMap(t => t.groups || []));
+  // Drop any active filters that are no longer visible
+  for (const tag of [...activeTags]) {
+    if (!visibleTags.has(tag)) activeTags.delete(tag);
+  }
+  const allTags = [...visibleTags].sort();
   const bar = document.getElementById('tag-bar');
   bar.innerHTML = '';
 
@@ -892,6 +898,7 @@ document.getElementById('btn-new').addEventListener('click', () => openModal());
 document.getElementById('btn-done').addEventListener('click', () => {
   showDone = !showDone;
   document.getElementById('btn-done').textContent = showDone ? 'Hide done' : 'Show done';
+  renderTagBar();
   renderBoard();
 });
 
