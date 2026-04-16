@@ -142,7 +142,7 @@ header {
   font-weight: 500;
   letter-spacing: 0.03em;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition: all 0.15s;
   white-space: nowrap;
 }
 .hbtn:hover:not(:disabled) { border-color: #a8a29e; color: #fafaf9; }
@@ -177,7 +177,7 @@ header {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #3c3836;
+  color: #57534e;
   margin-right: 4px;
   flex-shrink: 0;
 }
@@ -208,7 +208,7 @@ header {
   align-items: flex-start;
   overflow-x: auto;
   min-height: calc(100vh - 78px);
-  justify-content: safe center;
+  justify-content: center;
 }
 
 /* ── Column — wide, 2-col card grid ──────────────────────────────────── */
@@ -247,15 +247,15 @@ header {
 }
 
 .column-cards {
-  padding: 8px;
+  padding: 5px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 5px;
+  gap: 4px;
 }
 
 .empty-col {
   grid-column: 1 / -1;
-  padding: 18px 8px;
+  padding: 14px 8px;
   text-align: center;
   font-size: 12px;
   color: #c5c1bd;
@@ -265,16 +265,15 @@ header {
 .card {
   border: 1px solid var(--card-border);
   border-radius: 6px;
-  padding: 9px 11px;
+  padding: 5px 7px;
   cursor: pointer;
   transition: background 0.1s, border-color 0.1s, opacity 0.15s;
   user-select: none;
   min-width: 0;
 }
 
-.card:hover { background: var(--card-hover); border-color: #d4d0cb; }
+.card:not(.no-body):hover { background: var(--card-hover); border-color: #d4d0cb; }
 .card.no-body { cursor: default; }
-.card.no-body:hover { background: transparent; border-color: var(--card-border); }
 .card.dimmed { opacity: 0.18; }
 .card.expanded { grid-column: 1 / -1; }
 
@@ -282,7 +281,7 @@ header {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  margin-bottom: 7px;
+  margin-bottom: 4px;
 }
 
 .card-title {
@@ -312,7 +311,7 @@ header {
 .card-meta {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   flex-wrap: wrap;
 }
 
@@ -346,7 +345,7 @@ header {
   line-height: 1.65;
   color: #57534e;
   white-space: pre-wrap;
-  font-family: "SF Mono", ui-monospace, "Fira Code", Consolas, monospace;
+  font-family: ui-monospace, monospace;
   overflow-x: auto;
 }
 .card.expanded .card-body { display: block; }
@@ -416,7 +415,7 @@ header {
 .form-group textarea {
   height: 130px;
   resize: vertical;
-  font-family: "SF Mono", ui-monospace, "Fira Code", Consolas, monospace;
+  font-family: ui-monospace, monospace;
   font-size: 12px;
   line-height: 1.6;
 }
