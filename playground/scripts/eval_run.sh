@@ -75,12 +75,12 @@ fi
 # shellcheck disable=SC1090
 set -a; source "$REPO_ROOT/.env"; set +a
 
-# Activate the tools venv so the agent's `python3 scripts/tools/wazuh_cli.py`
-# invocations resolve to the venv interpreter (which has opensearchpy). System
-# python3 is missing the SIEM client deps, so without this every lead query
-# would crash on ModuleNotFoundError.
+# Activate the soc-agent venv so `python3 scripts/tools/wazuh_cli.py`
+# invocations resolve to the venv interpreter (which has opensearch-py).
+# Deps are declared as extras in pyproject.toml; install with:
+#   cd soc-agent && uv sync --extra dev
 # shellcheck disable=SC1091
-source "$PLUGIN_DIR/scripts/tools/.venv/bin/activate"
+source "$PLUGIN_DIR/.venv/bin/activate"
 
 # ---------------------------------------------------------------------------
 # Run dir

@@ -376,11 +376,7 @@ The generated script follows the patterns established by `wazuh_cli.py`:
 - `--run-dir` support for salt-wrapped output
 - `--raw` for JSON output
 
-If the adapter needs external dependencies (e.g., `opensearch-py`, `splunk-sdk`), the skill also generates:
-- `scripts/tools/{system}/requirements.txt`
-- `scripts/tools/{system}/setup.sh` (creates venv, installs deps)
-
-This follows the per-integration venv pattern from [packaging.md](packaging.md).
+If the adapter needs external dependencies (e.g., `opensearch-py`, `splunk-sdk`), the skill adds a named extra to `soc-agent/pyproject.toml` and updates `uv.lock` via `uv sync --extra dev`. See [packaging.md](packaging.md).
 
 #### Phase 3: Test
 
@@ -443,8 +439,8 @@ The skill creates a branch, commits the generated files, and presents a summary:
 ```
 Created:
   scripts/tools/splunk_cli.py          — adapter (health-check + query)
-  scripts/tools/splunk/setup.sh        — dependency setup
-  scripts/tools/splunk/requirements.txt
+  pyproject.toml                       — [splunk] extra added (splunk-sdk>=x.y)
+  uv.lock                              — updated
   knowledge/environment/systems/splunk/config.env
   knowledge/environment/systems/splunk/config.env.template
   knowledge/environment/systems/splunk/field-notes.md
@@ -556,7 +552,7 @@ The exception: if the connected system is well-known (Splunk, Elastic, CrowdStri
 | Component | Change |
 |-----------|--------|
 | `scripts/tools/wazuh_cli.py` | Moved here from `scripts/siem/`. Refactored to the adapter contract — `health-check` and `query` subcommands (no more flat flag interface). |
-| `scripts/tools/setup.sh` | Moved here from `scripts/siem/`. One shared venv under `scripts/tools/.venv/` for all adapters; add new adapter deps to `scripts/tools/requirements.txt` and re-run. |
+| `soc-agent/pyproject.toml` | All adapter deps declared as named extras (`[wazuh]`, `[query]`, etc.) and mirrored into `[dev]`. Single shared venv at `soc-agent/.venv` via `uv sync --extra dev`. Replaces per-adapter `setup.sh` + `requirements.txt`. |
 | `scripts/tools/host_query.py` | Moved here from `scripts/host_query.py`. Already subcommand-style; added `health-check` subcommand for preflight. |
 | `knowledge/environment/systems/wazuh/` | Unchanged structure. Remains the reference example for `/connect`-generated system docs. |
 
