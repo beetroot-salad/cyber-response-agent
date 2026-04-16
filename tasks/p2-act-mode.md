@@ -1,6 +1,6 @@
 ---
 title: act mode: auto-close for mature signatures with high-confidence precedent matches
-status: doing
+status: done
 groups: phase-2
 ---
 

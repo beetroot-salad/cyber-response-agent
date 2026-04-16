@@ -140,15 +140,26 @@ prologue:           # CONTEXTUALIZE: vertices + edges derived from the alert
   vertices: [...]
   edges: [...]
 
-hypothesize:        # HYPOTHESIZE: initial proposed frontier (may be empty)
+hypothesize:        # HYPOTHESIZE: initial proposed frontier (omit for SCREEN-matched cases)
   hypotheses: [...]
 
-gather:             # GATHER: ordered lead blocks
+gather:             # GATHER + ANALYZE: ordered lead blocks
   - lead: {...}
 
-conclude:           # ANALYZE + CONCLUDE
+conclude:           # CONCLUDE
   ...
 ```
+
+**`hypothesize` is optional.** For SCREEN-matched investigations, no
+hypothesis formation step runs — the screen leads encode pattern
+evaluation directly, and `outcome.screen_result: match` records the
+verdict. Omit the `hypothesize` block in these cases.
+
+For full-loop investigations, `hypothesize` is written once (after
+CONTEXTUALIZE, before the first GATHER lead). Subsequent-loop hypothesis
+evolution is captured inside leads via `new_hypotheses` (additions) and
+`shelved` (retractions). There is no second top-level `hypothesize`
+block.
 
 ### Vertex
 
@@ -268,6 +279,9 @@ gather:
       name: <string>
       target: v-{id}                    # vertex this lead operates on / investigates
 
+      selection_rationale: <string>     # optional — 1–3 sentences on why this lead now, not another
+      mode: screen                      # omit unless this lead was dispatched by the SCREEN subagent
+
       tests: [h-{id}, ...]              # optional — hypotheses this lead discriminates
 
       observes:                         # optional — explicit prediction/refutation mapping
@@ -300,6 +314,7 @@ gather:
 
         trust_root_reached: v-{id}      # omit when null
         failure_reason: <string>        # omit unless errored or degraded
+        screen_result: match | no_match # include only when mode: screen
 
       new_hypotheses: []                # full hypothesis records
       shelved: []                       # hypothesis IDs shelved by this lead
@@ -314,6 +329,21 @@ gather:
           reasoning: "<string>"
           supporting_edges: []
 ```
+
+**`selection_rationale` is optional.** Use it to capture the inter-lead
+strategic reasoning — why this lead was chosen next given what was
+already known. Omit for the first lead of an investigation (choice is
+obvious) and for SCREEN leads (subagent-directed). Include when the
+choice required weighting competing options: "source-classification
+first because IP attribution determines which hypotheses are live
+before committing to discriminating queries."
+
+**`mode: screen`** marks leads dispatched by the SCREEN subagent (loop
+0). These leads share SCREEN's fast-path purpose — pattern match or
+fall through — and are always in `loop: 0`. `outcome.screen_result`
+records whether the overall SCREEN matched (`match`) or fell through
+(`no_match`). Only the final screen lead in the sequence needs
+`screen_result`; omit it from intermediate screen leads.
 
 **`tests` is optional.** Present when the lead is discriminating
 between specific competing hypotheses. Absent when the lead is
@@ -541,3 +571,12 @@ coverage.
 15. **`component_of` sub-vertex ID convention.** Sub-vertices should
     follow `v-{parent}-{nonce}`. Not mechanically enforced; enforced
     by review.
+
+16. **`screen_result` requires `mode: screen`.** `outcome.screen_result`
+    is only valid on leads where `mode: screen` is set. Only the final
+    lead in a SCREEN sequence carries `screen_result`; intermediate
+    screen leads omit it.
+
+17. **SCREEN-matched companions omit `hypothesize`.** When
+    `outcome.screen_result: match` is present on any lead,
+    the top-level `hypothesize` block must be absent.

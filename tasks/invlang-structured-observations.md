@@ -1,6 +1,6 @@
 ---
 title: Structured observation snippets in ANALYZE (prediction/observation/result convention)
-status: backlog
+status: doing
 groups: reliability, knowledge, invlang
 ---
 

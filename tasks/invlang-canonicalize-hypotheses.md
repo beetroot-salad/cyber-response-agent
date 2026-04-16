@@ -1,6 +1,6 @@
 ---
 title: Canonicalize investigation vocabulary (hypotheses + lead names)
-status: backlog
+status: doing
 groups: reliability, knowledge, invlang
 ---
 
