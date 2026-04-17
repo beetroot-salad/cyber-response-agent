@@ -395,11 +395,28 @@ Choose the dispatch mode based on the investigative question:
 
 #### Model selection
 
-Pass `model="sonnet"` on `Agent(...)` calls for **single-lead** dispatch where the work is template-driven: fill a known query template, run it via the SIEM CLI, characterize raw results. Opus-level reasoning isn't needed for substitution + characterization, and single leads are the common case. For **composite** dispatch (cross-lead refinement, session-window narrowing, consistency checks) and **ad-hoc** leads (no template, custom query construction), omit the override and inherit the main model.
+**Single lead, template available** — dispatch the gather subagent on Haiku; it runs a generic data-source health probe, then executes the template-driven lead. The subagent escalates on non-normal probe verdicts or any condition requiring real reasoning (see `gather.md`). This is the cost lever for the common case.
 
-#### Lead execution
+```python
+Agent(
+  subagent_type="general-purpose",
+  model="haiku",
+  description="gather {lead_name} for {reporting_agent}",
+  prompt="Read ${CLAUDE_SKILL_DIR}/gather.md for your complete instructions. Substitute: run_dir={run_dir}, signature_id={signature_id}, lead_name={lead_name}, reporting_agent={reporting_agent}, incident_start={incident_start}, incident_end={incident_end}, entity_bindings={entity_bindings}, vendor={vendor}"
+)
+```
 
-For each lead (whether single or part of a composite):
+When the subagent returns `result: escalate`, read the `trigger` and re-dispatch accordingly — in all cases below, re-run the lead (or follow-up work) without the `model="haiku"` override so the subagent inherits the main model:
+
+- `elevated | low | broken` — the data-source rate signal itself is anomalous. Either record the probe output as the GATHER outcome (e.g., pipeline outage *is* the finding) or re-dispatch to characterize the spike with stronger reasoning.
+- `missing_template | binding_mismatch | follow_up_needed` — the work is no longer template-driven; re-dispatch so the subagent can construct queries.
+- `siem_error` — the SIEM-CLI failed in a way Haiku couldn't resolve. Re-dispatch on the main model so Sonnet-grade reasoning can debug (following `leads/data-source-debug/definition.md`) rather than silently retrying.
+
+**Composite dispatch** (cross-lead refinement, session-window narrowing, consistency checks) and **ad-hoc** leads (no template, custom query construction) do not use the Haiku gather subagent — handle them inline or omit the model override on a custom subagent. The Haiku gather path is template-strict by design.
+
+#### Lead execution (composite / ad-hoc / re-dispatched after escalation)
+
+When you are not using the Haiku gather subagent — composite dispatch, ad-hoc leads, or re-dispatch after a `follow_up_needed` escalation — the per-lead procedure is:
 
 1. Read `knowledge/common-investigation/leads/{lead-name}/definition.md` for what to characterize and pitfalls to avoid. If no lead directory exists, follow `leads/ad-hoc/definition.md`.
 

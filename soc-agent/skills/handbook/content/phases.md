@@ -114,8 +114,9 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 **Work:**
 
 1. **Pick dispatch mode.**
-   - *Single lead* — one subagent, one lead. Use when leads are independent.
-   - *Composite lead* — one subagent, multiple sequential leads. Use when leads share the same entity and time window, and earlier results can refine later queries (e.g., auth session boundaries narrow the window for data access queries). See `docs/design-v3-tool-execution.md §11`.
+   - *Single lead, template available* — dispatch the Haiku gather subagent (`skills/investigate/gather.md`). It runs a generic data-source health probe first and escalates on non-normal verdicts or any condition that's no longer template-driven. This is the cost lever for the common case.
+   - *Composite lead* — one subagent, multiple sequential leads. Use when leads share the same entity and time window, and earlier results can refine later queries (e.g., auth session boundaries narrow the window for data access queries). Handle inline on the main model. See `docs/design-v3-tool-execution.md §11`.
+   - *Ad-hoc / no template* — construct the query inline on the main model.
    - Leads targeting different entities should dispatch independently, in parallel where possible.
 2. **Read the lead definition.** `knowledge/common-investigation/leads/{lead-name}/definition.md` describes what to characterize and common pitfalls. If no definition exists for what you need, follow `leads/ad-hoc/definition.md`.
 3. **Execute the query.** If `leads/{lead-name}/templates/{vendor}.md` exists, use it — templates encode the base query in native syntax plus entity field mappings. Plug in entities and time range, then run via the SIEM CLI. If no template exists, construct the query yourself using `knowledge/environment/systems/` for field mappings and quirks.
