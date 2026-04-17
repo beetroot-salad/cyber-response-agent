@@ -148,15 +148,23 @@ after Stop, against the persisted run dir (`alert.json`,
 `investigation.md`, `report.md`, `state.json`, `tool_audit.jsonl`,
 `tool_trace.jsonl`).
 
-Two stages, both cheap:
+Three stages, all cheap:
 
 1. **Triage** — cheap (Haiku or deterministic). Reads the run
    artifacts, applies the trigger rules above, and outputs a list of
    `(section, reason)` pairs. Most runs exit here.
-2. **Scoped analyst** — one invocation per `(section, reason)` pair,
-   with narrow input. Per-section prompts keep output focused and cost
-   bounded. Haiku by default; Sonnet only for genuinely hard cases
-   (e.g. "propose a new archetype"). Opus never.
+2. **Normalization** — dedup pre-check for novel-shaped artifacts the
+   agent produced on the fly (ad-hoc leads, hypothesis names,
+   archetype candidates). Classifies each as duplicate, near-duplicate,
+   or novel against the existing KB. Runs on every run with novel
+   artifacts, independent of triage — dedup only works when applied
+   consistently. See §5.
+3. **Scoped analyst** — one invocation per `(section, reason)` pair,
+   with narrow input, framed by normalization output (so a proposal
+   for a duplicate artifact is "use existing X," not "add new Y").
+   Per-section prompts keep output focused and cost bounded. Haiku by
+   default; Sonnet only for genuinely hard cases (e.g. "propose a new
+   archetype"). Opus never.
 
 **Output is proposals, not writes.** Proposals are dropped into
 `runs/postmortem/{run_id}/proposals.md` (or equivalent). The KB is
@@ -164,7 +172,89 @@ never edited directly by the agent.
 
 ---
 
-## 5. Closing the suggest → review loop
+## 5. Normalization — the dedup pre-check
+
+### The bootstrap problem
+
+Investigations are open-ended. We can't predefine every lead the
+agent might need, and the catalog in `common-investigation/leads/`
+will never be complete. The agent is expected to define **ad-hoc
+leads on the fly** when the seed catalog doesn't cover the evidence
+it needs — same story for hypotheses, archetype candidates, and any
+other free-form artifact invlang surfaces.
+
+invlang's schema (TBD) can validate shape but not semantics. It can
+ensure a lead has a name and a result; it can't tell that `source-rep`
+and `source-reputation` are the same lead, or that
+`?bruteforce-external` and `?external-bruteforce` are the same
+hypothesis split across two runs.
+
+Left alone, this drifts in one direction: the KB accumulates
+near-duplicates, the catalog fragments, and the next investigation's
+pattern-matching weakens because "the same lead" appears under three
+names. Accepting ad-hoc creation without a back-pressure mechanism
+trades one bootstrap problem (pre-defining everything) for another
+(unbounded divergence).
+
+### What normalization does
+
+For every run with novel-shaped artifacts, before any proposal
+generation, a normalization pass:
+
+1. **Extracts novel-shaped artifacts** from the investigation —
+   ad-hoc leads, hypothesis names, archetype candidates,
+   anchor-confirmation variants, anything not drawn from an existing
+   catalog entry.
+2. **Compares against the existing KB** in two tiers:
+   - Mechanical: exact match, normalized-form match (case, hyphens,
+     plurals), fuzzy string similarity. Cheap, universal.
+   - Semantic: cheap LLM on shortlisted candidates from the mechanical
+     tier. Scoped — never a blanket "compare against everything."
+3. **Emits a classification per artifact:**
+   - **Duplicate** — matches an existing entry; canonical name
+     suggested; downstream proposal framed as "use existing X next
+     time."
+   - **Near-duplicate** — overlaps significantly with an existing
+     entry; downstream proposal framed as "extend X to cover this
+     variant" or "split X if the variance is structural."
+   - **Novel** — genuinely new; downstream proposal framed as "add to
+     catalog as Y."
+
+### Why this is a separate phase
+
+Normalization runs on **every run that produced novel-shaped
+artifacts**, independent of whether triage decided to produce KB
+updates. A clean SCREEN match with no ad-hoc artifacts needs nothing.
+A run with ad-hoc leads but a boring resolution still needs
+normalization — dedup only works when applied consistently, and
+skipping it on "uninteresting" runs is how duplicates cement.
+
+Separating normalization from the scoped analyst also lets the
+analyst's prompts assume normalized input. "Propose a screen
+refinement" is a different prompt from "propose a new lead," and the
+latter must not be generated for an artifact that's actually a
+duplicate.
+
+### Integration with the CI loop
+
+Normalization output is a first-class input to the review pipeline:
+
+- A proposal that claims "novel" but normalization flagged as
+  near-duplicate should fail the per-PR tier automatically.
+- The golden-set replay tier provides a second line of defense —
+  a proposed new lead that duplicates an existing one should produce
+  identical replay results, and a divergence means the "duplicate"
+  classification was wrong (or the proposal is doing something
+  unintended).
+- Normalization can also propose **KB cleanup** — when two existing
+  catalog entries are detected as duplicates of each other across
+  accumulated runs, that's a dedup proposal against the KB itself,
+  subject to the same edit/delete human-approval rule as golden-set
+  edits.
+
+---
+
+## 6. Closing the suggest → review loop
 
 Proposals-only is theater if nobody reviews them. The fix is a CI
 pipeline that validates proposed KB changes automatically, so that
@@ -216,7 +306,7 @@ call on distilled artifacts rather than a slog through raw output.
 
 ---
 
-## 6. Open questions / out of scope for this sketch
+## 7. Open questions / out of scope for this sketch
 
 - **Concrete triage prompt and rules.** Probably a mix of
   deterministic checks (state.json status, judge flags, trace anomaly
@@ -237,10 +327,16 @@ call on distilled artifacts rather than a slog through raw output.
   choice (Haiku default, Sonnet for hard cases, Opus never), but a
   per-run and per-day budget guard is worth adding before this goes
   live.
+- **Normalization thresholds.** Where does "duplicate" end and
+  "near-duplicate" begin, and when does "near-duplicate" become
+  "genuinely novel"? Needs empirical calibration once there's a
+  corpus of real ad-hoc artifacts to tune against. Probably starts
+  strict (bias toward flagging as duplicate) and relaxes as false
+  positives surface.
 
 ---
 
-## 7. What this replaces
+## 8. What this replaces
 
 This design supersedes the implicit "post-mortem = summarize each
 investigation into the KB" assumption that predates
