@@ -25,6 +25,7 @@ from hooks.scripts.invlang_validate import (
     _check_refutation_ids,
     _check_trust_anchor_completeness,
     _check_screen_result_scope,
+    _check_lead_predictions,
     _check_append_only,
     _merge_blocks,
     YAML_BLOCK_RE,
@@ -429,6 +430,78 @@ class TestCheckScreenResultScope:
         errors = _check_screen_result_scope(merged)
         assert errors
         assert "l-001" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_lead_predictions
+# ---------------------------------------------------------------------------
+
+
+def _lead_with_predictions(predictions):
+    return {"gather": [{
+        "id": "l-001", "loop": 1, "name": "volume-profile", "target": "v-001",
+        "query_details": {}, "outcome": {},
+        "predictions": predictions,
+        "resolutions": [],
+    }]}
+
+
+class TestCheckLeadPredictions:
+    def test_absent_predictions_passes(self):
+        merged = {"gather": [{
+            "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+            "query_details": {}, "outcome": {}, "resolutions": [],
+        }]}
+        assert _check_lead_predictions(merged) == []
+
+    def test_well_formed_predictions_pass(self):
+        merged = _lead_with_predictions([
+            {"id": "lp1", "if": "volume within 1σ", "read_as": "authorized",
+             "advance_to": "change-management-lookup"},
+            {"id": "lp2", "if": "volume >3σ", "read_as": "anomalous",
+             "advance_to": "HYPOTHESIZE"},
+        ])
+        assert _check_lead_predictions(merged) == []
+
+    def test_missing_required_field(self):
+        merged = _lead_with_predictions([
+            {"id": "lp1", "if": "x", "read_as": "y"},  # missing advance_to
+        ])
+        errors = _check_lead_predictions(merged)
+        assert errors
+        assert "advance_to" in errors[0]
+
+    def test_bad_id_pattern(self):
+        merged = _lead_with_predictions([
+            {"id": "p1", "if": "x", "read_as": "y", "advance_to": "next"},
+        ])
+        errors = _check_lead_predictions(merged)
+        assert any("does not match pattern" in e for e in errors)
+
+    def test_duplicate_ids(self):
+        merged = _lead_with_predictions([
+            {"id": "lp1", "if": "x", "read_as": "y", "advance_to": "a"},
+            {"id": "lp1", "if": "z", "read_as": "w", "advance_to": "b"},
+        ])
+        errors = _check_lead_predictions(merged)
+        assert any("duplicate id" in e for e in errors)
+
+    def test_empty_advance_to(self):
+        merged = _lead_with_predictions([
+            {"id": "lp1", "if": "x", "read_as": "y", "advance_to": ""},
+        ])
+        errors = _check_lead_predictions(merged)
+        assert any("non-empty string" in e for e in errors)
+
+    def test_predictions_not_a_list(self):
+        merged = {"gather": [{
+            "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+            "query_details": {}, "outcome": {},
+            "predictions": "not a list",
+            "resolutions": [],
+        }]}
+        errors = _check_lead_predictions(merged)
+        assert any("must be a list" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------

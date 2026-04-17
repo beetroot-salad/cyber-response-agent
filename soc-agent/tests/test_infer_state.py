@@ -178,7 +178,7 @@ class TestInferStateHook:
         assert state["history"] == ["CONTEXTUALIZE", "HYPOTHESIZE"]
 
     def test_illegal_transition_rejected(self, tmp_path):
-        """CONTEXTUALIZE -> GATHER (skipping HYPOTHESIZE) is rejected."""
+        """CONTEXTUALIZE -> ANALYZE (skipping HYPOTHESIZE and GATHER) is rejected."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
@@ -187,10 +187,10 @@ class TestInferStateHook:
         # First: CONTEXTUALIZE
         write_investigation(run_dir, "## CONTEXTUALIZE\nstuff\n", runs_dir)
 
-        # Then: skip to GATHER (illegal)
+        # Then: skip to ANALYZE (illegal — still not reachable from CONTEXTUALIZE)
         result = write_investigation(
             run_dir,
-            "## CONTEXTUALIZE\nstuff\n## GATHER (loop 1)\nquery\n",
+            "## CONTEXTUALIZE\nstuff\n## ANALYZE (loop 1)\nfindings\n",
             runs_dir,
         )
         assert result.returncode == 2

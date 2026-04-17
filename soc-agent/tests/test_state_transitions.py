@@ -43,15 +43,17 @@ class TestValidateTransition:
 
     def test_all_legal_transitions(self):
         legal = [
-            ("CONTEXTUALIZE", "SCREEN"),      # screen if playbook has it
-            ("CONTEXTUALIZE", "HYPOTHESIZE"),  # skip screen
+            ("CONTEXTUALIZE", "SCREEN"),       # screen if playbook has it
+            ("CONTEXTUALIZE", "HYPOTHESIZE"),  # branching-first case
+            ("CONTEXTUALIZE", "GATHER"),       # pure-gathering first lead (no/no cell)
             ("CONTEXTUALIZE", "CONCLUDE"),     # ticket-context fast-resolve
             ("SCREEN", "HYPOTHESIZE"),         # screen fall-through
             ("SCREEN", "CONCLUDE"),            # screen resolved
             ("HYPOTHESIZE", "GATHER"),
             ("GATHER", "ANALYZE"),
-            ("ANALYZE", "HYPOTHESIZE"),  # loop back
-            ("ANALYZE", "CONCLUDE"),  # finish
+            ("GATHER", "HYPOTHESIZE"),         # mid-lead fork discovery
+            ("ANALYZE", "HYPOTHESIZE"),        # loop back
+            ("ANALYZE", "CONCLUDE"),           # finish
         ]
         for current, proposed in legal:
             valid, error = validate_transition(current, proposed)
@@ -59,7 +61,6 @@ class TestValidateTransition:
 
     def test_all_illegal_transitions(self):
         illegal = [
-            ("CONTEXTUALIZE", "GATHER"),
             ("CONTEXTUALIZE", "ANALYZE"),
             ("SCREEN", "CONTEXTUALIZE"),
             ("SCREEN", "GATHER"),
@@ -71,7 +72,6 @@ class TestValidateTransition:
             ("HYPOTHESIZE", "CONCLUDE"),
             ("GATHER", "CONTEXTUALIZE"),
             ("GATHER", "SCREEN"),
-            ("GATHER", "HYPOTHESIZE"),
             ("GATHER", "CONCLUDE"),
             ("ANALYZE", "CONTEXTUALIZE"),
             ("ANALYZE", "SCREEN"),
@@ -257,9 +257,9 @@ class TestWriteStateScript:
             capture_output=True,
         )
 
-        # Try illegal transition (CONTEXTUALIZE -> GATHER is not allowed)
+        # Try illegal transition (CONTEXTUALIZE -> ANALYZE is not allowed)
         result = subprocess.run(
-            [sys.executable, str(script), str(run_dir), "GATHER"],
+            [sys.executable, str(script), str(run_dir), "ANALYZE"],
             capture_output=True,
             text=True,
         )

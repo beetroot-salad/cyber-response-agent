@@ -19,12 +19,20 @@ class Phase(str, Enum):
     CONCLUDE = "CONCLUDE"
 
 
-# Legal transitions: from_phase -> set of allowed to_phases
+# Legal transitions: from_phase -> set of allowed to_phases.
+#
+# HYPOTHESIZE is on-demand (invlang v2.7): the agent enters it when the lead
+# space branches, not as a fixed phase gate. This means:
+#   - CONTEXTUALIZE may go directly to GATHER for pure-gathering first leads
+#     (the no-branching / interpretation-vulnerable cell of the ASSESS matrix).
+#   - GATHER may go directly to HYPOTHESIZE when the agent realises mid-lead
+#     that a new fork has opened and wants to articulate it before ANALYZE.
+#   - ANALYZE → HYPOTHESIZE remains the canonical loop re-entry.
 TRANSITIONS: dict[Phase, set[Phase]] = {
-    Phase.CONTEXTUALIZE: {Phase.SCREEN, Phase.HYPOTHESIZE, Phase.CONCLUDE},  # SCREEN/CONCLUDE if fast path, else HYPOTHESIZE
+    Phase.CONTEXTUALIZE: {Phase.SCREEN, Phase.HYPOTHESIZE, Phase.GATHER, Phase.CONCLUDE},
     Phase.SCREEN: {Phase.HYPOTHESIZE, Phase.CONCLUDE},       # resolve or fall through
     Phase.HYPOTHESIZE: {Phase.GATHER},
-    Phase.GATHER: {Phase.ANALYZE},
+    Phase.GATHER: {Phase.ANALYZE, Phase.HYPOTHESIZE},
     Phase.ANALYZE: {Phase.HYPOTHESIZE, Phase.CONCLUDE},
     Phase.CONCLUDE: set(),  # Terminal
 }
@@ -75,7 +83,13 @@ def validate_transition(current: Optional[str], proposed: str) -> tuple[bool, st
 
 
 def count_loops(history: list[str]) -> int:
-    """Count the number of HYPOTHESIZE phases in the history (proxy for loop count)."""
+    """Count the number of HYPOTHESIZE phases in the history (proxy for loop count).
+
+    Note: with on-demand HYPOTHESIZE (invlang v2.7), loop count is no longer a
+    direct measure of investigation depth — a run can accumulate many GATHER/
+    ANALYZE cycles without re-entering HYPOTHESIZE. MAX_LOOPS still bounds
+    runaway hypothesis re-entry, which is the specific pathology we care about.
+    """
     return sum(1 for p in history if p == Phase.HYPOTHESIZE.value)
 
 

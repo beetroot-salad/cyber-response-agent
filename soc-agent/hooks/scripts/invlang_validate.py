@@ -19,6 +19,7 @@ Checks performed (deterministic — no LLM):
 7. Refutation IDs: -- resolutions have non-empty matched_refutation_ids
 8. trust_anchor_result completeness: all 5 fields present when block is present
 9. screen_result scope: only on leads with mode: screen
+10. lead.predictions structural: {id, if, read_as, advance_to}; ids match ^lp\\d+$ and are unique per lead
 
 Exit codes:
     0 - Passed (or not applicable)
@@ -56,6 +57,13 @@ _TRUST_ANCHOR_FIELDS = {"anchor_id", "kind", "result", "as_of", "authority_for_q
 
 # Loose ID format: one of the known prefixes followed by alphanumerics and hyphens
 _ID_RE = re.compile(r"^[vehl]-[a-z0-9][a-z0-9-]*$")
+
+# Lead-level prediction IDs are local to the lead; different namespace from
+# hypothesis predictions (p1, p2) to avoid collision.
+_LEAD_PREDICTION_ID_RE = re.compile(r"^lp\d+$")
+
+# Required fields on every lead.predictions entry
+_LEAD_PREDICTION_REQUIRED = {"id", "if", "read_as", "advance_to"}
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +349,59 @@ def _check_screen_result_scope(merged: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _check_lead_predictions(merged: dict[str, Any]) -> list[str]:
+    """Validate lead.predictions structural shape when present.
+
+    Each entry: {id, if, read_as, advance_to}. IDs match ^lp\\d+$ and are
+    unique within the lead. advance_to is either CONCLUDE, HYPOTHESIZE, or a
+    lead name declared elsewhere in the companion.
+    """
+    errors: list[str] = []
+
+    for lead in merged.get("gather", []) or []:
+        if not isinstance(lead, dict):
+            continue
+        preds = lead.get("predictions")
+        if preds is None:
+            continue
+        lid = lead.get("id", "?")
+        if not isinstance(preds, list):
+            errors.append(f"lead {lid}: predictions must be a list")
+            continue
+
+        seen_ids: set[str] = set()
+        for i, pred in enumerate(preds):
+            ctx = f"lead {lid} predictions[{i}]"
+            if not isinstance(pred, dict):
+                errors.append(f"{ctx}: entry must be a mapping")
+                continue
+
+            missing = _LEAD_PREDICTION_REQUIRED - pred.keys()
+            if missing:
+                errors.append(f"{ctx}: missing required field(s): {sorted(missing)}")
+
+            pid = pred.get("id")
+            if isinstance(pid, str):
+                if not _LEAD_PREDICTION_ID_RE.match(pid):
+                    errors.append(
+                        f"{ctx}: id {pid!r} does not match pattern ^lp\\d+$ "
+                        f"(e.g. lp1, lp2)"
+                    )
+                elif pid in seen_ids:
+                    errors.append(f"{ctx}: duplicate id {pid!r} within lead")
+                else:
+                    seen_ids.add(pid)
+
+            # advance_to is a forward reference — the target lead may not exist
+            # yet when this block is written. Require non-empty string only;
+            # post-hoc route compliance is measured in queries.py Class 8.
+            advance_to = pred.get("advance_to")
+            if "advance_to" in pred and not (isinstance(advance_to, str) and advance_to.strip()):
+                errors.append(f"{ctx}: advance_to must be a non-empty string")
+
+    return errors
+
+
 def _check_append_only(proposed_text: str, current_text: str) -> list[str]:
     """Fail if the proposed content has fewer YAML blocks than the on-disk content."""
     current_count = len(YAML_BLOCK_RE.findall(current_text))
@@ -394,6 +455,7 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_refutation_ids(merged))
     errors.extend(_check_trust_anchor_completeness(merged))
     errors.extend(_check_screen_result_scope(merged))
+    errors.extend(_check_lead_predictions(merged))
 
     return errors
 

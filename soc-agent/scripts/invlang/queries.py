@@ -13,7 +13,7 @@ Classes:
   5  lead_sequence_pattern         — serialize gather blocks as trace strings
   6  hypothesis_name_wildcard      — fnmatch on hypothesis names; filter by final weight
   7  prose_substring               — substring scan across all prose fields
-  8  lead_effectiveness            — score leads by log1p(count) × mean_abs_weight_delta
+  8  lead_effectiveness            — score leads on branching_delta + prediction_fidelity + kind_mix
   9  weight_reversal_mining        — resolutions where weight moved positive→negative
   10 lead_pair_synergy             — composite-dispatch pairs where combined > sum of individual deltas
   11 post_failure_recovery         — after a dead lead, what lead came next and how effective was it?
@@ -226,23 +226,25 @@ def dead_lead_lookup(
 # Class 5 — lead sequence pattern
 # ---------------------------------------------------------------------------
 
-def _infer_lead_type(lead: dict[str, Any]) -> str:
-    """Infer lead type from outcome content (v2.5 — no mode field).
+def _lead_kind(lead: dict[str, Any]) -> str:
+    """Classify a lead by its declared schema shape (v2.7 — tests + predictions drive).
 
-    trust:   trust_anchor_result present
-    refine:  attribute_updates only (no observations vertices/edges)
-    scope:   observations with vertices or edges, or empty outcome
-    fail:    failure_reason present
+    trust:       outcome.trust_anchor_result present
+    fail:        outcome.failure_reason present
+    branching:   lead.tests non-empty (collapses a hypothesis fork)
+    interpretive: lead.predictions non-empty (pre-committed reading, non-branching)
+    mechanical:  none of the above — pure enrichment
     """
     outcome = lead.get("outcome") or {}
     if outcome.get("failure_reason"):
         return "fail"
     if outcome.get("trust_anchor_result"):
         return "trust"
-    obs = outcome.get("observations") or {}
-    if outcome.get("attribute_updates") and not (obs.get("vertices") or obs.get("edges")):
-        return "refine"
-    return "scope"
+    if lead.get("tests"):
+        return "branching"
+    if lead.get("predictions"):
+        return "interpretive"
+    return "mechanical"
 
 
 def _lead_sequence(c: Companion) -> str:
@@ -252,13 +254,13 @@ def _lead_sequence(c: Companion) -> str:
         outcome = lead.get("outcome") or {}
         tar = outcome.get("trust_anchor_result") or {}
         fr = outcome.get("failure_reason")
-        lead_type = _infer_lead_type(lead)
-        if lead_type == "trust":
+        kind = _lead_kind(lead)
+        if kind == "trust":
             parts.append(f"trust({tar.get('anchor_id', name)}:{tar.get('result', '?')})")
-        elif lead_type == "fail":
+        elif kind == "fail":
             parts.append(f"{name}:FAIL={fr}")
-        elif lead_type == "refine":
-            parts.append(name if name.startswith("refine(") else f"refine({name})")
+        elif kind == "interpretive":
+            parts.append(f"{name}[preds]")
         else:
             parts.append(name)
     terminal = conclude_field(c.conclude, "termination", "category") or "?"
@@ -402,6 +404,9 @@ def _signed_delta(before: Any, after: Any) -> float:
     return float(_WEIGHT_NUMERIC.get(after, 0) - _WEIGHT_NUMERIC.get(before, 0))
 
 
+_LEAD_KINDS = ("branching", "interpretive", "trust", "fail", "mechanical")
+
+
 def _lead_effectiveness_rows(
     corpus: list[Companion],
     patterns: tuple[str, ...] = (),
@@ -410,48 +415,128 @@ def _lead_effectiveness_rows(
 
     patterns — fnmatch patterns, all of which must match a hypothesis name (conjunction).
                Empty = match all hypotheses.
+
+    Two orthogonal scores per lead name:
+      branching_delta    — log1p(count) × mean_abs_weight_delta, over leads with
+                           non-empty `tests`. N/A (None) when no branching occurrences.
+      prediction_fidelity — log1p(count) × fraction-of-routes-matched, over leads
+                           with non-empty `predictions`. N/A when no interpretive
+                           occurrences. Route match = the next lead in the same
+                           companion has a name equal to one of this lead's
+                           `advance_to` values, or the companion terminated and
+                           `advance_to` names CONCLUDE.
+      kind_mix          — histogram of kinds ({branching, interpretive, trust,
+                           fail, mechanical}) for this lead name across the corpus.
+                           Lets gathering-dominant leads be visible rather than
+                           penalised by a zero score.
     """
     def matches(h_name: str) -> bool:
         return all(fnmatch.fnmatchcase(h_name, p) for p in patterns)
 
-    per_name: dict[str, list[float]] = {}
+    branching_deltas: dict[str, list[float]] = {}
+    fidelity_hits: dict[str, list[int]] = {}  # 1 if route matched, 0 otherwise
+    kind_mix: dict[str, dict[str, int]] = {}
+    total_counts: dict[str, int] = {}
+
     for c in corpus:
         h_names: dict[str, str] = {h["id"]: h.get("name", "") for h in c.iter_new_hypotheses()}
-        for lead in c.leads:
-            resolutions = lead.get("resolutions", []) or []
-            if patterns:
-                deltas = [
-                    _abs_delta(r.get("before"), r.get("after"))
-                    for r in resolutions
-                    if matches(h_names.get(r.get("hypothesis", ""), ""))
-                ]
-                if not deltas:
-                    continue
-            else:
-                deltas = [_abs_delta(r.get("before"), r.get("after")) for r in resolutions]
-            lead_mean = sum(deltas) / len(deltas) if deltas else 0.0
-            per_name.setdefault(lead.get("name", "?"), []).append(lead_mean)
+        leads = c.leads
+        for idx, lead in enumerate(leads):
+            name = lead.get("name", "?")
+            kind = _lead_kind(lead)
 
-    rows = []
-    for name, corpus_deltas in sorted(per_name.items()):
-        count = len(corpus_deltas)
-        mean_delta = sum(corpus_deltas) / count
+            # When patterns are given, exclude leads that never touched a
+            # matching hypothesis — they can't contribute to either score.
+            if patterns:
+                touches_pattern = any(
+                    matches(h_names.get(r.get("hypothesis", ""), ""))
+                    for r in (lead.get("resolutions", []) or [])
+                )
+                if not touches_pattern:
+                    continue
+
+            total_counts[name] = total_counts.get(name, 0) + 1
+            kind_mix.setdefault(name, {k: 0 for k in _LEAD_KINDS})[kind] += 1
+
+            # Branching-delta: only over leads with declared tests (fork-collapsing).
+            if lead.get("tests"):
+                resolutions = lead.get("resolutions", []) or []
+                if patterns:
+                    deltas = [
+                        _abs_delta(r.get("before"), r.get("after"))
+                        for r in resolutions
+                        if matches(h_names.get(r.get("hypothesis", ""), ""))
+                    ]
+                else:
+                    deltas = [_abs_delta(r.get("before"), r.get("after")) for r in resolutions]
+                if deltas:
+                    lead_mean = sum(deltas) / len(deltas)
+                    branching_deltas.setdefault(name, []).append(lead_mean)
+
+            # Prediction-fidelity: route compliance for leads with predictions.
+            if lead.get("predictions"):
+                advance_tos = {
+                    p.get("advance_to")
+                    for p in (lead.get("predictions") or [])
+                    if isinstance(p, dict) and p.get("advance_to")
+                }
+                # Next lead in the companion, if any
+                next_lead_name = leads[idx + 1].get("name") if idx + 1 < len(leads) else None
+                if next_lead_name is None:
+                    matched = "CONCLUDE" in advance_tos
+                else:
+                    matched = next_lead_name in advance_tos
+                fidelity_hits.setdefault(name, []).append(1 if matched else 0)
+
+    rows: list[dict[str, Any]] = []
+    for name in sorted(total_counts.keys()):
+        count = total_counts[name]
+        bd = branching_deltas.get(name, [])
+        if bd:
+            mean_bd = sum(bd) / len(bd)
+            branching_delta = round(log1p(len(bd)) * mean_bd, 4)
+        else:
+            branching_delta = None
+
+        fh = fidelity_hits.get(name, [])
+        if fh:
+            rate = sum(fh) / len(fh)
+            prediction_fidelity = round(log1p(len(fh)) * rate, 4)
+        else:
+            prediction_fidelity = None
+
         rows.append({
             "lead_name": name,
             "count": count,
-            "mean_abs_weight_delta": round(mean_delta, 3),
-            "effectiveness": round(log1p(count) * mean_delta, 4),
+            "branching_delta": branching_delta,
+            "prediction_fidelity": prediction_fidelity,
+            "kind_mix": kind_mix[name],
         })
-    rows.sort(key=lambda r: r["effectiveness"], reverse=True)
+
+    # Sort: branching_delta desc, then prediction_fidelity desc, then count desc.
+    # None sorts as -inf so non-scoring leads fall to the bottom within each tier.
+    rows.sort(
+        key=lambda r: (
+            r["branching_delta"] if r["branching_delta"] is not None else float("-inf"),
+            r["prediction_fidelity"] if r["prediction_fidelity"] is not None else float("-inf"),
+            r["count"],
+        ),
+        reverse=True,
+    )
     return rows
 
 
 def lead_effectiveness(corpus: list[Companion]) -> dict[str, Any]:
-    """Score each lead name by log1p(count) × mean_abs_weight_delta across all hypotheses.
+    """Score each lead name on two orthogonal axes plus a kind histogram.
 
-    count           — occurrences of the lead name across the corpus
-    mean_abs_weight — mean |numeric(after) - numeric(before)| across all resolutions
-    effectiveness   — log1p(count) × mean_abs_weight_delta
+    branching_delta     — log1p(count_branching) × mean_abs_weight_delta. None if
+                          the lead never appeared in a branching (fork-collapsing)
+                          form — correct handling of pure-gathering leads rather
+                          than penalising them as "low effectiveness."
+    prediction_fidelity — log1p(count_interpretive) × route-match rate. None if
+                          the lead never carried pre-committed `predictions`.
+    kind_mix            — histogram over {branching, interpretive, trust, fail,
+                          mechanical} for this lead name.
     """
     rows = _lead_effectiveness_rows(corpus)
     return {"hits": rows, "count": len(rows)}
