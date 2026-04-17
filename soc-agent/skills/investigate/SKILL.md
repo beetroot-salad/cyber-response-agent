@@ -28,6 +28,14 @@ Other files under `hooks/scripts/` (infer_state, audit_tool_calls, budget_enforc
 
 ---
 
+## Investigation Language Schema
+
+You write structured YAML blocks into `investigation.md` at specific phases. The schema below governs all blocks. A PreToolUse hook (`invlang_validate.py`) validates every write — schema errors block the write with an explicit error message.
+
+!`cat ${CLAUDE_SKILL_DIR}/../../knowledge/invlang/schema.md`
+
+---
+
 ## Environment Readiness
 
 !`cd ${CLAUDE_SKILL_DIR}/../.. && python3 scripts/preflight.py --systems || true`
@@ -77,7 +85,7 @@ This means:
 1. **When uncertain, escalate.** A missed threat is catastrophically worse than escalating a benign alert. If two interpretations remain plausible after pursuing all leads, escalate. Your value is knowing when you *don't* know.
 2. **No remediation.** You investigate and recommend only. No blocking IPs, no account changes, no firewall rules.
 3. **Evidence over assumption.** If you don't have evidence, you don't know. Say so.
-4. **Maintain adversarial hypothesis.** Always keep at least one threat hypothesis active until explicitly refuted with `--` evidence. This is the "don't miss" principle — dangerous explanations stay on the table regardless of probability until the evidence rules them out.
+4. **Maintain adversarial hypothesis.** Always keep at least one threat hypothesis active until explicitly refuted with `--` evidence. This is the "don't miss" principle — dangerous explanations stay on the table regardless of probability until the evidence rules them out. Adversarial hypotheses are *upstream causal questions* — "did the attacker have what they needed?" — not downstream consequence checks ("did they succeed? is there lateral movement?"). Verifying downstream consequences (post-compromise scope, lateral movement, persistence) is incident response work; this agent's scope is triage. If evidence strongly suggests success and downstream scope is unknown, escalate — don't attempt IR inline.
 5. **No auto-close without archetype + grounding.** `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding — either every `required_anchors` entry confirmed OR a `matched_ticket_id` citing a valid precedent snapshot under the same archetype. An archetype that declares no required anchors cannot resolve without `matched_ticket_id`.
 6. **Fail safe.** Errors, timeouts, missing data — escalate with context gathered so far.
 7. **Stay in scope.** Investigate within the signature's detection domain. Don't expand scope — escalate instead.
@@ -118,8 +126,7 @@ Use the corpus query subagent at any phase when you need this grounding. Dispatc
 Agent(
   subagent_type="general-purpose",
   model="sonnet",
-  prompt=<read skills/investigate/query-past-investigations.md,
-          substitute {question}="…", {structured_params}="none">
+  prompt="Read ${CLAUDE_SKILL_DIR}/query-past-investigations.md for your complete instructions. Your question: {question}. structured_params: none"
 )
 ```
 
@@ -134,6 +141,8 @@ The subagent returns its findings alongside the code or query it executed. Treat
 ---
 
 ## Phase Instructions
+
+!`echo ${CLAUDE_SKILL_DIR}`
 
 ### CONTEXTUALIZE
 
@@ -152,7 +161,7 @@ When reading multiple knowledge or environment files, batch independent reads in
      subagent_type="general-purpose",
      model="haiku",
      description="archetype-scan for {signature_id}",
-     prompt=<read skills/investigate/archetype-scan.md, substitute {run_dir}, {signature_id}, {runs_dir} verbatim>
+     prompt="Read ${CLAUDE_SKILL_DIR}/archetype-scan.md for your complete instructions. Substitute: run_dir={run_dir}, signature_id={signature_id}, runs_dir={runs_dir}"
    )
    ```
    When the subagent returns, read its `archetype_scan` ranked list AND its `adversarial_archetype` entry. Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation. Record both in `investigation.md` §CONTEXTUALIZE (see template below) — the adversarial archetype is the citable surface the CONCLUDE self-check's `archetype_shape_match` question asks about, so you need it in writing. If the subagent returned no useful output (malformed YAML, empty ranking), continue with the rest of CONTEXTUALIZE — archetypes are a useful prior, not required.
@@ -163,7 +172,7 @@ When reading multiple knowledge or environment files, batch independent reads in
      subagent_type="general-purpose",
      model="haiku",
      description="ticket-context for {identifier}",
-     prompt=<read skills/investigate/ticket-context.md, substitute {run_dir}, {runs_dir}, {signature_id} verbatim>
+     prompt="Read ${CLAUDE_SKILL_DIR}/ticket-context.md for your complete instructions. Substitute: run_dir={run_dir}, runs_dir={runs_dir}, signature_id={signature_id}"
    )
    ```
    When the subagent returns, read the `situation` paragraph, the `definite` / `maybe` clusters, and the `fast_resolve_candidates` (top ~3 similar prior investigations with their similarity dimensions). The fast-resolve *decision* is yours, not the subagent's: for each candidate, check whether the cited prior investigation + precedent file exist, whether the entity class and anchor confirmations still hold today, and whether the current alert's shape matches tightly enough to transfer the disposition. If a candidate clearly matches, go directly to CONCLUDE citing it. Otherwise use `situation` / `definite` / `maybe` for hypothesis ranking in HYPOTHESIZE.
@@ -187,6 +196,13 @@ Write an initial section in `{run_dir}/investigation.md`:
 **Data environment:** {reachable systems per preflight; any degraded systems and the leads they affect}
 ```
 
+Then append the `prologue:` YAML block to `{run_dir}/investigation.md` (no `--ids` needed — it is the first block and the namespace is empty):
+```yaml
+prologue:
+  vertices: [...]   # one vertex per distinct entity from the alert
+  edges: [...]      # one edge per observed relationship/event between entities
+```
+
 ### SCREEN (optional)
 
 **Goal:** Attempt fast resolution via mechanical pattern matching before the full investigation loop.
@@ -199,7 +215,7 @@ Write an initial section in `{run_dir}/investigation.md`:
      subagent_type="general-purpose",
      model="haiku",
      description="screen for {signature_id}",
-     prompt=<read skills/investigate/screen.md, substitute {run_dir} and the playbook ## Screen section verbatim>
+     prompt="Read ${CLAUDE_SKILL_DIR}/screen.md for your complete instructions. Substitute: run_dir={run_dir}, signature_id={signature_id}"
    )
    ```
    The `model="haiku"` override is required — SCREEN is mechanical pattern matching against a short table of indicators, and pinning Haiku is the main cost lever for repeat-alert investigations (baseline screen cost drops from ~$0.30 at main-agent rate to ~$0.02). If a run shows Haiku consistently producing malformed YAML or failing to follow the indicator resolution rules, fall back to `model="sonnet"` — but do not remove the override entirely.
@@ -296,6 +312,16 @@ Append to `{run_dir}/investigation.md`:
   - *Pitfalls:* ...
 ```
 
+Then append the `hypothesize:` YAML block. Run first to confirm the ID namespace (prologue IDs already exist):
+```
+bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
+```
+```yaml
+hypothesize:
+  hypotheses: [...]   # one entry per active hypothesis; weight: null; status: active
+```
+Omit the `hypothesize:` block entirely for SCREEN-matched cases.
+
 ### GATHER
 
 **Goal:** Execute the selected lead(s) — query SIEM, read data, collect evidence.
@@ -347,6 +373,8 @@ Append to `{run_dir}/investigation.md`:
 **Raw observation:** {what you found — be specific with numbers, IPs, usernames}
 **Cross-lead notes:** {for composite only — consistencies, contradictions, refinements applied}
 ```
+
+**No YAML block at GATHER.** Characterize the raw observation in prose; do not interpret. The complete `gather:` lead block — including `query_details`, `outcome`, and `resolutions` — is written at ANALYZE once both observation and analysis are complete.
 
 ### ANALYZE
 
@@ -401,19 +429,24 @@ Append to `{run_dir}/investigation.md`:
 
 **Evidence:** {lead-name} — {key observation}
 
-**Assessment:**
-```yaml
-hypotheses:
-  ?hypothesis-1:
-    weight: "++"
-    reasoning: "observation matches prediction exactly"
-  ?hypothesis-2:
-    weight: "--"
-    reasoning: "observation contradicts core prediction"
-```
+**Assessment:** {prose reasoning — weight per hypothesis with justification}
 
 **Surviving hypotheses:** ?hypothesis-1
 **Next action:** CONCLUDE | HYPOTHESIZE (need lead-name to discriminate X)
+```
+
+Then append the complete `gather:` lead block. Run first to confirm the ID namespace:
+```
+bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
+```
+Write the full block in one write — `outcome` (observations + attribute_updates) and `resolutions` together. No partial blocks.
+```yaml
+gather:
+  - id: l-{nonce}
+    loop: {N}
+    name: {lead-name}
+    target: v-{id}
+    # ... query_details, outcome, resolutions per schema
 ```
 
 ### CONCLUDE
@@ -453,6 +486,22 @@ Append to `{run_dir}/investigation.md`:
 **Verdict:** {resolved|escalated} — {1-line rationale}
 **Confirmed hypothesis:** ?{name} | none
 **Trace:** {trace line}
+```
+
+Then append the `conclude:` YAML block before writing `report.md`. Run `--ids` first:
+```
+bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
+```
+`matched_archetype` must be the archetype directory name from `knowledge/signatures/{sig}/archetypes/{name}/`.
+```yaml
+conclude:
+  termination:
+    category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
+    rationale: {why the investigation halted}
+  disposition: benign | true_positive | unclear
+  confidence: high | medium | low
+  matched_archetype: {name} | null
+  summary: {1-2 sentence summary}
 ```
 
 Write `{run_dir}/report.md`:

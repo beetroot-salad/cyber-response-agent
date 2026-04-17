@@ -63,54 +63,53 @@ hypothesize:
   hypotheses: []
 
 gather:
-  - lead:
-      id: l-001
-      loop: 1
-      name: container-exec-history
-      target: v-002
-      # D1: Falco's execve observation is modeled as a process entity (v-003) plus a
-      # spawned edge (e-002), NOT as a command vertex + targeted edge. A process is
-      # an entity with a lifetime, not a one-shot action. The v2.3 §10 mention of
-      # "file-write events" under `command+targeted` is inconsistent with this choice
-      # and should be clarified.
-      query_details:
-        system: runtime-audit-execve-feed
-        template: "leads/container-exec-history/templates/execve-feed.md"
-        query: "execve events where cgroup_container_id=a1b2c3d4 AND t ∈ [14:03:22, 14:03:32]"
-        time_window: "±5s around alert"
-        substitutions:
-          container_id: "a1b2c3d4"
-          t: "2026-04-14T14:03:27.412Z"
-      outcome:
-        observations:
-          # Mechanical lead materializes only what the execve feed directly observes:
-          # the host-side runc process and the spawned edge into the container.
-          # The kubectl-exec session and initiating identity are NOT materialized here
-          # — those are observable only via kube-audit (l-002).
-          vertices:
-            - id: v-003
-              type: process
-              classification: host-runtime-shim
-              identifier: "runc:[2:INIT] (host k8s-worker-07)"
-              attributes:
-                comm: "runc:[2:INIT]"
-                cmdline: "runc init"
-                host: "k8s-worker-07"
-                runtime: "containerd"
-                host_pid: 184733
-              citations:
-                - "runtime-audit-execve-feed:host=k8s-worker-07:event=execve-184733"
-          edges:
-            - id: e-002
-              relation: spawned
-              source_vertex: v-003
-              target_vertex: v-001
-              when: { timestamp: "2026-04-14T14:03:27.398Z" }
-              attributes:
-                uid: 0
-              authority:
-                kind: runtime-audit
-                source: "runtime-audit-execve-feed:host=k8s-worker-07:event=execve-184733"
+  - id: l-001
+    loop: 1
+    name: container-exec-history
+    target: v-002
+    # D1: Falco's execve observation is modeled as a process entity (v-003) plus a
+    # spawned edge (e-002), NOT as a command vertex + targeted edge. A process is
+    # an entity with a lifetime, not a one-shot action. The v2.3 §10 mention of
+    # "file-write events" under `command+targeted` is inconsistent with this choice
+    # and should be clarified.
+    query_details:
+      system: runtime-audit-execve-feed
+      template: "leads/container-exec-history/templates/execve-feed.md"
+      query: "execve events where cgroup_container_id=a1b2c3d4 AND t ∈ [14:03:22, 14:03:32]"
+      time_window: "±5s around alert"
+      substitutions:
+        container_id: "a1b2c3d4"
+        t: "2026-04-14T14:03:27.412Z"
+    outcome:
+      observations:
+        # Mechanical lead materializes only what the execve feed directly observes:
+        # the host-side runc process and the spawned edge into the container.
+        # The kubectl-exec session and initiating identity are NOT materialized here
+        # — those are observable only via kube-audit (l-002).
+        vertices:
+          - id: v-003
+            type: process
+            classification: host-runtime-shim
+            identifier: "runc:[2:INIT] (host k8s-worker-07)"
+            attributes:
+              comm: "runc:[2:INIT]"
+              cmdline: "runc init"
+              host: "k8s-worker-07"
+              runtime: "containerd"
+              host_pid: 184733
+            citations:
+              - "runtime-audit-execve-feed:host=k8s-worker-07:event=execve-184733"
+        edges:
+          - id: e-002
+            relation: spawned
+            source_vertex: v-003
+            target_vertex: v-001
+            when: { timestamp: "2026-04-14T14:03:27.398Z" }
+            attributes:
+              uid: 0
+            authority:
+              kind: runtime-audit
+              source: "runtime-audit-execve-feed:host=k8s-worker-07:event=execve-184733"
 
       # Discrimination level advances from v-001 (bash) to v-003 (runc).
       # Three hypothesis seeds per retrieval-sim, each written LEAN (1-2 predictions
@@ -185,46 +184,45 @@ gather:
             - "stolen-credential bypass is unfalsifiable without MDM trust-chain evidence; refutation here is 'no current evidence of credential compromise', not 'credential theft ruled out'"
           weight: null
 
-  - lead:
-      id: l-002
-      loop: 2
-      name: "anchor-lookup(kube-audit)"
-      target: v-003
-      tests: [h-001, h-002, h-003]
-      observes:
-        - hypothesis: h-001
-          predictions: [p1, p2]
-          refutations: [r1, r2]
-        - hypothesis: h-002
-          predictions: [p1, p2]
-          refutations: [r1, r2]
-        - hypothesis: h-003
-          predictions: [p1]
-          refutations: [r1]
-      query_details:
-        system: kube-audit
-        template: "leads/anchor-lookup/templates/kube-audit-exec.md"
-        query: "kube-audit entries: subresource=pods/exec AND target_container=a1b2c3d4 AND t ∈ [14:03:22, 14:03:32]"
-        time_window: "±5s around alert"
-        substitutions:
-          container_id: "a1b2c3d4"
-          t: "2026-04-14T14:03:27.412Z"
-      outcome:
-        observations:
-          vertices:
-            - id: v-004
-              type: session
-              classification: kubectl-exec-session
-              identifier: "kubectl-exec alice→payments-api-7b9d8f4c8-xk2qm @14:03:25Z"
-              attributes:
-                subresource: "pods/exec"
-                target_pod: "payments-api-7b9d8f4c8-xk2qm"
-                target_container: "a1b2c3d4"
-                kube_api_request_id: "7c1f8a22-kube-audit"
-                client_user_agent: "kubectl/v1.28.3"
-                rbac_role: "service-debug-operator"
-              citations:
-                - "kube-audit:request-id=7c1f8a22"
+  - id: l-002
+    loop: 2
+    name: "anchor-lookup(kube-audit)"
+    target: v-003
+    tests: [h-001, h-002, h-003]
+    observes:
+      - hypothesis: h-001
+        predictions: [p1, p2]
+        refutations: [r1, r2]
+      - hypothesis: h-002
+        predictions: [p1, p2]
+        refutations: [r1, r2]
+      - hypothesis: h-003
+        predictions: [p1]
+        refutations: [r1]
+    query_details:
+      system: kube-audit
+      template: "leads/anchor-lookup/templates/kube-audit-exec.md"
+      query: "kube-audit entries: subresource=pods/exec AND target_container=a1b2c3d4 AND t ∈ [14:03:22, 14:03:32]"
+      time_window: "±5s around alert"
+      substitutions:
+        container_id: "a1b2c3d4"
+        t: "2026-04-14T14:03:27.412Z"
+    outcome:
+      observations:
+        vertices:
+          - id: v-004
+            type: session
+            classification: kubectl-exec-session
+            identifier: "kubectl-exec alice→payments-api-7b9d8f4c8-xk2qm @14:03:25Z"
+            attributes:
+              subresource: "pods/exec"
+              target_pod: "payments-api-7b9d8f4c8-xk2qm"
+              target_container: "a1b2c3d4"
+              kube_api_request_id: "7c1f8a22-kube-audit"
+              client_user_agent: "kubectl/v1.28.3"
+              rbac_role: "service-debug-operator"
+            citations:
+              - "kube-audit:request-id=7c1f8a22"
 
             # v-005 uses the new `identity` type (was `user` in v2.2).
             - id: v-005

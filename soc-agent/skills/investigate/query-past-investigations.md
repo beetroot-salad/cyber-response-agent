@@ -119,9 +119,9 @@ Create 2–3 minimal in-memory dicts: at least one positive (should appear in ou
 ```python
 positive = {
     "conclude": {"disposition": "true_positive", "confidence": "high"},
-    "gather": [{"lead": {"name": "auth-history",
-                          "resolutions": [{"before": None, "after": "++",
-                                           "reasoning": "47 failed attempts"}]}}]
+    "gather": [{"name": "auth-history",
+                "resolutions": [{"before": None, "after": "++",
+                                 "reasoning": "47 failed attempts"}]}]
 }
 negative = {
     "conclude": {"disposition": "benign", "confidence": "high"},

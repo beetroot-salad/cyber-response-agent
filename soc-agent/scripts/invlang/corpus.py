@@ -77,7 +77,7 @@ class Companion:
 
     @property
     def leads(self) -> list[dict[str, Any]]:
-        return [entry["lead"] for entry in self.body.get("gather", []) if "lead" in entry]
+        return [entry for entry in self.body.get("gather", []) if isinstance(entry, dict)]
 
     @property
     def conclude(self) -> dict[str, Any]:
@@ -139,6 +139,29 @@ def _load_from_path(path: Path) -> list[Companion]:
 # ---------------------------------------------------------------------------
 # Public loader
 # ---------------------------------------------------------------------------
+
+def extract_ids(body: dict[str, Any]) -> dict[str, list[str]]:
+    """Walk a parsed companion body and return all IDs grouped by type.
+
+    Returns a dict with keys 'vertices', 'edges', 'hypotheses', 'leads'.
+    Includes IDs introduced both in the prologue and inside lead outcomes/new_hypotheses.
+    """
+    prologue = body.get("prologue", {})
+    vertices   = [v["id"] for v in prologue.get("vertices", []) if "id" in v]
+    edges      = [e["id"] for e in prologue.get("edges", [])    if "id" in e]
+    hypotheses = [h["id"] for h in body.get("hypothesize", {}).get("hypotheses", []) if "id" in h]
+    leads: list[str] = []
+    for lead in body.get("gather", []):
+        if not isinstance(lead, dict):
+            continue
+        if "id" in lead:
+            leads.append(lead["id"])
+        obs = lead.get("outcome", {}).get("observations", {})
+        vertices.extend(v["id"]   for v in obs.get("vertices", [])          if "id" in v)
+        edges.extend(   e["id"]   for e in obs.get("edges", [])              if "id" in e)
+        hypotheses.extend(h["id"] for h in lead.get("new_hypotheses", [])   if "id" in h)
+    return {"vertices": vertices, "edges": edges, "hypotheses": hypotheses, "leads": leads}
+
 
 def load_corpus(
     root: Path | None = None,

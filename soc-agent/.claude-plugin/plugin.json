@@ -41,6 +41,16 @@
             "type": "command",
             "if": "Edit(*/investigation.md)",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate_conclude.py"
+          },
+          {
+            "type": "command",
+            "if": "Write(*/investigation.md)",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/invlang_validate.py"
+          },
+          {
+            "type": "command",
+            "if": "Edit(*/investigation.md)",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/invlang_validate.py"
           }
         ]
       }

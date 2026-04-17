@@ -183,69 +183,68 @@ hypothesize:
 # ---------------------------------------------------------------------------
 
 gather:
-  - lead:
-      id: l-001
-      loop: 1
-      name: "anchor-lookup(entra-id-sign-in-log)"
-      target: v-002
-      tests: [h-001, h-002]
-      observes:
-        - hypothesis: h-001
-          predictions: [p1]
-          refutations: [r1]
-        - hypothesis: h-002
-          predictions: [p1]
-          refutations: [r1]
-      query_details:
-        system: entra-id
-        template: "leads/anchor-lookup/templates/entra-id-sign-in.md"
-        query: "Entra ID sign-in events for alice.chen@company.com around 2026-04-14T14:32:11Z"
-        time_window: "2026-04-14T14:00:00Z – 14:40:00Z"
-      outcome:
-        observations:
-          vertices: []
-          edges: []
-          # No new graph entities — the sign-in observation elaborates
-          # attributes of the existing v-002 (OWA session) and v-003 (client
-          # endpoint) via the trust_anchor_result and its authority_for_question
-          # ruling. The "unrecognized device" signal is load-bearing and
-          # lives in the resolution reasoning + the anchor result enum.
-        trust_anchor_result:
-          anchor_id: entra-id-sign-in-log
-          kind: entra-id-sign-in-log
-          result: partial
-          as_of: "2026-04-14T14:31:55Z"
-          authority_for_question: partial
-      concerns:
-        - "Entra sign-in confirmed MFA (push approval) but the device_id in the sign-in record is NOT in the MDM-Intune registry for alice's enrolled devices — an unrecognized device signal"
-      # h-001 (?legitimate-user-action) was lean. MFA succeeded but device is
-      # unrecognized — evidence splits into: did alice act on an unmanaged
-      # device (travel laptop, personal device), vs did an attacker phish
-      # alice's MFA? Refine into hierarchical children; shelve the parent.
-      shelved: [h-001]
-      new_hypotheses:
-        - id: h-001-001
-          name: "?user-self-configured-unmanaged-device"
-          attached_to_vertex: v-002
-          proposed_edge:
-            relation: initiated_by
-            parent_vertex:
-              type: endpoint
-              classification: unknown-endpoint
-              attributes:
-                knowledge: partial
-                user_owned: true
-                mechanism: "alice owns an unenrolled personal device (travel laptop, home PC) and used it to legitimately set up mail forwarding — perhaps during a vacation or device migration"
-          predictions:
-            - id: p1
-              claim: "alice.chen has accessed M365 from other non-corp devices in the past 30 days, establishing a travel/personal-device pattern"
-            - id: p2
-              claim: "alice can confirm she created the rule with a documented operational reason (even if informal)"
-          refutation_shape:
-            - id: r1
-              claim: "no prior non-corp device access for alice AND alice denies creating the rule"
-          concerns:
-            - "this hypothesis is benign; the refutation requires out-of-band contact with alice"
+  - id: l-001
+    loop: 1
+    name: "anchor-lookup(entra-id-sign-in-log)"
+    target: v-002
+    tests: [h-001, h-002]
+    observes:
+      - hypothesis: h-001
+        predictions: [p1]
+        refutations: [r1]
+      - hypothesis: h-002
+        predictions: [p1]
+        refutations: [r1]
+    query_details:
+      system: entra-id
+      template: "leads/anchor-lookup/templates/entra-id-sign-in.md"
+      query: "Entra ID sign-in events for alice.chen@company.com around 2026-04-14T14:32:11Z"
+      time_window: "2026-04-14T14:00:00Z – 14:40:00Z"
+    outcome:
+      observations:
+        vertices: []
+        edges: []
+        # No new graph entities — the sign-in observation elaborates
+        # attributes of the existing v-002 (OWA session) and v-003 (client
+        # endpoint) via the trust_anchor_result and its authority_for_question
+        # ruling. The "unrecognized device" signal is load-bearing and
+        # lives in the resolution reasoning + the anchor result enum.
+      trust_anchor_result:
+        anchor_id: entra-id-sign-in-log
+        kind: entra-id-sign-in-log
+        result: partial
+        as_of: "2026-04-14T14:31:55Z"
+        authority_for_question: partial
+    concerns:
+      - "Entra sign-in confirmed MFA (push approval) but the device_id in the sign-in record is NOT in the MDM-Intune registry for alice's enrolled devices — an unrecognized device signal"
+    # h-001 (?legitimate-user-action) was lean. MFA succeeded but device is
+    # unrecognized — evidence splits into: did alice act on an unmanaged
+    # device (travel laptop, personal device), vs did an attacker phish
+    # alice's MFA? Refine into hierarchical children; shelve the parent.
+    shelved: [h-001]
+    new_hypotheses:
+      - id: h-001-001
+        name: "?user-self-configured-unmanaged-device"
+        attached_to_vertex: v-002
+        proposed_edge:
+          relation: initiated_by
+          parent_vertex:
+            type: endpoint
+            classification: unknown-endpoint
+            attributes:
+              knowledge: partial
+              user_owned: true
+              mechanism: "alice owns an unenrolled personal device (travel laptop, home PC) and used it to legitimately set up mail forwarding — perhaps during a vacation or device migration"
+        predictions:
+          - id: p1
+            claim: "alice.chen has accessed M365 from other non-corp devices in the past 30 days, establishing a travel/personal-device pattern"
+          - id: p2
+            claim: "alice can confirm she created the rule with a documented operational reason (even if informal)"
+        refutation_shape:
+          - id: r1
+            claim: "no prior non-corp device access for alice AND alice denies creating the rule"
+        concerns:
+          - "this hypothesis is benign; the refutation requires out-of-band contact with alice"
 
         - id: h-001-002
           name: "?mfa-phished-account-takeover"
@@ -287,126 +286,124 @@ gather:
             placeholder.
           supporting_edges: [e-003]
 
-  - lead:
-      id: l-002
-      loop: 1
-      name: "anchor-lookup(mdm-intune)"
-      target: v-003
-      tests: [h-001-001, h-001-002]
-      observes:
-        - hypothesis: h-001-001
-          predictions: [p1]
-        - hypothesis: h-001-002
-          predictions: [p1]
-          refutations: [r1]
-      query_details:
-        system: mdm-intune
-        template: "leads/anchor-lookup/templates/mdm-intune.md"
-        query: "device registry for alice.chen@company.com — list all enrolled devices, compliance status, last-seen; also query device_id from l-001 specifically"
-        time_window: "current"
-      outcome:
-        observations:
-          vertices: []
-          edges: []
-        trust_anchor_result:
-          anchor_id: mdm-intune
-          kind: mdm-intune
-          result: refuted
-          as_of: "2026-04-14T14:33:00Z"
-          authority_for_question: full
-      resolutions:
-        - hypothesis: h-001-001
-          before: null
-          after: "-"
-          severity_of_test: severe
-          matched_refutation_ids: [r1]
-          reasoning: |
-            MDM-Intune reports zero devices enrolled for alice.chen matching
-            the Entra sign-in device_id. Alice's three enrolled corp devices
-            (two US Windows laptops, one iOS) are all US-registered. The
-            'recent access from other unmanaged devices' baseline (p1) cannot
-            be confirmed — no baseline of unmanaged-device use exists. r1's
-            condition (no history of unmanaged access) is satisfied. Weight: -.
-            Not -- because MDM only covers corp-managed devices; a genuinely
-            personal device alice owns but never enrolled would be invisible
-            to MDM.
-          supporting_edges: [e-003]
-        - hypothesis: h-001-002
-          before: null
-          after: "+"
-          severity_of_test: severe
-          matched_prediction_ids: [p1]
-          reasoning: |
-            MDM-Intune confirmed the session device is not any of alice's
-            enrolled corp or personal devices, AND her normal sessions
-            originate from enrolled US-based devices. p1 supported: device_id
-            absent from MDM, alice's other sessions on compliant US devices —
-            consistent with an unauthorized actor on an unmanaged endpoint.
-            Rule 16: authority_for_question is full. Weight advances to +.
-            Not ++ because the absence of a device registration is consistent
-            with alice owning an unenrolled personal device — not strictly
-            impossible without out-of-band confirmation.
-          supporting_edges: [e-003]
+  - id: l-002
+    loop: 1
+    name: "anchor-lookup(mdm-intune)"
+    target: v-003
+    tests: [h-001-001, h-001-002]
+    observes:
+      - hypothesis: h-001-001
+        predictions: [p1]
+      - hypothesis: h-001-002
+        predictions: [p1]
+        refutations: [r1]
+    query_details:
+      system: mdm-intune
+      template: "leads/anchor-lookup/templates/mdm-intune.md"
+      query: "device registry for alice.chen@company.com — list all enrolled devices, compliance status, last-seen; also query device_id from l-001 specifically"
+      time_window: "current"
+    outcome:
+      observations:
+        vertices: []
+        edges: []
+      trust_anchor_result:
+        anchor_id: mdm-intune
+        kind: mdm-intune
+        result: refuted
+        as_of: "2026-04-14T14:33:00Z"
+        authority_for_question: full
+    resolutions:
+      - hypothesis: h-001-001
+        before: null
+        after: "-"
+        severity_of_test: severe
+        matched_refutation_ids: [r1]
+        reasoning: |
+          MDM-Intune reports zero devices enrolled for alice.chen matching
+          the Entra sign-in device_id. Alice's three enrolled corp devices
+          (two US Windows laptops, one iOS) are all US-registered. The
+          'recent access from other unmanaged devices' baseline (p1) cannot
+          be confirmed — no baseline of unmanaged-device use exists. r1's
+          condition (no history of unmanaged access) is satisfied. Weight: -.
+          Not -- because MDM only covers corp-managed devices; a genuinely
+          personal device alice owns but never enrolled would be invisible
+          to MDM.
+        supporting_edges: [e-003]
+      - hypothesis: h-001-002
+        before: null
+        after: "+"
+        severity_of_test: severe
+        matched_prediction_ids: [p1]
+        reasoning: |
+          MDM-Intune confirmed the session device is not any of alice's
+          enrolled corp or personal devices, AND her normal sessions
+          originate from enrolled US-based devices. p1 supported: device_id
+          absent from MDM, alice's other sessions on compliant US devices —
+          consistent with an unauthorized actor on an unmanaged endpoint.
+          Rule 16: authority_for_question is full. Weight advances to +.
+          Not ++ because the absence of a device registration is consistent
+          with alice owning an unenrolled personal device — not strictly
+          impossible without out-of-band confirmation.
+        supporting_edges: [e-003]
 
-  - lead:
-      id: l-003
-      loop: 2
-      name: "anchor-lookup(mail-forwarding-policy-registry)"
-      target: v-001
-      tests: [h-001-001, h-001-002]
-      observes:
-        - hypothesis: h-001-001
-          predictions: [p2]
-        - hypothesis: h-001-002
-          predictions: [p1]
-      query_details:
-        system: mail-forwarding-policy-registry
-        template: "leads/anchor-lookup/templates/mail-policy.md"
-        query: "is external mail forwarding permitted for alice.chen@company.com (Finance Operations / SAP-Read roles)?"
-        time_window: "current"
-      outcome:
-        observations:
-          vertices: []
-          edges: []
-        trust_anchor_result:
-          anchor_id: mail-forwarding-policy-registry
-          kind: mail-forwarding-policy-registry
-          result: refuted
-          as_of: "2026-04-14T14:33:30Z"
-          authority_for_question: full
-      resolutions:
-        - hypothesis: h-001-001
-          before: "-"
-          after: "--"
-          severity_of_test: moderate
-          matched_refutation_ids: [r1]
-          reasoning: |
-            policy registry confirms external mail forwarding is prohibited
-            for Finance Operations. No legitimate self-setup reason exists —
-            alice cannot have had an authorized operational reason to create
-            this rule. Even if alice created it herself, doing so would be a
-            policy violation with no legitimate use case. r1 satisfied: the
-            benign self-setup story requires a policy exception that does
-            not exist. h-001-001 advances to --.
-          supporting_edges: [e-003]
-        - hypothesis: h-001-002
-          before: "+"
-          after: "++"
-          severity_of_test: moderate
-          matched_prediction_ids: [p1]
-          reasoning: |
-            policy registry confirms no legitimate use case for this rule
-            for alice's role — the rule is inherently anomalous regardless
-            of who created it. Combined with the unrecognized device (l-002),
-            this satisfies all predictions for h-001-002: device absent from
-            MDM (p1 confirmed in l-002), alice's normal sessions are US/
-            compliant (p1 confirmed in l-002), and the forwarding action is
-            organizationally unauthorized (policy anchor, full authority).
-            Rule 6: p1 is the only prediction; union of matched_prediction_ids
-            = {p1} = full set. Weight advances to ++. Strong refutation of
-            the benign side (h-001-001 at --) + strong confirmation on the
-            adversarial side closes the case at trust-root.
-          supporting_edges: [e-003]
+  - id: l-003
+    loop: 2
+    name: "anchor-lookup(mail-forwarding-policy-registry)"
+    target: v-001
+    tests: [h-001-001, h-001-002]
+    observes:
+      - hypothesis: h-001-001
+        predictions: [p2]
+      - hypothesis: h-001-002
+        predictions: [p1]
+    query_details:
+      system: mail-forwarding-policy-registry
+      template: "leads/anchor-lookup/templates/mail-policy.md"
+      query: "is external mail forwarding permitted for alice.chen@company.com (Finance Operations / SAP-Read roles)?"
+      time_window: "current"
+    outcome:
+      observations:
+        vertices: []
+        edges: []
+      trust_anchor_result:
+        anchor_id: mail-forwarding-policy-registry
+        kind: mail-forwarding-policy-registry
+        result: refuted
+        as_of: "2026-04-14T14:33:30Z"
+        authority_for_question: full
+    resolutions:
+      - hypothesis: h-001-001
+        before: "-"
+        after: "--"
+        severity_of_test: moderate
+        matched_refutation_ids: [r1]
+        reasoning: |
+          policy registry confirms external mail forwarding is prohibited
+          for Finance Operations. No legitimate self-setup reason exists —
+          alice cannot have had an authorized operational reason to create
+          this rule. Even if alice created it herself, doing so would be a
+          policy violation with no legitimate use case. r1 satisfied: the
+          benign self-setup story requires a policy exception that does
+          not exist. h-001-001 advances to --.
+        supporting_edges: [e-003]
+      - hypothesis: h-001-002
+        before: "+"
+        after: "++"
+        severity_of_test: moderate
+        matched_prediction_ids: [p1]
+        reasoning: |
+          policy registry confirms no legitimate use case for this rule
+          for alice's role — the rule is inherently anomalous regardless
+          of who created it. Combined with the unrecognized device (l-002),
+          this satisfies all predictions for h-001-002: device absent from
+          MDM (p1 confirmed in l-002), alice's normal sessions are US/
+          compliant (p1 confirmed in l-002), and the forwarding action is
+          organizationally unauthorized (policy anchor, full authority).
+          Rule 6: p1 is the only prediction; union of matched_prediction_ids
+          = {p1} = full set. Weight advances to ++. Strong refutation of
+          the benign side (h-001-001 at --) + strong confirmation on the
+          adversarial side closes the case at trust-root.
+        supporting_edges: [e-003]
 
 # ---------------------------------------------------------------------------
 # CONCLUDE

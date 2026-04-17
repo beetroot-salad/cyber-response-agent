@@ -16,7 +16,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .corpus import Companion, load_corpus, PILOT_CORPUS_FILES, _corpus_root
+import yaml
+
+from .corpus import Companion, load_corpus, PILOT_CORPUS_FILES, _corpus_root, YAML_BLOCK_RE, extract_ids
 from .queries import (
     ENUM_CHOICES,
     anchor_calibration,
@@ -157,6 +159,14 @@ OUTPUT
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
+    p.add_argument(
+        "--ids", dest="ids_path", metavar="PATH",
+        help=(
+            "Print all IDs currently present in a single investigation.md file, "
+            "grouped by type (vertices, edges, hypotheses, leads). "
+            "Use before writing a new block to confirm the ID namespace."
+        ),
+    )
     p.add_argument(
         "--class", dest="query_class", type=int, choices=range(1, 13), metavar="N",
         help="Run a single query class (1–12) instead of the full demo.",
@@ -349,9 +359,44 @@ def _run_demo(corpus: list[Companion], as_json: bool) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def _run_ids(path_str: str) -> int:
+    """Print all IDs from a single investigation.md, grouped by type."""
+    path = Path(path_str)
+    if not path.exists():
+        print(f"(file not yet created — ID namespace is empty)", file=sys.stderr)
+        for kind in ("vertices", "edges", "hypotheses", "leads"):
+            print(f"{kind + ':':<12} (none)")
+        return 0
+
+    text = path.read_text()
+    merged: dict[str, Any] = {}
+    for match in YAML_BLOCK_RE.finditer(text):
+        try:
+            doc = yaml.safe_load(match.group(1))
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        for key in ("prologue", "hypothesize", "conclude"):
+            if key in doc:
+                merged[key] = doc[key]
+        if "gather" in doc:
+            merged.setdefault("gather", [])
+            merged["gather"].extend(doc["gather"])
+
+    ids = extract_ids(merged)
+    for kind, id_list in ids.items():
+        val = "  ".join(id_list) if id_list else "(none)"
+        print(f"{kind + ':':<12} {val}")
+    return 0
+
+
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
+
+    if args.ids_path is not None:
+        return _run_ids(args.ids_path)
 
     corpus = load_corpus()
 
