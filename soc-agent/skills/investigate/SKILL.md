@@ -541,14 +541,13 @@ gather:
 
 **Goal:** Write the final report with structured frontmatter.
 
-**Preconditions — enforced by hook on writing `## CONCLUDE`:**
+**Preconditions — enforced automatically by hook:**
 
-1. Read `skills/investigate/conclusion_checks.md` and answer every question that applies to your status.
-2. Write your answers to `{run_dir}/conclusion_checks.json` following the schema in that file. Each citation is a `{lines, contains}` pair; `contains` must be a VERBATIM substring copied from the cited line range.
+When you write the `conclude:` YAML block to `investigation.md`, a PreToolUse hook spawns two Haiku judge subagents in parallel against the proposed log. Together they verify the investigation is sound enough to close — adversarial refutation, `++` falsification attempts, dangling-evidence sweep, archetype shape/completeness, and the anchor leg of grounding. Verdicts are ANDed deterministically; any FLAG blocks the write with an error message.
 
-The self-check fires on **every** non-screen-resolved CONCLUDE write — SCREEN-resolved investigations are exempt regardless (their safety comes from SCREEN pattern match + precedent + `validate_report.py`).
+You don't dispatch these judges yourself and you don't author any artifact for them — they read `investigation.md`, `alert.json`, and the relevant archetype READMEs directly. SCREEN-resolved investigations are exempt (their safety comes from the SCREEN pattern match + precedent + post-report validation).
 
-The hook fires as **PreToolUse**, so a rejection blocks the write before state.json advances — fix whatever the hook named, then retry the same write from the same phase. Every error message ends with an explicit next-action line. Author `conclusion_checks.json` **before** writing the `## CONCLUDE` header to `investigation.md`.
+If the gate FLAGs, fix the underlying issue in `investigation.md` — typically by running an additional lead, downgrading a hypothesis grade that lacks a falsification path, addressing dangling evidence with a new ANALYZE pass, or escalating instead of resolving. Then retry the write. The judges re-read the updated log on each retry; there is no need to "re-prompt" them.
 
 ---
 

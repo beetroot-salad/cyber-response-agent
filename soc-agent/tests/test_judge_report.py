@@ -1,7 +1,12 @@
-"""Tests for the Tier 2 semantic judge (integrated in validate_report.py).
+"""Tests for the post-report Tier 2 semantic judge (validate_report.py).
 
-Tests the deterministic parts: prompt assembly, verdict parsing, precedent
-loading, and gating logic. Does NOT test LLM invocation (requires claude CLI).
+The slimmed Tier 2 judge only validates the report↔log delta plus
+precedent transfer. Shape/completeness/anchor-leg checks moved to the
+pre-CONCLUDE judges (see test_validate_conclude.py).
+
+Tests the deterministic parts: prompt assembly, verdict parsing,
+precedent loading, and gating logic. Does NOT test LLM invocation
+(requires claude CLI).
 """
 
 import json
@@ -14,26 +19,24 @@ import pytest
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
+from hooks.scripts.judge_runner import parse_verdict
 from hooks.scripts.validate_report import (
     assemble_prompt,
     load_precedent,
     load_report_frontmatter,
-    parse_verdict,
     read_file_safe,
 )
 
 
-# --- Verdict parsing ---
+# --- Verdict parsing (parse_verdict moved to judge_runner) ---
 
 
 class TestParseVerdict:
     def test_pass_verdict(self):
         output = textwrap.dedent("""\
-            PRECEDENT_MATCH: PASS — conditions hold
             INTERNAL_CONSISTENCY: PASS — report follows from log
             EVIDENCE_SUFFICIENCY: PASS — strong evidence
-            COMPLETENESS: PASS — all leads pursued
-            ADVERSARIAL_CHECK: PASS — threats refuted
+            PRECEDENT_TRANSFER: PASS — precedent transfers
             VERDICT: PASS — all criteria satisfied
         """)
         verdict, reason = parse_verdict(output)
@@ -42,11 +45,9 @@ class TestParseVerdict:
 
     def test_flag_verdict(self):
         output = textwrap.dedent("""\
-            PRECEDENT_MATCH: FLAG — external IP vs internal precedent
             INTERNAL_CONSISTENCY: PASS — ok
             EVIDENCE_SUFFICIENCY: PASS — ok
-            COMPLETENESS: PASS — ok
-            ADVERSARIAL_CHECK: PASS — ok
+            PRECEDENT_TRANSFER: FLAG — entity class differs
             VERDICT: FLAG — precedent mismatch
         """)
         verdict, reason = parse_verdict(output)
@@ -79,8 +80,8 @@ class TestParseVerdict:
         """Judge might wrap output in code fences."""
         output = textwrap.dedent("""\
             ```
-            PRECEDENT_MATCH: PASS — ok
-            VERDICT: FLAG — missing auth check
+            INTERNAL_CONSISTENCY: PASS — ok
+            VERDICT: FLAG — missing evidence
             ```
         """)
         verdict, reason = parse_verdict(output)
@@ -96,25 +97,21 @@ class TestAssemblePrompt:
             alert_data='{"rule": "test"}',
             investigation_log="## CONTEXTUALIZE\ntest",
             report="---\nstatus: resolved\n---",
-            archetype="# Archetype story",
             precedent='{"ticket_id": "SEC-001"}',
             salt="abc123",
         )
         assert "{alert_data}" not in prompt
         assert "{investigation_log}" not in prompt
         assert "{report}" not in prompt
-        assert "{archetype}" not in prompt
         assert "{precedent}" not in prompt
         assert "{judge_mode}" not in prompt
         assert "full" in prompt
 
     def test_escalation_mode(self):
-        """Escalation mode: status=escalated, regardless of what's cited."""
         prompt = assemble_prompt(
             alert_data="alert",
             investigation_log="log",
             report="report",
-            archetype="# Archetype",
             precedent=None,
             salt="abc123",
             status="escalated",
@@ -122,28 +119,31 @@ class TestAssemblePrompt:
         assert "escalation" in prompt
 
     def test_full_mode_default(self):
-        """Default status is resolved → full mode."""
         prompt = assemble_prompt(
             alert_data="alert",
             investigation_log="log",
             report="report",
-            archetype="# Archetype",
             precedent='{"ticket_id": "SEC-001"}',
             salt="abc123",
         )
         assert "Mode: **full**" in prompt
 
-    def test_prompt_contains_criteria(self):
-        prompt = assemble_prompt("a", "b", "c", "arch", "d", "salt")
-        assert "SHAPE_MATCH" in prompt
-        assert "COMPLETENESS" in prompt
-        assert "GROUNDING_MATCH" in prompt
+    def test_prompt_contains_slimmed_criteria(self):
+        prompt = assemble_prompt("a", "b", "c", "d", "salt")
         assert "INTERNAL_CONSISTENCY" in prompt
         assert "EVIDENCE_SUFFICIENCY" in prompt
-        assert "ADVERSARIAL_CHECK" in prompt
+        assert "PRECEDENT_TRANSFER" in prompt
+
+    def test_prompt_excludes_pre_conclude_criteria(self):
+        """Shape/completeness/anchor-leg moved to pre-CONCLUDE judges."""
+        prompt = assemble_prompt("a", "b", "c", "d", "salt")
+        assert "SHAPE_MATCH" not in prompt
+        assert "COMPLETENESS" not in prompt
+        assert "GROUNDING_MATCH" not in prompt
+        assert "ADVERSARIAL_CHECK" not in prompt
 
     def test_untrusted_content_is_salted(self):
-        prompt = assemble_prompt("alert", "log", "report", "arch", "prec", "mysalt")
+        prompt = assemble_prompt("alert", "log", "report", "prec", "mysalt")
         assert "<run-mysalt-alert-data>" in prompt
         assert "</run-mysalt-alert-data>" in prompt
         assert "<run-mysalt-investigation-log>" in prompt
@@ -152,28 +152,25 @@ class TestAssemblePrompt:
     def test_report_is_not_salted(self):
         """Report is agent-generated, not untrusted external data."""
         prompt = assemble_prompt(
-            "alert", "log", "report_content", "arch", "prec", "mysalt"
+            "alert", "log", "report_content", "prec", "mysalt"
         )
         assert "run-mysalt-report" not in prompt
         assert "report_content" in prompt
 
-    def test_archetype_is_salted(self):
-        """Archetype README content is wrapped in salted delimiters."""
-        prompt = assemble_prompt(
-            "alert", "log", "report", "arch_story", "prec", "mysalt"
-        )
-        assert "<run-mysalt-archetype>" in prompt
-        assert "</run-mysalt-archetype>" in prompt
-        assert "arch_story" in prompt
-
     def test_precedent_is_salted(self):
         """Precedent data is wrapped in salted delimiters (defense-in-depth)."""
         prompt = assemble_prompt(
-            "alert", "log", "report", "arch", "prec_data", "mysalt"
+            "alert", "log", "report", "prec_data", "mysalt"
         )
         assert "<run-mysalt-precedent>" in prompt
         assert "</run-mysalt-precedent>" in prompt
         assert "prec_data" in prompt
+
+    def test_no_precedent_placeholder_message(self):
+        prompt = assemble_prompt(
+            "alert", "log", "report", None, "mysalt"
+        )
+        assert "PRECEDENT_TRANSFER is N/A" in prompt
 
 
 # --- File reading ---
@@ -261,7 +258,6 @@ class TestLoadPrecedent:
         assert data["ticket_id"] == "SEC-001"
 
     def test_load_without_extension(self, fake_root):
-        """Ticket IDs without .json still resolve to the underlying file."""
         _write_precedent(
             fake_root, "test-sig", "test-arch", "SEC-001",
             {"ticket_id": "SEC-001", "archetype": "test-arch"},
@@ -286,9 +282,7 @@ class TestLoadPrecedent:
 
 
 class TestJudgeGating:
-    """Tests that the judge runs in the right mode for each report type."""
-
-    def test_resolved_with_archetype_and_ticket_triggers_full_mode(self, tmp_path):
+    def test_resolved_with_archetype_and_ticket(self, tmp_path):
         report = tmp_path / "report.md"
         report.write_text(textwrap.dedent("""\
             ---
@@ -312,7 +306,6 @@ class TestJudgeGating:
         assert fm.get("status") == "resolved"
         assert fm.get("matched_archetype") == "monitoring-probe"
         assert fm.get("matched_ticket_id") == "SEC-2024-001"
-        # Full mode: archetype + precedent both cited
 
     def test_escalated_has_no_archetype(self, tmp_path):
         report = tmp_path / "report.md"
@@ -330,12 +323,10 @@ class TestJudgeGating:
         assert fm is not None
         assert fm.get("status") == "escalated"
         assert fm.get("matched_archetype") is None
-        # The gating check: no archetype → no-archetype mode
 
     def test_escalation_mode_prompt(self):
-        """Escalation mode: status=escalated drives the mode, not what's cited."""
         prompt = assemble_prompt(
-            "alert", "log", "report", None, None, "salt",
+            "alert", "log", "report", None, "salt",
             status="escalated",
         )
         assert "Mode: **escalation**" in prompt

@@ -14,10 +14,7 @@ Exit codes:
 """
 
 import json
-import os
 import re
-import secrets
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,12 +24,17 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts import permissions as permissions_module
 from hooks.scripts.frontmatter import parse_yaml_frontmatter
+from hooks.scripts.judge_runner import (
+    get_run_salt,
+    invoke_judge,
+    parse_verdict,
+    wrap_untrusted,
+)
 from hooks.scripts.run_context import get_runs_dir
 from schemas.precedent import check_recency, DEFAULT_MAX_AGE_DAYS
 from schemas.report_frontmatter import parse_frontmatter
 
 JUDGE_PROMPT_PATH = Path(__file__).resolve().parent / "judge_prompt.md"
-JUDGE_MODEL = os.environ.get("SOC_AGENT_JUDGE_MODEL", "haiku")
 
 
 # ---------------------------------------------------------------------------
@@ -459,42 +461,26 @@ def read_file_safe(path: Path, label: str) -> str:
     return f"[{label} not found: {path.name}]"
 
 
-def get_run_salt(run_dir: Path) -> str:
-    """Get the per-run salt from meta.json, or generate a fallback."""
-    meta_path = run_dir / "meta.json"
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text())
-            return meta.get("salt", "")
-        except (json.JSONDecodeError, KeyError):
-            pass
-    # Fallback: generate a per-invocation salt
-    return secrets.token_hex(8)
-
-
-def wrap_untrusted(content: str, tag: str, salt: str) -> str:
-    """Wrap untrusted content in salted delimiters."""
-    return f"<run-{salt}-{tag}>\n{content}\n</run-{salt}-{tag}>"
-
-
 def assemble_prompt(
     alert_data: str,
     investigation_log: str,
     report: str,
-    archetype: str | None,
     precedent: str | None,
     salt: str,
     status: str = "resolved",
 ) -> str:
-    """Assemble the judge prompt from the template and context.
+    """Assemble the slimmed Tier 2 judge prompt.
 
-    Two judge modes:
-    - `full`: status=resolved. SHAPE_MATCH + COMPLETENESS + GROUNDING_MATCH +
-       the three universal criteria. Pass/flag gates whether resolution stands.
-    - `escalation`: status=escalated. SHAPE_MATCH + COMPLETENESS still run
-       (advisory context for the human analyst) when shape was attempted,
-       plus the three universal criteria. The report stays escalated
-       regardless of verdict.
+    The slimmed judge (post-CONCLUDE refactor) only validates the
+    report↔log delta plus precedent transfer. Archetype / shape /
+    completeness / anchor-leg checks moved to the pre-CONCLUDE judges.
+
+    Two modes:
+    - `full`: status=resolved. INTERNAL_CONSISTENCY + EVIDENCE_SUFFICIENCY
+       are hard gates; PRECEDENT_TRANSFER fires when matched_ticket_id is
+       set, otherwise N/A.
+    - `escalation`: status=escalated. INTERNAL_CONSISTENCY +
+       EVIDENCE_SUFFICIENCY are hard gates; PRECEDENT_TRANSFER is N/A.
     """
     template = JUDGE_PROMPT_PATH.read_text()
 
@@ -507,63 +493,19 @@ def assemble_prompt(
     prompt = prompt.replace("{investigation_log}", safe_log)
     prompt = prompt.replace("{report}", report)
 
-    if archetype is not None:
-        safe_archetype = wrap_untrusted(archetype, "archetype", salt)
-        prompt = prompt.replace("{archetype}", safe_archetype)
-    else:
-        prompt = prompt.replace(
-            "{archetype}",
-            "[No archetype cited in this report]",
-        )
-
     if precedent is not None:
         safe_precedent = wrap_untrusted(precedent, "precedent", salt)
         prompt = prompt.replace("{precedent}", safe_precedent)
     else:
         prompt = prompt.replace(
             "{precedent}",
-            "[No matched ticket — grounding comes from anchors alone, "
-            "or report is escalated]",
+            "[No matched ticket — PRECEDENT_TRANSFER is N/A]",
         )
 
     mode = "full" if status == "resolved" else "escalation"
     prompt = prompt.replace("{judge_mode}", mode)
 
     return prompt
-
-
-JUDGE_TIMEOUT_SECONDS = int(os.environ.get("SOC_AGENT_JUDGE_TIMEOUT_SECONDS", "90"))
-
-
-def invoke_judge(prompt: str) -> tuple[str, int]:
-    """Invoke claude CLI with the judge prompt. Returns (output, returncode)."""
-    try:
-        result = subprocess.run(
-            ["claude", "-p", prompt, "--model", JUDGE_MODEL, "--output-format", "text"],
-            capture_output=True,
-            text=True,
-            timeout=JUDGE_TIMEOUT_SECONDS,
-        )
-        return result.stdout.strip(), result.returncode
-    except FileNotFoundError:
-        return "claude CLI not found", 1
-    except subprocess.TimeoutExpired:
-        return f"judge timed out after {JUDGE_TIMEOUT_SECONDS}s", 1
-
-
-def parse_verdict(output: str) -> tuple[str, str]:
-    """Parse the VERDICT line from judge output. Returns (pass|flag, reason)."""
-    for line in output.splitlines():
-        line = line.strip()
-        if line.startswith("VERDICT:"):
-            rest = line[len("VERDICT:"):].strip()
-            match = re.match(r"(PASS|FLAG)\s*[—\-]\s*(.*)", rest, re.IGNORECASE)
-            if match:
-                return match.group(1).upper(), match.group(2)
-            if "PASS" in rest.upper():
-                return "PASS", rest
-            return "FLAG", rest
-    return "FLAG", "could not parse judge verdict from output"
 
 
 def run_tier2(run_dir: Path, fields: dict) -> tuple[bool, str]:
@@ -587,24 +529,10 @@ def run_tier2(run_dir: Path, fields: dict) -> tuple[bool, str]:
                 f"'{matched_archetype}' could not be loaded"
             )
 
-    # Load the archetype README (story text) when an archetype is cited,
-    # so the judge can compare the report's narrative against the abstract
-    # pattern the archetype describes.
-    archetype_text: str | None = None
-    if matched_archetype:
-        archetype_readme = (
-            SOC_AGENT_ROOT
-            / "knowledge"
-            / "signatures"
-            / signature_id
-            / "archetypes"
-            / matched_archetype
-            / "README.md"
-        )
-        if archetype_readme.exists():
-            archetype_text = archetype_readme.read_text()
-
-    # Load artifacts
+    # Load artifacts. The slimmed Tier 2 judge no longer reads the
+    # archetype README — shape/completeness moved to the pre-CONCLUDE
+    # judges. Tier 2's only archetype-adjacent check is PRECEDENT_TRANSFER,
+    # which uses the precedent snapshot directly.
     salt = get_run_salt(run_dir)
     alert_text = read_file_safe(run_dir / "alert.json", "alert data")
     investigation_text = read_file_safe(run_dir / "investigation.md", "investigation log")
@@ -616,7 +544,6 @@ def run_tier2(run_dir: Path, fields: dict) -> tuple[bool, str]:
         alert_text,
         investigation_text,
         report_text,
-        archetype_text,
         precedent_text,
         salt,
         status=status,
