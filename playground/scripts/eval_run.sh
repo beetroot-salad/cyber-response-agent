@@ -54,7 +54,7 @@ fi
 # Paths
 # ---------------------------------------------------------------------------
 
-REPO_ROOT=/workspace
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PLUGIN_DIR="$REPO_ROOT/soc-agent"
 MCP_CONFIG="$REPO_ROOT/.claude/mcp_config.json"
 TOOLS_VENV="$PLUGIN_DIR/.venv/bin/python3"

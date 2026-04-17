@@ -11,7 +11,7 @@ language** — the structured companion file proposed in
 `docs/investigation-language.md`, §3. The pilot lives under
 `docs/experiments/investigation-language-pilot/`.
 
-**Working directory assumption.** All paths are relative to `/workspace/`.
+**Working directory assumption.** All paths are relative to the repo root (mounted at `/workspace/` in the devcontainer).
 
 ---
 

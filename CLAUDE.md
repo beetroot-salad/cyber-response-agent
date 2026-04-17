@@ -54,6 +54,8 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 
 ## Project Structure
 
+Paths shown as mounted in the devcontainer (`/workspace/` maps to the repo root on the host).
+
 ```
 /workspace/
 ├── soc-agent/                     # Claude Code plugin (all agent content)

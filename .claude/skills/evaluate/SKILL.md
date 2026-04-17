@@ -8,7 +8,7 @@ argument-hint: "<rule_id> [--window 1h]"
 
 Evaluates the `soc-agent:investigate` skill against one real Wazuh alert from the playground. Use this to measure agent quality, observe failure modes, identify regressions after skill or harness changes, and compare against the baseline cost / latency.
 
-**Working directory assumption.** All paths in this skill are relative to `/workspace/` (the repo root). The agent's shell cwd should be that — run `pwd` if unsure.
+**Working directory assumption.** All paths in this skill are relative to the repo root (mounted at `/workspace/` in the devcontainer). The agent's shell cwd should be that — run `pwd` if unsure.
 
 ## Workflow
 
@@ -28,8 +28,8 @@ Evaluates the `soc-agent:investigate` skill against one real Wazuh alert from th
 
    Verify the alert landed:
    ```bash
-   /workspace/soc-agent/.venv/bin/python3 \
-     /workspace/soc-agent/scripts/fetch_alert.py <rule_id> --window 5m
+   soc-agent/.venv/bin/python3 \
+     soc-agent/scripts/fetch_alert.py <rule_id> --window 5m
    ```
 
 2. **Run the eval harness** in the background:

@@ -9,6 +9,7 @@ description: Read-only live host state queries against playground containers via
 
 ## Access Pattern
 
+Path shown for devcontainer context (`/workspace/` = repo root):
 ```
 python3 /workspace/soc-agent/scripts/tools/host_query.py [--host HOST] <subcommand> [args...]
 ```
