@@ -166,6 +166,7 @@ stdbuf -oL -eL claude \
         "Bash(python3 scripts/tools/wazuh_cli.py *)" \
         "Bash(python3 scripts/tools/host_query.py *)" \
         "Bash(python3 scripts/invlang/cli.py *)" \
+        "Bash(bash scripts/invlang/run.sh *)" \
         "Bash(python3 hooks/scripts/write_state.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/contextualize_preload.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/preflight.py *)" \
@@ -176,6 +177,7 @@ stdbuf -oL -eL claude \
         "Bash(python3 /workspace/soc-agent/scripts/tools/wazuh_cli.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/tools/host_query.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/invlang/cli.py *)" \
+        "Bash(bash /workspace/soc-agent/scripts/invlang/run.sh *)" \
         "Bash(python3 /workspace/soc-agent/hooks/scripts/write_state.py *)" \
         "mcp__wazuh__*" \
         "Task" \
