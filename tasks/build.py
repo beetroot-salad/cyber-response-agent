@@ -345,7 +345,11 @@ header {
   font-family: ui-monospace, monospace;
   margin-left: auto;
   white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.1s;
 }
+.card-id:hover { color: var(--text); }
+.card-id.copied { color: #059669; }
 
 /* ── Expanded body ────────────────────────────────────────────────────── */
 .card-body {
@@ -827,7 +831,7 @@ function renderCard(task) {
     <div class="card-meta">
       ${badges}
       ${hasBody ? '<span class="expand-hint">···</span>' : ''}
-      <span class="card-id">${esc(task.id)}</span>
+      <span class="card-id" title="Click to copy">${esc(task.id)}</span>
     </div>
     ${depHTML}
     ${hasBody ? `<div class="card-body">${esc(task.body)}</div>` : ''}
@@ -844,10 +848,28 @@ function renderCard(task) {
     });
   });
 
-  // Body expand (click card, not badge or edit-btn)
+  // Card ID click → copy to clipboard
+  const idEl = card.querySelector('.card-id');
+  idEl.addEventListener('click', async e => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(task.id);
+      const original = idEl.textContent;
+      idEl.textContent = 'copied';
+      idEl.classList.add('copied');
+      setTimeout(() => {
+        idEl.textContent = original;
+        idEl.classList.remove('copied');
+      }, 1000);
+    } catch (err) {
+      toast('Copy failed: ' + err.message, 'error');
+    }
+  });
+
+  // Body expand (click card, not badge, edit-btn, or card-id)
   if (hasBody) {
     card.addEventListener('click', e => {
-      if (e.target.closest('.edit-btn') || e.target.closest('.badge')) return;
+      if (e.target.closest('.edit-btn') || e.target.closest('.badge') || e.target.closest('.card-id')) return;
       card.classList.toggle('expanded');
     });
   }
