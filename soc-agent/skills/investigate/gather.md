@@ -49,7 +49,7 @@ For every bullet in the lead definition's **What to Characterize** section, repo
 Emit **exactly one** of the following on stdout. Use the first matching condition:
 
 **ESCALATE** — emit when any of:
-- The health probe verdict is `elevated`, `low`, or `broken`
+- The health probe verdict is `elevated`, `low`, or `broken` (broken = real tooling failure: `count_fn_error` or `baseline_no_samples`)
 - The template doesn't exist for the requested `vendor`, or required `entity_bindings` are missing / don't map to the template's `entity_fields`
 - The SIEM CLI returns an error you cannot resolve by re-quoting the query
 - The lead's "What to Characterize" requires a follow-up query (a second probe, a baseline shift) that is not in the template
@@ -61,7 +61,9 @@ health_probe: { ... full probe JSON if it ran, else null }
 context: "{1-2 sentences: what you tried, what blocked you. Include partial observations if any.}"
 ```
 
-**FINDING** — emit when probe was `normal` (or skipped) and the lead executed cleanly:
+A probe verdict of `inconclusive` (baseline too sparse, or all-zero) is **not** escalation-worthy — the data source is intermittent by nature (cron probes, batch jobs, on-demand flows). Proceed with the lead and emit a `finding`; the probe JSON in the output will record the inconclusive baseline for the audit trail.
+
+**FINDING** — emit when probe was `normal` / `inconclusive` (or skipped) and the lead executed cleanly:
 
 ```yaml
 result: finding

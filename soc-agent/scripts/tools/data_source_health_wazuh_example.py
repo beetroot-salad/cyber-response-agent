@@ -64,8 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--incident-start", required=True, help="Incident window start (ISO 8601 UTC).")
     p.add_argument("--incident-end", required=True, help="Incident window end (ISO 8601 UTC).")
     p.add_argument("--samples", type=int, default=5, help="Number of baseline windows to sample (default: 5).")
-    p.add_argument("--sample-hours", type=int, default=3, help="Length of each baseline window in hours (default: 3).")
-    p.add_argument("--lookback-days", type=int, default=10, help="How far back to draw baseline samples from (default: 10).")
+    p.add_argument("--lookback-days", type=int, default=10, help="How far back to draw baseline samples from (default: 10). Each baseline window matches the incident window's duration (shift-query pattern).")
     p.add_argument("--exclude-recent-hours", type=int, default=24, help="Buffer between baseline pool and incident start, to avoid contamination (default: 24).")
     p.add_argument("--k", type=float, default=2.0, help="Stdev multiplier for elevated/low thresholds (default: 2.0).")
     p.add_argument("--seed", type=int, help="Optional RNG seed for reproducible sampling.")
@@ -96,7 +95,6 @@ def main() -> int:
         incident_window,
         args.reporting_agent,
         samples=args.samples,
-        sample_hours=args.sample_hours,
         lookback_days=args.lookback_days,
         exclude_recent_hours=args.exclude_recent_hours,
         k=args.k,
