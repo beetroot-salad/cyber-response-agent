@@ -135,6 +135,76 @@ def validate_precedent_content(
     return errors
 
 
+def validate_temporal_anchors_reconfirmed(
+    matched_archetype: str,
+    matched_ticket_id: str,
+    signature_id: str,
+    anchors_consulted: list,
+) -> list[str]:
+    """Enforce: every temporal anchor cited by the precedent must be
+    re-confirmed in this investigation.
+
+    A precedent's `anchors_at_time` may mark entries with `temporal: true`
+    — confirmations that were time-bounded at the moment the past ticket
+    closed (business trip, change window, deploy run, on-call shift).
+    Temporal confirmations do not transfer forward in time: a later alert
+    with the same shape and entities cannot inherit that disposition
+    unless the temporal state is re-confirmed now.
+
+    For each `temporal: true` entry in the precedent, the current report's
+    `trust_anchors_consulted` must contain a matching entry with
+    `result: confirmed`. Otherwise the precedent match is stale and
+    grounding fails.
+    """
+    errors: list[str] = []
+    candidate = _precedent_path(signature_id, matched_archetype, matched_ticket_id)
+    if not candidate.exists():
+        return errors
+
+    try:
+        data = json.loads(candidate.read_text())
+    except (json.JSONDecodeError, OSError):
+        return errors  # shape errors reported by validate_precedent_content
+
+    anchors_at_time = data.get("anchors_at_time") or []
+    if not isinstance(anchors_at_time, list):
+        return errors
+
+    temporal_anchors = [
+        entry for entry in anchors_at_time
+        if isinstance(entry, dict) and entry.get("temporal") is True and entry.get("anchor")
+    ]
+    if not temporal_anchors:
+        return errors
+
+    consulted_by_name: dict = {}
+    for entry in anchors_consulted or []:
+        if isinstance(entry, dict) and entry.get("anchor"):
+            consulted_by_name[entry["anchor"]] = entry
+
+    for tanchor in temporal_anchors:
+        name = tanchor["anchor"]
+        current = consulted_by_name.get(name)
+        if current is None:
+            errors.append(
+                f"precedent '{matched_ticket_id}' cites temporal anchor "
+                f"'{name}' (time-bounded confirmation at ticket close) but "
+                f"this investigation did not re-consult it; temporal "
+                f"confirmations do not transfer forward in time"
+            )
+            continue
+        result = current.get("result", "")
+        if result != "confirmed":
+            errors.append(
+                f"precedent '{matched_ticket_id}' cites temporal anchor "
+                f"'{name}' as confirmed at ticket close, but this "
+                f"investigation's re-confirmation returned '{result}'; "
+                f"temporal grounding is stale"
+            )
+
+    return errors
+
+
 def check_precedent_exists(
     matched_archetype: str,
     matched_ticket_id: str,
@@ -338,6 +408,14 @@ def validate_tier1(report_path: Path) -> tuple[bool, list[str], dict | None]:
                         report.signature_id,
                     )
                     errors.extend(content_errors)
+
+                    temporal_errors = validate_temporal_anchors_reconfirmed(
+                        report.matched_archetype,
+                        report.matched_ticket_id,
+                        report.signature_id,
+                        report.trust_anchors_consulted,
+                    )
+                    errors.extend(temporal_errors)
 
     return len(errors) == 0, errors, fields
 

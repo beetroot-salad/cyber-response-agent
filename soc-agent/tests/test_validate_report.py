@@ -30,6 +30,7 @@ from hooks.scripts.validate_report import (
     playbook_has_screen_section,
     validate_archetype_anchors,
     validate_precedent_content,
+    validate_temporal_anchors_reconfirmed,
     validate_tier1,
     wrap_untrusted,
 )
@@ -415,6 +416,97 @@ class TestValidatePrecedentContent:
         )
         errors = validate_precedent_content(
             "test-arch", "SEC-001", "no-config-sig"
+        )
+        assert errors == []
+
+
+class TestTemporalAnchorReconfirmation:
+    """Rule: precedents citing temporal anchors require re-confirmation today.
+
+    A `temporal: true` anchor in the precedent's anchors_at_time means the
+    grounding fact was time-bounded at ticket close (business trip, change
+    window, on-call shift). It does not transfer forward — the current
+    investigation must re-confirm it via trust_anchors_consulted.
+    """
+
+    def _with_temporal_anchor(self, name: str = "travel-authorization"):
+        return _valid_precedent_dict(anchors_at_time=[
+            {"anchor": name, "result": "confirmed", "temporal": True, "citation": "x"},
+        ])
+
+    def test_no_temporal_anchors_passes(self, fake_root):
+        _make_precedent_file(
+            fake_root, "sig", "arch", "SEC-001",
+            _valid_precedent_dict(anchors_at_time=[
+                {"anchor": "cdn-allowlist", "result": "confirmed", "temporal": False},
+            ]),
+        )
+        errors = validate_temporal_anchors_reconfirmed(
+            "arch", "SEC-001", "sig", anchors_consulted=[],
+        )
+        assert errors == []
+
+    def test_temporal_anchor_reconfirmed_passes(self, fake_root):
+        _make_precedent_file(
+            fake_root, "sig", "arch", "SEC-001", self._with_temporal_anchor(),
+        )
+        errors = validate_temporal_anchors_reconfirmed(
+            "arch", "SEC-001", "sig",
+            anchors_consulted=[
+                {"anchor": "travel-authorization", "kind": "authoritative-source",
+                 "result": "confirmed", "citation": "HR trip #42"},
+            ],
+        )
+        assert errors == []
+
+    def test_temporal_anchor_not_consulted_fails(self, fake_root):
+        _make_precedent_file(
+            fake_root, "sig", "arch", "SEC-001", self._with_temporal_anchor(),
+        )
+        errors = validate_temporal_anchors_reconfirmed(
+            "arch", "SEC-001", "sig", anchors_consulted=[],
+        )
+        assert len(errors) == 1
+        assert "travel-authorization" in errors[0]
+        assert "did not re-consult" in errors[0]
+
+    def test_temporal_anchor_refuted_fails(self, fake_root):
+        _make_precedent_file(
+            fake_root, "sig", "arch", "SEC-001", self._with_temporal_anchor(),
+        )
+        errors = validate_temporal_anchors_reconfirmed(
+            "arch", "SEC-001", "sig",
+            anchors_consulted=[
+                {"anchor": "travel-authorization", "kind": "authoritative-source",
+                 "result": "refuted", "citation": "no active trip"},
+            ],
+        )
+        assert len(errors) == 1
+        assert "stale" in errors[0]
+
+    def test_mixed_permanent_and_temporal(self, fake_root):
+        _make_precedent_file(
+            fake_root, "sig", "arch", "SEC-001",
+            _valid_precedent_dict(anchors_at_time=[
+                {"anchor": "approved-monitoring-sources", "result": "confirmed",
+                 "temporal": False},
+                {"anchor": "travel-authorization", "result": "confirmed",
+                 "temporal": True},
+            ]),
+        )
+        errors = validate_temporal_anchors_reconfirmed(
+            "arch", "SEC-001", "sig",
+            anchors_consulted=[
+                {"anchor": "approved-monitoring-sources", "kind": "authoritative-source",
+                 "result": "confirmed"},
+            ],
+        )
+        assert len(errors) == 1
+        assert "travel-authorization" in errors[0]
+
+    def test_missing_precedent_file_no_error(self, fake_root):
+        errors = validate_temporal_anchors_reconfirmed(
+            "arch", "MISSING", "sig", anchors_consulted=[],
         )
         assert errors == []
 
