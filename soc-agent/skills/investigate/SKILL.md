@@ -28,6 +28,14 @@ Other files under `hooks/scripts/` (infer_state, audit_tool_calls, budget_enforc
 
 ---
 
+## Investigation Language Schema
+
+You write structured YAML blocks into `investigation.md` at specific phases. The schema below governs all blocks. A PreToolUse hook (`invlang_validate.py`) validates every write — schema errors block the write with an explicit error message.
+
+!`cat ${CLAUDE_SKILL_DIR}/../../knowledge/invlang/schema.md`
+
+---
+
 ## Environment Readiness
 
 !`cd ${CLAUDE_SKILL_DIR}/../.. && python3 scripts/preflight.py --systems || true`
@@ -77,7 +85,7 @@ This means:
 1. **When uncertain, escalate.** A missed threat is catastrophically worse than escalating a benign alert. If two interpretations remain plausible after pursuing all leads, escalate. Your value is knowing when you *don't* know.
 2. **No remediation.** You investigate and recommend only. No blocking IPs, no account changes, no firewall rules.
 3. **Evidence over assumption.** If you don't have evidence, you don't know. Say so.
-4. **Maintain adversarial hypothesis.** Always keep at least one threat hypothesis active until explicitly refuted with `--` evidence. This is the "don't miss" principle — dangerous explanations stay on the table regardless of probability until the evidence rules them out.
+4. **Maintain adversarial hypothesis.** Always keep at least one threat hypothesis active until explicitly refuted with `--` evidence. This is the "don't miss" principle — dangerous explanations stay on the table regardless of probability until the evidence rules them out. Adversarial hypotheses are *upstream causal questions* — "did the attacker have what they needed?" — not downstream consequence checks ("did they succeed? is there lateral movement?"). Verifying downstream consequences (post-compromise scope, lateral movement, persistence) is incident response work; this agent's scope is triage. If evidence strongly suggests success and downstream scope is unknown, escalate — don't attempt IR inline.
 5. **No auto-close without archetype + grounding.** `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding — either every `required_anchors` entry confirmed OR a `matched_ticket_id` citing a valid precedent snapshot under the same archetype. An archetype that declares no required anchors cannot resolve without `matched_ticket_id`.
 6. **Fail safe.** Errors, timeouts, missing data — escalate with context gathered so far.
 7. **Stay in scope.** Investigate within the signature's detection domain. Don't expand scope — escalate instead.
@@ -185,6 +193,13 @@ Write an initial section in `{run_dir}/investigation.md`:
 **Archetype matches:** {ranked list from archetype-scan, one line each: name (strength) — key features}
 **Adversarial archetype:** {name} — {one-line reason why a real threat would hide inside this archetype, and how the current alert does or doesn't resemble it}
 **Data environment:** {reachable systems per preflight; any degraded systems and the leads they affect}
+```
+
+Then append the `prologue:` YAML block to `{run_dir}/investigation.md` (no `--ids` needed — it is the first block and the namespace is empty):
+```yaml
+prologue:
+  vertices: [...]   # one vertex per distinct entity from the alert
+  edges: [...]      # one edge per observed relationship/event between entities
 ```
 
 ### SCREEN (optional)
@@ -296,6 +311,16 @@ Append to `{run_dir}/investigation.md`:
   - *Pitfalls:* ...
 ```
 
+Then append the `hypothesize:` YAML block. Run first to confirm the ID namespace (prologue IDs already exist):
+```
+python3 scripts/invlang/cli.py --ids {run_dir}/investigation.md
+```
+```yaml
+hypothesize:
+  hypotheses: [...]   # one entry per active hypothesis; weight: null; status: active
+```
+Omit the `hypothesize:` block entirely for SCREEN-matched cases.
+
 ### GATHER
 
 **Goal:** Execute the selected lead(s) — query SIEM, read data, collect evidence.
@@ -347,6 +372,8 @@ Append to `{run_dir}/investigation.md`:
 **Raw observation:** {what you found — be specific with numbers, IPs, usernames}
 **Cross-lead notes:** {for composite only — consistencies, contradictions, refinements applied}
 ```
+
+**No YAML block at GATHER.** Characterize the raw observation in prose; do not interpret. The complete `gather:` lead block — including `query_details`, `outcome`, and `resolutions` — is written at ANALYZE once both observation and analysis are complete.
 
 ### ANALYZE
 
@@ -401,19 +428,25 @@ Append to `{run_dir}/investigation.md`:
 
 **Evidence:** {lead-name} — {key observation}
 
-**Assessment:**
-```yaml
-hypotheses:
-  ?hypothesis-1:
-    weight: "++"
-    reasoning: "observation matches prediction exactly"
-  ?hypothesis-2:
-    weight: "--"
-    reasoning: "observation contradicts core prediction"
-```
+**Assessment:** {prose reasoning — weight per hypothesis with justification}
 
 **Surviving hypotheses:** ?hypothesis-1
 **Next action:** CONCLUDE | HYPOTHESIZE (need lead-name to discriminate X)
+```
+
+Then append the complete `gather:` lead block. Run first to confirm the ID namespace:
+```
+python3 scripts/invlang/cli.py --ids {run_dir}/investigation.md
+```
+Write the full block in one write — `outcome` (observations + attribute_updates) and `resolutions` together. No partial blocks.
+```yaml
+gather:
+  - lead:
+      id: l-{nonce}
+      loop: {N}
+      name: {lead-name}
+      target: v-{id}
+      # ... query_details, outcome, resolutions per schema
 ```
 
 ### CONCLUDE
@@ -453,6 +486,22 @@ Append to `{run_dir}/investigation.md`:
 **Verdict:** {resolved|escalated} — {1-line rationale}
 **Confirmed hypothesis:** ?{name} | none
 **Trace:** {trace line}
+```
+
+Then append the `conclude:` YAML block before writing `report.md`. Run `--ids` first:
+```
+python3 scripts/invlang/cli.py --ids {run_dir}/investigation.md
+```
+`matched_archetype` must be the archetype directory name from `knowledge/signatures/{sig}/archetypes/{name}/`.
+```yaml
+conclude:
+  termination:
+    category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
+    rationale: {why the investigation halted}
+  disposition: benign | true_positive | unclear
+  confidence: high | medium | low
+  matched_archetype: {name} | null
+  summary: {1-2 sentence summary}
 ```
 
 Write `{run_dir}/report.md`:

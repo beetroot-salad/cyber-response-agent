@@ -1,6 +1,6 @@
 ---
 title: Rewrite investigation.md phase templates in SKILL.md (compressed YAML-style notation)
-status: backlog
+status: deferred
 groups: cost
 ---
 
