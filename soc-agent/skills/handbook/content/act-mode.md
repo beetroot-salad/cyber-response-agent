@@ -99,7 +99,7 @@ Every `close_ticket` decision — success, failure, or skip — appends one row 
 - **The hook always exits 0.** A broken connector, a stale `config/actions.yaml`, or an unexpected exception inside the dispatcher never crashes the agent session. Failures show up as `status: failure` rows in `action_audit.jsonl`.
 - **Per-signature opt-in.** The signature template ships with `mode.default: recommend` and empty `mitigation.actions`. Existing signatures graduate one at a time, deliberately. No global flip.
 - **Dry-run default.** Every caller except the production Stop hook uses dry-run. Production writes are reachable only through the one code path in `close_ticket_action.py` that passes `--execute`.
-- **Tier 1 and Tier 2 still run first.** Act mode sits on top of the existing two-tier report validation; a report that fails either tier never reaches the dispatcher. See `content/validation.md`.
+- **All CONCLUDE validation still runs first.** Act mode sits on top of the three-layer CONCLUDE validation (Layer 0 pre-close self-check, Tier 1 structural report check, Tier 2 semantic judge) plus `invlang_validate.py` on every investigation.md write. A report that fails any of those never reaches the dispatcher. See `content/validation.md`.
 
 ## What's not yet implemented
 

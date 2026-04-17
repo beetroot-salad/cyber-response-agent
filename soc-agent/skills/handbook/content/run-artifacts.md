@@ -18,7 +18,7 @@ runs/
 └── tool_trace.jsonl           # one JSON line per read-only tool call
 ```
 
-The runs directory path is configurable via `SOC_AGENT_RUNS_DIR`, defaulting to `soc-agent/runs/` under the plugin root. Inside it, every investigation gets its own UUID-named directory so artifacts can't collide.
+The runs directory path is set via `SOC_AGENT_RUNS_DIR` and is **required** — `scripts/setup_run.py` errors out if the variable is unset rather than falling back to a default. The canonical deployment uses a repo-root `runs/` directory (moved out from under `soc-agent/` in PR #68 so investigation artifacts live alongside, not inside, the plugin source tree). Inside it, every investigation gets its own UUID-named directory so artifacts can't collide.
 
 ## Per-investigation files
 
@@ -145,9 +145,14 @@ Three append-only JSONL files sit at the top of the runs directory. Each is a si
 ### `runs/audit.jsonl`
 
 **Who writes:** `hooks/scripts/investigation_summary.py` (Stop hook), once per completed investigation.
-**Contains:** one JSON object per investigation summarizing outcome — ticket id, signature id, status, disposition, confidence, leads pursued, trace, timestamps.
+**Contains:** one JSON object per investigation. Fields:
 
-This is the canonical "what did the agent decide" log. Downstream analytics (false-negative rate, mean time to disposition, resolution rate per signature) read this file.
+- **Outcome** — `run_id`, `ticket_id`, `signature_id`, `status`, `disposition`, `confidence`, `matched_archetype`, `matched_ticket_id`, `leads_pursued`.
+- **Timestamps** — `start_timestamp` (from `meta.json::created_at`), `end_timestamp` (Stop hook fire time, UTC ISO 8601).
+- **Token usage** — `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` (deduped by `message.id` when the persisted session transcript is used; taken from the `result` record when stream-json is piped in).
+- **Cost and models** — `total_cost_usd` (from the stream-json `result` record when present), `models` (sorted distinct list of every model name seen on assistant messages — typically one element, more if `/model` was used mid-session or a subagent ran on a different model).
+
+This is the canonical "what did the agent decide" log. Downstream analytics (false-negative rate, mean time to disposition, resolution rate per signature, cost per run) read this file.
 
 ### `runs/tool_audit.jsonl`
 

@@ -7,32 +7,13 @@ For per-phase detail, see `content/phases.md`.
 ## The loop
 
 ```
-       ┌──────────────────┐
-       │  CONTEXTUALIZE   │
-       └────────┬─────────┘
-                │
-      ┌─────────┼──────────┐
-      │         │          │
-      ▼         ▼          ▼
- ┌────────┐ ┌──────────┐ ┌──────────┐
- │ SCREEN │ │HYPOTHE-  │ │ CONCLUDE │ (ticket-context fast-resolve)
- └───┬────┘ │SIZE      │ └──────────┘
-     │      └────┬─────┘
-     ├──────────►│
-     ▼           ▼
- ┌──────────┐ ┌────────┐
- │ CONCLUDE │ │ GATHER │
- └──────────┘ └───┬────┘
-                  ▼
-              ┌────────┐
-              │ANALYZE │
-              └───┬────┘
-        ┌─────────┴─────────┐
-        ▼                   ▼
-  ┌──────────┐         ┌──────────┐
-  │HYPOTHE-  │◄────────│ CONCLUDE │
-  │SIZE      │  loop
-  └──────────┘
+CONTEXTUALIZE ─┬─→ CONCLUDE                        (ticket-context fast-resolve)
+               ├─→ SCREEN ─┬─→ CONCLUDE            (pattern match)
+               │           └─→ HYPOTHESIZE
+               ├─→ HYPOTHESIZE ─→ GATHER ─┬─→ ANALYZE ─┬─→ HYPOTHESIZE  (loop)
+               │                          │            └─→ CONCLUDE
+               │                          └─→ HYPOTHESIZE  (fork opened mid-lead)
+               └─→ GATHER                                (first lead is non-branching)
 ```
 
 The loop is a finite-state machine with six phases and a hard limit on hypothesis cycles.
@@ -41,32 +22,33 @@ The loop is a finite-state machine with six phases and a hard limit on hypothesi
 
 | Phase | What happens | Can transition to |
 |---|---|---|
-| `CONTEXTUALIZE` | Load signature knowledge, parse alert, integrate preloaded ticket-context + archetype-scan, build resolution map | `SCREEN`, `HYPOTHESIZE`, `CONCLUDE` |
+| `CONTEXTUALIZE` | Load signature knowledge, parse alert, integrate inline ticket-context + archetype-scan, build resolution map | `SCREEN`, `HYPOTHESIZE`, `GATHER`, `CONCLUDE` |
 | `SCREEN` *(optional)* | Cheap subagent attempts mechanical pattern match against known benign outcomes | `HYPOTHESIZE`, `CONCLUDE` |
-| `HYPOTHESIZE` | Form or update candidate explanations, select the most diagnostic lead | `GATHER` |
-| `GATHER` | Execute the selected lead(s), characterize raw observations | `ANALYZE` |
+| `HYPOTHESIZE` | Articulate a fork between competing explanations, select the discriminating lead | `GATHER` |
+| `GATHER` | Execute the selected lead(s), characterize raw observations | `ANALYZE`, `HYPOTHESIZE` |
 | `ANALYZE` | Weight evidence against each surviving hypothesis using `++ / + / - / --` | `HYPOTHESIZE`, `CONCLUDE` |
 | `CONCLUDE` | Write `report.md` with structured frontmatter | *(terminal)* |
 
 Full per-phase detail in `content/phases.md`.
 
-## The three paths out of CONTEXTUALIZE
+## The paths out of CONTEXTUALIZE
 
-CONTEXTUALIZE is the only legal initial phase, and it has three legal next-hops:
+CONTEXTUALIZE is the only legal initial phase, and it has four legal next-hops:
 
-1. **CONCLUDE** — ticket-context fast-resolve. If the preloaded ticket-context finds a recent prior investigation of the same pattern with `status=resolved` and `confidence=high`, and the current alert's entities and behavior match, the main agent validates the match and jumps straight to CONCLUDE with the prior precedent.
+1. **CONCLUDE** — ticket-context fast-resolve. If the ticket-context subagent finds a recent prior investigation of the same pattern with `status=resolved` and `confidence=high`, and the current alert's entities and behavior match, the main agent validates the match and jumps straight to CONCLUDE with the prior precedent.
 2. **SCREEN** — if the signature's playbook has a `## Screen` section, try the mechanical fast-path.
-3. **HYPOTHESIZE** — otherwise, enter the full loop directly.
+3. **HYPOTHESIZE** — articulate a fork between explanations, then pick the discriminating lead.
+4. **GATHER** — direct entry when the first lead is purely mechanical or interpretive (no fork has opened yet). Invlang v2.7 made HYPOTHESIZE on-demand rather than a mandatory gate; a run that opens with a characterization lead may skip HYPOTHESIZE and enter the loop at GATHER.
 
-The first two exist purely to compress work for known patterns. A signature with no playbook `## Screen` section and no prior matching investigation always enters the full loop via path 3.
+Paths 1–2 exist to compress work for known patterns. Paths 3–4 are the full-loop entries; the agent picks between them based on whether the very next lead's value depends on which competing story is true.
 
 ## The hypothesis loop
 
 `HYPOTHESIZE → GATHER → ANALYZE` is the core cycle. Each iteration picks one lead, runs it, weighs the result. ANALYZE decides whether to loop again (need more evidence) or conclude (mechanism confirmed and verified, or escalation triggered).
 
-A **loop** is counted by the state machine as the number of `HYPOTHESIZE` entries in the phase history.
+A **cycle** is counted by the state machine as the number of `HYPOTHESIZE` plus `ANALYZE` entries in the phase history. Counting both keeps the guardrail meaningful under invlang v2.7's on-demand `HYPOTHESIZE` — a run that keeps gathering without re-hypothesizing still accumulates cycles.
 
-**Maximum loops: 7.** The 8th attempt to transition into `HYPOTHESIZE` fails with a state machine error telling the agent it must transition to `CONCLUDE`. Most investigations resolve in 2–3 loops; if you're past 5 without convergence, the hypothesis space is probably incomplete and escalation is the right call anyway.
+**Maximum cycles: `MAX_LOOPS = 12`** (from `schemas/state.py`). The next transition into `HYPOTHESIZE` or `ANALYZE` past the cap is rejected with a state machine error directing the agent to `CONCLUDE`. Most investigations resolve in 2–3 cycles; past 8 without convergence, the hypothesis space is probably incomplete and escalation is the right call anyway.
 
 This hard limit exists for two reasons:
 - It bounds the worst-case wall-clock time for a stuck investigation
@@ -74,7 +56,11 @@ This hard limit exists for two reasons:
 
 ## State machine enforcement
 
-The loop is enforced by the `infer_state.py` PostToolUse hook, which fires automatically when the agent writes `## PHASE` section headers to `investigation.md`. On each Write/Edit to `investigation.md` the hook:
+The loop is enforced by two hooks on `investigation.md` that together prevent illegal phase transitions.
+
+**`infer_state_pre.py` (PreToolUse, Write|Edit)** fires *before* a write to `investigation.md` lands. It simulates the proposed post-write text (Write: `tool_input.content`; Edit: `old_string → new_string` against the on-disk file), extracts the `## PHASE` headers that would result, and rejects the write if any new transition is illegal or would exceed `MAX_LOOPS`. Because PreToolUse runs before the filesystem change, a rejected write never advances `state.json` — the agent fixes its plan and retries the same write from the same phase with zero recovery.
+
+**`infer_state.py` (PostToolUse, Write|Edit)** fires *after* the write succeeds. On each Write/Edit to `investigation.md` it:
 
 1. Extracts all `## PHASE` headers from the file
 2. Compares against the recorded history in `state.json`
@@ -82,17 +68,17 @@ The loop is enforced by the `infer_state.py` PostToolUse hook, which fires autom
 4. Counts investigation cycles in the history (every `HYPOTHESIZE` and every `ANALYZE` entry); rejects the transition if it would exceed `MAX_LOOPS`
 5. Writes the new state back to `state.json` with an updated timestamp and appended history
 
-If any check fails the hook exits with code 2, which blocks the write and feeds the error back to the agent. The agent must then adjust its plan — you cannot "talk around" the state machine.
+If any check fails either hook exits with code 2 — the Pre hook blocks the write outright, the Post hook signals failure to the agent after the write. The agent must then adjust its plan; you cannot "talk around" the state machine.
 
 ## Legal transitions
 
 From `schemas/state.py` (`TRANSITIONS` dict):
 
 ```python
-CONTEXTUALIZE → {SCREEN, HYPOTHESIZE, CONCLUDE}
+CONTEXTUALIZE → {SCREEN, HYPOTHESIZE, GATHER, CONCLUDE}
 SCREEN        → {HYPOTHESIZE, CONCLUDE}
 HYPOTHESIZE   → {GATHER}
-GATHER        → {ANALYZE}
+GATHER        → {ANALYZE, HYPOTHESIZE}
 ANALYZE       → {HYPOTHESIZE, CONCLUDE}
 CONCLUDE      → {}                           # terminal
 ```
@@ -100,13 +86,14 @@ CONCLUDE      → {}                           # terminal
 Things this explicitly forbids:
 
 - Starting anywhere other than `CONTEXTUALIZE`
-- Skipping from `CONTEXTUALIZE` directly to `GATHER` or `ANALYZE`
+- Skipping from `CONTEXTUALIZE` directly to `ANALYZE` (no evidence yet to analyze)
 - Skipping from `SCREEN` back to `CONTEXTUALIZE`
 - Going from `HYPOTHESIZE` straight to `CONCLUDE` (you must run a lead first)
+- Going from `GATHER` straight to `CONCLUDE` (you must ANALYZE the evidence first)
 - Backtracking from `CONCLUDE` (once the report is being written, the investigation is over)
 - Re-entering `SCREEN` after the loop has started
 
-The `HYPOTHESIZE → GATHER → ANALYZE` sequence is locked — you cannot skip GATHER and pretend you have evidence. You cannot "just re-analyze" existing evidence without selecting a new lead first.
+`GATHER → HYPOTHESIZE` exists so the agent can articulate a newly-opened fork mid-lead before ANALYZE, without pretending it already knew the fork. `CONTEXTUALIZE → GATHER` exists because HYPOTHESIZE is on-demand — a first lead that does not branch on competing stories can go directly to GATHER.
 
 ## `state.json` shape
 
@@ -151,7 +138,7 @@ Unbounded loops invite two failure modes:
 1. **Drift** — the agent keeps pulling new leads that feel relevant but don't discriminate between surviving hypotheses. It burns budget without converging.
 2. **Gaming the safety check** — if loops were unlimited, the agent could technically satisfy "pursued enough leads" by running many low-severity leads, none of which actually refute threat hypotheses.
 
-The 7-loop cap makes both impossible. Combined with the CONCLUDE-transition self-check (see `content/validation.md`) and the adversarial hypothesis rule, the loop has both a ceiling and a floor: you must articulate refutation and grounding evidence before resolving, and you cannot run more than a bounded number of rounds before escalating.
+The `MAX_LOOPS = 12` cap makes both impossible. Combined with the CONCLUDE-transition self-check (see `content/validation.md`) and the adversarial hypothesis rule, the loop has both a ceiling and a floor: you must articulate refutation and grounding evidence before resolving, and you cannot run more than a bounded number of rounds before escalating.
 
 ## How `investigation.md` relates to the state machine
 

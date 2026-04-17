@@ -146,7 +146,8 @@ The whole flow is composable: swap Wazuh for Splunk and the only thing that chan
 | If you want to... | Edit this |
 |---|---|
 | Add a new alert type | `knowledge/signatures/{new-id}/` + `config/signatures/{new-id}/permissions.yaml` |
-| Add a new SIEM or data source | `knowledge/environment/systems/{new-system}/` + `knowledge/environment/data-sources/` entries + a new adapter CLI |
+| Add a new SIEM or data source | `knowledge/environment/systems/{new-system}/` + `knowledge/environment/data-sources/` entries + a new adapter CLI under `scripts/tools/` that implements the base in `schemas/adapter_contract.py` (use `/connect` to bootstrap the scaffolding) |
+| Add a new ticketing connector | A new CLI under `scripts/tools/` implementing the ticketing family in `schemas/adapter_contract.py` (see `content/act-mode.md` for the `ActionContract` dry-run-first dispatch) |
 | Add a new reusable lead | `knowledge/common-investigation/leads/{new-lead}/definition.md` + per-vendor templates as needed |
 | Capture a cross-cutting investigation lesson | `knowledge/common-investigation/lessons/{lesson}.md` + `@import:{lesson}` from playbooks |
 | Change how trust anchors work | `knowledge/environment/operations/` and the `required_anchors` frontmatter of the archetypes that use them |

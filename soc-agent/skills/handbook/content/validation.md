@@ -78,6 +78,8 @@ Pulled from `validate_report.py::validate_tier1` and `schemas/report_frontmatter
    - The precedent's `archetype` field must match the parent directory name. A precedent whose `archetype` field disagrees with its filesystem location is rejected.
    - `captured_at` is present and within `precedent_max_age_days` of now. The max age is per-signature, set in `config/signatures/{signature_id}/permissions.yaml`, defaulting to the constant in `schemas/precedent.py`. Stale precedents are rejected.
 
+10. **Temporal anchor re-confirmation.** Precedent snapshots may mark entries in `anchors_at_time` with `temporal: true` for facts whose truth value can change over time (session timing, rotating credentials, current membership of an access group). A precedent cannot carry such facts forward unchanged — for every `temporal: true` anchor in the matched precedent, the current report's `trust_anchors_consulted` must list the same anchor with `result: confirmed`. Missing re-consultation or any non-confirmed result (`refuted`, `unavailable`) fails with "temporal grounding is stale." Non-temporal anchors inherit through the precedent as before; temporal ones do not.
+
 ### What Tier 1 does *not* check
 
 - Whether the narrative in `investigation.md` actually supports the report's conclusion

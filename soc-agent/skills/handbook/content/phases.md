@@ -26,11 +26,12 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
    Inline dispatch replaces an earlier background-preload design — under faster main-agent models the main agent read the preload output file before the detached child finished writing it, so the "preload" was effectively missing and the agent fell back to manually walking the signature knowledge tree (a significant cost hit). Synchronous inline dispatch eliminates that race.
 4. **Build a resolution map** of the data environment: for each lead in the playbook, which abstract operation does it need, which concrete operations and data sources cover it, and are those sources healthy right now? Data gaps are noted explicitly because they constrain which hypotheses can actually be discriminated in later phases.
 
-**Legal next phases:** `SCREEN`, `HYPOTHESIZE`, `CONCLUDE`.
+**Legal next phases:** `SCREEN`, `HYPOTHESIZE`, `GATHER`, `CONCLUDE`.
 
 - `CONCLUDE` only via ticket-context fast-resolve.
 - `SCREEN` only if the playbook has a `## Screen` section.
-- Otherwise `HYPOTHESIZE`.
+- `HYPOTHESIZE` when the first lead depends on which competing story is true (fork already open).
+- `GATHER` when the first lead is mechanical or interpretive and does not branch on a hypothesis fork. HYPOTHESIZE is on-demand (invlang v2.7) — a run may enter the loop at GATHER and only enter HYPOTHESIZE later if a fork opens.
 
 **investigation.md shape:**
 
@@ -82,7 +83,7 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 
 **Entry:** from `CONTEXTUALIZE`, `SCREEN` (fall-through), or `ANALYZE` (loop).
 
-**Goal:** Form or update candidate explanations and pick the most diagnostic lead.
+**Goal:** Articulate an investigation fork and pick the lead that collapses it. HYPOTHESIZE is **on-demand** — enter it when the very next lead branches on which explanation is true. If the immediate next lead is the same regardless of which story is true, you are not in a branching regime; stay in the mechanical/interpretive lane and return to GATHER.
 
 **Work:**
 
@@ -118,12 +119,21 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
    - *Composite lead* — one subagent, multiple sequential leads. Use when leads share the same entity and time window, and earlier results can refine later queries (e.g., auth session boundaries narrow the window for data access queries). Handle inline on the main model. See `docs/design-v3-tool-execution.md §11`.
    - *Ad-hoc / no template* — construct the query inline on the main model.
    - Leads targeting different entities should dispatch independently, in parallel where possible.
+
+   **Data-source health probe** (invoked by the gather subagent before every template-driven lead whose `definition.md` has a non-empty `data_tags`). The probe samples baseline windows from the recent past, compares against the incident-window rate, and emits a JSON verdict:
+
+   - `normal` — incident rate within `k·stdev` of baseline mean. Lead proceeds.
+   - `elevated` — incident rate above the band (real signal or pipeline issue). Subagent escalates.
+   - `low` — incident rate below the band (`recent_below_baseline`). Subagent escalates.
+   - `broken` — no usable signal. Trigger distinguishes the cause: `baseline_all_zero` (samples ran, all returned 0, incident also 0), `baseline_no_samples` (no baseline samples succeeded), `count_fn_error` (every SIEM call raised). Subagent escalates with the trigger.
+
+   Escalation bubbles back to the main agent as a gather result — the main agent treats the lead as unexecuted, not as "absence is evidence," and either re-dispatches inline with richer reasoning or picks a different lead. The verdict JSON (including every `sampled_windows` timestamp the probe touched) is written to `runs/tool_audit.jsonl` for post-hoc review. Leads with empty `data_tags` (lookup-only, ad-hoc, debug) skip the probe — there is no per-source rate signal to evaluate.
 2. **Read the lead definition.** `knowledge/common-investigation/leads/{lead-name}/definition.md` describes what to characterize and common pitfalls. If no definition exists for what you need, follow `leads/ad-hoc/definition.md`.
 3. **Execute the query.** If `leads/{lead-name}/templates/{vendor}.md` exists, use it — templates encode the base query in native syntax plus entity field mappings. Plug in entities and time range, then run via the SIEM CLI. If no template exists, construct the query yourself using `knowledge/environment/systems/` for field mappings and quirks.
 4. **Validate results.** Check data source health. If the result is zero, unexpectedly low, or the latest event is stale, follow `leads/data-source-debug/definition.md` before assuming "absence is evidence." A query that returned zero because the pipeline is broken is not the same as a query that returned zero because nothing happened.
 5. **Characterize, do not interpret.** "Timing is periodic, 5 min ± 3 s" is characterization. "This is a monitoring probe" is interpretation — save that for `ANALYZE`.
 
-**Legal next phase:** `ANALYZE`.
+**Legal next phases:** `ANALYZE` (normal path), or `HYPOTHESIZE` (a new fork opened mid-lead and should be articulated before weighing evidence).
 
 **investigation.md shape:**
 
