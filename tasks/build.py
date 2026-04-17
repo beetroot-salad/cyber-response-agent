@@ -339,6 +339,14 @@ header {
   margin-left: auto;
 }
 
+.card-id {
+  font-size: 10px;
+  color: #c5c1bd;
+  font-family: ui-monospace, monospace;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 /* ── Expanded body ────────────────────────────────────────────────────── */
 .card-body {
   display: none;
@@ -533,6 +541,7 @@ header {
           <option value="backlog">Backlog</option>
           <option value="todo">Todo</option>
           <option value="doing">Doing</option>
+          <option value="deferred">Deferred</option>
           <option value="done">Done</option>
         </select>
       </div>
@@ -751,8 +760,8 @@ function closeModal() {
 
 // ── Tag bar ────────────────────────────────────────────────────────────────
 function renderTagBar() {
-  // Never include done tasks in the filter bar regardless of showDone
-  const visibleTasks = tasks.filter(t => t.status !== 'done');
+  // Never include done/deferred tasks in the filter bar regardless of showDone
+  const visibleTasks = tasks.filter(t => t.status !== 'done' && t.status !== 'deferred');
   const visibleTags = new Set(visibleTasks.flatMap(t => t.groups || []));
   // Drop any active filters that are no longer visible
   for (const tag of [...activeTags]) {
@@ -785,7 +794,7 @@ function renderTagBar() {
 // ── Card ───────────────────────────────────────────────────────────────────
 function renderCard(task) {
   const hasBody  = !!task.body;
-  const isDone   = task.status === 'done';
+  const isDone   = task.status === 'done' || task.status === 'deferred';
   const dimmed   = activeTags.size > 0 && !(task.groups || []).some(g => activeTags.has(g));
   const deps     = task.depends_on || [];
 
@@ -818,6 +827,7 @@ function renderCard(task) {
     <div class="card-meta">
       ${badges}
       ${hasBody ? '<span class="expand-hint">···</span>' : ''}
+      <span class="card-id">${esc(task.id)}</span>
     </div>
     ${depHTML}
     ${hasBody ? `<div class="card-body">${esc(task.body)}</div>` : ''}
@@ -875,16 +885,17 @@ function renderCard(task) {
 
 // ── Board ──────────────────────────────────────────────────────────────────
 const COLS = [
-  { id: 'backlog', label: 'Backlog' },
-  { id: 'todo',    label: 'Todo'    },
-  { id: 'doing',   label: 'Doing'  },
-  { id: 'done',    label: 'Done'   },
+  { id: 'backlog',  label: 'Backlog'  },
+  { id: 'todo',     label: 'Todo'     },
+  { id: 'doing',    label: 'Doing'    },
+  { id: 'deferred', label: 'Deferred' },
+  { id: 'done',     label: 'Done'     },
 ];
 
 function renderBoard() {
   const board = document.getElementById('board');
   board.innerHTML = '';
-  const cols = showDone ? COLS : COLS.slice(0, 3);
+  const cols = showDone ? COLS : COLS.filter(c => c.id !== 'done' && c.id !== 'deferred');
 
   for (const col of cols) {
     const colTasks = tasks.filter(t => t.status === col.id);

@@ -1,6 +1,6 @@
 # Investigation Language
 
-**Status:** Implemented. Spec v2.5.
+**Status:** Implemented. Spec v2.6.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
 
 A structured schema for recording security investigations as graph
