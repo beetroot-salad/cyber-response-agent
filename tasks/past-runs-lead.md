@@ -1,6 +1,6 @@
 ---
 title: Expose past investigations as a lead (leads/past-investigations/)
-status: backlog
+status: deferred
 groups: reliability, knowledge, past-runs
 ---
 

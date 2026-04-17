@@ -1,6 +1,6 @@
 ---
 title: Temporal staleness check for past-run matches
-status: todo
+status: deferred
 groups: reliability, knowledge, past-runs
 ---
 
