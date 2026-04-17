@@ -3,9 +3,12 @@
 # in an isolated environment with full transcript capture.
 #
 # Isolation strategy:
-#   - Run dir lives outside /workspace, so the project CLAUDE.md (/workspace/CLAUDE.md)
-#     and the conversation auto-memory (/root/.claude/projects/-workspace/) are not
-#     auto-loaded by claude's traversal. We get a clean context.
+#   - Run dir lives under /workspace/runs/ (gitignored via **/runs/*). The project
+#     CLAUDE.md at /workspace/CLAUDE.md is still on the traversal path — claude picks
+#     it up because we cd into the run dir (a /workspace descendant). That's the
+#     intended behavior: eval runs should see the same project context a real
+#     investigation would. The conversation auto-memory at
+#     /root/.claude/projects/-workspace/ is still skipped (different path root).
 #   - --plugin-dir loads the soc-agent plugin for this session only.
 #   - --setting-sources user keeps user-level settings but skips project/local
 #     (which would be empty in /tmp anyway, but explicit is better).
@@ -21,7 +24,7 @@
 # Usage:
 #   playground/scripts/eval_run.sh <rule_id> [--window 4h] [--offset 0]
 #
-# Outputs (under /tmp/cra-eval/{run_id}/):
+# Outputs (under /workspace/runs/{run_id}/):
 #   alert.json        — the raw alert this run is investigating
 #   transcript.jsonl  — full event stream (model + tool + hook events)
 #   runs/{uuid}/      — the soc-agent run directory (investigation.md, report.md, state.json, ...)
@@ -87,7 +90,7 @@ source "$PLUGIN_DIR/.venv/bin/activate"
 # ---------------------------------------------------------------------------
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)-rule${RULE_ID}"
-EVAL_DIR="/tmp/cra-eval/$RUN_ID"
+EVAL_DIR="$REPO_ROOT/runs/$RUN_ID"
 mkdir -p "$EVAL_DIR/runs"
 
 echo "[+] Eval run: $RUN_ID"

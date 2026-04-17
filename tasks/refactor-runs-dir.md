@@ -1,6 +1,6 @@
 ---
 title: Refactor runs dir
-status: todo
+status: doing
 groups: evaluation
 ---
 

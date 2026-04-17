@@ -132,10 +132,12 @@ def main() -> int:
     # Generate a neutral run ID — decoupled from alert field names
     run_id = str(uuid.uuid4())
 
-    # Build run directory path
-    runs_base = Path(
-        os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs"))
-    )
+    # SOC_AGENT_RUNS_DIR is required — there is no default.
+    runs_base_val = os.environ.get("SOC_AGENT_RUNS_DIR")
+    if not runs_base_val:
+        print("Error: SOC_AGENT_RUNS_DIR is not set.", file=sys.stderr)
+        return 1
+    runs_base = Path(runs_base_val)
     run_dir = runs_base / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 

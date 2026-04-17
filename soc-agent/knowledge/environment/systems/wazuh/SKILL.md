@@ -37,13 +37,13 @@ python3 scripts/tools/wazuh_cli.py health-check
 python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND data.srcip:10.0.0.5' \
   --window 2h \
-  --run-dir /tmp/cra-eval/.../runs/<uuid>
+  --run-dir /workspace/runs/.../runs/<uuid>
 
 # All sshd events for an agent across an explicit time range
 python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND agent.name:web-server-01' \
   --start 2026-04-03T10:00:00Z --end 2026-04-04T10:00:00Z \
-  --run-dir /tmp/cra-eval/.../runs/<uuid>
+  --run-dir /workspace/runs/.../runs/<uuid>
 ```
 
 ## Files

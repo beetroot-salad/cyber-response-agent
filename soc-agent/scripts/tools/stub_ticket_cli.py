@@ -67,7 +67,10 @@ STUB_LOG_NAME = "stub_ticket_actions.jsonl"
 
 
 def _runs_dir() -> Path:
-    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_DIR / "runs")))
+    val = os.environ.get("SOC_AGENT_RUNS_DIR")
+    if not val:
+        raise RuntimeError("SOC_AGENT_RUNS_DIR is not set.")
+    return Path(val)
 
 
 # ---------------------------------------------------------------------------

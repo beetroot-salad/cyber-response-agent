@@ -1,6 +1,6 @@
 ---
 title: Model gathering leads as first-class citizens in invlang schema
-status: backlog
+status: doing
 groups: invlang, investigate, schema
 ---
 

@@ -1,8 +1,17 @@
 """Investigation-language companion loader.
 
-Parses v2.5 companion YAML files into Companion objects for use by the
-query classes. A companion is a single investigation expressed as the
-four-phase structure: prologue → hypothesize → gather → conclude.
+Two source shapes are supported:
+
+1. Live investigation.md (default). A single markdown file containing one or
+   more ```yaml fenced blocks — one per phase (prologue, hypothesize, gather,
+   conclude). Blocks are merged into a single companion body. This is the
+   canonical source for the query tool: it walks SOC_AGENT_RUNS_DIR for
+   `**/investigation.md` and loads every finished (prologue + gather +
+   conclude) investigation it finds.
+
+2. Hand-curated companion YAML (allowlist). A single .yaml file holding the
+   full four-phase companion body. Used for the pilot corpus; callers pass
+   an explicit (root, paths) allowlist.
 """
 
 from __future__ import annotations
@@ -21,16 +30,21 @@ import yaml
 # Paths
 # ---------------------------------------------------------------------------
 
-# workspace root: invlang/ → scripts/ → soc-agent/ → workspace
-_WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-
-# Default corpus root — override via INVLANG_CORPUS_ROOT env var
-_DEFAULT_CORPUS_ROOT = _WORKSPACE_ROOT / "docs/experiments/investigation-language-pilot"
-
-
 def _corpus_root() -> Path:
+    """Root directory the default loader scans for investigation.md files.
+
+    Priority: INVLANG_CORPUS_ROOT override → SOC_AGENT_RUNS_DIR. Both unset
+    raises — there is no filesystem default.
+    """
     env = os.environ.get("INVLANG_CORPUS_ROOT")
-    return Path(env) if env else _DEFAULT_CORPUS_ROOT
+    if env:
+        return Path(env)
+    runs = os.environ.get("SOC_AGENT_RUNS_DIR")
+    if runs:
+        return Path(runs)
+    raise RuntimeError(
+        "Neither INVLANG_CORPUS_ROOT nor SOC_AGENT_RUNS_DIR is set."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -114,8 +128,37 @@ def _case_id_from_path(path: Path) -> str:
     return path.parent.name if path.parent.name not in {"", "."} else path.stem
 
 
+def _merge_md_blocks(text: str) -> dict[str, Any]:
+    """Merge every ```yaml block in an investigation.md into one companion body.
+
+    Live investigations write one block per phase (prologue at CONTEXTUALIZE,
+    hypothesize at HYPOTHESIZE, gather lead at ANALYZE, conclude at CONCLUDE);
+    gather blocks may appear multiple times. This mirrors the merge in cli.py's
+    `--ids` handler.
+    """
+    merged: dict[str, Any] = {}
+    for match in YAML_BLOCK_RE.finditer(text):
+        try:
+            doc = yaml.safe_load(match.group(1))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        for key in ("prologue", "hypothesize", "conclude"):
+            if key in doc:
+                merged[key] = doc[key]
+        if "gather" in doc and isinstance(doc["gather"], list):
+            merged.setdefault("gather", [])
+            merged["gather"].extend(doc["gather"])
+    return merged
+
+
 def _load_from_path(path: Path) -> list[Companion]:
-    """Parse a file and return every companion it contains (0 or more)."""
+    """Parse a file and return every companion it contains (0 or more).
+
+    .yaml  — one companion per file (whole document is the body).
+    .md    — merge every ```yaml block into a single companion body.
+    """
     results: list[Companion] = []
     if path.suffix == ".yaml":
         try:
@@ -125,14 +168,12 @@ def _load_from_path(path: Path) -> list[Companion]:
         if _looks_like_companion(doc):
             results.append(Companion(_case_id_from_path(path), path, doc))
     elif path.suffix == ".md":
-        text = path.read_text()
-        for match in YAML_BLOCK_RE.finditer(text):
-            try:
-                doc = yaml.safe_load(match.group(1))
-            except yaml.YAMLError:
-                continue
-            if _looks_like_companion(doc):
-                results.append(Companion(_case_id_from_path(path), path, doc))
+        try:
+            merged = _merge_md_blocks(path.read_text())
+        except OSError:
+            return results
+        if _looks_like_companion(merged):
+            results.append(Companion(_case_id_from_path(path), path, merged))
     return results
 
 
@@ -163,17 +204,38 @@ def extract_ids(body: dict[str, Any]) -> dict[str, list[str]]:
     return {"vertices": vertices, "edges": edges, "hypotheses": hypotheses, "leads": leads}
 
 
+def discover_run_investigations(root: Path) -> list[Companion]:
+    """Walk `root` for `**/investigation.md` and load each as one companion.
+
+    Skips files that don't parse to a finished companion body (missing any of
+    prologue / gather / conclude). Used as the default corpus source.
+    """
+    if not root.exists():
+        return []
+    companions: list[Companion] = []
+    for md in sorted(root.rglob("investigation.md")):
+        companions.extend(_load_from_path(md))
+    return companions
+
+
 def load_corpus(
     root: Path | None = None,
-    paths: tuple[str, ...] = PILOT_CORPUS_FILES,
+    paths: tuple[str, ...] | None = None,
 ) -> list[Companion]:
-    """Load companions from the allowlisted file set.
+    """Load companions.
 
-    root  — corpus root directory. Defaults to INVLANG_CORPUS_ROOT env var,
-            then to docs/experiments/investigation-language-pilot/.
-    paths — relative file paths from root. Defaults to PILOT_CORPUS_FILES.
+    Default (paths=None): walk `root` (or _corpus_root()) for
+    `**/investigation.md` and merge each file's yaml blocks into one
+    companion. This is the live-investigation source.
+
+    Allowlist mode (paths is a tuple): load exactly those relative paths
+    from `root`. Used for the hand-curated pilot corpus; pass
+    `paths=PILOT_CORPUS_FILES` and `root=<pilot dir>` explicitly.
     """
     effective_root = root if root is not None else _corpus_root()
+    if paths is None:
+        return discover_run_investigations(effective_root)
+
     companions: list[Companion] = []
     for rel in paths:
         abs_path = effective_root / rel

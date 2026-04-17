@@ -150,8 +150,10 @@ GLOBAL OPTIONS
   --top N   Return at most N results (applied after class-specific default sort).
 
 CORPUS
-  Default: docs/experiments/investigation-language-pilot/ (PILOT_CORPUS_FILES).
-  Override: set INVLANG_CORPUS_ROOT env var.
+  Default: walks $SOC_AGENT_RUNS_DIR for **/investigation.md and merges each
+  file's ```yaml blocks into one companion. Finished investigations only
+  (prologue + gather + conclude required).
+  Override: set INVLANG_CORPUS_ROOT env var to point at a different runs tree.
 
 OUTPUT
   Default: human-readable.  --json: emit one JSON object per invocation.
