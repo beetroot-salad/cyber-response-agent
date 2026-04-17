@@ -1,12 +1,14 @@
 ---
-name: username-analysis
+name: user-analysis
 data_tags: [identity-state, auth-events]
+baseline: not-applicable   # Account classification is binary — account exists or doesn't; name matches a known pattern or doesn't. Diversity counts across events in the current alert window are observations on that alert, not rate claims against history.
 ---
 
 ## Goal
 
-Classify the username(s) involved in an alert against known patterns
-and determine what the username choice reveals about the actor's intent.
+Classify the user account(s) involved in an alert against known
+patterns and determine what the account choice reveals about the
+actor's intent.
 
 ## What to Characterize
 

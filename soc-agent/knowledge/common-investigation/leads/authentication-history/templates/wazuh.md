@@ -52,6 +52,32 @@ python3 scripts/tools/wazuh_cli.py query \
   --start 2026-04-03T10:00:00Z --window 24h
 ```
 
+## Baseline (Shift Query)
+
+To grade a rate claim, run the same query against a prior window of
+equal duration — shift `--start` back 7 days, keep `--window`
+identical. Compare event counts between the two windows.
+
+Current window (observed):
+```bash
+python3 scripts/tools/wazuh_cli.py query \
+  --query 'rule.groups:sshd AND data.srcip:10.0.0.5' \
+  --start 2026-04-17T10:00:00Z --window 2h
+```
+
+Baseline window (same entity, 7 days earlier, same duration):
+```bash
+python3 scripts/tools/wazuh_cli.py query \
+  --query 'rule.groups:sshd AND data.srcip:10.0.0.5' \
+  --start 2026-04-10T10:00:00Z --window 2h
+```
+
+For per-host failure-rate baselines, swap the entity field to
+`agent.name` and narrow to failed-auth rules (e.g.,
+`AND rule.id:(5710 OR 5712 OR 5716)`). If the baseline window is
+empty, report that explicitly — `0 → N` is stronger than
+`N → 10N` at the same absolute count.
+
 ## Customization Notes
 
 - To filter specific rule IDs (e.g., failed auth only): add `AND rule.id:5710`

@@ -117,15 +117,15 @@ knowledge/common-investigation/leads/
 │   ├── definition.md                 # What to characterize, pitfalls, data tags
 │   └── templates/
 │       └── wazuh.md                  # Wazuh query template: field mapping + base query + examples
+├── network-analysis/
+│   ├── definition.md
+│   └── templates/
+│       └── wazuh.md
 ├── process-lineage/
 │   └── definition.md
 ├── source-reputation/
 │   └── definition.md
-├── network-analysis/
-│   └── definition.md
-├── recent-alert-correlation/
-│   └── definition.md
-├── username-analysis/
+├── user-analysis/
 │   └── definition.md
 ├── data-source-debug/                # Meta-lead: debugging protocol (no templates)
 │   └── definition.md

@@ -1,6 +1,7 @@
 ---
 name: network-analysis
 data_tags: [network-events]
+baseline: optional       # Binary observations (connection to known-bad IP, DNS for newly-registered domain) are self-interpreting; volume/rate claims (beaconing frequency, bytes exfiltrated) require a shift-query comparison.
 ---
 
 ## Goal
@@ -34,3 +35,30 @@ or received, traffic patterns, and communication targets.
   either endpoint is a known proxy.
 - DNS-over-HTTPS bypasses standard DNS logging. Absence of DNS
   queries doesn't mean no domain resolution occurred.
+- Not every deployment ingests network telemetry into the SIEM.
+  Check `environment/data-sources/network-events.md` before assuming
+  flow data, firewall logs, or DNS logs are queryable — the absence
+  of events may mean "not logged here," not "did not happen."
+
+## Baseline
+
+- **When needed:** Claims about rate, volume, or beaconing cadence
+  ("30 MB exfiltrated," "connects every 60s," "10× normal outbound
+  to this peer") are only interpretable against a baseline. Binary
+  observations — connection to a known-bad IP, DNS for a newly
+  registered domain, use of a non-standard port for a standard
+  service — do not require one.
+- **Shift query:** Re-run the same entity-scoped query against a
+  prior window of equal duration, typically `--start` shifted `7d`
+  earlier with identical `--window`. For beaconing cadence, compare
+  inter-connection intervals between the two windows; for volume,
+  compare byte/packet sums. If the entity is a short-lived host or
+  container, substitute "peer host in the same role" for the shift
+  — a same-host 7d baseline is meaningless when the host didn't
+  exist then.
+- **Interpretation:** Prefer σ-framing — `>3σ above this entity's
+  7-day mean outbound bytes`, `beacon interval variance <5%
+  (unusually regular)`, `first-ever connection to this /24` — over
+  absolute thresholds. A `0 → N` jump (first contact, new peer,
+  new port) is stronger evidence than `N → 10N` at the same
+  absolute count; call it out explicitly.
