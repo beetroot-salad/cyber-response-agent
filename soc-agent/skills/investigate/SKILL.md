@@ -126,8 +126,7 @@ Use the corpus query subagent at any phase when you need this grounding. Dispatc
 Agent(
   subagent_type="general-purpose",
   model="sonnet",
-  prompt=<read skills/investigate/query-past-investigations.md,
-          substitute {question}="…", {structured_params}="none">
+  prompt="Read ${CLAUDE_SKILL_DIR}/query-past-investigations.md for your complete instructions. Your question: {question}. structured_params: none"
 )
 ```
 
@@ -142,6 +141,8 @@ The subagent returns its findings alongside the code or query it executed. Treat
 ---
 
 ## Phase Instructions
+
+!`echo ${CLAUDE_SKILL_DIR}`
 
 ### CONTEXTUALIZE
 
@@ -160,7 +161,7 @@ When reading multiple knowledge or environment files, batch independent reads in
      subagent_type="general-purpose",
      model="haiku",
      description="archetype-scan for {signature_id}",
-     prompt=<read skills/investigate/archetype-scan.md, substitute {run_dir}, {signature_id}, {runs_dir} verbatim>
+     prompt="Read ${CLAUDE_SKILL_DIR}/archetype-scan.md for your complete instructions. Substitute: run_dir={run_dir}, signature_id={signature_id}, runs_dir={runs_dir}"
    )
    ```
    When the subagent returns, read its `archetype_scan` ranked list AND its `adversarial_archetype` entry. Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation. Record both in `investigation.md` §CONTEXTUALIZE (see template below) — the adversarial archetype is the citable surface the CONCLUDE self-check's `archetype_shape_match` question asks about, so you need it in writing. If the subagent returned no useful output (malformed YAML, empty ranking), continue with the rest of CONTEXTUALIZE — archetypes are a useful prior, not required.
@@ -171,7 +172,7 @@ When reading multiple knowledge or environment files, batch independent reads in
      subagent_type="general-purpose",
      model="haiku",
      description="ticket-context for {identifier}",
-     prompt=<read skills/investigate/ticket-context.md, substitute {run_dir}, {runs_dir}, {signature_id} verbatim>
+     prompt="Read ${CLAUDE_SKILL_DIR}/ticket-context.md for your complete instructions. Substitute: run_dir={run_dir}, runs_dir={runs_dir}, signature_id={signature_id}"
    )
    ```
    When the subagent returns, read the `situation` paragraph, the `definite` / `maybe` clusters, and the `fast_resolve_candidates` (top ~3 similar prior investigations with their similarity dimensions). The fast-resolve *decision* is yours, not the subagent's: for each candidate, check whether the cited prior investigation + precedent file exist, whether the entity class and anchor confirmations still hold today, and whether the current alert's shape matches tightly enough to transfer the disposition. If a candidate clearly matches, go directly to CONCLUDE citing it. Otherwise use `situation` / `definite` / `maybe` for hypothesis ranking in HYPOTHESIZE.
@@ -214,7 +215,7 @@ prologue:
      subagent_type="general-purpose",
      model="haiku",
      description="screen for {signature_id}",
-     prompt=<read skills/investigate/screen.md, substitute {run_dir} and the playbook ## Screen section verbatim>
+     prompt="Read ${CLAUDE_SKILL_DIR}/screen.md for your complete instructions. Substitute: run_dir={run_dir}, signature_id={signature_id}"
    )
    ```
    The `model="haiku"` override is required — SCREEN is mechanical pattern matching against a short table of indicators, and pinning Haiku is the main cost lever for repeat-alert investigations (baseline screen cost drops from ~$0.30 at main-agent rate to ~$0.02). If a run shows Haiku consistently producing malformed YAML or failing to follow the indicator resolution rules, fall back to `model="sonnet"` — but do not remove the override entirely.

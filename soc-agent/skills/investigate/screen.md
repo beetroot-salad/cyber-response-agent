@@ -11,7 +11,7 @@ Read the following files from the run directory to understand the alert and inve
 
 ## Screen Patterns
 
-{screen_section}
+Read `knowledge/signatures/{signature_id}/playbook.md` and locate the `## Screen` section. That section's pattern table is what you match against below.
 
 ## Instructions
 
