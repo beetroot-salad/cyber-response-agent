@@ -1,6 +1,6 @@
 ---
 title: Migrate investigation.md to live YAML blocks — full v2.6 schema
-status: doing
+status: done
 groups: invlang, investigate, schema
 ---
 

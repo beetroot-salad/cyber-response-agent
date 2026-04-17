@@ -38,8 +38,16 @@ from hooks.scripts.run_context import get_runs_dir  # noqa: E402
 
 
 def find_active_run() -> Path | None:
-    """Find the most recently modified run directory (heuristic)."""
-    runs = get_runs_dir()
+    """Find the most recently modified run directory (heuristic).
+
+    This hook fires on every Read/Bash PostToolUse — including outside any
+    investigation — so a missing SOC_AGENT_RUNS_DIR must degrade to "no
+    active run" rather than crash. get_salt(None) already handles it.
+    """
+    try:
+        runs = get_runs_dir()
+    except RuntimeError:
+        return None
     if not runs.exists():
         return None
     candidates = [d for d in runs.iterdir() if d.is_dir() and (d / "meta.json").exists()]

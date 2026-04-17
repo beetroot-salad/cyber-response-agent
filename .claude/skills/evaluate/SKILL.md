@@ -36,7 +36,7 @@ Evaluates the `soc-agent:investigate` skill against one real Wazuh alert from th
    ```bash
    playground/scripts/eval_run.sh <rule_id> --window 1h
    ```
-   Each run takes 7-15 min wall clock and costs ~$2.40-$3.00. Output goes to a timestamped dir under `/tmp/cra-eval/`.
+   Each run takes 7-15 min wall clock and costs ~$2.40-$3.00. Output goes to a timestamped dir under `/workspace/runs/`. That dir is gitignored but persists across sessions, so past eval runs remain browsable — see **Historic runs** below.
 
 3. **Verify the run actually started** by reading the output file once after kicking off — don't assume from the task id alone. The harness should print `[+] Launching claude (isolated, transcript → ...)` and start producing transcript events. If the output file is silent after a few seconds, the launch failed (check for MCP config errors, missing alerts, missing `.env`, etc.).
 
@@ -44,16 +44,16 @@ Evaluates the `soc-agent:investigate` skill against one real Wazuh alert from th
 
 5. **When the run terminates**, postmortem with the analyzer:
    ```bash
-   playground/scripts/analyze_run.py /tmp/cra-eval/<run_id>/
+   playground/scripts/analyze_run.py /workspace/runs/<run_id>/
    ```
    The analyzer prints metadata, wall clock + cost, tool call breakdown (categorized OK vs denied), SIEM queries, subagent spawns, hook events, denied/errored results, and final disposition. Add `--terse` for the high-level metrics only.
 
 6. **Read the investigation artifacts** for qualitative scoring:
-   - `/tmp/cra-eval/<run_id>/runs/<uuid>/investigation.md` — phase-by-phase narrative
-   - `/tmp/cra-eval/<run_id>/runs/<uuid>/report.md` — final disposition + analyst hand-off
-   - `/tmp/cra-eval/<run_id>/runs/<uuid>/state.json` — phase progression
-   - `/tmp/cra-eval/<run_id>/runs/tool_audit.jsonl` — state-changing tool call audit
-   - `/tmp/cra-eval/<run_id>/runs/tool_trace.jsonl` — read-only tool calls (for debugging)
+   - `/workspace/runs/<run_id>/runs/<uuid>/investigation.md` — phase-by-phase narrative
+   - `/workspace/runs/<run_id>/runs/<uuid>/report.md` — final disposition + analyst hand-off
+   - `/workspace/runs/<run_id>/runs/<uuid>/state.json` — phase progression
+   - `/workspace/runs/<run_id>/runs/tool_audit.jsonl` — state-changing tool call audit
+   - `/workspace/runs/<run_id>/runs/tool_trace.jsonl` — read-only tool calls (for debugging)
 
 7. **Score against the dimensions** below.
 
@@ -157,6 +157,10 @@ Two changes together unblocked it in run #5, neither alone would have:
 2. **`model="haiku"` on the Agent spawn.** SKILL.md SCREEN section pins the subagent to Haiku via `Agent(subagent_type="general-purpose", model="haiku", ...)`. Without this the subagent inherits the main agent's model and the economic argument for offloading gets weaker.
 
 If either is removed, the agent will likely go back to inline screening. Treat both as load-bearing.
+
+## Historic runs
+
+All past eval runs persist under `/workspace/runs/<run_id>/` (gitignored but not wiped). The cost baseline table above references runs by number (`#1`…`#25`); the on-disk `<run_id>` is a `YYYYMMDD-HHMMSS-rule<N>` timestamp, so mapping a table row back to its artifacts is an `ls /workspace/runs/ | grep rule<N>` + date match. Useful when a new finding contradicts an older run and you want to re-read that run's `investigation.md`, `transcript.jsonl`, or `analyze_run.py` output instead of trusting the table summary.
 
 ## Known harness quirks (don't confuse for agent bugs)
 

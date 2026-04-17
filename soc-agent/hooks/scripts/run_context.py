@@ -31,14 +31,15 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
-
 _BASH_INV_PATH_RE = re.compile(r"([^\s'\"<>|&;()`$]*investigation\.md)")
 
 
 def get_runs_dir() -> Path:
-    """Return the configured runs directory (env override or default)."""
-    return Path(os.environ.get("SOC_AGENT_RUNS_DIR", str(SOC_AGENT_ROOT / "runs")))
+    """Return the configured runs directory. Fails fast if unset."""
+    val = os.environ.get("SOC_AGENT_RUNS_DIR")
+    if not val:
+        raise RuntimeError("SOC_AGENT_RUNS_DIR is not set.")
+    return Path(val)
 
 
 def extract_run_dir_from_path(file_path: str | Path | None) -> Path | None:

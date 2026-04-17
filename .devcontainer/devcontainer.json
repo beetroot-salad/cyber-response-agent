@@ -56,6 +56,10 @@
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
 
+  "remoteEnv": {
+    "SOC_AGENT_RUNS_DIR": "${containerWorkspaceFolder}/runs"
+  },
+
   "mounts": [
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=${localEnv:USERPROFILE}/.claude,target=/root/.claude,type=bind"

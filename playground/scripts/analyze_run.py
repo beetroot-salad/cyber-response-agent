@@ -11,7 +11,7 @@ Usage:
     analyze_run.py <eval_dir> --terse    # high-level metrics only
 
     # eval_dir is the directory `eval_run.sh` creates, e.g.
-    #   /tmp/cra-eval/20260410-141350-rule5710/
+    #   /workspace/runs/20260410-141350-rule5710/
     # which contains alert.json, transcript.jsonl, and runs/{uuid}/...
 
 Exit codes:
@@ -449,7 +449,7 @@ def section_disposition(run_dir: Path | None) -> None:
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Postmortem analyzer for soc-agent eval runs")
-    p.add_argument("eval_dir", help="Path to /tmp/cra-eval/{run_id}/ (eval_run.sh output dir)")
+    p.add_argument("eval_dir", help="Path to /workspace/runs/{run_id}/ (eval_run.sh output dir)")
     p.add_argument("--terse", action="store_true",
                    help="Print only metadata, timing, and disposition")
     args = p.parse_args()
