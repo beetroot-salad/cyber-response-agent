@@ -563,11 +563,16 @@ conclude:
   termination:
     category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
     rationale: {why the investigation halted}
-  disposition: benign | true_positive | unclear
+  disposition: benign | false_positive | true_positive | unclear
   confidence: high | medium | low
   matched_archetype: {name} | null
   summary: {1-2 sentence summary}
 ```
+
+**Translation to report.md frontmatter** (the report schema enums are narrower than invlang):
+
+- `conclude.disposition: unclear` → `disposition: inconclusive` in report.md. The other three values (`benign`, `false_positive`, `true_positive`) pass through unchanged.
+- Any anchor `result: partial` or `result: no-data` in `trust_anchor_result` blocks → `result: unavailable` when copied into `trust_anchors_consulted[]` in report.md. `confirmed` and `refuted` pass through unchanged.
 
 Write `{run_dir}/report.md`:
 ```markdown

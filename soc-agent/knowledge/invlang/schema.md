@@ -182,6 +182,12 @@ outcome:
     anchor_id: <string>
     kind: <string>
     result: confirmed | refuted | partial | no-data
+                                # NOTE: the report frontmatter `trust_anchors_consulted[].result`
+                                # enum is narrower — only {confirmed, refuted, unavailable}.
+                                # When copying an anchor result into report.md, map
+                                # `partial` → `unavailable` and `no-data` → `unavailable`.
+                                # `partial` stays usable in the investigation block for grading
+                                # (see Partial authority cap rule below).
     as_of: <iso>                # timestamp the answer is authoritative ABOUT
     authority_for_question: full | partial
   trust_root_reached: v-{id}    # omit when null
@@ -210,7 +216,11 @@ conclude:
   termination:
     category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
     rationale: <string>
-  disposition: benign | true_positive | unclear
+  disposition: benign | false_positive | true_positive | unclear
+                                     # NOTE: the report frontmatter `disposition` enum uses
+                                     # `inconclusive` instead of `unclear`. When copying this
+                                     # value into report.md, map `unclear` → `inconclusive`.
+                                     # The other three values pass through unchanged.
   confidence: high | medium | low
   matched_archetype: <name> | null   # use the archetype directory name from
                                      # knowledge/signatures/{sig}/archetypes/{name}/
