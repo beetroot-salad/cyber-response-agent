@@ -102,29 +102,33 @@ class TestValidateTransition:
 
 
 class TestCountLoops:
+    # A cycle = any HYPOTHESIZE or ANALYZE entry. One full H→G→A cycle yields 2.
     def test_no_loops(self):
         assert count_loops(["CONTEXTUALIZE"]) == 0
 
-    def test_one_loop(self):
+    def test_one_cycle_counts_two(self):
         history = ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE"]
-        assert count_loops(history) == 1
+        assert count_loops(history) == 2
 
-    def test_two_loops(self):
+    def test_two_cycles_count_four(self):
         history = [
             "CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE",
             "HYPOTHESIZE", "GATHER", "ANALYZE",
         ]
-        assert count_loops(history) == 2
+        assert count_loops(history) == 4
 
-    def test_max_loops(self):
-        history = ["CONTEXTUALIZE"]
-        for _ in range(MAX_LOOPS):
-            history.extend(["HYPOTHESIZE", "GATHER", "ANALYZE"])
-        assert count_loops(history) == MAX_LOOPS
+    def test_gather_analyze_without_rehypothesis_still_counts(self):
+        # Under on-demand HYPOTHESIZE, a GATHER→ANALYZE cycle with no
+        # re-entry to HYPOTHESIZE still advances the loop counter.
+        history = [
+            "CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE",
+            "GATHER", "ANALYZE",  # no new HYPOTHESIZE
+        ]
+        assert count_loops(history) == 3  # 1 H + 2 A
 
     def test_screen_does_not_count_as_loop(self):
         history = ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE"]
-        assert count_loops(history) == 1
+        assert count_loops(history) == 2  # 1 H + 1 A
 
 
 # --- make_state ---
@@ -280,8 +284,10 @@ class TestWriteStateScript:
             capture_output=True,
         )
 
-        # Run MAX_LOOPS full cycles (H->G->A)
-        for _ in range(MAX_LOOPS):
+        # Each H->G->A cycle adds 2 to count_loops (one H + one A). Run the
+        # maximum number of full cycles that still fits under the cap.
+        full_cycles = MAX_LOOPS // 2
+        for _ in range(full_cycles):
             for phase in ["HYPOTHESIZE", "GATHER", "ANALYZE"]:
                 result = subprocess.run(
                     [sys.executable, str(script), str(run_dir), phase],
@@ -290,7 +296,7 @@ class TestWriteStateScript:
                 )
                 assert result.returncode == 0, f"Failed at {phase}: {result.stderr}"
 
-        # The (MAX_LOOPS+1)th HYPOTHESIZE should be rejected
+        # Next HYPOTHESIZE would push count past MAX_LOOPS → rejected.
         result = subprocess.run(
             [sys.executable, str(script), str(run_dir), "HYPOTHESIZE"],
             capture_output=True,

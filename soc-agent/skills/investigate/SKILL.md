@@ -101,24 +101,22 @@ HYPOTHESIZE is **on-demand**, not a mandatory gate. Between leads, ASSESS: does 
 
 ```
 CONTEXTUALIZE
-  │
-  ▼
-ASSESS ◀──────────────────────────────────┐
-  │                                       │
-  ├─ branching? ── yes ──▶ HYPOTHESIZE    │
-  │                (articulate the fork)  │
-  │        no                             │
-  ▼        ▼                              │
-GATHER (pre-register readings iff         │
-        outcome is interpretation-        │
-        vulnerable — see schema           │
-        lead.predictions)                 │
-  │                                       │
-  ▼                                       │
-ANALYZE ──────────────────────────────────┘
-  │
-  ▼
-CONCLUDE
+      │
+      ▼
+   ASSESS ◀─────────────────────┐
+    │                            │
+    │  branching?                │
+    ├──── yes ───▶ HYPOTHESIZE   │
+    │                 │          │
+    └──── no ─────────┤          │
+                      ▼          │
+                   GATHER         │   (in GATHER, pre-register readings
+                      │           │    iff the outcome is interpretation-
+                      ▼           │    vulnerable — see schema
+                   ANALYZE ───────┘    lead.predictions)
+                      │
+                      ▼
+                   CONCLUDE
 ```
 
 ASSESS is a decision step the agent performs in its head, not a phase header. The phase headers you write to investigation.md are `## CONTEXTUALIZE`, `## SCREEN`, `## HYPOTHESIZE`, `## GATHER`, `## ANALYZE`, `## CONCLUDE` — no `## ASSESS`.
@@ -133,7 +131,7 @@ Transitions (enforced by the state machine hook):
 - GATHER → ANALYZE (normal path) or → HYPOTHESIZE (a new fork opened mid-lead)
 - ANALYZE → HYPOTHESIZE | CONCLUDE
 
-The state machine is enforced automatically — when you write a phase section header to `investigation.md`, a hook validates the transition and updates `state.json`. Phase headers must be exactly `## PHASENAME` with no prefix or suffix. If you attempt an illegal transition, the write is blocked. The hook reports loop count; a hard cap on HYPOTHESIZE re-entry is enforced — if you're approaching it without convergence, escalate.
+The state machine is enforced automatically — when you write a phase section header to `investigation.md`, a hook validates the transition and updates `state.json`. Phase headers must be exactly `## PHASENAME` with no prefix or suffix. If you attempt an illegal transition, the write is blocked. The hook reports loop count (every HYPOTHESIZE and every ANALYZE entry counts as one cycle); a hard cap is enforced — if you're approaching it without convergence, escalate.
 
 ---
 

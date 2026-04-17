@@ -181,9 +181,13 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
 # ---------------------------------------------------------------------------
 
 def count_hypothesize_loops(text: str) -> int:
-    """Number of `## HYPOTHESIZE` phase headers in the proposed text. This
-    matches `count_loops` over state.history but works against the proposed
-    investigation text directly, which the hook already has in hand."""
+    """Number of `## HYPOTHESIZE` phase headers in the proposed text.
+
+    Distinct from `schemas.state.count_loops`, which now counts HYPOTHESIZE +
+    ANALYZE cycles against MAX_LOOPS. This function is the complexity signal
+    for the CONCLUDE self-check gate — "how many times did the agent revisit
+    the hypothesis space" — where counting ANALYZE would dilute the signal.
+    """
     return sum(1 for p in iter_phase_headers(text) if p == "HYPOTHESIZE")
 
 

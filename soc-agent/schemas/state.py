@@ -40,10 +40,14 @@ TRANSITIONS: dict[Phase, set[Phase]] = {
 # CONTEXTUALIZE is the only valid initial phase
 INITIAL_PHASE = Phase.CONTEXTUALIZE
 
-# Maximum number of hypothesis-gather-analyze loops before forced conclusion.
-# 7 loops is generous — most investigations resolve in 2-3. If you're past 5
-# without convergence, the hypothesis space is likely incomplete.
-MAX_LOOPS = 7
+# Maximum number of investigation cycles before forced conclusion. A cycle is
+# any entry into HYPOTHESIZE or ANALYZE — both bound investigation depth, and
+# with on-demand HYPOTHESIZE (invlang v2.7) a run can accumulate many
+# GATHER→ANALYZE cycles without re-entering HYPOTHESIZE. Counting ANALYZE too
+# restores the guardrail: a runaway agent that keeps gathering without ever
+# re-hypothesizing still trips the cap. Bumped from 7 to 12 to compensate for
+# the broader counting rule — most investigations still resolve in 2-3 cycles.
+MAX_LOOPS = 12
 
 
 def validate_transition(current: Optional[str], proposed: str) -> tuple[bool, str]:
@@ -83,14 +87,15 @@ def validate_transition(current: Optional[str], proposed: str) -> tuple[bool, st
 
 
 def count_loops(history: list[str]) -> int:
-    """Count the number of HYPOTHESIZE phases in the history (proxy for loop count).
+    """Count investigation cycles in the history.
 
-    Note: with on-demand HYPOTHESIZE (invlang v2.7), loop count is no longer a
-    direct measure of investigation depth — a run can accumulate many GATHER/
-    ANALYZE cycles without re-entering HYPOTHESIZE. MAX_LOOPS still bounds
-    runaway hypothesis re-entry, which is the specific pathology we care about.
+    A cycle is any entry into HYPOTHESIZE or ANALYZE. With on-demand
+    HYPOTHESIZE (invlang v2.7), counting only HYPOTHESIZE would let a runaway
+    agent accumulate unbounded GATHER→ANALYZE cycles. Counting ANALYZE closes
+    that loophole — every completed gather/analyze cycle contributes one,
+    every hypothesis re-entry contributes one, and MAX_LOOPS bounds the sum.
     """
-    return sum(1 for p in history if p == Phase.HYPOTHESIZE.value)
+    return sum(1 for p in history if p in {Phase.HYPOTHESIZE.value, Phase.ANALYZE.value})
 
 
 def make_state(

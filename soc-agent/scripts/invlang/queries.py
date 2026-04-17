@@ -445,21 +445,30 @@ def _lead_effectiveness_rows(
             name = lead.get("name", "?")
             kind = _lead_kind(lead)
 
-            # When patterns are given, exclude leads that never touched a
-            # matching hypothesis — they can't contribute to either score.
+            # Pattern filtering applies per-score, not per-lead: a --hypothesis
+            # filter excludes a lead from the branching-delta accounting when
+            # its resolutions never touched a matching hypothesis, but the
+            # lead's interpretive routing (prediction_fidelity) and kind_mix
+            # are orthogonal to resolution targeting — gathering-dominant leads
+            # should remain visible. Only drop the lead entirely when no score
+            # would accept it.
+            touches_pattern = True
             if patterns:
                 touches_pattern = any(
                     matches(h_names.get(r.get("hypothesis", ""), ""))
                     for r in (lead.get("resolutions", []) or [])
                 )
-                if not touches_pattern:
+                # If the lead has no branching contribution and no predictions,
+                # the filter has nothing orthogonal to preserve — skip.
+                if not touches_pattern and not lead.get("predictions"):
                     continue
 
             total_counts[name] = total_counts.get(name, 0) + 1
             kind_mix.setdefault(name, {k: 0 for k in _LEAD_KINDS})[kind] += 1
 
-            # Branching-delta: only over leads with declared tests (fork-collapsing).
-            if lead.get("tests"):
+            # Branching-delta: only over leads with declared tests (fork-collapsing)
+            # AND (if filter set) touching a matching hypothesis.
+            if lead.get("tests") and touches_pattern:
                 resolutions = lead.get("resolutions", []) or []
                 if patterns:
                     deltas = [
@@ -474,6 +483,7 @@ def _lead_effectiveness_rows(
                     branching_deltas.setdefault(name, []).append(lead_mean)
 
             # Prediction-fidelity: route compliance for leads with predictions.
+            # Orthogonal to --hypothesis filtering.
             if lead.get("predictions"):
                 advance_tos = {
                     p.get("advance_to")

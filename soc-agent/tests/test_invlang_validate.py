@@ -26,8 +26,10 @@ from hooks.scripts.invlang_validate import (
     _check_trust_anchor_completeness,
     _check_screen_result_scope,
     _check_lead_predictions,
+    _check_route_compliance,
     _check_append_only,
     _merge_blocks,
+    collect_warnings,
     YAML_BLOCK_RE,
 )
 
@@ -502,6 +504,97 @@ class TestCheckLeadPredictions:
         }]}
         errors = _check_lead_predictions(merged)
         assert any("must be a list" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_route_compliance (warning channel)
+# ---------------------------------------------------------------------------
+
+
+def _merged_with_leads(leads):
+    return {"gather": leads}
+
+
+def _lead(name, predictions=None):
+    return {
+        "id": f"l-{name}", "loop": 1, "name": name, "target": "v-001",
+        "query_details": {}, "outcome": {},
+        "predictions": predictions,
+        "resolutions": [],
+    }
+
+
+class TestCheckRouteCompliance:
+    def test_no_predictions_is_silent(self):
+        merged = _merged_with_leads([_lead("a"), _lead("b")])
+        assert _check_route_compliance(merged) == []
+
+    def test_next_lead_matches_advance_to(self):
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "next-step"}]
+        merged = _merged_with_leads([_lead("first", preds), _lead("next-step")])
+        assert _check_route_compliance(merged) == []
+
+    def test_next_lead_mismatch_emits_warning(self):
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "expected"}]
+        merged = _merged_with_leads([_lead("first", preds), _lead("actual-other")])
+        warnings = _check_route_compliance(merged)
+        assert warnings
+        assert "actual-other" in warnings[0]
+        assert "expected" in warnings[0]
+
+    def test_terminal_lead_with_conclude_is_silent(self):
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "CONCLUDE"}]
+        merged = _merged_with_leads([_lead("first", preds)])
+        assert _check_route_compliance(merged) == []
+
+    def test_terminal_lead_without_conclude_warns(self):
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "next-step"}]
+        merged = _merged_with_leads([_lead("first", preds)])
+        warnings = _check_route_compliance(merged)
+        assert warnings
+        assert "terminal" in warnings[0].lower()
+
+    def test_hypothesize_advance_does_not_require_next_lead(self):
+        # advance_to HYPOTHESIZE is valid even on a terminal lead — the
+        # companion may continue in a follow-up HYPOTHESIZE block elsewhere.
+        # Here we check the non-terminal case: if next lead isn't HYPOTHESIZE-
+        # flavored (which it won't be — phases aren't leads), that's still a
+        # mismatch, and the warning is correct.
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "HYPOTHESIZE"}]
+        merged = _merged_with_leads([_lead("first", preds), _lead("some-other")])
+        warnings = _check_route_compliance(merged)
+        assert warnings
+
+
+class TestCollectWarnings:
+    def test_companion_with_route_warning(self):
+        text = (
+            "```yaml\n"
+            "gather:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: first\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome: {}\n"
+            "    predictions:\n"
+            "      - id: lp1\n"
+            "        if: x\n"
+            "        read_as: y\n"
+            "        advance_to: expected-next\n"
+            "    resolutions: []\n"
+            "  - id: l-002\n"
+            "    loop: 1\n"
+            "    name: actual-next\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome: {}\n"
+            "    resolutions: []\n"
+            "```\n"
+        )
+        warnings = collect_warnings(text)
+        assert warnings
+        assert "actual-next" in warnings[0]
 
 
 # ---------------------------------------------------------------------------
