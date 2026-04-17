@@ -55,7 +55,7 @@ _LEAD_REQUIRED = {"id", "loop", "name", "target", "query_details", "outcome", "r
 _TRUST_ANCHOR_FIELDS = {"anchor_id", "kind", "result", "as_of", "authority_for_question"}
 
 # Loose ID format: one of the known prefixes followed by alphanumerics and hyphens
-_ID_RE = re.compile(r"^[vehljk]-[a-z0-9][a-z0-9-]*$")
+_ID_RE = re.compile(r"^[vehl]-[a-z0-9][a-z0-9-]*$")
 
 
 # ---------------------------------------------------------------------------

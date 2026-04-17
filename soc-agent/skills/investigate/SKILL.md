@@ -313,7 +313,7 @@ Append to `{run_dir}/investigation.md`:
 
 Then append the `hypothesize:` YAML block. Run first to confirm the ID namespace (prologue IDs already exist):
 ```
-python3 scripts/invlang/cli.py --ids {run_dir}/investigation.md
+bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
 ```
 ```yaml
 hypothesize:
@@ -436,7 +436,7 @@ Append to `{run_dir}/investigation.md`:
 
 Then append the complete `gather:` lead block. Run first to confirm the ID namespace:
 ```
-python3 scripts/invlang/cli.py --ids {run_dir}/investigation.md
+bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
 ```
 Write the full block in one write — `outcome` (observations + attribute_updates) and `resolutions` together. No partial blocks.
 ```yaml
@@ -490,7 +490,7 @@ Append to `{run_dir}/investigation.md`:
 
 Then append the `conclude:` YAML block before writing `report.md`. Run `--ids` first:
 ```
-python3 scripts/invlang/cli.py --ids {run_dir}/investigation.md
+bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
 ```
 `matched_archetype` must be the archetype directory name from `knowledge/signatures/{sig}/archetypes/{name}/`.
 ```yaml

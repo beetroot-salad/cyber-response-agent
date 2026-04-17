@@ -1,6 +1,6 @@
 # Investigation Language — Agent Reference
 
-Schema v2.6. Validator: `scripts/invlang/validate.py` (fires automatically as a hook on investigation.md writes).
+Schema v2.6. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes).
 
 ---
 
@@ -328,7 +328,7 @@ lead:
 
 ---
 
-## Key validator rules (write-time)
+## Key rules
 
 1. **Edge authority.** `++`/`--` resolutions must cite at least one `siem-event`, `runtime-audit`, or `authoritative-source` edge in `supporting_edges`.
 2. **Refutation IDs.** Every `--` resolution requires non-empty `matched_refutation_ids` referencing IDs that exist in the target hypothesis.
