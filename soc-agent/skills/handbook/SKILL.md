@@ -6,7 +6,7 @@ allowed-tools: Read, Glob, Grep
 
 # Cyber Response Agent Handbook
 
-On-demand reference for the cyber-response-agent plugin. This skill explains how the plugin works — it does not investigate alerts. Use `/investigate` for actual alert work, `/author` for knowledge-base edits, or `/connect` (planned) for data source wiring. See the relationship table below.
+On-demand reference for the cyber-response-agent plugin. This skill explains how the plugin works — it does not investigate alerts. Use `/investigate` for actual alert work, `/author` for knowledge-base edits, or `/connect` for data source wiring. See the relationship table below.
 
 ## Who asks this skill questions
 
@@ -21,7 +21,7 @@ Either way, the job is the same: pull the smallest slice of documentation that a
 
 - Understanding what the plugin is and how its pieces fit together
 - Looking up the investigation loop and state machine
-- Checking how a particular guardrail works (two-tier validation, two-leg resolution requirement, adversarial hypothesis rule, loop cap)
+- Checking how a particular guardrail works (three-layer CONCLUDE validation, two-leg resolution requirement, adversarial hypothesis rule, loop cap, invlang companion validation)
 - Seeing the layout of `state.json`, `report.md`, `investigation.md`, or other run artifacts
 - Understanding how environment knowledge, signatures, and lead templates compose
 - Figuring out how to extend or customize the plugin (new signature, new SIEM, new lead)
@@ -49,6 +49,7 @@ Each file under `content/` is a standalone reference document. Start here, then 
 | `content/validation.md` | Three-layer CONCLUDE validation — Layer 0 (PreToolUse `validate_conclude.py`: ticket-context dispatch, `conclusion_checks.json` with hybrid `{lines, contains}` citations, always-fire self-check), Tier 1 (deterministic report-artifact validation: frontmatter, archetype shape, grounding leg), Tier 2 (semantic judge with 5 criteria, full vs no-precedent mode, salted delimiter injection defense) | Questions about why a CONCLUDE write or report was rejected, how the self-check works, how the shape and grounding legs are enforced, or how the plugin defends against prompt injection in the alert |
 | `content/run-artifacts.md` | Run directory layout — `alert.json`, `meta.json`, `investigation.md`, `state.json`, `report.md`, plus the cross-run `audit.jsonl`, `tool_audit.jsonl`, `tool_trace.jsonl` logs. Who writes each, who reads each, how they support debugging and live monitoring, and the ingest-time sanitization layer of the prompt-injection defense | Questions about what's in the runs directory, how to monitor or debug the agent, where a file comes from, the difference between `tool_audit.jsonl` and `tool_trace.jsonl`, or the ingest-side (Layer 1) half of prompt-injection defense. Pair with `content/validation.md` for the judge-side (Layer 2) half |
 | `content/knowledge-base.md` | How `common-investigation/`, `environment/`, `signatures/`, `config/signatures/`, and `schemas/` compose at runtime. The step-by-step of how a single lead resolves from playbook → definition → data source → template → CLI. Where new signatures, systems, leads, and lessons belong | Questions about how the knowledge layers fit together, where to add a new signature or SIEM, or the role of each directory |
+| `content/invlang.md` | The investigation language (invlang) — structured YAML companion blocks the agent writes into `investigation.md`, the `invlang_validate.py` PreToolUse hook's error + warning checks, append-only enforcement, edge-authority and refutation rules, and how companion vocabulary maps to report frontmatter at CONCLUDE | Questions about YAML blocks in `investigation.md`, why an invlang write was rejected, what a `gather:` / `hypothesize:` / `conclude:` block should contain, or how the companion schema relates to the final report |
 | `content/act-mode.md` | Post-investigation action dispatch — how a mature signature graduates from recommend to act, the Stop-stage `close_ticket_action` hook, the dry-run-first `ActionContract`, the precondition gate, the `runs/action_audit.jsonl` schema, and how `/connect` wires a ticketing connector | Questions about recommend vs act mode, per-signature graduation, the ticketing connector contract, or how the close-ticket Stop hook works |
 
 Additional content files may be added over time. When you add one, include it in the table above so `/handbook` can find it.
@@ -60,11 +61,11 @@ Additional content files may be added over time. When you add one, include it in
 | `/investigate` | shipped | Runs an actual alert investigation | "Please triage this alert" |
 | `/handbook` (this skill) | shipped | Explains the plugin itself | Pure reference questions, no state changes |
 | `/author` | shipped | Edits the knowledge base — signatures (context.md, playbook.md, archetype directories + precedent snapshots), leads, environment knowledge, permissions — with deterministic checks plus probe evidence feeding a self-reflection step | Creating or editing knowledge content; post-mortem archetype authoring |
-| `/connect` | planned | Connects a new data source: adapter CLI, environment knowledge scaffolding, credential setup instructions | Wiring up a new SIEM/EDR/lookup system |
+| `/connect` | shipped | Connects a new data source: adapter CLI, environment knowledge scaffolding, credential setup instructions | Wiring up a new SIEM/EDR/lookup system |
 
-`/author` is shipped — for questions about its design and contract, ground answers in `skills/author/design.md` (the design lives inside the skill directory). `/connect` is still referenced in the design but not yet implemented; for questions about it, answer from the design docs (`content/design.md`, `docs/design-v3-init-and-connect.md`) or say the skill isn't available yet.
+`/author` and `/connect` are both shipped — for questions about their design and contract, ground answers in `skills/author/design.md` and `skills/connect/design.md` (the design documents live inside each skill's directory).
 
-The handbook is read-only by contract. The `allowed-tools` frontmatter restricts this skill to `Read`, `Glob`, and `Grep` — no writes, no edits, no shell. If a question drifts into "now please do it," hand off to the appropriate shipped skill above, or tell the user the planned skill isn't available yet.
+The handbook is read-only by contract. The `allowed-tools` frontmatter restricts this skill to `Read`, `Glob`, and `Grep` — no writes, no edits, no shell. If a question drifts into "now please do it," hand off to the appropriate shipped skill above.
 
 ## House rules
 

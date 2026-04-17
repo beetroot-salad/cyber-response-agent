@@ -44,17 +44,24 @@ The plugin keeps the LLM in charge of *investigative strategy* — which hypothe
 
 The separation is deliberate: **Python code handles what can be verified structurally; the LLM handles what requires judgment.** No safety-critical check relies on LLM self-assessment of its own work — those are done by an independent judge (a separate Claude call, with untrusted content wrapped in per-run salted delimiters).
 
-See `content/validation.md` for the two-tier validation detail, and `content/investigation-loop.md` for the state machine.
+See `content/validation.md` for the three-layer CONCLUDE validation detail (Layer 0 PreToolUse self-check, Tier 1 deterministic report check, Tier 2 semantic judge), and `content/investigation-loop.md` for the state machine.
 
 ## The investigation loop at a glance
 
 ```
-CONTEXTUALIZE → [SCREEN] → HYPOTHESIZE → GATHER → ANALYZE → CONCLUDE
-                    │         ↑                      │
-                    │         └────── loop ──────────┘
-                    │                                │
-                    └────────── fast-path ───────────┘
+CONTEXTUALIZE ─┬─→ CONCLUDE        (ticket-context fast-resolve on repeat alerts)
+               ├─→ SCREEN ─┬─→ CONCLUDE  (mechanical pattern match)
+               │            └─→ HYPOTHESIZE
+               └─→ HYPOTHESIZE → GATHER → ANALYZE ─┬─→ HYPOTHESIZE (loop)
+                                                    └─→ CONCLUDE
 ```
+
+Three legal paths to CONCLUDE:
+- From CONTEXTUALIZE — ticket-context subagent matches a recent high-confidence prior investigation of the same pattern.
+- From SCREEN — a cheap subagent matches the alert against the playbook's known benign patterns.
+- From ANALYZE — the full loop converges (mechanism confirmed + verified + scoped, or explicit escalation).
+
+See `content/investigation-loop.md` for the authoritative diagram and legal transitions.
 
 - **CONTEXTUALIZE** — read signature knowledge, parse alert, integrate preloaded ticket-context and archetype-scan context, build a resolution map of available tools.
 - **SCREEN** *(optional, if the playbook defines a `## Screen` section)* — a cheap subagent attempts a mechanical pattern match against known benign outcomes. Match → straight to CONCLUDE. No match → fall through to the full loop with evidence already gathered.
@@ -63,7 +70,7 @@ CONTEXTUALIZE → [SCREEN] → HYPOTHESIZE → GATHER → ANALYZE → CONCLUDE
 - **ANALYZE** — weight evidence against each surviving hypothesis. Loop back, or conclude.
 - **CONCLUDE** — write `report.md` with structured frontmatter and a trace line.
 
-A maximum of 7 hypothesis loops is enforced by the state machine. Most investigations resolve in 2–3.
+A maximum of `MAX_LOOPS = 12` cycles (HYPOTHESIZE + ANALYZE entries combined) is enforced by the state machine. Most investigations resolve in 2–3.
 
 ## Core separation of concerns
 
@@ -91,11 +98,14 @@ Swapping Wazuh for Splunk is a matter of writing a new `knowledge/environment/sy
 
 When you install the plugin you get:
 
-- The **investigate skill** — entry point, investigation loop, SCREEN and ticket-context subagent prompts
-- **Python hooks** — report validation (two tiers), state machine, audit logging, tool output tagging, budget enforcement, investigation summary
-- **Schemas** — dataclass validators for report frontmatter, state transitions, precedent shape
+- The **investigate skill** — entry point, investigation loop, and subagent prompts (`ticket-context`, `archetype-scan`, `screen`, `gather`, `query-past-investigations`, `conclusion_checks`)
+- **Python hooks** registered in `plugin.json`:
+  - *PreToolUse* — `infer_state_pre.py` (blocks illegal phase transitions before they land), `validate_conclude.py` (Layer 0 CONCLUDE self-check + citation integrity), `invlang_validate.py` (companion-YAML schema gate)
+  - *PostToolUse* — `infer_state.py` (state-machine history + cycle counting), `validate_report.py` (Tier 1 structural + Tier 2 semantic-judge report validation, including temporal precedent re-confirmation), `audit_tool_calls.py` (audit vs trace JSONL split), `tag_tool_results.py` (salted delimiter wrapping of untrusted data), `budget_enforcer.py` (warning-only tool-call + wall-clock budget tracking)
+  - *Stop* — `stop_handler.py` composing `investigation_summary.py` (outcome JSONL + token/cost/timestamps) and `close_ticket_action.py` (act-mode dispatch)
+- **Schemas** — dataclass validators for report frontmatter, state transitions, precedent shape, and the adapter contract
 - **Knowledge scaffolding** — portable `common-investigation` methodology (checklist, lead definitions, lessons), the 4-area `environment/` directory with SKILL.md overviews, a signature `_template/`, and reference Wazuh signatures
-- **Setup scripts** — run directory setup, alert sanitization, precedent search, import resolver
+- **Setup scripts** — run directory setup, alert sanitization, precedent search, import resolver, data-source health probe library
 - The **handbook, author, and connect skills** (this one, plus its siblings)
 
 What you bring:
