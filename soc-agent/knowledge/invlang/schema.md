@@ -58,6 +58,35 @@ conclude:
 
 ---
 
+> **Embedding rule.** The section headers below (`Vertex`, `Edge`, `Hypothesis`) show the
+> schema as standalone YAML fragments with an outer key (`vertex:`, `edge:`, `hypothesis:`).
+> When you embed these inside a list (`prologue.vertices`, `prologue.edges`,
+> `hypothesize.hypotheses`, `gather[].lead.outcome.observations.vertices`, etc.) **drop the
+> outer key** — the list item is the object directly:
+>
+> ```yaml
+> # CORRECT — flat list items
+> prologue:
+>   vertices:
+>     - id: v-001
+>       type: endpoint
+>   edges:
+>     - id: e-001
+>       relation: attempted_auth
+> hypothesize:
+>   hypotheses:
+>     - id: h-001
+>       name: "?opportunistic-scanner"
+>
+> # WRONG — do not add a wrapping key
+> prologue:
+>   vertices:
+>     - vertex:           # ← this extra key breaks ID collection
+>         id: v-001
+> ```
+
+---
+
 ## Vertex
 
 ```yaml
