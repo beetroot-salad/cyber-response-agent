@@ -442,12 +442,11 @@ bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
 Write the full block in one write — `outcome` (observations + attribute_updates) and `resolutions` together. No partial blocks.
 ```yaml
 gather:
-  - lead:
-      id: l-{nonce}
-      loop: {N}
-      name: {lead-name}
-      target: v-{id}
-      # ... query_details, outcome, resolutions per schema
+  - id: l-{nonce}
+    loop: {N}
+    name: {lead-name}
+    target: v-{id}
+    # ... query_details, outcome, resolutions per schema
 ```
 
 ### CONCLUDE

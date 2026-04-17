@@ -121,7 +121,7 @@ def make_companion(
     body: dict[str, Any] = {
         "prologue": prologue or {"vertices": [], "edges": []},
         "hypothesize": {"hypotheses": hypotheses},
-        "gather": [{"lead": ld} for ld in leads],
+        "gather": list(leads),
         "conclude": {
             "termination": {"category": termination_category, "rationale": "test"},
             "disposition": disposition,

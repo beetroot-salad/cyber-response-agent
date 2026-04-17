@@ -76,41 +76,40 @@ hypothesize:
 
 VALID_LEAD_YAML = """\
 gather:
-  - lead:
-      id: l-001
-      loop: 1
-      name: source-classification
-      target: v-001
-      query_details:
-        system: wazuh-indexer
-        template: source-ip-lookup
-        query: "src_ip:203.0.113.47"
-        time_window: "30d"
-        substitutions: {}
-      outcome:
-        attribute_updates:
-          - vertex: v-001
-            updates:
-              classification: external-unknown
-        observations:
-          vertices: []
-          edges:
-            - id: e-002
-              relation: classified_as
-              source_vertex: v-001
-              target_vertex: v-002
-              authority:
-                kind: siem-event
-                source: wazuh-indexer
-      resolutions:
-        - hypothesis: h-001
-          before: null
-          after: "+"
-          severity_of_test: weak
-          matched_prediction_ids: []
-          matched_refutation_ids: []
-          reasoning: "No prior authenticated sessions — consistent with scanner"
-          supporting_edges: [e-001]
+  - id: l-001
+    loop: 1
+    name: source-classification
+    target: v-001
+    query_details:
+      system: wazuh-indexer
+      template: source-ip-lookup
+      query: "src_ip:203.0.113.47"
+      time_window: "30d"
+      substitutions: {}
+    outcome:
+      attribute_updates:
+        - vertex: v-001
+          updates:
+            classification: external-unknown
+      observations:
+        vertices: []
+        edges:
+          - id: e-002
+            relation: classified_as
+            source_vertex: v-001
+            target_vertex: v-002
+            authority:
+              kind: siem-event
+              source: wazuh-indexer
+    resolutions:
+      - hypothesis: h-001
+        before: null
+        after: "+"
+        severity_of_test: weak
+        matched_prediction_ids: []
+        matched_refutation_ids: []
+        reasoning: "No prior authenticated sessions — consistent with scanner"
+        supporting_edges: [e-001]
 """
 
 VALID_CONCLUDE_YAML = """\
@@ -175,32 +174,31 @@ class TestCheckLeadRequiredFields:
     def test_missing_resolutions(self):
         lead_no_resolutions = """\
 gather:
-  - lead:
-      id: l-001
-      loop: 1
-      name: test
-      target: v-001
-      query_details:
-        system: wazuh
-        template: t
-        query: q
-        time_window: 1h
-        substitutions: {}
-      outcome:
-        observations:
-          vertices: []
-          edges: []
+  - id: l-001
+    loop: 1
+    name: test
+    target: v-001
+    query_details:
+      system: wazuh
+      template: t
+      query: q
+      time_window: 1h
+      substitutions: {}
+    outcome:
+      observations:
+        vertices: []
+        edges: []
 """
-        merged = {"gather": [{"lead": {
+        merged = {"gather": [{
             "id": "l-001", "loop": 1, "name": "test", "target": "v-001",
             "query_details": {}, "outcome": {},
             # resolutions missing
-        }}]}
+        }]}
         errors = _check_lead_required_fields(merged)
         assert any("resolutions" in e for e in errors)
 
     def test_missing_multiple_fields(self):
-        merged = {"gather": [{"lead": {"id": "l-001"}}]}
+        merged = {"gather": [{"id": "l-001"}]}
         errors = _check_lead_required_fields(merged)
         assert errors
         assert any("l-001" in e for e in errors)
@@ -256,22 +254,22 @@ class TestCheckIdReferences:
         assert errors == [], errors
 
     def test_dangling_target_ref(self):
-        merged = {"gather": [{"lead": {
+        merged = {"gather": [{
             "id": "l-001", "loop": 1, "name": "test",
             "target": "v-999",  # doesn't exist
             "query_details": {}, "outcome": {}, "resolutions": [],
-        }}]}
+        }]}
         errors = _check_id_references(merged)
         assert any("v-999" in e for e in errors)
 
     def test_dangling_resolution_hypothesis(self):
         merged = {
             "prologue": {"vertices": [{"id": "v-001"}], "edges": [{"id": "e-001", "authority": {"kind": "siem-event"}}]},
-            "gather": [{"lead": {
+            "gather": [{
                 "id": "l-001", "loop": 1, "name": "test", "target": "v-001",
                 "query_details": {}, "outcome": {},
                 "resolutions": [{"hypothesis": "h-999", "after": "+", "supporting_edges": ["e-001"]}],
-            }}],
+            }],
         }
         errors = _check_id_references(merged)
         assert any("h-999" in e for e in errors)
@@ -291,7 +289,7 @@ class TestCheckEdgeAuthority:
                             "source_vertex": "v-001", "target_vertex": "v-002",
                             "authority": {"kind": authority_kind, "source": "wazuh"}}]
             },
-            "gather": [{"lead": {
+            "gather": [{
                 "id": "l-001", "loop": 1, "name": "test", "target": "v-001",
                 "query_details": {}, "outcome": {"observations": {"vertices": [], "edges": []}},
                 "resolutions": [{
@@ -302,7 +300,7 @@ class TestCheckEdgeAuthority:
                     "reasoning": "test",
                     "supporting_edges": ["e-001"],
                 }],
-            }}],
+            }],
         }
 
     def test_pp_with_siem_event_passes(self):
@@ -318,11 +316,11 @@ class TestCheckEdgeAuthority:
     def test_pp_empty_supporting_edges_fails(self):
         merged = {
             "prologue": {"vertices": [], "edges": []},
-            "gather": [{"lead": {
+            "gather": [{
                 "id": "l-001", "loop": 1, "name": "test", "target": "v-001",
                 "query_details": {}, "outcome": {"observations": {"vertices": [], "edges": []}},
                 "resolutions": [{"hypothesis": "h-001", "after": "++", "supporting_edges": []}],
-            }}],
+            }],
         }
         errors = _check_edge_authority(merged)
         assert errors
@@ -338,31 +336,31 @@ class TestCheckEdgeAuthority:
 
 class TestCheckRefutationIds:
     def test_mm_with_ids_passes(self):
-        merged = {"gather": [{"lead": {
+        merged = {"gather": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {},
             "resolutions": [{"hypothesis": "h-001", "after": "--",
                               "matched_refutation_ids": ["r1"], "supporting_edges": []}],
-        }}]}
+        }]}
         assert _check_refutation_ids(merged) == []
 
     def test_mm_empty_ids_fails(self):
-        merged = {"gather": [{"lead": {
+        merged = {"gather": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {},
             "resolutions": [{"hypothesis": "h-001", "after": "--",
                               "matched_refutation_ids": [], "supporting_edges": []}],
-        }}]}
+        }]}
         errors = _check_refutation_ids(merged)
         assert errors
         assert "l-001" in errors[0]
 
     def test_mm_missing_key_fails(self):
-        merged = {"gather": [{"lead": {
+        merged = {"gather": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {},
             "resolutions": [{"hypothesis": "h-001", "after": "--", "supporting_edges": []}],
-        }}]}
+        }]}
         assert _check_refutation_ids(merged)
 
 
@@ -373,7 +371,7 @@ class TestCheckRefutationIds:
 
 class TestCheckTrustAnchorCompleteness:
     def test_complete_passes(self):
-        merged = {"gather": [{"lead": {
+        merged = {"gather": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {
                 "trust_anchor_result": {
@@ -386,11 +384,11 @@ class TestCheckTrustAnchorCompleteness:
                 "observations": {"vertices": [], "edges": []},
             },
             "resolutions": [],
-        }}]}
+        }]}
         assert _check_trust_anchor_completeness(merged) == []
 
     def test_missing_two_fields_fails(self):
-        merged = {"gather": [{"lead": {
+        merged = {"gather": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {
                 "trust_anchor_result": {
@@ -400,7 +398,7 @@ class TestCheckTrustAnchorCompleteness:
                 },
             },
             "resolutions": [],
-        }}]}
+        }]}
         errors = _check_trust_anchor_completeness(merged)
         assert errors
         assert "l-001" in errors[0]
@@ -413,21 +411,21 @@ class TestCheckTrustAnchorCompleteness:
 
 class TestCheckScreenResultScope:
     def test_screen_result_on_screen_lead_passes(self):
-        merged = {"gather": [{"lead": {
+        merged = {"gather": [{
             "id": "l-001", "loop": 0, "name": "t", "target": "v-001",
             "mode": "screen",
             "query_details": {}, "outcome": {"screen_result": "no_match"},
             "resolutions": [],
-        }}]}
+        }]}
         assert _check_screen_result_scope(merged) == []
 
     def test_screen_result_on_non_screen_lead_fails(self):
-        merged = {"gather": [{"lead": {
+        merged = {"gather": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             # mode: screen absent
             "query_details": {}, "outcome": {"screen_result": "no_match"},
             "resolutions": [],
-        }}]}
+        }]}
         errors = _check_screen_result_scope(merged)
         assert errors
         assert "l-001" in errors[0]
@@ -538,22 +536,21 @@ class TestHookIntegration:
     def test_missing_lead_field_fails(self, tmp_path):
         bad_lead = """\
 gather:
-  - lead:
-      id: l-001
-      loop: 1
-      name: test
-      target: v-001
-      query_details:
-        system: wazuh
-        template: t
-        query: q
-        time_window: 1h
-        substitutions: {}
-      outcome:
-        observations:
-          vertices: []
-          edges: []
-      # resolutions missing
+  - id: l-001
+    loop: 1
+    name: test
+    target: v-001
+    query_details:
+      system: wazuh
+      template: t
+      query: q
+      time_window: 1h
+      substitutions: {}
+    outcome:
+      observations:
+        vertices: []
+        edges: []
+    # resolutions missing
 """
         content = f"## ANALYZE\n\n```yaml\n{bad_lead}```\n"
         result = _run_hook(content, tmp_path=tmp_path)
@@ -564,30 +561,29 @@ gather:
         prologue_content = f"## CONTEXTUALIZE\n\n```yaml\n{VALID_PROLOGUE_YAML}```\n"
         lead_no_edges = """\
 gather:
-  - lead:
-      id: l-001
-      loop: 1
-      name: test
-      target: v-001
-      query_details:
-        system: wazuh
-        template: t
-        query: q
-        time_window: 1h
-        substitutions: {}
-      outcome:
-        observations:
-          vertices: []
-          edges: []
-      resolutions:
-        - hypothesis: h-001
-          before: null
-          after: "++"
-          severity_of_test: severe
-          matched_prediction_ids: [p1]
-          matched_refutation_ids: []
-          reasoning: "strong evidence"
-          supporting_edges: []
+  - id: l-001
+    loop: 1
+    name: test
+    target: v-001
+    query_details:
+      system: wazuh
+      template: t
+      query: q
+      time_window: 1h
+      substitutions: {}
+    outcome:
+      observations:
+        vertices: []
+        edges: []
+    resolutions:
+      - hypothesis: h-001
+        before: null
+        after: "++"
+        severity_of_test: severe
+        matched_prediction_ids: [p1]
+        matched_refutation_ids: []
+        reasoning: "strong evidence"
+        supporting_edges: []
 """
         content = prologue_content + f"\n```yaml\n{lead_no_edges}```\n"
         result = _run_hook(content, tmp_path=tmp_path)
@@ -597,37 +593,36 @@ gather:
     def test_mm_missing_refutation_ids_fails(self, tmp_path):
         bad_resolution = """\
 gather:
-  - lead:
-      id: l-001
-      loop: 1
-      name: test
-      target: v-001
-      query_details:
-        system: wazuh
-        template: t
-        query: q
-        time_window: 1h
-        substitutions: {}
-      outcome:
-        observations:
-          vertices: []
-          edges:
-            - id: e-003
-              relation: attempted_auth
-              source_vertex: v-001
-              target_vertex: v-002
-              authority:
-                kind: siem-event
-                source: wazuh
-      resolutions:
-        - hypothesis: h-001
-          before: null
-          after: "--"
-          severity_of_test: severe
-          matched_prediction_ids: []
-          matched_refutation_ids: []
-          reasoning: "contradicts prediction"
-          supporting_edges: [e-003]
+  - id: l-001
+    loop: 1
+    name: test
+    target: v-001
+    query_details:
+      system: wazuh
+      template: t
+      query: q
+      time_window: 1h
+      substitutions: {}
+    outcome:
+      observations:
+        vertices: []
+        edges:
+          - id: e-003
+            relation: attempted_auth
+            source_vertex: v-001
+            target_vertex: v-002
+            authority:
+              kind: siem-event
+              source: wazuh
+    resolutions:
+      - hypothesis: h-001
+        before: null
+        after: "--"
+        severity_of_test: severe
+        matched_prediction_ids: []
+        matched_refutation_ids: []
+        reasoning: "contradicts prediction"
+        supporting_edges: [e-003]
 """
         prologue = f"```yaml\n{VALID_PROLOGUE_YAML}```\n"
         content = f"## CONTEXTUALIZE\n\n{prologue}\n## ANALYZE\n\n```yaml\n{bad_resolution}```\n"
@@ -638,26 +633,25 @@ gather:
     def test_trust_anchor_incomplete_fails(self, tmp_path):
         incomplete_tar = """\
 gather:
-  - lead:
-      id: l-001
-      loop: 1
-      name: test
-      target: v-001
-      query_details:
-        system: wazuh
-        template: t
-        query: q
-        time_window: 1h
-        substitutions: {}
-      outcome:
-        trust_anchor_result:
-          anchor_id: approved-sources
-          kind: org-authority
-          # missing: result, as_of, authority_for_question
-        observations:
-          vertices: []
-          edges: []
-      resolutions: []
+  - id: l-001
+    loop: 1
+    name: test
+    target: v-001
+    query_details:
+      system: wazuh
+      template: t
+      query: q
+      time_window: 1h
+      substitutions: {}
+    outcome:
+      trust_anchor_result:
+        anchor_id: approved-sources
+        kind: org-authority
+        # missing: result, as_of, authority_for_question
+      observations:
+        vertices: []
+        edges: []
+    resolutions: []
 """
         content = f"## ANALYZE\n\n```yaml\n{incomplete_tar}```\n"
         result = _run_hook(content, tmp_path=tmp_path)
@@ -667,23 +661,22 @@ gather:
     def test_screen_result_on_non_screen_lead_fails(self, tmp_path):
         bad_screen = """\
 gather:
-  - lead:
-      id: l-001
-      loop: 1
-      name: test
-      target: v-001
-      query_details:
-        system: wazuh
-        template: t
-        query: q
-        time_window: 1h
-        substitutions: {}
-      outcome:
-        screen_result: no_match
-        observations:
-          vertices: []
-          edges: []
-      resolutions: []
+  - id: l-001
+    loop: 1
+    name: test
+    target: v-001
+    query_details:
+      system: wazuh
+      template: t
+      query: q
+      time_window: 1h
+      substitutions: {}
+    outcome:
+      screen_result: no_match
+      observations:
+        vertices: []
+        edges: []
+    resolutions: []
 """
         content = f"## ANALYZE\n\n```yaml\n{bad_screen}```\n"
         result = _run_hook(content, tmp_path=tmp_path)
@@ -713,22 +706,21 @@ gather:
         # Lead targets v-999 which is not declared
         bad_ref = """\
 gather:
-  - lead:
-      id: l-001
-      loop: 1
-      name: test
-      target: v-999
-      query_details:
-        system: wazuh
-        template: t
-        query: q
-        time_window: 1h
-        substitutions: {}
-      outcome:
-        observations:
-          vertices: []
-          edges: []
-      resolutions: []
+  - id: l-001
+    loop: 1
+    name: test
+    target: v-999
+    query_details:
+      system: wazuh
+      template: t
+      query: q
+      time_window: 1h
+      substitutions: {}
+    outcome:
+      observations:
+        vertices: []
+        edges: []
+    resolutions: []
 """
         content = f"## ANALYZE\n\n```yaml\n{bad_ref}```\n"
         result = _run_hook(content, tmp_path=tmp_path)

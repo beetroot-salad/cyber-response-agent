@@ -141,175 +141,170 @@ hypothesize:
 gather:
   # ---- SCREEN leads (loop 0) ----
 
-  - lead:
-      id: l-001
-      loop: 0
-      name: "screen-approved-monitoring-sources"
-      target: v-001
-      mode: screen
-      query_details:
-        system: "environment-knowledge"
-        template: "knowledge/environment/operations/approved-monitoring-sources.md"
-        query: "lookup 203.0.113.45 in approved-monitoring-sources table"
-        time_window: "static lookup"
-      outcome:
-        attribute_updates:
-          - vertex: v-001
-            updates:
-              classification: "unknown-endpoint"
-              approved_monitoring: false
-        screen_result: no_match
+  - id: l-001
+    loop: 0
+    name: "screen-approved-monitoring-sources"
+    target: v-001
+    mode: screen
+    query_details:
+      system: "environment-knowledge"
+      template: "knowledge/environment/operations/approved-monitoring-sources.md"
+      query: "lookup 203.0.113.45 in approved-monitoring-sources table"
+      time_window: "static lookup"
+    outcome:
+      attribute_updates:
+        - vertex: v-001
+          updates:
+            classification: "unknown-endpoint"
+            approved_monitoring: false
+      screen_result: no_match
 
   # ---- LOOP 1 ----
 
-  - lead:
-      id: l-002
-      loop: 1
-      name: "source-classification"
-      target: v-001
-      query_details:
-        system: "ip-reputation"
-        template: "leads/source-classification"
-        query: "lookup 203.0.113.45 in GreyNoise, Shodan, AbuseIPDB"
-        time_window: "current"
-      outcome:
-        attribute_updates:
-          - vertex: v-001
-            updates:
-              classification: "scanner-infrastructure"
-              reputation: malicious
-              threat_intel_tags: ["mass-ssh-scanner", "port-scanner", "ssh-brute"]
-              asn: "AS64496 Scanner-Hosting-Inc"
-              last_seen_scanning: "2026-04-12"
-      resolutions:
-        - hypothesis: h-001
-          before: null
-          after: "+"
-          severity_of_test: moderate
-          matched_prediction_ids: [p2]
-          reasoning: "203.0.113.45 flagged in GreyNoise as mass-SSH-scanner with 20 months of activity. Corroborates ?opportunistic-scanner."
-          supporting_edges: [e-001]
-        - hypothesis: h-002
-          before: null
-          after: "+"
-          severity_of_test: weak
-          matched_prediction_ids: []
-          reasoning: "Malicious IP classification is consistent with targeted use — adversaries sometimes acquire scanner-flagged IPs to blend with noise. IP reputation alone cannot discriminate targeted vs. opportunistic."
-          supporting_edges: [e-001]
-        - hypothesis: h-003
-          before: null
-          after: "-"
-          severity_of_test: moderate
-          matched_refutation_ids: [r1]
-          reasoning: "Dedicated scanner ASN inconsistent with credential-stuffing infrastructure, which relies on non-flagged residential or VPN IPs to avoid blocking."
-          supporting_edges: [e-001]
+  - id: l-002
+    loop: 1
+    name: "source-classification"
+    target: v-001
+    query_details:
+      system: "ip-reputation"
+      template: "leads/source-classification"
+      query: "lookup 203.0.113.45 in GreyNoise, Shodan, AbuseIPDB"
+      time_window: "current"
+    outcome:
+      attribute_updates:
+        - vertex: v-001
+          updates:
+            classification: "scanner-infrastructure"
+            reputation: malicious
+            threat_intel_tags: ["mass-ssh-scanner", "port-scanner", "ssh-brute"]
+            asn: "AS64496 Scanner-Hosting-Inc"
+            last_seen_scanning: "2026-04-12"
+    resolutions:
+      - hypothesis: h-001
+        before: null
+        after: "+"
+        severity_of_test: moderate
+        matched_prediction_ids: [p2]
+        reasoning: "203.0.113.45 flagged in GreyNoise as mass-SSH-scanner with 20 months of activity. Corroborates ?opportunistic-scanner."
+        supporting_edges: [e-001]
+      - hypothesis: h-002
+        before: null
+        after: "+"
+        severity_of_test: weak
+        matched_prediction_ids: []
+        reasoning: "Malicious IP classification is consistent with targeted use — adversaries sometimes acquire scanner-flagged IPs to blend with noise. IP reputation alone cannot discriminate targeted vs. opportunistic."
+        supporting_edges: [e-001]
+      - hypothesis: h-003
+        before: null
+        after: "-"
+        severity_of_test: moderate
+        matched_refutation_ids: [r1]
+        reasoning: "Dedicated scanner ASN inconsistent with credential-stuffing infrastructure, which relies on non-flagged residential or VPN IPs to avoid blocking."
+        supporting_edges: [e-001]
 
   # ---- LOOP 2 ----
 
-  - lead:
-      id: l-003
-      loop: 2
-      name: "threat-intel-deep-lookup"
-      target: v-001
-      selection_rationale: "IP reputation gave a summary tag; deep threat-intel query would provide campaign attribution — whether this IP is associated with targeted campaigns vs. indiscriminate scanning, which would resolve h-001 vs. h-002."
-      query_details:
-        system: "threat-intel"
-        template: "leads/threat-intel-lookup"
-        query: "threat-intel enrich 203.0.113.45 --campaigns --associations"
-        time_window: "current"
-      concerns:
-        - "external threat-intel API has known latency spikes during peak hours"
-      outcome:
-        failure_reason: "timeout"
+  - id: l-003
+    loop: 2
+    name: "threat-intel-deep-lookup"
+    target: v-001
+    selection_rationale: "IP reputation gave a summary tag; deep threat-intel query would provide campaign attribution — whether this IP is associated with targeted campaigns vs. indiscriminate scanning, which would resolve h-001 vs. h-002."
+    query_details:
+      system: "threat-intel"
+      template: "leads/threat-intel-lookup"
+      query: "threat-intel enrich 203.0.113.45 --campaigns --associations"
+      time_window: "current"
+    concerns:
+      - "external threat-intel API has known latency spikes during peak hours"
+    outcome:
+      failure_reason: "timeout"
 
-  - lead:
-      id: l-004
-      loop: 2
-      name: "dns-passive-lookup"
-      target: v-001
-      selection_rationale: "Recovery from l-003 timeout. DNS passive history independently confirms ASN and hosting type without the slow API call, answering whether this is dedicated scanner infrastructure vs. general-purpose hosting."
-      query_details:
-        system: "dns-reputation"
-        template: "leads/dns-passive"
-        query: "passive-dns reverse-lookup 203.0.113.45; ASN registration lookup"
-        time_window: "current + 90-day history"
-      outcome:
-        attribute_updates:
-          - vertex: v-001
-            updates:
-              reverse_dns: null
-              asn_org: "Scanner-Hosting-Inc — dedicated scanner/research hosting, no customer workloads"
-              hosting_type: "dedicated-scanner-infrastructure"
-              passive_dns_names: []
-      resolutions:
-        - hypothesis: h-002
-          before: "+"
-          after: "+"
-          severity_of_test: weak
-          matched_prediction_ids: []
-          reasoning: "Dedicated scanner ASN slightly weakens ?targeted-brute-force (targeted attackers tend to avoid flagged scanner infrastructure) but does not refute it — deliberate cover is possible. Weight unchanged pending auth-history."
-          supporting_edges: [e-001]
+  - id: l-004
+    loop: 2
+    name: "dns-passive-lookup"
+    target: v-001
+    selection_rationale: "Recovery from l-003 timeout. DNS passive history independently confirms ASN and hosting type without the slow API call, answering whether this is dedicated scanner infrastructure vs. general-purpose hosting."
+    query_details:
+      system: "dns-reputation"
+      template: "leads/dns-passive"
+      query: "passive-dns reverse-lookup 203.0.113.45; ASN registration lookup"
+      time_window: "current + 90-day history"
+    outcome:
+      attribute_updates:
+        - vertex: v-001
+          updates:
+            reverse_dns: null
+            asn_org: "Scanner-Hosting-Inc — dedicated scanner/research hosting, no customer workloads"
+            hosting_type: "dedicated-scanner-infrastructure"
+            passive_dns_names: []
+    resolutions:
+      - hypothesis: h-002
+        before: "+"
+        after: "+"
+        severity_of_test: weak
+        matched_prediction_ids: []
+        reasoning: "Dedicated scanner ASN slightly weakens ?targeted-brute-force (targeted attackers tend to avoid flagged scanner infrastructure) but does not refute it — deliberate cover is possible. Weight unchanged pending auth-history."
+        supporting_edges: [e-001]
 
   # ---- LOOP 3 ----
 
-  - lead:
-      id: l-005
-      loop: 3
-      name: "authentication-history-extended"
-      target: v-002
-      tests: [h-001, h-002, h-003]
-      selection_rationale: "Source classification and DNS confirm this is scanner-class infrastructure. Auth-history is now the decisive lead: username scatter and attempt pacing will discriminate ?opportunistic-scanner (≥5 generic names, wordlist rate) from ?targeted-brute-force (env-specific names) and ?credential-stuffing-external (breach-list names, lower rate)."
-      query_details:
-        system: "wazuh"
-        template: "leads/authentication-history/templates/wazuh.md"
-        query: "data.srcip:203.0.113.45 AND agent.name:prod-webserver-01 rule:5710, 30min preceding + 10min forward"
-        time_window: "2026-04-12T08:44:03Z–09:24:03Z"
-      outcome:
-        observations:
-          vertices: []
-          edges:
-            - id: e-002
-              relation: attempted_auth
-              source_vertex: v-001
-              target_vertex: v-002
-              when:
-                start: "2026-04-12T09:11:47Z"
-                end: "2026-04-12T09:14:51Z"
-              status: refuted
-              attributes:
-                protocol: ssh
-                event_count: 47
-                distinct_usernames: [admin, root, ubuntu, pi, oracle, postgres, deploy, user, test, guest, operator, mysql, ftpuser, git, jenkins, hadoop, tomcat, nagios, www-data, ansible]
-                username_count: 20
-                successful_logins_forward: 0
-                attempt_rate_per_second: 0.26
-                burst_shape: "steady sweep, ~4s between usernames"
-              authority:
-                kind: siem-event
-                source: "wazuh:rule=5710:event-window=l5-extended"
-        trust_root_reached: v-001
-      resolutions:
-        - hypothesis: h-001
-          before: "+"
-          after: "++"
-          severity_of_test: severe
-          matched_prediction_ids: [p1]
-          reasoning: "20 distinct generic usernames (admin, root, ubuntu, pi, oracle, postgres, …) at ~0.26/s is a textbook SSH wordlist scan. p1 fully confirmed. trust_root_reached: v-001 is external with no accessible upstream."
-          supporting_edges: [e-001, e-002]
-        - hypothesis: h-002
-          before: "+"
-          after: "--"
-          severity_of_test: severe
-          matched_refutation_ids: [r1]
-          reasoning: "All 20 usernames are generic wordlist entries (admin, root, pi, git, jenkins, …) — zero environment-specific account names that would signal knowledge of this server's stack. r1 directly matched. A targeted attacker with prior reconnaissance would use service-account names, not a public wordlist. Refuted at severity=severe."
-          supporting_edges: [e-001, e-002]
-        - hypothesis: h-003
-          before: "-"
-          after: "--"
-          severity_of_test: severe
-          matched_refutation_ids: [r1]
-          reasoning: "0.26/s steady sweep matches mass-scanner profile, not credential-stuffing pacing. Usernames are generic wordlist entries, not breach-list personal identifiers. Both r1 conditions met."
-          supporting_edges: [e-001, e-002]
+  - id: l-005
+    loop: 3
+    name: "authentication-history-extended"
+    target: v-002
+    tests: [h-001, h-002, h-003]
+    selection_rationale: "Source classification and DNS confirm this is scanner-class infrastructure. Auth-history is now the decisive lead: username scatter and attempt pacing will discriminate ?opportunistic-scanner (≥5 generic names, wordlist rate) from ?targeted-brute-force (env-specific names) and ?credential-stuffing-external (breach-list names, lower rate)."
+    query_details:
+      system: "wazuh"
+      template: "leads/authentication-history/templates/wazuh.md"
+      query: "data.srcip:203.0.113.45 AND agent.name:prod-webserver-01 rule:5710, 30min preceding + 10min forward"
+      time_window: "2026-04-12T08:44:03Z–09:24:03Z"
+    outcome:
+      observations:
+        vertices: []
+        edges:
+          - id: e-002
+            relation: attempted_auth
+            source_vertex: v-001
+            target_vertex: v-002
+            when:
+              start: "2026-04-12T09:11:47Z"
+              end: "2026-04-12T09:14:51Z"
+            status: refuted
+            attributes:
+              protocol: ssh
+              event_count: 47
+              distinct_usernames: [admin, root, ubuntu, pi, oracle, postgres, deploy, user, test, guest, operator, mysql, ftpuser, git, jenkins, hadoop, tomcat, nagios, www-data, ansible]
+              username_count: 20
+              successful_logins_forward: 0
+              attempt_rate_per_second: 0.26
+              burst_shape: "steady sweep, ~4s between usernames"
+            authority:
+              kind: siem-event
+              source: "wazuh:rule=5710:event-window=l5-extended"
+      trust_root_reached: v-001
+    resolutions:
+      - hypothesis: h-001
+        before: "+"
+        after: "++"
+        severity_of_test: severe
+        matched_prediction_ids: [p1]
+        reasoning: "20 distinct generic usernames (admin, root, ubuntu, pi, oracle, postgres, …) at ~0.26/s is a textbook SSH wordlist scan. p1 fully confirmed. trust_root_reached: v-001 is external with no accessible upstream."
+        supporting_edges: [e-001, e-002]
+      - hypothesis: h-002
+        before: "+"
+        after: "--"
+        severity_of_test: severe
+        matched_refutation_ids: [r1]
+        reasoning: "All 20 usernames are generic wordlist entries (admin, root, pi, git, jenkins, …) — zero environment-specific account names that would signal knowledge of this server's stack. r1 directly matched. A targeted attacker with prior reconnaissance would use service-account names, not a public wordlist. Refuted at severity=severe."
+        supporting_edges: [e-001, e-002]
+      - hypothesis: h-003
+        before: "-"
+        after: "--"
+        severity_of_test: severe
+        matched_refutation_ids: [r1]
+        reasoning: "0.26/s steady sweep matches mass-scanner profile, not credential-stuffing pacing. Usernames are generic wordlist entries, not breach-list personal identifiers. Both r1 conditions met."
+        supporting_edges: [e-001, e-002]
 
 # ---------------------------------------------------------------------------
 # CONCLUDE

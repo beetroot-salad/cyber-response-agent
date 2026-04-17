@@ -115,8 +115,9 @@ def _collect_declared_ids(merged: dict[str, Any]) -> set[str]:
     for h in merged.get("hypothesize", {}).get("hypotheses", []):
         if hid := h.get("id"):
             ids.add(hid)
-    for entry in merged.get("gather", []):
-        lead = entry.get("lead", {})
+    for lead in merged.get("gather", []):
+        if not isinstance(lead, dict):
+            continue
         if lid := lead.get("id"):
             ids.add(lid)
         obs = lead.get("outcome", {}).get("observations", {})
@@ -154,13 +155,9 @@ def _merge_blocks(blocks: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _check_lead_required_fields(merged: dict[str, Any]) -> list[str]:
     errors = []
-    for i, entry in enumerate(merged.get("gather", [])):
-        if not isinstance(entry, dict) or "lead" not in entry:
-            errors.append(f"gather[{i}]: entry missing 'lead' key")
-            continue
-        lead = entry["lead"]
+    for i, lead in enumerate(merged.get("gather", [])):
         if not isinstance(lead, dict):
-            errors.append(f"gather[{i}].lead: must be a mapping")
+            errors.append(f"gather[{i}]: entry must be a mapping (lead object)")
             continue
         missing = _LEAD_REQUIRED - lead.keys()
         if missing:
@@ -186,8 +183,9 @@ def _check_id_formats(merged: dict[str, Any]) -> list[str]:
         _check(e.get("id"), "prologue edge")
     for h in merged.get("hypothesize", {}).get("hypotheses", []):
         _check(h.get("id"), "hypothesize hypothesis")
-    for entry in merged.get("gather", []):
-        lead = entry.get("lead", {})
+    for lead in merged.get("gather", []):
+        if not isinstance(lead, dict):
+            continue
         _check(lead.get("id"), "gather lead")
         obs = lead.get("outcome", {}).get("observations", {})
         for v in obs.get("vertices", []):
@@ -209,8 +207,9 @@ def _check_id_references(merged: dict[str, Any]) -> list[str]:
         if isinstance(id_val, str) and id_val and id_val not in declared:
             errors.append(f"{context}: references unknown ID {id_val!r}")
 
-    for entry in merged.get("gather", []):
-        lead = entry.get("lead", {})
+    for lead in merged.get("gather", []):
+        if not isinstance(lead, dict):
+            continue
         lid = lead.get("id", "?")
         _ref(lead.get("target"), f"lead {lid} target")
         for tid in lead.get("tests", []) or []:
@@ -244,8 +243,9 @@ def _check_edge_authority(merged: dict[str, Any]) -> list[str]:
         kind = e.get("authority", {}).get("kind", "")
         if eid:
             edge_authority[eid] = kind
-    for entry in merged.get("gather", []):
-        lead = entry.get("lead", {})
+    for lead in merged.get("gather", []):
+        if not isinstance(lead, dict):
+            continue
         obs = lead.get("outcome", {}).get("observations", {})
         for e in obs.get("edges", []):
             eid = e.get("id")
@@ -253,8 +253,9 @@ def _check_edge_authority(merged: dict[str, Any]) -> list[str]:
             if eid:
                 edge_authority[eid] = kind
 
-    for entry in merged.get("gather", []):
-        lead = entry.get("lead", {})
+    for lead in merged.get("gather", []):
+        if not isinstance(lead, dict):
+            continue
         lid = lead.get("id", "?")
         for res in lead.get("resolutions", []) or []:
             after = res.get("after", "")
@@ -287,8 +288,9 @@ def _check_edge_authority(merged: dict[str, Any]) -> list[str]:
 def _check_refutation_ids(merged: dict[str, Any]) -> list[str]:
     """-- resolutions must have non-empty matched_refutation_ids."""
     errors = []
-    for entry in merged.get("gather", []):
-        lead = entry.get("lead", {})
+    for lead in merged.get("gather", []):
+        if not isinstance(lead, dict):
+            continue
         lid = lead.get("id", "?")
         for res in lead.get("resolutions", []) or []:
             if res.get("after") == "--":
@@ -304,8 +306,9 @@ def _check_refutation_ids(merged: dict[str, Any]) -> list[str]:
 def _check_trust_anchor_completeness(merged: dict[str, Any]) -> list[str]:
     """trust_anchor_result must have all 5 required fields when present."""
     errors = []
-    for entry in merged.get("gather", []):
-        lead = entry.get("lead", {})
+    for lead in merged.get("gather", []):
+        if not isinstance(lead, dict):
+            continue
         lid = lead.get("id", "?")
         tar = lead.get("outcome", {}).get("trust_anchor_result")
         if tar is None:
@@ -325,8 +328,9 @@ def _check_trust_anchor_completeness(merged: dict[str, Any]) -> list[str]:
 def _check_screen_result_scope(merged: dict[str, Any]) -> list[str]:
     """screen_result is only valid on leads where mode: screen."""
     errors = []
-    for entry in merged.get("gather", []):
-        lead = entry.get("lead", {})
+    for lead in merged.get("gather", []):
+        if not isinstance(lead, dict):
+            continue
         lid = lead.get("id", "?")
         outcome = lead.get("outcome", {})
         if "screen_result" in outcome and lead.get("mode") != "screen":

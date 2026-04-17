@@ -77,7 +77,7 @@ class Companion:
 
     @property
     def leads(self) -> list[dict[str, Any]]:
-        return [entry["lead"] for entry in self.body.get("gather", []) if "lead" in entry]
+        return [entry for entry in self.body.get("gather", []) if isinstance(entry, dict)]
 
     @property
     def conclude(self) -> dict[str, Any]:
@@ -151,8 +151,9 @@ def extract_ids(body: dict[str, Any]) -> dict[str, list[str]]:
     edges      = [e["id"] for e in prologue.get("edges", [])    if "id" in e]
     hypotheses = [h["id"] for h in body.get("hypothesize", {}).get("hypotheses", []) if "id" in h]
     leads: list[str] = []
-    for entry in body.get("gather", []):
-        lead = entry.get("lead", {})
+    for lead in body.get("gather", []):
+        if not isinstance(lead, dict):
+            continue
         if "id" in lead:
             leads.append(lead["id"])
         obs = lead.get("outcome", {}).get("observations", {})

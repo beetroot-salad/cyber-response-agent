@@ -8,19 +8,17 @@ Schema v2.6. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on 
 
 **Graph discovery.** An investigation constructs a directed graph by working backward from the alert. Confirmed vertices and edges grow monotonically. The investigation halts when it reaches a trust root (no accessible upstream) or has explicitly refuted every adversarial hypothesis.
 
-**Entities as vertices.** Every observed entity (endpoint, process, identity, session, file…) becomes a typed vertex with a classification and identifier. Model at the granularity the investigation reasons at — don't decompose a process into threads unless a lead reveals heterogeneous structure that changes hypothesis trajectory.
+**Entities as vertices.** Every observed entity (endpoint, process, identity, session, file…) becomes a typed vertex with a classification and identifier. Model at the resolution the investigation reasons at — don't decompose finer unless a lead forces it. When it does, append sub-vertices via `component_of` with hierarchical IDs (`v-{parent}-{nonce}`); the parent vertex remains valid.
 
 **Relations as edges.** Observed connections and events between entities become edges. Each edge carries authority (how reliably the source recorded it) and optional temporal data.
 
 **Hypotheses as proposed edges.** A hypothesis proposes that one specific upstream vertex exists, connected to a confirmed vertex by exactly one edge (`proposed_edge`). Predictions describe what observable evidence would confirm or contradict it; keep to 1–2 predictions — the minimum that distinguishes this hypothesis from competing ones.
 
-**Attributes.** Facts about a vertex that don't add topology (IP classification, process owner, port) stay as `attributes` on the vertex or as `attribute_updates` in a lead outcome. Don't materialize a vertex just to carry an attribute.
+**Attributes.** Facts about a vertex that don't add topology (identity role, file creation time, IP classification, listening port) stay as `attributes` on the vertex or as `attribute_updates` in a lead outcome. Don't materialize a vertex just to carry an attribute.
 
 **Leads.** A lead is a graph operation: topology-extending (new vertices/edges enter the confirmed graph via `outcome.observations`) or attribute-refining (existing vertices enriched via `attribute_updates`), or both. `tests` declares which hypotheses it discriminates; `resolutions` records weight effects with reasoning.
 
-**Granularity.** Model at the resolution the investigation reasons at, not finer. When a lead forces inward decomposition, append sub-vertices via `component_of` with hierarchical IDs (`v-{parent}-{nonce}`); the parent vertex and its edges remain valid. Coarser observations are still true.
-
-**Corpus.** Past investigations are indexed and queryable by hypothesis name, lead outcome, archetype, and disposition. Query before HYPOTHESIZE to calibrate hypothesis names and initial weights against known patterns. Use `matched_archetype` at CONCLUDE to connect this run to the indexed corpus.
+**Corpus.** Past investigations are queryable. Query before HYPOTHESIZE to calibrate hypothesis names and weights; set `matched_archetype` at CONCLUDE to connect this run.
 
 ---
 
@@ -41,170 +39,156 @@ Call `invlang --enum` before writing any block that introduces new IDs or refere
 
 ## Top-level structure
 
+Every list item below is a flat object — no wrapping key (no `- vertex:`, `- edge:`, `- hypothesis:`, `- lead:`).
+
 ```yaml
 prologue:       # vertices + edges from alert entities
-  vertices: [...]
-  edges: [...]
+  vertices:
+    - id: v-001          # vertex object fields directly (see Vertex below)
+      type: endpoint
+      ...
+  edges:
+    - id: e-001          # edge object fields directly
+      ...
 
 hypothesize:    # initial proposed frontier; omit for screen-matched cases
-  hypotheses: [...]
+  hypotheses:
+    - id: h-001          # hypothesis object fields directly
+      ...
 
 gather:         # one entry per lead; written at ANALYZE, not during GATHER
-  - lead: {...}
+  - id: l-001            # lead object fields directly
+    loop: 1
+    ...
 
 conclude:
   ...
 ```
 
----
-
-> **Embedding rule.** The section headers below (`Vertex`, `Edge`, `Hypothesis`) show the
-> schema as standalone YAML fragments with an outer key (`vertex:`, `edge:`, `hypothesis:`).
-> When you embed these inside a list (`prologue.vertices`, `prologue.edges`,
-> `hypothesize.hypotheses`, `gather[].lead.outcome.observations.vertices`, etc.) **drop the
-> outer key** — the list item is the object directly:
->
-> ```yaml
-> # CORRECT — flat list items
-> prologue:
->   vertices:
->     - id: v-001
->       type: endpoint
->   edges:
->     - id: e-001
->       relation: attempted_auth
-> hypothesize:
->   hypotheses:
->     - id: h-001
->       name: "?opportunistic-scanner"
->
-> # WRONG — do not add a wrapping key
-> prologue:
->   vertices:
->     - vertex:           # ← this extra key breaks ID collection
->         id: v-001
-> ```
+Leads in the same iteration share a `loop:` value; there is no grouping wrapper.
 
 ---
 
 ## Vertex
 
+Fields of a vertex object (list item under `prologue.vertices` or `outcome.observations.vertices`):
+
 ```yaml
-vertex:
-  id: v-{nonce}              # stable, append-only; sub-vertices: v-{parent}-{nonce}
-  type: <string>             # from type vocabulary
-  classification: <string>   # from seed list or {type}:{slug} provisional
-  identifier: <string>       # human-readable primary key
-  attributes: {}             # type-specific key-value pairs; omit if empty
-  trust_root: true           # omit when false
-  placeholder: true          # omit when false
-  concerns: []               # omit if empty
-  citations: []              # omit if single or implicit
+id: v-{nonce}              # stable, append-only; sub-vertices: v-{parent}-{nonce}
+type: <string>             # from type vocabulary
+classification: <string>   # from seed list or {type}:{slug} provisional
+identifier: <string>       # human-readable primary key
+attributes: {}             # type-specific key-value pairs; omit if empty
+trust_root: true           # omit when false
+placeholder: true          # omit when false
+concerns: []               # omit if empty
+citations: []              # omit if single or implicit
 ```
 
 ---
 
 ## Edge
 
+Fields of an edge object (list item under `prologue.edges` or `outcome.observations.edges`):
+
 ```yaml
-edge:
-  id: e-{nonce}
-  relation: <string>         # from relation catalog
-  source_vertex: v-{id}
-  target_vertex: v-{id}
-  when: { timestamp: <iso> } # omit if not meaningful
-  attributes: {}             # omit if empty
-  status: observed           # omit; emit hypothesized | refuted when non-default
-  authority:
-    kind: siem-event | runtime-audit | authoritative-source
-        | client-asserted | inferred-structural
-    source: <string>
-    trust_chain: []          # omit if empty
-  concerns: []               # omit if empty
+id: e-{nonce}
+relation: <string>         # from relation catalog
+source_vertex: v-{id}
+target_vertex: v-{id}
+when: { timestamp: <iso> } # omit if not meaningful
+attributes: {}             # omit if empty
+status: observed           # omit; emit hypothesized | refuted when non-default
+authority:
+  kind: siem-event | runtime-audit | authoritative-source
+      | client-asserted | inferred-structural
+  source: <string>
+  trust_chain: []          # omit if empty
+concerns: []               # omit if empty
 ```
 
 ---
 
 ## Hypothesis
 
-```yaml
-hypothesis:
-  id: h-{nonce}              # child refinements: h-{parent}-{nonce}
-  name: "?descriptive-slug"
-  attached_to_vertex: v-{id}
-  proposed_edge:
-    relation: <string>
-    parent_vertex:
-      type: <string>
-      classification: <string>
-      attributes: {}         # omit if empty
-  predictions:
-    - id: p1
-      claim: "<source-agnostic claim about world state>"
-  refutation_shape:          # omit if no clean refutation shape exists
-    - id: r1
-      claim: "<observation that would contradict a core prediction>"
-  concerns: []               # omit if empty
-  weight: null               # null | "++" | "+" | "-" | "--"
-  weight_history: []         # omit until transitions exist; each lead resolution that changes
-                             # weight appends { from: <before>, to: <after>, lead: l-{id} }
-  status: active             # omit; emit confirmed | refuted | shelved when non-default
-```
+Fields of a hypothesis object (list item under `hypothesize.hypotheses` or `lead.new_hypotheses`). `proposed_edge.parent_vertex` is the *causal upstream* — the vertex that would explain the confirmed anchor if it existed. "Parent" means upstream in the causal chain, not schema hierarchy; relation direction is irrelevant.
 
-`proposed_edge.parent_vertex` is the *causal upstream* — the vertex that, if it existed, would explain the current confirmed anchor via the proposed relation. "Parent" means upstream in the causal chain, not schema hierarchy. Relation direction is irrelevant: `executed_in: command → session` means `proposed_edge.parent_vertex` for a hypothesis about what session a command ran in is still the session vertex.
+```yaml
+id: h-{nonce}              # child refinements: h-{parent}-{nonce}
+name: "?descriptive-slug"
+attached_to_vertex: v-{id}
+proposed_edge:
+  relation: <string>
+  parent_vertex:
+    type: <string>
+    classification: <string>
+    attributes: {}         # omit if empty
+predictions:
+  - id: p1
+    claim: "<source-agnostic claim about world state>"
+refutation_shape:          # omit if no clean refutation shape exists
+  - id: r1
+    claim: "<observation that would contradict a core prediction>"
+concerns: []               # omit if empty
+weight: null               # null | "++" | "+" | "-" | "--"
+weight_history: []         # omit until transitions exist; each lead resolution that
+                           # changes weight appends { from: <before>, to: <after>, lead: l-{id} }
+status: active             # omit; emit confirmed | refuted | shelved when non-default
+```
 
 ---
 
 ## Lead
 
+Fields of a lead object (list item under `gather`):
+
 ```yaml
-lead:
-  id: l-{nonce}
-  loop: <int>
-  name: <string>
-  target: v-{id}
-  selection_rationale: <string>   # optional; 1–3 sentences on why this lead now
-  mode: screen                    # omit unless SCREEN-dispatched
-  tests: [h-{id}, ...]            # optional; hypotheses this lead discriminates
-  observes:                       # optional; explicit prediction/refutation mapping
-    - { hypothesis: h-{id}, predictions: [p1], refutations: [r1] }
-  query_details:
-    system: <string>
-    template: <string>
-    query: <string>
-    time_window: <string>
-    substitutions: {}
-  concerns: []                    # omit if empty
-  outcome:
-    attribute_updates:            # enriches existing confirmed vertices
-      - vertex: v-{id}
-        updates: {}
-    observations:
-      vertices: []
-      edges: []
-    trust_anchor_result:          # include when the lead queried a named trust anchor
-                                  # (an authoritative-source that can give a definitive verdict).
-                                  # Omit for SIEM queries that are not anchors.
-      anchor_id: <string>
-      kind: <string>
-      result: confirmed | refuted | partial | no-data
-      as_of: <iso>                # timestamp the answer is authoritative ABOUT
-      authority_for_question: full | partial
-    trust_root_reached: v-{id}    # omit when null
-    failure_reason: <string>      # adapter-error | attribution-opaque | partial-coverage
-                                  # | permission-denied | timeout | other
-    screen_result: match | no_match  # only when mode: screen; only on final screen lead
-  new_hypotheses: []              # full hypothesis records
-  shelved: []                     # hypothesis IDs shelved by this lead
-  resolutions:
-    - hypothesis: h-{id}
-      before: null | "++" | "+" | "-" | "--"
-      after: "++" | "+" | "-" | "--"
-      severity_of_test: severe | moderate | weak
-      matched_prediction_ids: []
-      matched_refutation_ids: []
-      reasoning: "<string>"       # explain why this evidence moves weight — not a field restatement
-      supporting_edges: []
+id: l-{nonce}
+loop: <int>
+name: <string>
+target: v-{id}
+selection_rationale: <string>   # optional; 1–3 sentences on why this lead now
+mode: screen                    # omit unless SCREEN-dispatched
+tests: [h-{id}, ...]            # optional; hypotheses this lead discriminates
+observes:                       # optional; explicit prediction/refutation mapping
+  - { hypothesis: h-{id}, predictions: [p1], refutations: [r1] }
+query_details:
+  system: <string>
+  template: <string>
+  query: <string>
+  time_window: <string>
+  substitutions: {}
+concerns: []                    # omit if empty
+outcome:
+  attribute_updates:            # enriches existing confirmed vertices
+    - vertex: v-{id}
+      updates: {}
+  observations:
+    vertices: []
+    edges: []
+  trust_anchor_result:          # include when the lead queried a named trust anchor
+                                # (authoritative-source that can give a definitive verdict);
+                                # omit for SIEM queries that are not anchors.
+    anchor_id: <string>
+    kind: <string>
+    result: confirmed | refuted | partial | no-data
+    as_of: <iso>                # timestamp the answer is authoritative ABOUT
+    authority_for_question: full | partial
+  trust_root_reached: v-{id}    # omit when null
+  failure_reason: <string>      # adapter-error | attribution-opaque | partial-coverage
+                                # | permission-denied | timeout | other
+  screen_result: match | no_match  # only when mode: screen; only on final screen lead
+new_hypotheses: []              # full hypothesis records
+shelved: []                     # hypothesis IDs shelved by this lead
+resolutions:
+  - hypothesis: h-{id}
+    before: null | "++" | "+" | "-" | "--"
+    after: "++" | "+" | "-" | "--"
+    severity_of_test: severe | moderate | weak
+    matched_prediction_ids: []
+    matched_refutation_ids: []
+    reasoning: "<string>"       # explain why this evidence moves weight — not a field restatement
+    supporting_edges: []
 ```
 
 ---
@@ -292,9 +276,10 @@ Use `unclassified-{type}` when unknown; `ambiguous-{a}-or-{b}` when genuinely in
 
 ### Hypothesis — lean one-hop predictions
 
+A hypothesis list item under `hypothesize.hypotheses` — no `hypothesis:` wrapping key. `proposed_edge` names exactly one new vertex and one new edge; predictions test the *proposed vertex's* existence, not alert data already in hand (that would be an observation, not a prediction).
+
 ```yaml
-hypothesis:
-  id: h-001
+- id: h-001
   name: "?opportunistic-scanner"
   attached_to_vertex: v-001          # confirmed source endpoint (203.0.113.47)
   proposed_edge:
@@ -313,13 +298,12 @@ hypothesis:
   status: active
 ```
 
-**One-hop discipline:** `proposed_edge.parent_vertex` is the immediate upstream cause — exactly one new vertex, one new edge. Predictions test the *proposed vertex's* existence or nature, not the alert data already in hand. `p1` here is falsifiable against threat-intel; it would not appear for a legitimate admin IP. Do not write predictions that re-describe what the alert already tells you — those are observations, not predictions.
-
 ### Lead — attribute update + resolution with reasoning
 
+A lead list item under `gather` — no `lead:` wrapping key. `reasoning` explains *why* the evidence moves weight (what was ruled in/out, what uncertainty remains), not a restatement of field values.
+
 ```yaml
-lead:
-  id: l-001
+- id: l-001
   loop: 1
   name: source-classification
   target: v-001                      # source endpoint
@@ -352,8 +336,6 @@ lead:
         legitimate first-time sources would also show no session history."
       supporting_edges: [e-002]
 ```
-
-`reasoning` explains *why* this evidence moves weight — not a restatement of the field values. Cite what was found, what it rules in or out, and what residual uncertainty remains.
 
 ---
 
