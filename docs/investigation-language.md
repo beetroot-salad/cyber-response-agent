@@ -282,10 +282,19 @@ gather:
       selection_rationale: <string>     # optional — 1–3 sentences on why this lead now, not another
       mode: screen                      # omit unless this lead was dispatched by the SCREEN subagent
 
-      tests: [h-{id}, ...]              # optional — hypotheses this lead discriminates
+      tests: [h-{id}, ...]              # optional — hypotheses this lead discriminates.
+                                        # Presence ⇒ fork-collapsing; absence ⇒ non-branching.
 
       observes:                         # optional — explicit prediction/refutation mapping
         - { hypothesis: h-{id}, predictions: [p1], refutations: [r1] }
+
+      predictions:                      # optional — conditional branch plans for
+                                        # non-branching but interpretation-vulnerable leads.
+                                        # IDs local to the lead (lp1, lp2, …).
+        - id: lp1
+          if: "<outcome pattern>"
+          read_as: "<interpretation>"
+          advance_to: "<lead-name | CONCLUDE | HYPOTHESIZE>"
 
       query_details:
         system: <string>
@@ -351,6 +360,32 @@ purely informational (classification lookup, attribute enrichment,
 establishing scope). A lead with no `tests` still produces
 `resolutions` when its outcome happens to bear on active hypotheses
 — the connection is recorded in the resolution, not pre-declared.
+
+**`predictions` is optional — pre-commitment for interpretation-
+vulnerable leads.** A lead can be non-branching (same step-1
+regardless of which story is true) yet still have outcome fields
+whose reading is interpretive — volume anomaly shape, process-name
+plausibility, reputation-weight thresholds. For those leads,
+pre-register how the outcome will be read as conditional branch
+plans: `if <outcome pattern> → read_as <interpretation> →
+advance_to <next step>`. The triple is auditable: the actually-run
+next lead should match one of the `advance_to` values. If the
+observed pattern doesn't fit any `if` branch, that is itself a
+signal — HYPOTHESIZE to extend the fork space, don't silently
+rationalize.
+
+Lead-level predictions are **not** a substitute for hypothesis-level
+predictions. The two are orthogonal commitments:
+
+| Form | Commits to | When to use |
+|---|---|---|
+| Hypothesis + predictions | Named world models; predictions test them | Multiple plausible explanations, analytically distinct, divergent step-1 leads |
+| Lead + predictions | Decision rules on a shared next-step lead | Same step-1 lead regardless; the *reading* determines step-2 |
+
+Interpretation-vulnerability is per-field, not per-lead. A single
+lead can mix mechanical fields (UID, count) with interpretive ones
+(process-name plausibility, threshold judgment). Pre-register on
+the specific fields that carry the judgment.
 
 **`attribute_updates` vs `observations`.** Use `attribute_updates`
 when the lead enriches an already-confirmed vertex without new
@@ -580,3 +615,12 @@ coverage.
 17. **SCREEN-matched companions omit `hypothesize`.** When
     `outcome.screen_result: match` is present on any lead,
     the top-level `hypothesize` block must be absent.
+
+18. **Lead-level predictions structure.** When `lead.predictions` is
+    present, each entry has `id` (matching `^lp\d+$`, unique within
+    the lead), `if`, `read_as`, `advance_to`. `advance_to` is either
+    a lead name appearing elsewhere in the companion, or one of
+    `CONCLUDE` / `HYPOTHESIZE`. If the lead is followed by another
+    lead in the same companion, the follower's `name` should match
+    at least one `advance_to` value — otherwise a route-compliance
+    warning is emitted.

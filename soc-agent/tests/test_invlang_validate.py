@@ -25,8 +25,11 @@ from hooks.scripts.invlang_validate import (
     _check_refutation_ids,
     _check_trust_anchor_completeness,
     _check_screen_result_scope,
+    _check_lead_predictions,
+    _check_route_compliance,
     _check_append_only,
     _merge_blocks,
+    collect_warnings,
     YAML_BLOCK_RE,
 )
 
@@ -429,6 +432,169 @@ class TestCheckScreenResultScope:
         errors = _check_screen_result_scope(merged)
         assert errors
         assert "l-001" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_lead_predictions
+# ---------------------------------------------------------------------------
+
+
+def _lead_with_predictions(predictions):
+    return {"gather": [{
+        "id": "l-001", "loop": 1, "name": "volume-profile", "target": "v-001",
+        "query_details": {}, "outcome": {},
+        "predictions": predictions,
+        "resolutions": [],
+    }]}
+
+
+class TestCheckLeadPredictions:
+    def test_absent_predictions_passes(self):
+        merged = {"gather": [{
+            "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+            "query_details": {}, "outcome": {}, "resolutions": [],
+        }]}
+        assert _check_lead_predictions(merged) == []
+
+    def test_well_formed_predictions_pass(self):
+        merged = _lead_with_predictions([
+            {"id": "lp1", "if": "volume within 1σ", "read_as": "authorized",
+             "advance_to": "change-management-lookup"},
+            {"id": "lp2", "if": "volume >3σ", "read_as": "anomalous",
+             "advance_to": "HYPOTHESIZE"},
+        ])
+        assert _check_lead_predictions(merged) == []
+
+    def test_missing_required_field(self):
+        merged = _lead_with_predictions([
+            {"id": "lp1", "if": "x", "read_as": "y"},  # missing advance_to
+        ])
+        errors = _check_lead_predictions(merged)
+        assert errors
+        assert "advance_to" in errors[0]
+
+    def test_bad_id_pattern(self):
+        merged = _lead_with_predictions([
+            {"id": "p1", "if": "x", "read_as": "y", "advance_to": "next"},
+        ])
+        errors = _check_lead_predictions(merged)
+        assert any("does not match pattern" in e for e in errors)
+
+    def test_duplicate_ids(self):
+        merged = _lead_with_predictions([
+            {"id": "lp1", "if": "x", "read_as": "y", "advance_to": "a"},
+            {"id": "lp1", "if": "z", "read_as": "w", "advance_to": "b"},
+        ])
+        errors = _check_lead_predictions(merged)
+        assert any("duplicate id" in e for e in errors)
+
+    def test_empty_advance_to(self):
+        merged = _lead_with_predictions([
+            {"id": "lp1", "if": "x", "read_as": "y", "advance_to": ""},
+        ])
+        errors = _check_lead_predictions(merged)
+        assert any("non-empty string" in e for e in errors)
+
+    def test_predictions_not_a_list(self):
+        merged = {"gather": [{
+            "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+            "query_details": {}, "outcome": {},
+            "predictions": "not a list",
+            "resolutions": [],
+        }]}
+        errors = _check_lead_predictions(merged)
+        assert any("must be a list" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_route_compliance (warning channel)
+# ---------------------------------------------------------------------------
+
+
+def _merged_with_leads(leads):
+    return {"gather": leads}
+
+
+def _lead(name, predictions=None):
+    return {
+        "id": f"l-{name}", "loop": 1, "name": name, "target": "v-001",
+        "query_details": {}, "outcome": {},
+        "predictions": predictions,
+        "resolutions": [],
+    }
+
+
+class TestCheckRouteCompliance:
+    def test_no_predictions_is_silent(self):
+        merged = _merged_with_leads([_lead("a"), _lead("b")])
+        assert _check_route_compliance(merged) == []
+
+    def test_next_lead_matches_advance_to(self):
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "next-step"}]
+        merged = _merged_with_leads([_lead("first", preds), _lead("next-step")])
+        assert _check_route_compliance(merged) == []
+
+    def test_next_lead_mismatch_emits_warning(self):
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "expected"}]
+        merged = _merged_with_leads([_lead("first", preds), _lead("actual-other")])
+        warnings = _check_route_compliance(merged)
+        assert warnings
+        assert "actual-other" in warnings[0]
+        assert "expected" in warnings[0]
+
+    def test_terminal_lead_with_conclude_is_silent(self):
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "CONCLUDE"}]
+        merged = _merged_with_leads([_lead("first", preds)])
+        assert _check_route_compliance(merged) == []
+
+    def test_terminal_lead_without_conclude_warns(self):
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "next-step"}]
+        merged = _merged_with_leads([_lead("first", preds)])
+        warnings = _check_route_compliance(merged)
+        assert warnings
+        assert "terminal" in warnings[0].lower()
+
+    def test_hypothesize_advance_does_not_require_next_lead(self):
+        # advance_to HYPOTHESIZE is valid even on a terminal lead — the
+        # companion may continue in a follow-up HYPOTHESIZE block elsewhere.
+        # Here we check the non-terminal case: if next lead isn't HYPOTHESIZE-
+        # flavored (which it won't be — phases aren't leads), that's still a
+        # mismatch, and the warning is correct.
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "HYPOTHESIZE"}]
+        merged = _merged_with_leads([_lead("first", preds), _lead("some-other")])
+        warnings = _check_route_compliance(merged)
+        assert warnings
+
+
+class TestCollectWarnings:
+    def test_companion_with_route_warning(self):
+        text = (
+            "```yaml\n"
+            "gather:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: first\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome: {}\n"
+            "    predictions:\n"
+            "      - id: lp1\n"
+            "        if: x\n"
+            "        read_as: y\n"
+            "        advance_to: expected-next\n"
+            "    resolutions: []\n"
+            "  - id: l-002\n"
+            "    loop: 1\n"
+            "    name: actual-next\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome: {}\n"
+            "    resolutions: []\n"
+            "```\n"
+        )
+        warnings = collect_warnings(text)
+        assert warnings
+        assert "actual-next" in warnings[0]
 
 
 # ---------------------------------------------------------------------------

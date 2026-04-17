@@ -97,22 +97,70 @@ This means:
 
 ## Investigation Loop
 
-```
-Phases: CONTEXTUALIZE → [SCREEN] → HYPOTHESIZE → GATHER → ANALYZE → CONCLUDE
+HYPOTHESIZE is **on-demand**, not a mandatory gate. Between leads, ASSESS: does the next step branch on which explanation is true? If yes, enter HYPOTHESIZE and articulate the fork. If no, go straight to GATHER.
 
-Transitions:
-- CONTEXTUALIZE → CONCLUDE (ticket-context fast-resolve for repeat alerts with prior investigation)
-- CONTEXTUALIZE → SCREEN (when playbook has a ## Screen section)
-- CONTEXTUALIZE → HYPOTHESIZE (when playbook has no ## Screen section)
-- SCREEN → CONCLUDE (screen matched a known pattern — after validation)
-- SCREEN → HYPOTHESIZE (screen didn't match — pass evidence to full loop)
+```
+CONTEXTUALIZE
+      │
+      ▼
+   ASSESS ◀─────────────────────┐
+    │                            │
+    │  branching?                │
+    ├──── yes ───▶ HYPOTHESIZE   │
+    │                 │          │
+    └──── no ─────────┤          │
+                      ▼          │
+                   GATHER         │   (in GATHER, pre-register readings
+                      │           │    iff the outcome is interpretation-
+                      ▼           │    vulnerable — see schema
+                   ANALYZE ───────┘    lead.predictions)
+                      │
+                      ▼
+                   CONCLUDE
+```
+
+ASSESS is a decision step the agent performs in its head, not a phase header. The phase headers you write to investigation.md are `## CONTEXTUALIZE`, `## SCREEN`, `## HYPOTHESIZE`, `## GATHER`, `## ANALYZE`, `## CONCLUDE` — no `## ASSESS`.
+
+Transitions (enforced by the state machine hook):
+- CONTEXTUALIZE → CONCLUDE (ticket-context fast-resolve for repeat alerts)
+- CONTEXTUALIZE → SCREEN (playbook has a ## Screen section)
+- CONTEXTUALIZE → HYPOTHESIZE (branching-first case — step-1 lead depends on which explanation is true)
+- CONTEXTUALIZE → GATHER (pure-gathering first lead — step-1 is the same regardless of explanation)
+- SCREEN → CONCLUDE | HYPOTHESIZE (matched | no-match)
 - HYPOTHESIZE → GATHER
-- GATHER → ANALYZE
-- ANALYZE → HYPOTHESIZE (more leads needed)
-- ANALYZE → CONCLUDE (mechanism confirmed + verified + scoped, or escalation)
-```
+- GATHER → ANALYZE (normal path) or → HYPOTHESIZE (a new fork opened mid-lead)
+- ANALYZE → HYPOTHESIZE | CONCLUDE
 
-The state machine is enforced automatically — when you write a phase section header to `investigation.md`, a hook validates the transition and updates `state.json`. Phase headers must be exactly `## PHASENAME` with no prefix or suffix — e.g. `## CONTEXTUALIZE`, `## HYPOTHESIZE`, `## GATHER`, `## ANALYZE`, `## SCREEN`, `## CONCLUDE`. If you attempt an illegal transition (e.g., writing `## GATHER` before `## HYPOTHESIZE`), the write will be blocked. The hook also reports your current loop count. A hard limit on hypothesis loops is enforced — if you're approaching it without convergence, escalate.
+The state machine is enforced automatically — when you write a phase section header to `investigation.md`, a hook validates the transition and updates `state.json`. Phase headers must be exactly `## PHASENAME` with no prefix or suffix. If you attempt an illegal transition, the write is blocked. The hook reports loop count (every HYPOTHESIZE and every ANALYZE entry counts as one cycle); a hard cap is enforced — if you're approaching it without convergence, escalate.
+
+---
+
+## ASSESS: choosing the next edge
+
+ASSESS is how you pick among the transitions above. It is an in-head decision step, not a phase — no `## ASSESS` header is written to `investigation.md`. You run ASSESS at the end of CONTEXTUALIZE and after every ANALYZE, before committing to the next edge.
+
+Enter HYPOTHESIZE when the **very next lead** depends on which explanation is true. If the immediate next lead is the same regardless of which story is true, you are NOT in a branching regime — even if step-2 might later diverge. Hypothesize when the fork opens, not before.
+
+Formally, two orthogonal axes govern how much pre-commitment the next lead warrants:
+
+- **Branching** — does the choice of the *very next* lead depend on which explanation is true?
+- **Interpretation-vulnerability** — would reading the outcome post-hoc risk rationalization? (Per-field, not per-lead — a single lead can mix mechanical fields with interpretive ones.)
+
+| Branching? | Interp.-vulnerable? | What to do |
+|---|---|---|
+| yes | yes | HYPOTHESIZE: articulate hypotheses AND pre-register per-hypothesis predictions |
+| yes | no | HYPOTHESIZE: articulate hypotheses; skip prediction blocks (mechanical fork, e.g. identity lookup that decides a branch) |
+| no | yes | Skip HYPOTHESIZE. In GATHER, pre-register lead-level `predictions` (conditional branch plans on the interpretive outcome fields) |
+| no | no | Skip HYPOTHESIZE. GATHER mechanically, no ceremony |
+
+**Reclassification cue.** Before entering HYPOTHESIZE, name the specific outcome that would open the fork. If you can't, the fork hasn't opened yet — stay in the mechanical / interpretive lane and re-assess after the next lead.
+
+**Worked examples** (from probe corpus under `docs/experiments/investigation-language-pilot/`):
+
+- **no / no — FIM sudoers modified, mechanical actor lookup.** Step-1 is "who modified the file" regardless of intent. The identity lookup itself doesn't branch; the branch opens *after* its result. Go straight to GATHER.
+- **no / yes — DLP access-volume anomaly.** Step-1 is the access-volume profile regardless of story. But the reading is interpretive (what's "anomalous" vs "authorized"?). Go to GATHER; pre-register lead-level `predictions` (`if volume within 1σ → read_as authorized → advance_to change-management-lookup`; `if >3σ on new buckets → read_as corroborated DLP → advance_to HYPOTHESIZE`; etc.).
+- **yes / no — SSH invalid user, volume-count first.** Reframing the first lead from interpretive reputation to mechanical volume count is a win; the branch (scanner vs targeted) opens on the count. Enter HYPOTHESIZE; skip per-prediction blocks (the fork is mechanical).
+- **yes / yes — Prod DB outbound to low-rep IP.** Multiple plausible explanations (benign update / lateral reconnaissance / exfil) predict divergent step-1 leads. Enter HYPOTHESIZE with full per-hypothesis predictions.
 
 ---
 
@@ -242,6 +290,8 @@ Append to `{run_dir}/investigation.md`:
 ### HYPOTHESIZE
 
 **Goal:** Form or update hypotheses and select the most diagnostic lead.
+
+Entry is governed by the ASSESS rubric above — arrive here only when the very next lead branches on which explanation is true.
 
 #### Generating Hypotheses
 
@@ -376,6 +426,26 @@ Append to `{run_dir}/investigation.md`:
 
 **No YAML block at GATHER.** Characterize the raw observation in prose; do not interpret. The complete `gather:` lead block — including `query_details`, `outcome`, and `resolutions` — is written at ANALYZE once both observation and analysis are complete.
 
+#### Pre-registering readings (non-branching interpretive leads)
+
+When the lead is non-branching (no hypothesis fork opened) but the outcome has **interpretation-vulnerable fields** — volume anomaly shape, process-name plausibility, reputation-weight thresholds, "looks like a scan" pattern judgment — pre-register how you will read those fields *before* running the lead. This prevents narrative drift during enrichment: reading a mixed signal as `++` post-hoc instead of the honest `+`.
+
+The unit of pre-registration is the **outcome field**, not the lead. A single lead can mix mechanical fields (UID, count, IP address) with interpretive ones (process-name plausibility, threshold judgment). Pre-register on the specific fields that carry the judgment; the mechanical ones don't need it.
+
+Use the **reviewer test**: "Could a reviewer reasonably disagree with my reading of this field?" If yes, pre-register.
+
+Record pre-registrations in the lead's `predictions` block (schema has the triple form):
+
+```yaml
+predictions:
+  - id: lp1
+    if: "<outcome pattern on the interpretive field(s)>"
+    read_as: "<what this reading means>"
+    advance_to: "<next lead name | CONCLUDE | HYPOTHESIZE>"
+```
+
+Each prediction is simultaneously an interpretation commitment and a pre-committed routing decision. If the observed outcome doesn't fit any `if` branch, that is itself a signal — HYPOTHESIZE to extend the fork space, don't silently rationalize.
+
 ### ANALYZE
 
 **Goal:** Weight evidence against each hypothesis using structured assessments.
@@ -390,6 +460,7 @@ Cross-check your analysis against the investigation philosophy:
 - **Severity of tests:** Are your leads severe enough? A benign conclusion from weak tests should not produce high confidence. If you've only pursued leads where all hypotheses predict the same outcome, you haven't actually discriminated.
 - **Watch for the unexplained:** If your best hypothesis leaves significant observations unexplained, your hypothesis space may be incomplete — consider whether you've missed an actor type, pathway, or mechanism.
 - **Circumstantial vs authoritative:** Distinguish "evidence consistent with X" (circumstantial) from "authoritative source confirms X" (e.g. the sanction registry explicitly lists this IP, the change-management ticket is open with a confirmed operator, the query result directly answers the question). Do not promote circumstantial to authoritative. A `++` weight on a mechanism hypothesis tied to an anchored archetype requires authoritative confirmation; circumstantial consistency alone is at most `+`. A refutation shape being met does not automatically mean `--` — ask: "Was the test severe enough? Could the hypothesis still be true despite this evidence?" `--` means direct contradiction of a core prediction, not "looks unlikely."
+- **Route compliance for pre-committed readings:** If the just-run lead carried `predictions` (lead-level conditional branch plans), check that the actual outcome pattern matched one of your `if` branches and that the next lead you're about to select matches the corresponding `advance_to`. If the observed pattern didn't fit any branch, that's a signal the fork space was incomplete — HYPOTHESIZE to extend it, don't silently rationalize the outcome into the closest branch.
 - **No rollup grades across hypotheses:** A hypothesis's grade reflects evidence on *that specific mechanism*. Do not upgrade a mechanism hypothesis from `+` to `++` on the strength of evidence that actually supports a sibling mechanism, and do not invent a parent class (`?compromise-confirmed`, `?malicious-activity`) to aggregate sibling grades — see HYPOTHESIZE step 5. If two mechanism hypotheses are both at `+` and neither is refuted, the correct CONCLUDE disposition is `escalated / inconclusive` with both listed as active, not `escalated / true_positive / high` with a composite wrapper. Losing grade crispness is the honest outcome when the evidence doesn't discriminate — and the concurrent list carries more detail for the analyst than the merge would.
 
 **Decision after ANALYZE:**
@@ -498,7 +569,7 @@ conclude:
   termination:
     category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
     rationale: {why the investigation halted}
-  disposition: benign | true_positive | unclear
+  disposition: benign | false_positive | true_positive | inconclusive
   confidence: high | medium | low
   matched_archetype: {name} | null
   summary: {1-2 sentence summary}

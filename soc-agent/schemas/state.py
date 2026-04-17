@@ -19,12 +19,20 @@ class Phase(str, Enum):
     CONCLUDE = "CONCLUDE"
 
 
-# Legal transitions: from_phase -> set of allowed to_phases
+# Legal transitions: from_phase -> set of allowed to_phases.
+#
+# HYPOTHESIZE is on-demand (invlang v2.7): the agent enters it when the lead
+# space branches, not as a fixed phase gate. This means:
+#   - CONTEXTUALIZE may go directly to GATHER for pure-gathering first leads
+#     (the no-branching / interpretation-vulnerable cell of the ASSESS matrix).
+#   - GATHER may go directly to HYPOTHESIZE when the agent realises mid-lead
+#     that a new fork has opened and wants to articulate it before ANALYZE.
+#   - ANALYZE → HYPOTHESIZE remains the canonical loop re-entry.
 TRANSITIONS: dict[Phase, set[Phase]] = {
-    Phase.CONTEXTUALIZE: {Phase.SCREEN, Phase.HYPOTHESIZE, Phase.CONCLUDE},  # SCREEN/CONCLUDE if fast path, else HYPOTHESIZE
+    Phase.CONTEXTUALIZE: {Phase.SCREEN, Phase.HYPOTHESIZE, Phase.GATHER, Phase.CONCLUDE},
     Phase.SCREEN: {Phase.HYPOTHESIZE, Phase.CONCLUDE},       # resolve or fall through
     Phase.HYPOTHESIZE: {Phase.GATHER},
-    Phase.GATHER: {Phase.ANALYZE},
+    Phase.GATHER: {Phase.ANALYZE, Phase.HYPOTHESIZE},
     Phase.ANALYZE: {Phase.HYPOTHESIZE, Phase.CONCLUDE},
     Phase.CONCLUDE: set(),  # Terminal
 }
@@ -32,10 +40,14 @@ TRANSITIONS: dict[Phase, set[Phase]] = {
 # CONTEXTUALIZE is the only valid initial phase
 INITIAL_PHASE = Phase.CONTEXTUALIZE
 
-# Maximum number of hypothesis-gather-analyze loops before forced conclusion.
-# 7 loops is generous — most investigations resolve in 2-3. If you're past 5
-# without convergence, the hypothesis space is likely incomplete.
-MAX_LOOPS = 7
+# Maximum number of investigation cycles before forced conclusion. A cycle is
+# any entry into HYPOTHESIZE or ANALYZE — both bound investigation depth, and
+# with on-demand HYPOTHESIZE (invlang v2.7) a run can accumulate many
+# GATHER→ANALYZE cycles without re-entering HYPOTHESIZE. Counting ANALYZE too
+# restores the guardrail: a runaway agent that keeps gathering without ever
+# re-hypothesizing still trips the cap. Bumped from 7 to 12 to compensate for
+# the broader counting rule — most investigations still resolve in 2-3 cycles.
+MAX_LOOPS = 12
 
 
 def validate_transition(current: Optional[str], proposed: str) -> tuple[bool, str]:
@@ -75,8 +87,15 @@ def validate_transition(current: Optional[str], proposed: str) -> tuple[bool, st
 
 
 def count_loops(history: list[str]) -> int:
-    """Count the number of HYPOTHESIZE phases in the history (proxy for loop count)."""
-    return sum(1 for p in history if p == Phase.HYPOTHESIZE.value)
+    """Count investigation cycles in the history.
+
+    A cycle is any entry into HYPOTHESIZE or ANALYZE. With on-demand
+    HYPOTHESIZE (invlang v2.7), counting only HYPOTHESIZE would let a runaway
+    agent accumulate unbounded GATHER→ANALYZE cycles. Counting ANALYZE closes
+    that loophole — every completed gather/analyze cycle contributes one,
+    every hypothesis re-entry contributes one, and MAX_LOOPS bounds the sum.
+    """
+    return sum(1 for p in history if p in {Phase.HYPOTHESIZE.value, Phase.ANALYZE.value})
 
 
 def make_state(

@@ -19,9 +19,16 @@ Checks performed (deterministic — no LLM):
 7. Refutation IDs: -- resolutions have non-empty matched_refutation_ids
 8. trust_anchor_result completeness: all 5 fields present when block is present
 9. screen_result scope: only on leads with mode: screen
+10. lead.predictions structural: {id, if, read_as, advance_to}; ids match ^lp\\d+$ and are unique per lead
+
+Warnings (non-blocking, printed to stderr with exit 0):
+- Route compliance: when a lead with `predictions` is followed by another lead in
+  the same companion, the follower's `name` should match at least one
+  `advance_to`; terminal leads with no follower should have `CONCLUDE` in at
+  least one `advance_to`.
 
 Exit codes:
-    0 - Passed (or not applicable)
+    0 - Passed (or warnings only)
     2 - Validation failed (message fed back to agent, blocks the write)
 """
 
@@ -56,6 +63,13 @@ _TRUST_ANCHOR_FIELDS = {"anchor_id", "kind", "result", "as_of", "authority_for_q
 
 # Loose ID format: one of the known prefixes followed by alphanumerics and hyphens
 _ID_RE = re.compile(r"^[vehl]-[a-z0-9][a-z0-9-]*$")
+
+# Lead-level prediction IDs are local to the lead; different namespace from
+# hypothesis predictions (p1, p2) to avoid collision.
+_LEAD_PREDICTION_ID_RE = re.compile(r"^lp\d+$")
+
+# Required fields on every lead.predictions entry
+_LEAD_PREDICTION_REQUIRED = {"id", "if", "read_as", "advance_to"}
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +355,116 @@ def _check_screen_result_scope(merged: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _check_lead_predictions(merged: dict[str, Any]) -> list[str]:
+    """Validate lead.predictions structural shape when present.
+
+    Each entry: {id, if, read_as, advance_to}. IDs match ^lp\\d+$ and are
+    unique within the lead. advance_to is either CONCLUDE, HYPOTHESIZE, or a
+    lead name declared elsewhere in the companion.
+    """
+    errors: list[str] = []
+
+    for lead in merged.get("gather", []) or []:
+        if not isinstance(lead, dict):
+            continue
+        preds = lead.get("predictions")
+        if preds is None:
+            continue
+        lid = lead.get("id", "?")
+        if not isinstance(preds, list):
+            errors.append(f"lead {lid}: predictions must be a list")
+            continue
+
+        seen_ids: set[str] = set()
+        for i, pred in enumerate(preds):
+            ctx = f"lead {lid} predictions[{i}]"
+            if not isinstance(pred, dict):
+                errors.append(f"{ctx}: entry must be a mapping")
+                continue
+
+            missing = _LEAD_PREDICTION_REQUIRED - pred.keys()
+            if missing:
+                errors.append(f"{ctx}: missing required field(s): {sorted(missing)}")
+
+            pid = pred.get("id")
+            if isinstance(pid, str):
+                if not _LEAD_PREDICTION_ID_RE.match(pid):
+                    errors.append(
+                        f"{ctx}: id {pid!r} does not match pattern ^lp\\d+$ "
+                        f"(e.g. lp1, lp2)"
+                    )
+                elif pid in seen_ids:
+                    errors.append(f"{ctx}: duplicate id {pid!r} within lead")
+                else:
+                    seen_ids.add(pid)
+
+            # advance_to is a forward reference — the target lead may not exist
+            # yet when this block is written. Require non-empty string only;
+            # post-hoc route compliance is measured in queries.py Class 8.
+            advance_to = pred.get("advance_to")
+            if "advance_to" in pred and not (isinstance(advance_to, str) and advance_to.strip()):
+                errors.append(f"{ctx}: advance_to must be a non-empty string")
+
+    return errors
+
+
+def _check_route_compliance(merged: dict[str, Any]) -> list[str]:
+    """Warn when a lead's predictions don't cover the actually-next lead.
+
+    For each lead with `predictions`:
+      - if there's a following lead in the same companion, its `name` should
+        appear in at least one `advance_to`.
+      - if there's no following lead (this is the last lead in `gather`),
+        `CONCLUDE` should appear in at least one `advance_to`.
+
+    Returns a list of warning strings (empty if all compliant). Warnings do not
+    block the write; route mismatches are legitimate signals (the fork space
+    was incomplete) rather than structural errors.
+    """
+    warnings: list[str] = []
+    leads = merged.get("gather", []) or []
+    if not isinstance(leads, list):
+        return warnings
+
+    for idx, lead in enumerate(leads):
+        if not isinstance(lead, dict):
+            continue
+        preds = lead.get("predictions")
+        if not isinstance(preds, list) or not preds:
+            continue
+
+        advance_tos = {
+            p.get("advance_to")
+            for p in preds
+            if isinstance(p, dict) and isinstance(p.get("advance_to"), str) and p.get("advance_to").strip()
+        }
+        if not advance_tos:
+            continue
+
+        lid = lead.get("id", "?")
+        next_lead = leads[idx + 1] if idx + 1 < len(leads) else None
+        if next_lead is None:
+            # Terminal lead in this companion — CONCLUDE should be a declared route.
+            if "CONCLUDE" not in advance_tos:
+                warnings.append(
+                    f"lead {lid}: terminal lead with predictions but no advance_to names "
+                    f"CONCLUDE (declared: {sorted(a for a in advance_tos if a)})"
+                )
+            continue
+
+        next_name = next_lead.get("name") if isinstance(next_lead, dict) else None
+        if not isinstance(next_name, str):
+            continue
+        if next_name not in advance_tos:
+            warnings.append(
+                f"lead {lid}: next lead {next_name!r} does not match any advance_to "
+                f"(declared: {sorted(a for a in advance_tos if a)}). "
+                f"If the fork space was incomplete, HYPOTHESIZE to extend it."
+            )
+
+    return warnings
+
+
 def _check_append_only(proposed_text: str, current_text: str) -> list[str]:
     """Fail if the proposed content has fewer YAML blocks than the on-disk content."""
     current_count = len(YAML_BLOCK_RE.findall(current_text))
@@ -394,8 +518,34 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_refutation_ids(merged))
     errors.extend(_check_trust_anchor_completeness(merged))
     errors.extend(_check_screen_result_scope(merged))
+    errors.extend(_check_lead_predictions(merged))
 
     return errors
+
+
+def collect_warnings(proposed_text: str) -> list[str]:
+    """Non-blocking checks that emit warnings rather than errors.
+
+    Run after `validate_companion` clears structural errors. Returns a list of
+    warning strings (empty = nothing to warn about).
+    """
+    warnings: list[str] = []
+    blocks: list[dict[str, Any]] = []
+    for match in YAML_BLOCK_RE.finditer(proposed_text):
+        raw = match.group(1)
+        try:
+            doc = yaml.safe_load(raw)
+        except yaml.YAMLError:
+            continue  # structural errors already reported by validate_companion
+        if isinstance(doc, dict):
+            blocks.append(doc)
+
+    if not blocks:
+        return warnings
+
+    merged = _merge_blocks(blocks)
+    warnings.extend(_check_route_compliance(merged))
+    return warnings
 
 
 # ---------------------------------------------------------------------------
@@ -422,17 +572,23 @@ def main() -> None:
             pass
 
     errors = validate_companion(proposed_text, current_text)
-    if not errors:
-        sys.exit(0)
+    if errors:
+        print("invlang validation failed:", file=sys.stderr)
+        for err in errors:
+            print(f"  - {err}", file=sys.stderr)
+        print(
+            "Next action: fix the YAML block(s) and retry the write.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
-    print("invlang validation failed:", file=sys.stderr)
-    for err in errors:
-        print(f"  - {err}", file=sys.stderr)
-    print(
-        "Next action: fix the YAML block(s) and retry the write.",
-        file=sys.stderr,
-    )
-    sys.exit(2)
+    warnings = collect_warnings(proposed_text)
+    if warnings:
+        print("invlang route-compliance warnings:", file=sys.stderr)
+        for w in warnings:
+            print(f"  - {w}", file=sys.stderr)
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":

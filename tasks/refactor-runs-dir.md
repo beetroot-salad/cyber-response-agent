@@ -1,6 +1,6 @@
 ---
 title: Refactor runs dir
-status: doing
+status: done
 groups: evaluation
 ---
 

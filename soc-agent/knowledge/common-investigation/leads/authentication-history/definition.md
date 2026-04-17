@@ -1,6 +1,7 @@
 ---
 name: authentication-history
 data_tags: [auth-events]
+baseline: optional       # Absolute observations (e.g., "success after failure from this IP") are self-interpreting; rate claims ("400 failures/hr is high") require a shift-query comparison.
 ---
 
 ## Goal
@@ -40,3 +41,25 @@ available" or "not observed." Omission is ambiguous to the main agent.
   rotation — looks like low-frequency brute force but isn't.
 - Time windows matter: always state the window you queried.
   Missing events outside your window can change the interpretation.
+
+## Baseline
+
+- **When needed:** Any claim framed as a rate or volume ("400 failures
+  per hour," "unusually many distinct usernames," "burst of activity")
+  needs a baseline before it can be graded `++` or `--`. Absolute
+  observations ("success followed failures from the same IP," "root
+  login at 03:00," "new-to-host username") do not — they are
+  self-interpreting.
+- **Shift query:** Re-run the same entity-scoped query against a
+  prior window of equal duration — typically `--start` shifted `7d`
+  earlier with the same `--window`. For per-entity noise profiles
+  (e.g., this IP's typical failure rate against this host), a 7-day
+  shift captures weekly seasonality; for identity patterns (this
+  user's typical login hours), extend to 30d if the 7d window is
+  sparse. Vendor-specific syntax lives in `templates/{vendor}.md`.
+- **Interpretation:** Prefer σ-framing over absolute thresholds.
+  `>3σ above this entity's 7-day mean`, `10× the baseline rate`, or
+  `top decile across comparable hosts` are environment-agnostic and
+  make refutation shapes unambiguous. A `0 → N` jump (no prior
+  events in the shift window) is stronger evidence than an `N → 10N`
+  jump at the same absolute count — call that out explicitly.

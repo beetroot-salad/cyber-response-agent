@@ -178,7 +178,7 @@ class TestInferStateHook:
         assert state["history"] == ["CONTEXTUALIZE", "HYPOTHESIZE"]
 
     def test_illegal_transition_rejected(self, tmp_path):
-        """CONTEXTUALIZE -> GATHER (skipping HYPOTHESIZE) is rejected."""
+        """CONTEXTUALIZE -> ANALYZE (skipping HYPOTHESIZE and GATHER) is rejected."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
@@ -187,10 +187,10 @@ class TestInferStateHook:
         # First: CONTEXTUALIZE
         write_investigation(run_dir, "## CONTEXTUALIZE\nstuff\n", runs_dir)
 
-        # Then: skip to GATHER (illegal)
+        # Then: skip to ANALYZE (illegal — still not reachable from CONTEXTUALIZE)
         result = write_investigation(
             run_dir,
-            "## CONTEXTUALIZE\nstuff\n## GATHER (loop 1)\nquery\n",
+            "## CONTEXTUALIZE\nstuff\n## ANALYZE (loop 1)\nfindings\n",
             runs_dir,
         )
         assert result.returncode == 2
@@ -310,7 +310,7 @@ class TestInferStateHook:
         assert state["history"] == phases
 
     def test_max_loops_enforced(self, tmp_path):
-        """MAX_LOOPS+1 HYPOTHESIZE entries are rejected."""
+        """Cycles beyond MAX_LOOPS are rejected (H+A count, cap is MAX_LOOPS)."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
@@ -319,15 +319,17 @@ class TestInferStateHook:
         content = "## CONTEXTUALIZE\nstuff\n"
         write_investigation(run_dir, content, runs_dir)
 
-        # Run MAX_LOOPS full cycles
-        for i in range(1, MAX_LOOPS + 1):
+        # Each H->G->A cycle contributes 2 to count_loops. Run the max number
+        # of full cycles that still fits under the cap.
+        full_cycles = MAX_LOOPS // 2
+        for i in range(1, full_cycles + 1):
             for phase in ["HYPOTHESIZE", "GATHER", "ANALYZE"]:
                 content += f"## {phase} (loop {i})\nstuff\n"
                 result = write_investigation(run_dir, content, runs_dir)
                 assert result.returncode == 0, f"Loop {i} {phase} failed: {result.stderr}"
 
-        # The (MAX_LOOPS+1)th HYPOTHESIZE should be rejected
-        content += f"## HYPOTHESIZE (loop {MAX_LOOPS + 1})\nstuff\n"
+        # Next HYPOTHESIZE pushes the counter past MAX_LOOPS → rejected.
+        content += f"## HYPOTHESIZE (loop {full_cycles + 1})\nstuff\n"
         result = write_investigation(run_dir, content, runs_dir)
         assert result.returncode == 2
         assert "Maximum" in result.stderr

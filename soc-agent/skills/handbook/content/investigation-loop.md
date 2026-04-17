@@ -79,7 +79,7 @@ The loop is enforced by the `infer_state.py` PostToolUse hook, which fires autom
 1. Extracts all `## PHASE` headers from the file
 2. Compares against the recorded history in `state.json`
 3. For each new phase, looks up `TRANSITIONS[current_phase]` in `schemas/state.py` to check whether the proposed transition is legal
-4. Counts hypothesis loops in the history; rejects the transition if it would exceed `MAX_LOOPS`
+4. Counts investigation cycles in the history (every `HYPOTHESIZE` and every `ANALYZE` entry); rejects the transition if it would exceed `MAX_LOOPS`
 5. Writes the new state back to `state.json` with an updated timestamp and appended history
 
 If any check fails the hook exits with code 2, which blocks the write and feeds the error back to the agent. The agent must then adjust its plan — you cannot "talk around" the state machine.

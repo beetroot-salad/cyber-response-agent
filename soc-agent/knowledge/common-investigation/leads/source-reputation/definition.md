@@ -1,6 +1,7 @@
 ---
 name: source-reputation
 data_tags: [asset-state, threat-intel]
+baseline: not-applicable   # Reputation checks are binary lookups (known-bad, known-scanner, asset-inventory membership) — absolute counts directly answer the question, no rate comparison needed.
 ---
 
 ## Goal

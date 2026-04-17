@@ -198,6 +198,8 @@ hypotheses:
 
 ## Phase count and loop bounds
 
-A **loop** is counted as the number of `HYPOTHESIZE` entries in `state.json` history. `MAX_LOOPS = 7` (from `schemas/state.py`). The 8th attempt to transition into `HYPOTHESIZE` is rejected with a state machine error directing the agent to `CONCLUDE`. See `content/investigation-loop.md#why-loops-are-capped-instead-of-open-ended`.
+A **cycle** is counted as any `HYPOTHESIZE` or `ANALYZE` entry in `state.json` history. `MAX_LOOPS = 12` (from `schemas/state.py`). The next transition into `HYPOTHESIZE` or `ANALYZE` past the cap is rejected with a state machine error directing the agent to `CONCLUDE`. See `content/investigation-loop.md#why-loops-are-capped-instead-of-open-ended`.
 
-Most investigations resolve in 2–3 loops. If you're past 5 without convergence, the hypothesis space is probably incomplete and escalation is the correct call anyway.
+Counting ANALYZE alongside HYPOTHESIZE keeps the guardrail meaningful under invlang v2.7's on-demand HYPOTHESIZE: a run that keeps gathering without re-hypothesizing still accumulates cycles and will eventually trip the cap.
+
+Most investigations resolve in 2–3 cycles. If you're past 8 without convergence, the hypothesis space is probably incomplete and escalation is the correct call anyway.

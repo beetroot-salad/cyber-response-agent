@@ -109,8 +109,14 @@ class TestStateTransitionContract:
         valid, _ = validate_transition("HYPOTHESIZE", "ANALYZE")
         assert not valid
 
-    def test_cannot_skip_hypothesize(self):
+    def test_context_to_gather_is_on_demand_allowed(self):
+        # HYPOTHESIZE is on-demand (invlang v2.7); pure-gathering first leads
+        # may enter GATHER directly from CONTEXTUALIZE.
         valid, _ = validate_transition("CONTEXTUALIZE", "GATHER")
+        assert valid
+
+    def test_cannot_skip_to_analyze_from_context(self):
+        valid, _ = validate_transition("CONTEXTUALIZE", "ANALYZE")
         assert not valid
 
 

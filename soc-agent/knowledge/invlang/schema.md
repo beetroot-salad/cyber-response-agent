@@ -1,6 +1,6 @@
 # Investigation Language — Agent Reference
 
-Schema v2.6. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes).
+Schema v2.7. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes).
 
 ---
 
@@ -16,7 +16,7 @@ Schema v2.6. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on 
 
 **Attributes.** Facts about a vertex that don't add topology (identity role, file creation time, IP classification, listening port) stay as `attributes` on the vertex or as `attribute_updates` in a lead outcome. Don't materialize a vertex just to carry an attribute.
 
-**Leads.** A lead is a graph operation: topology-extending (new vertices/edges enter the confirmed graph via `outcome.observations`) or attribute-refining (existing vertices enriched via `attribute_updates`), or both. `tests` declares which hypotheses it discriminates; `resolutions` records weight effects with reasoning.
+**Leads.** A lead is a graph operation: topology-extending (new vertices/edges enter the confirmed graph via `outcome.observations`) or attribute-refining (existing vertices enriched via `attribute_updates`), or both. `tests` declares which hypotheses it discriminates; `resolutions` records weight effects with reasoning. A lead that does not collapse a fork (no `tests`) may still pre-commit to a reading via lead-level `predictions` — conditional branch plans that bind how an interpretation-vulnerable outcome should be read and what to run next.
 
 **Corpus.** Past investigations are queryable. Query before HYPOTHESIZE to calibrate hypothesis names and weights; set `matched_archetype` at CONCLUDE to connect this run.
 
@@ -149,9 +149,19 @@ name: <string>
 target: v-{id}
 selection_rationale: <string>   # optional; 1–3 sentences on why this lead now
 mode: screen                    # omit unless SCREEN-dispatched
-tests: [h-{id}, ...]            # optional; hypotheses this lead discriminates
+tests: [h-{id}, ...]            # optional; hypotheses this lead discriminates.
+                                # Presence signals the lead collapses a fork; absence
+                                # signals a non-branching (gathering or interpretive) lead.
 observes:                       # optional; explicit prediction/refutation mapping
   - { hypothesis: h-{id}, predictions: [p1], refutations: [r1] }
+predictions:                    # optional; pre-committed conditional branch plans for
+                                # non-branching but interpretation-vulnerable leads.
+                                # IDs are local to the lead (lp1, lp2, …) and do not
+                                # collide with hypothesis predictions (p1, p2, …).
+  - id: lp1
+    if: "<outcome pattern>"           # how to recognise this branch in the result
+    read_as: "<interpretation>"       # what this outcome means
+    advance_to: "<lead-name | CONCLUDE | HYPOTHESIZE>"   # pre-committed next step
 query_details:
   system: <string>
   template: <string>
@@ -171,7 +181,11 @@ outcome:
                                 # omit for SIEM queries that are not anchors.
     anchor_id: <string>
     kind: <string>
-    result: confirmed | refuted | partial | no-data
+    result: confirmed | refuted | unavailable
+                                # `unavailable` covers both "anchor returned partial coverage"
+                                # and "anchor had no data" — the grading cap for reduced
+                                # authority is expressed via `authority_for_question` below,
+                                # not by splitting the result enum.
     as_of: <iso>                # timestamp the answer is authoritative ABOUT
     authority_for_question: full | partial
   trust_root_reached: v-{id}    # omit when null
@@ -200,7 +214,7 @@ conclude:
   termination:
     category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
     rationale: <string>
-  disposition: benign | true_positive | unclear
+  disposition: benign | false_positive | true_positive | inconclusive
   confidence: high | medium | low
   matched_archetype: <name> | null   # use the archetype directory name from
                                      # knowledge/signatures/{sig}/archetypes/{name}/
@@ -337,6 +351,50 @@ A lead list item under `gather` — no `lead:` wrapping key. `reasoning` explain
       supporting_edges: [e-002]
 ```
 
+### Lead — non-branching with pre-committed readings
+
+A gathering lead whose outcome is interpretation-vulnerable but does not collapse a hypothesis fork. No `tests` (single expected step-1 regardless of which story is true). `predictions` names the outcome patterns that would route step-2 differently — the triple is auditable after the fact: the actually-run next lead should match an `advance_to`.
+
+```yaml
+- id: l-002
+  loop: 1
+  name: access-volume-profile
+  target: v-003                      # identity whose access triggered the DLP alert
+  selection_rationale: "Volume alone can't distinguish authorized bulk export from
+    exfiltration; the profile shape (cadence, targets, prior history) determines the
+    next lead rather than collapsing a hypothesis."
+  query_details:
+    system: wazuh-indexer
+    template: identity-object-access
+    query: "user.name:alice AND action:GetObject"
+    time_window: "30d"
+    substitutions: { user: "alice" }
+  predictions:
+    - id: lp1
+      if: "access matches identity's prior 30d cadence within 1σ; targets overlap known project buckets"
+      read_as: "authorized bulk read, consistent with baseline"
+      advance_to: change-management-lookup
+    - id: lp2
+      if: "volume >3σ above baseline and targets include buckets identity has not read before"
+      read_as: "anomalous access pattern; DLP alert corroborated"
+      advance_to: HYPOTHESIZE
+    - id: lp3
+      if: "partial overlap: cadence normal but target set includes one unfamiliar bucket"
+      read_as: "mixed signal; scope question before concluding"
+      advance_to: bucket-sensitivity-lookup
+  outcome:
+    attribute_updates:
+      - vertex: v-003
+        updates:
+          baseline_30d_reads: 847
+          observed_30d_reads: 862
+          target_overlap: full
+    observations:
+      vertices: []
+      edges: []
+  resolutions: []                    # no hypotheses to resolve on this lead
+```
+
 ---
 
 ## Key rules
@@ -348,3 +406,4 @@ A lead list item under `gather` — no `lead:` wrapping key. `reasoning` explain
 5. **`trust_anchor_result` completeness.** When present, all five fields (`anchor_id`, `kind`, `result`, `as_of`, `authority_for_question`) are required.
 6. **Partial authority cap.** A resolution grounded solely by `authority_for_question: partial` cannot push a hypothesis past `+` or `-`.
 7. **`screen_result` scope.** Only valid on `mode: screen` leads; only on the final lead in a SCREEN sequence. SCREEN-matched companions omit the top-level `hypothesize` block.
+8. **Lead-level predictions.** When present, each entry has `id` (matching `^lp\d+$`), `if`, `read_as`, `advance_to`. IDs are unique within the lead. `advance_to` is either the name of another lead in the same or subsequent loop, or one of `CONCLUDE` / `HYPOTHESIZE`. The actual next step should match at least one pre-committed branch — mismatches are flagged by the validator.

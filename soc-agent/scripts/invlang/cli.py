@@ -94,7 +94,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="invlang-query",
         description="""
-Investigation-language query tool (v2.6 corpus).
+Investigation-language query tool (v2.7 corpus).
 
 Without --class or --enumerate, runs the full demo across all 12 classes.
 
@@ -113,7 +113,7 @@ QUERY CLASSES
   5  lead-sequence          Full investigation trace per case; filter by substring
   6  hypothesis-wildcard    fnmatch on hypothesis names; filter by final weight
   7  prose-substring        Substring scan across all prose fields (reasoning, summaries, concerns)
-  8  lead-effectiveness     Rank leads by log1p(count) × mean_abs_weight_delta
+  8  lead-effectiveness     Rank leads on branching_delta + prediction_fidelity + kind_mix
                               --hypothesis PATTERN [PATTERN …]  restrict to matching hypotheses
                               --discriminate-between P1 P2       signed lift: moves P1 up, P2 down
   9  weight-reversal        Resolutions where weight moved from positive/null to negative
