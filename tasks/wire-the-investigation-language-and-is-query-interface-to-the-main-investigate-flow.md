@@ -1,6 +1,6 @@
 ---
 title: Wire the investigation language and is-query interface to the main investigate flow
-status: doing
+status: deferred
 groups: invlang, investigate
 depends_on: improving-query-script
 ---

@@ -1,6 +1,6 @@
 ---
 title: Test live companion writing — markdown-with-YAML-blocks format
-status: todo
+status: deferred
 groups: invlang, investigate, schema
 ---
 

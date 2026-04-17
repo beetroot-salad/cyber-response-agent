@@ -1,6 +1,6 @@
 ---
 title: Structured observation snippets in ANALYZE (prediction/observation/result convention)
-status: doing
+status: deferred
 groups: reliability, knowledge, invlang
 ---
 
