@@ -395,9 +395,9 @@ Choose the dispatch mode based on the investigative question:
 
 #### Model selection
 
-**Single lead, template available** — dispatch the gather subagent on Haiku. The work is mechanical (fill template, run query, characterize bullets) and the subagent escalates back to you on a non-normal data-source health verdict, missing template, binding mismatch, or any condition that requires real reasoning. This is the cost lever for the common case.
+**Single lead, template available** — dispatch the gather subagent on Haiku; it runs a generic data-source health probe, then executes the template-driven lead. The subagent escalates on non-normal probe verdicts or any condition requiring real reasoning (see `gather.md`). This is the cost lever for the common case.
 
-```
+```python
 Agent(
   subagent_type="general-purpose",
   model="haiku",
@@ -406,11 +406,11 @@ Agent(
 )
 ```
 
-The Haiku subagent runs a generic data-source health probe (`scripts/tools/data_source_health.py`) before executing the lead — see `environment/systems/{vendor}/SKILL.md` for the vendor binding. If the probe returns `elevated | low | broken`, or the lead's template is absent / bindings don't match / the work needs follow-up queries, the subagent emits `result: escalate` with a `trigger` field and any partial observations. Read the trigger before re-dispatching:
+When the subagent returns `result: escalate`, read the `trigger` and re-dispatch accordingly — in all cases below, re-run the lead (or follow-up work) without the `model="haiku"` override so the subagent inherits the main model:
 
-- `elevated | low | broken` — the data-source rate signal itself is anomalous. That may be the finding (e.g., pipeline outage during the incident) or it may indicate a real spike that needs Sonnet to characterize. Decide based on which makes sense, then either record the probe output as the GATHER outcome or re-dispatch without `model="haiku"`.
-- `missing_template | binding_mismatch | follow_up_needed` — the work is no longer template-driven. Re-dispatch without the `model="haiku"` override (inherits main model) so the subagent can construct queries.
-- `siem_error` — re-dispatch is unlikely to help. Treat as a tooling failure and follow `leads/data-source-debug/definition.md`.
+- `elevated | low | broken` — the data-source rate signal itself is anomalous. Either record the probe output as the GATHER outcome (e.g., pipeline outage *is* the finding) or re-dispatch to characterize the spike with stronger reasoning.
+- `missing_template | binding_mismatch | follow_up_needed` — the work is no longer template-driven; re-dispatch so the subagent can construct queries.
+- `siem_error` — the SIEM-CLI failed in a way Haiku couldn't resolve. Re-dispatch on the main model so Sonnet-grade reasoning can debug (following `leads/data-source-debug/definition.md`) rather than silently retrying.
 
 **Composite dispatch** (cross-lead refinement, session-window narrowing, consistency checks) and **ad-hoc** leads (no template, custom query construction) do not use the Haiku gather subagent — handle them inline or omit the model override on a custom subagent. The Haiku gather path is template-strict by design.
 

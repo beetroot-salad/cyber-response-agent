@@ -65,7 +65,36 @@ def test_broken_when_baseline_and_incident_both_empty():
 
     v = dsh.assess_health(lambda s, e: 0, incident_window, "agent-001", samples=5, seed=1)
     assert v.verdict == "broken"
-    assert v.trigger == "baseline_empty"
+    assert v.trigger == "baseline_all_zero"
+
+
+def test_baseline_all_zero_but_incident_has_events_flags_asymmetry():
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_window = _window(incident_end, 1)
+
+    def count_fn(start, end):
+        if start >= incident_window[0]:
+            return 7  # incident has events
+        return 0  # baseline dead
+
+    v = dsh.assess_health(count_fn, incident_window, "agent-001", samples=5, seed=1)
+    assert v.verdict == "elevated"
+    assert v.trigger == "recent_above_baseline"
+    assert any("baseline is all-zero but incident window has events" in n for n in v.notes)
+
+
+def test_broken_when_baseline_samples_all_raise_but_incident_succeeds():
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_window = _window(incident_end, 1)
+
+    def count_fn(start, end):
+        if start >= incident_window[0]:
+            return 5  # incident succeeds
+        raise RuntimeError("baseline shard down")
+
+    v = dsh.assess_health(count_fn, incident_window, "agent-001", samples=3, seed=1)
+    assert v.verdict == "broken"
+    assert v.trigger == "baseline_no_samples"
 
 
 def test_broken_when_count_fn_always_raises():
@@ -125,3 +154,20 @@ def test_to_dict_round_trips_via_json():
     assert payload["reporting_agent"] == "agent-001"
     assert payload["incident_window"]["start"].endswith("Z")
     assert "verdict" in payload and "trigger" in payload
+
+
+def test_sampled_windows_present_for_audit():
+    """Every timestamp the probe picks must appear in `sampled_windows` — this is
+    what the tool-audit log captures for debugging, independent of count_fn outcome."""
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+
+    def boom(start, end):
+        raise RuntimeError("down")
+
+    v = dsh.assess_health(boom, _window(incident_end, 1), "agent-001", samples=4, seed=1)
+    payload = v.to_dict()
+    assert "sampled_windows" in payload
+    assert len(payload["sampled_windows"]) == 4
+    for w in payload["sampled_windows"]:
+        assert w["start"].endswith("Z") and w["end"].endswith("Z")
+        assert w["start"] < w["end"]

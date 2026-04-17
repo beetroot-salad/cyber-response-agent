@@ -32,7 +32,7 @@ Read these files in parallel:
 
 If the lead's `definition.md` frontmatter has a non-empty `data_tags` list, run the data-source health probe before executing the lead. The probe samples a small set of windows from the recent past and confirms the data source is emitting events at a normal rate for `reporting_agent`. The exact CLI invocation is documented in `environment/systems/{vendor}/SKILL.md` — pass the lead's base query (with `reporting_agent` scoping baked in but **without** any incident-specific entity filters that would narrow the source-rate signal), `--reporting-agent`, `--incident-start`, `--incident-end`.
 
-The probe emits a JSON verdict with one of: `normal | elevated | low | broken`.
+The probe emits a JSON verdict with one of: `normal | elevated | low | broken`. Broken verdicts carry a trigger distinguishing *why* the probe couldn't characterize the source: `baseline_all_zero` (samples ran, all returned 0, incident also 0), `baseline_no_samples` (no baseline samples succeeded), `count_fn_error` (every SIEM call raised).
 
 If the lead has empty `data_tags` (lookup-only, ad-hoc, debug), **skip the probe** — there is no per-source rate signal to evaluate. Proceed to step 2.
 

@@ -6,38 +6,33 @@ random windows from the recent past and compares the rate against the
 incident window. Returns a structured verdict the gather subagent uses to
 decide whether to proceed (Haiku-cheap) or escalate (Sonnet/Opus).
 
-The probe is vendor-agnostic. The CLI wrapper at the bottom binds it to
-Wazuh by closing over wazuh_cli.query_alerts(... limit=0). Other vendors
-implement their own thin wrapper, calling assess_health() with their own
-count_fn.
+This module is vendor-agnostic. For a working CLI binding, see the example
+at `scripts/tools/data_source_health_wazuh_example.py` — new vendors should
+copy that shape, pointing `count_fn` at their own query CLI.
 
 Verdicts:
     normal     — incident rate within k·stdev of baseline mean
     elevated   — incident rate > mean + k·stdev (anomaly: real signal or pipeline issue)
     low        — incident rate < mean - k·stdev (data source may have stalled)
-    broken     — all baseline samples returned 0 and incident count is 0 (no signal at all)
-                 or count_fn raised on every sample
+    broken     — no usable signal (baseline all zero AND incident zero, OR no
+                 baseline samples succeeded, OR all count_fn calls raised)
 
 Triggers (carried in the output for the escalating model):
-    recent_above_baseline
-    recent_below_baseline
-    baseline_empty
-    count_fn_error
-    normal
+    recent_above_baseline    — incident rate exceeds baseline + k·stdev
+    recent_below_baseline    — incident rate below baseline - k·stdev
+    baseline_all_zero        — every baseline sample succeeded but returned 0; incident also 0
+    baseline_no_samples      — no baseline samples succeeded (either sampling pool too small,
+                               or every sample raised); incident may still have succeeded
+    count_fn_error           — every count_fn call (baseline + incident) raised
+    normal                   — incident rate within baseline band
 """
 
 from __future__ import annotations
 
-import argparse
-import json
-import os
 import random
 import statistics
-import sys
-import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Callable
 
 CountFn = Callable[[datetime, datetime], int]
@@ -53,6 +48,7 @@ class HealthVerdict:
     incident_rate_per_hour: float
     baseline_mean_per_hour: float | None
     baseline_stdev_per_hour: float | None
+    sampled_windows: list[dict] = field(default_factory=list)
     baseline_samples: list[dict] = field(default_factory=list)
     k: float = 2.0
     notes: list[str] = field(default_factory=list)
@@ -71,6 +67,7 @@ class HealthVerdict:
             "baseline_stdev_per_hour": (
                 round(self.baseline_stdev_per_hour, 3) if self.baseline_stdev_per_hour is not None else None
             ),
+            "sampled_windows": self.sampled_windows,
             "baseline_samples": self.baseline_samples,
             "k": self.k,
             "notes": self.notes,
@@ -94,11 +91,13 @@ def _sample_windows(
     exclude_recent_hours: int,
     rng: random.Random,
 ) -> list[tuple[datetime, datetime]]:
-    """Pick `samples` non-overlapping windows of `sample_hours` from
+    """Pick up to `samples` non-overlapping windows of `sample_hours` from
     [incident_start - lookback_days, incident_start - exclude_recent_hours].
 
     The exclusion buffer keeps the incident itself (and any precursor events
-    that are part of the same activity) out of the baseline.
+    that are part of the same activity) out of the baseline. May return fewer
+    than `samples` windows if the pool is too small to fit them non-overlapping;
+    callers should check the returned length.
     """
     pool_end = incident_start - timedelta(hours=exclude_recent_hours)
     pool_start = incident_start - timedelta(days=lookback_days)
@@ -164,6 +163,16 @@ def assess_health(
         rng=rng,
     )
 
+    # Record every timestamp we chose — this is what gets audited, independent
+    # of whether count_fn later succeeds on it.
+    sampled_windows = [{"start": _iso(ws), "end": _iso(we)} for ws, we in windows]
+
+    notes: list[str] = []
+    if len(windows) < samples:
+        notes.append(
+            f"sampling pool produced {len(windows)} window(s); requested {samples}"
+        )
+
     baseline_rows: list[dict] = []
     rates: list[float] = []
     errors = 0
@@ -179,8 +188,6 @@ def assess_health(
             errors += 1
         baseline_rows.append(row)
 
-    notes: list[str] = []
-
     try:
         incident_count = count_fn(incident_start, incident_end)
         incident_rate = incident_count / incident_hours
@@ -191,7 +198,8 @@ def assess_health(
         incident_failed = True
         notes.append(f"incident-window count_fn failed: {e}")
 
-    if errors == len(windows) and incident_failed:
+    # Every call failed (baseline AND incident): pure tooling failure.
+    if windows and errors == len(windows) and incident_failed:
         return HealthVerdict(
             verdict="broken",
             trigger="count_fn_error",
@@ -201,21 +209,25 @@ def assess_health(
             incident_rate_per_hour=0.0,
             baseline_mean_per_hour=None,
             baseline_stdev_per_hour=None,
+            sampled_windows=sampled_windows,
             baseline_samples=baseline_rows,
             k=k,
             notes=notes + ["all count_fn invocations failed"],
         )
 
+    # No usable baseline (either no windows drawn, or every sample raised).
+    # Distinct from baseline_all_zero: here we have zero signal about baseline.
     if not rates:
         return HealthVerdict(
             verdict="broken",
-            trigger="baseline_empty",
+            trigger="baseline_no_samples",
             reporting_agent=reporting_agent,
             incident_window=(_iso(incident_start), _iso(incident_end)),
             incident_count=incident_count,
             incident_rate_per_hour=incident_rate,
             baseline_mean_per_hour=None,
             baseline_stdev_per_hour=None,
+            sampled_windows=sampled_windows,
             baseline_samples=baseline_rows,
             k=k,
             notes=notes + ["no baseline samples succeeded"],
@@ -230,10 +242,24 @@ def assess_health(
     upper = mean + k * effective_stdev
     lower = max(mean - k * effective_stdev, 0.0)
 
-    if all(r == 0 for r in rates) and incident_count == 0:
+    baseline_all_zero = all(r == 0 for r in rates)
+
+    if baseline_all_zero and incident_count == 0:
         verdict = "broken"
-        trigger = "baseline_empty"
-        notes.append("baseline returned zero events across all samples and incident window is also empty")
+        trigger = "baseline_all_zero"
+        notes.append(
+            "baseline returned zero events across all samples and incident window is also empty"
+        )
+    elif baseline_all_zero and incident_count > 0:
+        # Baseline looks dead but incident has events — classify as elevated
+        # (the escalating model needs to decide: pipeline recovery, misconfigured
+        # baseline query, or real spike) and flag the asymmetry explicitly.
+        verdict = "elevated"
+        trigger = "recent_above_baseline"
+        notes.append(
+            "baseline is all-zero but incident window has events — baseline query may be "
+            "too narrow, data source may have just started reporting, or this is a real spike"
+        )
     elif incident_rate > upper:
         verdict = "elevated"
         trigger = "recent_above_baseline"
@@ -253,87 +279,8 @@ def assess_health(
         incident_rate_per_hour=incident_rate,
         baseline_mean_per_hour=mean,
         baseline_stdev_per_hour=stdev,
+        sampled_windows=sampled_windows,
         baseline_samples=baseline_rows,
         k=k,
         notes=notes,
     )
-
-
-# ---------------------------------------------------------------------------
-# CLI — Wazuh binding
-# ---------------------------------------------------------------------------
-
-def _parse_iso(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
-
-
-def _build_wazuh_count_fn(query_string: str):
-    # Imported lazily so the library is usable in tests without opensearch-py.
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import wazuh_cli  # type: ignore
-
-    config = wazuh_cli.load_config()
-    client = wazuh_cli.get_indexer_client(config)
-
-    def count_fn(start: datetime, end: datetime) -> int:
-        _, total = wazuh_cli.query_alerts(
-            client, config, query_string, _iso(start), _iso(end), limit=0
-        )
-        return int(total)
-
-    return count_fn
-
-
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        description="Data-source health probe (Wazuh binding) — emits JSON verdict.",
-    )
-    p.add_argument("--query", "-q", required=True, help="Lucene query identifying the data source (entity/agent scoping included).")
-    p.add_argument("--reporting-agent", required=True, help="Agent identifier whose data this probe is checking. Recorded in output for traceability.")
-    p.add_argument("--incident-start", required=True, help="Incident window start (ISO 8601 UTC).")
-    p.add_argument("--incident-end", required=True, help="Incident window end (ISO 8601 UTC).")
-    p.add_argument("--samples", type=int, default=5, help="Number of baseline windows to sample (default: 5).")
-    p.add_argument("--sample-hours", type=int, default=3, help="Length of each baseline window in hours (default: 3).")
-    p.add_argument("--lookback-days", type=int, default=10, help="How far back to draw baseline samples from (default: 10).")
-    p.add_argument("--exclude-recent-hours", type=int, default=24, help="Buffer between baseline pool and incident start, to avoid contamination (default: 24).")
-    p.add_argument("--k", type=float, default=2.0, help="Stdev multiplier for elevated/low thresholds (default: 2.0).")
-    p.add_argument("--seed", type=int, help="Optional RNG seed for reproducible sampling.")
-    return p
-
-
-def main() -> int:
-    args = build_parser().parse_args()
-    incident_window = (_parse_iso(args.incident_start), _parse_iso(args.incident_end))
-
-    try:
-        count_fn = _build_wazuh_count_fn(args.query)
-    except SystemExit:
-        raise
-    except Exception as e:  # noqa: BLE001
-        print(json.dumps({
-            "verdict": "broken",
-            "trigger": "count_fn_error",
-            "reporting_agent": args.reporting_agent,
-            "error": f"could not build Wazuh count_fn: {e}",
-            "trace": traceback.format_exc(),
-        }, indent=2))
-        return 1
-
-    verdict = assess_health(
-        count_fn,
-        incident_window,
-        args.reporting_agent,
-        samples=args.samples,
-        sample_hours=args.sample_hours,
-        lookback_days=args.lookback_days,
-        exclude_recent_hours=args.exclude_recent_hours,
-        k=args.k,
-        seed=args.seed,
-    )
-
-    print(json.dumps(verdict.to_dict(), indent=2))
-    return 0 if verdict.verdict == "normal" else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
