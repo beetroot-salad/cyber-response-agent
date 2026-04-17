@@ -135,6 +135,35 @@ The state machine is enforced automatically — when you write a phase section h
 
 ---
 
+## ASSESS: choosing the next edge
+
+ASSESS is how you pick among the transitions above. It is an in-head decision step, not a phase — no `## ASSESS` header is written to `investigation.md`. You run ASSESS at the end of CONTEXTUALIZE and after every ANALYZE, before committing to the next edge.
+
+Enter HYPOTHESIZE when the **very next lead** depends on which explanation is true. If the immediate next lead is the same regardless of which story is true, you are NOT in a branching regime — even if step-2 might later diverge. Hypothesize when the fork opens, not before.
+
+Formally, two orthogonal axes govern how much pre-commitment the next lead warrants:
+
+- **Branching** — does the choice of the *very next* lead depend on which explanation is true?
+- **Interpretation-vulnerability** — would reading the outcome post-hoc risk rationalization? (Per-field, not per-lead — a single lead can mix mechanical fields with interpretive ones.)
+
+| Branching? | Interp.-vulnerable? | What to do |
+|---|---|---|
+| yes | yes | HYPOTHESIZE: articulate hypotheses AND pre-register per-hypothesis predictions |
+| yes | no | HYPOTHESIZE: articulate hypotheses; skip prediction blocks (mechanical fork, e.g. identity lookup that decides a branch) |
+| no | yes | Skip HYPOTHESIZE. In GATHER, pre-register lead-level `predictions` (conditional branch plans on the interpretive outcome fields) |
+| no | no | Skip HYPOTHESIZE. GATHER mechanically, no ceremony |
+
+**Reclassification cue.** Before entering HYPOTHESIZE, name the specific outcome that would open the fork. If you can't, the fork hasn't opened yet — stay in the mechanical / interpretive lane and re-assess after the next lead.
+
+**Worked examples** (from probe corpus under `docs/experiments/investigation-language-pilot/`):
+
+- **no / no — FIM sudoers modified, mechanical actor lookup.** Step-1 is "who modified the file" regardless of intent. The identity lookup itself doesn't branch; the branch opens *after* its result. Go straight to GATHER.
+- **no / yes — DLP access-volume anomaly.** Step-1 is the access-volume profile regardless of story. But the reading is interpretive (what's "anomalous" vs "authorized"?). Go to GATHER; pre-register lead-level `predictions` (`if volume within 1σ → read_as authorized → advance_to change-management-lookup`; `if >3σ on new buckets → read_as corroborated DLP → advance_to HYPOTHESIZE`; etc.).
+- **yes / no — SSH invalid user, volume-count first.** Reframing the first lead from interpretive reputation to mechanical volume count is a win; the branch (scanner vs targeted) opens on the count. Enter HYPOTHESIZE; skip per-prediction blocks (the fork is mechanical).
+- **yes / yes — Prod DB outbound to low-rep IP.** Multiple plausible explanations (benign update / lateral reconnaissance / exfil) predict divergent step-1 leads. Enter HYPOTHESIZE with full per-hypothesis predictions.
+
+---
+
 ## Corpus Guidance
 
 Past investigations are a trail map for this mountain. When you face uncertainty — about which hypothesis is worth pursuing, which lead is most likely to discriminate, whether a pattern you're seeing has led others astray before — querying the corpus gives you the paths others took: which routes were fast, which required tools you don't have, and where explorers got stuck or reversed course.
@@ -262,30 +291,7 @@ Append to `{run_dir}/investigation.md`:
 
 **Goal:** Form or update hypotheses and select the most diagnostic lead.
 
-#### When to enter HYPOTHESIZE (ASSESS first)
-
-Enter HYPOTHESIZE when the **very next lead** depends on which explanation is true. If the immediate next lead is the same regardless of which story is true, you are NOT in a branching regime — even if step-2 might later diverge. Hypothesize when the fork opens, not before.
-
-Formally, two orthogonal axes govern how much pre-commitment the next lead warrants:
-
-- **Branching** — does the choice of the *very next* lead depend on which explanation is true?
-- **Interpretation-vulnerability** — would reading the outcome post-hoc risk rationalization? (Per-field, not per-lead — a single lead can mix mechanical fields with interpretive ones.)
-
-| Branching? | Interp.-vulnerable? | What to do |
-|---|---|---|
-| yes | yes | HYPOTHESIZE: articulate hypotheses AND pre-register per-hypothesis predictions |
-| yes | no | HYPOTHESIZE: articulate hypotheses; skip prediction blocks (mechanical fork, e.g. identity lookup that decides a branch) |
-| no | yes | Skip HYPOTHESIZE. In GATHER, pre-register lead-level `predictions` (conditional branch plans on the interpretive outcome fields) |
-| no | no | Skip HYPOTHESIZE. GATHER mechanically, no ceremony |
-
-**Reclassification cue.** Before entering HYPOTHESIZE, name the specific outcome that would open the fork. If you can't, the fork hasn't opened yet — stay in the mechanical / interpretive lane and re-assess after the next lead.
-
-**Worked examples** (from probe corpus under `docs/experiments/investigation-language-pilot/`):
-
-- **no / no — FIM sudoers modified, mechanical actor lookup.** Step-1 is "who modified the file" regardless of intent. The identity lookup itself doesn't branch; the branch opens *after* its result. Go straight to GATHER.
-- **no / yes — DLP access-volume anomaly.** Step-1 is the access-volume profile regardless of story. But the reading is interpretive (what's "anomalous" vs "authorized"?). Go to GATHER; pre-register lead-level `predictions` (`if volume within 1σ → read_as authorized → advance_to change-management-lookup`; `if >3σ on new buckets → read_as corroborated DLP → advance_to HYPOTHESIZE`; etc.).
-- **yes / no — SSH invalid user, volume-count first.** Reframing the first lead from interpretive reputation to mechanical volume count is a win; the branch (scanner vs targeted) opens on the count. Enter HYPOTHESIZE; skip per-prediction blocks (the fork is mechanical).
-- **yes / yes — Prod DB outbound to low-rep IP.** Multiple plausible explanations (benign update / lateral reconnaissance / exfil) predict divergent step-1 leads. Enter HYPOTHESIZE with full per-hypothesis predictions.
+Entry is governed by the ASSESS rubric above — arrive here only when the very next lead branches on which explanation is true.
 
 #### Generating Hypotheses
 
