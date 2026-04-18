@@ -139,28 +139,31 @@ The state machine is enforced automatically — when you write a phase section h
 
 ASSESS is how you pick among the transitions above. It is an in-head decision step, not a phase — no `## ASSESS` header is written to `investigation.md`. You run ASSESS at the end of CONTEXTUALIZE and after every ANALYZE, before committing to the next edge.
 
-Enter HYPOTHESIZE when the **very next lead** depends on which explanation is true. If the immediate next lead is the same regardless of which story is true, you are NOT in a branching regime — even if step-2 might later diverge. Hypothesize when the fork opens, not before.
+ASSESS answers one question: **does the hypothesis space fork at this anchor?** It does *not* pick the lead — that is a separate, downstream decision inside HYPOTHESIZE once a fork is established.
 
 Formally, two orthogonal axes govern how much pre-commitment the next lead warrants:
 
-- **Branching** — does the choice of the *very next* lead depend on which explanation is true?
-- **Interpretation-vulnerability** — would reading the outcome post-hoc risk rationalization? (Per-field, not per-lead — a single lead can mix mechanical fields with interpretive ones.)
+- **Branching (hypothesis-space property)** — does the current anchor admit multiple competing one-hop parent classifications whose predictions are observationally distinguishable? Branching is a property of the *hypothesis space*, not of which lead you'd run. A real fork exists whenever there are ≥2 plausible classifications that would predict different world-states — even if one lead happens to discriminate them all. Conversely, a fork does *not* exist when the alert admits only one plausible upstream classification and the next query is just extracting its attributes (mechanical enrichment). Branching asks "are there competing explanations?"; lead selection asks "which edge measurement most efficiently discriminates them?" — keep these separate.
+- **Interpretation-vulnerability (lead-outcome property)** — would reading the outcome of the chosen lead post-hoc risk rationalization? (Per-field, not per-lead — a single lead can mix mechanical fields with interpretive ones.)
 
-| Branching? | Interp.-vulnerable? | What to do |
+| Hypothesis fork? | Chosen lead's outcome interp.-vulnerable? | What to do |
 |---|---|---|
-| yes | yes | HYPOTHESIZE: articulate hypotheses AND pre-register per-hypothesis predictions |
-| yes | no | HYPOTHESIZE: articulate hypotheses; skip prediction blocks (mechanical fork, e.g. identity lookup that decides a branch) |
-| no | yes | Skip HYPOTHESIZE. In GATHER, pre-register lead-level `predictions` (conditional branch plans on the interpretive outcome fields) |
-| no | no | Skip HYPOTHESIZE. GATHER mechanically, no ceremony |
+| yes | yes | HYPOTHESIZE: articulate the fork as one-hop proposals + per-hypothesis predictions. Select lead(s) that discriminate. Pre-register lead-level `predictions` on the interpretive outcome fields. |
+| yes | no | HYPOTHESIZE: articulate the fork + proposals. Select lead(s). Skip lead-level predictions — outcome reading is mechanical. |
+| no | yes | Skip HYPOTHESIZE. GATHER with pre-registered lead-level `predictions` on the interpretive outcome fields. |
+| no | no | Skip HYPOTHESIZE. Mechanical GATHER, no ceremony. |
 
-**Reclassification cue.** Before entering HYPOTHESIZE, name the specific outcome that would open the fork. If you can't, the fork hasn't opened yet — stay in the mechanical / interpretive lane and re-assess after the next lead.
+**Lead selection is inside HYPOTHESIZE, not ASSESS.** Once branching is established, choosing the discriminating edge measurement — single lead, composite dispatch, primary-plus-fallback — is lead-selection work governed by §HYPOTHESIZE → Selecting Leads. The branching question stays at the hypothesis-space layer: "are there competing classifications worth articulating?" A case where one clean lead partitions four hypotheses is still a branching case (four competing classifications exist) — the lead selection just happens to resolve efficiently.
+
+**Reclassification cue.** Before entering HYPOTHESIZE, name ≥2 competing one-hop classifications whose predictions diverge. If you can name only one plausible classification — or can't articulate how their predictions would differ — there's no fork yet. Stay in the mechanical / interpretive lane and re-assess after the next lead.
 
 **Worked examples** (from probe corpus under `docs/experiments/investigation-language-pilot/`):
 
-- **no / no — FIM sudoers modified, mechanical actor lookup.** Step-1 is "who modified the file" regardless of intent. The identity lookup itself doesn't branch; the branch opens *after* its result. Go straight to GATHER.
-- **no / yes — DLP access-volume anomaly.** Step-1 is the access-volume profile regardless of story. But the reading is interpretive (what's "anomalous" vs "authorized"?). Go to GATHER; pre-register lead-level `predictions` (`if volume within 1σ → read_as authorized → advance_to change-management-lookup`; `if >3σ on new buckets → read_as corroborated DLP → advance_to HYPOTHESIZE`; etc.).
-- **yes / no — SSH invalid user, volume-count first.** Reframing the first lead from interpretive reputation to mechanical volume count is a win; the branch (scanner vs targeted) opens on the count. Enter HYPOTHESIZE; skip per-prediction blocks (the fork is mechanical).
-- **yes / yes — Prod DB outbound to low-rep IP.** Multiple plausible explanations (benign update / lateral reconnaissance / exfil) predict divergent step-1 leads. Enter HYPOTHESIZE with full per-hypothesis predictions.
+- **no / no — FIM sudoers modified, mechanical actor lookup.** Only one plausible classification at this step ("some actor modified the file"); we don't know enough to propose competing parent classifications. The branch opens *after* the identity lookup returns. Go straight to GATHER.
+- **no / yes — DLP access-volume anomaly.** The signal is a volume profile characterization — there's no competing-classifications fork yet, we're measuring a field to *then* know whether a fork opens. The reading is interpretive. Go to GATHER; pre-register lead-level `predictions` on the interpretive volume-shape field.
+- **yes / no — SSH invalid user, volume-count first.** Hypothesis space forks: scanner vs. targeted predict different volume counts. Enter HYPOTHESIZE, articulate the fork. Lead selection: volume count — the reading is mechanical (numbers), so no lead-level predictions needed.
+- **yes / yes — Prod DB outbound to low-rep IP.** Hypothesis space forks across competing classifications (sanctioned telemetry / extension-driven / adversary-controlled). Enter HYPOTHESIZE, articulate the fork. Lead selection may produce a single discriminating lead (e.g., Falco process-lineage partitions all three) or composite (if divergent systems are needed). Pre-register lead-level predictions on the interpretive ancestry field.
+- **yes / yes — cron-modification with single audit lead.** Hypothesis space forks (CM-deploy / interactive-admin / adversary-persistence). A single auditd query partitions all three — that's an *efficient lead selection*, not an absence of branching. The fork is real; lead selection resolved it in one shot.
 
 ---
 
@@ -322,45 +325,57 @@ Entry is governed by the ASSESS rubric above — arrive here only when the very 
 
 #### Generating Hypotheses
 
-A hypothesis is a causal story: it proposes an actor, an intent, and an action that produced this specific event. `?monitoring-probe` is shorthand for: "a monitoring system performed a health check via SSH using a test credential that doesn't exist on this host."
+A hypothesis is a **one-hop proposed extension of the confirmed graph**: it proposes that a specific upstream vertex exists, connected to an already-confirmed vertex by exactly one edge, with 1–2 predictions that discriminate it from competing proposals. See `docs/investigation-language.md` §Hypothesis for the structural spec (`attached_to_vertex`, `proposed_edge.parent_vertex`, `predictions`, `refutation_shape`).
+
+**One hop, not a narrative.** Do not pre-commit to a deep causal chain at hypothesis formation time. `?monitoring-probe` is not "a monitoring system performed a health check via SSH using a test credential that doesn't exist on this host" — that packs an actor classification, an intent, a tool, and a configuration choice into a single label. The lean form is: "the upstream process initiating this `attempted_auth` edge has classification `sanctioned-monitoring-probe`." One predicted attribute on one proposed vertex. Depth is added later by decomposition (§Refinement below), not upfront.
+
+**Lean predictions.** 1–2 predictions per hypothesis. A single prediction captures the core discriminating claim. Add a second only when two independent facts each partially confirm the hypothesis and neither alone suffices. Three or more predictions almost always signals an unlean hypothesis — split it, or defer the extra predictions to a refinement after a lead confirms the parent.
 
 **Two layers, not one.** Playbooks for known signatures carry two complementary catalogs:
 
-- **Hypothesis seeds** (in the playbook body) are lean, mechanism-shaped candidate explanations to reason from. They are lacking by design — skeletal prompts for "what could be producing this event?" that the agent develops during the investigation.
-- **Archetype catalog** (under `archetypes/{name}/`) is a pattern-recognition *cache*. Each archetype is a named pattern rooted in past tickets, with its own story, required trust anchors, and discriminating boundary. Archetypes frame and steer an investigation — and when an archetype's shape cleanly matches, they provide a fast-path resolution via the grounding leg (required anchors confirmed, or a precedent citation). But they are recommendations, not source of truth: novel variants, shape mutations, and adversaries mimicking benign patterns all require reasoning from mechanisms, not from the cached pattern alone.
+- **Hypothesis seeds** (in the playbook body) are candidate one-hop proposals — the classifications of upstream vertex to consider first. They are skeletal by design; the agent keeps or prunes them based on observables.
+- **Archetype catalog** (under `archetypes/{name}/`) is a pattern-recognition *cache* of past ticket outcomes, with required trust anchors and discriminating boundaries. Archetypes inform which hypotheses to prioritize and provide a fast-path resolution when a clean match + confirmed grounding can auto-resolve. They are recommendations, not source of truth: novel variants, shape mutations, and adversaries mimicking benign patterns all require reasoning from proposed edges, not from cached patterns alone.
 
-Work from both layers together. Start from the hypothesis seeds (plus any adversarial hypothesis the severity demands). As evidence accumulates, check whether the emerging shape matches an archetype. If it does, the archetype's grounding rules apply and a clean match + confirmed grounding can auto-resolve. If the evidence doesn't fit any archetype, the hypothesis loop keeps running until one hypothesis is confirmed with `++` evidence and the adversarial hypothesis is explicitly refuted — at which point the outcome is either escalation (no archetype matched, so no auto-close path) or, rarely, a novel pattern that deserves a new archetype after the fact.
+Work from both layers together. Start from the hypothesis seeds (plus any adversarial hypothesis the severity demands). As evidence accumulates, check whether the emerging shape matches an archetype. If the evidence doesn't fit any archetype, the hypothesis loop keeps running until one hypothesis is confirmed with `++` evidence and the adversarial hypothesis is explicitly refuted — at which point the outcome is either escalation or, rarely, a novel pattern that deserves a new archetype after the fact.
 
 The COMPLETENESS criterion in Tier 2 captures the discipline: the judge expects you to have exhausted the shape space *inside and outside* the catalog. Forcing an alert into the closest archetype when the evidence has features the archetype doesn't describe is a failure mode the judge will catch.
 
 For novel alerts (no playbook), generate hypotheses by:
 
-1. **Parse the event semantics.** What exactly does this alert mean? Not "SSH failure" but "SSH login attempt with a non-existent username." Precision constrains the quality of your hypotheses.
+1. **Locate the anchor.** Which confirmed vertex is this hypothesis attaching upstream of? Usually the alert's observed edge (e.g., the `attempted_auth` edge) or its source/target vertex. Every hypothesis must name its `attached_to_vertex`.
 
-2. **Enumerate mechanisms.** What real-world activities would produce this specific event? Consider all technical pathways — for a process alert: what spawned it? For an auth alert: what initiated the connection? For a file change: what modified it?
+2. **Enumerate one-hop parents.** What kinds of upstream vertices, connected by what relation, would explain the anchor? For an `attempted_auth` edge: a process on the source endpoint initiated it — so the parent_vertex is `{type: process, classification: X}` for varying X. Enumerate the plausible X values (sanctioned-monitoring, bait-workload, operator-shell, adversary-controlled), one hypothesis each.
 
-3. **Constrain with observables.** The alert already contains data. Use it to prune: if the source is internal, don't hypothesize opportunistic external scanning.
+3. **Constrain with observables.** The alert already contains data. Use it to prune the classification set: if the source is internal, don't propose an external-scanner classification.
 
-4. **Scope to current evidence.** Start with the mechanism ("unauthorized authentication attempt") not the implementation ("brute force with hydra from a VPS"). The right scope: enough detail to make distinct predictions, testable with 1-2 leads. If you can't test it in 1-2 leads, the hypothesis is too broad (split it) or too narrow (merge with a sibling).
+4. **Keep it lean.** 1–2 predictions per hypothesis. Prefer a single predicted attribute on the proposed parent vertex (cadence, parent-process chain, username-scatter shape) over a multi-hop narrative about how that parent came to exist. Deeper ancestry (who triggered the bait? was the monitoring system compromised?) is a *next loop* after the current hop is confirmed — not this one.
 
-5. **Mechanism-specific, not umbrella.** Your job is to determine legitimacy and — where malicious — what specifically happened, in as much detail as the evidence supports. Refutations count as detail: narrowing the mechanism space is itself a detailed answer. Umbrella hypotheses like `?compromise-confirmed` or `?malicious-activity` are not hypotheses, they are labels — they mask two or more live mechanism hypotheses under a parent class that carries no new information and no distinct analyst actions. If the evidence is consistent with both `?dga-malware` and `?dns-tunneling` and discriminates neither, the correct state is both live concurrently, not merged into a parent. The concurrent list IS the detail; the merge loses it.
+5. **No umbrellas.** Umbrella hypotheses like `?compromise-confirmed` or `?malicious-activity` mask two or more distinct one-hop proposals under a parent class that carries no new information. If the evidence is consistent with both `?dga-malware` and `?dns-tunneling` and discriminates neither, the correct state is both live concurrently, not merged.
+
+#### Refinement, not upfront detail
+
+When a lead confirms the one-hop parent and the investigation needs to distinguish sub-cases (retry-loop vs. enumeration-misconfig, legitimate-bait vs. bait-triggered-by-adversary), **decompose via hierarchical IDs**: allocate child hypotheses `h-{parent}-{ordinal}` in the lead's `new_hypotheses` and shelve the parent in the same block. Children inherit no weight from the parent; their histories are independent. This is the machinery for deepening — use it instead of pre-committing to the refined narrative at HYPOTHESIZE time.
 
 **Completeness checks** — verify before proceeding:
-- **Actor types:** Have you considered automated systems, authorized humans, and unauthorized humans?
-- **Pathways:** Have you considered all technical mechanisms that could produce this event?
-- **Adversarial:** At least one adversarial hypothesis must survive until explicitly refuted with `--` evidence.
+- **Classification coverage:** For each anchor edge, have you considered plausible upstream parent classifications (automated, human-authorized, human-unauthorized, adversarial)?
+- **Adversarial:** At least one adversarial hypothesis must survive until explicitly refuted with `--` evidence. It may be attached to the same anchor as benign hypotheses, or to a different not-yet-observed edge (e.g., `?compromise-followup` attached to a hypothetical future `authenticated_as` edge).
+- **Leanness:** Each hypothesis has ≤2 predictions. If a hypothesis has more, something should be refined out or split.
 
 #### Selecting Leads
 
-For each surviving hypothesis, construct the story in three layers:
+Lead selection is the **second step** of HYPOTHESIZE, logically distinct from fork articulation. ASSESS already determined there is a real branching fork (multiple competing one-hop classifications); now choose the edge measurement(s) that most efficiently discriminate them.
 
-1. **The story:** "If this hypothesis is true, then it happened like this..." — the causal sequence from actor to event
-2. **The artifacts:** "...which would produce these artifacts..." — what evidence exists in principle (logs, network flows, process trees, file changes)
-3. **The observations:** "...and given our data sources, we can observe..." — what we can actually check, given what's instrumented
+A lead is an edge measurement that collapses the proposed frontier. For each active hypothesis, identify the observable that its predicted attribute turns on — the query that would confirm the proposed parent vertex (moving toward `+`/`++`) or produce the refutation shape (`-`/`--`).
 
-Then find where the stories **diverge most** across hypotheses. That divergence point is your most diagnostic lead.
+Then pick the lead whose outcome **discriminates most across the hypothesis set**:
 
-**Absence is evidence.** A hypothesis predicts what you WILL find and what you WON'T find. If `?brute-force` predicts high volume and you see exactly 1 attempt, that's refuting evidence. Some mechanisms are defined by the conjunction of "event X present AND event Y absent" — actively verify both sides. Don't assume absence; query for it.
+- **Single lead (preferred when available)** — one edge measurement whose outcome field partitions all active hypotheses. Example: a Falco process-lineage query on a connecting process's ancestry discriminates sanctioned-telemetry vs. extension-triggered vs. adversary-controlled in one query.
+- **Composite dispatch** — multiple leads, same entity + window, dispatched together. Use when no single measurement partitions the fork but several scoped to the same anchor would (e.g., process-lineage + forward-window auth-history to simultaneously resolve "who initiated this" and "did compromise follow").
+- **Primary-plus-deferred** — pick the highest-discrimination lead now and defer secondary leads to subsequent loops, conditional on outcome. Use when secondary leads genuinely depend on the first lead's result and running them early is wasteful.
+
+Single-lead elegance is a goal, not a constraint. If the cleanest discrimination requires two measurements, dispatch composite — don't collapse hypotheses just to fit them under one lead.
+
+**Absence is evidence.** A hypothesis predicts what you WILL find and what you WON'T find. If `?brute-force` predicts high volume and you see exactly 1 attempt, that's refuting evidence. Some classifications are defined by the conjunction of "event X present AND event Y absent" — actively verify both sides. Don't assume absence; query for it.
 
 **Quantify predictions relative to a baseline.** Prefer statistical framing to absolute thresholds — "within 1σ of historical cadence," "count in lowest decile for this signature," "rate consistent with approved-monitoring-sources baseline," ">3σ deviation from typical wordlist-scan volume." Relative predictions are environment-agnostic and make refutation shapes unambiguous. When no baseline exists, say so and state the refutation shape qualitatively ("refuted if success event observed in follow-up window"). Vague predictions ("consistent with monitoring activity") cannot be refuted and should be rewritten.
 
@@ -376,17 +391,19 @@ The archetype scan from CONTEXTUALIZE step 3 already ranked the archetype storie
 
 #### Output
 
-Append to `{run_dir}/investigation.md`:
+Append to `{run_dir}/investigation.md`. Each hypothesis is a one-hop proposal — state its anchor, its proposed upstream edge, and 1–2 predictions. Do not pack multi-hop narrative into a single entry.
+
 ```markdown
 ## HYPOTHESIZE (loop {N})
 
-**Active hypotheses:** ?hypothesis-1, ?hypothesis-2
-**Selected lead:** {lead-name}
-**Predictions:** (quantify relative to baseline where possible; see guidance above)
-- ?hypothesis-1: {expected observation}
-  - *Pitfalls:* {1–2 alert-specific traps}
-- ?hypothesis-2: {expected observation}
-  - *Pitfalls:* ...
+**Active hypotheses:**
+
+- `?hypothesis-1` — attaches upstream of `v-{anchor}` via `<relation>`; proposed parent: `{type, classification}`. Predicts: {1–2 discriminating observations, quantified relative to baseline where possible}. Refutation shape: {what observation would contradict}.
+- `?hypothesis-2` — ...
+
+**Selected lead:** `{lead-name}` — what it measures on which vertex/edge, and which hypotheses its outcome discriminates.
+
+**Pitfalls:** 1–2 alert-specific traps per hypothesis that could make it look confirmed when it isn't (attacker-controllable signals, known false-positive patterns, observations easy to mistake for authoritative). Alert-specific only; not the static lead-level pitfalls from `leads/{lead}/definition.md`.
 ```
 
 Then append the `hypothesize:` YAML block. Run first to confirm the ID namespace (prologue IDs already exist):
@@ -557,6 +574,7 @@ Retry the same write after the fix — no state-machine recovery needed.
    - For SCREEN-resolved investigations, use the disposition, confidence, matched_archetype, and matched_ticket_id from the validated screen result
 5. If `resolved`:
    - `matched_archetype` must name an archetype directory under `knowledge/signatures/{signature_id}/archetypes/` (the directory containing the archetype's `story.md` + `trust-anchors.md`)
+   - **Shape re-verification (mandatory before writing any non-null `matched_archetype`)** — Read `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/story.md` AND `trust-anchors.md` in a single batched turn. Walk through each out-of-archetype condition the story names and confirm the GATHER evidence does not trigger it. The scanner's `disqualifiers` list from CONTEXTUALIZE is a starting point but was judged against the single-alert view only — the out-of-archetype check must apply to the full broader evidence gathered during the loop (ticket-context window, authentication-history, any correlated queries). If any disqualifier is triggered, `matched_archetype: null` and `status: escalated` — the closest-label fallback is not allowed. This step re-introduces the story's shape constraints into context right before slot-filling the frontmatter and is the structural fix for the "ANALYZE said escalate, CONCLUDE wrote resolved" self-contradiction.
    - **Grounding leg** (at least one of):
      - Every anchor in the archetype's `required_anchors` frontmatter appears in `trust_anchors_consulted` with `result: confirmed` and a concrete citation, OR
      - `matched_ticket_id` names a precedent snapshot JSON file inside the matched archetype's directory

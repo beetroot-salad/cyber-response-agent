@@ -440,6 +440,75 @@ def check_frontier_closure(proposed_text: str) -> str | None:
     )
 
 
+ESCALATION_CATEGORIES = {"exhaustion-escalation", "severity-ceiling"}
+
+
+def check_termination_vs_verdict(proposed_text: str) -> str | None:
+    """Block CONCLUDE writes where termination.category contradicts the
+    frontmatter's verdict / matched_archetype.
+
+    The ANALYZE subagent picks termination.category as its routing
+    decision. An escalation category (exhaustion-escalation,
+    severity-ceiling) means the loop cannot produce a resolved
+    disposition. When the main agent then writes `**Verdict:** resolved`
+    or, for exhaustion-escalation, names a non-null matched_archetype,
+    it is contradicting its own routing — the exact self-contradiction
+    observed in run #34 where ANALYZE loop 2 said "no matching
+    archetype, exhaustion-escalation" but CONCLUDE wrote
+    `matched_archetype: monitoring-probe / resolved`.
+
+    Rules enforced:
+      - termination.category ∈ {exhaustion-escalation, severity-ceiling}
+        ⇒ Verdict must be `escalated`, not `resolved`.
+      - termination.category == exhaustion-escalation
+        ⇒ matched_archetype must be null (no archetype fits, by
+        definition of the category).
+
+    Returns None on pass, an error message on fail.
+    """
+    conclude_block = extract_conclude_yaml(proposed_text)
+    if conclude_block is None:
+        return None
+
+    termination = conclude_block.get("termination") or {}
+    if not isinstance(termination, dict):
+        return None
+    category = termination.get("category")
+    if category not in ESCALATION_CATEGORIES:
+        return None
+
+    verdict = extract_status(proposed_text)
+    matched_archetype = conclude_block.get("matched_archetype")
+
+    errors: list[str] = []
+    if verdict == "resolved":
+        errors.append(
+            f"`**Verdict:** resolved` contradicts "
+            f"`termination.category: {category}` — escalation categories "
+            f"cannot produce a resolved disposition. Change Verdict to "
+            f"`escalated` or change termination.category to a resolving "
+            f"kind (trust-root, adversarial-refuted) only if the evidence "
+            f"actually supports resolution."
+        )
+    if category == "exhaustion-escalation" and matched_archetype not in (None, "null", ""):
+        errors.append(
+            f"`matched_archetype: {matched_archetype!r}` contradicts "
+            f"`termination.category: exhaustion-escalation` — by definition "
+            f"this category means no archetype fits the evidence. Set "
+            f"matched_archetype to null, or change termination.category if "
+            f"an archetype actually matches the observed shape."
+        )
+
+    if not errors:
+        return None
+    return (
+        "termination-vs-verdict contradiction: "
+        + " | ".join(errors)
+        + " Next action: reconcile the CONCLUDE frontmatter with the "
+        "ANALYZE routing, then retry the write."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -464,6 +533,10 @@ def main():
         errors.append(err)
 
     if not is_screen_resolved(proposed_text):
+        err = check_termination_vs_verdict(proposed_text)
+        if err:
+            errors.append(err)
+
         err = run_judges(run_dir, proposed_text)
         if err:
             errors.append(err)
