@@ -9,10 +9,11 @@ to stdout for !`command` substitution in SKILL.md.
 
 Output order:
 1. knowledge/signatures/{sig_id}/context.md (always)
-2. knowledge/signatures/{sig_id}/playbook.md (always)
-3. knowledge/signatures/{sig_id}/archetypes/{name}/{story.md, trust-anchors.md} (when present, per archetype)
-4. knowledge/common-investigation/checklist.md (always — safety artifact)
-5. Each unique @import:name found in playbook body
+2. knowledge/signatures/{sig_id}/field-quirks.md (when present — JSON paths + Key Observables)
+3. knowledge/signatures/{sig_id}/playbook.md (always)
+4. knowledge/signatures/{sig_id}/archetypes/{name}/{story.md, trust-anchors.md} (when present, per archetype)
+5. knowledge/common-investigation/checklist.md (always — safety artifact)
+6. Each unique @import:name found in playbook body
 
 Resolution: @import:name looks in lessons/{name}.md.
 
@@ -97,7 +98,13 @@ def main() -> int:
     # 1. Signature context
     emit_file(context_path)
 
-    # 2. Signature playbook
+    # 2. Field quirks (when present) — JSON paths + Key Observables.
+    # Owns the mechanical reading of the alert; context.md owns threat-model prose.
+    field_quirks_path = sig_dir / "field-quirks.md"
+    if field_quirks_path.exists():
+        emit_file(field_quirks_path)
+
+    # 3. Signature playbook
     emit_file(playbook_path)
 
     # 3. Archetypes (when present) — sorted for deterministic output.

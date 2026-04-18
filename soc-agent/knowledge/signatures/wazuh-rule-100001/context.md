@@ -45,18 +45,6 @@ to events whose `data.rule` matches this name. The Wazuh chain is in
 rule definition (and any version drift) is in the falcosecurity/rules repo
 linked above.
 
-## Alert Fields
-
-Field paths to know — only the non-obvious ones are listed. `data.rule`,
-`data.priority`, etc. are self-explanatory.
-
-| Field | JSON Path | Why it's worth documenting |
-|-------|-----------|----------------------------|
-| Parent process | `data.output_fields.proc.pname` | "pname" = parent process name. Easy to misread as "process name." This is the strongest discriminator on this signature. |
-| Process ancestry | `data.output_fields.proc.aname[2..n]` | Grandparent, great-grandparent, etc. Useful when `pname` itself is a shell or interpreter and you need to walk further up. |
-| Container ID | `data.output_fields.container.id` | Short (12-char) Docker/containerd ID. Note: `output_fields` is **nested** in the indexed event (`output_fields.container.id`), even though the original Falco JSON uses dotted keys (`"container.id"`). Query the nested form. |
-| Falco priority | `data.priority` | Wazuh maps Falco priority to its own level. The Falco-side priority can differ from the Wazuh-side level. |
-
 ## Related Rules
 
 | Rule ID | Description | Relationship |

@@ -7,9 +7,11 @@ purpose: Field-level quirks for shape comparison. Read by archetype-scan and oth
 
 ## Key observables
 
-Mirror the Key Observables table from `context.md`. This is the subset
-subagents need to extract entities from the alert — observable name,
-JSON path, and one-line reason it matters for shape comparison.
+The fields that define this alert's identity — what makes THIS alert
+THIS alert. Used by subagents to extract entities for SIEM queries
+(ticket-context) and compare shape against archetype stories
+(archetype-scan). Each entry names the observable, its JSON path, and
+one-line reason it matters for shape comparison.
 
 | Observable | JSON path | Why it matters for shape comparison |
 |-----------|-----------|-------------------------------------|

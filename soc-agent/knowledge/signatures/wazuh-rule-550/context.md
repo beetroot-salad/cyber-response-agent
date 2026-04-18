@@ -42,17 +42,6 @@ Frequency is 300s. See `playground/target-endpoint/Dockerfile`.
 
 The rule fires once per modified file per scan.
 
-## Alert Fields
-
-| Field | JSON Path | Why it's worth documenting |
-|-------|-----------|----------------------------|
-| Changed attrs | `syscheck.changed_attributes` | List of which attributes changed (`md5`, `size`, `mtime`, `perm`, `uname`, ...). The set of changed attributes is the strongest hint about *what kind* of change this is — perm/uname changes carry different threat weight than mtime/md5. |
-| Diff | `syscheck.diff` | Text diff of before/after content. **Only present** when `report_changes=yes` AND the file is text AND the parent dir has the option enabled. Absent for binaries or unconfigured paths. |
-| Scan vs realtime | (implicit from path config) | The agent does not flag which mode produced the alert. You have to know from the agent's `<directories>` config whether the path is realtime or scan-based — affects timestamp interpretation. |
-
-Other fields (`syscheck.path`, `syscheck.event`, `syscheck.md5_before/after`,
-`syscheck.uname_before/after`, etc.) are self-explanatory.
-
 ## Related Rules
 
 | Rule ID | Description | Relationship |

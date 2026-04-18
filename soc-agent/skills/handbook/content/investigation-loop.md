@@ -7,7 +7,7 @@ For per-phase detail, see `content/phases.md`.
 ## The loop
 
 ```
-CONTEXTUALIZE ─┬─→ CONCLUDE                        (ticket-context fast-resolve)
+CONTEXTUALIZE ─┬─→ CONCLUDE                        (main-agent dedup on live repeat)
                ├─→ SCREEN ─┬─→ CONCLUDE            (pattern match)
                │           └─→ HYPOTHESIZE
                ├─→ HYPOTHESIZE ─→ GATHER ─┬─→ ANALYZE ─┬─→ HYPOTHESIZE  (loop)
@@ -35,7 +35,7 @@ Full per-phase detail in `content/phases.md`.
 
 CONTEXTUALIZE is the only legal initial phase, and it has four legal next-hops:
 
-1. **CONCLUDE** — ticket-context fast-resolve. If the ticket-context subagent finds a recent prior investigation of the same pattern with `status=resolved` and `confidence=high`, and the current alert's entities and behavior match, the main agent validates the match and jumps straight to CONCLUDE with the prior precedent.
+1. **CONCLUDE** — dedup / duplicate path. If ticket-context's `repeats` cluster shows the same alert firing minutes ago on the same entities (often with an already-open ticket), the main agent can transition straight to CONCLUDE with `status=duplicate` or transfer a recent disposition — after verifying the cited prior ticket/precedent still holds. The subagent does not recommend this; it only surfaces the repeats.
 2. **SCREEN** — if the signature's playbook has a `## Screen` section, try the mechanical fast-path.
 3. **HYPOTHESIZE** — articulate a fork between explanations, then pick the discriminating lead.
 4. **GATHER** — direct entry when the first lead is purely mechanical or interpretive (no fork has opened yet). Invlang v2.7 made HYPOTHESIZE on-demand rather than a mandatory gate; a run that opens with a characterization lead may skip HYPOTHESIZE and enter the loop at GATHER.
@@ -125,7 +125,7 @@ Written by the `infer_state.py` hook, consumed by `validate_report.py` and by th
 
 An investigation can only terminate by transitioning to `CONCLUDE`. The three legal paths:
 
-- From `CONTEXTUALIZE` — ticket-context fast-resolve (matching prior investigation)
+- From `CONTEXTUALIZE` — main-agent dedup when ticket-context surfaces a live repeat or an already-open ticket on the same entities
 - From `SCREEN` — mechanical pattern match success
 - From `ANALYZE` — normal convergence (mechanism confirmed + verified + scoped, or explicit escalation)
 

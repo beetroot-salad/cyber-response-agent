@@ -45,16 +45,6 @@ ambiguous by design. Many legitimate services emit DNS queries that match
 this shape. Resolving these alerts requires domain knowledge the rule
 cannot encode.
 
-## Alert Fields
-
-| Field | JSON Path | Why it's worth documenting |
-|-------|-----------|----------------------------|
-| Source IP | `data.srcip` | Almost always `127.0.0.1` because dnsmasq runs locally on the endpoint. **Not** the originating process — that information is lost at this layer. Process attribution requires correlating with auditd / Falco / EDR. |
-| Domain | `data.dns_domain` | The full FQDN. To extract the parent (eTLD+1) you have to apply public-suffix-list logic — the field doesn't pre-split it. |
-
-`data.dns_query_type` (`A`/`AAAA`/`TXT`/...) and `agent.name` are
-self-explanatory.
-
 ## Related Rules
 
 | Rule ID | Description | Relationship |

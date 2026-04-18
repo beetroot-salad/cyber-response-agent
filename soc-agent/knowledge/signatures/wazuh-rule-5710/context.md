@@ -40,26 +40,6 @@ Invalid user <username> from <IP> port <port>
 Nov 15 02:30:00 server sshd[12345]: Invalid user testuser from 10.0.1.50 port 54321
 ```
 
-## Alert Fields
-
-| Field | JSON Path | Why it's worth documenting |
-|-------|-----------|----------------------------|
-| Username | `data.srcuser` | The attempted username — easy to read as "the user who connected", but it's the *target* the attacker is trying. The connecting party has no host account by definition (that's why the rule fires). |
-| Source IP | `data.srcip` | The connection source as seen by sshd. May be a NAT egress IP, not the actual attacker. |
-
-`data.dstuser` and `agent.name` are self-explanatory.
-
-## Key Observables
-
-The fields that define this alert's identity — what makes THIS alert THIS alert. Used by subagents for entity extraction (ticket-context) and shape comparison (archetype-scan).
-
-| Observable | JSON Path | Why It Matters |
-|-----------|-----------|----------------|
-| Attempted username | `data.srcuser` | Defines the target identity — pattern (wordlist vs real-looking vs sentinel) is the primary shape discriminator |
-| Source IP | `data.srcip` | Defines the actor — trust classification (internal monitoring vs external unknown) drives the risk axis |
-| Target host | `agent.name` | Defines scope — targeted vs spray-and-pray, singles out which host is under pressure |
-| Timestamp | `timestamp` | Defines temporal context — cadence (single vs burst vs periodic), correlation window anchor |
-
 ## Related Rules
 
 | Rule ID | Description | Relationship |
