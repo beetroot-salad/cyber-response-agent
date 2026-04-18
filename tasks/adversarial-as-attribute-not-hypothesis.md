@@ -1,8 +1,11 @@
 ---
 title: Reframe adversarial hypothesis rule as vertex/edge attribute, not parallel hypothesis
-status: todo
+status: done
 groups: hypothesize, invlang, validation
 ---
+
+**Shipped 2026-04-18.** invlang v2.8 schema + validator rules #19–#22 landed in `hooks/scripts/invlang_validate.py`; rule-5710 playbook rewritten to declare a single `?source-authorization-unknown` hypothesis with a `legitimacy_contract` on the `attempted_auth` edge; skill (`skills/investigate/SKILL.md`), subagents (`agents/hypothesize.md`, `agents/analyze.md`), judge prompts (`hooks/scripts/conclude_judge_A_prompt.md`, `judge_prompt.md`), handbook (`skills/handbook/content/*.md`), checklist (`knowledge/common-investigation/checklist.md`), signature template (`knowledge/signatures/_template/playbook.md`), agent-facing invlang schema (`knowledge/invlang/schema.md`), `CLAUDE.md`, `docs/design-v3-overview.md`, `docs/security-model.md`, and a v2.8 delta note on `docs/design-v3-hypothesis-archetype-rewrite.md` all propagated. 849 tests pass.
+
 
 **Blocker.** The current "maintain at least one adversarial hypothesis until explicitly refuted" rule (SKILL.md §HYPOTHESIZE → Completeness checks, and mirrored in inv-lang §Hypothesis) forces a parallel `?compromise-followup`-style hypothesis alongside mechanism hypotheses. This doubles the frontier without contributing a topology distinction. The mechanism hypotheses already partition the edge/vertex space exhaustively — adversarial-vs-benign is orthogonal to which mechanism is true.
 

@@ -1,12 +1,14 @@
 # Investigation Language — Agent Reference
 
-Schema v2.7. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes).
+Schema v2.8. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes). Full spec: `docs/investigation-language.md`.
+
+**v2.8 delta:** legitimacy is a first-class edge attribute. Hypotheses whose disposition depends on authorization declare a `legitimacy_contract`; the resolving lead writes `legitimacy_resolutions` on the materialized or already-confirmed edge. Supersedes the former "maintain adversarial hypothesis until `--`" bookkeeping rule — teeth are structural via validator rules #19–#22.
 
 ---
 
 ## Principles
 
-**Graph discovery.** An investigation constructs a directed graph by working backward from the alert. Confirmed vertices and edges grow monotonically. The investigation halts when it reaches a trust root (no accessible upstream) or has explicitly refuted every adversarial hypothesis.
+**Graph discovery.** An investigation constructs a directed graph by working backward from the alert. Confirmed vertices and edges grow monotonically. The investigation halts when it reaches a trust root (no accessible upstream) or every `legitimacy_contract` on a live-weight hypothesis has a fulfilling resolution.
 
 **Entities as vertices.** Every observed entity (endpoint, process, identity, session, file…) becomes a typed vertex with a classification and identifier. Model at the resolution the investigation reasons at — don't decompose finer unless a lead forces it. When it does, append sub-vertices via `component_of` with hierarchical IDs (`v-{parent}-{nonce}`); the parent vertex remains valid.
 
@@ -104,6 +106,20 @@ authority:
       | client-asserted | inferred-structural
   source: <string>
   trust_chain: []          # omit if empty
+legitimacy_resolutions: [] # omit when no contract resolves against this edge.
+                           # Populated when a lead resolves a declared
+                           # legitimacy_contract against this edge — real edges
+                           # often face parallel policy layers (IAM ×
+                           # data-classification × time-of-day); each contract
+                           # gets its own resolution. See Hypothesis below for
+                           # the contract-declaration side. Per entry:
+                           #   verdict: authorized | unauthorized | indeterminate
+                           #   anchor_kind: <iam-policy | oncall-schedule | ...>
+                           #   anchor_query: <short human record of what was asked>
+                           #   as_of: <iso>
+                           #   resolved_by_lead: l-{id}
+                           #   fulfills_contract: h-{id}.lc{n}
+                           #   concerns: []   # optional
 concerns: []               # omit if empty
 ```
 
@@ -129,6 +145,22 @@ predictions:
 refutation_shape:          # omit if no clean refutation shape exists
   - id: r1
     claim: "<observation that would contradict a core prediction>"
+legitimacy_contract: []    # optional; present when disposition depends on
+                           # policy authorization. Same mechanism, same
+                           # observables, but an authority would answer
+                           # "allowed" differently depending on source
+                           # identity (CFO vs external identity reading
+                           # payroll; operator shell vs RCE on prod). Do NOT
+                           # declare when the adversarial reading IS the
+                           # mechanism — classification carries the claim.
+                           # Per entry (local ids match ^lc\d+$):
+                           #   id: lc1
+                           #   edge_ref: proposed | e-{id}
+                           #   anchor_kind: <iam-policy | approved-monitoring-sources | ...>
+                           #   predicate: "<natural-language; any AND/OR allowed>"
+                           #   on_unauthorized: escalate
+                           #   on_indeterminate: escalate
+                           #   concerns: []   # optional
 concerns: []               # omit if empty
 weight: null               # null | "++" | "+" | "-" | "--"
 weight_history: []         # omit until transitions exist; each lead resolution that
@@ -170,8 +202,8 @@ query_details:
   substitutions: {}
 concerns: []                    # omit if empty
 outcome:
-  attribute_updates:            # enriches existing confirmed vertices
-    - vertex: v-{id}
+  attribute_updates:            # enriches existing confirmed vertices OR edges
+    - target: v-{id} | e-{id}   # exactly one; edge targets carry legitimacy resolutions
       updates: {}
   observations:
     vertices: []
@@ -332,7 +364,7 @@ A lead list item under `gather` — no `lead:` wrapping key. `reasoning` explain
     substitutions: { src_ip: "203.0.113.47" }
   outcome:
     attribute_updates:
-      - vertex: v-001
+      - target: v-001
         updates:
           classification: external-unknown
           asn: "AS64496 TEST-NET"
@@ -384,7 +416,7 @@ A gathering lead whose outcome is interpretation-vulnerable but does not collaps
       advance_to: bucket-sensitivity-lookup
   outcome:
     attribute_updates:
-      - vertex: v-003
+      - target: v-003
         updates:
           baseline_30d_reads: 847
           observed_30d_reads: 862
@@ -407,3 +439,7 @@ A gathering lead whose outcome is interpretation-vulnerable but does not collaps
 6. **Partial authority cap.** A resolution grounded solely by `authority_for_question: partial` cannot push a hypothesis past `+` or `-`.
 7. **`screen_result` scope.** Only valid on `mode: screen` leads; only on the final lead in a SCREEN sequence. SCREEN-matched companions omit the top-level `hypothesize` block.
 8. **Lead-level predictions.** When present, each entry has `id` (matching `^lp\d+$`), `if`, `read_as`, `advance_to`. IDs are unique within the lead. `advance_to` is either the name of another lead in the same or subsequent loop, or one of `CONCLUDE` / `HYPOTHESIZE`. The actual next step should match at least one pre-committed branch — mismatches are flagged by the validator.
+9. **Legitimacy contract edge_ref (v2.8).** Every `hypothesis.legitimacy_contract[].edge_ref` is either the literal `proposed` (referring to the hypothesis's own `proposed_edge`) or an `e-*` id declared elsewhere in the companion.
+10. **Legitimacy back-reference (v2.8).** Every `edge.legitimacy_resolutions[].fulfills_contract` of shape `h-{id}.lc{n}` points to an existing hypothesis whose `legitimacy_contract` contains that entry.
+11. **Legitimacy-gated disposition (v2.8).** `conclude.disposition: benign` requires every `legitimacy_contract` on a live-weight hypothesis (weight `++`/`+`, status `confirmed`/`active`) to have at least one fulfilling `legitimacy_resolutions` entry with `verdict: authorized`. Unfulfilled contracts, or any non-`authorized` verdict, force escalation.
+12. **Attribute-update target shape (v2.8).** Every `attribute_updates` entry has exactly one of `target: v-{id}` or `target: e-{id}`, and the id exists. The legacy `vertex:` key is rejected.

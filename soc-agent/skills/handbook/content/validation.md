@@ -29,7 +29,7 @@ The judge dispatch only fires once the proposed text contains both the `## CONCL
 2. **Two parallel Haiku judges** validate the investigation log. Both run via the `claude` CLI in per-thread `subprocess.Popen` calls behind a shared wall-clock deadline, so total time is bounded by a single `SOC_AGENT_JUDGE_TIMEOUT_SECONDS` regardless of which judge is slower. Prompts are passed over stdin rather than argv to avoid `ARG_MAX` on long investigation logs. Per-run salted delimiters wrap untrusted content. Verdicts are ANDed deterministically — any FLAG blocks the write.
 
    - **Judge A — Log integrity** (`hooks/scripts/conclude_judge_A_prompt.md`). Context: `investigation.md` (proposed text) + `alert.json`. Criteria:
-     - `ADVERSARIAL_CHECK` — adversarial hypothesis refuted with a `--` grade backed by a concrete observation, not just outweighed.
+     - `LEGITIMACY_CHECK` — every `legitimacy_contract` on a live-weight hypothesis has a fulfilling `legitimacy_resolutions` entry with an authority-grounded verdict; `disposition: benign` is structurally gated on `authorized`, and `unauthorized` / `indeterminate` verdicts force escalation. Mechanism-level adversarial hypotheses (`?adversary-controlled-*`) still require `--` refutation backed by a concrete observation, not just outweighed.
      - `PLUS_PLUS_FALSIFICATION` — every `++` grade traces back to a check that *would have* refuted the hypothesis if it had returned differently.
      - `DANGLING_EVIDENCE` — every significant observation is accounted for under the surviving hypothesis.
      - `ESCALATION_RATIONALE` (escalation mode only) — the rationale names a specific uncertainty, not "felt unsure."

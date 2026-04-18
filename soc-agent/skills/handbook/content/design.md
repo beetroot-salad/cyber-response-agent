@@ -26,7 +26,7 @@ This is hypothetico-deductive triage. It replaces a linear runbook (`"check fiel
 
 The key rules:
 
-- **Maintain at least one adversarial (threat) hypothesis** until it is explicitly refuted with strong evidence. A benign conclusion is strongest when built on the *absence* of threat indicators, not just the presence of benign ones.
+- **Legitimacy lives on the edge, not as a parallel hypothesis.** When a hypothesis's disposition depends on authorization (same mechanism is consistent with benign or adversarial intent depending on who/what ran it), declare a `legitimacy_contract` on the hypothesis naming the edge(s) and the authority that resolves them. `disposition: benign` is structurally gated on every contract resolving `authorized`; `unauthorized` or `indeterminate` verdicts force escalation. Mechanism-level adversarial variants (`?adversary-controlled-*`) are still enumerated as their own hypotheses — the classification carries the claim. See `docs/investigation-language.md` §Legitimacy as edge attribute.
 - **Structured assessments** (`++`, `+`, `-`, `--`) replace subjective confidence wording. Each lead's observations are weighted against each surviving hypothesis explicitly.
 - **Severity of tests.** A lead that would refute a hypothesis if it were wrong is more valuable than one that merely fits. Prefer leads where different hypotheses predict *different* outcomes.
 - **Absence is evidence.** "I queried for X and found zero results" can be just as informative as "I queried for X and found a match" — especially when the hypothesis predicts what should *not* be there.

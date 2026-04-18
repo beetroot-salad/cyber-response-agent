@@ -21,7 +21,7 @@ Either way, the job is the same: pull the smallest slice of documentation that a
 
 - Understanding what the plugin is and how its pieces fit together
 - Looking up the investigation loop and state machine
-- Checking how a particular guardrail works (three-layer CONCLUDE validation, two-leg resolution requirement, adversarial hypothesis rule, loop cap, invlang companion validation)
+- Checking how a particular guardrail works (three-layer CONCLUDE validation, two-leg resolution requirement, legitimacy-gated disposition, loop cap, invlang companion validation)
 - Seeing the layout of `state.json`, `report.md`, `investigation.md`, or other run artifacts
 - Understanding how environment knowledge, signatures, and lead templates compose
 - Figuring out how to extend or customize the plugin (new signature, new SIEM, new lead)

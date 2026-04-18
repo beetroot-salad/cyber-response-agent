@@ -647,13 +647,13 @@ class TestHookJudgeFlags:
         bin_dir = tmp_path / "bin"
         _make_fake_claude(
             bin_dir,
-            judge_a_output="ADVERSARIAL_CHECK: FLAG — adversarial not refuted\nVERDICT: FLAG — adversarial",
+            judge_a_output="LEGITIMACY_CHECK: FLAG — legitimacy_contract on live hypothesis not resolved\nVERDICT: FLAG — legitimacy",
         )
         event = _make_hook_event(str(run_dir / "investigation.md"))
         result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
         assert result.returncode == 2
         assert "Judge A" in result.stderr
-        assert "adversarial" in result.stderr.lower()
+        assert "legitimacy" in result.stderr.lower()
 
     def test_judge_b_flag_blocks(self, tmp_path):
         runs_dir, run_dir = _setup_run(tmp_path)

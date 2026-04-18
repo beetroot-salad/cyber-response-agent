@@ -24,6 +24,10 @@ Checks performed (deterministic — no LLM):
 12. Partial-authority cap (rule 6): anchor-only grounding on a partial-authority anchor cannot produce ++/--
 13. Prediction-lifecycle guard: prediction and refutation IDs are append-only at ID granularity (catches deletion-to-pass)
 14. Rollup-parent weight: a parent hypothesis's final weight cannot exceed the strongest child's final weight
+15. Legitimacy contract edge_ref (spec rule #19): hypothesis.legitimacy_contract[].edge_ref is `proposed` or an existing e-* id
+16. Legitimacy resolution back-reference (spec rule #20): edge.legitimacy_resolutions[].fulfills_contract of shape `h-{id}.lc{n}` points to an existing hypothesis + contract entry
+17. Legitimacy-gated disposition (spec rule #21): conclude.disposition=benign requires every contract on a live-weight hypothesis to have ≥1 fulfilling resolution with verdict=authorized; unauthorized/indeterminate verdicts cap disposition
+18. Attribute-update target shape (spec rule #22): each attribute_updates entry has exactly one of `target: v-{id}` or `target: e-{id}`, and the id exists
 
 Warnings (non-blocking, printed to stderr with exit 0):
 - Route compliance: when a lead with `predictions` is followed by another lead in
@@ -47,7 +51,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import yaml
 
@@ -60,6 +64,7 @@ from hooks.scripts.invlang_walkers import (
     iter_hypotheses,
     parent_hypothesis_id,
     compute_final_weight,
+    compute_final_status,
 )
 
 # Same regex used by corpus.py — extract ```yaml ... ``` spans from markdown
@@ -210,7 +215,8 @@ def _check_id_references(merged: dict[str, Any]) -> list[str]:
         for obs in lead.get("observes", []) or []:
             _ref(obs.get("hypothesis"), f"lead {lid} observes.hypothesis")
         for attr_upd in lead.get("outcome", {}).get("attribute_updates", []) or []:
-            _ref(attr_upd.get("vertex"), f"lead {lid} attribute_updates.vertex")
+            if isinstance(attr_upd, dict):
+                _ref(attr_upd.get("target"), f"lead {lid} attribute_updates.target")
         for se in lead.get("resolutions", []) or []:
             _ref(se.get("hypothesis"), f"lead {lid} resolution.hypothesis")
             for eid in se.get("supporting_edges", []) or []:
@@ -688,6 +694,326 @@ def _check_rollup_parent_weight(merged: dict[str, Any]) -> list[str]:
     return errors
 
 
+# ---------------------------------------------------------------------------
+# Legitimacy-as-edge-attribute rules (spec v2.8, rules #19–#22)
+# ---------------------------------------------------------------------------
+
+# Every contract's id must be `lc` followed by digits. Used to compose the
+# back-reference format `h-{id}.lc{n}` that legitimacy_resolutions must cite.
+_LEGITIMACY_CONTRACT_ID_RE = re.compile(r"^lc\d+$")
+
+_LEGITIMACY_VERDICTS = {"authorized", "unauthorized", "indeterminate"}
+
+
+def _collect_declared_edge_ids(merged: dict[str, Any]) -> set[str]:
+    """All declared edge IDs (prologue + lead observations). Used by rule #19."""
+    eids: set[str] = set()
+    for e in merged.get("prologue", {}).get("edges", []) or []:
+        if isinstance(e, dict):
+            eid = e.get("id")
+            if isinstance(eid, str):
+                eids.add(eid)
+    for lead in merged.get("gather", []) or []:
+        if not isinstance(lead, dict):
+            continue
+        for e in lead.get("outcome", {}).get("observations", {}).get("edges", []) or []:
+            if isinstance(e, dict):
+                eid = e.get("id")
+                if isinstance(eid, str):
+                    eids.add(eid)
+    return eids
+
+
+def _collect_contract_ids(merged: dict[str, Any]) -> set[str]:
+    """All `h-{id}.lc{n}` back-reference targets declared across hypotheses."""
+    out: set[str] = set()
+    for h in iter_hypotheses(merged):
+        hid = h.get("id")
+        if not isinstance(hid, str):
+            continue
+        for c in h.get("legitimacy_contract") or []:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("id")
+            if isinstance(cid, str):
+                out.add(f"{hid}.{cid}")
+    return out
+
+
+def _iter_edge_resolutions(
+    merged: dict[str, Any],
+) -> Iterator[tuple[str, str, dict[str, Any]]]:
+    """Yield (location, edge_id, resolution) for every legitimacy_resolutions entry.
+
+    Sources (all valid per spec): edges in prologue, edges in lead
+    observations, and attribute_updates entries targeting an edge with
+    `updates.legitimacy_resolutions`.
+    """
+    for e in merged.get("prologue", {}).get("edges", []) or []:
+        if not isinstance(e, dict):
+            continue
+        eid = e.get("id")
+        if not isinstance(eid, str):
+            continue
+        for r in e.get("legitimacy_resolutions") or []:
+            if isinstance(r, dict):
+                yield "prologue edge", eid, r
+    for lead in merged.get("gather", []) or []:
+        if not isinstance(lead, dict):
+            continue
+        lid = lead.get("id", "?")
+        for e in lead.get("outcome", {}).get("observations", {}).get("edges", []) or []:
+            if not isinstance(e, dict):
+                continue
+            eid = e.get("id")
+            if not isinstance(eid, str):
+                continue
+            for r in e.get("legitimacy_resolutions") or []:
+                if isinstance(r, dict):
+                    yield f"lead {lid} observation edge", eid, r
+        for upd in lead.get("outcome", {}).get("attribute_updates") or []:
+            if not isinstance(upd, dict):
+                continue
+            target = upd.get("target")
+            if not (isinstance(target, str) and target.startswith("e-")):
+                continue
+            updates = upd.get("updates")
+            if not isinstance(updates, dict):
+                continue
+            for r in updates.get("legitimacy_resolutions") or []:
+                if isinstance(r, dict):
+                    yield f"lead {lid} attribute_updates", target, r
+
+
+def _check_legitimacy_contract_edge_ref(merged: dict[str, Any]) -> list[str]:
+    """Spec rule #19: hypothesis.legitimacy_contract[].edge_ref resolves.
+
+    Each entry's `edge_ref` must be the literal `proposed` (referring to
+    the hypothesis's own `proposed_edge`) or an `e-*` id declared
+    elsewhere in the companion.
+    """
+    errors: list[str] = []
+    declared_edges = _collect_declared_edge_ids(merged)
+    for h in iter_hypotheses(merged):
+        hid = h.get("id", "?")
+        contracts = h.get("legitimacy_contract") or []
+        if not isinstance(contracts, list):
+            errors.append(f"hypothesis {hid}: legitimacy_contract must be a list")
+            continue
+        for i, c in enumerate(contracts):
+            if not isinstance(c, dict):
+                errors.append(f"hypothesis {hid}: legitimacy_contract[{i}] must be a mapping")
+                continue
+            cid = c.get("id", f"[{i}]")
+            if isinstance(c.get("id"), str) and not _LEGITIMACY_CONTRACT_ID_RE.match(c["id"]):
+                errors.append(
+                    f"hypothesis {hid}: legitimacy_contract {cid!r} id does not "
+                    f"match pattern ^lc\\d+$ (e.g. lc1, lc2)"
+                )
+            edge_ref = c.get("edge_ref")
+            if edge_ref is None:
+                errors.append(
+                    f"hypothesis {hid}: legitimacy_contract {cid!r} missing edge_ref"
+                )
+                continue
+            if edge_ref == "proposed":
+                continue
+            if not isinstance(edge_ref, str):
+                errors.append(
+                    f"hypothesis {hid}: legitimacy_contract {cid!r} edge_ref must be "
+                    f"'proposed' or an e-* id (got {edge_ref!r})"
+                )
+                continue
+            if not edge_ref.startswith("e-"):
+                errors.append(
+                    f"hypothesis {hid}: legitimacy_contract {cid!r} edge_ref "
+                    f"{edge_ref!r} must be 'proposed' or an e-* id"
+                )
+                continue
+            if edge_ref not in declared_edges:
+                errors.append(
+                    f"hypothesis {hid}: legitimacy_contract {cid!r} edge_ref "
+                    f"{edge_ref!r} is not a declared edge in this companion"
+                )
+    return errors
+
+
+def _check_legitimacy_resolution_backrefs(merged: dict[str, Any]) -> list[str]:
+    """Spec rule #20: legitimacy_resolutions[].fulfills_contract resolves.
+
+    Every `fulfills_contract` must be of shape `h-{id}.lc{n}` where the
+    named hypothesis exists and its `legitimacy_contract` contains an
+    entry with that id.
+    """
+    errors: list[str] = []
+    contract_ids = _collect_contract_ids(merged)
+    for location, eid, r in _iter_edge_resolutions(merged):
+        verdict = r.get("verdict")
+        if isinstance(verdict, str) and verdict not in _LEGITIMACY_VERDICTS:
+            errors.append(
+                f"{location} {eid}: legitimacy_resolutions.verdict {verdict!r} not in "
+                f"{sorted(_LEGITIMACY_VERDICTS)}"
+            )
+        back = r.get("fulfills_contract")
+        if back is None:
+            errors.append(
+                f"{location} {eid}: legitimacy_resolutions entry missing fulfills_contract"
+            )
+            continue
+        if not isinstance(back, str) or "." not in back:
+            errors.append(
+                f"{location} {eid}: legitimacy_resolutions.fulfills_contract {back!r} "
+                f"must be of shape 'h-{{id}}.lc{{n}}'"
+            )
+            continue
+        if back not in contract_ids:
+            errors.append(
+                f"{location} {eid}: legitimacy_resolutions.fulfills_contract {back!r} "
+                f"does not resolve to any declared hypothesis + contract entry"
+            )
+    return errors
+
+
+def _check_legitimacy_gated_disposition(merged: dict[str, Any]) -> list[str]:
+    """Spec rule #21: conclude.disposition is gated by contract resolutions.
+
+    For every hypothesis with weight ∈ {++, +} and status ∈ {confirmed,
+    active}, every declared `legitimacy_contract` must have at least one
+    `legitimacy_resolutions` entry fulfilling it. Then:
+
+    - disposition=benign requires every contract to have ≥1 verdict=authorized
+      (unfulfilled contracts and non-authorized verdicts are incompatible with
+      benign — the investigation must escalate instead).
+    - Any contract resolved with verdict=unauthorized → disposition must not
+      be benign.
+    - Any contract with only verdict=indeterminate → disposition must not be
+      benign.
+
+    The spec names `unclear` as the escalation disposition, but the surrounding
+    system also uses `inconclusive` / `escalated` in the same slot. Rather than
+    hard-code a single value, this rule enforces the load-bearing invariant —
+    benign is gated on authorized — and lets any non-benign disposition stand
+    for the escalation cases. Tighter disposition-vocabulary alignment is a
+    separate cleanup.
+    """
+    errors: list[str] = []
+    conclude = merged.get("conclude")
+    if not isinstance(conclude, dict):
+        return errors
+    disposition = conclude.get("disposition")
+    if disposition is None:
+        return errors
+
+    # Aggregate verdicts per contract (all edges considered).
+    verdicts_by_contract: dict[str, list[str]] = {}
+    for _, _, r in _iter_edge_resolutions(merged):
+        cid = r.get("fulfills_contract")
+        verdict = r.get("verdict")
+        if isinstance(cid, str) and isinstance(verdict, str):
+            verdicts_by_contract.setdefault(cid, []).append(verdict)
+
+    for h in iter_hypotheses(merged):
+        hid = h.get("id")
+        if not isinstance(hid, str):
+            continue
+        contracts = h.get("legitimacy_contract") or []
+        if not contracts:
+            continue
+        final_weight = compute_final_weight(merged, hid)
+        if final_weight not in ("++", "+"):
+            continue
+        status = compute_final_status(merged, hid)
+        if status not in ("active", "confirmed"):
+            continue
+
+        for c in contracts:
+            if not isinstance(c, dict):
+                continue
+            lc_id = c.get("id")
+            if not isinstance(lc_id, str):
+                continue
+            contract_ref = f"{hid}.{lc_id}"
+            verdicts = verdicts_by_contract.get(contract_ref, [])
+            has_authorized = "authorized" in verdicts
+            has_unauthorized = "unauthorized" in verdicts
+            has_indeterminate = "indeterminate" in verdicts
+
+            if disposition == "benign":
+                if not verdicts:
+                    errors.append(
+                        f"hypothesis {hid}: legitimacy_contract {lc_id} on a live-weight "
+                        f"hypothesis has no fulfilling legitimacy_resolutions entry, "
+                        f"but conclude.disposition is 'benign'. Resolve the contract "
+                        f"against its declared anchor, or escalate."
+                    )
+                elif has_unauthorized:
+                    errors.append(
+                        f"hypothesis {hid}: legitimacy_contract {lc_id} has a "
+                        f"resolution with verdict 'unauthorized' but "
+                        f"conclude.disposition is 'benign'. Escalate instead."
+                    )
+                elif has_indeterminate and not has_authorized:
+                    errors.append(
+                        f"hypothesis {hid}: legitimacy_contract {lc_id} has only "
+                        f"'indeterminate' resolution(s); conclude.disposition is "
+                        f"'benign'. Escalate instead."
+                    )
+                elif not has_authorized:
+                    errors.append(
+                        f"hypothesis {hid}: legitimacy_contract {lc_id} fulfilled with "
+                        f"verdict(s) {sorted(set(verdicts))} — none are 'authorized' — "
+                        f"yet conclude.disposition is 'benign'. Benign requires every "
+                        f"contract on a live-weight hypothesis to resolve 'authorized'."
+                    )
+    return errors
+
+
+def _check_attribute_updates_target_shape(merged: dict[str, Any]) -> list[str]:
+    """Spec rule #22: every attribute_updates entry has exactly one target.
+
+    Target is `v-{id}` or `e-{id}`, and the id exists in the companion.
+    Existence is also covered by the generic id-reference check; this
+    rule additionally enforces shape (target key present, single id,
+    correct prefix).
+    """
+    errors: list[str] = []
+    declared_ids = _collect_declared_ids(merged)
+    for lead in merged.get("gather", []) or []:
+        if not isinstance(lead, dict):
+            continue
+        lid = lead.get("id", "?")
+        for i, upd in enumerate(lead.get("outcome", {}).get("attribute_updates") or []):
+            ctx = f"lead {lid} attribute_updates[{i}]"
+            if not isinstance(upd, dict):
+                errors.append(f"{ctx}: entry must be a mapping")
+                continue
+            if "vertex" in upd and "target" not in upd:
+                errors.append(
+                    f"{ctx}: uses legacy `vertex:` field — use `target: v-{{id}} | e-{{id}}`"
+                )
+                continue
+            target = upd.get("target")
+            if not isinstance(target, str) or not target:
+                errors.append(
+                    f"{ctx}: missing `target:` (required, must be v-{{id}} or e-{{id}})"
+                )
+                continue
+            if not (target.startswith("v-") or target.startswith("e-")):
+                errors.append(
+                    f"{ctx}: target {target!r} must start with 'v-' or 'e-'"
+                )
+                continue
+            if target not in declared_ids:
+                errors.append(
+                    f"{ctx}: target {target!r} does not resolve to a declared id"
+                )
+            if "updates" not in upd or not isinstance(upd.get("updates"), dict):
+                errors.append(
+                    f"{ctx}: missing or non-mapping `updates` field"
+                )
+    return errors
+
+
 def _check_lead_dedup_warnings(merged: dict[str, Any]) -> list[str]:
     """Warn when two leads share the same template + query + substitutions.
 
@@ -953,6 +1279,10 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_prediction_coverage(merged))
     errors.extend(_check_partial_authority_cap(merged))
     errors.extend(_check_rollup_parent_weight(merged))
+    errors.extend(_check_legitimacy_contract_edge_ref(merged))
+    errors.extend(_check_legitimacy_resolution_backrefs(merged))
+    errors.extend(_check_legitimacy_gated_disposition(merged))
+    errors.extend(_check_attribute_updates_target_shape(merged))
 
     # Prediction-lifecycle guard needs the on-disk companion as well.
     if current_text is not None:

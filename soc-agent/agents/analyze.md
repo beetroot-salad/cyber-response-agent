@@ -56,12 +56,12 @@ The current cycle is loop `{loop_n}`. The GATHER block for this loop is already 
 ## Routing Rules
 
 **Route to HYPOTHESIZE if any of:**
-- Two or more hypotheses remain undifferentiated (all at `+` or mixed without a clear `++` + refuted adversarial).
-- The adversarial hypothesis has not been explicitly refuted with `--` evidence. "Deprioritized," "outweighed," or "unlikely given context" are not refutations.
+- Two or more hypotheses remain undifferentiated (all at `+` or mixed without a decisive `++`).
+- A live-weight hypothesis carries a `legitimacy_contract` with no fulfilling `legitimacy_resolutions` entry, or whose fulfillment verdict is `indeterminate`. "Deprioritized," "outweighed," or "unlikely given context" are not resolutions — the contract asks an authority; only an authority answer closes it.
 - A mechanism hypothesis is at `++` but the legitimacy/scope question is not yet resolved (see below).
 
 **Route to CONCLUDE only if:**
-- The adversarial is explicitly refuted (`--`), AND
+- Every `legitimacy_contract` on a live-weight hypothesis has a fulfilling `legitimacy_resolutions` entry (`verdict: authorized` is required for `benign` disposition; `unauthorized`/`indeterminate` force `status: escalated` per the legitimacy-gated-disposition rule in `docs/investigation-language.md`), AND
 - At least one mechanism hypothesis is at `++` with a failed refutation named, OR the investigation is escalating with clear rationale.
 
 When routing CONCLUDE, state:

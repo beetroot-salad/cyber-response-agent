@@ -6,6 +6,26 @@
 
 ---
 
+## v2.8 delta (2026-04-18)
+
+What this doc called "legitimacy attribution" is now a first-class edge
+attribute in invlang v2.8: hypotheses whose disposition depends on
+authorization declare a `legitimacy_contract`, and the resolving lead writes a
+`legitimacy_resolutions` entry on the edge. Disposition is gated structurally
+— `disposition: benign` requires every contract on a live-weight hypothesis
+to resolve `verdict: authorized`; `unauthorized`/`indeterminate` force
+escalation (validator rule #21 in `hooks/scripts/invlang_validate.py`). This
+supersedes the earlier "maintain at least one adversarial hypothesis until
+`--`" bookkeeping rule — the teeth moved from hypothesis bookkeeping to
+append-only edge attribution. Mechanism-level adversarial variants
+(`?adversary-controlled-*`) are still enumerated alongside benign
+classifications; classification carries the claim. See
+`docs/investigation-language.md` §Legitimacy as edge attribute for the full
+schema, and `tasks/adversarial-as-attribute-not-hypothesis.md` for the design
+discussion that drove the change.
+
+---
+
 ## TL;DR
 
 The current "hypothesis catalog" in signature playbooks conflates three

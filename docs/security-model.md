@@ -66,7 +66,7 @@ Hook implementation: `hooks/scripts/tag_tool_results.py`.
 
 The hypothesis-driven approach is itself a defense against both injection and hallucination:
 
-- **Adversarial hypothesis requirement** — at least one threat hypothesis must be maintained until explicitly refuted with `--` evidence. Prevents premature benign conclusions.
+- **Legitimacy-gated disposition (invlang v2.8, validator rule #21)** — hypotheses whose disposition depends on authorization declare a `legitimacy_contract`; the resolving lead writes a `legitimacy_resolutions` entry on the edge. `disposition: benign` requires every contract on a live-weight hypothesis to resolve `verdict: authorized`; `unauthorized`/`indeterminate` force escalation. Mechanism-level adversarial variants (`?adversary-controlled-*`, `?runtime-exec-injection`) remain separate hypotheses and still require `--` refutation backed by concrete observation. Prevents premature benign conclusions by forcing an authority answer, not a bookkeeping survival rule.
 - **Lead severity** — playbooks prioritize leads that are hard to fake (IP classification, auth history correlation, composite rule firing) over leads that are easy to manipulate (string fields, banners).
 - **Structured assessments** (`++`/`+`/`-`/`--`) replace subjective confidence, making reasoning auditable.
 

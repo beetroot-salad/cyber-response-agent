@@ -70,10 +70,22 @@ lookups, not packed into the hypothesis label.
   mechanism + intent + shape + effects into one name. Use only the
   parent-vertex classification (`adversary-controlled`,
   `in-container-runtime-descendant`, `runtime-exec-injection`, …).
-- **No parallel adversarial hypothesis.** Sanctioned-vs-adversarial is
-  an attribute of the confirmed parent, resolved by trust-anchor
-  lookup. Never write a hypothesis attached to a hypothetical future
-  edge to cover a "what if this is bad" case.
+- **Legitimacy is edge-level, not a parallel hypothesis.** When the
+  same mechanism is consistent with benign or adversarial intent
+  depending on authorization (CFO vs. external identity reading
+  payroll; operator shell on prod vs. attacker RCE on prod), declare
+  a `legitimacy_contract` on the hypothesis naming the edge and the
+  authority — see `docs/investigation-language.md` §Legitimacy as
+  edge attribute. Do **not** write a parallel `?sanctioned` vs.
+  `?unsanctioned` hypothesis pair: the mechanism is identical, only
+  the verdict differs. Contracts answer policy, not integrity —
+  integrity questions (session hijack, process-hollowing,
+  tool-masquerade) are mechanism-level discriminations (enumerate
+  `?adversary-controlled-*` alongside benign classifications), not
+  contracts. A hypothesis attached to a hypothetical future edge is
+  only correct when the adversarial signal is *itself* a distinct
+  future edge (a failed-auth alert followed by an unexpected
+  success) — that's a topology question, not legitimacy.
 - **No HYPOTHESIZE without a fork.** Enter only when ≥ 2 competing
   classifications have predictions that diverge on already-observable
   fields. If the discriminating data is not yet known, emit a GATHER
@@ -298,7 +310,7 @@ hypothesize:
         - {id: p3, claim: "additional failed attempts from srcip in 5-min window"}
         - {id: p4, claim: "no successful login in forward 60-sec window"}   # ⚠ 4 predictions on 4 different vertices
     - id: h-003
-      name: "?compromise-followup"   # ⚠ parallel adversarial hypothesis; forward-success is an auth-history attribute
+      name: "?compromise-followup"   # ⚠ parallel adversarial hypothesis — forward-success belongs either on the proposed edge (legitimacy contract + resolution) or on a distinct future `authenticated_as` edge (future-edge hypothesis), not as a sibling mechanism
 ```
 
 ⚠ And no lead has run yet. No mechanism fork is observable from the
@@ -322,9 +334,12 @@ gather:
 ```
 
 Re-enter HYPOTHESIZE only at a later loop if enrichment leaves
-disposition genuinely ambiguous — and only with a legitimacy-attribute
-fork on the confirmed source process (e.g., `?sanctioned-but-
-unregistered` vs. `?unsanctioned-origin`).
+disposition genuinely ambiguous — and, when authorization determines
+the verdict, do so with a single hypothesis carrying a
+`legitimacy_contract` on the relevant edge (authority resolves
+`authorized` / `unauthorized` / `indeterminate`). Do **not** split
+into a parallel `?sanctioned-*` vs. `?unsanctioned-*` pair — same
+mechanism, one edge, one contract.
 
 ## Return
 

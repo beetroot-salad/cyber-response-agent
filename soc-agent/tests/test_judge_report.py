@@ -140,7 +140,7 @@ class TestAssemblePrompt:
         assert "SHAPE_MATCH" not in prompt
         assert "COMPLETENESS" not in prompt
         assert "GROUNDING_MATCH" not in prompt
-        assert "ADVERSARIAL_CHECK" not in prompt
+        assert "LEGITIMACY_CHECK" not in prompt
 
     def test_untrusted_content_is_salted(self):
         prompt = assemble_prompt("alert", "log", "report", "prec", "mysalt")

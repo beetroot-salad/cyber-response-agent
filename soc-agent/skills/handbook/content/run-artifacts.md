@@ -64,7 +64,7 @@ The salt is generated per run (`secrets.token_hex(8)`) specifically so it cannot
 
 A markdown document with one `## {PHASE}` section per phase transition. See `content/phases.md` for the per-phase templates. The sections accumulate — the agent never rewrites earlier sections. By CONCLUDE, `investigation.md` is a complete narrative of the investigation: hypotheses formed, leads selected, observations gathered, weights assigned, decisions made.
 
-This file is the **agent-owned log**. The structural record lives in `state.json`; the narrative lives here. The Tier 2 judge reads `investigation.md` (and only this, not `state.json`) when evaluating `INTERNAL_CONSISTENCY`, `EVIDENCE_SUFFICIENCY`, `COMPLETENESS`, and `ADVERSARIAL_CHECK`.
+This file is the **agent-owned log**. The structural record lives in `state.json`; the narrative lives here. The Tier 2 judge reads `investigation.md` (and only this, not `state.json`) when evaluating `INTERNAL_CONSISTENCY`, `EVIDENCE_SUFFICIENCY`, `COMPLETENESS`, and `LEGITIMACY_CHECK`.
 
 ### `state.json`
 

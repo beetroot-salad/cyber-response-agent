@@ -71,21 +71,32 @@ Most investigations resolve through enrichment alone: the archetype
 catalog above captures the cross-product of (source sanctioned?) ×
 (username class) × (volume shape) × (forward success?) that these
 leads discriminate. If enrichment leaves disposition ambiguous, the
-fork that typically opens is a legitimacy fork on the source
-process:
+fork that typically opens is a single legitimacy question on the
+`attempted_auth` edge — whether an `approved-monitoring-sources`
+entry authorizes the `(srcip, srcuser, target)` triple — carried as
+a `legitimacy_contract` on the hypothesis. Do **not** split into
+parallel `?sanctioned-*` vs. `?unsanctioned-*` hypotheses: same
+mechanism, same observables, only the authority answer differs — the
+textbook legitimacy-contract case. See
+`docs/investigation-language.md` §Legitimacy as edge attribute.
 
-- **`?sanctioned-but-unregistered`** — a benign origin exists that
-  the visible sanction registries don't cover (new automation,
-  undocumented monitoring source, recently-deployed service).
-- **`?unsanctioned-origin`** — no legitimate authorization resolves;
-  source process is adversarial by construction pending a broader
-  anchor lookup.
+The contract's verdict routes to archetype:
+- `authorized` → `monitoring-probe` or `service-account-rotation`
+  depending on username class (sanction registry ×
+  `scheduled-jobs` resolves the benign sub-case).
+- `unauthorized` → `credential-stuffing` or `external-bruteforce`
+  depending on username class × volume shape.
+- `indeterminate` → escalate; the anchor gap is the rationale.
 
-Legitimacy is an attribute of the source-process vertex resolved by
-anchor lookup, not a parallel topology hypothesis. Forward-window
-success (a 5501/5715 from the same srcip within 60s) is a mandatory
-attribute check inside `authentication-history`, not a separate
-hypothesis slot.
+Forward-window success (a 5501/5715 from the same srcip within 60s)
+is a mandatory attribute check inside `authentication-history`, not
+a separate hypothesis slot. If observed, it overrides the contract
+verdict — success-after-failure is always severe (escalation).
+
+The escalation archetypes (`credential-stuffing`, `external-bruteforce`)
+are adversarial-by-mechanism: classification carries the claim and
+no contract is declared. Their `--` refutation comes from concrete
+volume/shape evidence, not from an anchor lookup.
 
 ## Starter lead order
 

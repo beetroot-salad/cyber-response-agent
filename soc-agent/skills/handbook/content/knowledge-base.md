@@ -49,7 +49,7 @@ Each of these plays a different role. The runtime composition is what makes them
 Universal investigation methodology. Nothing in this directory is vendor-specific, org-specific, or signature-specific — it's the parts of "how to investigate a security alert" that don't change when you swap the SIEM or the org.
 
 - **`SKILL.md`** — investigation vocabulary (hypotheses with `?` prefix, assessments `++/+/-/--`, trace format) and the top-level index.
-- **`checklist.md`** — self-check guide the agent reads at CONTEXTUALIZE and verifies at CONCLUDE. Investigation completeness, adversarial hypothesis, report shape, common mistakes.
+- **`checklist.md`** — self-check guide the agent reads at CONTEXTUALIZE and verifies at CONCLUDE. Investigation completeness, legitimacy-contract declaration + resolution, report shape, common mistakes.
 - **`leads/`** — reusable **lead definitions**. Each lead is a directory:
   ```
   leads/{lead-name}/

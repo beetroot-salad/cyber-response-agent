@@ -35,6 +35,10 @@ from hooks.scripts.invlang_validate import (
     _check_lead_dedup_warnings,
     _check_silent_empty_result_warnings,
     _check_tool_audit_cross_ref_warnings,
+    _check_legitimacy_contract_edge_ref,
+    _check_legitimacy_resolution_backrefs,
+    _check_legitimacy_gated_disposition,
+    _check_attribute_updates_target_shape,
     _merge_blocks,
     collect_warnings,
     YAML_BLOCK_RE,
@@ -98,7 +102,7 @@ gather:
       substitutions: {}
     outcome:
       attribute_updates:
-        - vertex: v-001
+        - target: v-001
           updates:
             classification: external-unknown
       observations:
@@ -948,7 +952,7 @@ class TestCheckSilentEmpty:
             ["h-001"],
             {
                 "observations": {"vertices": [], "edges": []},
-                "attribute_updates": [{"vertex": "v-001", "updates": {"classification": "x"}}],
+                "attribute_updates": [{"target": "v-001", "updates": {"classification": "x"}}],
             },
         )]}
         assert _check_silent_empty_result_warnings(merged) == []
@@ -1334,3 +1338,357 @@ gather:
         result = _run_hook(content, tmp_path=tmp_path)
         assert result.returncode == 2
         assert "v-999" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Legitimacy rules (spec v2.8, rules #19–#22)
+# ---------------------------------------------------------------------------
+
+
+def _companion_with_contract(
+    contract_edge_ref: str = "proposed",
+    contract_id: str = "lc1",
+    resolutions: list[dict] | None = None,
+    disposition: str = "benign",
+    hypothesis_weight: str = "+",
+    extra_edges: list[dict] | None = None,
+) -> dict:
+    """Build a merged companion carrying one hypothesis with one legitimacy_contract.
+
+    Defaults shape a live-weight benign resolution with one `authorized` verdict
+    attached to the hypothesis's proposed edge. Override parameters to flip
+    individual dimensions for negative cases.
+    """
+    edges = [
+        {
+            "id": "e-001",
+            "relation": "attempted_auth",
+            "source_vertex": "v-001",
+            "target_vertex": "v-002",
+            "authority": {"kind": "siem-event", "source": "wazuh"},
+        }
+    ]
+    if extra_edges:
+        edges.extend(extra_edges)
+    new_edge = {
+        "id": "e-002",
+        "relation": "classified_as",
+        "source_vertex": "v-001",
+        "target_vertex": "v-002",
+        "authority": {"kind": "authoritative-source", "source": "registry"},
+        "legitimacy_resolutions": resolutions or [
+            {
+                "verdict": "authorized",
+                "anchor_kind": "approved-monitoring-sources",
+                "anchor_query": "registry lookup",
+                "as_of": "2026-04-18T00:00:00Z",
+                "resolved_by_lead": "l-001",
+                "fulfills_contract": f"h-001.{contract_id}",
+            }
+        ],
+    }
+    return {
+        "prologue": {
+            "vertices": [
+                {"id": "v-001", "type": "endpoint", "classification": "external"},
+                {"id": "v-002", "type": "endpoint", "classification": "internal"},
+            ],
+            "edges": edges,
+        },
+        "hypothesize": {
+            "hypotheses": [
+                {
+                    "id": "h-001",
+                    "name": "?source-authorization-unknown",
+                    "attached_to_vertex": "v-001",
+                    "proposed_edge": {
+                        "relation": "attempted_auth",
+                        "parent_vertex": {"type": "identity", "classification": "unknown"},
+                    },
+                    "predictions": [{"id": "p1", "claim": "source resolves to an approved entry"}],
+                    "legitimacy_contract": [
+                        {
+                            "id": contract_id,
+                            "edge_ref": contract_edge_ref,
+                            "anchor_kind": "approved-monitoring-sources",
+                            "predicate": "authorized iff srcip in approved-monitoring-sources",
+                            "on_unauthorized": "escalate",
+                            "on_indeterminate": "escalate",
+                        }
+                    ],
+                }
+            ]
+        },
+        "gather": [
+            {
+                "id": "l-001",
+                "loop": 1,
+                "name": "trust-anchor-lookup",
+                "target": "v-001",
+                "query_details": {},
+                "outcome": {"observations": {"vertices": [], "edges": [new_edge]}},
+                "resolutions": [
+                    {
+                        "hypothesis": "h-001",
+                        "after": hypothesis_weight,
+                        "severity_of_test": "severe",
+                        "matched_prediction_ids": ["p1"],
+                        "matched_refutation_ids": [],
+                        "reasoning": "anchor lookup resolved",
+                        "supporting_edges": ["e-002"],
+                    }
+                ],
+            }
+        ],
+        "conclude": {
+            "termination": {"category": "trust-root", "rationale": "contract resolved"},
+            "disposition": disposition,
+            "confidence": "high",
+        },
+    }
+
+
+class TestCheckLegitimacyContractEdgeRef:
+    def test_valid_proposed(self):
+        merged = _companion_with_contract(contract_edge_ref="proposed")
+        assert _check_legitimacy_contract_edge_ref(merged) == []
+
+    def test_valid_existing_edge(self):
+        merged = _companion_with_contract(contract_edge_ref="e-001")
+        assert _check_legitimacy_contract_edge_ref(merged) == []
+
+    def test_unknown_edge_ref(self):
+        merged = _companion_with_contract(contract_edge_ref="e-999")
+        errors = _check_legitimacy_contract_edge_ref(merged)
+        assert any("e-999" in e and "not a declared edge" in e for e in errors)
+
+    def test_bad_id_pattern(self):
+        merged = _companion_with_contract(contract_id="legit1")
+        errors = _check_legitimacy_contract_edge_ref(merged)
+        assert any("^lc\\d+$" in e for e in errors)
+
+    def test_missing_edge_ref(self):
+        merged = _companion_with_contract()
+        merged["hypothesize"]["hypotheses"][0]["legitimacy_contract"][0].pop("edge_ref")
+        errors = _check_legitimacy_contract_edge_ref(merged)
+        assert any("missing edge_ref" in e for e in errors)
+
+    def test_non_edge_string(self):
+        merged = _companion_with_contract(contract_edge_ref="v-001")
+        errors = _check_legitimacy_contract_edge_ref(merged)
+        assert any("must be 'proposed' or an e-* id" in e for e in errors)
+
+
+class TestCheckLegitimacyResolutionBackrefs:
+    def test_valid_backref(self):
+        merged = _companion_with_contract()
+        assert _check_legitimacy_resolution_backrefs(merged) == []
+
+    def test_unknown_contract(self):
+        merged = _companion_with_contract(
+            resolutions=[{
+                "verdict": "authorized",
+                "anchor_kind": "x",
+                "anchor_query": "q",
+                "as_of": "2026-04-18",
+                "resolved_by_lead": "l-001",
+                "fulfills_contract": "h-999.lc1",
+            }]
+        )
+        errors = _check_legitimacy_resolution_backrefs(merged)
+        assert any("does not resolve" in e for e in errors)
+
+    def test_bad_shape(self):
+        merged = _companion_with_contract(
+            resolutions=[{
+                "verdict": "authorized",
+                "anchor_kind": "x",
+                "anchor_query": "q",
+                "as_of": "2026-04-18",
+                "resolved_by_lead": "l-001",
+                "fulfills_contract": "not-a-reference",
+            }]
+        )
+        errors = _check_legitimacy_resolution_backrefs(merged)
+        assert any("must be of shape" in e for e in errors)
+
+    def test_missing_backref(self):
+        merged = _companion_with_contract(
+            resolutions=[{
+                "verdict": "authorized",
+                "anchor_kind": "x",
+                "anchor_query": "q",
+                "as_of": "2026-04-18",
+                "resolved_by_lead": "l-001",
+            }]
+        )
+        errors = _check_legitimacy_resolution_backrefs(merged)
+        assert any("missing fulfills_contract" in e for e in errors)
+
+    def test_bad_verdict(self):
+        merged = _companion_with_contract(
+            resolutions=[{
+                "verdict": "maybe",
+                "anchor_kind": "x",
+                "anchor_query": "q",
+                "as_of": "2026-04-18",
+                "resolved_by_lead": "l-001",
+                "fulfills_contract": "h-001.lc1",
+            }]
+        )
+        errors = _check_legitimacy_resolution_backrefs(merged)
+        assert any("verdict 'maybe'" in e for e in errors)
+
+
+class TestCheckLegitimacyGatedDisposition:
+    def test_benign_with_authorized(self):
+        merged = _companion_with_contract(disposition="benign")
+        assert _check_legitimacy_gated_disposition(merged) == []
+
+    def test_benign_with_unfulfilled_contract(self):
+        merged = _companion_with_contract(disposition="benign", resolutions=[])
+        # Remove the edge's legitimacy_resolutions entirely to simulate unfulfilled.
+        lead_edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        lead_edge.pop("legitimacy_resolutions", None)
+        errors = _check_legitimacy_gated_disposition(merged)
+        assert any("no fulfilling legitimacy_resolutions" in e for e in errors)
+
+    def test_benign_with_indeterminate_only_fails(self):
+        merged = _companion_with_contract(
+            disposition="benign",
+            resolutions=[{
+                "verdict": "indeterminate",
+                "anchor_kind": "x",
+                "anchor_query": "q",
+                "as_of": "2026-04-18",
+                "resolved_by_lead": "l-001",
+                "fulfills_contract": "h-001.lc1",
+            }],
+        )
+        errors = _check_legitimacy_gated_disposition(merged)
+        assert any("'indeterminate'" in e and "Escalate instead" in e for e in errors)
+
+    def test_unauthorized_with_benign_fails(self):
+        merged = _companion_with_contract(
+            disposition="benign",
+            resolutions=[{
+                "verdict": "unauthorized",
+                "anchor_kind": "x",
+                "anchor_query": "q",
+                "as_of": "2026-04-18",
+                "resolved_by_lead": "l-001",
+                "fulfills_contract": "h-001.lc1",
+            }],
+        )
+        errors = _check_legitimacy_gated_disposition(merged)
+        assert any("'unauthorized'" in e and "Escalate instead" in e for e in errors)
+
+    def test_unauthorized_with_true_positive_ok(self):
+        merged = _companion_with_contract(
+            disposition="true_positive",
+            resolutions=[{
+                "verdict": "unauthorized",
+                "anchor_kind": "x",
+                "anchor_query": "q",
+                "as_of": "2026-04-18",
+                "resolved_by_lead": "l-001",
+                "fulfills_contract": "h-001.lc1",
+            }],
+        )
+        assert _check_legitimacy_gated_disposition(merged) == []
+
+    def test_indeterminate_with_non_benign_ok(self):
+        """Rule intentionally tolerant to 'unclear' vs 'inconclusive' vocabulary.
+
+        The spec names 'unclear' as the escalation disposition, but the report
+        frontmatter still uses 'inconclusive' / 'escalated' in the same slot.
+        As long as disposition is not 'benign', indeterminate-only contracts
+        pass.
+        """
+        for disp in ("unclear", "inconclusive", "true_positive", "escalated"):
+            merged = _companion_with_contract(
+                disposition=disp,
+                resolutions=[{
+                    "verdict": "indeterminate",
+                    "anchor_kind": "x",
+                    "anchor_query": "q",
+                    "as_of": "2026-04-18",
+                    "resolved_by_lead": "l-001",
+                    "fulfills_contract": "h-001.lc1",
+                }],
+            )
+            assert _check_legitimacy_gated_disposition(merged) == [], disp
+
+    def test_no_conclude_block_passes(self):
+        merged = _companion_with_contract()
+        merged.pop("conclude", None)
+        assert _check_legitimacy_gated_disposition(merged) == []
+
+    def test_hypothesis_refuted_skips_check(self):
+        merged = _companion_with_contract(
+            disposition="benign",
+            hypothesis_weight="--",
+            resolutions=[],
+        )
+        lead_edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        lead_edge.pop("legitimacy_resolutions", None)
+        # Matched_refutation_ids must be present for --; add one the hypothesis
+        # doesn't declare to keep the scope narrow — the refutation check is
+        # covered by other tests. Give the resolution a matched refutation id.
+        merged["hypothesize"]["hypotheses"][0]["refutation_shape"] = [{"id": "r1", "claim": "x"}]
+        merged["gather"][0]["resolutions"][0]["matched_refutation_ids"] = ["r1"]
+        assert _check_legitimacy_gated_disposition(merged) == []
+
+
+class TestCheckAttributeUpdatesTargetShape:
+    def _merged_with_update(self, update: dict) -> dict:
+        return {
+            "prologue": {
+                "vertices": [{"id": "v-001", "type": "endpoint"}],
+                "edges": [{"id": "e-001", "relation": "attempted_auth"}],
+            },
+            "gather": [
+                {
+                    "id": "l-001",
+                    "loop": 1,
+                    "name": "t",
+                    "target": "v-001",
+                    "query_details": {},
+                    "outcome": {"attribute_updates": [update]},
+                    "resolutions": [],
+                }
+            ],
+        }
+
+    def test_valid_vertex_target(self):
+        merged = self._merged_with_update({"target": "v-001", "updates": {"classification": "x"}})
+        assert _check_attribute_updates_target_shape(merged) == []
+
+    def test_valid_edge_target(self):
+        merged = self._merged_with_update({"target": "e-001", "updates": {"note": "y"}})
+        assert _check_attribute_updates_target_shape(merged) == []
+
+    def test_legacy_vertex_field_rejected(self):
+        merged = self._merged_with_update({"vertex": "v-001", "updates": {"classification": "x"}})
+        errors = _check_attribute_updates_target_shape(merged)
+        assert any("legacy `vertex:` field" in e for e in errors)
+
+    def test_missing_target(self):
+        merged = self._merged_with_update({"updates": {"classification": "x"}})
+        errors = _check_attribute_updates_target_shape(merged)
+        assert any("missing `target:`" in e for e in errors)
+
+    def test_bad_prefix(self):
+        merged = self._merged_with_update({"target": "h-001", "updates": {"classification": "x"}})
+        errors = _check_attribute_updates_target_shape(merged)
+        assert any("'v-' or 'e-'" in e for e in errors)
+
+    def test_unknown_id(self):
+        merged = self._merged_with_update({"target": "v-999", "updates": {"classification": "x"}})
+        errors = _check_attribute_updates_target_shape(merged)
+        assert any("does not resolve" in e for e in errors)
+
+    def test_missing_updates(self):
+        merged = self._merged_with_update({"target": "v-001"})
+        errors = _check_attribute_updates_target_shape(merged)
+        assert any("missing or non-mapping `updates`" in e for e in errors)
