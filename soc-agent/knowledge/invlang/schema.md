@@ -31,7 +31,7 @@ Schema v2.7. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on 
 | HYPOTHESIZE | `hypothesize:` | end of HYPOTHESIZE |
 | GATHER | narrative only — no YAML block | during GATHER |
 | ANALYZE | complete `gather:` lead block (outcome + resolutions together) | end of ANALYZE |
-| CONCLUDE | `conclude:` | after conclusion_checks.json, before report.md |
+| CONCLUDE | `conclude:` | after the `## CONCLUDE` header + verdict line, before report.md |
 
 Call `invlang --enum` before writing any block that introduces new IDs or references existing ones.
 

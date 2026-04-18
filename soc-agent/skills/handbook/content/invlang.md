@@ -25,7 +25,7 @@ The narrative log remains agent-owned; the companion blocks give the plugin a ma
 | HYPOTHESIZE | `hypothesize:` | end of phase | initial proposed frontier of hypotheses |
 | GATHER | *(no YAML block)* | narrative only | the lead block is written at ANALYZE |
 | ANALYZE | complete `gather:` lead (outcome + resolutions) | end of phase | one entry per lead; entries in the same cycle share `loop:` |
-| CONCLUDE | `conclude:` | after `conclusion_checks.json`, before `report.md` | `termination`, `disposition`, `confidence`, `matched_archetype` |
+| CONCLUDE | `conclude:` | after the `## CONCLUDE` header + verdict line, before `report.md` | `termination`, `disposition`, `confidence`, `matched_archetype` |
 
 The schema is **graph-first** (Schema v2.7 as of this writing):
 
@@ -77,9 +77,9 @@ The companion `matched_archetype` names the archetype directory under `knowledge
 
 invlang validation complements, does not replace, the other CONCLUDE-path checks:
 
-- **Layer 0 `validate_conclude.py`** — ensures the agent authored `conclusion_checks.json` with correct question coverage and resolvable citations before the `## CONCLUDE` header lands.
+- **Layer 0 `validate_conclude.py`** — fires two parallel Haiku judges (log integrity + archetype/grounding) when the `conclude:` YAML block lands, blocking the write on any FLAG.
 - **`invlang_validate.py`** — ensures the companion YAML is structurally consistent at every investigation.md write.
 - **Tier 1 `validate_report.py`** — ensures the `report.md` artifact is structurally legal (frontmatter, archetype shape, grounding, temporal re-confirmation).
-- **Tier 2 semantic judge** — ensures the narrative in `investigation.md` actually supports the report's conclusion.
+- **Tier 2 semantic judge** — slimmed to validating the report↔log delta plus precedent transfer.
 
 See `content/validation.md` for the full CONCLUDE-path story.
