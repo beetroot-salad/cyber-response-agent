@@ -149,18 +149,17 @@ knowledge base and anchor lookups, not raw alert-field comparisons.
 
 | Pattern | Indicators | Leads | Action | Archetype |
 |---|---|---|---|---|
-| monitoring-probe fast-path | `source_classification: internal-monitoring-host` (via `environment/context/ip-ranges.md`) AND `username_classification: monitoring-pattern` (via `environment/context/identity-patterns.md`) AND `approved-monitoring-sources` anchor confirms the triple AND `attempt_count_5min: 1` AND `successful_login_after_60s: false` | source-classification, username-classification, authentication-history, approved-monitoring-sources anchor | resolve → benign, matched_archetype: monitoring-probe, matched_ticket_id: SEC-2024-001 | `archetypes/monitoring-probe/` |
+| monitoring-probe fast-path | `source_classification: internal-monitoring-host` (via `environment/context/ip-ranges.md`) AND `username_classification: monitoring-pattern` (via `environment/context/identity-patterns.md`) AND `approved-monitoring-sources` anchor confirms the triple AND `cadence_shape: periodic` (see resolution below) AND `successful_login_after_60s: false` | source-classification, username-classification, authentication-history, approved-monitoring-sources anchor | resolve → benign, matched_archetype: monitoring-probe, matched_ticket_id: SEC-2024-001 | `archetypes/monitoring-probe/` |
 
-**Why a real query, not pure field matching:** `attempt_count_5min`
-and `successful_login_after_60s` cannot be read from the alert
-itself. They describe context that requires a historical + forward
-lookup via `authentication-history`. This is by design — an
-adversarial variant that reuses an approved source IP and username
-family but bursts multiple attempts (same identity, different shape)
-would trivially bypass a pure field-match screen; requiring the
-historical + forward query forces the fast path to care about
-cadence and follow-up success, both of which the anchor's
-confirmation shape depends on.
+**Why a real query, not pure field matching:** `cadence_shape` and
+`successful_login_after_60s` cannot be read from the alert itself.
+They describe context that requires a historical + forward lookup via
+`authentication-history`. This is by design — an adversarial variant
+that reuses an approved source IP and username family but bursts
+multiple attempts (same identity, different shape) would trivially
+bypass a pure field-match screen; requiring the historical + forward
+query forces the fast path to care about cadence and follow-up
+success, both of which the anchor's confirmation shape depends on.
 
 **Indicator resolution:**
 
@@ -175,16 +174,41 @@ confirmation shape depends on.
 - **approved-monitoring-sources anchor** — query the sanction anchor
   for the exact `(srcip, srcuser, target)` triple. See
   `environment/operations/approved-monitoring-sources.md`.
-- **attempt_count_5min** — from `authentication-history`: how many
-  5710 events from this srcip in the 5 minutes preceding the alert.
-  The fast path requires **exactly 1** (the alert itself). Any retry
-  burst disqualifies.
+- **cadence_shape** — from `authentication-history` cluster stats over
+  a **1h backward window** scoped to the `(srcip, srcuser)` pair.
+  Fast-path passes when ALL of:
+  - `cluster_count ≥ 3` — at least three distinct probe attempts in
+    the window (fewer = insufficient evidence of periodicity, fall
+    through to the full loop)
+  - `max_cluster_size ≤ 3` — no single probe attempt has more than
+    three events; larger clusters are burst-shaped and disqualify
+    regardless of repetition
+  - (optional, strengthening) `stdev_cluster_gap_s / mean_cluster_gap_s ≤ 0.3` —
+    inter-cluster gaps tightly clustered around a mean; tolerates
+    any natural cadence (1m, 5m, 15m, 1h) without hard-coding an
+    expected interval
+  See `knowledge/common-investigation/leads/authentication-history/definition.md`
+  §"Cluster stats" for the clustering rule (10s retry gap).
 - **successful_login_after_60s** — from the same lead: was there any
   successful SSH login (rule group `authentication_success`) from
   this srcip in the 60 seconds after the alert. Must be **false**.
 
 All five indicators must pass for the screen to match. Any failure
 drops the investigation into the full loop.
+
+**Why cluster-count, not per-minute attempt count:** Legitimate
+probes use a wide range of natural cadences (1m production Nagios,
+5m default Nagios, 15m lightweight health checks, hourly audits).
+A fixed "≤N events per M minutes" indicator either excludes faster
+tools or admits slow brute-force attempts. Clustering events into
+probe attempts first, then checking repetition, captures the actual
+shape a monitoring probe leaves in a SIEM: multiple distinct probe
+attempts at regular intervals, each attempt 1-2 events (single
+connection or one natural retry). The first tick of a newly-started
+probe chain cannot pass (cluster_count=1), which is correct — a
+single sentinel-named attempt with no prior cadence is
+indistinguishable from an opportunistic stray and should route
+through the full loop.
 
 ## Signature quirks
 
