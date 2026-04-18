@@ -40,9 +40,15 @@ This research phase is the foundation. The context, playbook, and archetypes sho
 - Screen table (optional, recommended) — fast-path patterns for the most common benign archetype. Only include a pattern if every indicator is unambiguous and every indicator is queryable via a real lead, not just alert-field matching
 - Scope — how far the investigation may range before escalating
 
+**field-quirks.md (new):**
+- Extract the subset of `context.md` that matters for shape comparison: the Key Observables table (observable → JSON path → why it matters) plus any field-level gotchas (e.g., counterintuitive field semantics, NAT-egress caveats). Read by the archetype-scan subagent instead of the full `context.md` — keep it tight.
+
 **archetypes/{archetype-name}/:**
 - Create one directory per archetype you identified in research
-- Inside each, write `README.md` describing the abstract story + required trust anchors (copy the shape of `archetypes/_template/README.md`)
+- Inside each, write:
+  - `story.md` — frontmatter (archetype, signature_id, required_anchors) + observable-shape narrative. Read by the archetype-scan subagent.
+  - `README.md` — same frontmatter + trust-anchor definitions + precedent pointer. Read by the main agent at grounding time.
+  - Copy the shape of `archetypes/_template/story.md` and `archetypes/_template/trust-anchors.md`.
 - Drop one JSON snapshot per representative ticket next to the README, named `{TICKET-ID}.json`. See `archetypes/_template/TEMPLATE.json` for the schema
 
 **Trust anchors (optional but recommended):**
@@ -55,10 +61,12 @@ This research phase is the foundation. The context, playbook, and archetypes sho
 ```
 {signature-id}/
 ├── context.md               # Signature reference (detection logic, threat model, FPs)
+├── field-quirks.md          # Key observables + field-level gotchas (scanner-scoped subset of context.md)
 ├── playbook.md              # Archetype catalog, leads, screen table, escalation criteria
 └── archetypes/              # One subdirectory per recognized archetype
     └── {archetype-name}/
-        ├── README.md        # Story + required_anchors + precedent pointer
+        ├── story.md         # Frontmatter + observable-shape narrative (scanner target)
+        ├── trust-anchors.md # Frontmatter + required-anchor grounding contract + precedent pointer
         └── {TICKET-ID}.json # One or more precedent snapshots (ticket cache)
 ```
 
@@ -66,7 +74,7 @@ This research phase is the foundation. The context, playbook, and archetypes sho
 
 Closing an alert without human escalation requires **both**:
 
-1. **Shape** — the investigation's observed evidence fits an archetype story (documented in the archetype README).
+1. **Shape** — the investigation's observed evidence fits an archetype story (documented in `story.md` under the archetype directory).
 2. **Grounding** — at least one of:
    - (a) the archetype's `required_anchors` all confirmed at investigation time, OR
    - (b) a `matched_ticket_id` pointing at a valid precedent snapshot under the same archetype.

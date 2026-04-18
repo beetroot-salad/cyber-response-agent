@@ -153,29 +153,41 @@ def extract_status(text: str) -> str | None:
     return m.group(1).lower()
 
 
-def load_archetype_readme(signature_id: str, archetype: str) -> str | None:
+def load_archetype_description(signature_id: str, archetype: str) -> str | None:
+    """Load an archetype's full description for Judge B.
+
+    Returns story.md + trust-anchors.md concatenated — story carries the
+    observable shape (needed for SHAPE_MATCH), trust-anchors carries the
+    grounding contract + precedent pointer (needed for COMPLETENESS /
+    GROUNDING_MATCH).
+    """
     if not signature_id or not archetype:
         return None
-    p = (
+    base = (
         SOC_AGENT_ROOT
         / "knowledge"
         / "signatures"
         / signature_id
         / "archetypes"
         / archetype
-        / "README.md"
     )
-    if p.exists():
-        try:
-            return p.read_text()
-        except OSError:
-            return None
-    return None
+    parts: list[str] = []
+    for name in ("story.md", "trust-anchors.md"):
+        p = base / name
+        if p.exists():
+            try:
+                parts.append(p.read_text())
+            except OSError:
+                continue
+    if not parts:
+        return None
+    return "\n\n".join(parts)
 
 
 def load_sibling_archetypes(signature_id: str, matched: str | None) -> str:
-    """Return a concatenated text block of sibling archetype READMEs
-    (excluding the matched one). Empty string if none / signature unknown."""
+    """Return a concatenated text block of sibling archetype descriptions
+    (story + trust-anchors per sibling, excluding the matched one). Empty
+    string if none / signature unknown."""
     if not signature_id:
         return ""
     arch_dir = (
@@ -193,13 +205,18 @@ def load_sibling_archetypes(signature_id: str, matched: str | None) -> str:
             continue
         if d.name == matched:
             continue
-        readme = d / "README.md"
-        if not readme.exists():
+        chunks: list[str] = []
+        for name in ("story.md", "trust-anchors.md"):
+            p = d / name
+            if not p.exists():
+                continue
+            try:
+                chunks.append(p.read_text())
+            except OSError:
+                continue
+        if not chunks:
             continue
-        try:
-            parts.append(f"# Sibling archetype: {d.name}\n\n{readme.read_text()}")
-        except OSError:
-            continue
+        parts.append(f"# Sibling archetype: {d.name}\n\n" + "\n\n".join(chunks))
     return "\n\n---\n\n".join(parts)
 
 
@@ -294,7 +311,7 @@ def run_judges(run_dir: Path, proposed_text: str) -> str | None:
 
     signature_id = get_signature_id(run_dir)
     matched_readme = (
-        load_archetype_readme(signature_id, matched_archetype)
+        load_archetype_description(signature_id, matched_archetype)
         if matched_archetype
         else None
     )

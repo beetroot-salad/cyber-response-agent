@@ -100,12 +100,12 @@ class TestResolverArchetypes:
         )
 
     def test_all_archetypes_present(self, wazuh_100001_result):
-        """Every archetype README in archetypes/ must appear in resolver output."""
+        """Every archetype story.md in archetypes/ must appear in resolver output."""
         out = wazuh_100001_result.stdout
         for name in self.EXPECTED_ARCHETYPES:
             marker = (
                 f"<!-- source: knowledge/signatures/wazuh-rule-100001/"
-                f"archetypes/{name}/README.md -->"
+                f"archetypes/{name}/story.md -->"
             )
             assert marker in out, f"Missing archetype marker: {name}"
 
@@ -126,7 +126,7 @@ class TestResolverArchetypes:
         out = wazuh_100001_result.stdout
         positions = []
         for name in self.EXPECTED_ARCHETYPES:
-            marker = f"archetypes/{name}/README.md -->"
+            marker = f"archetypes/{name}/story.md -->"
             positions.append(out.index(marker))
         assert positions == sorted(positions), (
             "Archetypes are not in alphabetical order"
@@ -137,9 +137,9 @@ class TestResolverArchetypes:
         out = wazuh_100001_result.stdout
         ctx_pos = out.index("context.md -->")
         pb_pos = out.index("playbook.md -->")
-        first_arch_pos = out.index("archetypes/app-spawned-shell/README.md -->")
+        first_arch_pos = out.index("archetypes/app-spawned-shell/story.md -->")
         last_arch_pos = out.index(
-            "archetypes/post-exploit-interactive/README.md -->"
+            "archetypes/post-exploit-interactive/story.md -->"
         )
         cl_pos = out.index("checklist.md -->")
         assert ctx_pos < pb_pos < first_arch_pos < last_arch_pos < cl_pos

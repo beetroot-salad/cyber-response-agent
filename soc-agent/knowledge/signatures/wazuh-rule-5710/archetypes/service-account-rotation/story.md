@@ -5,9 +5,7 @@ required_anchors:
   - scheduled-jobs
 ---
 
-# Service Account Rotation
-
-## Story
+# Service Account Rotation — Story
 
 An automated job on an internal host is attempting to authenticate to
 this host using a service-account username that has been rotated,
@@ -39,30 +37,3 @@ volume burst without the cron cadence (not an automated schedule),
 or a successful login from the same source (the job is not actually
 broken — either the rotation partially worked, or there's a parallel
 auth path we don't understand, either of which needs a human).
-
-## Trust Anchors
-
-### `scheduled-jobs`
-
-**Question:** does the org's scheduled-job registry declare an entry
-whose `(source, target, identity, schedule)` tuple matches the
-observed `(srcip, target-host, srcuser, cadence)`?
-
-**Confirmation:** the registry returns at least one entry whose
-source host matches the alert srcip, whose target includes this host,
-whose declared identity matches the observed srcuser, whose schedule
-window contains the alert timestamp, and whose job type is consistent
-with SSH-based automation. A registry that returns a different job
-on the same host, or a job with a different username, or a job whose
-schedule doesn't match the observed cadence, is **not** a confirmation.
-
-A match here is evidence that the failing login corresponds to a
-real, documented, broken automation. No match is a **refutation** —
-an internal service-account-shaped login attempt without a matching
-registry entry is exactly the case this anchor exists to catch, and
-escalation is the correct response.
-
-## Precedents
-
-Ticket snapshots live as sibling `{TICKET-ID}.json` files next to this
-README.

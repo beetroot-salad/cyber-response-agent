@@ -25,7 +25,7 @@ from hooks.scripts.validate_conclude import (
     check_frontier_closure,
     extract_conclude_yaml,
     extract_status,
-    load_archetype_readme,
+    load_archetype_description,
     load_sibling_archetypes,
 )
 
@@ -348,41 +348,44 @@ class TestCheckFrontierClosure:
 
 
 class TestArchetypeLoaders:
-    def test_load_archetype_readme_existing(self, monkeypatch, tmp_path):
+    def test_load_archetype_description_existing(self, monkeypatch, tmp_path):
         # Build a fake knowledge tree under tmp_path and point the module
         # at it via monkeypatching SOC_AGENT_ROOT.
         from hooks.scripts import validate_conclude as vc
 
         sig_dir = tmp_path / "knowledge" / "signatures" / "sig-1" / "archetypes"
         (sig_dir / "alpha").mkdir(parents=True)
-        (sig_dir / "alpha" / "README.md").write_text("# alpha story\n")
+        (sig_dir / "alpha" / "story.md").write_text("# alpha story\n")
+        (sig_dir / "alpha" / "trust-anchors.md").write_text("# alpha anchors\n")
         (sig_dir / "beta").mkdir(parents=True)
-        (sig_dir / "beta" / "README.md").write_text("# beta story\n")
+        (sig_dir / "beta" / "story.md").write_text("# beta story\n")
         (sig_dir / "gamma").mkdir(parents=True)
-        # gamma has no README — should be skipped silently
+        # gamma has neither file — should be skipped silently
 
         monkeypatch.setattr(vc, "SOC_AGENT_ROOT", tmp_path)
-        assert vc.load_archetype_readme("sig-1", "alpha") == "# alpha story\n"
+        assert vc.load_archetype_description("sig-1", "alpha") == (
+            "# alpha story\n\n\n# alpha anchors\n"
+        )
 
-    def test_load_archetype_readme_missing(self, monkeypatch, tmp_path):
+    def test_load_archetype_description_missing(self, monkeypatch, tmp_path):
         from hooks.scripts import validate_conclude as vc
         monkeypatch.setattr(vc, "SOC_AGENT_ROOT", tmp_path)
-        assert vc.load_archetype_readme("sig-1", "nonexistent") is None
+        assert vc.load_archetype_description("sig-1", "nonexistent") is None
 
-    def test_load_archetype_readme_empty_inputs(self):
-        assert load_archetype_readme("", "alpha") is None
-        assert load_archetype_readme("sig-1", "") is None
+    def test_load_archetype_description_empty_inputs(self):
+        assert load_archetype_description("", "alpha") is None
+        assert load_archetype_description("sig-1", "") is None
 
     def test_load_sibling_archetypes_excludes_matched(self, monkeypatch, tmp_path):
         from hooks.scripts import validate_conclude as vc
 
         sig_dir = tmp_path / "knowledge" / "signatures" / "sig-1" / "archetypes"
         (sig_dir / "alpha").mkdir(parents=True)
-        (sig_dir / "alpha" / "README.md").write_text("alpha\n")
+        (sig_dir / "alpha" / "story.md").write_text("alpha\n")
         (sig_dir / "beta").mkdir(parents=True)
-        (sig_dir / "beta" / "README.md").write_text("beta\n")
+        (sig_dir / "beta" / "story.md").write_text("beta\n")
         (sig_dir / "gamma").mkdir(parents=True)
-        (sig_dir / "gamma" / "README.md").write_text("gamma\n")
+        (sig_dir / "gamma" / "story.md").write_text("gamma\n")
 
         monkeypatch.setattr(vc, "SOC_AGENT_ROOT", tmp_path)
         result = vc.load_sibling_archetypes("sig-1", "alpha")

@@ -4,9 +4,7 @@ signature_id: wazuh-rule-5710
 required_anchors: []
 ---
 
-# Credential Stuffing
-
-## Story
+# Credential Stuffing — Story
 
 An external actor attempted to log in as a small set of **real-looking
 usernames** with credentials likely sourced from a third-party breach.
@@ -29,22 +27,12 @@ and username realism**. Monitoring probes come from internal
 monitoring hosts with sentinel usernames; credential stuffing comes
 from external sources using realistic usernames.
 
-This archetype always escalates. There is no trust anchor that
-confirms "this external credential-stuffing attempt was authorized" —
-a coordinated red-team exercise would fall under a different archetype
-(not yet defined) anchored by the exercise's change ticket. Without
-that, an external source submitting real-looking usernames is
-adversarial and should be treated as credential-compromise-adjacent:
-the analyst needs to verify whether the attempted usernames
-correspond to real accounts on *any* host in the environment, and
-whether any of them appear in a known breach dump.
+This archetype always escalates. The disposition is always escalate
+to a human — the analyst needs to verify whether the attempted
+usernames correspond to real accounts on *any* host in the
+environment, and whether any of them appear in a known breach dump.
 
 What takes an alert *out* of this archetype: internal source (a
 different archetype entirely), high-volume wordlist pattern
 (`external-bruteforce`), or a single-attempt sentinel username
 (`monitoring-probe`).
-
-## Precedents
-
-Ticket snapshots live as sibling `{TICKET-ID}.json` files next to this
-README.

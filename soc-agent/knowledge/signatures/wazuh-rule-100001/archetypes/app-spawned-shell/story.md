@@ -5,9 +5,7 @@ required_anchors:
   - image-baseline
 ---
 
-# Application-Spawned Shell
-
-## Story
+# Application-Spawned Shell — Story
 
 A long-running application binary shelled out as part of its normal
 work. The shell appears as a child of a service process (web server,
@@ -41,25 +39,3 @@ this archetype regardless of baseline.
 This is benign **only when the image baseline confirms the pattern
 is established**. The baseline is the only thing distinguishing
 routine shell-out from compromise.
-
-## Trust Anchors
-
-### `image-baseline`
-
-**Question:** for this `container.image`, does the historical record
-show 100001 events firing from the same `proc.pname` with a similar
-`proc.cmdline` shape, with sufficient frequency and over a long
-enough window to be considered routine?
-
-**Confirmation:** the anchor returns a baseline showing this
-parent/cmdline shape recurring across many prior events for this
-image, with sample size large enough to be representative and a
-recency window that includes the current image version. A baseline
-that shows only a few recent occurrences without a longer-term
-pattern is *not* sufficient confirmation — it could be the early
-stages of a compromise that the agent is now treating as the new
-normal.
-
-## Precedents
-
-None yet.

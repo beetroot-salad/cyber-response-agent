@@ -4,9 +4,7 @@ signature_id: wazuh-rule-550
 required_anchors: []
 ---
 
-# Sensitive File Tampering
-
-## Story
+# Sensitive File Tampering — Story
 
 A security-relevant file was modified in a way consistent with
 attacker tampering: changing access controls, weakening
@@ -55,7 +53,3 @@ missing from the alert), the agent cannot characterize the change
 content. In that case the archetype matches by path alone and the
 alert escalates with the missing diff cited as the reason content
 analysis was impossible.
-
-## Precedents
-
-None yet.

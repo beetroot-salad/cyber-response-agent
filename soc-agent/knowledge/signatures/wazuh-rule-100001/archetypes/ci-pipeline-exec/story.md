@@ -5,9 +5,7 @@ required_anchors:
   - deploy-runs
 ---
 
-# CI/CD Pipeline Exec
-
-## Story
+# CI/CD Pipeline Exec — Story
 
 A continuous-integration or continuous-deployment job exec'd into the
 container to run a scripted command — typically a build step, a
@@ -37,22 +35,3 @@ This is benign **only when a real CI/CD run actually correlates in
 time** with the alert. Without that correlation, the activity is
 indistinguishable from an attacker abusing a CI service account or
 exec'ing into the container under a CI-shaped identity.
-
-## Trust Anchors
-
-### `deploy-runs`
-
-**Question:** does the org's CI/CD run history show an active or
-recently-completed job whose target includes this `container.id`,
-`container.name`, or its host, with a window that contains the alert
-timestamp?
-
-**Confirmation:** the anchor returns a run ID whose target and time
-window match the alert, and whose job type is consistent with the
-observed cmdline (a migration job for a migration command, a smoke
-test for a curl-shaped command, etc.). A run that targeted a
-*different* workload at the same time is not a confirmation.
-
-## Precedents
-
-None yet.

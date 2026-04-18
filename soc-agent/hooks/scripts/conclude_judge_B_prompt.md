@@ -37,7 +37,7 @@ grounding.
 ### 1. SHAPE_MATCH
 
 Does the investigation's observed evidence actually fit the matched
-archetype's story? The archetype README describes an abstract pattern
+archetype's story? The archetype `story.md` describes an abstract pattern
 — parent process family, cadence, cmdline shape, volume profile,
 identity class, preceding or following events, and so on. Compare that
 story against what the investigation actually gathered (from the alert
@@ -64,8 +64,8 @@ inside and outside the archetype catalog?
 Concretely:
 
 - **Inside the catalog**: are there sibling archetypes under this
-  signature (other archetype READMEs you have been given) that could
-  also fit the evidence? If so, did the investigation run any lead
+  signature (the other archetype descriptions you have been given —
+  each is a story + README pair) that could also fit the evidence? If so, did the investigation run any lead
   that discriminates between them, or did it latch onto the first
   plausible match?
 - **Outside the catalog**: did the agent consider that the pattern
@@ -82,7 +82,7 @@ clearly states "considered archetypes X, Y, Z and none fit because…"
 is high-quality; an escalation that ignores siblings is not.
 
 FLAG if: obvious sibling archetypes are unaddressed, OR discriminating
-leads listed in the matched archetype's README were skipped, OR the
+leads listed in the matched archetype's description were skipped, OR the
 evidence contains features the investigation doesn't explain under the
 matched archetype.
 
@@ -93,7 +93,7 @@ citation. You only assess the **anchor leg** here; the post-report
 judge handles precedent transfer.
 
 Walk through the investigation log and identify each anchor
-consultation. The matched archetype's README lists `required_anchors`
+consultation. The matched archetype's `trust-anchors.md` lists `required_anchors`
 in its frontmatter — every required anchor must appear in the
 investigation as a concrete consultation with a non-hollow result:
 
@@ -150,7 +150,7 @@ reflected in the reason text but do NOT forcibly drag VERDICT to FLAG.
 ### Investigation Log (proposed)
 {investigation_log}
 
-### Matched Archetype README (from `conclude.matched_archetype`)
+### Matched Archetype Description — story + trust-anchors (from `conclude.matched_archetype`)
 {matched_archetype}
 
 ### Sibling Archetypes Under This Signature (for COMPLETENESS check)

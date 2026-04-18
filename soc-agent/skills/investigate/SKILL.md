@@ -196,7 +196,7 @@ The subagent returns its findings alongside the code or query it executed. Treat
 
 **Goal:** Understand what you're investigating before forming hypotheses.
 
-1. Review the **Signature Knowledge** section above — it contains the signature context, playbook (archetype catalog + leads), archetype READMEs, checklist, and any imported common knowledge
+1. Review the **Signature Knowledge** section above — it contains the signature context, playbook (archetype catalog + leads), archetype descriptions (one `story.md` + one `trust-anchors.md` per archetype), checklist, and any imported common knowledge
 2. Review the alert data you identified in Read the Alert
 
 When reading multiple knowledge or environment files, batch independent reads into a single turn using parallel tool calls. Do not issue sequential Reads for files that don't depend on each other.
@@ -204,12 +204,14 @@ When reading multiple knowledge or environment files, batch independent reads in
 3. **Dispatch CONTEXTUALIZE subagents.** Both subagents produce YAML summaries the main agent reads before forming hypotheses. **Dispatch them in parallel** — two `Agent()` calls in a single assistant message so they run concurrently. Both are pinned to Haiku (cheap, mechanical work).
 
    **Archetype scan** — ranks this signature's archetype stories against the current alert by observable shape (entity relationship, volume/count, temporal pattern). Read-only, no SIEM queries.
+
+   You already have playbook.md loaded, which lists every archetype name under this signature. Build the `story_paths` list from those names — one `.../archetypes/{name}/story.md` per archetype — and pass it to the subagent. Do not send the subagent to enumerate archetype directories; it should only read the exact paths you hand it.
    ```
    Agent(
      subagent_type="general-purpose",
      model="haiku",
      description="archetype-scan for {signature_id}",
-     prompt="Read ${CLAUDE_SKILL_DIR}/archetype-scan.md for your complete instructions. Substitute: run_dir={run_dir}, signature_id={signature_id}, runs_dir={runs_dir}"
+     prompt="Read ${CLAUDE_SKILL_DIR}/archetype-scan.md for your complete instructions. Substitute: alert_path={run_dir}/alert.json, field_quirks_path=/workspace/soc-agent/knowledge/signatures/{signature_id}/field-quirks.md, story_paths=/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_1}/story.md,/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_2}/story.md,..."
    )
    ```
    When the subagent returns, read its `archetype_scan` ranked list AND its `adversarial_archetype` entry. Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation. Record both in `investigation.md` §CONTEXTUALIZE (see template below) — the adversarial archetype is the citable surface the CONCLUDE self-check's `archetype_shape_match` question asks about, so you need it in writing. If the subagent returned no useful output (malformed YAML, empty ranking), continue with the rest of CONTEXTUALIZE — archetypes are a useful prior, not required.
@@ -287,6 +289,28 @@ Append to `{run_dir}/investigation.md`:
 **Outcome:** {proceeding to CONCLUDE | falling through to HYPOTHESIZE — reason}
 ```
 
+**Then compose one `gather:` YAML entry per lead the screen subagent ran.** Screen leads share the same top-level `gather:` block as normal leads, but with a reduced shape: each is `mode: screen` with `resolutions: []` (SCREEN has no hypotheses yet, so there is nothing to grade). The final lead in the screen sequence carries `screen_result: match | no_match` inside its `outcome`.
+
+```yaml
+gather:
+  - id: l-{nonce}
+    loop: 0
+    name: {lead-name from screen subagent}
+    target: v-{id}
+    mode: screen
+    query_details: { ... }
+    outcome:
+      observations: { vertices: [...], edges: [...] }
+      # final screen lead only:
+      screen_result: match  # or no_match
+    resolutions: []
+```
+
+Emit all screen leads in one write. Two constraints that trip up the validator if violated:
+
+- `resolutions: []` is required (validator rejects missing `resolutions` even when empty) — it encodes "this lead didn't grade any hypothesis," which is the correct state for SCREEN.
+- **Do not set `tests` on screen leads.** `tests: [h-...]` means "this lead discriminates these hypotheses," but no hypothesis IDs exist yet at SCREEN time (HYPOTHESIZE comes after). A screen lead with `tests: [h-001]` is rejected as an unknown-ID reference. Omit `tests` entirely on `mode: screen` leads.
+
 ### HYPOTHESIZE
 
 **Goal:** Form or update hypotheses and select the most diagnostic lead.
@@ -345,7 +369,7 @@ Reference `knowledge/common-investigation/leads/` for lead methodology. Each lea
 
 #### Past Investigation Patterns
 
-The archetype scan from CONTEXTUALIZE step 3 already ranked the archetype stories for this signature against the current alert — one entry per `README.md` under `knowledge/signatures/{signature_id}/archetypes/*/`. Review that ranking at HYPOTHESIZE time: strong-match archetypes inform hypothesis seeds, and their `required_anchors` tell you what needs confirmation. If you need grounding detail beyond the ranking (specific past tickets, concrete anchor confirmations), read the precedent snapshot JSONs under the matched archetype directory (`archetypes/{name}/*.json`). Past investigations inform both hypothesis generation and lead selection — they reveal which leads tend to be most diagnostic for this signature type. Remember that a precedent with `temporal: true` anchor entries needs re-confirmation against live anchors before the match transfers to the current alert.
+The archetype scan from CONTEXTUALIZE step 3 already ranked the archetype stories for this signature against the current alert — one entry per `story.md` under `knowledge/signatures/{signature_id}/archetypes/*/`. Review that ranking at HYPOTHESIZE time: strong-match archetypes inform hypothesis seeds, and their `required_anchors` tell you what needs confirmation. If you need grounding detail beyond the ranking (specific past tickets, concrete anchor confirmations), read the archetype's `trust-anchors.md` and the precedent snapshot JSONs under the matched archetype directory (`archetypes/{name}/*.json`). Past investigations inform both hypothesis generation and lead selection — they reveal which leads tend to be most diagnostic for this signature type. Remember that a precedent with `temporal: true` anchor entries needs re-confirmation against live anchors before the match transfers to the current alert.
 
 #### Output
 
@@ -529,7 +553,7 @@ Retry the same write after the fix — no state-machine recovery needed.
 4. Determine disposition: `benign` (correct detection, harmless), `false_positive` (rule misfired), `true_positive` (confirmed threat), or `inconclusive` (can't determine)
    - For SCREEN-resolved investigations, use the disposition, confidence, matched_archetype, and matched_ticket_id from the validated screen result
 5. If `resolved`:
-   - `matched_archetype` must name an archetype directory under `knowledge/signatures/{signature_id}/archetypes/` (the directory containing the archetype's `README.md`)
+   - `matched_archetype` must name an archetype directory under `knowledge/signatures/{signature_id}/archetypes/` (the directory containing the archetype's `story.md` + `trust-anchors.md`)
    - **Grounding leg** (at least one of):
      - Every anchor in the archetype's `required_anchors` frontmatter appears in `trust_anchors_consulted` with `result: confirmed` and a concrete citation, OR
      - `matched_ticket_id` names a precedent snapshot JSON file inside the matched archetype's directory

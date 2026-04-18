@@ -4,9 +4,7 @@ signature_id: wazuh-rule-100110
 required_anchors: []
 ---
 
-# Co-Fired Malicious DNS Pattern
-
-## Story
+# Co-Fired Malicious DNS Pattern — Story
 
 A high-entropy DNS query alert co-fired with one or more rules from
 the malicious-DNS rule cluster:
@@ -42,7 +40,3 @@ What takes an alert *out* of this archetype is the absence of any
 co-fired rule. A high-entropy query with no co-firing falls back to
 the starter hypotheses (CDN/cloud, analytics, DGA, tunneling) and
 should be characterized further before escalating.
-
-## Precedents
-
-None yet.

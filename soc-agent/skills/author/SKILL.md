@@ -20,8 +20,8 @@ Most invocations fall into one of three shapes. Treat these as scope anchors, no
 
 | Mode | What changes | Gate |
 |---|---|---|
-| **New signature** | `context.md`, `playbook.md`, `config/signatures/{id}/permissions.yaml` | No hard gate; SIEM data improves quality but isn't required |
-| **Add archetype** | New `archetypes/{name}/README.md`; playbook archetype table | **Requires a run_dir** — see ground rules. Do not derive archetypes from domain knowledge or hypotheses alone. |
+| **New signature** | `context.md`, `field-quirks.md`, `playbook.md`, `config/signatures/{id}/permissions.yaml` | No hard gate; SIEM data improves quality but isn't required |
+| **Add archetype** | New `archetypes/{name}/story.md` + `trust-anchors.md`; playbook archetype table | **Requires a run_dir** — see ground rules. Do not derive archetypes from domain knowledge or hypotheses alone. |
 | **Tweak** | Targeted edit to context, playbook, or archetype based on a case or user feedback | Scope tightly; one logical unit per invocation |
 
 **One logical unit per invocation.** Don't one-shot five archetypes. Each archetype is a separate unit; do one, validate, stop. The same applies to context + playbook: write them together (they're a pair), then stop.
@@ -50,9 +50,10 @@ Read the files you'll edit, the adjacent files that shape them (sibling signatur
 
 Write tight. Avoid verbose phrasing, avoid padding, avoid restating what the reader already knows. Every claim should carry weight; every constraint should be load-bearing. Tight knowledge is better knowledge — it gets read, the load-bearing words stand out, and the agent at runtime wastes less context on hedging.
 
-Specific traps to avoid in archetype READMEs:
+Specific traps to avoid in archetype `story.md` / `trust-anchors.md`:
 - **Don't repeat routing logic.** If a precedence rule (e.g., "sensitive-file-tampering takes precedence by path") applies to multiple archetypes, state it once in the playbook — not in every archetype that might overlap.
-- **Don't re-describe trust anchor confirmation.** Each archetype's Trust Anchors section should state the question the anchor answers and the job-type constraint for this archetype. It should not re-document the anchor's confirmation protocol — that lives in `environment/operations/{anchor}.md`.
+- **Don't re-describe trust anchor confirmation.** Each archetype's `trust-anchors.md` should state the question the anchor answers and the job-type constraint for this archetype. It should not re-document the anchor's confirmation protocol — that lives in `environment/operations/{anchor}.md`.
+- **Keep story and anchors separated.** `story.md` carries the observable-shape narrative and is what the archetype-scan subagent reads; `trust-anchors.md` carries the grounding contract + precedent pointer. Don't mirror the story into trust-anchors or the anchors into story — each file has one job.
 - **Use absolute paths.** FIM alerts surface absolute paths. Tilde notation (`~/.bashrc`) won't match a real alert path and misleads the agent.
 
 ### Validate
