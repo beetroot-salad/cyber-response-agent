@@ -541,13 +541,17 @@ gather:
 
 **Goal:** Write the final report with structured frontmatter.
 
-**Preconditions — enforced automatically by hook:**
+**Gate on the `conclude:` YAML write.** The write is automatically validated for investigation soundness before it lands. You do nothing extra to invoke it — write normally.
 
-When you write the `conclude:` YAML block to `investigation.md`, a PreToolUse hook spawns two Haiku judge subagents in parallel against the proposed log. Together they verify the investigation is sound enough to close — adversarial refutation, `++` falsification attempts, dangling-evidence sweep, archetype shape/completeness, and the anchor leg of grounding. Verdicts are ANDed deterministically; any FLAG blocks the write with an error message.
+If the gate rejects the write, the error message names the failed criterion. Respond by fixing the underlying gap in `investigation.md` and retrying:
 
-You don't dispatch these judges yourself and you don't author any artifact for them — they read `investigation.md`, `alert.json`, and the relevant archetype READMEs directly. SCREEN-resolved investigations are exempt (their safety comes from the SCREEN pattern match + precedent + post-report validation).
+- Adversarial hypothesis not refuted with `--` evidence → run a discriminating lead, or escalate.
+- A `++` grade with no falsification path → downgrade to `+`, or run a check that could have refuted it.
+- Dangling evidence (observations the confirmed hypothesis doesn't explain) → add an ANALYZE pass that accounts for them, or expand the hypothesis space.
+- Archetype shape mismatch or sibling archetype unaddressed → revisit archetype selection or escalate as a novel variant.
+- Required anchor missing or hollow → consult the anchor concretely, or escalate.
 
-If the gate FLAGs, fix the underlying issue in `investigation.md` — typically by running an additional lead, downgrading a hypothesis grade that lacks a falsification path, addressing dangling evidence with a new ANALYZE pass, or escalating instead of resolving. Then retry the write. The judges re-read the updated log on each retry; there is no need to "re-prompt" them.
+Retry the same write after the fix — no state-machine recovery needed.
 
 ---
 

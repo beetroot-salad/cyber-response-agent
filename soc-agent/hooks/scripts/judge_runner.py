@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 JUDGE_MODEL = os.environ.get("SOC_AGENT_JUDGE_MODEL", "haiku")
-JUDGE_TIMEOUT_SECONDS = int(os.environ.get("SOC_AGENT_JUDGE_TIMEOUT_SECONDS", "90"))
+JUDGE_TIMEOUT_SECONDS = int(os.environ.get("SOC_AGENT_JUDGE_TIMEOUT_SECONDS", "120"))
 
 
 def get_run_salt(run_dir: Path) -> str:
@@ -54,27 +54,26 @@ def wrap_untrusted(content: str, tag: str, salt: str) -> str:
 _CLAUDE_ARGV = ["claude", "-p", "--model", JUDGE_MODEL, "--output-format", "text"]
 
 
-def invoke_judge(prompt: str, *, timeout: int | None = None) -> tuple[str, int]:
+def invoke_judge(prompt: str, *, timeout: int = JUDGE_TIMEOUT_SECONDS) -> tuple[str, int]:
     """Invoke the claude CLI with a judge prompt.
 
     Returns (stdout, returncode). Returncode 1 covers FileNotFoundError
     and timeout, with the failure reason returned in the stdout slot so
     callers can surface it to the agent.
     """
-    t = timeout if timeout is not None else JUDGE_TIMEOUT_SECONDS
     try:
         result = subprocess.run(
             _CLAUDE_ARGV,
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=t,
+            timeout=timeout,
         )
         return result.stdout.strip(), result.returncode
     except FileNotFoundError:
         return "claude CLI not found", 1
     except subprocess.TimeoutExpired:
-        return f"judge timed out after {t}s", 1
+        return f"judge timed out after {timeout}s", 1
 
 
 def _run_one_judge(prompt: str, deadline: float, total_timeout: int) -> tuple[str, int]:
@@ -106,7 +105,7 @@ def _run_one_judge(prompt: str, deadline: float, total_timeout: int) -> tuple[st
 def invoke_judges_parallel(
     prompts: list[tuple[str, str]],
     *,
-    timeout: int | None = None,
+    timeout: int = JUDGE_TIMEOUT_SECONDS,
 ) -> list[tuple[str, str, int]]:
     """Run multiple judges concurrently, each in its own thread, sharing
     a single wall-clock deadline.
@@ -118,11 +117,10 @@ def invoke_judges_parallel(
     """
     if not prompts:
         return []
-    t = timeout if timeout is not None else JUDGE_TIMEOUT_SECONDS
-    deadline = time.monotonic() + t
+    deadline = time.monotonic() + timeout
     with ThreadPoolExecutor(max_workers=len(prompts)) as ex:
         futures = [
-            (label, ex.submit(_run_one_judge, prompt, deadline, t))
+            (label, ex.submit(_run_one_judge, prompt, deadline, timeout))
             for label, prompt in prompts
         ]
         return [(label, *f.result()) for label, f in futures]
