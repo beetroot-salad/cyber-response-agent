@@ -19,6 +19,12 @@ indexes: [wazuh-alerts-*]
 | user        | data.srcuser    | SSH only. For Windows AD use data.dstuser instead  |
 | host        | agent.name      | Target host, not source. See field-quirks.md       |
 
+### Discriminator fields (not entities — inspect in raw JSON)
+
+| Field          | Purpose                                                                 |
+|----------------|-------------------------------------------------------------------------|
+| data.srcport   | Source-port discriminator (see `definition.md` → "Same connection vs distinct connections"). Distinct values across N rows = N real connections; identical value = one connection duplicated. |
+
 ## Base Query
 
 ```
@@ -81,5 +87,5 @@ empty, report that explicitly — `0 → N` is stronger than
 ## Customization Notes
 
 - To filter specific rule IDs (e.g., failed auth only): add `AND rule.id:5710`
-- To get raw JSON for programmatic parsing: add `--raw`
 - Unfiltered count (data source health) is included automatically in formatted output
+- Formatted output already embeds the first 3 events' full `_source` JSON — inspect it for discriminator fields the summary lines elide (notably `data.srcport`, the source-port discriminator called out in `definition.md`). `--raw` is only needed when you want every event's JSON.

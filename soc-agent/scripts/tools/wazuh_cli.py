@@ -359,6 +359,11 @@ def format_output(query_string, time_start, time_end, config, items, match_count
 
         breakdown_text = "\n".join(parts)
 
+    if not items:
+        raw_text = "(no matching events)"
+    else:
+        raw_text = json.dumps(items[:3], indent=2)
+
     return f"""## Query Results
 **Query:** {query_string}
 **Time range:** {time_start} to {time_end}
@@ -375,7 +380,15 @@ def format_output(query_string, time_start, time_end, config, items, match_count
 {sample_text}
 
 ### Count Breakdown
-{breakdown_text}"""
+{breakdown_text}
+
+### Raw Sample Events (first 3, full _source)
+Use these for field-level inspection when the summary lines above don't carry
+the discriminator you need (e.g. source port, process name, connection tuple).
+
+```json
+{raw_text}
+```"""
 
 
 # ---------------------------------------------------------------------------

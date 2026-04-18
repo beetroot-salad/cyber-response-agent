@@ -1,6 +1,6 @@
 ---
 title: wazuh_cli query — surface discriminator fields + raw sample events
-status: todo
+status: done
 groups: tools, evaluation, quality
 ---
 
