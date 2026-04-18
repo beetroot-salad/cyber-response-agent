@@ -1,151 +1,117 @@
 """Tests for the CONCLUDE transition verification hook.
 
-Tests validate_conclude.py: the helper imports it depends on, and the
-hook end-to-end via subprocess simulating PostToolUse events on stdin.
+Tests validate_conclude.py: helper unit tests, plus end-to-end via
+subprocess simulating PreToolUse events on stdin. Judge subprocess
+calls are intercepted by shadowing the `claude` CLI with a fake
+script on PATH whose stdout is controlled per-test.
 """
 
 import json
+import os
+import stat
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
-
-import pytest
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.investigation_parse import (
-    count_distinct_leads,
     has_conclude_header,
     is_screen_resolved,
 )
 from hooks.scripts.validate_conclude import (
     check_frontier_closure,
-    count_hypothesize_loops,
-    extract_line_slice,
-    load_expected_questions,
-    parse_line_range,
-    signature_archetype_count,
+    extract_conclude_yaml,
+    extract_status,
+    load_archetype_readme,
+    load_sibling_archetypes,
 )
 
 HOOK_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "validate_conclude.py"
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: line range parsing + slicing
+# Unit tests: extract_status
 # ---------------------------------------------------------------------------
 
 
-class TestParseLineRange:
-    def test_single_line(self):
-        assert parse_line_range("64") == (64, 64)
+class TestExtractStatus:
+    def test_resolved(self):
+        text = "## CONCLUDE\n\n**Verdict:** resolved — monitoring probe\n"
+        assert extract_status(text) == "resolved"
 
-    def test_inclusive_range(self):
-        assert parse_line_range("62-68") == (62, 68)
+    def test_escalated(self):
+        text = "## CONCLUDE\n\n**Verdict:** escalated — two live hypotheses\n"
+        assert extract_status(text) == "escalated"
 
-    def test_whitespace_tolerant(self):
-        assert parse_line_range("  62 - 68  ") == (62, 68)
+    def test_case_insensitive(self):
+        text = "## CONCLUDE\n\n**Verdict:** Resolved — foo\n"
+        assert extract_status(text) == "resolved"
 
-    def test_single_equal_range(self):
-        assert parse_line_range("5-5") == (5, 5)
-
-    def test_non_numeric(self):
-        assert parse_line_range("abc") is None
-
-    def test_reversed_range(self):
-        assert parse_line_range("68-62") is None
-
-    def test_zero(self):
-        assert parse_line_range("0") is None
-
-    def test_negative(self):
-        assert parse_line_range("-5") is None
+    def test_missing(self):
+        text = "## CONCLUDE\nno verdict line here\n"
+        assert extract_status(text) is None
 
     def test_empty(self):
-        assert parse_line_range("") is None
-        assert parse_line_range("   ") is None
-
-    def test_non_string(self):
-        assert parse_line_range(64) is None  # type: ignore[arg-type]
-        assert parse_line_range(None) is None  # type: ignore[arg-type]
-
-
-class TestExtractLineSlice:
-    TEXT = "line one\nline two\nline three\nline four\nline five\n"
-
-    def test_single_line(self):
-        assert extract_line_slice(self.TEXT, 2, 2) == "line two"
-
-    def test_range(self):
-        assert extract_line_slice(self.TEXT, 2, 4) == "line two\nline three\nline four"
-
-    def test_first_line(self):
-        assert extract_line_slice(self.TEXT, 1, 1) == "line one"
-
-    def test_out_of_bounds(self):
-        assert extract_line_slice(self.TEXT, 1, 100) is None
-
-    def test_range_exactly_at_eof(self):
-        # split('\n') on text ending in '\n' produces a trailing empty
-        # string, so len(lines) == 6. Line 5 (the last real content) is
-        # at index 4.
-        assert extract_line_slice(self.TEXT, 5, 5) == "line five"
+        assert extract_status("") is None
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: count_distinct_leads (via investigation_parse)
+# Unit tests: extract_conclude_yaml
 # ---------------------------------------------------------------------------
 
 
-class TestCountLeads:
-    def test_single_lead_single_block(self):
-        text = (
-            "## CONTEXTUALIZE\nstuff\n"
-            "## HYPOTHESIZE (loop 1)\nstuff\n"
-            "## GATHER (loop 1)\n\n**Lead:** authentication-history\nquery stuff\n"
-            "## ANALYZE (loop 1)\nstuff\n"
-        )
-        assert count_distinct_leads(text) == 1
+class TestExtractConcludeYaml:
+    def test_extracts_conclude_block(self):
+        text = textwrap.dedent("""\
+            ## CONCLUDE
+            text
 
-    def test_multiple_blocks_distinct_leads(self):
-        text = (
-            "## GATHER (loop 1)\n**Lead:** authentication-history\n\n"
-            "## ANALYZE (loop 1)\n"
-            "## GATHER (loop 2)\n**Lead:** source-reputation\n\n"
-            "## ANALYZE (loop 2)\n"
-        )
-        assert count_distinct_leads(text) == 2
+            ```yaml
+            conclude:
+              disposition: benign
+              matched_archetype: monitoring-probe
+              confidence: high
+              summary: ok
+            ```
+            """)
+        result = extract_conclude_yaml(text)
+        assert result is not None
+        assert result["matched_archetype"] == "monitoring-probe"
+        assert result["disposition"] == "benign"
 
-    def test_composite_dispatch(self):
-        text = (
-            "## GATHER (loop 1)\n**Leads:** auth-history, data-access, network-flows\n"
-            "## ANALYZE (loop 1)\n"
-        )
-        assert count_distinct_leads(text) == 3
+    def test_no_yaml_block(self):
+        text = "## CONCLUDE\n**Verdict:** resolved — foo\n"
+        assert extract_conclude_yaml(text) is None
 
-    def test_composite_with_parenthetical(self):
-        text = (
-            "## GATHER (loop 1)\n**Leads:** a, b, c (for composite)\n"
-            "## ANALYZE (loop 1)\n"
-        )
-        assert count_distinct_leads(text) == 3
+    def test_other_yaml_block_only(self):
+        # A non-conclude yaml block (e.g., a gather: block earlier in
+        # the file) does not satisfy the gate.
+        text = textwrap.dedent("""\
+            ```yaml
+            gather:
+              - id: l-1
+                name: foo
+            ```
+            """)
+        assert extract_conclude_yaml(text) is None
 
-    def test_duplicate_leads_counted_once(self):
-        text = (
-            "## GATHER (loop 1)\n**Lead:** auth-history\n"
-            "## ANALYZE (loop 1)\n"
-            "## GATHER (loop 2)\n**Lead:** auth-history\n"
-            "## ANALYZE (loop 2)\n"
-        )
-        assert count_distinct_leads(text) == 1
+    def test_skips_unparseable_block_finds_next(self):
+        text = textwrap.dedent("""\
+            ```yaml
+            : invalid : yaml :
+            ```
 
-    def test_no_gather_blocks(self):
-        text = "## CONTEXTUALIZE\n## SCREEN\n## CONCLUDE\n"
-        assert count_distinct_leads(text) == 0
-
-    def test_gather_without_lead_marker(self):
-        text = "## GATHER (loop 1)\nsome query\n## ANALYZE (loop 1)\n"
-        assert count_distinct_leads(text) == 0
+            ```yaml
+            conclude:
+              matched_archetype: foo
+            ```
+            """)
+        result = extract_conclude_yaml(text)
+        assert result is not None
+        assert result["matched_archetype"] == "foo"
 
 
 # ---------------------------------------------------------------------------
@@ -377,63 +343,85 @@ class TestCheckFrontierClosure:
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: is_screen_resolved
+# Unit tests: archetype loaders
+# ---------------------------------------------------------------------------
+
+
+class TestArchetypeLoaders:
+    def test_load_archetype_readme_existing(self, monkeypatch, tmp_path):
+        # Build a fake knowledge tree under tmp_path and point the module
+        # at it via monkeypatching SOC_AGENT_ROOT.
+        from hooks.scripts import validate_conclude as vc
+
+        sig_dir = tmp_path / "knowledge" / "signatures" / "sig-1" / "archetypes"
+        (sig_dir / "alpha").mkdir(parents=True)
+        (sig_dir / "alpha" / "README.md").write_text("# alpha story\n")
+        (sig_dir / "beta").mkdir(parents=True)
+        (sig_dir / "beta" / "README.md").write_text("# beta story\n")
+        (sig_dir / "gamma").mkdir(parents=True)
+        # gamma has no README — should be skipped silently
+
+        monkeypatch.setattr(vc, "SOC_AGENT_ROOT", tmp_path)
+        assert vc.load_archetype_readme("sig-1", "alpha") == "# alpha story\n"
+
+    def test_load_archetype_readme_missing(self, monkeypatch, tmp_path):
+        from hooks.scripts import validate_conclude as vc
+        monkeypatch.setattr(vc, "SOC_AGENT_ROOT", tmp_path)
+        assert vc.load_archetype_readme("sig-1", "nonexistent") is None
+
+    def test_load_archetype_readme_empty_inputs(self):
+        assert load_archetype_readme("", "alpha") is None
+        assert load_archetype_readme("sig-1", "") is None
+
+    def test_load_sibling_archetypes_excludes_matched(self, monkeypatch, tmp_path):
+        from hooks.scripts import validate_conclude as vc
+
+        sig_dir = tmp_path / "knowledge" / "signatures" / "sig-1" / "archetypes"
+        (sig_dir / "alpha").mkdir(parents=True)
+        (sig_dir / "alpha" / "README.md").write_text("alpha\n")
+        (sig_dir / "beta").mkdir(parents=True)
+        (sig_dir / "beta" / "README.md").write_text("beta\n")
+        (sig_dir / "gamma").mkdir(parents=True)
+        (sig_dir / "gamma" / "README.md").write_text("gamma\n")
+
+        monkeypatch.setattr(vc, "SOC_AGENT_ROOT", tmp_path)
+        result = vc.load_sibling_archetypes("sig-1", "alpha")
+        assert "alpha" not in result
+        assert "beta" in result
+        assert "gamma" in result
+
+    def test_load_sibling_archetypes_no_signature(self):
+        assert load_sibling_archetypes("", None) == ""
+
+    def test_load_sibling_archetypes_unknown_signature(self, monkeypatch, tmp_path):
+        from hooks.scripts import validate_conclude as vc
+        monkeypatch.setattr(vc, "SOC_AGENT_ROOT", tmp_path)
+        assert vc.load_sibling_archetypes("nope", None) == ""
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: is_screen_resolved (text-based, defined in investigation_parse)
 # ---------------------------------------------------------------------------
 
 
 class TestIsScreenResolved:
-    def test_screen_only_no_gather(self):
+    def test_screen_only(self):
         text = "## CONTEXTUALIZE\n## SCREEN\n**Result:** match\n## CONCLUDE\n"
         assert is_screen_resolved(text) is True
 
-    def test_screen_with_gather_block(self):
+    def test_screen_with_full_loop(self):
         text = (
             "## CONTEXTUALIZE\n## SCREEN\n## HYPOTHESIZE (loop 1)\n"
-            "## GATHER (loop 1)\n**Lead:** auth-history\n"
-            "## ANALYZE (loop 1)\n## CONCLUDE\n"
+            "## GATHER (loop 1)\n## ANALYZE (loop 1)\n## CONCLUDE\n"
         )
         assert is_screen_resolved(text) is False
 
-    def test_full_loop_no_screen(self):
+    def test_full_loop_only(self):
         text = (
             "## CONTEXTUALIZE\n## HYPOTHESIZE (loop 1)\n"
-            "## GATHER (loop 1)\n**Lead:** auth-history\n"
-            "## ANALYZE (loop 1)\n## CONCLUDE\n"
+            "## GATHER (loop 1)\n## ANALYZE (loop 1)\n## CONCLUDE\n"
         )
         assert is_screen_resolved(text) is False
-
-
-# ---------------------------------------------------------------------------
-# Unit tests: load_expected_questions
-# ---------------------------------------------------------------------------
-
-
-class TestLoadExpectedQuestions:
-    def test_returns_both_statuses(self):
-        result = load_expected_questions()
-        assert "resolved" in result
-        assert "escalated" in result
-
-    def test_resolved_has_expected_ids(self):
-        result = load_expected_questions()
-        resolved = set(result["resolved"])
-        # These are the question IDs defined in the prompt file; if the
-        # prompt is edited, update this test in lockstep.
-        assert "adversarial_refuted" in resolved
-        assert "plus_plus_refutation_attempt" in resolved
-        assert "authoritative_vs_circumstantial" in resolved
-        assert "dangling_evidence" in resolved
-        assert "archetype_shape_match" in resolved
-
-    def test_escalated_has_expected_ids(self):
-        result = load_expected_questions()
-        escalated = set(result["escalated"])
-        assert "dangling_evidence" in escalated
-        assert "escalation_rationale" in escalated
-
-    def test_escalated_does_not_require_adversarial(self):
-        result = load_expected_questions()
-        assert "adversarial_refuted" not in result["escalated"]
 
 
 # ---------------------------------------------------------------------------
@@ -467,26 +455,21 @@ hypotheses:
     weight: "--"
     reasoning: single attempt contradicts brute-force prediction of >50
 
-## HYPOTHESIZE (loop 2)
-
-**Selected lead:** source-reputation
-
-## GATHER (loop 2)
-
-**Lead:** source-reputation
-**Raw observation:** 10.0.1.50 matches approved-monitoring-sources entry
-
-## ANALYZE (loop 2)
-
-hypotheses:
-  ?monitoring-probe:
-    weight: "++"
-    reasoning: authoritative anchor confirms
-
 ## CONCLUDE
 
 **Verdict:** resolved — monitoring probe from approved source
 **Confirmed hypothesis:** ?monitoring-probe
+
+```yaml
+conclude:
+  termination:
+    category: trust-root
+    rationale: anchor confirmed
+  disposition: benign
+  confidence: high
+  matched_archetype: monitoring-probe
+  summary: monitoring probe from approved-monitoring-sources entry
+```
 """
 
 
@@ -498,68 +481,30 @@ SCREEN_RESOLVED_INVESTIGATION = """\
 ## SCREEN
 
 **Result:** match
-**Leads run:** authentication-history (no anomalies), source-reputation (approved)
+**Leads run:** authentication-history (no anomalies)
 **Outcome:** proceeding to CONCLUDE
 
 ## CONCLUDE
 
 **Verdict:** resolved — known monitoring probe pattern
+
+```yaml
+conclude:
+  termination:
+    category: trust-root
+    rationale: screen match
+  disposition: benign
+  confidence: high
+  matched_archetype: monitoring-probe
+  summary: screen pattern match
+```
 """
-
-
-def _resolved_checks(investigation_text: str) -> dict:
-    """Build a valid conclusion_checks.json dict whose citations resolve
-    against VALID_INVESTIGATION (line numbers are hardcoded to that text —
-    change both together)."""
-    return {
-        "status": "resolved",
-        "checks": [
-            {
-                "question_id": "adversarial_refuted",
-                "answer": "?brute-force predicted >50 attempts, observed 1.",
-                "citations": [
-                    {"lines": "14", "contains": "1 authentication attempt from 10.0.1.50"},
-                    {"lines": "23", "contains": 'weight: "--"'},
-                ],
-            },
-            {
-                "question_id": "plus_plus_refutation_attempt",
-                "answer": "Ran source-reputation; a non-matching result would have refuted.",
-                "citations": [
-                    {"lines": "28-32", "contains": "source-reputation"},
-                ],
-            },
-            {
-                "question_id": "authoritative_vs_circumstantial",
-                "answer": "Authoritative: approved-monitoring-sources registry match.",
-                "citations": [
-                    {"lines": "33", "contains": "matches approved-monitoring-sources entry"},
-                ],
-            },
-            {
-                "question_id": "dangling_evidence",
-                "answer": "All observations consistent.",
-                "citations": [
-                    {"lines": "40", "contains": "authoritative anchor confirms"},
-                ],
-            },
-            {
-                "question_id": "archetype_shape_match",
-                "answer": "All features fit the monitoring-probe archetype.",
-                "citations": [
-                    {"lines": "44", "contains": "monitoring probe from approved source"},
-                ],
-            },
-        ],
-    }
 
 
 def _setup_run(
     tmp_path: Path,
     investigation_text: str = VALID_INVESTIGATION,
-    conclusion_checks: dict | None = None,
     signature_id: str = "wazuh-rule-5710",
-    severity: str = "medium",
     with_ticket_context: bool = True,
 ) -> tuple[Path, Path]:
     """Create a runs_dir + run_dir with the artifacts a passing run needs."""
@@ -567,17 +512,12 @@ def _setup_run(
     runs_dir.mkdir()
     run_dir = runs_dir / "run-test"
     run_dir.mkdir()
-    meta = {"run_id": "run-test", "signature_id": signature_id}
-    if severity is not None:
-        meta["severity"] = severity
+    meta = {"run_id": "run-test", "signature_id": signature_id, "salt": "deadbeef"}
     (run_dir / "meta.json").write_text(json.dumps(meta))
     (run_dir / "investigation.md").write_text(investigation_text)
+    (run_dir / "alert.json").write_text(json.dumps({"id": "SEC-001"}))
     if with_ticket_context:
         (run_dir / "ticket_context.yaml").write_text("situation: ok\n")
-    if conclusion_checks is not None:
-        (run_dir / "conclusion_checks.json").write_text(
-            json.dumps(conclusion_checks)
-        )
     return runs_dir, run_dir
 
 
@@ -588,17 +528,6 @@ def _make_hook_event(
     old_string: str = "",
     new_string: str = "",
 ) -> str:
-    """Build a PreToolUse event targeting `file_path`.
-
-    For Write events, the hook reads `tool_input.content` (the proposed
-    file body, not what's currently on disk). Tests default `content` to
-    the current on-disk body — `_setup_run` has already written the
-    desired investigation.md before the test calls this helper — so
-    existing tests continue to work without rewiring.
-
-    For Edit events, tests pass explicit `old_string` / `new_string`;
-    the hook simulates the replacement against the on-disk file.
-    """
     tool_input: dict = {"file_path": file_path}
     if tool_name == "Write":
         if content is None:
@@ -620,100 +549,187 @@ def _make_hook_event(
     )
 
 
-def _run_hook(event: str, runs_dir: Path) -> subprocess.CompletedProcess:
-    import os
+def _make_fake_claude(
+    bin_dir: Path,
+    *,
+    judge_a_output: str = "VERDICT: PASS — looks fine",
+    judge_b_output: str = "VERDICT: PASS — looks fine",
+    returncode: int = 0,
+) -> Path:
+    """Write a fake `claude` CLI that returns canned VERDICT lines.
+
+    The shim reads the prompt from stdin (matching how the hook now
+    invokes claude) and distinguishes Judge A from Judge B by sniffing
+    for the unique heading from each prompt file. Tests call this once
+    per case to set up; the resulting directory is prepended to PATH
+    for the hook subprocess.
+    """
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / "claude"
+    script.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env python3
+            import sys
+            # `claude -p --model haiku --output-format text` with prompt on stdin
+            prompt = sys.stdin.read()
+            if "Pre-CONCLUDE Judge — Log Integrity" in prompt:
+                sys.stdout.write({judge_a_output!r})
+            elif "Pre-CONCLUDE Judge — Archetype" in prompt:
+                sys.stdout.write({judge_b_output!r})
+            else:
+                sys.stdout.write("VERDICT: PASS — unknown prompt, defaulting")
+            sys.exit({returncode})
+            """
+        )
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return script
+
+
+def _run_hook(
+    event: str,
+    runs_dir: Path,
+    fake_claude_dir: Path | None = None,
+) -> subprocess.CompletedProcess:
+    env = {**os.environ, "SOC_AGENT_RUNS_DIR": str(runs_dir)}
+    if fake_claude_dir is not None:
+        env["PATH"] = f"{fake_claude_dir}{os.pathsep}{env.get('PATH', '')}"
     return subprocess.run(
         [sys.executable, str(HOOK_SCRIPT)],
         input=event,
         capture_output=True,
         text=True,
-        env={**os.environ, "SOC_AGENT_RUNS_DIR": str(runs_dir)},
+        env=env,
     )
 
 
 # ---------------------------------------------------------------------------
-# Integration tests: hook via subprocess
+# Integration tests: hook via subprocess (with fake claude CLI)
 # ---------------------------------------------------------------------------
 
 
 class TestHookHappyPath:
-    def test_all_gates_pass(self, tmp_path):
-        runs_dir, run_dir = _setup_run(
-            tmp_path, conclusion_checks=_resolved_checks(VALID_INVESTIGATION)
-        )
+    def test_both_judges_pass(self, tmp_path):
+        runs_dir, run_dir = _setup_run(tmp_path)
+        bin_dir = tmp_path / "bin"
+        _make_fake_claude(bin_dir)
         event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
+        result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
         assert result.returncode == 0, f"stderr: {result.stderr}"
 
     def test_edit_event_appending_conclude(self, tmp_path):
-        # Realistic Edit: on-disk investigation.md ends at ANALYZE (loop 2);
-        # the Edit replaces the full pre-CONCLUDE text with itself plus a
-        # trailing ## CONCLUDE section. The hook must simulate the
-        # replacement and see the resulting CONCLUDE header in the
-        # post-edit proposed text.
+        # Realistic Edit: on-disk investigation.md ends at ANALYZE; the
+        # Edit replaces the full pre-CONCLUDE text with itself plus a
+        # trailing ## CONCLUDE section + conclude: yaml block.
         pre_conclude = VALID_INVESTIGATION.split("## CONCLUDE", 1)[0]
-        new_text = VALID_INVESTIGATION  # pre_conclude + CONCLUDE section
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=pre_conclude,
-            conclusion_checks=_resolved_checks(VALID_INVESTIGATION),
-        )
+        new_text = VALID_INVESTIGATION
+        runs_dir, run_dir = _setup_run(tmp_path, investigation_text=pre_conclude)
+        bin_dir = tmp_path / "bin"
+        _make_fake_claude(bin_dir)
         event = _make_hook_event(
             str(run_dir / "investigation.md"),
             tool_name="Edit",
             old_string=pre_conclude,
             new_string=new_text,
         )
-        result = _run_hook(event, runs_dir)
+        result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
         assert result.returncode == 0, f"stderr: {result.stderr}"
+
+
+class TestHookJudgeFlags:
+    def test_judge_a_flag_blocks(self, tmp_path):
+        runs_dir, run_dir = _setup_run(tmp_path)
+        bin_dir = tmp_path / "bin"
+        _make_fake_claude(
+            bin_dir,
+            judge_a_output="ADVERSARIAL_CHECK: FLAG — adversarial not refuted\nVERDICT: FLAG — adversarial",
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
+        assert result.returncode == 2
+        assert "Judge A" in result.stderr
+        assert "adversarial" in result.stderr.lower()
+
+    def test_judge_b_flag_blocks(self, tmp_path):
+        runs_dir, run_dir = _setup_run(tmp_path)
+        bin_dir = tmp_path / "bin"
+        _make_fake_claude(
+            bin_dir,
+            judge_b_output="SHAPE_MATCH: FLAG — evidence contradicts story\nVERDICT: FLAG — shape",
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
+        assert result.returncode == 2
+        assert "Judge B" in result.stderr
+
+    def test_both_flag_surfaces_both(self, tmp_path):
+        runs_dir, run_dir = _setup_run(tmp_path)
+        bin_dir = tmp_path / "bin"
+        _make_fake_claude(
+            bin_dir,
+            judge_a_output="VERDICT: FLAG — A reason",
+            judge_b_output="VERDICT: FLAG — B reason",
+        )
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
+        assert result.returncode == 2
+        assert "Judge A" in result.stderr
+        assert "Judge B" in result.stderr
+
+    def test_judge_subprocess_failure_blocks(self, tmp_path):
+        runs_dir, run_dir = _setup_run(tmp_path)
+        bin_dir = tmp_path / "bin"
+        _make_fake_claude(bin_dir, returncode=1)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
+        assert result.returncode == 2
+        assert "rc=1" in result.stderr or "CLI error" in result.stderr
 
 
 class TestScreenResolved:
-    """Screen-resolved runs skip the leads-floor and conclusion_checks gates."""
-
-    def test_screen_resolved_passes_without_conclusion_checks(self, tmp_path):
+    def test_screen_resolved_skips_judges(self, tmp_path):
+        # No fake claude on PATH — if the hook tried to invoke a judge it
+        # would fail with FileNotFoundError. Screen-resolved runs must
+        # bypass the judge dispatch entirely.
         runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=SCREEN_RESOLVED_INVESTIGATION,
-            conclusion_checks=None,
+            tmp_path, investigation_text=SCREEN_RESOLVED_INVESTIGATION
         )
         event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-
-    def test_screen_resolved_passes_with_zero_leads(self, tmp_path):
-        # SCREEN_RESOLVED_INVESTIGATION has no GATHER blocks (lead count=0)
-        # but the hook must not enforce the medium-severity floor of 2.
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=SCREEN_RESOLVED_INVESTIGATION,
-            conclusion_checks=None,
-            severity="critical",  # would normally require 4 leads
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
+        result = _run_hook(event, runs_dir, fake_claude_dir=None)
         assert result.returncode == 0, f"stderr: {result.stderr}"
 
     def test_screen_resolved_still_checks_ticket_context(self, tmp_path):
         runs_dir, run_dir = _setup_run(
             tmp_path,
             investigation_text=SCREEN_RESOLVED_INVESTIGATION,
-            conclusion_checks=None,
             with_ticket_context=False,
         )
-        # Audit log present but contains no ticket-context dispatch — gate 1
-        # fires even for screen-resolved runs.
         (runs_dir / "tool_audit.jsonl").write_text(
             json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}) + "\n"
         )
         event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
+        result = _run_hook(event, runs_dir, fake_claude_dir=None)
         assert result.returncode == 2
         assert "ticket-context" in result.stderr
 
 
+class TestPreYamlConcludeWrite:
+    """First CONCLUDE write (header + prose only, no yaml block yet) is
+    a deferred-pass — wait for the conclude: yaml block before judging."""
+
+    def test_header_only_passes(self, tmp_path):
+        # Strip the yaml block — leaves just ## CONCLUDE + verdict prose.
+        text = VALID_INVESTIGATION.split("```yaml", 1)[0]
+        runs_dir, run_dir = _setup_run(tmp_path, investigation_text=text)
+        # No fake claude — must not invoke a judge.
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir, fake_claude_dir=None)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+
+
 class TestHookNonTriggers:
-    def test_no_investigation_md(self, tmp_path):
+    def test_no_investigation_md_target(self, tmp_path):
         runs_dir = tmp_path / "runs"
         runs_dir.mkdir()
         event = _make_hook_event("/tmp/other.md")
@@ -721,8 +737,8 @@ class TestHookNonTriggers:
         assert result.returncode == 0
 
     def test_investigation_without_conclude(self, tmp_path):
-        text_no_conclude = VALID_INVESTIGATION.replace("## CONCLUDE", "## ANALYZE (loop 3)")
-        runs_dir, run_dir = _setup_run(tmp_path, investigation_text=text_no_conclude)
+        text = VALID_INVESTIGATION.replace("## CONCLUDE", "## ANALYZE (loop 3)")
+        runs_dir, run_dir = _setup_run(tmp_path, investigation_text=text)
         event = _make_hook_event(str(run_dir / "investigation.md"))
         result = _run_hook(event, runs_dir)
         assert result.returncode == 0
@@ -738,8 +754,6 @@ class TestHookNonTriggers:
         assert result.returncode == 0
 
     def test_nested_subdir_rejected(self, tmp_path):
-        # extract_run_dir requires investigation.md to live in a direct
-        # child of runs_dir. Anything deeper is treated as unrelated.
         runs_dir = tmp_path / "runs"
         runs_dir.mkdir()
         nested = runs_dir / "run-x" / "subdir"
@@ -749,511 +763,60 @@ class TestHookNonTriggers:
         result = _run_hook(event, runs_dir)
         assert result.returncode == 0
 
-
-class TestGate1TicketContext:
-    def test_fails_when_ticket_context_missing(self, tmp_path):
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            conclusion_checks=_resolved_checks(VALID_INVESTIGATION),
-            with_ticket_context=False,
-        )
-        # Audit log exists but contains no ticket-context dispatch —
-        # without an audit log at all, the check silently passes because
-        # the fallback scan has no signal to work with.
-        (runs_dir / "tool_audit.jsonl").write_text(
-            json.dumps(
-                {
-                    "tool_name": "Bash",
-                    "tool_input": {"command": "ls"},
-                }
-            )
-            + "\n"
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
+    def test_unrelated_tool(self, tmp_path):
+        # Bash event — hook should silently no-op.
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        event = json.dumps({
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"},
+            "tool_use_id": "x",
+            "session_id": "s",
+        })
         result = _run_hook(event, runs_dir)
+        assert result.returncode == 0
+
+
+class TestTicketContextGate:
+    def test_ticket_context_yaml_satisfies(self, tmp_path):
+        runs_dir, run_dir = _setup_run(tmp_path, with_ticket_context=True)
+        bin_dir = tmp_path / "bin"
+        _make_fake_claude(bin_dir)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
+        assert result.returncode == 0
+
+    def test_audit_log_satisfies(self, tmp_path):
+        runs_dir, run_dir = _setup_run(tmp_path, with_ticket_context=False)
+        (runs_dir / "tool_audit.jsonl").write_text(
+            json.dumps({
+                "tool_name": "Agent",
+                "tool_input": {"prompt": "Read ticket-context.md ..."},
+            }) + "\n"
+        )
+        bin_dir = tmp_path / "bin"
+        _make_fake_claude(bin_dir)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
+        assert result.returncode == 0
+
+    def test_no_audit_no_marker_silent_pass(self, tmp_path):
+        # If the audit hook isn't running we have no signal — gate stays silent.
+        runs_dir, run_dir = _setup_run(tmp_path, with_ticket_context=False)
+        bin_dir = tmp_path / "bin"
+        _make_fake_claude(bin_dir)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
+        assert result.returncode == 0
+
+    def test_audit_present_no_dispatch_fails(self, tmp_path):
+        runs_dir, run_dir = _setup_run(tmp_path, with_ticket_context=False)
+        (runs_dir / "tool_audit.jsonl").write_text(
+            json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}) + "\n"
+        )
+        bin_dir = tmp_path / "bin"
+        _make_fake_claude(bin_dir)
+        event = _make_hook_event(str(run_dir / "investigation.md"))
+        result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
         assert result.returncode == 2
         assert "ticket-context" in result.stderr
-
-    def test_silent_pass_when_no_audit_log(self, tmp_path):
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            conclusion_checks=_resolved_checks(VALID_INVESTIGATION),
-            with_ticket_context=False,
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-
-    def test_passes_via_audit_fallback(self, tmp_path):
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            conclusion_checks=_resolved_checks(VALID_INVESTIGATION),
-            with_ticket_context=False,
-        )
-        audit = runs_dir / "tool_audit.jsonl"
-        audit.write_text(
-            json.dumps(
-                {
-                    "tool_name": "Task",
-                    "tool_input": {
-                        "description": "ticket-context for SEC-001",
-                        "prompt": "read ticket-context.md",
-                    },
-                }
-            )
-            + "\n"
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-
-
-class TestGate3ConclusionFile:
-    def test_fails_when_file_missing(self, tmp_path):
-        # Force the complexity gate to fire by pointing at a thin signature
-        # (wazuh-rule-550 has 1 archetype, below the maturity threshold of 2).
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            conclusion_checks=None,
-            signature_id="wazuh-rule-550",
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "conclusion_checks.json not found" in result.stderr
-
-    def test_fails_on_invalid_json(self, tmp_path):
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=None)
-        (run_dir / "conclusion_checks.json").write_text("{ not json")
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "not valid JSON" in result.stderr
-
-    def test_fails_on_invalid_status(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["status"] = "maybe"
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "status" in result.stderr
-
-    def test_fails_on_missing_question(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"] = checks["checks"][:-1]  # drop one required
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "missing required question" in result.stderr
-
-    def test_fails_on_extra_question(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"].append(
-            {
-                "question_id": "not_a_real_question",
-                "answer": "noise",
-                "citations": [{"lines": "42", "contains": "CONCLUDE"}],
-            }
-        )
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "unexpected question" in result.stderr
-
-    def test_fails_on_empty_answer(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["answer"] = "   "
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "empty or missing 'answer'" in result.stderr
-
-
-class TestGate4Citations:
-    """Hybrid line-range + verbatim-token citation checks."""
-
-    def test_fails_on_contains_not_in_range(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = [
-            {"lines": "14", "contains": "this string is not in the log"}
-        ]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "not found within lines" in result.stderr
-
-    def test_fails_on_contains_in_other_lines_but_not_cited_range(self, tmp_path):
-        # "weight" appears on line 20 (++) and line 23 (--) — citing line
-        # 14 (an observation) and claiming "weight" is in it must fail.
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = [
-            {"lines": "14", "contains": 'weight: "--"'}
-        ]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "not found within lines" in result.stderr
-
-    def test_fails_on_empty_citations_list(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = []
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "non-empty" in result.stderr
-
-    def test_fails_on_empty_contains(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = [{"lines": "14", "contains": "   "}]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "'contains' must be a non-empty string" in result.stderr
-
-    def test_fails_on_missing_contains(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = [{"lines": "14"}]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "'contains' must be a non-empty string" in result.stderr
-
-    def test_fails_on_malformed_lines(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = [
-            {"lines": "abc", "contains": "whatever"}
-        ]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "'lines' must be a string" in result.stderr
-
-    def test_fails_on_reversed_range(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = [
-            {"lines": "25-14", "contains": "whatever"}
-        ]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "'lines' must be a string" in result.stderr
-
-    def test_fails_on_out_of_bounds_range(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = [
-            {"lines": "500", "contains": "CONCLUDE"}
-        ]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "out of bounds" in result.stderr
-
-    def test_fails_on_string_citation_old_format(self, tmp_path):
-        # The hybrid schema rejects bare string citations from the old
-        # format — must be an object now.
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = ["1 authentication attempt"]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "must be an object" in result.stderr
-
-    def test_single_line_citation(self, tmp_path):
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = [
-            {"lines": "14", "contains": "1 authentication attempt"}
-        ]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-
-    def test_range_citation(self, tmp_path):
-        # Range spans ANALYZE loop 1 — token "weight" appears on lines 20 and 23.
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = [
-            {"lines": "16-24", "contains": 'weight: "--"'}
-        ]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-
-    def test_contains_with_comma_ok(self, tmp_path):
-        # JSON handles commas cleanly — the comma in the contains string
-        # isn't a separator. Line 5 has "?monitoring-probe, ?brute-force".
-        checks = _resolved_checks(VALID_INVESTIGATION)
-        checks["checks"][0]["citations"] = [
-            {"lines": "5", "contains": "?monitoring-probe, ?brute-force"}
-        ]
-        runs_dir, run_dir = _setup_run(tmp_path, conclusion_checks=checks)
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-
-
-# ---------------------------------------------------------------------------
-# Status branching
-# ---------------------------------------------------------------------------
-
-
-class TestStatusBranching:
-    ESCALATED_INVESTIGATION = """\
-## CONTEXTUALIZE
-
-**Alert:** SEC-002
-
-## HYPOTHESIZE (loop 1)
-
-## GATHER (loop 1)
-
-**Lead:** authentication-history
-**Raw observation:** 47 attempts from unknown source
-
-## ANALYZE (loop 1)
-
-Two live hypotheses, undecidable with current evidence.
-
-## HYPOTHESIZE (loop 2)
-
-## GATHER (loop 2)
-
-**Lead:** source-reputation
-**Raw observation:** no registry match
-
-## ANALYZE (loop 2)
-
-Cannot discriminate ?brute-force from ?credential-stuffing.
-
-## CONCLUDE
-
-**Verdict:** escalated — cannot discriminate two live hypotheses
-"""
-
-    def test_escalated_passes_with_reduced_question_set(self, tmp_path):
-        checks = {
-            "status": "escalated",
-            "checks": [
-                {
-                    "question_id": "dangling_evidence",
-                    "answer": "All observations consistent.",
-                    "citations": [
-                        {"lines": "21", "contains": "no registry match"},
-                    ],
-                },
-                {
-                    "question_id": "escalation_rationale",
-                    "answer": "Two live hypotheses undecidable with current leads.",
-                    "citations": [
-                        {"lines": "25", "contains": "Cannot discriminate ?brute-force from ?credential-stuffing"},
-                    ],
-                },
-            ],
-        }
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=self.ESCALATED_INVESTIGATION,
-            conclusion_checks=checks,
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-
-    def test_escalated_with_resolved_questions_rejected(self, tmp_path):
-        # Escalated status with resolved-only questions should fail.
-        checks = _resolved_checks(self.ESCALATED_INVESTIGATION)
-        checks["status"] = "escalated"
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=self.ESCALATED_INVESTIGATION,
-            conclusion_checks=checks,
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "unexpected question" in result.stderr or "missing required" in result.stderr
-
-
-# ---------------------------------------------------------------------------
-# Complexity gate — when does the self-check actually fire?
-# ---------------------------------------------------------------------------
-
-
-class TestCountHypothesizeLoops:
-    def test_zero_loops(self):
-        assert count_hypothesize_loops("## CONTEXTUALIZE\n## CONCLUDE\n") == 0
-
-    def test_one_loop(self):
-        text = "## CONTEXTUALIZE\n## HYPOTHESIZE (loop 1)\n## GATHER (loop 1)\n## ANALYZE\n## CONCLUDE\n"
-        assert count_hypothesize_loops(text) == 1
-
-    def test_multiple_loops(self):
-        text = (
-            "## CONTEXTUALIZE\n"
-            "## HYPOTHESIZE (loop 1)\n## GATHER (loop 1)\n## ANALYZE (loop 1)\n"
-            "## HYPOTHESIZE (loop 2)\n## GATHER (loop 2)\n## ANALYZE (loop 2)\n"
-            "## HYPOTHESIZE (loop 3)\n## GATHER (loop 3)\n## ANALYZE (loop 3)\n"
-            "## CONCLUDE\n"
-        )
-        assert count_hypothesize_loops(text) == 3
-
-
-class TestSignatureArchetypeCount:
-    def test_5710_has_4_archetypes(self):
-        # wazuh-rule-5710 ships with credential-stuffing, external-bruteforce,
-        # monitoring-probe, service-account-rotation. If this breaks, a new
-        # archetype was added — update the test.
-        assert signature_archetype_count("wazuh-rule-5710") == 4
-
-    def test_thin_signature(self):
-        # wazuh-rule-550 ships with one archetype directory.
-        assert signature_archetype_count("wazuh-rule-550") == 1
-
-    def test_missing_signature(self):
-        assert signature_archetype_count("nonexistent-signature") == 0
-
-    def test_empty_id(self):
-        assert signature_archetype_count("") == 0
-
-
-class TestComplexityGateFiring:
-    """The complexity gate is TEMPORARILY disabled (always fires). Tests
-    below reflect the always-fire behavior; reference logic preserved in
-    `_complexity_gate_disabled_fire_always` for when we re-enable."""
-
-    def _thin_investigation(self, loops: int) -> str:
-        """Synthetic investigation text with exactly `loops` HYPOTHESIZE sections."""
-        parts = ["## CONTEXTUALIZE\n\n"]
-        for i in range(1, loops + 1):
-            parts.extend([
-                f"## HYPOTHESIZE (loop {i})\n\n",
-                f"## GATHER (loop {i})\n\n**Lead:** authentication-history\n\n",
-                f"## ANALYZE (loop {i})\n\n",
-            ])
-        parts.append("## CONCLUDE\n\n**Verdict:** escalated — test\n")
-        return "".join(parts)
-
-    def test_mature_fast_still_fires_self_check(self, tmp_path):
-        """Gate disabled: even 5710 (4 archetypes) + 2 loops → self-check
-        fires. Missing conclusion_checks.json → rejection."""
-        inv = self._thin_investigation(loops=2)
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=inv,
-            conclusion_checks=None,
-            signature_id="wazuh-rule-5710",
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "conclusion_checks.json" in result.stderr
-
-    def test_struggling_loops_fires_self_check(self, tmp_path):
-        """5710 (4 archetypes) + 4 loops → self-check fires despite mature
-        scaffolding. Missing conclusion_checks.json → rejection."""
-        inv = self._thin_investigation(loops=4)
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=inv,
-            conclusion_checks=None,
-            signature_id="wazuh-rule-5710",
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "conclusion_checks.json" in result.stderr
-
-    def test_thin_scaffolding_fires_self_check(self, tmp_path):
-        """550 (1 archetype) + 2 loops → self-check fires because scaffolding
-        is thin, regardless of loop count."""
-        inv = self._thin_investigation(loops=2)
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=inv,
-            conclusion_checks=None,
-            signature_id="wazuh-rule-550",
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "conclusion_checks.json" in result.stderr
-
-    def test_defensive_authoring_still_validates(self, tmp_path):
-        """Defensive authoring: the agent wrote conclusion_checks.json with
-        broken citations. The hook validates the file and catches the error,
-        regardless of complexity-gate state."""
-        inv = self._thin_investigation(loops=2)
-        bad_checks = {
-            "status": "escalated",
-            "checks": [
-                {
-                    "question_id": "dangling_evidence",
-                    "answer": "All observations consistent.",
-                    "citations": [
-                        {"lines": "1", "contains": "this string is not in the log"},
-                    ],
-                },
-                {
-                    "question_id": "escalation_rationale",
-                    "answer": "Test.",
-                    "citations": [
-                        {"lines": "1", "contains": "## CONTEXTUALIZE"},
-                    ],
-                },
-            ],
-        }
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=inv,
-            conclusion_checks=bad_checks,
-            signature_id="wazuh-rule-5710",
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 2
-        assert "not found within lines" in result.stderr
-
-    def test_valid_file_passes(self, tmp_path):
-        """Valid conclusion_checks.json → hook passes regardless of gate state."""
-        inv = self._thin_investigation(loops=2)
-        valid_checks = {
-            "status": "escalated",
-            "checks": [
-                {
-                    "question_id": "dangling_evidence",
-                    "answer": "All observations consistent.",
-                    "citations": [
-                        {"lines": "1", "contains": "## CONTEXTUALIZE"},
-                    ],
-                },
-                {
-                    "question_id": "escalation_rationale",
-                    "answer": "Test.",
-                    "citations": [
-                        {"lines": "17", "contains": "## ANALYZE"},
-                    ],
-                },
-            ],
-        }
-        runs_dir, run_dir = _setup_run(
-            tmp_path,
-            investigation_text=inv,
-            conclusion_checks=valid_checks,
-            signature_id="wazuh-rule-5710",
-        )
-        event = _make_hook_event(str(run_dir / "investigation.md"))
-        result = _run_hook(event, runs_dir)
-        assert result.returncode == 0, f"stderr: {result.stderr}"

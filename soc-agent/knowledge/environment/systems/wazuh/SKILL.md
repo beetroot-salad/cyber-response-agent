@@ -25,7 +25,7 @@ Run from the soc-agent root (e.g. `cd /workspace/soc-agent && python3 scripts/to
   - `--start <ISO>` / `--end <ISO>` / `--window <duration>` — scope the time range. `--window` (e.g. `2h`, `24h`, `7d`) is used when `--end` is omitted.
   - `--limit <N>` — cap the number of returned events (default 500, max 10000).
   - `--run-dir <path>` — wraps query output in salted untrusted-data delimiters keyed off the run's `meta.json` salt. Use this when feeding results into reasoning.
-  - `--raw` — emit raw JSON instead of formatted text. Default formatted output is designed for direct reading; raw is for programmatic re-parsing in rare cases.
+  - `--raw` — emit raw JSON instead of formatted text. Default formatted output already embeds the full `_source` of the first 3 events under a `### Raw Sample Events` section for field-level inspection, so `--raw` is rarely needed — reach for it only when you need every event's raw JSON (e.g. programmatic re-parsing over >3 events).
 
 ### Example invocations
 

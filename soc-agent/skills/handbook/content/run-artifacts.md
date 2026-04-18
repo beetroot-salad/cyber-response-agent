@@ -11,7 +11,6 @@ runs/
 │   ├── meta.json              # run_id, signature_id, per-run salt
 │   ├── investigation.md       # agent's narrative log (per-phase sections)
 │   ├── state.json             # state machine state (phase, history, timestamps)
-│   ├── conclusion_checks.json # pre-CONCLUDE self-check answers + citations
 │   └── report.md              # final report — structured frontmatter + body
 ├── audit.jsonl                # one JSON line per completed investigation
 ├── tool_audit.jsonl           # one JSON line per state-changing tool call

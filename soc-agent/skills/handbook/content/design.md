@@ -98,10 +98,10 @@ Swapping Wazuh for Splunk is a matter of writing a new `knowledge/environment/sy
 
 When you install the plugin you get:
 
-- The **investigate skill** — entry point, investigation loop, and subagent prompts (`ticket-context`, `archetype-scan`, `screen`, `gather`, `query-past-investigations`, `conclusion_checks`)
+- The **investigate skill** — entry point, investigation loop, and subagent prompts (`ticket-context`, `archetype-scan`, `screen`, `gather`, `query-past-investigations`)
 - **Python hooks** registered in `plugin.json`:
-  - *PreToolUse* — `infer_state_pre.py` (blocks illegal phase transitions before they land), `validate_conclude.py` (Layer 0 CONCLUDE self-check + citation integrity), `invlang_validate.py` (companion-YAML schema gate)
-  - *PostToolUse* — `infer_state.py` (state-machine history + cycle counting), `validate_report.py` (Tier 1 structural + Tier 2 semantic-judge report validation, including temporal precedent re-confirmation), `audit_tool_calls.py` (audit vs trace JSONL split), `tag_tool_results.py` (salted delimiter wrapping of untrusted data), `budget_enforcer.py` (warning-only tool-call + wall-clock budget tracking)
+  - *PreToolUse* — `infer_state_pre.py` (blocks illegal phase transitions before they land), `validate_conclude.py` (Layer 0 pre-CONCLUDE gate: ticket-context dispatch + two parallel Haiku judges for log integrity and archetype/grounding), `invlang_validate.py` (companion-YAML schema gate)
+  - *PostToolUse* — `infer_state.py` (state-machine history + cycle counting), `validate_report.py` (Tier 1 structural + slimmed Tier 2 delta judge, including temporal precedent re-confirmation), `audit_tool_calls.py` (audit vs trace JSONL split), `tag_tool_results.py` (salted delimiter wrapping of untrusted data), `budget_enforcer.py` (warning-only tool-call + wall-clock budget tracking)
   - *Stop* — `stop_handler.py` composing `investigation_summary.py` (outcome JSONL + token/cost/timestamps) and `close_ticket_action.py` (act-mode dispatch)
 - **Schemas** — dataclass validators for report frontmatter, state transitions, precedent shape, and the adapter contract
 - **Knowledge scaffolding** — portable `common-investigation` methodology (checklist, lead definitions, lessons), the 4-area `environment/` directory with SKILL.md overviews, a signature `_template/`, and reference Wazuh signatures

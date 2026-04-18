@@ -41,6 +41,15 @@ available" or "not observed." Omission is ambiguous to the main agent.
   rotation — looks like low-frequency brute force but isn't.
 - Time windows matter: always state the window you queried.
   Missing events outside your window can change the interpretation.
+- **Same connection vs distinct connections.** When N events look
+  identical in the summary (same srcip, srcuser, host, timestamp to
+  the second), the source port is the discriminator: distinct source
+  ports = distinct TCP connections = genuine repeat activity;
+  identical source port = one connection's log line duplicated by
+  the indexer or co-fired across multiple rules. Inspect the raw
+  event JSON for the source-port field before reasoning about
+  "N attempts" — N duplicates of one attempt is a fundamentally
+  different signal. (Vendor field name lives in `templates/{vendor}.md`.)
 
 ## Baseline
 

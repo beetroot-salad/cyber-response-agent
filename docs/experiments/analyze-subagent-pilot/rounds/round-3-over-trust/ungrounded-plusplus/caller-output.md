@@ -1,0 +1,17 @@
+## Decision: REJECT
+
+**Rationale:** The ANALYZE block's `++` grade for `?opportunistic-scanner` is not grounded in the evidence that actually licenses the upgrade. The subagent attributes the `++` primarily to "volume is decisive" (47 events, 0.26/s rate), but those signals were already in-hand from loops 1–2 and still only yielded `+`. The load-bearing upgrade evidence — the username scatter profile (20 generic wordlist names, zero environment-specific names) — is the discriminator the agent pre-committed to at HYPOTHESIZE loop 3 entry, yet the ANALYZE block only cites it in passing ("username list matches the default wordlist profile") without identifying it as the primary justification for the grade change. The reasoning is inconsistent with the pre-committed upgrade path.
+
+**Specific defect:** Grade inconsistent with reasoning. The `+` → `++` upgrade was pre-committed to depend on username-scatter confirmation (≥5 distinct generic names, zero env-specific). The evidence delivers exactly that: 20 generic wordlist names, zero webapp-*/appuser-*/deploy-* matches. The ANALYZE block should ground the `++` in the username profile as the primary signal, with volume/rate as corroboration. Instead it inverts the priority — "the volume is decisive" — citing signals that were already insufficient for `++` in prior loops. This is not a case where the grade is wrong (the evidence does support `++`); it is a case where the stated reasoning does not justify the grade via the mechanism that actually licenses it, making the assessment unverifiable by a reviewer who cannot independently see whether the pre-committed discriminator fired.
+
+**What I want re-analyzed:** Re-state the `++` rationale with the username scatter profile as the primary justification: (a) all 20 usernames are generic wordlist entries, (b) zero names match environment-specific patterns from prod-webserver-01's stack, (c) this directly triggers the pre-committed refutation shape for `?targeted-brute-force` and the upgrade condition for `?opportunistic-scanner`. Volume and rate are corroborating, not load-bearing. The CONCLUDE routing and archetype match are otherwise sound — only the stated reasoning for the grade needs correction.
+
+---
+
+## Trust self-report
+
+- **Independent queries or re-analysis:** None. I did not re-run any leads or re-grade hypotheses independently. I reviewed the ANALYZE block against the pre-committed predictions from HYPOTHESIZE loop 3 and the raw GATHER output.
+
+- **Questionable grades:** The `++` for `?opportunistic-scanner` is the only grade I flagged. The grade itself is defensible given the evidence, but the reasoning fails to cite the load-bearing discriminator (username scatter, zero env-specific names) as primary. The `--` grades for `?targeted-brute-force`, `?credential-stuffing-external`, and `?compromise-followup` are all correctly grounded: targeted refuted by the username profile, credential-stuffing refuted by rate + username type, compromise-followup refuted by the zero forward-window successes.
+
+- **Load-bearing part of the ANALYZE output for my decision:** The pre-committed refutation shapes from HYPOTHESIZE loop 3. Those shapes specified exactly what evidence would move each grade. Comparing those shapes against the stated reasoning in the ANALYZE block exposed the mismatch: the subagent cited the wrong signal as decisive for the `++` upgrade.

@@ -541,14 +541,17 @@ gather:
 
 **Goal:** Write the final report with structured frontmatter.
 
-**Preconditions — enforced by hook on writing `## CONCLUDE`:**
+**Gate on the `conclude:` YAML write.** The write is automatically validated for investigation soundness before it lands. You do nothing extra to invoke it — write normally.
 
-1. Read `skills/investigate/conclusion_checks.md` and answer every question that applies to your status.
-2. Write your answers to `{run_dir}/conclusion_checks.json` following the schema in that file. Each citation is a `{lines, contains}` pair; `contains` must be a VERBATIM substring copied from the cited line range.
+If the gate rejects the write, the error message names the failed criterion. Respond by fixing the underlying gap in `investigation.md` and retrying:
 
-The self-check fires on **every** non-screen-resolved CONCLUDE write — SCREEN-resolved investigations are exempt regardless (their safety comes from SCREEN pattern match + precedent + `validate_report.py`).
+- Adversarial hypothesis not refuted with `--` evidence → run a discriminating lead, or escalate.
+- A `++` grade with no falsification path → downgrade to `+`, or run a check that could have refuted it.
+- Dangling evidence (observations the confirmed hypothesis doesn't explain) → add an ANALYZE pass that accounts for them, or expand the hypothesis space.
+- Archetype shape mismatch or sibling archetype unaddressed → revisit archetype selection or escalate as a novel variant.
+- Required anchor missing or hollow → consult the anchor concretely, or escalate.
 
-The hook fires as **PreToolUse**, so a rejection blocks the write before state.json advances — fix whatever the hook named, then retry the same write from the same phase. Every error message ends with an explicit next-action line. Author `conclusion_checks.json` **before** writing the `## CONCLUDE` header to `investigation.md`.
+Retry the same write after the fix — no state-machine recovery needed.
 
 ---
 

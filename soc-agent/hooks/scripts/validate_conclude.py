@@ -3,84 +3,77 @@
 
 Fires on Write/Edit targeting `investigation.md` (narrowed by `if`
 filters in plugin.json). Computes the *proposed* post-write text from
-the tool input (not the file on disk, which hasn't been updated yet),
-checks for a `## CONCLUDE` header, and enforces:
+the tool input (not the file on disk, which hasn't been updated yet).
 
-1. ticket-context subagent was dispatched during CONTEXTUALIZE.
-   Silent backstop — not surfaced in SKILL.md §CONCLUDE because by
-   CONCLUDE time the damage is already done. Exists only so a broken
-   preload surfaces somewhere.
-2. `conclusion_checks.json` exists in the run directory and covers the
-   expected question set for its declared status. Each citation is a
-   `{lines: "A-B", contains: "token"}` pair — the hook parses the
-   range, slices those lines from the proposed investigation.md text,
-   and checks that `contains` is a verbatim substring of that slice.
-   Prevents fabrication; cheaper and more paraphrase-tolerant than
-   matching a full sentence against the whole file. Expected question
-   IDs come from `skills/investigate/conclusion_checks.md` so the two
-   stay in sync.
+Fires only when the proposed text contains both a `## CONCLUDE` header
+AND a parseable `conclude:` YAML block — the second of the two writes
+the agent performs at the conclusion boundary, by which point
+`matched_archetype` is declared and Judge B has the context it needs.
 
-   The self-check (gate 2) only fires when the investigation is
-   *struggling* or the signature's scaffolding is thin. Concretely:
-   - `loops >= 4` (forced iteration signals the agent is on weak
-     ground, regardless of signature maturity), OR
-   - `archetype_count < 2` for the signature (a playbook with one or
-     zero archetypes gives the agent no discriminative story to fit
-     evidence against, so the forced articulation earns its keep).
+Two gates run:
 
-   Screen-resolved investigations are exempt regardless — their
-   safety comes from SCREEN pattern match + precedent +
-   validate_report.py Tier 1/2.
+1. **ticket-context dispatched.** Silent backstop — verifies the
+   ticket-context subagent fired during CONTEXTUALIZE. Not surfaced in
+   SKILL.md because by CONCLUDE time the damage is already done; this
+   exists only so a broken preload surfaces somewhere.
+
+2. **Two-judge investigation soundness check.** Two Haiku judges run
+   in parallel via the claude CLI:
+     - Judge A (log integrity): ADVERSARIAL_CHECK,
+       PLUS_PLUS_FALSIFICATION, DANGLING_EVIDENCE,
+       ESCALATION_RATIONALE.
+     - Judge B (archetype/grounding): SHAPE_MATCH, COMPLETENESS,
+       GROUNDING_MATCH (anchor leg only).
+   Verdicts are ANDed deterministically — any FLAG blocks the write.
+
+SCREEN-resolved investigations are exempt from gate 2 (their safety
+comes from SCREEN pattern match + precedent + validate_report.py).
 
 Running as PreToolUse means a rejection blocks the write before
-`infer_state.py` advances `state.json`. The agent can then fix the
-authoring gap and re-issue the write from the same pre-CONCLUDE phase,
-without the state machine confusion a rejected PostToolUse would
-cause.
+`infer_state.py` advances `state.json`. The agent fixes the issue and
+re-issues the write from the same phase, no state-machine confusion.
 
 Exit codes:
-    0 - Passed (or not a CONCLUDE-triggering write)
+    0 - Passed (or not a CONCLUDE-finalising write)
     2 - Gate failed (message fed back to agent, blocks the write)
 """
+
+from __future__ import annotations
 
 import json
 import re
 import sys
 from pathlib import Path
 
+import yaml
+
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.investigation_parse import (
     has_conclude_header,
-    iter_phase_headers,
     is_screen_resolved,
     resolve_proposed_text,
 )
-from hooks.scripts.invlang_validate import YAML_BLOCK_RE, _merge_blocks
+from hooks.scripts.invlang_validate import _merge_blocks
 from hooks.scripts.invlang_walkers import (
     collect_hypothesis_ids,
     compute_final_status,
 )
-
-import yaml
-
-CONCLUSION_CHECKS_PROMPT = (
-    SOC_AGENT_ROOT / "skills" / "investigate" / "conclusion_checks.md"
+from hooks.scripts.judge_runner import (
+    get_run_salt,
+    invoke_judges_parallel,
+    parse_verdict,
+    wrap_untrusted,
 )
+from hooks.scripts.run_context import extract_run_dir_from_path
 
-# Thresholds for firing the self-check. Raising either makes the check
-# stricter (fires more often); lowering makes it more permissive.
-MAX_LOOPS_BEFORE_SELF_CHECK = 4
-MIN_ARCHETYPES_FOR_MATURE_SCAFFOLDING = 2
+JUDGE_A_PROMPT_PATH = Path(__file__).resolve().parent / "conclude_judge_A_prompt.md"
+JUDGE_B_PROMPT_PATH = Path(__file__).resolve().parent / "conclude_judge_B_prompt.md"
 
-# Question headers in the prompt file: `### \`question_id\``
-QUESTION_HEADER_RE = re.compile(r"^### `([a-z_][a-z0-9_]*)`\s*$", re.MULTILINE)
-
-# Per-status question sections in the prompt file.
-STATUS_SECTION_RE = re.compile(
-    r"^## Questions — status: (\w+)\s*$(.*?)(?=^## Questions — status:|\Z)",
-    re.MULTILINE | re.DOTALL,
+YAML_BLOCK_RE = re.compile(r"```yaml[ \t]*\r?\n(.*?)\r?\n```", re.DOTALL)
+VERDICT_LINE_RE = re.compile(
+    r"\*\*Verdict:\*\*\s*(resolved|escalated)\b", re.IGNORECASE
 )
 
 
@@ -91,22 +84,15 @@ STATUS_SECTION_RE = re.compile(
 def check_ticket_context_spawned(run_dir: Path) -> str | None:
     """Return None on pass, error message on fail.
 
-    The ticket-context subagent is dispatched inline by the main agent
-    during CONTEXTUALIZE (see SKILL.md §CONTEXTUALIZE step 3). The
-    primary detection path is the audit log scan below, which looks for
-    a Task/Agent call matching the ticket-context subagent prompt.
-
-    The `ticket_context.yaml` file check is kept as a legacy/test
-    convenience — tests can set it as a fast "ticket-context ran" marker
-    without building an audit log. Production flow no longer writes the
-    file (no preload script).
+    Primary signal is the audit log scan for a Task/Agent call mentioning
+    ticket-context. The `ticket_context.yaml` file path is a legacy/test
+    convenience marker.
     """
     if (run_dir / "ticket_context.yaml").exists():
         return None
 
     audit_path = run_dir.parent / "tool_audit.jsonl"
     if not audit_path.exists():
-        # Audit hook not running — no signal available, don't fail.
         return None
 
     try:
@@ -130,8 +116,8 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
     return (
         "ticket-context subagent was not dispatched during CONTEXTUALIZE. "
         "The main agent is expected to spawn it inline via Agent() as "
-        "described in SKILL.md §CONTEXTUALIZE step 3; the audit log "
-        "has no matching Task/Agent call. Dispatch the subagent using "
+        "described in SKILL.md §CONTEXTUALIZE step 3; the audit log has no "
+        "matching Task/Agent call. Dispatch the subagent using "
         "skills/investigate/ticket-context.md before re-issuing this "
         "CONCLUDE write. Next action: stay in CONCLUDE, run the subagent, "
         "then retry the write."
@@ -139,28 +125,59 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Self-check complexity gate
+# Gate 2 fire condition + context extraction
 # ---------------------------------------------------------------------------
 
-def count_hypothesize_loops(text: str) -> int:
-    """Number of `## HYPOTHESIZE` phase headers in the proposed text.
+def extract_conclude_yaml(text: str) -> dict | None:
+    """Find the first ```yaml fenced block whose top-level key is `conclude`
+    and return the parsed dict. Returns None if no such block is found or
+    parsing fails."""
+    for raw in YAML_BLOCK_RE.findall(text):
+        try:
+            doc = yaml.safe_load(raw)
+        except yaml.YAMLError:
+            continue
+        if isinstance(doc, dict) and "conclude" in doc:
+            inner = doc["conclude"]
+            if isinstance(inner, dict):
+                return inner
+    return None
 
-    Distinct from `schemas.state.count_loops`, which now counts HYPOTHESIZE +
-    ANALYZE cycles against MAX_LOOPS. This function is the complexity signal
-    for the CONCLUDE self-check gate — "how many times did the agent revisit
-    the hypothesis space" — where counting ANALYZE would dilute the signal.
-    """
-    return sum(1 for p in iter_phase_headers(text) if p == "HYPOTHESIZE")
+
+def extract_status(text: str) -> str | None:
+    """Return 'resolved' or 'escalated' from the `**Verdict:**` line in
+    the CONCLUDE section, or None if not present / unparseable."""
+    m = VERDICT_LINE_RE.search(text)
+    if not m:
+        return None
+    return m.group(1).lower()
 
 
-def signature_archetype_count(signature_id: str) -> int:
-    """Number of archetype directories under the signature's knowledge tree.
+def load_archetype_readme(signature_id: str, archetype: str) -> str | None:
+    if not signature_id or not archetype:
+        return None
+    p = (
+        SOC_AGENT_ROOT
+        / "knowledge"
+        / "signatures"
+        / signature_id
+        / "archetypes"
+        / archetype
+        / "README.md"
+    )
+    if p.exists():
+        try:
+            return p.read_text()
+        except OSError:
+            return None
+    return None
 
-    An archetype is a subdirectory of `knowledge/signatures/{sig}/archetypes/`
-    that contains a README.md. Missing tree → 0.
-    """
+
+def load_sibling_archetypes(signature_id: str, matched: str | None) -> str:
+    """Return a concatenated text block of sibling archetype READMEs
+    (excluding the matched one). Empty string if none / signature unknown."""
     if not signature_id:
-        return 0
+        return ""
     arch_dir = (
         SOC_AGENT_ROOT
         / "knowledge"
@@ -169,255 +186,166 @@ def signature_archetype_count(signature_id: str) -> int:
         / "archetypes"
     )
     if not arch_dir.exists():
-        return 0
-    count = 0
-    for d in arch_dir.iterdir():
-        if d.is_dir() and (d / "README.md").exists():
-            count += 1
-    return count
+        return ""
+    parts: list[str] = []
+    for d in sorted(arch_dir.iterdir()):
+        if not d.is_dir():
+            continue
+        if d.name == matched:
+            continue
+        readme = d / "README.md"
+        if not readme.exists():
+            continue
+        try:
+            parts.append(f"# Sibling archetype: {d.name}\n\n{readme.read_text()}")
+        except OSError:
+            continue
+    return "\n\n---\n\n".join(parts)
 
 
-def should_run_self_check(run_dir: Path, proposed_text: str) -> bool:
-    """TEMPORARILY always True — we want empirical data on the self-check's
-    value and cost on every investigation, not just struggling ones. The
-    complexity-gated version is preserved below as reference for when we
-    turn it back on.
-
-    Previous behavior (loops < MAX AND archetype_count >= MIN → skip) is
-    retained in the `_complexity_gate_disabled_fire_always` helper for
-    reference and future re-enable.
-    """
-    return True
-
-
-def _complexity_gate_disabled_fire_always(run_dir: Path, proposed_text: str) -> bool:
-    """Reference implementation of the complexity gate — not wired up.
-
-    Fire the self-check when the investigation is struggling (many
-    hypothesis loops) or the signature's scaffolding is thin (few
-    archetypes). Kept for when we want to re-enable the skip path.
-    """
-    loops = count_hypothesize_loops(proposed_text)
-    if loops >= MAX_LOOPS_BEFORE_SELF_CHECK:
-        return True
+def get_signature_id(run_dir: Path) -> str:
     meta_path = run_dir / "meta.json"
-    signature_id = ""
-    if meta_path.exists():
-        try:
-            signature_id = json.loads(meta_path.read_text()).get("signature_id", "")
-        except (json.JSONDecodeError, OSError):
-            pass
-    archetype_count = signature_archetype_count(signature_id)
-    if archetype_count < MIN_ARCHETYPES_FOR_MATURE_SCAFFOLDING:
-        return True
-    return False
-
-
-# ---------------------------------------------------------------------------
-# Gates 2 + 3: conclusion_checks.json
-# ---------------------------------------------------------------------------
-
-def load_expected_questions() -> dict[str, list[str]]:
-    """Parse the agent-facing prompt to discover expected question IDs per
-    status. Returns {"resolved": [...], "escalated": [...]}."""
-    if not CONCLUSION_CHECKS_PROMPT.exists():
-        return {}
-    text = CONCLUSION_CHECKS_PROMPT.read_text()
-    result: dict[str, list[str]] = {}
-    for match in STATUS_SECTION_RE.finditer(text):
-        status = match.group(1).strip()
-        section = match.group(2)
-        ids = QUESTION_HEADER_RE.findall(section)
-        result[status] = ids
-    return result
-
-
-_NEXT_ACTION_AUTHORING = (
-    "Next action: stay in CONCLUDE, fix conclusion_checks.json, retry the write."
-)
-
-
-def parse_line_range(value: str) -> tuple[int, int] | None:
-    """Parse a `lines` field from a citation: either `"N"` (single line)
-    or `"A-B"` (inclusive range, 1-indexed). Returns (start, end) or None
-    on any parse error (non-integer, reversed range, non-positive)."""
-    if not isinstance(value, str):
-        return None
-    s = value.strip()
-    if not s:
-        return None
-    if "-" in s:
-        parts = s.split("-", 1)
-        try:
-            start = int(parts[0].strip())
-            end = int(parts[1].strip())
-        except ValueError:
-            return None
-    else:
-        try:
-            start = end = int(s)
-        except ValueError:
-            return None
-    if start < 1 or end < start:
-        return None
-    return (start, end)
-
-
-def extract_line_slice(text: str, start: int, end: int) -> str | None:
-    """Return lines [start..end] of `text` joined with newlines (1-indexed,
-    inclusive). Returns None if the range runs off the end of the text."""
-    lines = text.split("\n")
-    if end > len(lines):
-        return None
-    return "\n".join(lines[start - 1:end])
-
-
-def check_conclusion_file(run_dir: Path, investigation_text: str) -> str | None:
-    """Validate conclusion_checks.json shape, question set, and citations.
-
-    Every rejection message ends with an explicit next-action line so the
-    agent knows where to go. All failures here are authoring issues — the
-    agent stays in the current phase and re-issues the write after fixing
-    the JSON. No phase change is needed.
-    """
-    checks_path = run_dir / "conclusion_checks.json"
-    if not checks_path.exists():
-        return (
-            "conclusion_checks.json not found in run directory. Read "
-            "skills/investigate/conclusion_checks.md and write your answers "
-            "to conclusion_checks.json *before* the ## CONCLUDE write. "
-            "Next action: stay in CONCLUDE, author the file, retry the write."
-        )
-
+    if not meta_path.exists():
+        return ""
     try:
-        data = json.loads(checks_path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
+        return json.loads(meta_path.read_text()).get("signature_id", "")
+    except (json.JSONDecodeError, OSError):
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Prompt assembly
+# ---------------------------------------------------------------------------
+
+def assemble_judge_a_prompt(
+    *,
+    alert_text: str,
+    investigation_text: str,
+    salt: str,
+    status: str,
+) -> str:
+    template = JUDGE_A_PROMPT_PATH.read_text()
+    safe_alert = wrap_untrusted(alert_text, "alert-data", salt)
+    safe_log = wrap_untrusted(investigation_text, "investigation-log", salt)
+    mode = "full" if status == "resolved" else "escalation"
+    prompt = template.replace("{alert_data}", safe_alert)
+    prompt = prompt.replace("{investigation_log}", safe_log)
+    prompt = prompt.replace("{judge_mode}", mode)
+    return prompt
+
+
+def assemble_judge_b_prompt(
+    *,
+    alert_text: str,
+    investigation_text: str,
+    matched_archetype_text: str | None,
+    sibling_archetypes_text: str,
+    salt: str,
+    status: str,
+) -> str:
+    template = JUDGE_B_PROMPT_PATH.read_text()
+    safe_alert = wrap_untrusted(alert_text, "alert-data", salt)
+    safe_log = wrap_untrusted(investigation_text, "investigation-log", salt)
+    if matched_archetype_text is not None:
+        safe_arch = wrap_untrusted(matched_archetype_text, "archetype", salt)
+    else:
+        safe_arch = "[No matched_archetype declared in the conclude: block]"
+    if sibling_archetypes_text:
+        safe_siblings = wrap_untrusted(
+            sibling_archetypes_text, "sibling-archetypes", salt
+        )
+    else:
+        safe_siblings = "[No sibling archetypes under this signature]"
+    mode = "full" if status == "resolved" else "escalation"
+    prompt = template.replace("{alert_data}", safe_alert)
+    prompt = prompt.replace("{investigation_log}", safe_log)
+    prompt = prompt.replace("{matched_archetype}", safe_arch)
+    prompt = prompt.replace("{sibling_archetypes}", safe_siblings)
+    prompt = prompt.replace("{judge_mode}", mode)
+    return prompt
+
+
+# ---------------------------------------------------------------------------
+# Gate 2: parallel judge dispatch
+# ---------------------------------------------------------------------------
+
+def run_judges(run_dir: Path, proposed_text: str) -> str | None:
+    """Run Judge A and Judge B in parallel. Return None on pass, an
+    error message describing the FLAGs on fail."""
+    status = extract_status(proposed_text)
+    if status is None:
         return (
-            f"conclusion_checks.json is not valid JSON: {e}. "
-            f"{_NEXT_ACTION_AUTHORING}"
+            "CONCLUDE write is missing a parseable `**Verdict:** resolved|escalated` "
+            "line in the ## CONCLUDE section. Add it per the SKILL.md §CONCLUDE "
+            "template and retry. Next action: stay in CONCLUDE, fix the verdict "
+            "line, retry the write."
         )
 
-    if not isinstance(data, dict):
-        return (
-            "conclusion_checks.json must be a JSON object with 'status' and "
-            f"'checks' fields. {_NEXT_ACTION_AUTHORING}"
-        )
+    conclude_block = extract_conclude_yaml(proposed_text)
+    if conclude_block is None:
+        # Pre-YAML write — defer until the conclude: block is added.
+        return None
 
-    status = data.get("status")
-    if status not in ("resolved", "escalated"):
-        return (
-            f"conclusion_checks.json 'status' must be 'resolved' or "
-            f"'escalated', got {status!r}. {_NEXT_ACTION_AUTHORING}"
-        )
+    matched_archetype = conclude_block.get("matched_archetype")
+    if isinstance(matched_archetype, str) and not matched_archetype.strip():
+        matched_archetype = None
+    if matched_archetype is not None and not isinstance(matched_archetype, str):
+        matched_archetype = None
 
-    checks = data.get("checks")
-    if not isinstance(checks, list):
-        return (
-            f"conclusion_checks.json 'checks' must be a list. "
-            f"{_NEXT_ACTION_AUTHORING}"
-        )
+    signature_id = get_signature_id(run_dir)
+    matched_readme = (
+        load_archetype_readme(signature_id, matched_archetype)
+        if matched_archetype
+        else None
+    )
+    sibling_text = load_sibling_archetypes(signature_id, matched_archetype)
 
-    expected = load_expected_questions()
-    if status not in expected:
-        return (
-            f"conclusion_checks.md does not define a question set for "
-            f"status '{status}'. This is a skill-configuration bug, not an "
-            f"agent issue — escalate to the human operator."
-        )
-    expected_ids = set(expected[status])
+    alert_text = ""
+    alert_path = run_dir / "alert.json"
+    if alert_path.exists():
+        try:
+            alert_text = alert_path.read_text()
+        except OSError:
+            alert_text = ""
 
-    actual_ids: list[str] = []
-    for i, entry in enumerate(checks):
-        if not isinstance(entry, dict):
-            return (
-                f"conclusion_checks.json checks[{i}] must be an object. "
-                f"{_NEXT_ACTION_AUTHORING}"
+    salt = get_run_salt(run_dir)
+
+    prompt_a = assemble_judge_a_prompt(
+        alert_text=alert_text,
+        investigation_text=proposed_text,
+        salt=salt,
+        status=status,
+    )
+    prompt_b = assemble_judge_b_prompt(
+        alert_text=alert_text,
+        investigation_text=proposed_text,
+        matched_archetype_text=matched_readme,
+        sibling_archetypes_text=sibling_text,
+        salt=salt,
+        status=status,
+    )
+
+    results = invoke_judges_parallel([("A", prompt_a), ("B", prompt_b)])
+
+    flags: list[str] = []
+    for label, output, returncode in results:
+        if returncode != 0:
+            flags.append(f"Judge {label} CLI error (rc={returncode}): {output}")
+            continue
+        verdict, reason = parse_verdict(output)
+        if verdict != "PASS":
+            flags.append(
+                f"Judge {label} flagged investigation: {reason}\n\n"
+                f"Full Judge {label} output:\n{output}"
             )
-        qid = entry.get("question_id")
-        if not qid:
-            return (
-                f"conclusion_checks.json checks[{i}] is missing 'question_id'. "
-                f"{_NEXT_ACTION_AUTHORING}"
-            )
-        actual_ids.append(qid)
 
-    actual_set = set(actual_ids)
-    missing = expected_ids - actual_set
-    extra = actual_set - expected_ids
-    if missing:
-        return (
-            f"conclusion_checks.json is missing required question(s) for "
-            f"status={status}: {sorted(missing)}. {_NEXT_ACTION_AUTHORING}"
+    if flags:
+        return "\n\n".join(flags) + (
+            "\n\nNext action: stay in CONCLUDE, address the FLAG(s) above by "
+            "either revising the investigation log (additional ANALYZE, a new "
+            "lead, or downgrading a hypothesis grade) or escalating instead of "
+            "resolving, then retry the write."
         )
-    if extra:
-        return (
-            f"conclusion_checks.json contains unexpected question(s): "
-            f"{sorted(extra)}. Valid for status={status}: {sorted(expected_ids)}. "
-            f"{_NEXT_ACTION_AUTHORING}"
-        )
-
-    # Gate 3: citation resolution.
-    # Each citation is `{"lines": "N" or "A-B", "contains": "verbatim token"}`.
-    # The hook checks (a) the range parses and is within file bounds,
-    # (b) `contains` is a plain substring of the sliced line range.
-    max_line = investigation_text.count("\n") + 1
-    for entry in checks:
-        qid = entry["question_id"]
-        answer = entry.get("answer", "")
-        if not isinstance(answer, str) or not answer.strip():
-            return (
-                f"conclusion_checks.json question '{qid}' has empty or "
-                f"missing 'answer'. {_NEXT_ACTION_AUTHORING}"
-            )
-        citations = entry.get("citations")
-        if not isinstance(citations, list) or not citations:
-            return (
-                f"conclusion_checks.json question '{qid}' must have a "
-                f"non-empty 'citations' list. {_NEXT_ACTION_AUTHORING}"
-            )
-        for j, citation in enumerate(citations):
-            if not isinstance(citation, dict):
-                return (
-                    f"conclusion_checks.json question '{qid}' citation[{j}] "
-                    f"must be an object with 'lines' and 'contains' fields. "
-                    f"{_NEXT_ACTION_AUTHORING}"
-                )
-            lines_value = citation.get("lines")
-            rng = parse_line_range(lines_value) if isinstance(lines_value, str) else None
-            if rng is None:
-                return (
-                    f"conclusion_checks.json question '{qid}' citation[{j}] "
-                    f"'lines' must be a string like \"64\" or \"62-68\" "
-                    f"(1-indexed, start <= end). Got {lines_value!r}. "
-                    f"{_NEXT_ACTION_AUTHORING}"
-                )
-            start, end = rng
-            slice_text = extract_line_slice(investigation_text, start, end)
-            if slice_text is None:
-                return (
-                    f"conclusion_checks.json question '{qid}' citation[{j}] "
-                    f"'lines' range {start}-{end} is out of bounds "
-                    f"(investigation.md has {max_line} lines). "
-                    f"{_NEXT_ACTION_AUTHORING}"
-                )
-            contains = citation.get("contains")
-            if not isinstance(contains, str) or not contains.strip():
-                return (
-                    f"conclusion_checks.json question '{qid}' citation[{j}] "
-                    f"'contains' must be a non-empty string. "
-                    f"{_NEXT_ACTION_AUTHORING}"
-                )
-            if contains not in slice_text:
-                preview = contains[:80] + ("..." if len(contains) > 80 else "")
-                return (
-                    f"conclusion_checks.json question '{qid}' citation[{j}] "
-                    f"'contains' text not found within lines {start}-{end}: "
-                    f"{preview!r}. The token must be a VERBATIM substring of "
-                    f"the cited line range — copy-paste directly from "
-                    f"investigation.md, including backticks and punctuation. "
-                    f"{_NEXT_ACTION_AUTHORING}"
-                )
-
     return None
 
 
@@ -519,16 +447,9 @@ def main():
         errors.append(err)
 
     if not is_screen_resolved(proposed_text):
-        # Fire the self-check when either (a) complexity says we need it,
-        # or (b) the agent authored conclusion_checks.json defensively — in
-        # the second case we validate what they wrote even though we would
-        # have exempted a missing file.
-        run_gate = should_run_self_check(run_dir, proposed_text)
-        file_present = (run_dir / "conclusion_checks.json").exists()
-        if run_gate or file_present:
-            err = check_conclusion_file(run_dir, proposed_text)
-            if err:
-                errors.append(err)
+        err = run_judges(run_dir, proposed_text)
+        if err:
+            errors.append(err)
 
         err = check_frontier_closure(proposed_text)
         if err:

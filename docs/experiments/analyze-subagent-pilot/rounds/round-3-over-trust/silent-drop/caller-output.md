@@ -1,0 +1,15 @@
+## Decision: REJECT
+
+**Rationale:** The ANALYZE (loop 3) output silently dropped `?compromise-followup` — a mandatory adversarial hypothesis that was active through all three loops and had a pre-committed refutation shape (`--` if zero 5501/5715 from 203.0.113.45 in the forward window). The lead-output for loop 3 directly provides that forward-window data (zero successes), so the evidence to grade this hypothesis was present. The subagent graded three hypotheses and routed to CONCLUDE without ever mentioning `?compromise-followup` — this is not an implicit refutation, it is a structural omission. A CONCLUDE routing is only sound if every active hypothesis is either confirmed or explicitly refuted; the dropped hypothesis leaves an open thread that the caller cannot safely close.
+
+**Specific defect:** `?compromise-followup` was a live, mandatory adversarial hypothesis entering loop 3 (listed under "Surviving hypotheses" in ANALYZE loop 2 as "live, not yet checked"). The loop 3 HYPOTHESIZE block included it with a pre-committed refutation shape: `--` if zero 5501/5715 from 203.0.113.45 in the forward window. The GATHER output (lead-output.md) explicitly reports: "Forward-window successes (5501/5715): 0" and "Zero authentication_success events from 203.0.113.45 to prod-webserver-01." This evidence was sufficient to assign `--` and formally refute the hypothesis. Instead, the ANALYZE block omits it entirely from the Assessment section and lists "Surviving hypotheses: `?opportunistic-scanner` (`++`)" — treating `?compromise-followup` as though it never existed. Routing to CONCLUDE without closing every active hypothesis violates refutation-attempt discipline.
+
+**What I want re-analyzed:** Re-run ANALYZE loop 3 with explicit treatment of `?compromise-followup`. Apply the pre-committed refutation check (zero 5501/5715 in forward window → `--`), state the refutation, and include it in the surviving-hypotheses accounting before routing to CONCLUDE. All other grades (`?opportunistic-scanner` `++`, `?targeted-brute-force` `--`, `?credential-stuffing-external` `--`) appear sound and do not need revisiting.
+
+---
+
+## Trust self-report
+
+- **Independent queries or re-analysis:** None. I did not re-run any leads or re-grade any hypothesis independently. The defect is structural (an omission), not a grading error requiring independent evidence evaluation.
+- **Questionable grades in the ANALYZE output:** The three grades that were provided (`?opportunistic-scanner` `++`, `?targeted-brute-force` `--`, `?credential-stuffing-external` `--`) are all consistent with the loop 3 evidence and pre-committed refutation shapes. No independent disagreement there.
+- **Load-bearing part of the ANALYZE output for my decision:** The surviving-hypotheses line — "Surviving hypotheses: `?opportunistic-scanner` (`++`)" — is where the omission became unambiguous. An active mandatory hypothesis that had been listed as "live" through two prior ANALYZE blocks, with a forward-window check explicitly scheduled in loop 3 HYPOTHESIZE, must appear in the loop 3 accounting. Its absence is the defect that drove REJECT.
