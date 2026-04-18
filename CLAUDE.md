@@ -162,12 +162,49 @@ pytest soc-agent/tests/test_e2e_live.py -m "llm and live"  # Live Wazuh
 
 ## Investigation Flow Language
 
-The agent uses a structured vocabulary for investigations:
+**Full spec:** `docs/investigation-language.md` (v2.6, implemented). CLI query tool: `soc-agent/scripts/invlang/cli.py`.
 
+### Purpose
+
+The investigation language is a structured YAML schema for recording security investigations as **graph traversals**. Each investigation produces a companion document — a machine-readable + human-readable audit trail of every hypothesis, lead, observation, and weight update from alert to disposition. Companions are designed to be corpus-queryable: which hypothesis patterns recur, which leads are most discriminating, where investigations stall.
+
+### Philosophy
+
+An investigation maintains two layers: a **confirmed graph** (vertices/edges backed by SIEM events, runtime audit, or authoritative sources — append-only, never mutated) and a **proposed frontier** (one candidate upstream extension per active hypothesis). Leads collapse the frontier: each lead is an edge measurement that either materializes proposed elements into the confirmed graph or refutes them.
+
+Investigations traverse **backward** — from the observed alert toward upstream causes — halting when the frontier is empty or a **trust root** is reached (a vertex with no accessible upstream). The agent is not allowed to pre-commit to deep causal narratives; hypotheses are lean (1–2 predictions, the minimum that discriminates between competing explanations), deepened only when evidence forces it.
+
+Inline vocabulary used in `investigation.md`:
 - **Hypotheses** prefixed with `?` — e.g., `?monitoring-probe`, `?brute-force`
 - **Leads** — evidence-gathering actions that discriminate between hypotheses
 - **Assessments** — `++` (strongly supports), `+` (weakly supports), `-` (weakly refutes), `--` (strongly refutes)
 - **Trace** — compressed investigation path: `lead1(result)→lead2(result)→disposition:hypothesis`
+
+### Companion structure (top-level)
+
+```yaml
+prologue:       # CONTEXTUALIZE: vertices + edges derived from the alert
+  vertices: []
+  edges: []
+
+hypothesize:    # HYPOTHESIZE: initial proposed frontier (omit for SCREEN-matched cases)
+  hypotheses: []
+
+gather:         # GATHER + ANALYZE: ordered lead blocks
+  - lead: {...}
+
+conclude:       # CONCLUDE: termination category, disposition, confidence, matched_archetype
+  termination:
+    category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
+  disposition: benign | true_positive | unclear
+  confidence: high | medium | low
+  matched_archetype: <name> | null
+```
+
+The key invariants enforced by the validator (18 rules in total — see spec §Validator rules):
+- **Edge authority** — `++`/`--` resolutions must cite at least one `siem-event`, `runtime-audit`, or `authoritative-source` edge.
+- **Append-only** — no existing record is ever mutated; decomposition adds sub-vertices, attribution adds `identified_as` links.
+- **Mechanical leads stay within their data source** — a lead's observations contain only entities the queried system directly names by native identity.
 
 ## Key Design Patterns
 
