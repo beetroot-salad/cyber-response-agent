@@ -47,7 +47,11 @@ services:
       # offline agent in Fleet.
       - target-endpoint-elastic-state:/var/lib/elastic-agent
     networks:
-      - response-network
+      response-network:
+        # Pinned so monitoring-host's 172.22.0.10 pin can't collide with an
+        # auto-assigned target-endpoint on recreate. .13 matches the historical
+        # auto-assignment referenced in alert corpora.
+        ipv4_address: 172.22.0.13
 
   # Monitoring Host (generates realistic SSH traffic against target-endpoint
   # from a stable "internal monitoring" IP — used as SCREEN-pattern ground

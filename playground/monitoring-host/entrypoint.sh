@@ -46,7 +46,7 @@ TOKEN_FILE=/fleet-shared/enrollment-token
 
 echo ""
 echo "Monitoring Host Ready"
-echo "  Cron: ✓ monitoring_probe every 10 min → target-endpoint"
+echo "  Cron: ✓ nagios (5m) + zabbix (10m) + healthcheck (15m) → target-endpoint"
 echo "  Bait: manual trigger via docker exec"
 echo "========================================="
 echo ""

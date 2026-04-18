@@ -36,7 +36,9 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 | Component | Path | Purpose |
 |-----------|------|---------|
 | **Investigate Skill** | `soc-agent/skills/investigate/SKILL.md` | Entry point + investigation loop (merged skill) |
-| **Screen Prompt** | `soc-agent/skills/investigate/screen.md` | Subagent prompt for fast pattern matching (SCREEN phase) |
+| **Screen Subagent** | `soc-agent/agents/screen.md` | Plugin-registered custom subagent for fast pattern matching (SCREEN phase) |
+| **Archetype-scan Subagent** | `soc-agent/agents/archetype-scan.md` | Plugin-registered custom subagent for CONTEXTUALIZE archetype ranking |
+| **Ticket-context Subagent** | `soc-agent/agents/ticket-context.md` | Plugin-registered custom subagent for CONTEXTUALIZE 4-hour correlation |
 | **Import Resolver** | `soc-agent/scripts/resolve_imports.py` | `!command` preprocessing: resolves signature knowledge |
 | **Validate Report Hook** | `soc-agent/hooks/scripts/validate_report.py` | PostToolUse hook (Write\|Edit): combined Tier 1 + Tier 2 validation |
 | **Judge Prompt** | `soc-agent/hooks/scripts/judge_prompt.md` | Prompt template for Tier 2 judge (5 criteria, two modes) |

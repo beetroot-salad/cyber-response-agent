@@ -1,7 +1,8 @@
 ---
-subagent_type: general-purpose
+name: ticket-context
+description: Mechanical 4-hour correlation query — returns repeats and related alerts grouped by shared entities. Used by the investigate skill's CONTEXTUALIZE phase. Structured counts only, no characterization.
+tools: Read, Bash, Grep, Glob
 model: haiku
-description: ticket-context for {identifier}
 ---
 
 # Ticket Context: Recent Correlation
@@ -82,7 +83,7 @@ Partial failure (some queries succeeded): populate what you have, and add `queri
 
 ## Output format
 
-Respond with EXACTLY this YAML block, no prose before or after:
+Respond with EXACTLY this YAML block, no prose before or after, then stop:
 
 ```yaml
 ticket_context:
@@ -117,3 +118,5 @@ ticket_context:
 ```
 
 Empty sections → `[]`. No narrative fields, no `reasoning`, no `situation`, no threat language anywhere.
+
+You have no Write/Edit authority — you cannot modify `investigation.md` or any file. Return the YAML; the main agent persists it.

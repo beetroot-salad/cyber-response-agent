@@ -47,18 +47,23 @@ Returns: { approved: bool, probe_name, cadence, scope, owner } or null
 
 ## Playground Deployment
 
-| Source | Target | Usernames | Cadence | Approved |
-|--------|--------|-----------|---------|----------|
-| `172.22.0.10` (monitoring-host) | `target-endpoint` | `nagios`, `zabbix`, `prometheus`, `healthcheck`, `monitorprobe`, `sensu`, `testuser`, `probe` | single attempt every ~10 min | yes |
+| Source | Target | Username | Cadence | Approved |
+|--------|--------|----------|---------|----------|
+| `172.22.0.10` (monitoring-host) | `target-endpoint` | `nagios` | single attempt every 5 min | yes |
+| `172.22.0.10` (monitoring-host) | `target-endpoint` | `zabbix` | single attempt every 10 min | yes |
+| `172.22.0.10` (monitoring-host) | `target-endpoint` | `healthcheck` | single attempt every 15 min | yes |
+| `172.22.0.10` (monitoring-host) | `target-endpoint` | any other username | any | **no** |
 | `172.22.0.10` | any other target | any | any | **no** |
 | any other source | `target-endpoint` | any | any | **no** |
 
-The monitoring-host runs `playground/monitoring-host/workloads/monitoring_probe.sh`
-on a cron, producing a single-attempt SSH probe with one of the
-monitoring-pattern usernames against target-endpoint. Anything else from
-this source — in particular the manually-triggered multi-attempt variants
-under `playground/monitoring-host/workloads/monitoring_bait.sh` — is
-**not** sanctioned and must not match this anchor.
+The monitoring-host runs `playground/monitoring-host/workloads/monitoring_probe.sh <username>`
+on three independent cron entries — one per tool, each with its own stable
+username and cadence. Real monitoring deployments pin one username per tool
+(Nagios uses `nagios`, Zabbix uses `zabbix`, etc.); rotating usernames from
+a single source would violate the archetype shape and break repeats-clustering.
+Anything else from this source — in particular the manually-triggered
+multi-attempt variants under `playground/monitoring-host/workloads/monitoring_bait.sh` —
+is **not** sanctioned and must not match this anchor.
 
 ### Grounding the monitoring-host as a live, operational source
 

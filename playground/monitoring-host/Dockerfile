@@ -22,10 +22,23 @@ RUN curl -fsSL https://artifacts.elastic.co/downloads/beats/elastic-agent/elasti
 COPY workloads/ /opt/workloads/
 RUN chmod +x /opt/workloads/*.sh
 
-# Monitoring probe runs every 10 min. Creates steady-state noise of routine
-# health-check 5710 alerts against target-endpoint. Bait workload (multi-attempt
-# variant) is NOT in cron — it's triggered on demand per eval scenario.
-RUN echo "*/10 * * * * root /opt/workloads/monitoring_probe.sh >> /var/log/monitoring.log 2>&1" > /etc/cron.d/monitoring && \
+# Three independent monitoring tools probe target-endpoint on their own
+# cadences, each with a stable username. This matches real orgs that run
+# multiple health-check tools in parallel, and gives the agent's screen /
+# ticket-context subagents clean repeats-clusters to work with (one cluster
+# per (srcip, srcuser) triple rather than a single rotating one).
+#
+# Cadences offset to reduce exact-minute collisions:
+#   nagios      every  5 min, starting at :00  → 12 alerts/hour
+#   zabbix      every 10 min, starting at :02  →  6 alerts/hour
+#   healthcheck every 15 min, starting at :07  →  4 alerts/hour
+#
+# Bait workload (multi-attempt variant) is NOT in cron — triggered on demand.
+RUN { \
+        echo "*/5 * * * * root /opt/workloads/monitoring_probe.sh nagios >> /var/log/monitoring.log 2>&1"; \
+        echo "2-59/10 * * * * root /opt/workloads/monitoring_probe.sh zabbix >> /var/log/monitoring.log 2>&1"; \
+        echo "7-59/15 * * * * root /opt/workloads/monitoring_probe.sh healthcheck >> /var/log/monitoring.log 2>&1"; \
+    } > /etc/cron.d/monitoring && \
     chmod 0644 /etc/cron.d/monitoring && \
     touch /var/log/monitoring.log
 
