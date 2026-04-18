@@ -1,7 +1,9 @@
 # Investigation Language
 
-**Status:** Implemented. Spec v2.6.
+**Status:** Implemented. Spec v2.8.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
+
+**v2.8 delta:** legitimacy as first-class edge attribute (`edge.legitimacy_resolutions`) driven by hypothesis-declared contracts (`hypothesis.legitimacy_contract`); `attribute_updates` extended to edge targets; validator rules #19–#22; supersedes the former "maintain adversarial hypothesis until `--`" bookkeeping rule.
 
 A structured schema for recording security investigations as graph
 traversals. Designed for SOC-level alert triage: the agent works
@@ -101,6 +103,51 @@ across cases that should match the same retrieval pattern, creates
 prediction IDs for facts not yet in evidence, and makes weight
 accumulation harder. Refine into more specific children only when
 evidence forces the distinction.
+
+### Legitimacy as edge attribute
+
+Legitimacy — is this edge *authorized*? — is a property of the
+(`source_vertex`, `edge`, `target_vertex`, `authority`) quadruple at
+time T. The same `read` edge from a session to a storage object is
+authorized when the session's identity carries the required role and
+unauthorized when it does not. The mechanism is identical; only the
+verdict differs. Legitimacy therefore lives **on the edge**, not as a
+parallel hypothesis.
+
+A hypothesis whose disposition depends on authorization declares a
+`legitimacy_contract` naming the edge(s) whose verdict is load-bearing
+and the authority that resolves them. When the resolving lead fires,
+the edge gains a `legitimacy_resolutions` entry with the verdict and a
+back-reference to the contract. Append-only is preserved by backward
+traversal: the hypothesis is written once and never mutated; the
+materialized edge points backward via `fulfills_contract`.
+
+**Three shapes of adversariness.** Not every adversarial question is a
+legitimacy question:
+
+- **Mechanism-level** — enumerate `adversary-controlled` alongside
+  benign classifications when they predict observationally distinct
+  world-states. Normal mechanism enumeration; no contract needed.
+- **Attribute-level (policy authorization)** — same mechanism, same
+  observables, but an authority would answer "allowed" differently
+  depending on the source identity. This is the legitimacy contract
+  case. Common.
+- **Future-edge** — the adversarial signal is a separate downstream
+  edge (a failed-auth alert followed by an unexpected success). That
+  is a topology question; write it as its own hypothesis attached to
+  the hypothetical future edge.
+
+**Contracts answer policy, not integrity.** A contract asks "is this
+edge allowed by the relevant authority?" It does not ask "was this
+edge actually executed as it appears?" Session hijack, token theft,
+MFA bypass, process-hollowing, tool-masquerade — all integrity
+questions — are mechanism-level discriminations, not contracts. By
+construction, if AuthN was bypassed, the IAM anchor still says
+"authorized" because the session looks legitimate to it. Integrity is
+resolved by behavioral observation (impossible travel, device
+fingerprint, anomalous timing), not by anchor lookup. Contracts
+therefore bottom out at the authentication edge; below that is
+mechanism enumeration.
 
 ### Leads as graph operations
 
@@ -207,6 +254,7 @@ edge:
         | client-asserted | inferred-structural
     source: <string>
     trust_chain: []                # omit if empty
+  legitimacy_resolutions: []       # omit when no contract resolves against this edge (§Legitimacy)
   concerns: []                     # omit if empty
 ```
 
@@ -217,6 +265,35 @@ weight. `client-asserted` and `inferred-structural` cap at `+`/`-`.
 
 A `client-asserted` edge on a verified trust chain gets effective
 `authoritative-source` authority; record the chain in `trust_chain`.
+
+**`legitimacy_resolutions` is a plural list.** Each entry records one
+contract's verdict:
+
+```yaml
+legitimacy_resolutions:
+  - verdict: authorized | unauthorized | indeterminate
+    anchor_kind: <string>           # iam-policy | data-classification-policy | oncall-schedule | deploy-runs | image-baseline | ...
+    anchor_query: <string>          # short human-readable record of what was asked
+    as_of: <iso>                    # timestamp the answer is authoritative ABOUT
+    resolved_by_lead: l-{id}
+    fulfills_contract: h-{id}.lc{n} # back-reference to the declaring hypothesis's contract entry
+    concerns: []                    # omit if empty; snapshot freshness, partial anchor coverage, etc.
+```
+
+Plural because real edges often face parallel policy layers — IAM ×
+data-classification × time-of-day — each resolved independently by a
+different anchor, any one of which can deny. Do not collapse layered
+policies into a single entry; each contract gets its own resolution.
+
+**When `legitimacy_resolutions` appears.** Only on edges that fulfill
+a declared contract. Edges not referenced by any contract omit the
+field entirely. Do not write speculative verdicts — that is
+verdict-on-everything clutter.
+
+**Append-only on existing edges.** If a contract resolves against an
+already-confirmed edge (not the proposed edge of its hypothesis), the
+resolving lead writes the verdict via `attribute_updates` targeting
+the edge — not by mutating the original edge record.
 
 **Per-question authority** (whether a source covers all aspects of
 the question being asked) is a property of the lead, not the edge.
@@ -246,6 +323,8 @@ hypothesis:
     - id: r1
       claim: "<observation that would contradict a core prediction>"
 
+  legitimacy_contract: []               # optional; present when disposition depends on policy authorization (§Legitimacy)
+
   concerns: []                          # residuals, unfalsifiability caveats; omit if empty
   weight: null | "++" | "+" | "-" | "--"
   weight_history: []                    # omit until transitions exist
@@ -268,6 +347,39 @@ core discriminating claim. Add a second only when two independent
 facts each partially confirm the hypothesis and neither alone
 suffices. Three or more predictions usually signals either a
 non-lean hypothesis or a refinement that should be deferred.
+
+**Legitimacy contracts** are declared on the hypothesis when
+disposition hinges on an authorization lookup (§Legitimacy). Each
+contract entry:
+
+```yaml
+legitimacy_contract:
+  - id: lc1                             # local to hypothesis; ^lc\d+$
+    edge_ref: proposed | e-{id}         # the hypothesis's proposed_edge, or an existing confirmed edge
+    anchor_kind: <string>               # which authority resolves it
+    predicate: "<natural-language claim — authorized iff ...>"
+    on_unauthorized: escalate
+    on_indeterminate: escalate
+    concerns: []                        # optional; e.g., anchor known to be behind preflight
+```
+
+The predicate is natural language. Any AND/OR combination is
+permitted — no structured DSL. The agent evaluates the predicate
+against anchor data when the resolving lead fires. Declare contracts
+only when the mechanism is consistent with both benign and adversarial
+readings depending on authorization; when the adversarial reading IS
+the mechanism (e.g., `?adversary-controlled-process`), skip the
+contract — the classification already carries the claim.
+
+**Behavioral-consistency prediction (optional).** A contract resolved
+`authorized` establishes policy compliance, not integrity. The
+hypothesis MAY carry one baseline-consistency prediction — positive
+("expect corroborating activity X") or negative ("expect NOT to see
+>Nσ volume deviation / access outside baseline file set / concurrent
+geo-distant sessions"). Gates: baseline queryable, scoped to the
+alert's entities, weight-sensitive. Severity caps at `moderate`.
+Unavailable baseline → `indeterminate` in `concerns`; do not
+confabulate.
 
 ### Lead
 
@@ -306,8 +418,8 @@ gather:
       concerns: []                      # omit if empty
 
       outcome:
-        attribute_updates:              # optional — enriches existing confirmed vertices
-          - vertex: v-{id}
+        attribute_updates:              # optional — enriches existing confirmed vertices OR edges
+          - target: v-{id} | e-{id}     # vertex or edge id; exactly one
             updates: {}
 
         observations:
@@ -388,11 +500,13 @@ lead can mix mechanical fields (UID, count) with interpretive ones
 the specific fields that carry the judgment.
 
 **`attribute_updates` vs `observations`.** Use `attribute_updates`
-when the lead enriches an already-confirmed vertex without new
-topology (e.g., a classification lookup adds `classification:
-monitoring-host` to an existing endpoint vertex). Use `observations`
-when new vertices or edges enter the confirmed graph. Both may appear
-in the same outcome.
+when the lead enriches an already-confirmed vertex or edge without
+new topology (e.g., a classification lookup adds `classification:
+monitoring-host` to an existing endpoint vertex; a legitimacy
+resolution adds a `legitimacy_resolutions` entry to an existing edge).
+Use `observations` when new vertices or edges enter the confirmed
+graph. Both may appear in the same outcome. Each `attribute_updates`
+entry targets exactly one of `target: v-{id}` or `target: e-{id}`.
 
 **`trust_anchor_result`.** Include whenever an authority anchor was
 queried. Five fields: anchor identity (`anchor_id`, `kind`), verdict
@@ -447,6 +561,18 @@ conclude:
   edges cannot be tested with available tools. `ceiling_test`
   records the out-of-band step that would resolve it.
 - `exhaustion-escalation` — loop budget exhausted.
+
+**Legitimacy-gated disposition.** `disposition: benign` requires that
+every `legitimacy_contract` on every confirmed-weight hypothesis
+(weight `++` or `+`, status `confirmed` or `active`) has at least one
+fulfilling `legitimacy_resolutions` entry with `verdict: authorized`
+on a contracted edge. Any contract that is unfulfilled, or whose
+fulfillment carries `verdict: indeterminate`, caps disposition at
+`unclear` with `status: escalated`. Any `verdict: unauthorized` forces
+`status: escalated` with disposition ∈ {`unclear`, `true_positive`}
+depending on remaining evidence. This replaces the former "maintain
+adversarial hypothesis until `--`" bookkeeping rule; teeth are
+structural via validator rule #21.
 
 ---
 
@@ -624,3 +750,28 @@ coverage.
     lead in the same companion, the follower's `name` should match
     at least one `advance_to` value — otherwise a route-compliance
     warning is emitted.
+
+19. **Legitimacy contract `edge_ref` resolves.** Every
+    `legitimacy_contract[].edge_ref` is either the literal `proposed`
+    (referring to the hypothesis's own `proposed_edge`) or an `e-*`
+    id that exists in the companion.
+
+20. **Legitimacy back-reference resolves.** Every
+    `legitimacy_resolutions[].fulfills_contract` of the form
+    `h-{id}.lc{n}` points to an existing hypothesis whose
+    `legitimacy_contract` contains an entry with that id.
+
+21. **Legitimacy-gated disposition.** A `conclude.disposition: benign`
+    requires every `legitimacy_contract` across all confirmed-weight
+    hypotheses (weight `++` or `+`, status `confirmed` or `active`)
+    to have at least one fulfilling `legitimacy_resolutions` entry
+    with `verdict: authorized`. Unfulfilled contracts, or fulfillments
+    with `verdict: indeterminate`, force `status: escalated` and
+    disposition ∈ {`unclear`}. Any `verdict: unauthorized` forces
+    `status: escalated` with disposition ∈ {`unclear`, `true_positive`}.
+    Replaces the former "maintain adversarial hypothesis until `--`"
+    bookkeeping rule.
+
+22. **Attribute-update target shape.** Every `attribute_updates` entry
+    has exactly one of `target: v-{id}` or `target: e-{id}`, and the
+    id exists in the companion.

@@ -40,6 +40,34 @@ Schema changes (see `docs/investigation-language.md` schema delta — drafted al
 - Multi-anchor contracts? — Natural language predicate; any AND/OR combination. LLM evaluates.
 - `indeterminate` semantics? — Caps at escalate; structural via validator.
 - `fulfills_contract` back-reference explicit or derivable? — Explicit. Enables validator checks without graph traversal.
+- Singular vs plural edge verdicts? — Plural (`legitimacy_resolutions: [...]`). Real case is parallel policy layers on one edge (IAM × data-classification × time-of-day), not compromise chains.
+- Legitimacy contracts for session-hijack / forgery? — No. Contracts answer policy-authorization questions only. Integrity/forgery questions are mechanism-level — enumerate them as hypotheses on the `authenticated_as` edge (`?normal-authn` vs `?hijacked-session`), discriminated by behavioral observation (impossible travel, device-fingerprint shift, MFA anomaly). Contracts bottom out at the AuthN edge; below that is mechanism.
+
+**Behavioral-consistency prediction (opt-in addition to hypothesis, no schema extension):**
+
+A legitimacy contract resolved `authorized` establishes policy compliance, not integrity. The compromised-credential case (policy says yes, pattern says off) needs a third check. Rather than schematize it, extend the hypothesis-prediction guidance: when baseline data exists, the agent MAY add a single baseline-consistency prediction using the existing `predictions`/`refutation_shape` machinery.
+
+Gates — all three must hold before writing the prediction:
+1. Baseline data for the identity is queryable (not a new/rare identity; not a by-design-no-baseline account like break-glass).
+2. Prediction is scoped to the alert's entities and window — not a broad anomaly scan. Threat hunting is explicitly out of scope.
+3. Outcome is weight-sensitive — if already at `++` or `--` on other evidence, skip it.
+
+Severity cap: baseline-consistency leads default to `moderate` severity (one-step movement, cap at `+`/`-`). Never `severe` — identity patterns drift and "looks consistent" is easy by coincidence. If baseline is unavailable, write the prediction anyway, note in `concerns` that baseline was not queryable, and let the verdict float to `indeterminate`. Do not confabulate baselines.
+
+**Schema changes (finalized):**
+
+1. `hypothesis.legitimacy_contract: [...]` — optional list; per-entry `{id, edge_ref, anchor_kind, predicate, on_unauthorized, on_indeterminate, concerns}`.
+2. `edge.legitimacy_resolutions: [...]` — optional plural list; per-entry `{verdict, anchor_kind, anchor_query, as_of, resolved_by_lead, fulfills_contract, concerns}`.
+3. `lead.outcome.attribute_updates[].target: v-{id} | e-{id}` — extended from vertex-only to accept edge targets.
+4. Validator rules #19–#22 enforcing edge_ref resolution, back-reference resolution, legitimacy-gated disposition, and attribute-update target shape.
+
+**Guidance changes:**
+
+- SKILL.md §HYPOTHESIZE: drop the "parallel adversarial hypothesis" rule; replace with the three-shape decomposition (mechanism / attribute / future-edge) and gates for optional behavioral-consistency predictions.
+- SKILL.md operating principle #4: drop "maintain adversarial hypothesis until `--`"; replace with pointer to legitimacy contracts and the policy-vs-integrity boundary.
+- docs/investigation-language.md: new §Legitimacy-as-edge-attribute subsection under Philosophy; new `legitimacy_contract`/`legitimacy_resolutions` fields in §Hypothesis and §Edge; validator rules #19–#22; commentary establishing contracts = policy, mechanism = integrity, and contracts bottom out at AuthN.
+
+See `docs/experiments/hypothesize-subagent-v2/schema-delta-legitimacy.md` for the full draft; v2.8 spec being applied inline to `docs/investigation-language.md`.
 
 **Why it's a blocker.** The hypothesize-subagent v2 pilot (April 2026) and the rule-100001 playbook revision both surfaced this: forcing `?compromise-followup` as a seed makes clean mechanism enumeration impossible. Until the rule is reframed, every playbook rewrite either violates the rule (cleaner but non-compliant) or inflates the hypothesis space (compliant but ugly). For the rule-100001 revision we chose the former pragmatically; the validator does not yet enforce the adversarial-hypothesis rule, so there is no immediate break. But the inconsistency is now visible in the seed and will confuse the subagent extraction work.
 
