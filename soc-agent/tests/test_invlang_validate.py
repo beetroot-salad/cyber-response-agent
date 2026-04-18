@@ -28,6 +28,13 @@ from hooks.scripts.invlang_validate import (
     _check_lead_predictions,
     _check_route_compliance,
     _check_append_only,
+    _check_prediction_coverage,
+    _check_partial_authority_cap,
+    _check_prediction_lifecycle,
+    _check_rollup_parent_weight,
+    _check_lead_dedup_warnings,
+    _check_silent_empty_result_warnings,
+    _check_tool_audit_cross_ref_warnings,
     _merge_blocks,
     collect_warnings,
     YAML_BLOCK_RE,
@@ -595,6 +602,434 @@ class TestCollectWarnings:
         warnings = collect_warnings(text)
         assert warnings
         assert "actual-next" in warnings[0]
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_append_only
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_prediction_coverage (rule 3 / spec-rule 6)
+# ---------------------------------------------------------------------------
+
+
+def _coverage_fixture(
+    predictions: list[str],
+    resolutions: list[tuple[str, list[str]]],
+) -> dict:
+    """Build a merged companion with one hypothesis and N resolutions.
+
+    resolutions is a list of (after_weight, matched_prediction_ids).
+    """
+    return {
+        "hypothesize": {
+            "hypotheses": [{
+                "id": "h-001",
+                "name": "?test",
+                "predictions": [{"id": p, "claim": f"claim {p}"} for p in predictions],
+            }],
+        },
+        "gather": [{
+            "id": f"l-00{i+1}", "loop": 1, "name": f"lead-{i+1}", "target": "v-001",
+            "query_details": {}, "outcome": {},
+            "resolutions": [{
+                "hypothesis": "h-001", "after": after,
+                "matched_prediction_ids": ids, "supporting_edges": [],
+            }],
+        } for i, (after, ids) in enumerate(resolutions)],
+    }
+
+
+class TestCheckPredictionCoverage:
+    def test_pp_full_coverage_passes(self):
+        merged = _coverage_fixture(["p1", "p2"], [("++", ["p1", "p2"])])
+        assert _check_prediction_coverage(merged) == []
+
+    def test_pp_partial_coverage_fails(self):
+        merged = _coverage_fixture(["p1", "p2"], [("++", ["p1"])])
+        errors = _check_prediction_coverage(merged)
+        assert errors
+        assert "p2" in errors[0]
+        assert "++" in errors[0]
+
+    def test_pp_across_multiple_resolutions_unions(self):
+        merged = _coverage_fixture(
+            ["p1", "p2"],
+            [("+", ["p1"]), ("++", ["p2"])],
+        )
+        # Union across both resolutions covers {p1, p2} — the ++ is valid.
+        assert _check_prediction_coverage(merged) == []
+
+    def test_plus_does_not_require_coverage(self):
+        merged = _coverage_fixture(["p1", "p2"], [("+", ["p1"])])
+        assert _check_prediction_coverage(merged) == []
+
+    def test_hypothesis_with_no_predictions_is_skipped(self):
+        merged = _coverage_fixture([], [("++", [])])
+        assert _check_prediction_coverage(merged) == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_partial_authority_cap (rule 6)
+# ---------------------------------------------------------------------------
+
+
+def _partial_authority_fixture(after: str, supporting_edges: list[str]) -> dict:
+    return {
+        "gather": [{
+            "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+            "query_details": {},
+            "outcome": {
+                "trust_anchor_result": {
+                    "anchor_id": "approved-sources",
+                    "kind": "org-authority",
+                    "result": "confirmed",
+                    "as_of": "2026-04-17T00:00:00Z",
+                    "authority_for_question": "partial",
+                },
+                "observations": {"vertices": [], "edges": []},
+            },
+            "resolutions": [{
+                "hypothesis": "h-001", "after": after,
+                "matched_prediction_ids": [], "matched_refutation_ids": [],
+                "supporting_edges": supporting_edges,
+            }],
+        }],
+    }
+
+
+class TestCheckPartialAuthorityCap:
+    def test_plus_with_partial_anchor_passes(self):
+        merged = _partial_authority_fixture("+", [])
+        assert _check_partial_authority_cap(merged) == []
+
+    def test_pp_with_partial_anchor_only_fails(self):
+        merged = _partial_authority_fixture("++", [])
+        errors = _check_partial_authority_cap(merged)
+        assert errors
+        assert "partial" in errors[0]
+        assert "++" in errors[0]
+
+    def test_mm_with_partial_anchor_only_fails(self):
+        merged = _partial_authority_fixture("--", [])
+        errors = _check_partial_authority_cap(merged)
+        assert errors
+
+    def test_pp_with_partial_anchor_and_supporting_edge_passes(self):
+        merged = _partial_authority_fixture("++", ["e-001"])
+        assert _check_partial_authority_cap(merged) == []
+
+    def test_full_authority_anchor_is_not_capped(self):
+        merged = _partial_authority_fixture("++", [])
+        merged["gather"][0]["outcome"]["trust_anchor_result"]["authority_for_question"] = "full"
+        assert _check_partial_authority_cap(merged) == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_prediction_lifecycle (append-only on prediction IDs)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPredictionLifecycle:
+    def _merged_with_predictions(self, prediction_ids: list[str], refutation_ids: list[str] | None = None) -> dict:
+        h: dict = {
+            "id": "h-001",
+            "name": "?test",
+            "predictions": [{"id": p, "claim": f"c{p}"} for p in prediction_ids],
+        }
+        if refutation_ids:
+            h["refutation_shape"] = [{"id": r, "claim": f"r{r}"} for r in refutation_ids]
+        return {"hypothesize": {"hypotheses": [h]}}
+
+    def test_no_current_text_is_silent(self):
+        proposed = self._merged_with_predictions(["p1", "p2"])
+        assert _check_prediction_lifecycle(proposed, None) == []
+
+    def test_no_change_passes(self):
+        m = self._merged_with_predictions(["p1", "p2"])
+        assert _check_prediction_lifecycle(m, m) == []
+
+    def test_deleted_prediction_fails(self):
+        current = self._merged_with_predictions(["p1", "p2", "p3"])
+        proposed = self._merged_with_predictions(["p1", "p2"])  # p3 removed
+        errors = _check_prediction_lifecycle(proposed, current)
+        assert errors
+        assert "p3" in errors[0]
+        assert "h-001" in errors[0]
+
+    def test_added_prediction_passes(self):
+        current = self._merged_with_predictions(["p1"])
+        proposed = self._merged_with_predictions(["p1", "p2"])  # p2 added
+        assert _check_prediction_lifecycle(proposed, current) == []
+
+    def test_deleted_refutation_fails(self):
+        current = self._merged_with_predictions(["p1"], refutation_ids=["r1"])
+        proposed = self._merged_with_predictions(["p1"], refutation_ids=[])
+        errors = _check_prediction_lifecycle(proposed, current)
+        assert errors
+        assert "r1" in errors[0]
+        assert "refutation" in errors[0].lower()
+
+    def test_hypothesis_fully_removed_is_silent(self):
+        # Block-level append-only handles this; we skip to avoid dup errors.
+        current = self._merged_with_predictions(["p1", "p2"])
+        proposed = {"hypothesize": {"hypotheses": []}}
+        assert _check_prediction_lifecycle(proposed, current) == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_rollup_parent_weight
+# ---------------------------------------------------------------------------
+
+
+def _hierarchy_fixture(parent_weight: str | None, child_weights: dict[str, str | None]) -> dict:
+    hypotheses = [{"id": "h-001", "name": "?parent"}]
+    for cid in child_weights:
+        hypotheses.append({"id": cid, "name": f"?{cid}"})
+    resolutions: list[dict] = []
+    # One lead with resolutions for parent and each child (last one wins).
+    if parent_weight is not None:
+        resolutions.append({
+            "hypothesis": "h-001", "after": parent_weight,
+            "supporting_edges": ["e-001"], "matched_prediction_ids": [], "matched_refutation_ids": [],
+        })
+    for cid, w in child_weights.items():
+        if w is None:
+            continue
+        resolutions.append({
+            "hypothesis": cid, "after": w,
+            "supporting_edges": ["e-001"], "matched_prediction_ids": [], "matched_refutation_ids": [],
+        })
+    return {
+        "hypothesize": {"hypotheses": hypotheses},
+        "gather": [{
+            "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+            "query_details": {}, "outcome": {"observations": {"vertices": [], "edges": []}},
+            "resolutions": resolutions,
+        }],
+    }
+
+
+class TestCheckRollupParentWeight:
+    def test_no_hierarchy_passes(self):
+        merged = {"hypothesize": {"hypotheses": [{"id": "h-001"}]}, "gather": []}
+        assert _check_rollup_parent_weight(merged) == []
+
+    def test_parent_le_child_passes(self):
+        merged = _hierarchy_fixture("+", {"h-001-001": "++", "h-001-002": "+"})
+        assert _check_rollup_parent_weight(merged) == []
+
+    def test_parent_gt_all_children_fails(self):
+        merged = _hierarchy_fixture("++", {"h-001-001": "+", "h-001-002": "+"})
+        errors = _check_rollup_parent_weight(merged)
+        assert errors
+        assert "h-001" in errors[0]
+        assert "rollup" in errors[0].lower()
+
+    def test_parent_unresolved_is_skipped(self):
+        merged = _hierarchy_fixture(None, {"h-001-001": "+"})
+        assert _check_rollup_parent_weight(merged) == []
+
+    def test_parent_equal_to_max_child_passes(self):
+        merged = _hierarchy_fixture("++", {"h-001-001": "++", "h-001-002": "+"})
+        assert _check_rollup_parent_weight(merged) == []
+
+    def test_parent_pp_with_all_children_refuted_fails(self):
+        merged = _hierarchy_fixture("++", {"h-001-001": "--", "h-001-002": "--"})
+        errors = _check_rollup_parent_weight(merged)
+        assert errors
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_lead_dedup_warnings
+# ---------------------------------------------------------------------------
+
+
+def _dedup_lead(lead_id: str, template: str, query: str, subs: dict | None = None) -> dict:
+    return {
+        "id": lead_id, "loop": 1, "name": lead_id, "target": "v-001",
+        "query_details": {
+            "system": "wazuh",
+            "template": template,
+            "query": query,
+            "time_window": "1h",
+            "substitutions": subs or {},
+        },
+        "outcome": {},
+        "resolutions": [],
+    }
+
+
+class TestCheckLeadDedup:
+    def test_distinct_queries_silent(self):
+        merged = {"gather": [
+            _dedup_lead("l-001", "t1", "src_ip:1.2.3.4"),
+            _dedup_lead("l-002", "t1", "src_ip:5.6.7.8"),
+        ]}
+        assert _check_lead_dedup_warnings(merged) == []
+
+    def test_duplicate_query_warns(self):
+        merged = {"gather": [
+            _dedup_lead("l-001", "t1", "src_ip:1.2.3.4", {"ip": "1.2.3.4"}),
+            _dedup_lead("l-002", "t1", "src_ip:1.2.3.4", {"ip": "1.2.3.4"}),
+        ]}
+        warnings = _check_lead_dedup_warnings(merged)
+        assert warnings
+        assert "l-002" in warnings[0]
+        assert "l-001" in warnings[0]
+
+    def test_same_query_different_subs_silent(self):
+        merged = {"gather": [
+            _dedup_lead("l-001", "t1", "src_ip:${ip}", {"ip": "1.2.3.4"}),
+            _dedup_lead("l-002", "t1", "src_ip:${ip}", {"ip": "5.6.7.8"}),
+        ]}
+        # Same query string but different substitutions = different effective
+        # queries, not a dedup case.
+        assert _check_lead_dedup_warnings(merged) == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_silent_empty_result_warnings
+# ---------------------------------------------------------------------------
+
+
+class TestCheckSilentEmpty:
+    def _lead(self, tests, outcome):
+        return {
+            "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+            "tests": tests,
+            "query_details": {}, "outcome": outcome,
+            "resolutions": [],
+        }
+
+    def test_no_tests_silent(self):
+        merged = {"gather": [self._lead([], {"observations": {"vertices": [], "edges": []}})]}
+        assert _check_silent_empty_result_warnings(merged) == []
+
+    def test_tests_with_observations_silent(self):
+        merged = {"gather": [self._lead(
+            ["h-001"],
+            {"observations": {"vertices": [{"id": "v-002"}], "edges": []}},
+        )]}
+        assert _check_silent_empty_result_warnings(merged) == []
+
+    def test_tests_with_empty_outcome_warns(self):
+        merged = {"gather": [self._lead(
+            ["h-001"],
+            {"observations": {"vertices": [], "edges": []}},
+        )]}
+        warnings = _check_silent_empty_result_warnings(merged)
+        assert warnings
+        assert "l-001" in warnings[0]
+
+    def test_tests_with_failure_reason_silent(self):
+        merged = {"gather": [self._lead(
+            ["h-001"],
+            {"observations": {"vertices": [], "edges": []}, "failure_reason": "timeout"},
+        )]}
+        assert _check_silent_empty_result_warnings(merged) == []
+
+    def test_tests_with_trust_anchor_result_silent(self):
+        merged = {"gather": [self._lead(
+            ["h-001"],
+            {
+                "observations": {"vertices": [], "edges": []},
+                "trust_anchor_result": {
+                    "anchor_id": "x", "kind": "k", "result": "unavailable",
+                    "as_of": "2026-04-17", "authority_for_question": "full",
+                },
+            },
+        )]}
+        assert _check_silent_empty_result_warnings(merged) == []
+
+    def test_tests_with_attribute_updates_silent(self):
+        merged = {"gather": [self._lead(
+            ["h-001"],
+            {
+                "observations": {"vertices": [], "edges": []},
+                "attribute_updates": [{"vertex": "v-001", "updates": {"classification": "x"}}],
+            },
+        )]}
+        assert _check_silent_empty_result_warnings(merged) == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_tool_audit_cross_ref_warnings
+# ---------------------------------------------------------------------------
+
+
+class TestCheckToolAuditCrossRef:
+    def _make_run_with_audit(self, tmp_path: Path, entries: list[dict]) -> tuple[Path, Path]:
+        runs_dir = tmp_path / "runs"
+        run_dir = runs_dir / "test-run"
+        run_dir.mkdir(parents=True)
+        audit_path = runs_dir / "tool_audit.jsonl"
+        with open(audit_path, "w") as f:
+            for e in entries:
+                f.write(json.dumps(e) + "\n")
+        return run_dir, audit_path
+
+    def _lead_with_query(self, query: str) -> dict:
+        return {
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+                "query_details": {
+                    "system": "wazuh", "template": "t", "query": query,
+                    "time_window": "1h", "substitutions": {},
+                },
+                "outcome": {}, "resolutions": [],
+            }],
+        }
+
+    def test_missing_audit_file_silent(self, tmp_path):
+        runs_dir = tmp_path / "runs"
+        run_dir = runs_dir / "test-run"
+        run_dir.mkdir(parents=True)
+        merged = self._lead_with_query("src_ip:203.0.113.47 AND agent.ip:10.0.0.50")
+        assert _check_tool_audit_cross_ref_warnings(merged, run_dir, "sess-1") == []
+
+    def test_query_match_found_silent(self, tmp_path):
+        entry = {
+            "timestamp": "2026-04-17T00:00:00Z",
+            "session_id": "sess-1",
+            "tool_name": "Bash",
+            "tool_input": {"command": 'wazuh-query "src_ip:203.0.113.47 AND agent.ip:10.0.0.50"'},
+        }
+        run_dir, _ = self._make_run_with_audit(tmp_path, [entry])
+        merged = self._lead_with_query("src_ip:203.0.113.47 AND agent.ip:10.0.0.50")
+        assert _check_tool_audit_cross_ref_warnings(merged, run_dir, "sess-1") == []
+
+    def test_no_query_match_warns(self, tmp_path):
+        entry = {
+            "timestamp": "2026-04-17T00:00:00Z",
+            "session_id": "sess-1",
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -la"},
+        }
+        run_dir, _ = self._make_run_with_audit(tmp_path, [entry])
+        merged = self._lead_with_query("src_ip:203.0.113.47 AND agent.ip:10.0.0.50")
+        warnings = _check_tool_audit_cross_ref_warnings(merged, run_dir, "sess-1")
+        assert warnings
+        assert "l-001" in warnings[0]
+
+    def test_short_query_skipped(self, tmp_path):
+        run_dir, _ = self._make_run_with_audit(tmp_path, [{
+            "session_id": "sess-1", "tool_name": "Bash", "tool_input": {"command": "echo"},
+        }])
+        merged = self._lead_with_query("a")  # too short
+        assert _check_tool_audit_cross_ref_warnings(merged, run_dir, "sess-1") == []
+
+    def test_session_filter_excludes_other_sessions(self, tmp_path):
+        entry = {
+            "session_id": "sess-other",
+            "tool_name": "Bash",
+            "tool_input": {"command": 'wazuh-query "src_ip:203.0.113.47 AND agent.ip:10.0.0.50"'},
+        }
+        run_dir, _ = self._make_run_with_audit(tmp_path, [entry])
+        merged = self._lead_with_query("src_ip:203.0.113.47 AND agent.ip:10.0.0.50")
+        warnings = _check_tool_audit_cross_ref_warnings(merged, run_dir, "sess-1")
+        assert warnings  # not found under sess-1's scope
 
 
 # ---------------------------------------------------------------------------

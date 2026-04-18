@@ -7,8 +7,10 @@ full Markdown parser.
 """
 
 import re
+from pathlib import Path
 from typing import Iterator
 
+from hooks.scripts.run_context import extract_run_dir_from_path
 from schemas.state import Phase
 
 _PHASE_NAMES = "|".join(p.value for p in Phase)
@@ -82,3 +84,48 @@ def is_screen_resolved(text: str) -> bool:
     self-check question set, both of which assume the hypothesis loop ran.
     """
     return has_screen_block(text) and next(iter_gather_blocks(text), None) is None
+
+
+def resolve_proposed_text(hook_data: dict) -> tuple[Path | None, str | None]:
+    """Return (run_dir, proposed_text) for a PreToolUse targeting
+    investigation.md, or (None, None) if the event is unrelated.
+
+    Shared by invlang_validate.py and validate_conclude.py — both hooks
+    need the same Write/Edit projection to reason about the post-write
+    text without depending on on-disk state the write hasn't produced yet.
+
+    For Write: `tool_input.content` is the full proposed file.
+    For Edit:  read the current file and apply `old_string → new_string`
+               (respecting `replace_all`).
+    """
+    tool_name = hook_data.get("tool_name", "")
+    tool_input = hook_data.get("tool_input", {})
+    file_path = tool_input.get("file_path", "")
+
+    run_dir = extract_run_dir_from_path(file_path)
+    if run_dir is None:
+        return None, None
+
+    if tool_name == "Write":
+        content = tool_input.get("content", "")
+        return run_dir, content if isinstance(content, str) else ""
+
+    if tool_name == "Edit":
+        inv_path = run_dir / "investigation.md"
+        if not inv_path.exists():
+            return None, None
+        try:
+            current = inv_path.read_text()
+        except OSError:
+            return None, None
+        old = tool_input.get("old_string", "")
+        new = tool_input.get("new_string", "")
+        if not isinstance(old, str) or not isinstance(new, str):
+            return None, None
+        if tool_input.get("replace_all"):
+            proposed = current.replace(old, new)
+        else:
+            proposed = current.replace(old, new, 1)
+        return run_dir, proposed
+
+    return None, None

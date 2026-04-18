@@ -55,8 +55,15 @@ from hooks.scripts.investigation_parse import (
     has_conclude_header,
     iter_phase_headers,
     is_screen_resolved,
+    resolve_proposed_text,
 )
-from hooks.scripts.run_context import extract_run_dir_from_path
+from hooks.scripts.invlang_validate import YAML_BLOCK_RE, _merge_blocks
+from hooks.scripts.invlang_walkers import (
+    collect_hypothesis_ids,
+    compute_final_status,
+)
+
+import yaml
 
 CONCLUSION_CHECKS_PROMPT = (
     SOC_AGENT_ROOT / "skills" / "investigate" / "conclusion_checks.md"
@@ -75,51 +82,6 @@ STATUS_SECTION_RE = re.compile(
     r"^## Questions — status: (\w+)\s*$(.*?)(?=^## Questions — status:|\Z)",
     re.MULTILINE | re.DOTALL,
 )
-
-
-# ---------------------------------------------------------------------------
-# Proposed-content resolution
-# ---------------------------------------------------------------------------
-
-def resolve_proposed_text(hook_data: dict) -> tuple[Path | None, str | None]:
-    """Return (run_dir, proposed_text) for a PreToolUse event targeting
-    investigation.md, or (None, None) if the event is unrelated.
-
-    For Write: `tool_input.content` is the full proposed file.
-    For Edit:  read the current file and apply `old_string → new_string`
-               (respecting `replace_all`).
-    """
-    tool_name = hook_data.get("tool_name", "")
-    tool_input = hook_data.get("tool_input", {})
-    file_path = tool_input.get("file_path", "")
-
-    run_dir = extract_run_dir_from_path(file_path)
-    if run_dir is None:
-        return None, None
-
-    if tool_name == "Write":
-        content = tool_input.get("content", "")
-        return run_dir, content if isinstance(content, str) else ""
-
-    if tool_name == "Edit":
-        inv_path = run_dir / "investigation.md"
-        if not inv_path.exists():
-            return None, None
-        try:
-            current = inv_path.read_text()
-        except OSError:
-            return None, None
-        old = tool_input.get("old_string", "")
-        new = tool_input.get("new_string", "")
-        if not isinstance(old, str) or not isinstance(new, str):
-            return None, None
-        if tool_input.get("replace_all"):
-            proposed = current.replace(old, new)
-        else:
-            proposed = current.replace(old, new, 1)
-        return run_dir, proposed
-
-    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +422,56 @@ def check_conclusion_file(run_dir: Path, investigation_text: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Gate 4: frontier closure
+# ---------------------------------------------------------------------------
+
+def check_frontier_closure(proposed_text: str) -> str | None:
+    """Every declared hypothesis must have a terminal status at CONCLUDE.
+
+    A hypothesis is terminal when it's `confirmed` (last resolution `++`
+    or explicit `status: confirmed`), `refuted` (last resolution `--` or
+    explicit `status: refuted`), or `shelved` (appears in any lead's
+    `shelved` list). Any hypothesis still `active` at CONCLUDE means the
+    investigation is concluding with a live hypothesis it never tested
+    to completion — that's either a missed lead or a shape bug in the
+    hypothesis itself.
+
+    Returns None on pass; a single error message (possibly aggregating
+    multiple active hypotheses) on fail.
+    """
+    blocks: list = []
+    for match in YAML_BLOCK_RE.finditer(proposed_text):
+        try:
+            doc = yaml.safe_load(match.group(1))
+        except yaml.YAMLError:
+            continue
+        if isinstance(doc, dict):
+            blocks.append(doc)
+    if not blocks:
+        return None
+    merged = _merge_blocks(blocks)
+
+    active: list[str] = []
+    for hid in collect_hypothesis_ids(merged):
+        if compute_final_status(merged, hid) == "active":
+            active.append(hid)
+
+    if not active:
+        return None
+
+    return (
+        f"frontier-closure failed: hypothesis id(s) {sorted(active)} are "
+        f"still 'active' at CONCLUDE — every declared hypothesis must end in "
+        f"'confirmed' (++), 'refuted' (--), or 'shelved' (via a lead's shelved "
+        f"list). If a hypothesis can't be tested with available tools, shelve "
+        f"it explicitly and record the reason in the lead's concerns, or set "
+        f"termination.category: severity-ceiling with a ceiling_test. "
+        f"Next action: author the missing resolution/shelving in a new "
+        f"gather block, then retry the CONCLUDE write."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -493,6 +505,10 @@ def main():
             err = check_conclusion_file(run_dir, proposed_text)
             if err:
                 errors.append(err)
+
+        err = check_frontier_closure(proposed_text)
+        if err:
+            errors.append(err)
 
     if errors:
         print("CONCLUDE gate failed:", file=sys.stderr)

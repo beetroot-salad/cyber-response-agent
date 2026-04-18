@@ -20,6 +20,7 @@ from hooks.scripts.investigation_parse import (
     is_screen_resolved,
 )
 from hooks.scripts.validate_conclude import (
+    check_frontier_closure,
     count_hypothesize_loops,
     extract_line_slice,
     load_expected_questions,
@@ -145,6 +146,145 @@ class TestCountLeads:
     def test_gather_without_lead_marker(self):
         text = "## GATHER (loop 1)\nsome query\n## ANALYZE (loop 1)\n"
         assert count_distinct_leads(text) == 0
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: check_frontier_closure
+# ---------------------------------------------------------------------------
+
+
+def _companion_md(yaml_blocks: list[str]) -> str:
+    """Wrap raw YAML strings into ```yaml blocks inside a minimal investigation.md."""
+    parts = ["## CONTEXTUALIZE\n"]
+    for block in yaml_blocks:
+        parts.append("\n```yaml\n" + block + "\n```\n")
+    parts.append("\n## CONCLUDE\n\n**Verdict:** resolved\n")
+    return "".join(parts)
+
+
+class TestCheckFrontierClosure:
+    def test_no_yaml_blocks_passes(self):
+        assert check_frontier_closure("## CONCLUDE\nprose only\n") is None
+
+    def test_all_resolved_passes(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+        )
+        lead = (
+            "gather:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: t\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome:\n"
+            "      observations:\n"
+            "        vertices: []\n"
+            "        edges: []\n"
+            "    resolutions:\n"
+            "      - hypothesis: h-001\n"
+            "        after: \"++\"\n"
+            "        supporting_edges: []\n"
+        )
+        text = _companion_md([hypothesize, lead])
+        assert check_frontier_closure(text) is None
+
+    def test_active_hypothesis_fails(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+            "    - id: h-002\n"
+            "      name: \"?credential-stuffing\"\n"
+        )
+        # Only h-001 gets a resolution; h-002 remains active.
+        lead = (
+            "gather:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: t\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome:\n"
+            "      observations:\n"
+            "        vertices: []\n"
+            "        edges: []\n"
+            "    resolutions:\n"
+            "      - hypothesis: h-001\n"
+            "        after: \"++\"\n"
+            "        supporting_edges: []\n"
+        )
+        text = _companion_md([hypothesize, lead])
+        err = check_frontier_closure(text)
+        assert err is not None
+        assert "h-002" in err
+        assert "active" in err.lower()
+
+    def test_shelved_hypothesis_passes(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+        )
+        lead = (
+            "gather:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: t\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome:\n"
+            "      observations:\n"
+            "        vertices: []\n"
+            "        edges: []\n"
+            "    shelved: [h-001]\n"
+            "    resolutions: []\n"
+        )
+        text = _companion_md([hypothesize, lead])
+        assert check_frontier_closure(text) is None
+
+    def test_refuted_via_minus_minus_passes(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+        )
+        lead = (
+            "gather:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: t\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome:\n"
+            "      observations:\n"
+            "        vertices: []\n"
+            "        edges: []\n"
+            "    resolutions:\n"
+            "      - hypothesis: h-001\n"
+            "        after: \"--\"\n"
+            "        matched_refutation_ids: [r1]\n"
+            "        supporting_edges: []\n"
+        )
+        text = _companion_md([hypothesize, lead])
+        assert check_frontier_closure(text) is None
+
+    def test_explicit_status_refuted_passes(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+            "      status: refuted\n"
+        )
+        text = _companion_md([hypothesize])
+        assert check_frontier_closure(text) is None
 
 
 # ---------------------------------------------------------------------------
