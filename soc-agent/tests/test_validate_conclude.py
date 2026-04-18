@@ -22,6 +22,7 @@ from hooks.scripts.investigation_parse import (
     is_screen_resolved,
 )
 from hooks.scripts.validate_conclude import (
+    check_frontier_closure,
     extract_conclude_yaml,
     extract_status,
     load_archetype_readme,
@@ -111,6 +112,234 @@ class TestExtractConcludeYaml:
         result = extract_conclude_yaml(text)
         assert result is not None
         assert result["matched_archetype"] == "foo"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: check_frontier_closure
+# ---------------------------------------------------------------------------
+
+
+def _companion_md(yaml_blocks: list[str]) -> str:
+    """Wrap raw YAML strings into ```yaml blocks inside a minimal investigation.md."""
+    parts = ["## CONTEXTUALIZE\n"]
+    for block in yaml_blocks:
+        parts.append("\n```yaml\n" + block + "\n```\n")
+    parts.append("\n## CONCLUDE\n\n**Verdict:** resolved\n")
+    return "".join(parts)
+
+
+_RESOLVING_CONCLUDE = (
+    "conclude:\n"
+    "  termination:\n"
+    "    category: adversarial-refuted\n"
+    "    rationale: \"tests refuted\"\n"
+    "  disposition: benign\n"
+    "  confidence: high\n"
+    "  summary: \"test\"\n"
+)
+
+_ESCALATION_CONCLUDE = (
+    "conclude:\n"
+    "  termination:\n"
+    "    category: severity-ceiling\n"
+    "    rationale: \"tool-unavailable\"\n"
+    "  disposition: inconclusive\n"
+    "  confidence: medium\n"
+    "  ceiling_test:\n"
+    "    kind: tool-unavailable\n"
+    "    subject: \"vpn-audit\"\n"
+    "  ceiling_rationale: \"no vpn audit source\"\n"
+    "  summary: \"escalated\"\n"
+)
+
+
+class TestCheckFrontierClosure:
+    def test_no_yaml_blocks_passes(self):
+        assert check_frontier_closure("## CONCLUDE\nprose only\n") is None
+
+    def test_all_resolved_passes(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+        )
+        lead = (
+            "gather:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: t\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome:\n"
+            "      observations:\n"
+            "        vertices: []\n"
+            "        edges: []\n"
+            "    resolutions:\n"
+            "      - hypothesis: h-001\n"
+            "        after: \"++\"\n"
+            "        supporting_edges: []\n"
+        )
+        text = _companion_md([hypothesize, lead, _RESOLVING_CONCLUDE])
+        assert check_frontier_closure(text) is None
+
+    def test_active_hypothesis_in_resolving_investigation_fails(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+            "    - id: h-002\n"
+            "      name: \"?credential-stuffing\"\n"
+        )
+        # Only h-001 gets a resolution; h-002 remains active.
+        lead = (
+            "gather:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: t\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome:\n"
+            "      observations:\n"
+            "        vertices: []\n"
+            "        edges: []\n"
+            "    resolutions:\n"
+            "      - hypothesis: h-001\n"
+            "        after: \"++\"\n"
+            "        supporting_edges: []\n"
+        )
+        text = _companion_md([hypothesize, lead, _RESOLVING_CONCLUDE])
+        err = check_frontier_closure(text)
+        assert err is not None
+        assert "h-002" in err
+        assert "active" in err.lower()
+
+    def test_active_hypothesis_in_escalation_passes(self):
+        """severity-ceiling escalations legitimately hand off active hypotheses."""
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+            "    - id: h-002\n"
+            "      name: \"?credential-stuffing\"\n"
+        )
+        text = _companion_md([hypothesize, _ESCALATION_CONCLUDE])
+        assert check_frontier_closure(text) is None
+
+    def test_active_hypothesis_in_exhaustion_escalation_passes(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+        )
+        conclude = (
+            "conclude:\n"
+            "  termination:\n"
+            "    category: exhaustion-escalation\n"
+            "    rationale: \"loop budget exhausted\"\n"
+            "  disposition: inconclusive\n"
+            "  confidence: low\n"
+            "  summary: \"out of loops\"\n"
+        )
+        text = _companion_md([hypothesize, conclude])
+        assert check_frontier_closure(text) is None
+
+    def test_no_conclude_block_passes(self):
+        """Without termination.category, structural validation owns the error."""
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+        )
+        text = _companion_md([hypothesize])
+        assert check_frontier_closure(text) is None
+
+    def test_shelved_hypothesis_in_resolving_passes(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+        )
+        lead = (
+            "gather:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: t\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome:\n"
+            "      observations:\n"
+            "        vertices: []\n"
+            "        edges: []\n"
+            "    shelved: [h-001]\n"
+            "    resolutions: []\n"
+        )
+        text = _companion_md([hypothesize, lead, _RESOLVING_CONCLUDE])
+        assert check_frontier_closure(text) is None
+
+    def test_refuted_via_minus_minus_in_resolving_passes(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+        )
+        lead = (
+            "gather:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: t\n"
+            "    target: v-001\n"
+            "    query_details: {}\n"
+            "    outcome:\n"
+            "      observations:\n"
+            "        vertices: []\n"
+            "        edges: []\n"
+            "    resolutions:\n"
+            "      - hypothesis: h-001\n"
+            "        after: \"--\"\n"
+            "        matched_refutation_ids: [r1]\n"
+            "        supporting_edges: []\n"
+        )
+        text = _companion_md([hypothesize, lead, _RESOLVING_CONCLUDE])
+        assert check_frontier_closure(text) is None
+
+    def test_explicit_status_refuted_in_resolving_passes(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+            "      status: refuted\n"
+        )
+        text = _companion_md([hypothesize, _RESOLVING_CONCLUDE])
+        assert check_frontier_closure(text) is None
+
+    def test_trust_root_category_also_gates(self):
+        hypothesize = (
+            "hypothesize:\n"
+            "  hypotheses:\n"
+            "    - id: h-001\n"
+            "      name: \"?scanner\"\n"
+        )
+        conclude = (
+            "conclude:\n"
+            "  termination:\n"
+            "    category: trust-root\n"
+            "    rationale: \"reached trust root\"\n"
+            "  disposition: benign\n"
+            "  confidence: high\n"
+            "  summary: \"resolved at trust root\"\n"
+        )
+        text = _companion_md([hypothesize, conclude])
+        err = check_frontier_closure(text)
+        assert err is not None
+        assert "h-001" in err
 
 
 # ---------------------------------------------------------------------------

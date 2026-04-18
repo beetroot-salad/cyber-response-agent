@@ -53,6 +53,12 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 from hooks.scripts.investigation_parse import (
     has_conclude_header,
     is_screen_resolved,
+    resolve_proposed_text,
+)
+from hooks.scripts.invlang_validate import _merge_blocks
+from hooks.scripts.invlang_walkers import (
+    collect_hypothesis_ids,
+    compute_final_status,
 )
 from hooks.scripts.judge_runner import (
     get_run_salt,
@@ -69,51 +75,6 @@ YAML_BLOCK_RE = re.compile(r"```yaml[ \t]*\r?\n(.*?)\r?\n```", re.DOTALL)
 VERDICT_LINE_RE = re.compile(
     r"\*\*Verdict:\*\*\s*(resolved|escalated)\b", re.IGNORECASE
 )
-
-
-# ---------------------------------------------------------------------------
-# Proposed-content resolution
-# ---------------------------------------------------------------------------
-
-def resolve_proposed_text(hook_data: dict) -> tuple[Path | None, str | None]:
-    """Return (run_dir, proposed_text) for a PreToolUse event targeting
-    investigation.md, or (None, None) if the event is unrelated.
-
-    For Write: `tool_input.content` is the full proposed file.
-    For Edit:  read the current file and apply `old_string → new_string`
-               (respecting `replace_all`).
-    """
-    tool_name = hook_data.get("tool_name", "")
-    tool_input = hook_data.get("tool_input", {})
-    file_path = tool_input.get("file_path", "")
-
-    run_dir = extract_run_dir_from_path(file_path)
-    if run_dir is None:
-        return None, None
-
-    if tool_name == "Write":
-        content = tool_input.get("content", "")
-        return run_dir, content if isinstance(content, str) else ""
-
-    if tool_name == "Edit":
-        inv_path = run_dir / "investigation.md"
-        if not inv_path.exists():
-            return None, None
-        try:
-            current = inv_path.read_text()
-        except OSError:
-            return None, None
-        old = tool_input.get("old_string", "")
-        new = tool_input.get("new_string", "")
-        if not isinstance(old, str) or not isinstance(new, str):
-            return None, None
-        if tool_input.get("replace_all"):
-            proposed = current.replace(old, new)
-        else:
-            proposed = current.replace(old, new, 1)
-        return run_dir, proposed
-
-    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +350,80 @@ def run_judges(run_dir: Path, proposed_text: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Gate 4: frontier closure
+# ---------------------------------------------------------------------------
+
+# Only resolving terminations require every hypothesis to be terminal.
+# Escalations (severity-ceiling, exhaustion-escalation) exist precisely because
+# live hypotheses can't be tested to completion with available tools — active
+# hypotheses in the handoff are the point, not a bug.
+_RESOLVING_TERMINATION_CATEGORIES = {"trust-root", "adversarial-refuted"}
+
+
+def check_frontier_closure(proposed_text: str) -> str | None:
+    """Every declared hypothesis must have a terminal status at CONCLUDE —
+    but only for resolving investigations.
+
+    A hypothesis is terminal when it's `confirmed` (last resolution `++`
+    or explicit `status: confirmed`), `refuted` (last resolution `--` or
+    explicit `status: refuted`), or `shelved` (appears in any lead's
+    `shelved` list).
+
+    For `termination.category ∈ {trust-root, adversarial-refuted}`, any
+    hypothesis still `active` blocks the write — the investigation
+    claims closure but hasn't closed its frontier. For `severity-ceiling`
+    and `exhaustion-escalation`, active hypotheses are legitimate
+    (that's the content of the escalation), so the check passes
+    unconditionally. A missing `conclude.termination.category` also
+    passes — structural validation of that field is the job of the
+    report frontmatter check.
+
+    Returns None on pass; a single error message (possibly aggregating
+    multiple active hypotheses) on fail.
+    """
+    blocks: list = []
+    for match in YAML_BLOCK_RE.finditer(proposed_text):
+        try:
+            doc = yaml.safe_load(match.group(1))
+        except yaml.YAMLError:
+            continue
+        if isinstance(doc, dict):
+            blocks.append(doc)
+    if not blocks:
+        return None
+    merged = _merge_blocks(blocks)
+
+    # Read termination category. Only resolving categories gate on closure.
+    conclude_block = merged.get("conclude") or {}
+    termination = conclude_block.get("termination") or {}
+    category = termination.get("category") if isinstance(termination, dict) else None
+    if category not in _RESOLVING_TERMINATION_CATEGORIES:
+        return None
+
+    active: list[str] = []
+    for hid in collect_hypothesis_ids(merged):
+        if compute_final_status(merged, hid) == "active":
+            active.append(hid)
+
+    if not active:
+        return None
+
+    return (
+        f"frontier-closure failed: hypothesis id(s) {sorted(active)} are "
+        f"still 'active' at CONCLUDE but termination.category is {category!r} "
+        f"(a resolving category). Every declared hypothesis must end in "
+        f"'confirmed' (++), 'refuted' (--), or 'shelved' (via a lead's shelved "
+        f"list) before you can claim {category!r}. If a hypothesis can't be "
+        f"tested with available tools, either shelve it explicitly or switch "
+        f"termination.category to 'severity-ceiling' (and add ceiling_test) "
+        f"or 'exhaustion-escalation'. "
+        f"Next action: author the missing resolution/shelving in a new "
+        f"gather block, or change the termination category, then retry the "
+        f"CONCLUDE write."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -413,6 +448,10 @@ def main():
 
     if not is_screen_resolved(proposed_text):
         err = run_judges(run_dir, proposed_text)
+        if err:
+            errors.append(err)
+
+        err = check_frontier_closure(proposed_text)
         if err:
             errors.append(err)
 
