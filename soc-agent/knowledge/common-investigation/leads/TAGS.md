@@ -29,7 +29,7 @@ grep -h '^baseline:'  soc-agent/knowledge/common-investigation/leads/*/definitio
 grep -l 'auth-events' soc-agent/knowledge/common-investigation/leads/*/definition.md
 
 # all frontmatter keys in use (spot new tag dimensions)
-awk '/^---$/{f=!f; next} f && /^[a-z_]+:/' soc-agent/knowledge/common-investigation/leads/*/definition.md | sort -u
+awk 'FNR==1{c=0} /^---$/{c++; next} c==1 && /^[a-z_]+:/' soc-agent/knowledge/common-investigation/leads/*/definition.md | sort -u
 
 # leads missing a given tag (substitute the key)
 for f in soc-agent/knowledge/common-investigation/leads/*/definition.md; do
