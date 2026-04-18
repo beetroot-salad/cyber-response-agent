@@ -1,0 +1,311 @@
+# Elastic Security stack (free tier / Basic license).
+#
+# Single-node Elasticsearch + Kibana + Fleet Server. Intra-stack traffic is
+# HTTP to keep the dev bootstrap cert-free; xpack security is still enabled
+# so API clients use real basic-auth credentials (mirrors what a production
+# deployment would require).
+#
+# Bootstrap sequence (driven by service_completed_successfully gates):
+#
+#   elasticsearch
+#        │
+#        ▼
+#   elastic-setup  ──►  kibana_system password set
+#                       fleet-server service token written to fleet-shared
+#        │
+#        ├──► kibana  (uses kibana_system)
+#        │
+#        └──► fleet-server  (reads service token from fleet-shared)
+#                  │
+#                  ▼
+#              fleet-setup  ──►  calls Kibana /api/fleet/setup,
+#                                configures fleet-server host,
+#                                writes enrollment token for the
+#                                default policy to fleet-shared
+#
+# target-endpoint and monitoring-host read the enrollment token from the
+# shared volume at container start, then enroll + run elastic-agent.
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: elasticsearch
+    hostname: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      # 9200 is taken by wazuh.indexer — expose ES on 9201 host-side.
+      # Inside the response-network containers still reach it at
+      # http://elasticsearch:9200.
+      - "9201:9200"
+    networks:
+      - response-network
+
+  # One-shot: waits for ES green, sets kibana_system password, generates a
+  # service token for fleet-server, and writes the token to the fleet-shared
+  # volume. Idempotent — safe to re-run (deletes + recreates the token).
+  elastic-setup:
+    image: curlimages/curl:8.10.1
+    container_name: elastic-setup
+    # Run as root so it can write into the fleet-shared named volume
+    # (curlimages/curl runs as UID 100 by default).
+    user: "0:0"
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - KIBANA_SYSTEM_PASSWORD=${KIBANA_SYSTEM_PASSWORD}
+    volumes:
+      - fleet-shared:/fleet-shared
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "waiting for elasticsearch..."
+        until curl -s -u "elastic:$$ELASTIC_PASSWORD" http://elasticsearch:9200/_cluster/health \
+              | grep -qE '"status":"(green|yellow)"'; do sleep 3; done
+
+        echo "setting kibana_system password..."
+        curl -sS -X POST -u "elastic:$$ELASTIC_PASSWORD" \
+          -H 'Content-Type: application/json' \
+          http://elasticsearch:9200/_security/user/kibana_system/_password \
+          -d "{\"password\":\"$$KIBANA_SYSTEM_PASSWORD\"}"
+        echo
+
+        # Idempotent: if the token file already exists, keep it. Regenerating
+        # would invalidate the token already in use by a running fleet-server.
+        if [ -s /fleet-shared/fleet-server-service-token ]; then
+          echo "fleet-server service token already present, keeping"
+        else
+          echo "creating fleet-server service token..."
+          # Delete any stale server-side token of the same name (the file may
+          # have been wiped while the token persisted in ES).
+          curl -sS -X DELETE -u "elastic:$$ELASTIC_PASSWORD" \
+            "http://elasticsearch:9200/_security/service/elastic/fleet-server/credential/token/fleet-server-token" \
+            -o /dev/null || true
+          RESP=$$(curl -sS -X POST -u "elastic:$$ELASTIC_PASSWORD" \
+            "http://elasticsearch:9200/_security/service/elastic/fleet-server/credential/token/fleet-server-token")
+          echo "$$RESP" | grep -q '"value"' || { echo "token creation failed: $$RESP"; exit 1; }
+          TOKEN=$$(echo "$$RESP" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+          [ -n "$$TOKEN" ] || { echo "empty token"; exit 1; }
+          printf '%s' "$$TOKEN" > /fleet-shared/fleet-server-service-token
+          echo "wrote /fleet-shared/fleet-server-service-token"
+        fi
+    restart: "no"
+    networks:
+      - response-network
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    container_name: kibana
+    hostname: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD}
+      - XPACK_SECURITY_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - SERVER_PUBLICBASEURL=http://localhost:5602
+      # Pre-declare the fleet-server host so Fleet setup picks it up.
+      - XPACK_FLEET_AGENTS_FLEET_SERVER_HOSTS=["http://fleet-server:8220"]
+    ports:
+      # 5601 is taken by wazuh.dashboard on the host — expose Kibana on 5602.
+      # Inside the response-network it's still http://kibana:5601.
+      - "5602:5601"
+    depends_on:
+      elastic-setup:
+        condition: service_completed_successfully
+    networks:
+      - response-network
+
+  # Preseed: waits for Kibana, calls the Fleet setup API (creates Fleet
+  # indices + the fleet-server default policy), and records the policy ID
+  # so fleet-server can self-enroll into it. MUST run to completion before
+  # fleet-server starts — the elastic-agent wrapper has a hardcoded 2min
+  # self-enrollment timeout that fires if its policy doesn't exist.
+  fleet-preseed:
+    image: curlimages/curl:8.10.1
+    container_name: fleet-preseed
+    user: "0:0"
+    depends_on:
+      - kibana
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+    volumes:
+      - fleet-shared:/fleet-shared
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "waiting for kibana..."
+        until curl -s -u "elastic:$$ELASTIC_PASSWORD" http://kibana:5601/api/status \
+              | grep -q '"level":"available"'; do sleep 5; done
+
+        echo "running fleet setup..."
+        curl -sS -u "elastic:$$ELASTIC_PASSWORD" -X POST \
+          -H 'kbn-xsrf: x' \
+          http://kibana:5601/api/fleet/setup >/dev/null
+        echo "  fleet setup ok"
+
+        echo "pointing default Fleet output at http://elasticsearch:9200..."
+        # Fleet's default output ships to http://localhost:9200 unless we
+        # override it. Agents in the response-network must use the container
+        # hostname.
+        curl -sS -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+          -H 'Content-Type: application/json' -X PUT \
+          "http://kibana:5601/api/fleet/outputs/fleet-default-output" \
+          -d '{"name":"default","type":"elasticsearch","hosts":["http://elasticsearch:9200"],"is_default":true,"is_default_monitoring":true}' \
+          >/dev/null
+        echo "  output updated"
+
+        # Check whether the fleet-server policy already exists (idempotent).
+        # Fleet kuery requires the fully qualified saved-object path.
+        RESP=$$(curl -sS -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+          "http://kibana:5601/api/fleet/agent_policies?kuery=ingest-agent-policies.attributes.is_default_fleet_server:true")
+        POLICY_ID=$$(echo "$$RESP" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+
+        if [ -z "$$POLICY_ID" ]; then
+          echo "creating fleet-server agent policy..."
+          RESP=$$(curl -sS -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+            -H 'Content-Type: application/json' -X POST \
+            "http://kibana:5601/api/fleet/agent_policies?sys_monitoring=true" \
+            -d '{"name":"Fleet Server Policy","namespace":"default","is_default_fleet_server":true,"monitoring_enabled":["logs","metrics"]}')
+          POLICY_ID=$$(echo "$$RESP" | sed -n 's/.*"item":{"id":"\([^"]*\)".*/\1/p')
+          [ -n "$$POLICY_ID" ] || { echo "policy create failed: $$RESP"; exit 1; }
+          echo "  policy id: $$POLICY_ID"
+
+          echo "attaching fleet_server package to policy..."
+          # The package_policies API requires an explicit version; discover it
+          # from the EPM registry rather than pinning.
+          PKG_VERSION=$$(curl -sS -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+            "http://kibana:5601/api/fleet/epm/packages/fleet_server" \
+            | sed -n 's/.*"item":{[^}]*"version":"\([^"]*\)".*/\1/p' | head -n 1)
+          [ -n "$$PKG_VERSION" ] || { echo "fleet_server package version discovery failed"; exit 1; }
+          echo "  fleet_server package version: $$PKG_VERSION"
+          RESP=$$(curl -sS -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+            -H 'Content-Type: application/json' -X POST \
+            "http://kibana:5601/api/fleet/package_policies" \
+            -d "{\"name\":\"fleet_server-1\",\"policy_id\":\"$$POLICY_ID\",\"package\":{\"name\":\"fleet_server\",\"version\":\"$$PKG_VERSION\"}}")
+          echo "$$RESP" | grep -q '"id"' || { echo "package attach failed: $$RESP"; exit 1; }
+          echo "  package attached"
+        else
+          echo "fleet-server policy already exists: $$POLICY_ID"
+        fi
+
+        printf '%s' "$$POLICY_ID" > /fleet-shared/fleet-server-policy-id
+        echo "wrote /fleet-shared/fleet-server-policy-id = $$POLICY_ID"
+    restart: "no"
+    networks:
+      - response-network
+
+  fleet-server:
+    image: docker.elastic.co/elastic-agent/elastic-agent:8.15.3
+    container_name: fleet-server
+    hostname: fleet-server
+    # Run as root so the state volume (owned by root by default on named
+    # volume creation) is writable — otherwise `elastic-agent container`
+    # fails with "preparing STATE_PATH(/usr/share/elastic-agent/state) failed:
+    # mkdir .../state/data: permission denied". The image's default non-root
+    # user can't own root-created volume directories.
+    user: "0:0"
+    depends_on:
+      elastic-setup:
+        condition: service_completed_successfully
+      fleet-preseed:
+        condition: service_completed_successfully
+    environment:
+      - FLEET_SERVER_ENABLE=true
+      - FLEET_SERVER_ELASTICSEARCH_HOST=http://elasticsearch:9200
+      # Dev only: run Fleet Server in HTTP mode (agents enroll via http://).
+      # Production deployments require TLS between agent and fleet-server.
+      - FLEET_SERVER_INSECURE_HTTP=true
+      - FLEET_SERVER_HOST=0.0.0.0
+      - FLEET_SERVER_PORT=8220
+      - FLEET_URL=http://fleet-server:8220
+    volumes:
+      - fleet-shared:/fleet-shared:ro
+      # Persist self-enrollment state (agent.id, certs, encrypted config)
+      # across container recreates. Without this, fleet-server re-enrolls
+      # on every restart and leaves a stale offline agent in Fleet.
+      - fleet-server-state:/usr/share/elastic-agent/state
+    # Read the service token + fleet-server policy id written by the setup
+    # containers, then hand off to `elastic-agent container`.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        export FLEET_SERVER_SERVICE_TOKEN="$(cat /fleet-shared/fleet-server-service-token)"
+        export FLEET_SERVER_POLICY_ID="$(cat /fleet-shared/fleet-server-policy-id)"
+        exec elastic-agent container
+    networks:
+      - response-network
+    ports:
+      - "8220:8220"
+
+  # Postseed: runs after fleet-server is reachable. Fetches an enrollment
+  # token for the default *agent* policy (not the fleet-server policy) and
+  # writes it so endpoint containers can enroll.
+  fleet-setup:
+    image: curlimages/curl:8.10.1
+    container_name: fleet-setup
+    user: "0:0"
+    depends_on:
+      - fleet-server
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+    volumes:
+      - fleet-shared:/fleet-shared
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "waiting for fleet-server HEALTHY..."
+        until curl -s http://fleet-server:8220/api/status | grep -q '"status":"HEALTHY"'; do sleep 5; done
+
+        echo "finding default agent policy id..."
+        RESP=$$(curl -sS -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+          "http://kibana:5601/api/fleet/agent_policies?kuery=ingest-agent-policies.attributes.is_default:true")
+        AGENT_POLICY_ID=$$(echo "$$RESP" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+
+        if [ -z "$$AGENT_POLICY_ID" ]; then
+          echo "creating default agent policy..."
+          # sys_monitoring=true auto-attaches the `system` package so endpoints
+          # ship auth.log / syslog / process / metric data out of the box.
+          RESP=$$(curl -sS -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+            -H 'Content-Type: application/json' -X POST \
+            "http://kibana:5601/api/fleet/agent_policies?sys_monitoring=true" \
+            -d '{"name":"Endpoint Agent Policy","namespace":"default","is_default":true,"monitoring_enabled":["logs","metrics"]}')
+          AGENT_POLICY_ID=$$(echo "$$RESP" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+          [ -n "$$AGENT_POLICY_ID" ] || { echo "agent policy create failed: $$RESP"; exit 1; }
+        fi
+        echo "  agent policy id: $$AGENT_POLICY_ID"
+
+        echo "fetching enrollment token for that policy..."
+        RESP=$$(curl -sS -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+          "http://kibana:5601/api/fleet/enrollment_api_keys?kuery=policy_id:$$AGENT_POLICY_ID")
+        TOKEN=$$(echo "$$RESP" | sed -n 's/.*"api_key":"\([^"]*\)".*/\1/p' | head -n 1)
+        [ -n "$$TOKEN" ] || { echo "no enrollment token: $$RESP"; exit 1; }
+        printf '%s' "$$TOKEN" > /fleet-shared/enrollment-token
+        echo "wrote /fleet-shared/enrollment-token"
+    restart: "no"
+    networks:
+      - response-network
+
+volumes:
+  elasticsearch-data:
+  fleet-shared:
+  fleet-server-state:

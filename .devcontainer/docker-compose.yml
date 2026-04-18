@@ -40,6 +40,12 @@ services:
       # The whole queue dir + client.keys live behind a single named volume.
       # See entrypoint.sh for the symlink setup.
       - target-endpoint-state:/var/ossec-state
+      # Fleet enrollment token (written by fleet-setup one-shot).
+      - fleet-shared:/fleet-shared:ro
+      # Persist elastic-agent enrollment state (agent.id, certs, config).
+      # Without this, each container recreate re-enrolls and leaves a stale
+      # offline agent in Fleet.
+      - target-endpoint-elastic-state:/var/lib/elastic-agent
     networks:
       - response-network
 
@@ -54,6 +60,8 @@ services:
     hostname: monitoring-host
     volumes:
       - ../playground/monitoring-host/workloads:/opt/workloads
+      - fleet-shared:/fleet-shared:ro
+      - monitoring-host-elastic-state:/var/lib/elastic-agent
     networks:
       response-network:
         ipv4_address: 172.22.0.10
@@ -174,3 +182,7 @@ volumes:
   falco-logs:
   registry_data:
   target-endpoint-state:
+  target-endpoint-elastic-state:
+  monitoring-host-elastic-state:
+  # Also declared in elastic-stack.yml; compose merges on name.
+  fleet-shared:

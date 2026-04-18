@@ -63,6 +63,17 @@ RUN sed -i '/<\/ossec_config>/i \  <localfile>\n    <log_format>syslog</log_form
 RUN sed -i 's|<frequency>43200</frequency>|<frequency>300</frequency>|' /var/ossec/etc/ossec.conf && \
     sed -i 's|<directories>/etc,/usr/bin,/usr/sbin</directories>|<directories realtime="yes" report_changes="yes">/etc,/usr/bin,/usr/sbin</directories>|' /var/ossec/etc/ossec.conf
 
+# Install Elastic Agent (enrollment + start happens at container entrypoint,
+# since the enrollment token is only known after fleet-server has booted).
+# Stub systemctl during install: the deb's postinst tries to enable the
+# service, which fails in a build container with no systemd. We only need
+# the binary + data dir — service registration is irrelevant here.
+RUN curl -fsSL https://artifacts.elastic.co/downloads/beats/elastic-agent/elastic-agent-8.15.3-amd64.deb \
+        -o /tmp/elastic-agent.deb && \
+    ln -sf /bin/true /usr/bin/systemctl && \
+    dpkg -i /tmp/elastic-agent.deb && \
+    rm -f /usr/bin/systemctl /tmp/elastic-agent.deb
+
 # Create a non-root user for simulating user activity
 RUN useradd -m -s /bin/bash testuser && \
     echo "testuser:testpassword" | chpasswd && \

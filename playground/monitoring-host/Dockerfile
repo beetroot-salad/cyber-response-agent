@@ -6,7 +6,18 @@ RUN apt-get update && apt-get install -y \
     openssh-client \
     cron \
     ca-certificates \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Elastic Agent (enrollment + start happens at container entrypoint,
+# since the enrollment token is only known after fleet-server has booted).
+# Stub systemctl during install: the deb's postinst tries to enable the
+# service, which fails in a build container with no systemd.
+RUN curl -fsSL https://artifacts.elastic.co/downloads/beats/elastic-agent/elastic-agent-8.15.3-amd64.deb \
+        -o /tmp/elastic-agent.deb && \
+    ln -sf /bin/true /usr/bin/systemctl && \
+    dpkg -i /tmp/elastic-agent.deb && \
+    rm -f /usr/bin/systemctl /tmp/elastic-agent.deb
 
 COPY workloads/ /opt/workloads/
 RUN chmod +x /opt/workloads/*.sh
