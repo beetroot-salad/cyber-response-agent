@@ -35,16 +35,17 @@ attacker tried*, not the connecting user.
 ## Archetypes
 
 The archetypes recognized for this signature are defined as
-directories under `archetypes/`, each with a `README.md` describing
-the story + required trust anchors, and `{TICKET-ID}.json` snapshots
-of past tickets that matched.
+directories under `archetypes/`, each with a `story.md` (observable
+shape) and a `trust-anchors.md` (required anchors + precedent
+pointer), plus optional `{TICKET-ID}.json` snapshots of past tickets
+that matched.
 
-| Archetype | One-line description | File |
+| Archetype | One-line description | Directory |
 |---|---|---|
-| `monitoring-probe` | Internal monitoring host running a sanctioned single-attempt probe using a sentinel username | `archetypes/monitoring-probe/README.md` |
-| `service-account-rotation` | Internal automation whose credentials were rotated but whose config wasn't updated — broken benign automation | `archetypes/service-account-rotation/README.md` |
-| `credential-stuffing` | External actor submitting real-looking usernames from a breach dump — escalation outcome | `archetypes/credential-stuffing/README.md` |
-| `external-bruteforce` | External actor iterating a wordlist of common usernames at high volume — escalation outcome | `archetypes/external-bruteforce/README.md` |
+| `monitoring-probe` | Internal monitoring host running a sanctioned single-attempt probe using a sentinel username | `archetypes/monitoring-probe/` |
+| `service-account-rotation` | Internal automation whose credentials were rotated but whose config wasn't updated — broken benign automation | `archetypes/service-account-rotation/` |
+| `credential-stuffing` | External actor submitting real-looking usernames from a breach dump — escalation outcome | `archetypes/credential-stuffing/` |
+| `external-bruteforce` | External actor iterating a wordlist of common usernames at high volume — escalation outcome | `archetypes/external-bruteforce/` |
 
 Both benign archetypes require trust-anchor confirmation to resolve:
 `monitoring-probe` is anchored by `approved-monitoring-sources`,

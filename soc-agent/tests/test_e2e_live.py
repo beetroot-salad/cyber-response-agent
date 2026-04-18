@@ -296,13 +296,13 @@ class TestFullInvestigationResolve:
             archetype = fields.get("matched_archetype")
             assert archetype, "Resolved report must have matched_archetype"
 
-            archetype_readme = (
+            archetype_anchors = (
                 SOC_AGENT_ROOT / "knowledge" / "signatures" / "wazuh-rule-5710"
-                / "archetypes" / archetype / "README.md"
+                / "archetypes" / archetype / "trust-anchors.md"
             )
-            assert archetype_readme.exists(), (
-                f"matched_archetype '{archetype}' README not found at "
-                f"{archetype_readme}"
+            assert archetype_anchors.exists(), (
+                f"matched_archetype '{archetype}' trust-anchors.md not found at "
+                f"{archetype_anchors}"
             )
 
             ticket_id = fields.get("matched_ticket_id")

@@ -225,28 +225,31 @@ def check_precedent_exists(
 # ---------------------------------------------------------------------------
 
 def load_archetype_frontmatter(matched_archetype: str, signature_id: str) -> dict | None:
-    """Load and parse the YAML frontmatter of an archetype README.
+    """Load and parse the YAML frontmatter of an archetype's trust-anchors.md.
 
     Archetypes live at
-    `knowledge/signatures/{sig}/archetypes/{matched_archetype}/README.md`.
-    Returns None if the directory or README does not exist.
+    `knowledge/signatures/{sig}/archetypes/{matched_archetype}/trust-anchors.md`.
+    Frontmatter (archetype, signature_id, required_anchors) is duplicated
+    in `story.md`; either file is a valid source. We read trust-anchors.md
+    because it's the file that declares the grounding contract this
+    validator enforces. Returns None if the file does not exist.
     """
-    archetype_readme = (
+    archetype_file = (
         SOC_AGENT_ROOT
         / "knowledge"
         / "signatures"
         / signature_id
         / "archetypes"
         / matched_archetype
-        / "README.md"
+        / "trust-anchors.md"
     )
-    if not archetype_readme.exists():
+    if not archetype_file.exists():
         return None
-    return parse_yaml_frontmatter(archetype_readme.read_text())
+    return parse_yaml_frontmatter(archetype_file.read_text())
 
 
 def check_archetype_exists(matched_archetype: str, signature_id: str) -> bool:
-    """Check that the referenced archetype directory + README exists and parses."""
+    """Check that the referenced archetype directory + trust-anchors.md exists and parses."""
     if not matched_archetype:
         return False
     return load_archetype_frontmatter(matched_archetype, signature_id) is not None
@@ -529,10 +532,10 @@ def run_tier2(run_dir: Path, fields: dict) -> tuple[bool, str]:
                 f"'{matched_archetype}' could not be loaded"
             )
 
-    # Load artifacts. The slimmed Tier 2 judge no longer reads the
-    # archetype README — shape/completeness moved to the pre-CONCLUDE
-    # judges. Tier 2's only archetype-adjacent check is PRECEDENT_TRANSFER,
-    # which uses the precedent snapshot directly.
+    # Load artifacts. The slimmed Tier 2 judge no longer reads archetype
+    # descriptions — shape/completeness moved to the pre-CONCLUDE judges.
+    # Tier 2's only archetype-adjacent check is PRECEDENT_TRANSFER, which
+    # uses the precedent snapshot directly.
     salt = get_run_salt(run_dir)
     alert_text = read_file_safe(run_dir / "alert.json", "alert data")
     investigation_text = read_file_safe(run_dir / "investigation.md", "investigation log")

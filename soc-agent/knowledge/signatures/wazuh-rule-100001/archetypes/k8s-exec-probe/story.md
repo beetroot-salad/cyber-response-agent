@@ -5,9 +5,7 @@ required_anchors:
   - workload-manifest
 ---
 
-# Kubernetes Exec Probe
-
-## Story
+# Kubernetes Exec Probe — Story
 
 A Kubernetes liveness, readiness, or startup probe of `exec` type ran
 on its configured cadence. The kubelet exec'd into the container to
@@ -36,22 +34,3 @@ exec probe whose command matches what we observed**. Without that
 confirmation, a probe-shaped event is just one of several
 periodic-runtime-exec patterns and could be a cron-like backdoor
 mimicking a probe.
-
-## Trust Anchors
-
-### `workload-manifest`
-
-**Question:** does the Kubernetes pod spec for this `container.name`
-declare a liveness, readiness, or startup probe of `exec` type whose
-command matches the observed `proc.cmdline`, with `periodSeconds`
-matching the observed cadence?
-
-**Confirmation:** the anchor returns a probe definition whose command
-and period both match the observation. Mismatch on either the command
-or the period is a refutation, not a confirmation — a probe that's
-declared but runs a different command is more suspicious than no
-declared probe at all.
-
-## Precedents
-
-None yet.

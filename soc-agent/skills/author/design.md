@@ -74,7 +74,7 @@ This split matters. An earlier draft of this design had subagents "grade the edi
 
 **Tag-search** — observes the vocabulary a reader reaches for mid-investigation, framed as a search task rather than a tagging question. See "Tag consistency" above for the dispatch pattern and rationale; it's listed as a probe here because it produces evidence (search terms) that the main agent compares against the declared tags, same contract as every other probe.
 
-**Reconstruction** — the most important probe. The question it answers: *can a reader regenerate the real underlying artifact from the description?* For a `context.md`, that means writing the SIEM detection rule in native syntax. For an archetype README, the canonical alert JSON and a one-line closing reason. For a lead definition, the query the lead runs plus the fields it examines.
+**Reconstruction** — the most important probe. The question it answers: *can a reader regenerate the real underlying artifact from the description?* For a `context.md`, that means writing the SIEM detection rule in native syntax. For an archetype `story.md`, the canonical alert JSON and a one-line closing reason. For a lead definition, the query the lead runs plus the fields it examines.
 
 This is strictly stronger than "summarize the file." A summary that says "this archetype matches monitoring probes" passes a comprehension check. A reconstruction that produces an alert skeleton missing the `srcip` classification rule *fails* — because an agent at runtime cannot execute the rule from a description that leaves out the internal-vs-external distinction.
 

@@ -5,9 +5,7 @@ required_anchors:
   - image-baseline
 ---
 
-# Container Init Script
-
-## Story
+# Container Init Script — Story
 
 The container's own entrypoint or init script invoked a shell as part
 of normal startup. This happens when an image's `ENTRYPOINT` or `CMD`
@@ -38,22 +36,3 @@ This is benign **only when the image has a recorded baseline of doing
 exactly this on every prior start**. Without that baseline, an
 init-script-shaped event could be a tampered image or a startup hook
 that was never authorized.
-
-## Trust Anchors
-
-### `image-baseline`
-
-**Question:** for this `container.image`, does the historical record
-show 100001 events firing within seconds of container start, from
-the same `proc.pname`, with the same `proc.cmdline` shape, on every
-(or nearly every) prior container start observed in the environment?
-
-**Confirmation:** the anchor returns a baseline showing this image
-fires this exact pattern at startup, with sample size large enough
-to be representative (≥10 prior starts is a reasonable floor) and
-recent enough to reflect the current image version (no major version
-change since the baseline was established).
-
-## Precedents
-
-None yet.

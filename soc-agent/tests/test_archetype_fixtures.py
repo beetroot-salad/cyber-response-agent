@@ -123,7 +123,7 @@ class TestAnchorReferencesResolve:
     def test_all_archetype_required_anchors_have_operation_files(self):
         """Every required_anchor in every archetype must have an operation file."""
         ops_names = self._operations_anchor_names()
-        for path in ARCHETYPE_DIR.glob("*/README.md"):
+        for path in ARCHETYPE_DIR.glob("*/trust-anchors.md"):
             content = path.read_text()
             fm = parse_yaml_frontmatter(content)
             required = fm.get("required_anchors") or []
@@ -150,11 +150,12 @@ class TestExpectedOutcomesDocumented:
 
 
 class TestArchetypeFrontmatterParseable:
-    """Every archetype README under wazuh-rule-100001/archetypes/ must be
-    parseable by the zero-dep frontmatter parser used by the validation hook."""
+    """Every archetype trust-anchors.md under wazuh-rule-100001/archetypes/
+    must be parseable by the zero-dep frontmatter parser used by the
+    validation hook."""
 
     def test_all_archetypes_parse(self):
-        for path in ARCHETYPE_DIR.glob("*/README.md"):
+        for path in ARCHETYPE_DIR.glob("*/trust-anchors.md"):
             content = path.read_text()
             fm = parse_yaml_frontmatter(content)
             arch_name = path.parent.name

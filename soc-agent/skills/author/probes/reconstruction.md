@@ -12,7 +12,8 @@ If a reader of this file — including the investigation agent at runtime — ca
 |---|---|---|
 | `signatures/{id}/context.md` | The SIEM detection rule | Pseudo-query in the vendor's syntax (Wazuh rule XML, Lucene, SPL, KQL, EQL) |
 | `signatures/{id}/playbook.md` | A canonical alert that would fire this signature + the first investigation step it routes to | Alert JSON skeleton + numbered step |
-| `signatures/{id}/archetypes/{name}/README.md` | A canonical alert matching this archetype + the single-sentence closing reason | Alert JSON skeleton + "closes as {benign\|escalated} because …" |
+| `signatures/{id}/archetypes/{name}/story.md` | A canonical alert matching this archetype + the single-sentence closing reason | Alert JSON skeleton + "closes as {benign\|escalated} because …" |
+| `signatures/{id}/archetypes/{name}/trust-anchors.md` | The archetype's trust-anchor grounding procedure | For each `required_anchors` entry: what you query, what response counts as confirmation, what doesn't |
 | `common-investigation/leads/{name}/definition.md` | The query the lead runs | Pseudo-query + list of fields examined + what the result distinguishes |
 | `environment/data-sources/*.md` | The real data source and its event shape | Index/schema name + canonical event JSON skeleton |
 | `environment/operations/*.md` (trust anchor) | The authoritative system and the question you ask it | Lookup shape + expected response shape + failure modes |

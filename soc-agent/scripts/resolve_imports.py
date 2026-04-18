@@ -10,7 +10,7 @@ to stdout for !`command` substitution in SKILL.md.
 Output order:
 1. knowledge/signatures/{sig_id}/context.md (always)
 2. knowledge/signatures/{sig_id}/playbook.md (always)
-3. knowledge/signatures/{sig_id}/archetypes/*.md (when present, sorted by name)
+3. knowledge/signatures/{sig_id}/archetypes/{name}/{story.md, trust-anchors.md} (when present, per archetype)
 4. knowledge/common-investigation/checklist.md (always — safety artifact)
 5. Each unique @import:name found in playbook body
 
@@ -101,11 +101,17 @@ def main() -> int:
     emit_file(playbook_path)
 
     # 3. Archetypes (when present) — sorted for deterministic output.
-    # New layout: one directory per archetype, with README.md as the entry point.
+    # Each archetype dir has story.md (observable shape) + trust-anchors.md
+    # (anchors + precedents pointer). Emit story first, then trust-anchors.
     archetypes_dir = sig_dir / "archetypes"
     if archetypes_dir.is_dir():
-        for archetype_file in sorted(archetypes_dir.glob("*/README.md")):
-            emit_file(archetype_file)
+        for archetype_subdir in sorted(d for d in archetypes_dir.iterdir() if d.is_dir()):
+            story = archetype_subdir / "story.md"
+            trust = archetype_subdir / "trust-anchors.md"
+            if story.exists():
+                emit_file(story)
+            if trust.exists():
+                emit_file(trust)
 
     # 4. Checklist (always)
     if checklist_path.exists():

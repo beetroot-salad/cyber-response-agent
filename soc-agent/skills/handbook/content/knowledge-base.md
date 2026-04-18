@@ -23,10 +23,12 @@ soc-agent/
 │       ├── _template/
 │       └── {signature-id}/
 │           ├── context.md
+│           ├── field-quirks.md    # scanner-scoped subset of context.md
 │           ├── playbook.md
 │           └── archetypes/        # one directory per recognized archetype
 │               └── {archetype-name}/
-│                   ├── README.md      # story + required_anchors
+│                   ├── story.md        # observable-shape narrative (scanner target)
+│                   ├── trust-anchors.md # required anchors + precedent pointer (grounding contract)
 │                   └── {TICKET-ID}.json  # precedent snapshots (cached past tickets)
 │
 ├── config/
@@ -83,6 +85,8 @@ One directory per alert type. Each signature's directory is the domain knowledge
 
 - **`context.md`** — the signature reference. Frontmatter carries `signature_id`, `name`, `severity`, `data_sources`, MITRE mapping, related rules, base rate estimates. The body describes: detection logic (what triggers the rule), alert fields (what's in the payload), threat model (what an attacker would be doing if this is a true positive), known false positives (grounded in real closed tickets), risk indicators that actually discriminated outcomes historically, operational notes, tuning guidance, detection gaps. This is the document the agent reads to understand what kind of alert it's looking at and what the stakes are.
 
+- **`field-quirks.md`** — a tight, scanner-scoped extract of `context.md` holding just the Key Observables table (observable → JSON path → why it matters for shape comparison) plus any field-level gotchas (counterintuitive semantics, NAT-egress caveats). Read by the archetype-scan subagent instead of the full `context.md` — keeps the scanner's context small without depriving it of the field semantics it needs to extract observables from the alert.
+
 - **`playbook.md`** — the body carries two complementary catalogs plus the operational scaffolding:
   - **Hypothesis seeds** — lean, mechanism-shaped candidate explanations ("legitimate automation", "authentication mistake", "credential guessing", adversarial follow-up). These are *lacking by design*, skeletal prompts for the HYPOTHESIZE phase that the agent develops from evidence. They map roughly to archetypes when the shape fits, but an investigation can confirm a hypothesis without matching any archetype.
   - **Archetype catalog** — a pointer table into `archetypes/{name}/`, described below.
@@ -93,7 +97,8 @@ One directory per alert type. Each signature's directory is the domain knowledge
   Playbooks can use `@import:lesson-name` inline to reference files in `common-investigation/lessons/` — the import resolver pulls them in at skill load time so playbooks don't duplicate cross-cutting content.
 
 - **`archetypes/`** — the pattern-recognition **cache**, not the source of truth. One subdirectory per recognized archetype. Each archetype is a named pattern rooted in past tickets, used at HYPOTHESIZE time to frame / steer the investigation and at CONCLUDE time to short-circuit resolution via the grounding leg when the shape cleanly matches. Archetypes are *recommendations*, not the primary reasoning layer: the hypothesis loop always runs, and an investigation that doesn't match any archetype is a valid outcome (usually escalation, occasionally a novel pattern that deserves a new archetype after the fact). Each archetype directory holds:
-  - **`README.md`** — the archetype story: the abstract pattern, the discriminating boundary that takes alerts out of this archetype into siblings, and frontmatter-declared `required_anchors` listing the trust anchors that must be confirmed to resolve under this archetype.
+  - **`story.md`** — the archetype story: the abstract pattern and the discriminating boundary that takes alerts out of this archetype into siblings. Frontmatter declares `archetype`, `signature_id`, and `required_anchors`. Read by the archetype-scan subagent at CONTEXTUALIZE time.
+  - **`trust-anchors.md`** — the grounding contract: one subsection per `required_anchors` entry (question the anchor answers + what counts as confirmation) and a pointer to the precedent snapshots. Same frontmatter as `story.md`. Read by the main agent at ANALYZE/CONCLUDE time (for grounding) and by Judge B (for sibling completeness).
   - **`{TICKET-ID}.json`** (zero or more) — cached precedent snapshots. Each file is a pointer to a real past ticket in the source-of-truth ticketing system. The JSON captures `ticket_id`, `archetype`, `captured_at`, `disposition`, `narrative`, the raw `alert` snapshot, and `anchors_at_time` — the trust anchor responses at the moment the ticket closed. Entries in `anchors_at_time` marked `temporal: true` represent time-bounded confirmations (on-call windows, change tickets, deploy runs) that do NOT transfer forward in time and must be re-confirmed against live anchors.
 
 When an archetype *does* match, resolution requires both legs: a shape match (`matched_archetype` naming a real archetype directory) AND grounding — at least one of (every `required_anchors` entry confirmed, OR `matched_ticket_id` citing a valid precedent snapshot under the same archetype). Archetypes that declare no `required_anchors` can only resolve with a cited precedent. See `content/validation.md` for the Tier 1 enforcement details. When no archetype matches, `status=resolved` is not an option — the investigation escalates with whatever evidence and reasoning it has gathered.

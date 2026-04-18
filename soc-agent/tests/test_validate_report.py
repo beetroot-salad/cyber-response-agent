@@ -631,10 +631,10 @@ class TestCheckPrecedentExists:
 def _make_archetype_file(
     root: Path, sig: str, name: str, required_anchors: list
 ) -> Path:
-    """Helper: write an archetype README under archetypes/{name}/README.md."""
+    """Helper: write an archetype's trust-anchors.md under archetypes/{name}/."""
     arch_dir = root / "knowledge" / "signatures" / sig / "archetypes" / name
     arch_dir.mkdir(parents=True, exist_ok=True)
-    path = arch_dir / "README.md"
+    path = arch_dir / "trust-anchors.md"
     anchors_yaml = "\n".join(f"  - {a}" for a in required_anchors)
     if required_anchors:
         anchors_block = f"required_anchors:\n{anchors_yaml}"
@@ -663,7 +663,7 @@ class TestArchetypeValidation:
         assert "change-windows" in fm["required_anchors"]
 
     def test_load_archetype_fake_root(self, fake_root):
-        """Loads an archetype README from a synthetic signature dir."""
+        """Loads an archetype's trust-anchors.md from a synthetic signature dir."""
         _make_archetype_file(fake_root, "test-sig", "my-arch", ["a1"])
         fm = load_archetype_frontmatter("my-arch", "test-sig")
         assert fm is not None

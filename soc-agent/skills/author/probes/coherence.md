@@ -8,7 +8,7 @@ A reviewer will compare the statements and decide coherence. You produce evidenc
 
 {FILES}
 
-Each file is labeled by its filename (e.g., `playbook.md`, `archetypes/monitoring-probe/README.md`). Use the labels in your output.
+Each file is labeled by its filename (e.g., `playbook.md`, `archetypes/monitoring-probe/story.md`). Use the labels in your output.
 
 ## Topics
 

@@ -39,10 +39,11 @@ class ReportFrontmatter:
     signature_description: Optional[str] = None
     trace: Optional[str] = None
     # Archetype + optional precedent ticket citation. matched_archetype names
-    # a directory under knowledge/signatures/{sig}/archetypes/ whose README.md
-    # declares the story and required_anchors. matched_ticket_id optionally
-    # names a precedent snapshot — a JSON file inside that archetype
-    # directory — which grounds the match in a specific past ticket.
+    # a directory under knowledge/signatures/{sig}/archetypes/ containing
+    # story.md (observable shape) and trust-anchors.md (required_anchors +
+    # grounding contract). matched_ticket_id optionally names a precedent
+    # snapshot — a JSON file inside that archetype directory — which grounds
+    # the match in a specific past ticket.
     # trust_anchors_consulted records which anchors were consulted and what
     # they returned; each entry is a dict with keys: anchor, kind, result,
     # citation (citation is a free-form short description).
