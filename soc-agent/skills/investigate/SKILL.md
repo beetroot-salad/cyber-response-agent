@@ -515,10 +515,9 @@ ANALYZE runs as a dedicated subagent. You do not grade hypotheses inline — you
 1. **Dispatch the ANALYZE subagent.**
    ```
    Agent(
-     subagent_type="general-purpose",
-     model="sonnet",
+     subagent_type="soc-agent:analyze",
      description="analyze loop {N} for {signature_id}",
-     prompt="Read ${CLAUDE_SKILL_DIR}/analyze.md for your complete instructions. Substitute: run_dir={run_dir}, loop_n={N}, signature_id={signature_id}"
+     prompt="run_dir={run_dir}\nloop_n={N}\nsignature_id={signature_id}"
    )
    ```
    `{N}` is the loop number you just stamped on this cycle's `## HYPOTHESIZE (loop N)` and `## GATHER (loop N)` headers — the ANALYZE belongs to the same cycle. Do not increment it.
