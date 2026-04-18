@@ -482,13 +482,11 @@ ANALYZE runs as a dedicated subagent. You do not grade hypotheses inline — you
 
    **Why dispatch, not inline.** Weighted grading, rollup reasoning, and refutation discipline are the token-heaviest per-cycle work, and most of it is not load-bearing for later phases — only the grades, surviving hypotheses, routing decision, and (on CONCLUDE) disposition+archetype matter downstream. Keeping that reasoning in a subagent isolates rollup discipline from the main loop's other responsibilities and keeps main context lean.
 
-2. **Validate the subagent's output is well-formed.** The subagent returns an `## ANALYZE (loop N)` prose block followed by a `## Self-report` section. Both must be present. The ANALYZE block must name surviving hypotheses with weights and a `Next action:` of `CONCLUDE` or `HYPOTHESIZE`; on CONCLUDE it must include `disposition`, `confidence`, and `matched_archetype` (or `null`). If the subagent returns malformed output, re-enter HYPOTHESIZE — treat it as insufficient analysis, not a subagent retry.
+2. **Trust the subagent's grades and routing. Do not re-grade.** The subagent owns the weighted assessment and the routing decision; your job is to act on it, not re-derive it. Skim the output for two things only: (a) well-formedness — both `## ANALYZE (loop N)` and `## Self-report` sections present, `Next action:` is `CONCLUDE` or `HYPOTHESIZE`, CONCLUDE includes `disposition`/`confidence`/`matched_archetype`; (b) anomaly flags — if `Anomalies:` names a specific missing lead or evidence gap, route HYPOTHESIZE for the next cycle even if the subagent said CONCLUDE. Otherwise proceed with the subagent's stated routing. Writing your own parallel analysis in a thinking block defeats the extraction — don't.
 
-3. **Read the self-report.** If the `Anomalies:` list flags prior-loop grade defects (e.g., an ungrounded `++`, a silently-dropped hypothesis), take those seriously — the subagent may be correcting a real error. Integrate the anomaly into your routing: if the flag identifies a gap that requires more evidence, route HYPOTHESIZE regardless of the subagent's stated routing. If the flag is purely corrective of past grading, the corrected weights already appear in the subagent's Assessment.
+3. **Paste the ANALYZE block into `{run_dir}/investigation.md`** verbatim, appending at end-of-file. The subagent's output already includes the `## ANALYZE (loop N)` header. Anchor the Edit/Write at the last line of the current file (read the tail if unsure) — never insert ahead of an existing phase header, or `infer_state_pre.py` will reject on phase-order mismatch. Do not paste the `## Self-report` section; it is for your consumption only.
 
-4. **Paste the ANALYZE block into `{run_dir}/investigation.md`** verbatim — the subagent's output already includes the `## ANALYZE (loop N)` header. This creates the phase entry `infer_state.py` picks up. Do not paste the `## Self-report` section into the investigation log; it is for your consumption only.
-
-5. **Compose the `gather:` YAML block for the current loop** using the subagent's Assessment as the source of `resolutions`, and the GATHER prose observations as the source of `outcome.observations`. Run first to confirm the ID namespace:
+4. **Compose the `gather:` YAML block for the current loop** using the subagent's Assessment as the source of `resolutions`, and the GATHER prose observations as the source of `outcome.observations`. Run first to confirm the ID namespace:
    ```
    bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
    ```
@@ -502,7 +500,7 @@ ANALYZE runs as a dedicated subagent. You do not grade hypotheses inline — you
        # ... query_details, outcome, resolutions per schema
    ```
 
-6. **Act on the routing.**
+5. **Act on the routing.**
    - `Next action: HYPOTHESIZE` → re-enter HYPOTHESIZE for loop N+1, using the subagent's discriminator guidance.
    - `Next action: CONCLUDE` → proceed to CONCLUDE. The subagent's `disposition`, `confidence`, and `matched_archetype` feed the report frontmatter; anchor grounding is enforced at report validation, not here.
 
