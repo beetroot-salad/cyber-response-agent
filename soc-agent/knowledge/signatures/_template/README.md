@@ -32,6 +32,7 @@ This research phase is the foundation. The context, playbook, and archetypes sho
 - Threat model — grounded in what you saw in real tickets
 - Known false positives — from the recurring benign patterns you identified
 - Risk indicators — the fields and values that actually discriminated outcomes in past tickets
+- **Do not duplicate JSON paths / Key Observables here** — those live in `field-quirks.md` (below) and are baked into the main-agent prompt separately.
 
 **playbook.md:**
 - Update frontmatter (signature_id, last_updated)
@@ -40,8 +41,8 @@ This research phase is the foundation. The context, playbook, and archetypes sho
 - Screen table (optional, recommended) — fast-path patterns for the most common benign archetype. Only include a pattern if every indicator is unambiguous and every indicator is queryable via a real lead, not just alert-field matching
 - Scope — how far the investigation may range before escalating
 
-**field-quirks.md (new):**
-- Extract the subset of `context.md` that matters for shape comparison: the Key Observables table (observable → JSON path → why it matters) plus any field-level gotchas (e.g., counterintuitive field semantics, NAT-egress caveats). Read by the archetype-scan subagent instead of the full `context.md` — keep it tight.
+**field-quirks.md:**
+- Owns the mechanical reading of the alert: Key Observables table (observable → JSON path → why it matters for shape comparison) plus any field-level gotchas (counterintuitive field semantics, NAT-egress caveats, conditional fields). Read by the archetype-scan and ticket-context subagents directly, and baked into the main-agent prompt alongside `context.md`. Keep it tight — no threat-model prose here; that stays in `context.md`.
 
 **archetypes/{archetype-name}/:**
 - Create one directory per archetype you identified in research
@@ -61,7 +62,7 @@ This research phase is the foundation. The context, playbook, and archetypes sho
 ```
 {signature-id}/
 ├── context.md               # Signature reference (detection logic, threat model, FPs)
-├── field-quirks.md          # Key observables + field-level gotchas (scanner-scoped subset of context.md)
+├── field-quirks.md          # Key observables + field-level gotchas (mechanical reading of the alert)
 ├── playbook.md              # Archetype catalog, leads, screen table, escalation criteria
 └── archetypes/              # One subdirectory per recognized archetype
     └── {archetype-name}/

@@ -49,7 +49,7 @@ See `content/validation.md` for the three-layer CONCLUDE validation detail (Laye
 ## The investigation loop at a glance
 
 ```
-CONTEXTUALIZE ─┬─→ CONCLUDE        (ticket-context fast-resolve on repeat alerts)
+CONTEXTUALIZE ─┬─→ CONCLUDE        (main-agent dedup when ticket-context surfaces a live repeat)
                ├─→ SCREEN ─┬─→ CONCLUDE  (mechanical pattern match)
                │            └─→ HYPOTHESIZE
                └─→ HYPOTHESIZE → GATHER → ANALYZE ─┬─→ HYPOTHESIZE (loop)
@@ -57,7 +57,7 @@ CONTEXTUALIZE ─┬─→ CONCLUDE        (ticket-context fast-resolve on repea
 ```
 
 Three legal paths to CONCLUDE:
-- From CONTEXTUALIZE — ticket-context subagent matches a recent high-confidence prior investigation of the same pattern.
+- From CONTEXTUALIZE — ticket-context's `repeats` cluster shows the same alert firing minutes ago on the same entities, and the main agent verifies an open/recent ticket justifies a duplicate disposition.
 - From SCREEN — a cheap subagent matches the alert against the playbook's known benign patterns.
 - From ANALYZE — the full loop converges (mechanism confirmed + verified + scoped, or explicit escalation).
 

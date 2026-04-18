@@ -122,7 +122,7 @@ CONTEXTUALIZE
 ASSESS is a decision step the agent performs in its head, not a phase header. The phase headers you write to investigation.md are `## CONTEXTUALIZE`, `## SCREEN`, `## HYPOTHESIZE`, `## GATHER`, `## ANALYZE`, `## CONCLUDE` — no `## ASSESS`.
 
 Transitions (enforced by the state machine hook):
-- CONTEXTUALIZE → CONCLUDE (ticket-context fast-resolve for repeat alerts)
+- CONTEXTUALIZE → CONCLUDE (main-agent dedup when ticket-context surfaces a live repeat)
 - CONTEXTUALIZE → SCREEN (playbook has a ## Screen section)
 - CONTEXTUALIZE → HYPOTHESIZE (branching-first case — step-1 lead depends on which explanation is true)
 - CONTEXTUALIZE → GATHER (pure-gathering first lead — step-1 is the same regardless of explanation)
@@ -216,18 +216,21 @@ When reading multiple knowledge or environment files, batch independent reads in
    ```
    When the subagent returns, read its `archetype_scan` ranked list AND its `adversarial_archetype` entry. Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation. Record both in `investigation.md` §CONTEXTUALIZE (see template below) — the adversarial archetype is the citable surface the CONCLUDE self-check's `archetype_shape_match` question asks about, so you need it in writing. If the subagent returned no useful output (malformed YAML, empty ranking), continue with the rest of CONTEXTUALIZE — archetypes are a useful prior, not required.
 
-   **Ticket context** — queries the SIEM for related alerts, clusters them mechanically, and recommends whether fast-resolve is possible.
+   **Ticket context** — queries the SIEM for alerts on the same entities in the last 4 hours and clusters them mechanically. Pure correlation; no characterization, no prior-investigation comparison.
    ```
    Agent(
      subagent_type="general-purpose",
      model="haiku",
      description="ticket-context for {identifier}",
-     prompt="Read ${CLAUDE_SKILL_DIR}/ticket-context.md for your complete instructions. Substitute: run_dir={run_dir}, runs_dir={runs_dir}, signature_id={signature_id}"
+     prompt="Read ${CLAUDE_SKILL_DIR}/ticket-context.md for your complete instructions. Substitute: run_dir={run_dir}, signature_id={signature_id}"
    )
    ```
-   When the subagent returns, read the `situation` paragraph, the `definite` / `maybe` clusters, and the `fast_resolve_candidates` (top ~3 similar prior investigations with their similarity dimensions). The fast-resolve *decision* is yours, not the subagent's: for each candidate, check whether the cited prior investigation + precedent file exist, whether the entity class and anchor confirmations still hold today, and whether the current alert's shape matches tightly enough to transfer the disposition. If a candidate clearly matches, go directly to CONCLUDE citing it. Otherwise use `situation` / `definite` / `maybe` for hypothesis ranking in HYPOTHESIZE.
+   When the subagent returns, read `entities`, `repeats`, `related`, and `high_volume_dimensions`. Interpretation is yours:
+   - **Duplicate / fast-resolve path** — if `repeats` shows the same alert firing minutes ago on the same entities (especially if a prior ticket is open or recently resolved), you may transition directly CONTEXTUALIZE → CONCLUDE with `status=duplicate` or transfer a recent disposition. Verify the prior ticket exists before citing it; the subagent does not check.
+   - **Hypothesis seeding** — use `related` clusters to widen your mental model of what's happening on the host. High-volume dimensions are a weak signal (noisy entity or high-activity window) — note them but don't over-weight.
+   - **Entity classification stays with you.** The subagent returns raw values (IPs, usernames). You decide whether `172.22.0.10` is a NAT gateway or `healthcheck` is a known monitoring alias using `knowledge/environment/context/`.
 
-   **Related alerts are seeds for thinking, not evidence for grading.** Ticket-context surfaces alerts on the same entity across all signatures. Use them to widen your mental model of what's happening on this host, notice patterns you would otherwise miss, and prompt new hypothesis branches. Do not cite them as grading evidence (`+`/`++`/`-`/`--`) in ANALYZE unless you can (a) name a specific causal mechanism linking them to the current alert and (b) point to a concrete observation that establishes the link. "Temporally concurrent," "same host," and "high combined alert volume" are not mechanisms — they are coincidence shapes that any multi-cron or high-baseline environment produces naturally. A related alert that seeds a new hypothesis is generative; the new hypothesis must then be investigated through the normal HYPOTHESIZE → GATHER → ANALYZE loop, not treated as pre-confirmed by its proximity to the current alert.
+   **Related alerts are seeds for thinking, not evidence for grading.** Use them to notice patterns you would otherwise miss and prompt new hypothesis branches. Do not cite them as grading evidence (`+`/`++`/`-`/`--`) in ANALYZE unless you can (a) name a specific causal mechanism linking them to the current alert and (b) point to a concrete observation that establishes the link. "Temporally concurrent," "same host," and "high combined alert volume" are not mechanisms — they are coincidence shapes that any multi-cron or high-baseline environment produces naturally. A related alert that seeds a new hypothesis must then be investigated through the normal HYPOTHESIZE → GATHER → ANALYZE loop, not treated as pre-confirmed by its proximity.
 
 4. **Environment readiness.** The `## Environment Readiness` section at the top of this skill is the preflight output — which configured adapters responded to `health-check`. For any system marked unreachable or degraded, scan `knowledge/common-investigation/leads/*/definition.md` for leads whose `data_tags` depend on that system and record them in `investigation.md` as affected (see the template below). Preflight is deliberately a connectivity check only; it does not verify per-index freshness. If a GATHER query later returns suspect results (zero matches, stale latest event, unexpectedly low count), follow `knowledge/common-investigation/leads/data-source-debug/definition.md` to diagnose whether it's a coverage gap, field-schema drift, or true absence.
 
