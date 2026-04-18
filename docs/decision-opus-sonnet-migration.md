@@ -162,7 +162,7 @@ The 4 live Sonnet runs were performed on a **medium-quality harness with relativ
 
 - `skills/investigate/SKILL.md`: three discipline cues added (ANALYZE circumstantial-vs-authoritative + premature-CONCLUDE warning; HYPOTHESIZE statistical-framed predictions + per-hypothesis pitfalls subsection). Zero-risk edits — Opus #10 validated they land cleanly with no regression vs the earlier Opus baseline.
 - `scripts/contextualize_preload.py`: ticket-context removed from preload. Only archetype-scan runs in the background now.
-- `skills/investigate/ticket-context.md`: frontmatter model pinned to `haiku`.
+- `skills/investigate/ticket-context.md`: frontmatter model pinned to `haiku`. (Since migrated to `agents/ticket-context.md` as a plugin custom subagent.)
 - `skills/investigate/SKILL.md` CONTEXTUALIZE step 3: updated to split "archetype-scan (preloaded)" from "ticket-context (dispatch inline as Haiku Agent() call)".
 - `playground/scripts/eval_run.sh`: `--model "${SOC_EVAL_MODEL:-opus}"` — respects an env-var override so future eval sessions can flip without another edit; default stays Opus per user instruction.
 - Evaluate skill baseline table: runs #10–#14 documented with full meta-findings + a reference-run map.

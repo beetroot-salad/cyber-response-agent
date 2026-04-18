@@ -24,7 +24,7 @@ The judge dispatch only fires once the proposed text contains both the `## CONCL
 
 ### What Layer 0 checks
 
-1. **Ticket-context subagent was dispatched** during CONTEXTUALIZE. The ticket-context subagent is dispatched inline by the main agent via `Agent(prompt=<skills/investigate/ticket-context.md>)`; the audit log records Task/Agent calls, and the check passes if any matches the ticket-context prompt signature. A legacy `ticket_context.yaml` file-existence check is retained for test convenience but is no longer the production detection path.
+1. **Ticket-context subagent was dispatched** during CONTEXTUALIZE. The ticket-context subagent is dispatched inline by the main agent via `Agent(subagent_type="ticket-context")` (plugin custom subagent at `agents/ticket-context.md`); the audit log records Task/Agent calls, and the check passes if any matches the ticket-context prompt signature. A legacy `ticket_context.yaml` file-existence check is retained for test convenience but is no longer the production detection path.
 
 2. **Two parallel Haiku judges** validate the investigation log. Both run via the `claude` CLI in per-thread `subprocess.Popen` calls behind a shared wall-clock deadline, so total time is bounded by a single `SOC_AGENT_JUDGE_TIMEOUT_SECONDS` regardless of which judge is slower. Prompts are passed over stdin rather than argv to avoid `ARG_MAX` on long investigation logs. Per-run salted delimiters wrap untrusted content. Verdicts are ANDed deterministically — any FLAG blocks the write.
 

@@ -17,6 +17,19 @@ available" or "not observed." Omission is ambiguous to the main agent.
 - **Timing pattern**: Classify as periodic (regular intervals — note
   interval and variance), burst (clustered in short window — note
   window and count), or irregular (no clear pattern).
+- **Cluster stats (per `(srcip, srcuser)` pair, when screening for
+  probe-like periodic cadence)**: Group events into *probe attempts*
+  by clustering with a **retry gap of 10s** (consecutive events ≤ 10s
+  apart belong to the same cluster — this folds natural SSH
+  reconnect retries into one probe attempt). Report:
+  - `event_count` — total raw events in the window
+  - `cluster_count` — number of distinct probe attempts after
+    clustering
+  - `max_cluster_size` — largest cluster's event count (a burst
+    indicator; natural retries are 1-2, rarely 3)
+  - `mean_cluster_gap_s`, `stdev_cluster_gap_s` — inter-cluster
+    timing when `cluster_count ≥ 3`; omit otherwise (not enough
+    samples for a cadence claim)
 - **Username diversity**: Single username, small set (<5), or many
   distinct usernames. Note if any match known patterns from
   environment/context/identity-patterns.md (service accounts, admin accounts).

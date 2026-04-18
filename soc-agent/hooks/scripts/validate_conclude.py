@@ -118,7 +118,7 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
         "The main agent is expected to spawn it inline via Agent() as "
         "described in SKILL.md §CONTEXTUALIZE step 3; the audit log has no "
         "matching Task/Agent call. Dispatch the subagent using "
-        "skills/investigate/ticket-context.md before re-issuing this "
+        "Agent(subagent_type=\"ticket-context\") before re-issuing this "
         "CONCLUDE write. Next action: stay in CONCLUDE, run the subagent, "
         "then retry the write."
     )

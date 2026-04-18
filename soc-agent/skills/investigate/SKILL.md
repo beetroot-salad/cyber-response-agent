@@ -211,10 +211,9 @@ When reading multiple knowledge or environment files, batch independent reads in
    You already have playbook.md loaded, which lists every archetype name under this signature. Build the `story_paths` list from those names — one `.../archetypes/{name}/story.md` per archetype — and pass it to the subagent. Do not send the subagent to enumerate archetype directories; it should only read the exact paths you hand it.
    ```
    Agent(
-     subagent_type="general-purpose",
-     model="haiku",
+     subagent_type="soc-agent:archetype-scan",
      description="archetype-scan for {signature_id}",
-     prompt="Read ${CLAUDE_SKILL_DIR}/archetype-scan.md for your complete instructions. Substitute: alert_path={run_dir}/alert.json, field_quirks_path=/workspace/soc-agent/knowledge/signatures/{signature_id}/field-quirks.md, story_paths=/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_1}/story.md,/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_2}/story.md,..."
+     prompt="alert_path={run_dir}/alert.json\nfield_quirks_path=/workspace/soc-agent/knowledge/signatures/{signature_id}/field-quirks.md\nstory_paths=/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_1}/story.md,/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_2}/story.md,..."
    )
    ```
    When the subagent returns, read its `archetype_scan` ranked list AND its `adversarial_archetype` entry. Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation. Record both in `investigation.md` §CONTEXTUALIZE (see template below) — the adversarial archetype is the citable surface the CONCLUDE self-check's `archetype_shape_match` question asks about, so you need it in writing. If the subagent returned no useful output (malformed YAML, empty ranking), continue with the rest of CONTEXTUALIZE — archetypes are a useful prior, not required.
@@ -222,10 +221,9 @@ When reading multiple knowledge or environment files, batch independent reads in
    **Ticket context** — queries the SIEM for alerts on the same entities in the last 4 hours and clusters them mechanically. Pure correlation; no characterization, no prior-investigation comparison.
    ```
    Agent(
-     subagent_type="general-purpose",
-     model="haiku",
+     subagent_type="soc-agent:ticket-context",
      description="ticket-context for {identifier}",
-     prompt="Read ${CLAUDE_SKILL_DIR}/ticket-context.md for your complete instructions. Substitute: run_dir={run_dir}, signature_id={signature_id}"
+     prompt="run_dir={run_dir}\nsignature_id={signature_id}"
    )
    ```
    When the subagent returns, read `entities`, `repeats`, `related`, and `high_volume_dimensions`. Interpretation is yours:
@@ -268,13 +266,12 @@ prologue:
 1. **Spawn the SCREEN subagent.** It runs the playbook's screen pattern table — checks each pattern's indicators against the alert, executes the specified leads, and returns a structured `screen_result: match | no_match` with the supporting observations.
    ```
    Agent(
-     subagent_type="general-purpose",
-     model="haiku",
+     subagent_type="soc-agent:screen",
      description="screen for {signature_id}",
-     prompt="Read ${CLAUDE_SKILL_DIR}/screen.md for your complete instructions. Substitute: run_dir={run_dir}, signature_id={signature_id}"
+     prompt="run_dir={run_dir}\nsignature_id={signature_id}"
    )
    ```
-   The `model="haiku"` override is required — SCREEN is mechanical pattern matching against a short table of indicators, and pinning Haiku is the main cost lever for repeat-alert investigations (baseline screen cost drops from ~$0.30 at main-agent rate to ~$0.02). If a run shows Haiku consistently producing malformed YAML or failing to follow the indicator resolution rules, fall back to `model="sonnet"` — but do not remove the override entirely.
+   The `screen` subagent is pinned to Haiku in its frontmatter — SCREEN is mechanical pattern matching against a short table of indicators, and Haiku is the main cost lever for repeat-alert investigations (baseline screen cost drops from ~$0.30 at main-agent rate to ~$0.02). If a run shows Haiku consistently producing malformed YAML or failing to follow the indicator resolution rules, override at the call site with `model="sonnet"` — but do not change the frontmatter default.
 
    **Why this matters — do NOT inline the screen work.** Reading the playbook table and reasoning "looks like monitoring, no match" in the main agent's context is strictly cheaper *per invocation* but violates two goals: (a) the cost lever is Haiku screening on repeat alerts, which requires actually dispatching the subagent; (b) the indicator resolution requires a real `authentication-history` query whose raw results would pollute your main context if run inline. Always spawn.
 
@@ -283,6 +280,8 @@ prologue:
 > Note: The report validation hooks (Tier 1 + Tier 2 judge) handle deeper validation — precedent existence, evidence sufficiency, report consistency. The main agent's job here is only to check that the screen subagent returned a coherent, complete response.
 
 **If `screen_result: no_match`** — proceed to HYPOTHESIZE. The evidence gathered during screening (the `leads_run` observations) becomes part of the investigation record. Do not re-run those leads in the full loop unless you have reason to believe the results were incomplete.
+
+**If `screen_result: error`** — the subagent could not complete a clean match/no_match decision (missing file, failed query, missing substitution). Log the `reason` in the SCREEN section of `investigation.md` and fall through to HYPOTHESIZE. Do not treat `error` as `no_match` — the distinction matters for debugging and for audit.
 
 **If the subagent returns malformed or unparseable output** — treat as no_match and fall through to HYPOTHESIZE.
 

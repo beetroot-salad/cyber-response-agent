@@ -16,9 +16,10 @@ Evaluates the `soc-agent:investigate` skill against one real Wazuh alert from th
 
    ```bash
    # Scenario A — monitoring-probe (SCREEN should MATCH, disposition benign)
-   # Single SSH attempt as a monitoring-pattern user. Also runs automatically
-   # every 10 min via monitoring-host's cron.
-   docker exec monitoring-host /opt/workloads/monitoring_probe.sh
+   # Single SSH attempt as a monitoring-pattern user. The cron runs three
+   # tools in parallel (nagios 5m / zabbix 10m / healthcheck 15m); this manual
+   # invocation picks one explicitly — the script now requires the username.
+   docker exec monitoring-host /opt/workloads/monitoring_probe.sh nagios
 
    # Scenario B — bait (SCREEN should FALL THROUGH to full loop)
    # 5-attempt burst as the same username family. Violates the screen

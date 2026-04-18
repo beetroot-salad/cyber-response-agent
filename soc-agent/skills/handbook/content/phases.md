@@ -58,7 +58,7 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 
 **Work:**
 
-1. Spawn a **subagent** with the prompt at `skills/investigate/screen.md`. Use a cheap model (Sonnet or Haiku). Pass the run directory path, the `## Screen` section from the playbook, and access to the same SIEM tools.
+1. Spawn the **screen subagent** via `Agent(subagent_type="screen")`. It is a plugin-registered custom subagent (`agents/screen.md`) with its own system prompt (CLAUDE.md does not leak in), tools restricted to Read/Bash/Grep/Glob, and model pinned to Haiku in frontmatter. Pass the run directory path and signature ID in the user message.
 2. The subagent tries to match the alert against the pattern table. For each pattern, every indicator must be unambiguous — if any indicator is uncertain, the subagent must return `no_match`.
 3. Parse the subagent response:
    - `screen_result: match` → validate the output is well-formed (required YAML fields, non-empty observations, `matched_pattern` exists in the Screen table). If valid, go to `CONCLUDE`. The report validation hooks will do the deeper semantic check.
