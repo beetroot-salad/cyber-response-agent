@@ -211,7 +211,7 @@ When reading multiple knowledge or environment files, batch independent reads in
    You already have playbook.md loaded, which lists every archetype name under this signature. Build the `story_paths` list from those names — one `.../archetypes/{name}/story.md` per archetype — and pass it to the subagent. Do not send the subagent to enumerate archetype directories; it should only read the exact paths you hand it.
    ```
    Agent(
-     subagent_type="archetype-scan",
+     subagent_type="soc-agent:archetype-scan",
      description="archetype-scan for {signature_id}",
      prompt="alert_path={run_dir}/alert.json\nfield_quirks_path=/workspace/soc-agent/knowledge/signatures/{signature_id}/field-quirks.md\nstory_paths=/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_1}/story.md,/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_2}/story.md,..."
    )
@@ -221,7 +221,7 @@ When reading multiple knowledge or environment files, batch independent reads in
    **Ticket context** — queries the SIEM for alerts on the same entities in the last 4 hours and clusters them mechanically. Pure correlation; no characterization, no prior-investigation comparison.
    ```
    Agent(
-     subagent_type="ticket-context",
+     subagent_type="soc-agent:ticket-context",
      description="ticket-context for {identifier}",
      prompt="run_dir={run_dir}\nsignature_id={signature_id}"
    )
@@ -266,7 +266,7 @@ prologue:
 1. **Spawn the SCREEN subagent.** It runs the playbook's screen pattern table — checks each pattern's indicators against the alert, executes the specified leads, and returns a structured `screen_result: match | no_match` with the supporting observations.
    ```
    Agent(
-     subagent_type="screen",
+     subagent_type="soc-agent:screen",
      description="screen for {signature_id}",
      prompt="run_dir={run_dir}\nsignature_id={signature_id}"
    )

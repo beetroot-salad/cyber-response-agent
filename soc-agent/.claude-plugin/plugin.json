@@ -6,7 +6,6 @@
     "name": "Cyber Response Agent"
   },
   "skills": "./skills/",
-  "agents": "./agents/",
   "hooks": {
     "Stop": [
       {
