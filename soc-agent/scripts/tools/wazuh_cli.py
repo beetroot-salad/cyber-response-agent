@@ -28,6 +28,8 @@ import ssl
 import urllib.error
 import urllib.request
 from collections import Counter
+
+RAW_SAMPLE_COUNT = 3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -362,7 +364,7 @@ def format_output(query_string, time_start, time_end, config, items, match_count
     if not items:
         raw_text = "(no matching events)"
     else:
-        raw_text = json.dumps(items[:3], indent=2)
+        raw_text = json.dumps(items[:RAW_SAMPLE_COUNT], indent=2)
 
     return f"""## Query Results
 **Query:** {query_string}
@@ -382,7 +384,7 @@ def format_output(query_string, time_start, time_end, config, items, match_count
 ### Count Breakdown
 {breakdown_text}
 
-### Raw Sample Events (first 3, full _source)
+### Raw Sample Events (first {RAW_SAMPLE_COUNT}, full _source)
 Use these for field-level inspection when the summary lines above don't carry
 the discriminator you need (e.g. source port, process name, connection tuple).
 
