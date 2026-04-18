@@ -465,77 +465,46 @@ Each prediction is simultaneously an interpretation commitment and a pre-committ
 
 ### ANALYZE
 
-**Goal:** Weight evidence against each hypothesis using structured assessments.
+**Goal:** Weight evidence against each hypothesis and route the next action.
 
-For each surviving hypothesis, assign a weight:
-- `++` strongly supports (evidence is exactly what this hypothesis predicts)
-- `+` weakly supports (consistent but not distinctive)
-- `-` weakly refutes (somewhat inconsistent)
-- `--` strongly refutes (contradicts a core prediction)
+ANALYZE runs as a dedicated subagent. You do not grade hypotheses inline — you dispatch the subagent, paste its output into the log, and act on its routing decision.
 
-Cross-check your analysis against the investigation philosophy:
-- **Severity of tests:** Are your leads severe enough? A benign conclusion from weak tests should not produce high confidence. If you've only pursued leads where all hypotheses predict the same outcome, you haven't actually discriminated.
-- **Watch for the unexplained:** If your best hypothesis leaves significant observations unexplained, your hypothesis space may be incomplete — consider whether you've missed an actor type, pathway, or mechanism.
-- **Circumstantial vs authoritative:** Distinguish "evidence consistent with X" (circumstantial) from "authoritative source confirms X" (e.g. the sanction registry explicitly lists this IP, the change-management ticket is open with a confirmed operator, the query result directly answers the question). Do not promote circumstantial to authoritative. A `++` weight on a mechanism hypothesis tied to an anchored archetype requires authoritative confirmation; circumstantial consistency alone is at most `+`. A refutation shape being met does not automatically mean `--` — ask: "Was the test severe enough? Could the hypothesis still be true despite this evidence?" `--` means direct contradiction of a core prediction, not "looks unlikely."
-- **Route compliance for pre-committed readings:** If the just-run lead carried `predictions` (lead-level conditional branch plans), check that the actual outcome pattern matched one of your `if` branches and that the next lead you're about to select matches the corresponding `advance_to`. If the observed pattern didn't fit any branch, that's a signal the fork space was incomplete — HYPOTHESIZE to extend it, don't silently rationalize the outcome into the closest branch.
-- **No rollup grades across hypotheses:** A hypothesis's grade reflects evidence on *that specific mechanism*. Do not upgrade a mechanism hypothesis from `+` to `++` on the strength of evidence that actually supports a sibling mechanism, and do not invent a parent class (`?compromise-confirmed`, `?malicious-activity`) to aggregate sibling grades — see HYPOTHESIZE step 5. If two mechanism hypotheses are both at `+` and neither is refuted, the correct CONCLUDE disposition is `escalated / inconclusive` with both listed as active, not `escalated / true_positive / high` with a composite wrapper. Losing grade crispness is the honest outcome when the evidence doesn't discriminate — and the concurrent list carries more detail for the analyst than the merge would.
+1. **Dispatch the ANALYZE subagent.**
+   ```
+   Agent(
+     subagent_type="general-purpose",
+     model="sonnet",
+     description="analyze loop {N} for {signature_id}",
+     prompt="Read ${CLAUDE_SKILL_DIR}/analyze.md for your complete instructions. Substitute: run_dir={run_dir}, loop_n={N}, signature_id={signature_id}"
+   )
+   ```
+   `{N}` is the loop number you just stamped on this cycle's `## HYPOTHESIZE (loop N)` and `## GATHER (loop N)` headers — the ANALYZE belongs to the same cycle. Do not increment it.
 
-**Decision after ANALYZE:**
-- If hypotheses remain undifferentiated: → HYPOTHESIZE (select next lead)
-- If evidence contradicts all hypotheses: → CONCLUDE with escalation
-- If a mechanism hypothesis is confirmed (`++`): **verify and scope before concluding**
+   **Why dispatch, not inline.** Weighted grading, rollup reasoning, and refutation discipline are the token-heaviest per-cycle work, and most of it is not load-bearing for later phases — only the grades, surviving hypotheses, routing decision, and (on CONCLUDE) disposition+archetype matter downstream. Keeping that reasoning in a subagent isolates rollup discipline from the main loop's other responsibilities and keeps main context lean.
 
-**Premature CONCLUDE is a primary failure mode.** Do not conclude until BOTH: the adversarial hypothesis is explicitly refuted with `--` evidence (not just deprioritized, outweighed, or "unlikely given context"), AND at least one mechanism hypothesis has `++` authoritative confirmation OR the investigation is escalating with a clear escalation rationale. When the adversarial is cleared but no mechanism reaches `++`, the correct next action is HYPOTHESIZE (pursue anchor confirmation or a differentiating lead), not CONCLUDE. When the target is high-sensitivity (production DB, secrets store, identity provider) and the evidence is ambiguous, escalate — do not accept weak evidence as sufficient.
+2. **Validate the subagent's output is well-formed.** The subagent returns an `## ANALYZE (loop N)` prose block followed by a `## Self-report` section. Both must be present. The ANALYZE block must name surviving hypotheses with weights and a `Next action:` of `CONCLUDE` or `HYPOTHESIZE`; on CONCLUDE it must include `disposition`, `confidence`, and `matched_archetype` (or `null`). If the subagent returns malformed output, re-enter HYPOTHESIZE — treat it as insufficient analysis, not a subagent retry.
 
-#### Verification and Scoping
+3. **Read the self-report.** If the `Anomalies:` list flags prior-loop grade defects (e.g., an ungrounded `++`, a silently-dropped hypothesis), take those seriously — the subagent may be correcting a real error. Integrate the anomaly into your routing: if the flag identifies a gap that requires more evidence, route HYPOTHESIZE regardless of the subagent's stated routing. If the flag is purely corrective of past grading, the corrected weights already appear in the subagent's Assessment.
 
-**`++` requires an attempted refutation.** Before committing any hypothesis to `++`, name one concrete check that would refute it if its result came back a specific way — then run it, or explicitly cite an earlier GATHER observation that already satisfies the check. Commit `++` only if the attempt fails to refute. If no refutation path is runnable in scope, the maximum grade is `+` — return to HYPOTHESIZE and pursue a differentiating lead, do not force `++`. The `++` grade represents confidence backed by a failed attempt to falsify, not just consistent evidence.
+4. **Paste the ANALYZE block into `{run_dir}/investigation.md`** verbatim — the subagent's output already includes the `## ANALYZE (loop N)` header. This creates the phase entry `infer_state.py` picks up. Do not paste the `## Self-report` section into the investigation log; it is for your consumption only.
 
-When a hypothesis about the mechanism is confirmed, two questions remain:
+5. **Compose the `gather:` YAML block for the current loop** using the subagent's Assessment as the source of `resolutions`, and the GATHER prose observations as the source of `outcome.observations`. Run first to confirm the ID namespace:
+   ```
+   bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
+   ```
+   Write the full block in one write — `outcome` (observations + attribute_updates) and `resolutions` together. No partial blocks.
+   ```yaml
+   gather:
+     - id: l-{nonce}
+       loop: {N}
+       name: {lead-name}
+       target: v-{id}
+       # ... query_details, outcome, resolutions per schema
+   ```
 
-1. **Is this instance legitimate?** Trace the causal chain toward a trust anchor — the authoritative source that establishes authorization. For automation: check the job config, creator, approval. For user activity: verify the identity and authorization. If you can verify authoritatively, confidence is high. If you can only rely on circumstantial evidence (pattern match + precedent), confidence is medium. If only weak circumstantial evidence is available, escalate.
-
-   When the matched archetype declares `required_anchors` in its frontmatter, those are the specific anchors to consult — see `knowledge/environment/operations/` for each anchor's question shape, query method, and failure modes. Record every consultation in the report's `trust_anchors_consulted` field with `anchor`, `kind` (`org-authority` or `telemetry-baseline`), `result` (`confirmed`, `refuted`, or `unavailable`), and a short `citation`. An archetype with required anchors **cannot** resolve to a non-escalation status without all of them returning `confirmed`.
-
-2. **What is the scope?** What was accessed, what's the blast radius, what's the impact? This determines escalation severity for confirmed threats, and informs the recommendation for benign activity (e.g., suggest rule tuning).
-
-> **Important:** Verification and scoping are not separate phases. They are additional HYPOTHESIZE→GATHER→ANALYZE cycles using the same loop. After confirming the mechanism, form new hypotheses about legitimacy or scope, and investigate them through the same loop structure.
-
-When mechanism is confirmed AND verified AND scoped → CONCLUDE.
-
-#### Chain-of-Events Awareness
-
-When confirming a mechanism that implies prior stages (e.g., data exfiltration implies prior unauthorized access; lateral movement implies initial compromise), note those implied stages as potential new investigation scopes. Per the "stay in scope" principle, do not chase the full kill chain — flag them for follow-up:
-
-> "Data exfiltrated via DNS tunneling. Recommend investigating initial access vector as a separate investigation."
-
-This keeps your current investigation focused while ensuring nothing is lost.
-
-Append to `{run_dir}/investigation.md`:
-```markdown
-## ANALYZE (loop {N})
-
-**Evidence:** {lead-name} — {key observation}
-
-**Assessment:** {prose reasoning — weight per hypothesis with justification}
-
-**Surviving hypotheses:** ?hypothesis-1
-**Next action:** CONCLUDE | HYPOTHESIZE (need lead-name to discriminate X)
-```
-
-Then append the complete `gather:` lead block. Run first to confirm the ID namespace:
-```
-bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
-```
-Write the full block in one write — `outcome` (observations + attribute_updates) and `resolutions` together. No partial blocks.
-```yaml
-gather:
-  - id: l-{nonce}
-    loop: {N}
-    name: {lead-name}
-    target: v-{id}
-    # ... query_details, outcome, resolutions per schema
-```
+6. **Act on the routing.**
+   - `Next action: HYPOTHESIZE` → re-enter HYPOTHESIZE for loop N+1, using the subagent's discriminator guidance.
+   - `Next action: CONCLUDE` → proceed to CONCLUDE. The subagent's `disposition`, `confidence`, and `matched_archetype` feed the report frontmatter; anchor grounding is enforced at report validation, not here.
 
 ### CONCLUDE
 
