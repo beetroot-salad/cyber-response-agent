@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-04-18T14:22:17.441Z",
+  "rule": {
+    "id": "5710",
+    "level": 5,
+    "description": "sshd: Attempt to login using a non-existent user",
+    "groups": ["syslog", "sshd", "invalid_login", "authentication_failed"]
+  },
+  "agent": {
+    "id": "003",
+    "name": "app-web-07",
+    "ip": "10.30.12.88"
+  },
+  "data": {
+    "srcip": "10.30.18.42",
+    "srcuser": "root",
+    "dstuser": "root"
+  },
+  "full_log": "Apr 18 14:22:17 app-web-07 sshd[18421]: Invalid user root from 10.30.18.42 port 52214",
+  "location": "/var/log/auth.log"
+}
