@@ -57,56 +57,35 @@ paths.
 
 ## Hypothesis seeds
 
-The archetype catalog above is a *pattern-recognition cache* — fast
-paths for alerts whose shape matches a past ticket. But every 5710
-investigation should start from candidate mechanism hypotheses and
-gather evidence against them; an archetype match, when it happens, is
-a short-circuit on top of that, not a replacement for it. Novel
-variants, shape mutations, and adversaries mimicking benign patterns
-all require the agent to reason from mechanisms, not from cached
-patterns alone.
+At loop 1 there is typically no fork to articulate. The alert
+confirms an `attempted_auth` edge from `v-src-ip` to `v-dst-host`
+with identity `v-attempted-user` and outcome `failed`; the process
+that initiated it on the source endpoint is not named in the event.
+The starter leads below are attribute-enrichment on those
+already-confirmed vertices (source classification, username
+classification, auth-history around the event) — not
+topology-extending proposals. Stay in the mechanical / interpretive
+lane per §ASSESS.
 
-The starter hypotheses below are lean mechanism-shaped candidates to
-consider at HYPOTHESIZE. They map roughly to the archetypes when the
-evidence fits, but the agent may confirm one of these without
-matching any archetype (in which case the outcome is escalation with
-a well-reasoned narrative), and may refute all of these and form a
-novel hypothesis if the evidence doesn't fit any seed.
+Most investigations resolve through enrichment alone: the archetype
+catalog above captures the cross-product of (source sanctioned?) ×
+(username class) × (volume shape) × (forward success?) that these
+leads discriminate. If enrichment leaves disposition ambiguous, the
+fork that typically opens is a legitimacy fork on the source
+process:
 
-### ?legitimate-automation
-Some sanctioned automated system — monitoring probe, health check,
-scheduled job, backup worker — produced this failed login. Typical
-shape: internal source, sentinel or service-account username, low
-volume, no successful follow-up. Maps to `monitoring-probe` or
-`service-account-rotation` archetypes when the specific automation
-is documented in the sanction registry.
+- **`?sanctioned-but-unregistered`** — a benign origin exists that
+  the visible sanction registries don't cover (new automation,
+  undocumented monitoring source, recently-deployed service).
+- **`?unsanctioned-origin`** — no legitimate authorization resolves;
+  source process is adversarial by construction pending a broader
+  anchor lookup.
 
-### ?authentication-mistake
-A human or automation submitted a wrong username by accident — typo,
-stale credential after rotation, misconfigured client. Typical shape:
-any source, real-looking username or service-account shape, low
-volume, often followed by a successful login within seconds (the
-retry after noticing the typo). This hypothesis is usually benign but
-has no dedicated archetype — it resolves via evidence discipline
-rather than archetype match.
-
-### ?credential-guessing
-An adversary is trying to find valid accounts on this host. Typical
-shape: external source, multiple distinct usernames or repeated
-attempts, usernames drawn from wordlists or breach dumps, no
-successful login (yet). Maps to `external-bruteforce` at high volume
-with wordlist usernames, or `credential-stuffing` at low volume with
-real-looking usernames.
-
-### ?compromise-followup (adversarial — always keep active)
-This failed auth is one event in a chain that includes (or will
-include) a successful authentication from the same source. The shape
-alone looks like any of the above, but the *temporal context* —
-specifically any 5501 / 5715 success from the same srcip within
-seconds — takes the event out of the benign archetypes entirely and
-into compromise territory. This hypothesis must be explicitly
-refuted with a forward-looking `authentication-history` check before
-any resolution, regardless of which archetype the shape matched.
+Legitimacy is an attribute of the source-process vertex resolved by
+anchor lookup, not a parallel topology hypothesis. Forward-window
+success (a 5501/5715 from the same srcip within 60s) is a mandatory
+attribute check inside `authentication-history`, not a separate
+hypothesis slot.
 
 ## Starter lead order
 

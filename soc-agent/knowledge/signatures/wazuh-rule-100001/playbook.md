@@ -37,20 +37,44 @@ the registry prefix that the `container-baseline` lead keys on.
 construction of the upstream Falco rule. Do not treat it as a
 discriminating signal.
 
+## Hypothesis seeds
+
+The alert confirms a child shell `process` vertex with a `spawned`
+edge from its parent. The discriminating question is the parent's
+process-topology mechanism — three mutually-exclusive options, read
+directly from `pname` / `aname` in the alert:
+
+- **`?image-entrypoint`** — parent is the image's entrypoint / init
+  wrapper (`tini`, `dumb-init`, `s6`, supervisord, custom launcher).
+- **`?runtime-process`** — parent ancestry walks back to the
+  container's PID 1 entirely inside the pid namespace (long-running
+  app or its descendants).
+- **`?underlying-host`** — parent ancestry crosses the namespace
+  boundary at a runtime exec primitive (`runc`, `containerd-shim`,
+  `docker-exec`, `crictl`, `crio`, `oc exec`, kubelet exec path).
+
+Legitimacy (approved operator vs. RCE attacker spawning a shell from
+the same process) is a trust-anchor attribute on the confirmed
+parent, not a separate hypothesis. The `correlated-falco-events`
+lead runs regardless as evidence, captured in the composition rule
+below.
+
 ## Archetypes
 
-The archetypes recognized for this signature are defined as standalone
-files in `archetypes/`. Each declares its own story, required trust
-anchors, and precedents.
+The archetypes below are a pattern-recognition *cache* — they carry
+trust-anchor definitions and precedent snapshots for the dispositions
+that commonly follow each mechanism. They are not a parallel seed
+list; each archetype lives under exactly one of the three mechanism
+seeds above.
 
-| Archetype | One-line description | File |
-|---|---|---|
-| `operator-runtime-debug` | Authorized operator opened a shell via `docker exec` / `kubectl exec` for ad-hoc debugging | `archetypes/operator-runtime-debug.md` |
-| `ci-pipeline-exec` | CI/CD job exec'd into the container to run a scripted, non-interactive command | `archetypes/ci-pipeline-exec.md` |
-| `k8s-exec-probe` | Kubernetes liveness/readiness/exec probe runs `sh -c "..."` on a strict cadence | `archetypes/k8s-exec-probe.md` |
-| `container-init-script` | The image's own entrypoint or init script invokes a shell at container start | `archetypes/container-init-script.md` |
-| `app-spawned-shell` | A long-running application binary shells out as part of its normal work, matching this image's established baseline | `archetypes/app-spawned-shell.md` |
-| `post-exploit-interactive` | Application-spawned interactive shell with no benign baseline — escalation outcome | `archetypes/post-exploit-interactive.md` |
+| Archetype | Parent mechanism | One-line description | Directory |
+|---|---|---|---|
+| `container-init-script` | `?image-entrypoint` | The image's own entrypoint or init script invokes a shell at container start | `archetypes/container-init-script/` |
+| `app-spawned-shell` | `?runtime-process` | A long-running application binary shells out as part of its normal work, matching this image's established baseline | `archetypes/app-spawned-shell/` |
+| `post-exploit-interactive` | `?runtime-process` | Application-spawned shell with no benign baseline — escalation outcome | `archetypes/post-exploit-interactive/` |
+| `operator-runtime-debug` | `?underlying-host` | Authorized operator opened a shell via `docker exec` / `kubectl exec` for ad-hoc debugging | `archetypes/operator-runtime-debug/` |
+| `ci-pipeline-exec` | `?underlying-host` | CI/CD job exec'd into the container to run a scripted, non-interactive command | `archetypes/ci-pipeline-exec/` |
+| `k8s-exec-probe` | `?underlying-host` | Kubernetes liveness/readiness/exec probe runs `sh -c "..."` on a strict cadence | `archetypes/k8s-exec-probe/` |
 
 ## Starter lead order
 

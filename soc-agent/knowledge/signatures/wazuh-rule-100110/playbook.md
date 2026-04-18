@@ -28,48 +28,41 @@ far. The remaining common patterns are listed as starter hypotheses.
 | `data.dns_domain` | The full queried domain — extract the eTLD+1 for parent classification |
 | `data.dns_query_type` | Query type (A, AAAA, TXT, NULL) — encoded-data hypotheses prefer TXT and NULL |
 
+## Hypothesis seeds
+
+At loop 1 there is typically no fork to articulate. The alert
+confirms a DNS query from `v-agent-host` targeting
+`v-queried-domain`, and the first leads are attribute-enrichment on
+those already-confirmed vertices (parent-domain classification,
+subdomain shape, query history, process attribution where available)
+— not topology-extending proposals. Stay in the mechanical /
+interpretive lane per §ASSESS and pre-register readings on the
+interpretive fields (reputation class, label-shape judgment).
+
+A fork opens after enrichment when the query-history cluster shape
+is ambiguous. Reach for one of these seed labels:
+
+- **`?one-shot-resolution`** — isolated lookup; no sibling clustering
+  on this eTLD+1 or NXDOMAIN burst around it.
+- **`?candidate-probing`** — varied-domain cluster with NXDOMAIN rate
+  above baseline (DGA shape).
+- **`?dns-channel`** — varied-subdomain cluster under the same
+  eTLD+1, regular cadence or high volume, possibly TXT/NULL (tunneling
+  shape).
+
+Legitimacy (known provider vs. unsanctioned) is a target-vertex
+attribute resolved by the parent-domain-classification anchor, not a
+parallel hypothesis.
+
 ## Archetypes
 
-| Archetype | One-line description | File |
+Catalog is partial — only the escalation composition-rule archetype
+is authored. CDN/analytics/DGA/tunneling outcomes should be added as
+directories once real ticket precedents accumulate.
+
+| Archetype | One-line description | Directory |
 |---|---|---|
-| `co-fired-malicious-pattern` | High-entropy query alongside 100112/100113/100115/100116 co-firing — escalation outcome | `archetypes/co-fired-malicious-pattern.md` |
-
-## Starter hypotheses
-
-The remaining common patterns. Note that the benign-shape stories
-share many primitives with each other and with the adversary
-stories; discrimination requires more than pattern matching.
-
-### ?cdn-or-cloud-service
-A legitimate CDN, cloud provider, or hosted service that uses
-high-entropy subdomain labels for cache keys, region routing, TLS
-SNI hashes, or anti-cache pinning. Parent domain (eTLD+1) belongs
-to a recognizable provider (`cloudfront.net`, `akamaiedge.net`,
-`azureedge.net`, `s3.amazonaws.com`, `googleusercontent.com`);
-query type is A/AAAA; historically many queries to this parent
-with varied subdomains; resolution succeeds.
-
-### ?analytics-or-tracking
-A web analytics, telemetry, advertising, or anti-fraud platform
-that generates per-event or per-session subdomains. Parent domain
-belongs to a known analytics/ads/tracking provider; A/AAAA queries;
-resolves successfully; bursty pattern correlating with user web
-activity windows.
-
-### ?dga-malware
-Domain-generation-algorithm malware probing for an active C2
-controller. Many queries to varied high-entropy domains across one
-or more parents with no prior history in the environment. NXDOMAIN
-bursts are a strong signal but not required — a DGA that has
-already located its active controller will produce mostly
-successful resolutions to a small set of domains.
-
-### ?dns-tunneling
-Data encoded into DNS query labels to a controlled authoritative
-server, used for C2 or exfiltration. Subdomain label is long and
-structured (base32/base64/hex chunks, fixed length, predictable
-format); high query volume to the same parent under varying
-subdomains; may use TXT or NULL record types.
+| `co-fired-malicious-pattern` | High-entropy query alongside 100112/100113/100115/100116 co-firing — escalation regardless of the primary query's mechanism | `archetypes/co-fired-malicious-pattern/` |
 
 ## Starter lead order
 

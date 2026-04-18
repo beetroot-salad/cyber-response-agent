@@ -14,7 +14,10 @@ scoping, escalation defaults, stop conditions — lives in the
 
 The archetype catalog under `archetypes/` is partial: only the
 escalation archetype `sensitive-file-tampering` is authored so far.
-The remaining common patterns are listed as starter hypotheses.
+Common benign outcomes (package transactions, automatic patching,
+config-management runs, operator edits) are not yet archetype
+directories — they should be added once real ticket precedents
+accumulate.
 
 ## Field shortcuts
 
@@ -36,43 +39,34 @@ guess what the diff would have shown.
 |---|---|---|
 | `sensitive-file-tampering` | Modification of a security-critical file (sudoers, shadow, sshd_config, PAM, etc.) — escalation outcome | `archetypes/sensitive-file-tampering.md` |
 
-## Starter hypotheses
+## Hypothesis seeds
 
-The remaining common patterns for this signature.
+At loop 1 there is no fork to articulate. The alert confirms a
+file-change edge on `syscheck.path` at `agent.name` with a set of
+changed attributes — but syscheck never names the process that wrote
+the file. The starter leads below are attribute-enrichment on the
+confirmed file/host/change-edge triple (path classification, attribute
+delta, temporal clustering). Stay in the mechanical / interpretive
+lane per §ASSESS.
 
-### ?package-management
-A manual package install/upgrade/remove (apt, dpkg, yum, dnf)
-modified a file the package owns. Path is package-owned, change time
-aligns with a package transaction, multiple 550 events cluster in
-the same minute, owner/permissions unchanged.
+A fork may open after enrichment when the first-wave leads surface
+ambiguity. The realistic fork routes to which **correlation source**
+to consult for process attribution — syscheck itself cannot
+discriminate:
 
-### ?automatic-patching
-An automatic patching mechanism (Ubuntu unattended-upgrades,
-dnf-automatic, yum-cron, vendor patch tooling) ran on its schedule.
-Same surface signature as `?package-management` but timing matches
-the patch schedule rather than a deploy window. Distinguishable from
-manual package management mainly by schedule and the absence of an
-operator/deploy ticket.
+- **`?bulk-scheduled-writer`** — the change is one of a correlated
+  burst (many same-package files modified in the same minute, or the
+  same config path modified across multiple hosts in a CM window).
+  Next lead dispatches package-manager log correlation, automatic-patch
+  schedule lookup, or CM controller run correlation.
+- **`?targeted-writer`** — the change is a point write (single file,
+  no correlated burst). Next lead dispatches process attribution via
+  auditd (rule 591) / shell history / change-ticket lookup.
 
-### ?config-management
-A configuration management tool (Ansible, Puppet, Chef, Salt,
-cloud-init) modified the file as part of a planned run. Path is a
-config under `/etc`, change time aligns with a config-mgmt cadence,
-potentially many 550 events across multiple hosts in the same
-window.
-
-### ?interactive-admin
-A human operator edited the file directly (vi, nano, sed) during
-normal operations or troubleshooting. Single host, one or a few
-files, no correlated package or config-mgmt activity, may align
-with a ticket or change window.
-
-### ?adversary-persistence
-An attacker modified an autostart, scheduling, or authentication
-file to maintain access (cron, systemd, sshd_config, authorized_keys,
-PAM, shell rc, ld.so.preload). Path is in a known persistence
-location, no correlated package or config-mgmt activity, may
-correlate with prior alerts on the same host.
+Legitimacy (sanctioned bulk run vs. unsanctioned writer; authorized
+admin vs. adversary) is a trust-anchor attribute on the confirmed
+writer once attribution resolves — not a parallel hypothesis at
+loop 1.
 
 ## Starter lead order
 
