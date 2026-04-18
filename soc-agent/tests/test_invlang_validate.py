@@ -987,7 +987,7 @@ class TestCheckToolAuditCrossRef:
         run_dir = runs_dir / "test-run"
         run_dir.mkdir(parents=True)
         merged = self._lead_with_query("src_ip:203.0.113.47 AND agent.ip:10.0.0.50")
-        assert _check_tool_audit_cross_ref_warnings(merged, run_dir, "sess-1") == []
+        assert _check_tool_audit_cross_ref_warnings(merged, run_dir) == []
 
     def test_query_match_found_silent(self, tmp_path):
         entry = {
@@ -998,7 +998,7 @@ class TestCheckToolAuditCrossRef:
         }
         run_dir, _ = self._make_run_with_audit(tmp_path, [entry])
         merged = self._lead_with_query("src_ip:203.0.113.47 AND agent.ip:10.0.0.50")
-        assert _check_tool_audit_cross_ref_warnings(merged, run_dir, "sess-1") == []
+        assert _check_tool_audit_cross_ref_warnings(merged, run_dir) == []
 
     def test_no_query_match_warns(self, tmp_path):
         entry = {
@@ -1009,7 +1009,7 @@ class TestCheckToolAuditCrossRef:
         }
         run_dir, _ = self._make_run_with_audit(tmp_path, [entry])
         merged = self._lead_with_query("src_ip:203.0.113.47 AND agent.ip:10.0.0.50")
-        warnings = _check_tool_audit_cross_ref_warnings(merged, run_dir, "sess-1")
+        warnings = _check_tool_audit_cross_ref_warnings(merged, run_dir)
         assert warnings
         assert "l-001" in warnings[0]
 
@@ -1018,18 +1018,25 @@ class TestCheckToolAuditCrossRef:
             "session_id": "sess-1", "tool_name": "Bash", "tool_input": {"command": "echo"},
         }])
         merged = self._lead_with_query("a")  # too short
-        assert _check_tool_audit_cross_ref_warnings(merged, run_dir, "sess-1") == []
+        assert _check_tool_audit_cross_ref_warnings(merged, run_dir) == []
 
-    def test_session_filter_excludes_other_sessions(self, tmp_path):
+    def test_subagent_session_query_matches_globally(self, tmp_path):
+        """Gather subagents log queries under their own session_id.
+
+        The check must match across all sessions; a subagent-dispatched
+        query should be found even though its session_id differs from
+        the main agent's.
+        """
         entry = {
-            "session_id": "sess-other",
+            "session_id": "subagent-sess-xyz",
+            "agent_id": "gather-subagent",
+            "agent_type": "gather",
             "tool_name": "Bash",
             "tool_input": {"command": 'wazuh-query "src_ip:203.0.113.47 AND agent.ip:10.0.0.50"'},
         }
         run_dir, _ = self._make_run_with_audit(tmp_path, [entry])
         merged = self._lead_with_query("src_ip:203.0.113.47 AND agent.ip:10.0.0.50")
-        warnings = _check_tool_audit_cross_ref_warnings(merged, run_dir, "sess-1")
-        assert warnings  # not found under sess-1's scope
+        assert _check_tool_audit_cross_ref_warnings(merged, run_dir) == []
 
 
 # ---------------------------------------------------------------------------

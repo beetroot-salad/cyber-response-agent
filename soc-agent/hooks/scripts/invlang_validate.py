@@ -777,22 +777,26 @@ def _check_silent_empty_result_warnings(merged: dict[str, Any]) -> list[str]:
     return warnings
 
 
-def _load_tool_audit_entries(
-    run_dir: Path, session_id: str | None
-) -> list[dict[str, Any]] | None:
-    """Load tool_audit.jsonl entries from the runs directory.
+def _load_tool_audit_entries(run_dir: Path) -> list[dict[str, Any]] | None:
+    """Load all tool_audit.jsonl entries from the runs directory.
 
     `tool_audit.jsonl` lives in the runs root (one global file for all
-    runs), not per-run. The call filters by session_id when available —
-    each run's main-agent writes share a session_id that also tags the
-    earlier tool calls in the same run. Subagent calls have a different
-    session_id and are excluded when a filter is applied.
+    runs), not per-run. No session filter is applied — leads are
+    dispatched to subagents by default, and the subagent's SIEM query
+    lands in the audit log under the subagent's session_id, not the
+    main agent's. Session-based filtering would therefore false-positive
+    on every subagent-dispatched lead.
+
+    The trade-off is FP across concurrent runs of the same signature
+    (same query text appearing in some *other* run's audit entry would
+    satisfy the substring match). Query text is specific enough in
+    practice — signatures parameterize on IP / user / host — that
+    cross-run collisions are rare. The check remains WARN-level to
+    absorb whatever false-positive rate does occur.
 
     Returns None when the audit file does not exist (audit hook not
-    running — no signal available, caller should skip silently). Returns
-    an empty list when the file exists but nothing matches the session
-    filter (a legitimate signal: this session hasn't logged any tool
-    calls, so any lead claiming a query is suspect).
+    running — no signal, caller skips silently). Returns an empty list
+    when the file exists but contains no parsable entries.
     """
     runs_root = run_dir.parent
     audit_path = runs_root / "tool_audit.jsonl"
@@ -810,11 +814,8 @@ def _load_tool_audit_entries(
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not isinstance(entry, dict):
-            continue
-        if session_id and entry.get("session_id") != session_id:
-            continue
-        entries.append(entry)
+        if isinstance(entry, dict):
+            entries.append(entry)
     return entries
 
 
@@ -830,30 +831,38 @@ def _audit_blob(entry: dict[str, Any]) -> str:
 
 
 def _check_tool_audit_cross_ref_warnings(
-    merged: dict[str, Any], run_dir: Path | None, session_id: str | None
+    merged: dict[str, Any], run_dir: Path | None
 ) -> list[str]:
     """Warn when a lead's query_details has no corresponding tool_audit entry.
 
-    For each lead's `query_details.query`, scan tool_audit.jsonl for any
-    tool call whose `tool_input` (serialized) contains the query as a
-    substring. `tool_input` is truncated to 2000 chars by the audit
-    hook, so we match on a prefix of the query to avoid false negatives
-    on long queries. When no match is found, emit a warning — this is
+    For each lead's `query_details.query`, scan the global
+    tool_audit.jsonl for any tool call whose `tool_input` (serialized)
+    contains the query as a substring. No session filter: lead queries
+    are executed by gather subagents under their own session_id, so
+    session-based matching would miss every subagent-dispatched query.
+    The trade-off is false-positive risk from concurrent runs of the
+    same signature that happen to issue the same parameterized query —
+    rare in practice because queries parameterize on IPs, users, and
+    hosts.
+
+    `tool_input` is truncated to 2000 chars by the audit hook, so the
+    check matches on a prefix of the query to avoid false negatives on
+    long queries. When no match is found, emit a warning — this is
     the deterministic signal for fabricated leads (the companion claims
     a query was run that no tool call evidences).
 
     Warning-only because:
     - The audit hook may lag or be disabled.
-    - Subagent-dispatched queries have a different session_id and the
-      permissive fallback may miss them.
-    - The first few writes in a run may land before any tool call does.
+    - Truncation at the 2000-char boundary can land in the middle of a
+      query prefix.
+    - Cross-run FP risk described above.
 
     A future rollout can promote to ERROR once false-positive rate is
     measured against the case fixtures.
     """
     if run_dir is None:
         return []
-    entries = _load_tool_audit_entries(run_dir, session_id)
+    entries = _load_tool_audit_entries(run_dir)
     if entries is None:
         # Audit hook not running — no signal available; don't warn.
         return []
@@ -883,10 +892,10 @@ def _check_tool_audit_cross_ref_warnings(
         lid = lead.get("id", "?")
         preview = query if len(query) <= 80 else query[:80] + "..."
         warnings.append(
-            f"lead {lid}: query {preview!r} has no matching entry in "
-            f"tool_audit.jsonl for this session. Either the query was "
-            f"fabricated, or it was issued by a subagent (different "
-            f"session_id) — verify the query was actually run."
+            f"lead {lid}: query {preview!r} has no matching entry anywhere "
+            f"in tool_audit.jsonl. Either the query was fabricated, or the "
+            f"audit log was truncated / truncated mid-prefix — verify the "
+            f"query was actually executed."
         )
     return warnings
 
@@ -958,13 +967,12 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
 def collect_warnings(
     proposed_text: str,
     run_dir: Path | None = None,
-    session_id: str | None = None,
 ) -> list[str]:
     """Non-blocking checks that emit warnings rather than errors.
 
     Run after `validate_companion` clears structural errors. `run_dir`
-    and `session_id` enable the tool_audit cross-reference check; when
-    either is missing, that check is skipped silently.
+    enables the tool_audit cross-reference check; when missing, that
+    check is skipped silently.
     """
     warnings: list[str] = []
     blocks, _ = _parse_blocks(proposed_text)
@@ -976,7 +984,7 @@ def collect_warnings(
     warnings.extend(_check_route_compliance(merged))
     warnings.extend(_check_lead_dedup_warnings(merged))
     warnings.extend(_check_silent_empty_result_warnings(merged))
-    warnings.extend(_check_tool_audit_cross_ref_warnings(merged, run_dir, session_id))
+    warnings.extend(_check_tool_audit_cross_ref_warnings(merged, run_dir))
     return warnings
 
 
@@ -1014,8 +1022,7 @@ def main() -> None:
         )
         sys.exit(2)
 
-    session_id = hook_data.get("session_id")
-    warnings = collect_warnings(proposed_text, run_dir, session_id)
+    warnings = collect_warnings(proposed_text, run_dir)
     if warnings:
         print("invlang warnings:", file=sys.stderr)
         for w in warnings:

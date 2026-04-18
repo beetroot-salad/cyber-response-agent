@@ -425,16 +425,30 @@ def check_conclusion_file(run_dir: Path, investigation_text: str) -> str | None:
 # Gate 4: frontier closure
 # ---------------------------------------------------------------------------
 
+# Only resolving terminations require every hypothesis to be terminal.
+# Escalations (severity-ceiling, exhaustion-escalation) exist precisely because
+# live hypotheses can't be tested to completion with available tools — active
+# hypotheses in the handoff are the point, not a bug.
+_RESOLVING_TERMINATION_CATEGORIES = {"trust-root", "adversarial-refuted"}
+
+
 def check_frontier_closure(proposed_text: str) -> str | None:
-    """Every declared hypothesis must have a terminal status at CONCLUDE.
+    """Every declared hypothesis must have a terminal status at CONCLUDE —
+    but only for resolving investigations.
 
     A hypothesis is terminal when it's `confirmed` (last resolution `++`
     or explicit `status: confirmed`), `refuted` (last resolution `--` or
     explicit `status: refuted`), or `shelved` (appears in any lead's
-    `shelved` list). Any hypothesis still `active` at CONCLUDE means the
-    investigation is concluding with a live hypothesis it never tested
-    to completion — that's either a missed lead or a shape bug in the
-    hypothesis itself.
+    `shelved` list).
+
+    For `termination.category ∈ {trust-root, adversarial-refuted}`, any
+    hypothesis still `active` blocks the write — the investigation
+    claims closure but hasn't closed its frontier. For `severity-ceiling`
+    and `exhaustion-escalation`, active hypotheses are legitimate
+    (that's the content of the escalation), so the check passes
+    unconditionally. A missing `conclude.termination.category` also
+    passes — structural validation of that field is the job of the
+    report frontmatter check.
 
     Returns None on pass; a single error message (possibly aggregating
     multiple active hypotheses) on fail.
@@ -451,6 +465,13 @@ def check_frontier_closure(proposed_text: str) -> str | None:
         return None
     merged = _merge_blocks(blocks)
 
+    # Read termination category. Only resolving categories gate on closure.
+    conclude_block = merged.get("conclude") or {}
+    termination = conclude_block.get("termination") or {}
+    category = termination.get("category") if isinstance(termination, dict) else None
+    if category not in _RESOLVING_TERMINATION_CATEGORIES:
+        return None
+
     active: list[str] = []
     for hid in collect_hypothesis_ids(merged):
         if compute_final_status(merged, hid) == "active":
@@ -461,13 +482,16 @@ def check_frontier_closure(proposed_text: str) -> str | None:
 
     return (
         f"frontier-closure failed: hypothesis id(s) {sorted(active)} are "
-        f"still 'active' at CONCLUDE — every declared hypothesis must end in "
+        f"still 'active' at CONCLUDE but termination.category is {category!r} "
+        f"(a resolving category). Every declared hypothesis must end in "
         f"'confirmed' (++), 'refuted' (--), or 'shelved' (via a lead's shelved "
-        f"list). If a hypothesis can't be tested with available tools, shelve "
-        f"it explicitly and record the reason in the lead's concerns, or set "
-        f"termination.category: severity-ceiling with a ceiling_test. "
+        f"list) before you can claim {category!r}. If a hypothesis can't be "
+        f"tested with available tools, either shelve it explicitly or switch "
+        f"termination.category to 'severity-ceiling' (and add ceiling_test) "
+        f"or 'exhaustion-escalation'. "
         f"Next action: author the missing resolution/shelving in a new "
-        f"gather block, then retry the CONCLUDE write."
+        f"gather block, or change the termination category, then retry the "
+        f"CONCLUDE write."
     )
 
 
