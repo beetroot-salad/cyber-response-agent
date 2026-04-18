@@ -5,6 +5,10 @@ Used by validate_conclude.py (pre-CONCLUDE gate, two parallel judges)
 and validate_report.py (post-report Tier 2). Centralising the
 subprocess invocation, salted-delimiter wrapping, and verdict parsing
 keeps both gates on the same contract.
+
+Prompts are fed to the `claude` CLI over stdin rather than argv so we
+don't inflate argv with multi-megabyte investigation logs and so the
+hook stays well clear of ARG_MAX on any platform.
 """
 
 from __future__ import annotations
@@ -13,6 +17,8 @@ import os
 import re
 import secrets
 import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 JUDGE_MODEL = os.environ.get("SOC_AGENT_JUDGE_MODEL", "haiku")
@@ -20,7 +26,12 @@ JUDGE_TIMEOUT_SECONDS = int(os.environ.get("SOC_AGENT_JUDGE_TIMEOUT_SECONDS", "9
 
 
 def get_run_salt(run_dir: Path) -> str:
-    """Per-run salt from meta.json, or a fresh fallback if missing."""
+    """Per-run salt from meta.json, or a fresh fallback if missing.
+
+    An empty-string salt would produce forgeable `<run--tag>` delimiters,
+    so we treat a missing or falsy salt the same as a missing meta.json
+    and generate a fresh per-invocation salt.
+    """
     import json
 
     meta_path = run_dir / "meta.json"
@@ -40,6 +51,9 @@ def wrap_untrusted(content: str, tag: str, salt: str) -> str:
     return f"<run-{salt}-{tag}>\n{content}\n</run-{salt}-{tag}>"
 
 
+_CLAUDE_ARGV = ["claude", "-p", "--model", JUDGE_MODEL, "--output-format", "text"]
+
+
 def invoke_judge(prompt: str, *, timeout: int | None = None) -> tuple[str, int]:
     """Invoke the claude CLI with a judge prompt.
 
@@ -50,7 +64,8 @@ def invoke_judge(prompt: str, *, timeout: int | None = None) -> tuple[str, int]:
     t = timeout if timeout is not None else JUDGE_TIMEOUT_SECONDS
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt, "--model", JUDGE_MODEL, "--output-format", "text"],
+            _CLAUDE_ARGV,
+            input=prompt,
             capture_output=True,
             text=True,
             timeout=t,
@@ -62,57 +77,55 @@ def invoke_judge(prompt: str, *, timeout: int | None = None) -> tuple[str, int]:
         return f"judge timed out after {t}s", 1
 
 
+def _run_one_judge(prompt: str, deadline: float, total_timeout: int) -> tuple[str, int]:
+    """Spawn one claude judge subprocess, feed the prompt over stdin,
+    and wait for its output — bounded by the shared `deadline`."""
+    try:
+        p = subprocess.Popen(
+            _CLAUDE_ARGV,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError:
+        return "claude CLI not found", 1
+    remaining = max(0.1, deadline - time.monotonic())
+    try:
+        stdout, _ = p.communicate(input=prompt, timeout=remaining)
+        return (stdout or "").strip(), p.returncode
+    except subprocess.TimeoutExpired:
+        p.kill()
+        try:
+            p.communicate(timeout=5)
+        except Exception:
+            pass
+        return f"judge timed out after {total_timeout}s", 1
+
+
 def invoke_judges_parallel(
     prompts: list[tuple[str, str]],
     *,
     timeout: int | None = None,
 ) -> list[tuple[str, str, int]]:
-    """Run multiple judges concurrently via subprocess.Popen.
+    """Run multiple judges concurrently, each in its own thread, sharing
+    a single wall-clock deadline.
 
     `prompts` is a list of (label, prompt) tuples. Returns a list of
-    (label, stdout, returncode) tuples in the same order. Each child
-    process runs to completion or until `timeout` seconds, whichever
-    comes first; killed children return (label, "judge timed out…", 1).
+    (label, stdout, returncode) tuples in the same order. Total wall-time
+    is bounded by `timeout` regardless of per-child cost: a judge still
+    running when the deadline elapses is killed and reported as a timeout.
     """
+    if not prompts:
+        return []
     t = timeout if timeout is not None else JUDGE_TIMEOUT_SECONDS
-
-    procs: list[tuple[str, subprocess.Popen | None, str | None]] = []
-    for label, prompt in prompts:
-        try:
-            p = subprocess.Popen(
-                [
-                    "claude",
-                    "-p",
-                    prompt,
-                    "--model",
-                    JUDGE_MODEL,
-                    "--output-format",
-                    "text",
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            procs.append((label, p, None))
-        except FileNotFoundError:
-            procs.append((label, None, "claude CLI not found"))
-
-    results: list[tuple[str, str, int]] = []
-    for label, p, err in procs:
-        if p is None:
-            results.append((label, err or "judge launch failed", 1))
-            continue
-        try:
-            stdout, _ = p.communicate(timeout=t)
-            results.append((label, (stdout or "").strip(), p.returncode))
-        except subprocess.TimeoutExpired:
-            p.kill()
-            try:
-                p.communicate(timeout=5)
-            except Exception:
-                pass
-            results.append((label, f"judge timed out after {t}s", 1))
-    return results
+    deadline = time.monotonic() + t
+    with ThreadPoolExecutor(max_workers=len(prompts)) as ex:
+        futures = [
+            (label, ex.submit(_run_one_judge, prompt, deadline, t))
+            for label, prompt in prompts
+        ]
+        return [(label, *f.result()) for label, f in futures]
 
 
 def parse_verdict(output: str) -> tuple[str, str]:

@@ -329,10 +329,11 @@ def _make_fake_claude(
 ) -> Path:
     """Write a fake `claude` CLI that returns canned VERDICT lines.
 
-    The shim distinguishes Judge A from Judge B by sniffing the prompt
-    text on argv (we look for the unique heading from each prompt
-    file). Tests call this once per case to set up; the resulting
-    directory is prepended to PATH for the hook subprocess.
+    The shim reads the prompt from stdin (matching how the hook now
+    invokes claude) and distinguishes Judge A from Judge B by sniffing
+    for the unique heading from each prompt file. Tests call this once
+    per case to set up; the resulting directory is prepended to PATH
+    for the hook subprocess.
     """
     bin_dir.mkdir(parents=True, exist_ok=True)
     script = bin_dir / "claude"
@@ -341,13 +342,8 @@ def _make_fake_claude(
             f"""\
             #!/usr/bin/env python3
             import sys
-            argv = sys.argv[1:]
-            # `claude -p <prompt> --model haiku --output-format text`
-            prompt = ""
-            if "-p" in argv:
-                i = argv.index("-p")
-                if i + 1 < len(argv):
-                    prompt = argv[i + 1]
+            # `claude -p --model haiku --output-format text` with prompt on stdin
+            prompt = sys.stdin.read()
             if "Pre-CONCLUDE Judge — Log Integrity" in prompt:
                 sys.stdout.write({judge_a_output!r})
             elif "Pre-CONCLUDE Judge — Archetype" in prompt:

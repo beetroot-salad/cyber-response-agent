@@ -65,7 +65,7 @@ from hooks.scripts.run_context import extract_run_dir_from_path
 JUDGE_A_PROMPT_PATH = Path(__file__).resolve().parent / "conclude_judge_A_prompt.md"
 JUDGE_B_PROMPT_PATH = Path(__file__).resolve().parent / "conclude_judge_B_prompt.md"
 
-YAML_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
+YAML_BLOCK_RE = re.compile(r"```yaml[ \t]*\r?\n(.*?)\r?\n```", re.DOTALL)
 VERDICT_LINE_RE = re.compile(
     r"\*\*Verdict:\*\*\s*(resolved|escalated)\b", re.IGNORECASE
 )
