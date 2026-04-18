@@ -204,3 +204,8 @@ echo "[+] Eval run complete: $RUN_ID"
 echo "    transcript: $EVAL_DIR/transcript.jsonl"
 echo "    runs:       $EVAL_DIR/runs/"
 ls "$EVAL_DIR/runs/" 2>/dev/null | head -5 || true
+
+# Render single-file HTML timeline for quick visual inspection.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$SCRIPT_DIR/render_transcript.py" "$EVAL_DIR" || \
+    echo "[!] render_transcript.py failed (non-fatal)"

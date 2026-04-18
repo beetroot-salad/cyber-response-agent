@@ -452,6 +452,8 @@ def main() -> int:
     p.add_argument("eval_dir", help="Path to /workspace/runs/{run_id}/ (eval_run.sh output dir)")
     p.add_argument("--terse", action="store_true",
                    help="Print only metadata, timing, and disposition")
+    p.add_argument("--html", action="store_true",
+                   help="Also render transcript.html via render_transcript.py")
     args = p.parse_args()
 
     eval_dir = Path(args.eval_dir).resolve()
@@ -483,6 +485,11 @@ def main() -> int:
     else:
         for fn in sections.values():
             fn()
+
+    if args.html:
+        import subprocess
+        renderer = Path(__file__).parent / "render_transcript.py"
+        subprocess.run([sys.executable, str(renderer), str(eval_dir)], check=False)
 
     return 0
 
