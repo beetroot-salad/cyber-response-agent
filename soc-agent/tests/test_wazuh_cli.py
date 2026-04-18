@@ -270,3 +270,46 @@ class TestInputValidation:
     def test_parse_duration_invalid(self):
         with pytest.raises(ValueError):
             wazuh_cli.parse_duration("abc")
+
+
+# ---------------------------------------------------------------------------
+# format_output — raw sample events block
+# ---------------------------------------------------------------------------
+
+class TestFormatOutputRawSamples:
+    CONFIG = {"WAZUH_INDEXER_ENDPOINT": "https://idx:9200"}
+
+    def test_empty_items_renders_placeholder(self):
+        out = wazuh_cli.format_output(
+            "*", "2026-04-01T00:00:00Z", "2026-04-01T01:00:00Z",
+            self.CONFIG, items=[], match_count=0, index_count=0,
+        )
+        assert "### Raw Sample Events" in out
+        assert "(no matching events)" in out.split("### Raw Sample Events", 1)[1]
+
+    def test_renders_first_n_events_as_json(self):
+        items = [
+            {"timestamp": f"2026-04-01T00:00:0{i}Z",
+             "rule": {"id": "5710", "description": "d"},
+             "data": {"srcip": "1.2.3.4", "srcuser": "root", "srcport": str(40000 + i)},
+             "agent": {"name": "host"}}
+            for i in range(5)
+        ]
+        out = wazuh_cli.format_output(
+            "*", "2026-04-01T00:00:00Z", "2026-04-01T01:00:00Z",
+            self.CONFIG, items=items, match_count=5, index_count=5,
+        )
+        raw_section = out.split("### Raw Sample Events", 1)[1]
+        fence = raw_section.split("```json", 1)[1].split("```", 1)[0]
+        parsed = json.loads(fence)
+        assert len(parsed) == wazuh_cli.RAW_SAMPLE_COUNT
+        assert parsed[0]["data"]["srcport"] == "40000"
+        # Should not include events beyond the cap
+        assert all(evt["data"]["srcport"] != "40004" for evt in parsed)
+
+    def test_header_reflects_sample_count_constant(self):
+        out = wazuh_cli.format_output(
+            "*", "2026-04-01T00:00:00Z", "2026-04-01T01:00:00Z",
+            self.CONFIG, items=[], match_count=0, index_count=0,
+        )
+        assert f"first {wazuh_cli.RAW_SAMPLE_COUNT}" in out

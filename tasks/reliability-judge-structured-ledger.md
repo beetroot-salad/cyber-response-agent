@@ -1,6 +1,6 @@
 ---
 title: Judge INTERNAL_CONSISTENCY against structured hypothesis ledger, not prose
-status: doing
+status: done
 groups: reliability, state, invlang
 ---
 
