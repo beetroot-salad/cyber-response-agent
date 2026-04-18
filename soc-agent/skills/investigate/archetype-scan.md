@@ -35,7 +35,7 @@ For each story file, extract:
 - `archetype` (from frontmatter)
 - `required_anchors` (from frontmatter)
 - **Story summary** — the observable shape (volume, cadence, source type, username pattern, etc.)
-- **Boundary conditions** — what explicitly takes an alert OUT of this archetype
+- **Disqualifiers** — the explicit list of conditions that take an alert OUT of this archetype (verbatim from the story's "out of archetype" paragraph, one item per condition). These travel forward to the main agent so they can be checked against GATHER evidence, not just the single-alert view.
 
 Then compare the current alert's shape against each archetype's story. Use the Key Observables table from `field-quirks.md` to know which alert fields matter and extract their values from `alert.json`. Rank by similarity across:
 
@@ -53,8 +53,11 @@ Return a ranked list plus an explicit adversarial archetype:
 archetype_scan:
   - archetype: {archetype-name}
     required_anchors: [{anchor-name}, ...]
+    disqualifiers:
+      - "{condition extracted verbatim from the story's out-of-archetype paragraph}"
+      - "..."
     story_match: "{strong|moderate|weak} — {why: which observable features match or diverge}"
-    boundary_note: "{what would disqualify this match, or null}"
+    boundary_note: "{which disqualifier the current single-alert view is close to, or null}"
 
 adversarial_archetype:
   archetype: {archetype-name}
@@ -73,4 +76,5 @@ adversarial_archetype:
 - **One batched Read turn.** All input files in a single parallel batch.
 - **Be specific.** Exact archetype names, exact anchor names, exact observable values from the alert.
 - **Rank by shape, not by label.** An archetype named "monitoring-probe" is not a match just because the source IP looks internal — the story's observable shape (cadence, username pattern, volume) must match too.
+- **`disqualifiers` is mandatory and intrinsic.** Extract every out-of-archetype condition the story names, even if the current single alert doesn't violate any of them. The main agent checks these against broader evidence (ticket-context, GATHER queries) that you do not see — your job is to preserve the list, not to pre-filter it.
 - **Archetypes are starting hypotheses, not conclusions.** The main agent decides whether the current alert truly fits. Do not editorialize the ranking as a recommendation.

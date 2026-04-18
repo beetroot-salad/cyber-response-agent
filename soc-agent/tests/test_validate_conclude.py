@@ -23,6 +23,7 @@ from hooks.scripts.investigation_parse import (
 )
 from hooks.scripts.validate_conclude import (
     check_frontier_closure,
+    check_termination_vs_verdict,
     extract_conclude_yaml,
     extract_status,
     load_archetype_description,
@@ -823,3 +824,86 @@ class TestTicketContextGate:
         result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
         assert result.returncode == 2
         assert "ticket-context" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: check_termination_vs_verdict
+# ---------------------------------------------------------------------------
+
+
+def _conclude_md(verdict: str, category: str, matched_archetype: str | None) -> str:
+    ma_line = (
+        f"  matched_archetype: {matched_archetype}\n"
+        if matched_archetype is not None
+        else "  matched_archetype: null\n"
+    )
+    return (
+        "## CONCLUDE\n\n"
+        f"**Verdict:** {verdict} — test\n\n"
+        "```yaml\n"
+        "conclude:\n"
+        "  termination:\n"
+        f"    category: {category}\n"
+        "    rationale: \"test\"\n"
+        "  disposition: benign\n"
+        "  confidence: high\n"
+        f"{ma_line}"
+        "  summary: \"test\"\n"
+        "```\n"
+    )
+
+
+class TestCheckTerminationVsVerdict:
+    def test_run_34_rejected_shape_fails(self):
+        """Run #34's self-contradiction: exhaustion + resolved + archetype."""
+        text = _conclude_md("resolved", "exhaustion-escalation", "monitoring-probe")
+        err = check_termination_vs_verdict(text)
+        assert err is not None
+        assert "resolved" in err
+        assert "exhaustion-escalation" in err
+        assert "monitoring-probe" in err
+
+    def test_run_34_recovered_shape_passes(self):
+        text = _conclude_md("escalated", "exhaustion-escalation", None)
+        assert check_termination_vs_verdict(text) is None
+
+    def test_resolving_category_with_resolved_passes(self):
+        text = _conclude_md("resolved", "trust-root", "monitoring-probe")
+        assert check_termination_vs_verdict(text) is None
+
+    def test_resolving_category_adversarial_refuted_passes(self):
+        text = _conclude_md("resolved", "adversarial-refuted", "monitoring-probe")
+        assert check_termination_vs_verdict(text) is None
+
+    def test_severity_ceiling_allows_archetype_but_blocks_resolved(self):
+        """severity-ceiling escalations can name an archetype (the archetype
+        fits, but severity mandates escalation) — only Verdict is gated."""
+        text = _conclude_md("resolved", "severity-ceiling", "monitoring-probe")
+        err = check_termination_vs_verdict(text)
+        assert err is not None
+        assert "severity-ceiling" in err
+        assert "resolved" in err
+        # archetype block should NOT be present — allowed under severity-ceiling
+        assert "matched_archetype: 'monitoring-probe'" not in err
+
+    def test_severity_ceiling_with_escalated_passes(self):
+        text = _conclude_md("escalated", "severity-ceiling", "monitoring-probe")
+        assert check_termination_vs_verdict(text) is None
+
+    def test_exhaustion_archetype_without_resolved_still_fails(self):
+        """exhaustion-escalation blocks non-null archetype even if verdict is escalated."""
+        text = _conclude_md("escalated", "exhaustion-escalation", "monitoring-probe")
+        err = check_termination_vs_verdict(text)
+        assert err is not None
+        assert "exhaustion-escalation" in err
+
+    def test_no_conclude_yaml_passes(self):
+        text = "## CONCLUDE\n\n**Verdict:** resolved\n"
+        assert check_termination_vs_verdict(text) is None
+
+    def test_missing_termination_category_passes(self):
+        text = (
+            "## CONCLUDE\n\n**Verdict:** resolved\n"
+            "```yaml\nconclude:\n  disposition: benign\n```\n"
+        )
+        assert check_termination_vs_verdict(text) is None
