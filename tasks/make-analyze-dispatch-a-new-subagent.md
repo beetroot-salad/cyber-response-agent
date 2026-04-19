@@ -1,6 +1,6 @@
 ---
 title: Make analyze dispatch a new subagent
-status: doing
+status: done
 groups: cost, context-management, subagent-extraction
 ---
 

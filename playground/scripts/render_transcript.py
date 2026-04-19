@@ -124,14 +124,31 @@ def detect_phase_for_event(ev: dict) -> str | None:
 
 
 def compute_phases(events_ts: list[tuple[dict, datetime | None]]) -> list[str | None]:
-    """Return a parallel list of phase names (None before the first header)."""
-    phases: list[str | None] = []
-    current: str | None = None
-    for ev, _ in events_ts:
-        new_phase = detect_phase_for_event(ev)
-        if new_phase is not None:
-            current = new_phase
-        phases.append(current)
+    """Return a parallel list of phase names.
+
+    The agent writes a `## PHASE` header into investigation.md at the *end*
+    of that phase (the write crystallizes the findings). So each event
+    belongs to the **next** phase write that follows it; the write itself
+    closes the phase. Events after the final phase write inherit that
+    phase (e.g. post-CONCLUDE wrap-up still counts as CONCLUDE).
+    """
+    declared: list[tuple[int, str]] = []
+    for i, (ev, _) in enumerate(events_ts):
+        p = detect_phase_for_event(ev)
+        if p is not None:
+            declared.append((i, p))
+
+    phases: list[str | None] = [None] * len(events_ts)
+    if not declared:
+        return phases
+    prev_idx = -1
+    for idx, name in declared:
+        for j in range(prev_idx + 1, idx + 1):
+            phases[j] = name
+        prev_idx = idx
+    last_idx, last_name = declared[-1]
+    for j in range(last_idx + 1, len(events_ts)):
+        phases[j] = last_name
     return phases
 
 
@@ -141,6 +158,119 @@ def event_output_tokens(ev: dict) -> int:
         return 0
     usage = ev.get("message", {}).get("usage") or {}
     return int(usage.get("output_tokens") or 0)
+
+
+def build_subagent_index(events: list[dict]) -> dict[str, dict]:
+    """Map Task/Agent tool_use.id → {subagent_type, description, short}.
+
+    Assistant events running inside a subagent carry `parent_tool_use_id`
+    matching the Task tool_use that spawned them, so we can label each
+    tool call with which instance made it.
+    """
+    idx: dict[str, dict] = {}
+    for ev in events:
+        if ev.get("type") != "assistant":
+            continue
+        for b in (ev.get("message", {}) or {}).get("content", []) or []:
+            if b.get("type") != "tool_use":
+                continue
+            if b.get("name") not in ("Task", "Agent"):
+                continue
+            inp = b.get("input", {}) or {}
+            tuid = b.get("id")
+            if not tuid:
+                continue
+            desc = inp.get("description", "") or ""
+            st = inp.get("subagent_type", "") or "general-purpose"
+            idx[tuid] = {
+                "subagent_type": st,
+                "description": desc,
+                "short": f"{st}:{desc[:40]}" if desc else st,
+            }
+    return idx
+
+
+def instance_label(ev: dict, subagent_idx: dict[str, dict]) -> str:
+    """Human-readable label for which agent instance produced this event.
+
+    Assistant/user events carry `parent_tool_use_id` when emitted from a
+    subagent. Missing parent = main agent. Unknown id = stray subagent.
+    """
+    if ev.get("type") not in ("assistant", "user"):
+        return ""
+    pid = ev.get("parent_tool_use_id")
+    if not pid:
+        return "main"
+    info = subagent_idx.get(pid)
+    if info:
+        return info["short"]
+    return f"subagent:{pid[:8]}"
+
+
+def summarize_phase_activity(
+    events_ts: list[tuple[dict, datetime | None]],
+    phases: list[str | None],
+) -> dict[str, dict]:
+    """Per-phase breakdown of activity: thinking, tool calls, tool results, hooks.
+
+    Returns {phase_name: {thinking_tokens, thinking_blocks, text_tokens,
+                          tool_calls, tool_result_bytes, hook_count,
+                          hook_seconds, subagent_spawns}}
+    """
+    out: dict[str, dict] = {}
+    # stream-json splits one assistant turn into one event per content
+    # block and echoes the same `usage` on each. De-dupe by message_id so
+    # output_tokens isn't multiplied by block count.
+    seen_msg_ids: set[str] = set()
+    for i, ((ev, _ts), phase) in enumerate(zip(events_ts, phases)):
+        label = phase or "pre-phase"
+        bucket = out.setdefault(label, {
+            "thinking_tokens": 0, "thinking_blocks": 0,
+            "text_tokens": 0, "text_blocks": 0,
+            "tool_calls": 0, "subagent_spawns": 0,
+            "tool_result_bytes": 0, "tool_results": 0,
+            "hook_count": 0,
+            "output_tokens": 0,
+        })
+        et = ev.get("type")
+        st = ev.get("subtype", "")
+        if et == "assistant":
+            msg = ev.get("message", {}) or {}
+            usage = msg.get("usage") or {}
+            mid = msg.get("id")
+            if mid and mid not in seen_msg_ids:
+                seen_msg_ids.add(mid)
+                bucket["output_tokens"] += int(usage.get("output_tokens") or 0)
+            for b in msg.get("content", []) or []:
+                bt = b.get("type")
+                if bt == "thinking":
+                    bucket["thinking_blocks"] += 1
+                    # Approximate tokens as chars/4
+                    bucket["thinking_tokens"] += len(b.get("thinking", "")) // 4
+                elif bt == "text":
+                    bucket["text_blocks"] += 1
+                    bucket["text_tokens"] += len(b.get("text", "")) // 4
+                elif bt == "tool_use":
+                    bucket["tool_calls"] += 1
+                    if b.get("name") in ("Task", "Agent"):
+                        bucket["subagent_spawns"] += 1
+        elif et == "user":
+            content = (ev.get("message", {}) or {}).get("content", [])
+            if isinstance(content, list):
+                for b in content:
+                    if b.get("type") != "tool_result":
+                        continue
+                    bucket["tool_results"] += 1
+                    cc = b.get("content", "")
+                    if isinstance(cc, list):
+                        cc = "".join(
+                            x.get("text", "") if isinstance(x, dict) else str(x)
+                            for x in cc
+                        )
+                    bucket["tool_result_bytes"] += len(str(cc))
+        elif et == "system" and st == "hook_response":
+            bucket["hook_count"] += 1
+    return out
 
 
 def summarize_phases(
@@ -268,10 +398,18 @@ def render_content_block(block: dict) -> str:
     )
 
 
-def render_event(ev: dict) -> str:
-    """Return HTML for the content column of one event row."""
+def render_event(ev: dict, instance: str = "") -> str:
+    """Return HTML for the content column of one event row.
+
+    `instance` names the agent that produced this event (main / subagent
+    label) so the reader can tell whose tool call this is.
+    """
     etype = ev.get("type")
     subtype = ev.get("subtype")
+    inst_html = (
+        f'<span class="instance">{html.escape(instance)}</span>'
+        if instance else ""
+    )
 
     if etype == "assistant":
         msg = ev.get("message", {})
@@ -285,7 +423,8 @@ def render_event(ev: dict) -> str:
             tok_meta = f" in={in_tok or 0} out={out_tok or 0}"
         blocks_html = "".join(render_content_block(b) for b in content)
         return (
-            f'<div class="ev-header"><span class="tlabel assistant">assistant</span> '
+            f'<div class="ev-header">{inst_html}'
+            f'<span class="tlabel assistant">assistant</span> '
             f'<span class="meta">model={html.escape(model)}{html.escape(tok_meta)}</span></div>'
             f"{blocks_html}"
         )
@@ -301,7 +440,8 @@ def render_event(ev: dict) -> str:
                 f"{html.escape(str(content))}</pre></details>"
             )
         return (
-            '<div class="ev-header"><span class="tlabel user">user</span></div>'
+            f'<div class="ev-header">{inst_html}'
+            '<span class="tlabel user">user</span></div>'
             f"{blocks_html}"
         )
     if etype == "system" and subtype in ("hook_started", "hook_response"):
@@ -316,14 +456,24 @@ def render_event(ev: dict) -> str:
         meta = f"{event_name}:{hook_name}"
         if subtype == "hook_response":
             meta += f" exit={exit_code} outcome={outcome}"
-        body = output
+        body_parts: list[str] = []
+        if output:
+            body_parts.append(output)
         if stderr:
-            body += f"\n--- stderr ---\n{stderr}"
+            body_parts.append(f"--- stderr ---\n{stderr}")
+        body = "\n".join(body_parts)
+        # Only render the raw <details> if there's something to show — a
+        # success-no-output hook is adequately described by the header meta.
+        raw_html = ""
+        if body:
+            raw_html = (
+                '<details class="blk other"><summary>raw</summary><pre>'
+                f"{html.escape(body)}</pre></details>"
+            )
         return (
             f'<div class="ev-header"><span class="tlabel {cls}">{html.escape(subtype)}</span> '
             f'<span class="meta">{html.escape(meta)}</span></div>'
-            '<details class="blk other"><summary>raw</summary><pre>'
-            f"{html.escape(body)}</pre></details>"
+            f"{raw_html}"
         )
     if etype == "system" and subtype in ("task_started", "task_notification", "task_progress"):
         desc = ev.get("description", "") or ev.get("summary", "")
@@ -373,13 +523,13 @@ def render_event(ev: dict) -> str:
 
 
 def row_type_class(ev: dict) -> str:
-    """Row-level class. Hook events get their own type (`type-tool`) so the
-    'hide system' filter doesn't also hide them — they represent tool-call
-    lifecycle, not system infra."""
+    """Row-level class. Hook events get their own `type-hook` class so
+    filters can target them directly; the 'hide system' filter covers
+    hooks as well (they're system infrastructure, not user-visible work)."""
     etype = ev.get("type", "other")
     subtype = ev.get("subtype", "")
     if etype == "system" and subtype in ("hook_started", "hook_response"):
-        return "type-tool"
+        return "type-hook"
     if etype == "system" and subtype in ("task_started", "task_notification", "task_progress"):
         return "type-task"
     return f"type-{etype}"
@@ -446,6 +596,56 @@ def render_timeline_bar(segments: list[dict]) -> str:
     )
 
 
+def render_activity_table(segments: list[dict], activity: dict[str, dict]) -> str:
+    """Per-phase breakdown table: thinking, tool calls, tool results, hooks.
+
+    Walks the timeline in order (using `segments` to drive ordering) and
+    shows counts + approx tokens + hook wall-clock so the reader can see
+    where time/cost goes inside each phase.
+    """
+    if not activity:
+        return ""
+    seen: list[str] = []
+    seen_set: set[str] = set()
+    for s in segments:
+        name = s["phase"]
+        if name not in seen_set:
+            seen.append(name); seen_set.add(name)
+    rows_html = []
+    header = (
+        "<tr><th>phase</th><th>dur</th><th>out tok</th>"
+        "<th>think blocks</th><th>think tok≈</th>"
+        "<th>tool calls</th><th>sub spawns</th>"
+        "<th>tool results</th><th>result bytes</th>"
+        "<th>hooks</th></tr>"
+    )
+    phase_dur: dict[str, float] = {}
+    for s in segments:
+        phase_dur[s["phase"]] = phase_dur.get(s["phase"], 0.0) + s["duration_s"]
+    for name in seen:
+        b = activity.get(name, {})
+        dur = phase_dur.get(name, 0.0)
+        color = PHASE_COLORS.get(name, "#cfd8dc")
+        rows_html.append(
+            f'<tr><td><span class="sw" style="background:{color}"></span>'
+            f'{html.escape(name)}</td>'
+            f'<td>{fmt_delta(dur)}</td>'
+            f'<td>{b.get("output_tokens", 0)}</td>'
+            f'<td>{b.get("thinking_blocks", 0)}</td>'
+            f'<td>{b.get("thinking_tokens", 0)}</td>'
+            f'<td>{b.get("tool_calls", 0)}</td>'
+            f'<td>{b.get("subagent_spawns", 0)}</td>'
+            f'<td>{b.get("tool_results", 0)}</td>'
+            f'<td>{b.get("tool_result_bytes", 0):,}</td>'
+            f'<td>{b.get("hook_count", 0)}</td></tr>'
+        )
+    return (
+        '<details class="activity" open><summary>phase activity breakdown</summary>'
+        f'<table class="activity-table"><thead>{header}</thead>'
+        f'<tbody>{"".join(rows_html)}</tbody></table></details>'
+    )
+
+
 def render_html(
     eval_dir: Path,
     events_ts: list[tuple[dict, datetime | None]],
@@ -453,6 +653,9 @@ def render_html(
 ) -> str:
     t0 = next((ts for _, ts in events_ts if ts is not None), None)
     segments = summarize_phases(events_ts, phases, t0)
+    raw_events = [ev for ev, _ in events_ts]
+    subagent_idx = build_subagent_index(raw_events)
+    activity = summarize_phase_activity(events_ts, phases)
 
     rows: list[str] = []
     prev_ts: datetime | None = None
@@ -473,6 +676,7 @@ def render_html(
         phase_label = phase or "pre-phase"
         phase_color = PHASE_COLORS.get(phase_label, "#cfd8dc")
 
+        inst = instance_label(ev, subagent_idx)
         rows.append(
             f'<div class="{row_class}" data-phase="{html.escape(phase_label)}">'
             f'<div class="ts">'
@@ -480,13 +684,14 @@ def render_html(
             f'<span class="delta{" slow" if slow else ""}">{delta_txt}</span>'
             f'<span class="phase-chip" style="background:{phase_color}">{html.escape(phase_label)}</span>'
             f'</div>'
-            f'<div class="content">{render_event(ev)}</div>'
+            f'<div class="content">{render_event(ev, inst)}</div>'
             "</div>"
         )
 
     rows_html = "\n".join(rows)
     title = f"Transcript · {eval_dir.name}"
     timeline_html = render_timeline_bar(segments)
+    activity_html = render_activity_table(segments, activity)
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>{html.escape(title)}</title>
 <style>
@@ -558,11 +763,26 @@ pre {{ white-space: pre-wrap; word-wrap: break-word; margin: 6px 0 0 18px;
        border-radius: 3px; max-height: 500px; overflow: auto;
        font-family: Menlo, Monaco, Consolas, monospace; font-size: 11px; }}
 /* Filters */
-body.hide-system .row.type-system {{ display: none; }}
+body.hide-system .row.type-system,
+body.hide-system .row.type-hook {{ display: none; }}
 body.hide-task .row.type-task {{ display: none; }}
-body.hide-tool .row.type-tool {{ display: none; }}
+body.hide-hook .row.type-hook {{ display: none; }}
 body.hide-ratelimit .row.type-rate_limit_event {{ display: none; }}
 body.only-slow .row:not(.slow) {{ display: none; }}
+/* Instance badge (main / subagent) */
+.instance {{ display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px;
+            font-weight: 600; background: #e0e0e0; color: #333; margin-right: 6px;
+            font-family: monospace; }}
+/* Activity breakdown table */
+.activity {{ margin: 6px 0 0 0; font-size: 11px; }}
+.activity > summary {{ cursor: pointer; color: #444; padding: 2px 0; }}
+.activity-table {{ border-collapse: collapse; margin-top: 4px; font-size: 11px; }}
+.activity-table th, .activity-table td {{ padding: 3px 8px; text-align: right;
+                                          border-bottom: 1px solid #eee; }}
+.activity-table th {{ background: #f5f5f5; font-weight: 600; color: #333; }}
+.activity-table td:first-child, .activity-table th:first-child {{ text-align: left; }}
+.activity-table .sw {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+                      margin-right: 4px; vertical-align: middle; }}
 /* Search: JS sets .row.search-hit on matches and body.search-active when
    the query is non-empty. Non-matches are hidden only while search-active. */
 body.search-active .row:not(.search-hit) {{ display: none; }}
@@ -570,11 +790,12 @@ body.search-active .row:not(.search-hit) {{ display: none; }}
 <header>
   <h1>{html.escape(title)}</h1>
   {timeline_html}
+  {activity_html}
   <div class="filters">
     <input type="search" id="q" placeholder="search rows… (case-insensitive)">
-    <label><input type="checkbox" id="f-system" checked> hide system</label>
+    <label><input type="checkbox" id="f-system" checked> hide system (incl. hooks)</label>
     <label><input type="checkbox" id="f-task" checked> hide task</label>
-    <label><input type="checkbox" id="f-tool"> hide tool events</label>
+    <label><input type="checkbox" id="f-hook"> hide hooks only</label>
     <label><input type="checkbox" id="f-ratelimit" checked> hide rate_limit</label>
     <label><input type="checkbox" id="f-slow"> only slow rows (≥{SLOW_GAP_SECONDS:.0f}s)</label>
     <button id="expand-all">expand all</button>
@@ -594,7 +815,7 @@ function bind(id, cls) {{
 }}
 bind('f-system', 'hide-system');
 bind('f-task', 'hide-task');
-bind('f-tool', 'hide-tool');
+bind('f-hook', 'hide-hook');
 bind('f-ratelimit', 'hide-ratelimit');
 bind('f-slow', 'only-slow');
 document.getElementById('expand-all').addEventListener('click', () =>

@@ -1,6 +1,6 @@
 ---
 title: Hypothesize dispatches a subagent
-status: doing
+status: done
 groups: cost, optional, context-management
 ---
 
