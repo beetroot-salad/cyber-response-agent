@@ -98,7 +98,7 @@ Swapping Wazuh for Splunk is a matter of writing a new `knowledge/environment/sy
 
 When you install the plugin you get:
 
-- The **investigate skill** — entry point, investigation loop, and subagent prompts (`ticket-context`, `archetype-scan`, `screen`, `gather`, `query-past-investigations`)
+- The **investigate skill** — entry point, investigation loop, subagent prompts (`archetype-scan`, `screen`, `gather`, `query-past-investigations`, and the legacy `ticket-context` fallback), and the mechanical `scripts/tools/ticket_context.py` correlation script that replaces the ticket-context subagent on the main dispatch path
 - **Python hooks** registered in `plugin.json`:
   - *PreToolUse* — `infer_state_pre.py` (blocks illegal phase transitions before they land), `validate_conclude.py` (Layer 0 pre-CONCLUDE gate: ticket-context dispatch + two parallel Haiku judges for log integrity and archetype/grounding), `invlang_validate.py` (companion-YAML schema gate)
   - *PostToolUse* — `infer_state.py` (state-machine history + cycle counting), `validate_report.py` (Tier 1 structural + slimmed Tier 2 delta judge, including temporal precedent re-confirmation), `audit_tool_calls.py` (audit vs trace JSONL split), `tag_tool_results.py` (salted delimiter wrapping of untrusted data), `budget_enforcer.py` (warning-only tool-call + wall-clock budget tracking)

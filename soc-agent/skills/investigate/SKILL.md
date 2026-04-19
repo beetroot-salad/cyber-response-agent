@@ -205,9 +205,9 @@ The subagent returns its findings alongside the code or query it executed. Treat
 
 1. Review the **Signature Knowledge** section above (already in context — do not spawn Explore to re-read it) and the alert data identified in Read the Alert.
 
-2. **Dispatch the two CONTEXTUALIZE subagents IN PARALLEL** — two `Agent()` calls in a single assistant message. Both are pinned to Haiku. Each subagent owns a piece of work that you would otherwise be tempted to do in your own context; your job here is to assemble their inputs and dispatch them, not to duplicate the work.
+2. **Dispatch the two CONTEXTUALIZE preloads IN PARALLEL** — one `Agent()` call and one `Bash()` call in a single assistant message. Each owns a piece of work that you would otherwise be tempted to do in your own context; your job here is to assemble their inputs and dispatch them, not to duplicate the work.
 
-   **`soc-agent:archetype-scan`** — *owns archetype ranking.* The subagent reads the alert plus this signature's archetype stories and returns the ranked match list and the adversarial archetype. Read-only, no SIEM queries. You do not rank archetypes yourself.
+   **`soc-agent:archetype-scan`** (Haiku subagent) — *owns archetype ranking.* The subagent reads the alert plus this signature's archetype stories and returns the ranked match list and the adversarial archetype. Read-only, no SIEM queries. You do not rank archetypes yourself.
 
    You already have playbook.md loaded, which lists every archetype name under this signature. Your only prep work is to assemble the `story_paths` list from those names — one `.../archetypes/{name}/story.md` per archetype — and pass it to the subagent. Do not send the subagent to enumerate archetype directories; it should only read the exact paths you hand it.
    ```
@@ -218,24 +218,25 @@ The subagent returns its findings alongside the code or query it executed. Treat
    )
    ```
 
-   **`soc-agent:ticket-context`** — *owns alert correlation.* The subagent queries the SIEM for alerts on the same entities in the last 4 hours and clusters them mechanically. Correlation is delegated to this subagent; your job is to transcribe its output and act on it, not to re-do the correlation.
+   **`scripts/tools/ticket_context.py`** (Python script) — *owns alert correlation.* The script dispatches parallel SIEM queries for the alert's Key Observables + same-signature over a 4-hour window and clusters returned alerts mechanically into `repeats`, `related`, and `high_volume_dimensions`. Runs in ~5-10s; output is a single fenced YAML block on stdout. Correlation is delegated to this script; your job is to transcribe its output, not to re-do the correlation.
    ```
-   Agent(
-     subagent_type="soc-agent:ticket-context",
-     description="ticket-context for {identifier}",
-     prompt="run_dir={run_dir}\nsignature_id={signature_id}"
+   Bash(
+     command="python3 /workspace/soc-agent/scripts/tools/ticket_context.py --run-dir {run_dir} --signature-id {signature_id}",
+     description="ticket-context for {identifier}"
    )
    ```
 
-3. **Wait for both subagents.** While waiting, you may load mental model — read the signature's playbook in more depth, an archetype `story.md`, an environment context file. You may NOT analyze the alert, grade hypotheses, decide disposition, or interpret evidence in advance of the subagent results. Loading is fine; analyzing is not.
+3. **Wait for both.** While waiting, you may load mental model — read the signature's playbook in more depth, an archetype `story.md`, an environment context file. You may NOT analyze the alert, grade hypotheses, decide disposition, or interpret evidence in advance of the results. Loading is fine; analyzing is not.
 
-4. **Transcribe the returns.** When the subagents return:
+4. **Transcribe the returns.** When both complete:
 
-   **Parsing YAML-strict subagents.** Both `archetype-scan` and `ticket-context` are declared YAML-strict: their full response is a single fenced ```yaml block. A PostToolUse hook (`extract_subagent_yaml.py`) appends a `## Canonical {subagent} output` section right after the raw tool_result, containing the first fenced block extracted from the response. **When the canonical section is present, parse it and ignore any preamble prose or duplicate blocks in the raw response.** If the canonical section is absent, no fenced YAML was returned (usually a subagent failure); treat as an empty/unusable result and continue.
+   **Parsing archetype-scan.** The subagent is declared YAML-strict: its full response is a single fenced ```yaml block. A PostToolUse hook (`extract_subagent_yaml.py`) appends a `## Canonical archetype-scan output` section right after the raw tool_result, containing the first fenced block extracted from the response. **When the canonical section is present, parse it and ignore any preamble prose or duplicate blocks in the raw response.** If the canonical section is absent, no fenced YAML was returned (usually a subagent failure); treat as an empty/unusable result and continue.
+
+   **Parsing ticket_context.py.** The script's stdout is a single fenced ```yaml block under top-level key `ticket_context:`. Parse it directly — no PostToolUse hook is involved. If the script emits `queries_failed` or `queries_partial`, note the failure reason in your transcription but proceed; the main agent still has enough context from archetype-scan and the alert itself.
 
    **From archetype-scan:** transcribe its `archetype_scan` ranked list AND its `adversarial_archetype` entry into the markdown summary. Archetypes are starting hypotheses, not conclusions; the strong matches inform hypothesis seeds, the adversarial one is the citable surface CONCLUDE's self-check expects in writing. If the subagent returned no useful output (malformed YAML, empty ranking), continue without it — archetypes are a useful prior, not required.
 
-   **From ticket-context:** transcribe `entities`, `repeats`, `related`, and `high_volume_dimensions`.
+   **From ticket_context.py:** transcribe `entities`, `repeats`, `related`, and `high_volume_dimensions`.
 
    - **Fast-resolve / cluster-resolution.** Trust the subagent's correlation signal. Many alert families fire in clusters or refire on the same entity — auth alerts that retry, EDR behavioural rules that batch, monitoring probes. When `repeats` shows the same alert firing minutes ago on the same entities, or `related` shows a tight cluster of alerts pointing to the same activity, the right move is to investigate the earliest alert and resolve the rest by reference: transition CONTEXTUALIZE → CONCLUDE with `status=duplicate` and cite the prior ticket (verify it exists before citing — the subagent does not check). Reinvestigating cluster duplicates wastes resources and adds no signal.
    - **Drill only when needed.** Each `related` cluster carries `signatures_detail: {rule_id: rule.description}` so you can judge the cluster's character without running your own query. Drill into a cluster with a targeted query **only** when the description leaves ambiguity that actually gates a downstream hypothesis (e.g. two possible mechanisms behind the same rule description). A cluster whose description already explains itself does not need a drill.
@@ -402,7 +403,7 @@ For the full structural spec (attached_to_vertex, proposed_edge, predictions, re
 
 #### Dispatch the HYPOTHESIZE subagent
 
-Hypothesis formation is owned by `soc-agent:hypothesize` (Sonnet, `agents/hypothesize.md`). The subagent reads the alert, `investigation.md`, the signature's playbook + context, and returns the `hypothesize:` YAML block plus `Selected lead:` and `Pitfalls:` lines. The methodology — anchor location, one-hop parent enumeration, refinement via hierarchical IDs, three shapes of adversariness, legitimacy-contract declaration, lead selection — lives in the subagent's prompt, not here.
+Hypothesis formation is owned by `soc-agent:hypothesize` (Sonnet, `agents/hypothesize.md`). The subagent reads the alert, `investigation.md`, the signature's playbook + context, and returns the `hypothesize:` YAML block plus `Selected lead:` and `Pitfalls:` lines. The methodology — anchor location, one-hop parent enumeration, **causal-story discipline** (each hypothesis carries a concrete causal chain from which predictions and refutation shapes derive — labels without stories max out at `+` regardless of evidence), refinement via hierarchical IDs, three shapes of adversariness, legitimacy-contract declaration, lead selection — lives in the subagent's prompt, not here.
 
 ```python
 Agent(
@@ -417,9 +418,13 @@ Agent(
 - If it returned a `gather:` block instead (no fork observable — discriminating data not yet in hand, or already resolved by prior leads), transcribe under `## GATHER (loop {N})` with the lead-level `predictions` triples and proceed to GATHER.
 - If it returned `error:`, surface the reason and stop. Do not form hypotheses inline.
 
-#### Verify leanness before accepting the subagent's output
+#### Verify leanness + story presence before accepting the subagent's output
 
-One structural check before transcribing: each hypothesis has **≤2 predictions**. Three or more signals an unlean hypothesis — the subagent should either split it or defer extras to post-lead refinement. This is the single check worth running at main-agent context; the rest of the discipline is audited structurally (invlang validator) or by the Tier 2 judge. If a hypothesis has 3+ predictions, re-dispatch with a one-line note pointing at the offending entry.
+Two structural checks before transcribing:
+- Each hypothesis has **≤2 predictions**. Three or more signals an unlean hypothesis — the subagent should either split it or defer extras to post-lead refinement.
+- Each hypothesis has a **non-empty `story` field** with a concrete causal chain (not "authorized activity" or "adversarial behavior" — actual process/timing/correlation claims). Hypotheses without stories are labels, not hypotheses; they should be rejected before transcription.
+
+These are the two checks worth running at main-agent context; the rest of the discipline is audited structurally (invlang validator) or by the CONCLUDE parallel judges. If a hypothesis fails either check, re-dispatch with a one-line note pointing at the offending entry.
 
 Omit the `hypothesize:` block entirely for SCREEN-matched cases.
 
@@ -540,35 +545,34 @@ Retry the same write after the fix — no state-machine recovery needed.
 
 ---
 
-1. Review the **Investigation Checklist** in the Signature Knowledge section above — verify every item before writing the report
-2. Generate a trace line summarizing the investigation path
-   - For SCREEN-resolved investigations, use the format: `screen({pattern}, {leads}) → disposition:hypothesis`
-3. Determine status: `resolved` (confident — archetype matched AND grounding satisfied) or `escalated` (uncertain, unfulfilled/`indeterminate`/`unauthorized` legitimacy contract on a live-weight hypothesis, grounding unsatisfied, or insufficient evidence)
-4. Determine disposition: `benign` (correct detection, harmless), `false_positive` (rule misfired), `true_positive` (confirmed threat), or `inconclusive` (can't determine)
-   - For SCREEN-resolved investigations, use the disposition, confidence, matched_archetype, and matched_ticket_id from the validated screen result
-5. If `resolved`:
-   - `matched_archetype` must name an archetype directory under `knowledge/signatures/{signature_id}/archetypes/` (the directory containing the archetype's `story.md` + `trust-anchors.md`). Shape verification — walking the archetype's out-of-archetype conditions against the loop's evidence — is owned by the ANALYZE subagent's contract and audited by the Tier 2 judge at report-write time; do not re-verify inline here.
-   - **Grounding leg** (at least one of):
-     - Every anchor in the archetype's `required_anchors` frontmatter appears in `trust_anchors_consulted` with `result: confirmed` and a concrete citation, OR
-     - `matched_ticket_id` names a precedent snapshot JSON file inside the matched archetype's directory
-   - If the archetype declares no `required_anchors`, `matched_ticket_id` is **mandatory** — Tier 1 will reject the report otherwise
-   - If a precedent is cited, verify its `anchors_at_time` entries — any entry with `temporal: true` represents a confirmation that no longer transfers forward in time; the current investigation must show the equivalent anchor re-confirmed today
-6. Write `{run_dir}/report.md` with YAML frontmatter
+#### Dispatch the CONCLUDE subagent
 
-Append to `{run_dir}/investigation.md`:
-```markdown
-## CONCLUDE
+CONCLUDE authoring is owned by `soc-agent:conclude` (Haiku, `agents/conclude.md`). The subagent reads the alert + `investigation.md` + the matched archetype's `story.md` / `trust-anchors.md` / precedent `*.json` files, transcribes the last ANALYZE block's routing (or the SCREEN match for SCREEN-resolved cases) into the three output artifacts: the `## CONCLUDE` markdown header, the `conclude:` YAML block, and the full `report.md` body. It does not re-analyze — the last ANALYZE block (or SCREEN result) is authoritative for `disposition`, `confidence`, and `matched_archetype`.
 
-**Verdict:** {resolved|escalated} — {1-line rationale}
-**Confirmed hypothesis:** ?{name} | none
-**Trace:** {trace line}
+```python
+Agent(
+  subagent_type="soc-agent:conclude",
+  description="conclude authoring for {identifier}",
+  prompt="run_dir={run_dir}\nsignature_id={signature_id}"
+)
 ```
 
-Then append the `conclude:` YAML block before writing `report.md`. Run `--ids` first:
-```
-bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
-```
-`matched_archetype` must be the archetype directory name from `knowledge/signatures/{sig}/archetypes/{name}/`.
+**When the subagent returns**, it emits exactly three fenced blocks in order: a `## CONCLUDE` markdown block, a `conclude:` YAML block, and a `report.md` markdown block. Transcribe each to its destination:
+
+1. Run `bash scripts/invlang/run.sh --ids {run_dir}/investigation.md` first to confirm the ID namespace (legacy safety check — no-op if IDs are clean).
+2. **Edit `{run_dir}/investigation.md`** to append the first block (the `## CONCLUDE` header + verdict/hypothesis/trace lines) followed immediately by the second block (the ```yaml fenced `conclude:` block). This is a single Edit that triggers the PreToolUse gate (`validate_conclude.py` + parallel Haiku judges). If the gate rejects, fix the investigation's upstream issue (per the failure modes above), re-dispatch the subagent, and retry.
+3. **Write `{run_dir}/report.md`** with the third block as the file contents. This triggers `validate_report.py` (Tier 1 structural + Tier 2 semantic delta judge). If rejected, fix the investigation's upstream issue, re-dispatch, and retry.
+
+Do **not** re-author any of the subagent's three blocks inline. If something needs correcting, it's an upstream gap (missing ANALYZE grade, unreconciled legitimacy_contract, unconfirmed anchor) — fix that in `investigation.md`, not in the CONCLUDE output.
+
+**Grounding leg (enforced by Tier 1 — the subagent handles this but the discipline lives here):**
+- Every anchor in the matched archetype's `required_anchors` frontmatter appears in `trust_anchors_consulted` with `result: confirmed` and a concrete citation, OR
+- `matched_ticket_id` names a precedent snapshot JSON file inside the matched archetype's directory.
+
+If the archetype declares no `required_anchors`, `matched_ticket_id` is **mandatory**. If a precedent is cited, any `anchors_at_time` entry with `temporal: true` means the current investigation must show the equivalent anchor re-confirmed today (handled by the ANALYZE loop upstream, audited by the Tier 2 judge at report-write time).
+
+**Output shapes for reference** (the subagent produces these; you transcribe):
+
 ```yaml
 conclude:
   termination:
@@ -580,9 +584,8 @@ conclude:
   summary: {1-2 sentence summary}
 ```
 
-Write `{run_dir}/report.md`:
-```markdown
----
+Report frontmatter:
+```yaml
 ticket_id: {identifier}
 signature_id: {signature_id}
 status: {resolved|escalated}
@@ -597,35 +600,9 @@ trust_anchors_consulted:
     citation: "{short human-readable description of the result}"
 leads_pursued: {count}
 trace: "{lead1(result) -> lead2(result) -> disposition:hypothesis}"
----
-
-# Investigation Report: {identifier}
-
-## Summary
-{2-3 sentence summary of findings}
-
-## Investigation Trace
-{trace line}
-
-## Hypothesis Outcomes
-- ?hypothesis-1: {active|confirmed|refuted} — {one-line reasoning}
-- ?hypothesis-2: {active|confirmed|refuted} — {one-line reasoning}
-
-## Key Evidence
-- {evidence point 1}
-- {evidence point 2}
-
-## Observations
-{Things noticed during investigation that are not part of the verdict but are worth noting — gaps in logging coverage, anomalous configurations, data quality issues, unusual environmental patterns. Keep factual, not prescriptive.}
-
-## Verdict
-{clear explanation of recommendation}
-
-## For Analyst (if escalated)
-### What We Know
-### What We Don't Know
-### Suggested Next Steps
 ```
+
+Report body sections (fixed order, subagent enforces): `## Summary`, `## Investigation Trace`, `## Hypothesis Outcomes`, `## Key Evidence`, `## Observations` (optional), `## Verdict`, `## For Analyst` (escalated only).
 
 ---
 

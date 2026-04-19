@@ -51,20 +51,140 @@ A hypothesis is a one-hop proposed extension of the confirmed graph:
 - `attached_to_vertex` — id of one confirmed vertex.
 - `proposed_edge` — one `relation` + one upstream `parent_vertex` with
   `{type, classification}`.
+- `story` — a short causal chain (2-4 sentences, typically one sentence
+  per mechanism link) explaining how the observed alert came to be
+  under this hypothesis. Each link names concrete processes, timing
+  relationships, and correlation signals.
 - `predictions` — 1 or 2 claims about observable attributes of the
-  proposed parent. Each prediction names one attribute of one vertex.
-- `refutation_shape` — the observation that would contradict a core
-  prediction.
+  proposed parent. Each prediction names one attribute of one vertex
+  AND cites which story link it tests (`from_story_link`).
+- `refutation_shape` — the observations that would contradict a core
+  prediction. Each entry cites which prediction(s) it refutes
+  (`refutes_predictions`).
 
 The parent-vertex classification is the **only axis a hypothesis
 varies**. Actor identity, intent, time window, forward-effects, and
 disposition are attributes — resolved by later leads or trust-anchor
 lookups, not packed into the hypothesis label.
 
+## Causal story
+
+The `story` field is the heart of the hypothesis. Predictions and
+refutation shapes are *derived* from story links, not invented
+independently of them. A hypothesis without a concrete causal story is
+a **label**, not a hypothesis — and labels cannot reach `++` no matter
+how much evidence accumulates.
+
+Writing the story forces you to think through the full chain: what
+triggered the event on the source host → what ran → what was invoked
+→ what the observable alert represents → what correlation signals
+another authority would have emitted. Each link in that chain is an
+opportunity to generate a prediction (observable present when the link
+is real) and a refutation (observable absent or contradictory when the
+link is not real).
+
+### Label vs story — examples
+
+**Label (weak):** `?monitoring-probe: "this is an authorized monitoring probe"`
+
+**Story (testable):**
+```
+Monitoring interval ticked on monitoring-host → cron fired the nagios
+health-check tool → nagios-check invoked `ssh monitorprobe@target-
+endpoint` → sshd rejected (unknown user) → rule 5710 fired.
+A correlating monitoring-system audit event exists for this tick.
+```
+
+Each link produces a prediction:
+- "cron fired" → *prediction:* cron event on monitoring-host at alert timestamp ± 5s
+- "nagios-check invoked ssh (cron tools don't retry)" → *prediction:* single attempt per tick per tool
+- "correlating audit event" → *prediction:* monitoring-system audit event within ±5s of alert
+
+And each prediction produces a refutation:
+- no cron tick → refutes "cron fired" link
+- cluster has ≥2 same-user attempts within 1s → refutes "single attempt per tick"
+- no audit-correlation event → refutes "correlating audit event"
+
+**Label (weak):** `?post-exploit-interactive: "this looks like post-exploit access"`
+
+**Story (testable):**
+```
+External foothold authenticated SSH to the container → attacker
+laterally moved within the container → attacker invoked docker exec
+to spawn an interactive bash session → whoami was their first
+reconnaissance command.
+```
+
+Predictions: novel-user authenticated SSH session in auth logs within the
+container ancestry; new connection tuple visible in rule 100002;
+interactive tty on the bash process; command-sequence pattern consistent
+with manual recon (not scripted).
+
+**Label (weak):** `?credential-stuffing: "this is credential stuffing"`
+
+**Story (testable):**
+```
+Attacker with a leaked credential database picked `admin` as a
+high-value target → issued ssh attempts at ~1/sec cadence from an
+unknown external IP → sshd rejected each → rule 5710 fired.
+No prior authentication relationship exists between source IP
+and target.
+```
+
+Predictions: source IP has no prior successful auth to target in recent
+history; username-cycling pattern (not single-user); inter-attempt cadence
+near wordlist-tool defaults; absence of any post-auth success.
+
+### The discipline
+
+1. **Write the story first, derive predictions second.** Before committing
+   a `predictions` list, write the story in 2-4 sentences. Each
+   prediction you then write must cite the specific story link it tests
+   via `from_story_link`.
+
+2. **No labels as hypotheses.** A hypothesis name without a concrete
+   causal story is structurally incomplete. If you cannot articulate
+   the causal chain from trigger to observed alert in plain English,
+   you don't have a hypothesis yet — you have a label. Labels max out
+   at `+` regardless of evidence.
+
+3. **Story links must be concrete, not generic.** "Authorized monitoring
+   activity" is a restatement, not a link. "Cron fired nagios-check at
+   10:22, which executed `ssh monitorprobe@target-endpoint`" is a link.
+   Name processes, timing, correlation signals. The more concrete the
+   link, the more falsifiable the prediction it generates.
+
+4. **Refutation shapes cite predictions, predictions cite story links.**
+   This is traceable accountability: the refutation_shape says which
+   prediction it refutes; the prediction says which story link it
+   tests; the story link is a concrete claim about the causal chain.
+   ANALYZE can mechanically walk this chain to verify a grade is
+   supported end-to-end.
+
+5. **One story per hypothesis, append-only.** Stories are write-once
+   per hypothesis. If later loops force a split (refinement via
+   hierarchical IDs), child hypotheses each write their own story —
+   do not inherit or copy the parent's.
+
+6. **Authority-anchor ≠ story.** An answer from a trust anchor
+   (`approved-monitoring-sources` says "yes, authorized") is a policy
+   answer, not a causal story. It does not substitute for predictions
+   that test the event's shape. Both are needed: the anchor answers
+   "is this source *allowed* to do this?"; the story + predictions
+   answer "does the event look like what this source is *documented*
+   to do?". A `++` grade needs both.
+
 ## Discipline
 
+- **Story-first.** See §Causal story above. Every hypothesis must have
+  a concrete `story` field before committing predictions or refutation
+  shapes. Predictions derive from story links; refutation shapes cite
+  the predictions they refute.
 - **Lean.** ≤ 2 predictions per hypothesis. Three predictions signals
-  an unlean label — split or defer.
+  an unlean label — split or defer. Multiple predictions should each
+  test a *different story link*; two predictions testing the same link
+  from different angles is a sign of under-differentiated hypothesis
+  shape.
 - **Mechanism-shaped, not narrative.** Labels like `?credential-
   guessing`, `?post-exploit-shell`, or `?compromise-followup` pack
   mechanism + intent + shape + effects into one name. Use only the
@@ -220,10 +340,13 @@ hypothesize:
         parent_vertex:
           type: <type>
           classification: <classification>
+      story: |
+        2-4 sentence causal chain. One sentence per mechanism link.
+        Name concrete processes, timing relationships, correlation signals.
       predictions:
-        - {id: p1, claim: "..."}
+        - {id: p1, claim: "...", from_story_link: "<short phrase naming the link>"}
       refutation_shape:
-        - {id: r1, claim: "..."}
+        - {id: r1, claim: "...", refutes_predictions: [p1]}
       weight: null
 ```
 
@@ -279,10 +402,20 @@ hypothesize:
       proposed_edge:
         relation: spawned
         parent_vertex: {type: process, classification: in-container-runtime-descendant}
+      story: |
+        Container start spawned /app/launcher.sh → the launcher spawned a
+        node application → a node child-process (or a spawned shell helper)
+        invoked /bin/sh, which spawned bash. The chain never crosses the
+        container boundary — every ancestor is a container-internal process
+        traceable to the image's own init sequence.
       predictions:
-        - {id: p1, claim: "ancestry above /app/launcher.sh resolves to an in-container init wrapper (tini / dumb-init / custom launcher) with no runtime exec primitive in the chain"}
+        - id: p1
+          claim: "ancestry above /app/launcher.sh resolves to an in-container init wrapper (tini / dumb-init / custom launcher) with no runtime exec primitive in the chain"
+          from_story_link: "chain never crosses the container boundary"
       refutation_shape:
-        - {id: r1, claim: "runc / containerd-shim / docker-exec / crictl appears above /app/launcher.sh"}
+        - id: r1
+          claim: "runc / containerd-shim / docker-exec / crictl appears above /app/launcher.sh"
+          refutes_predictions: [p1]
       weight: null
     - id: h-002
       name: "?underlying-host"
@@ -290,10 +423,22 @@ hypothesize:
       proposed_edge:
         relation: spawned
         parent_vertex: {type: process, classification: runtime-exec-injection}
+      story: |
+        A host-side actor invoked `docker exec` (or equivalent) against the
+        running container → runc/containerd-shim injected a process into the
+        container's namespace → that injected process is the bash shell we
+        observe. The chain crosses the container boundary at a runtime exec
+        primitive immediately above /app/launcher.sh. The invoker has docker
+        or runc access on the host — either an authorized operator or an
+        attacker with host compromise.
       predictions:
-        - {id: p1, claim: "extending ancestry shows a runtime exec primitive immediately above /app/launcher.sh"}
+        - id: p1
+          claim: "extending ancestry shows a runtime exec primitive immediately above /app/launcher.sh"
+          from_story_link: "chain crosses the container boundary at a runtime exec primitive"
       refutation_shape:
-        - {id: r1, claim: "chain continues to a container-init wrapper with no exec primitive"}
+        - id: r1
+          claim: "chain continues to a container-init wrapper with no exec primitive"
+          refutes_predictions: [p1]
       weight: null
 ```
 
@@ -360,13 +505,14 @@ hypothesize:
   hypotheses:
     - id: h-001
       name: "?credential-guessing"   # ⚠ narrative umbrella: intent + shape + effects packed in
+      # ⚠ no `story` field — this is a label, not a hypothesis
       proposed_edge:
         parent_vertex: {classification: adversarial-credential-attack}   # ⚠ mechanism + legitimacy conflated
       predictions:
         - {id: p1, claim: "srcip not in approved-monitoring-sources"}
         - {id: p2, claim: "admin classifies as wordlist-common"}
         - {id: p3, claim: "additional failed attempts from srcip in 5-min window"}
-        - {id: p4, claim: "no successful login in forward 60-sec window"}   # ⚠ 4 predictions on 4 different vertices
+        - {id: p4, claim: "no successful login in forward 60-sec window"}   # ⚠ 4 predictions on 4 different vertices, none tied to a named story link
     - id: h-003
       name: "?compromise-followup"   # ⚠ parallel adversarial hypothesis — forward-success belongs either on the proposed edge (legitimacy contract + resolution) or on a distinct future `authenticated_as` edge (future-edge hypothesis), not as a sibling mechanism
 ```

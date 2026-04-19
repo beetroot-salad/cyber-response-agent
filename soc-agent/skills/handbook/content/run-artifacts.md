@@ -55,7 +55,7 @@ The `salt` is the injection defense primitive (Layer 2 — see `content/validati
 
 The salt is generated per run (`secrets.token_hex(8)`) specifically so it cannot leak into training data or documentation and become forgeable — static delimiters would eventually.
 
-**Note on CONTEXTUALIZE subagent outputs.** Earlier versions of this plugin preloaded `ticket_context.yaml` and `archetype_scan.yaml` into the run directory via a background `!command` (`scripts/contextualize_preload.py`). That script has been retired — both subagents are now dispatched inline by the main agent during CONTEXTUALIZE and their outputs come back as `Agent()` tool results, not files on disk. No run-artifact entry exists for either YAML anymore because they're never written to the filesystem.
+**Note on CONTEXTUALIZE subagent outputs.** Earlier versions of this plugin preloaded `ticket_context.yaml` and `archetype_scan.yaml` into the run directory via a background `!command` (`scripts/contextualize_preload.py`). That script has been retired — both preloads are now dispatched inline by the main agent during CONTEXTUALIZE and their outputs come back directly in the tool result, not as files on disk. Archetype-scan is an `Agent()` subagent; ticket-context is a `Bash()` call to `scripts/tools/ticket_context.py` on the main path (with the legacy `soc-agent:ticket-context` subagent kept as a fallback for cases where the script environment is unavailable). No run-artifact entry exists for either YAML anymore because they're never written to the filesystem.
 
 ### `investigation.md`
 

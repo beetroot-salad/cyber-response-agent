@@ -465,9 +465,6 @@ def main():
         return
 
     # query subcommand
-    if args.end and not args.start:
-        parser.error("--end without --start is not supported. Use --start/--end or --start/--window.")
-
     args.limit = min(args.limit, 10000)
 
     time_start, time_end = compute_time_range(args)
