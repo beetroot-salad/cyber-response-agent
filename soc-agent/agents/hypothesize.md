@@ -75,65 +75,132 @@ independently of them. A hypothesis without a concrete causal story is
 a **label**, not a hypothesis — and labels cannot reach `++` no matter
 how much evidence accumulates.
 
-Writing the story forces you to think through the full chain: what
-triggered the event on the source host → what ran → what was invoked
-→ what the observable alert represents → what correlation signals
-another authority would have emitted. Each link in that chain is an
-opportunity to generate a prediction (observable present when the link
-is real) and a refutation (observable absent or contradictory when the
-link is not real).
+### One-hop scope (structural rule)
+
+A hypothesis is a **one-hop** proposed extension of the graph. The
+story respects that scope exactly:
+
+- **Story starts at `proposed_edge.parent_vertex`** — the hypothesized
+  upstream vertex, characterized by its `{type, classification}`.
+- **Story ends at `attached_to_vertex`** — the already-confirmed
+  observed vertex that triggered the investigation step.
+- **Each sentence describes how the parent vertex, given its proposed
+  classification, produced or relates to the observed vertex through
+  the proposed edge.** Attributes of the parent (its subtype,
+  schedule, identity, ancestry characteristics) are fair game for
+  predictions — they describe what the parent *is* if the hypothesis
+  holds. Edge attributes (timing, count, identity carried, outcome)
+  are fair game too.
+
+**What doesn't belong in the story:**
+
+- **Earlier causes.** "What invoked the parent" is a *separate*
+  hypothesis the agent can propose later, by attaching a new
+  hypothesis to the now-confirmed parent. Packing multi-hop ancestry
+  into this story smuggles untested claims into the hypothesis under
+  consideration. If the parent is "cron-spawned monitor process", the
+  story explains what a cron-spawned monitor would do when it runs —
+  not how cron came to fire.
+- **Downstream consequences.** "What happened after the observed
+  event" belongs to incident response, not triage. Stories describe
+  how the observed event came to be, not what its successors are.
+- **Disposition claims.** The story describes the causal mechanism,
+  not the verdict. "This is authorized" is a disposition, not a
+  story link. The *evidence* that demonstrates authorization
+  (anchor consultation, audit-correlation) belongs in predictions and
+  refutation shapes.
+
+Writing the story under this scope forces you to think through exactly
+what the one-hop parent's existence implies for the observed vertex:
+what traits must the parent have, what must the edge look like, what
+correlating signals would the parent's classification generate on
+other systems. Each of those is a prediction handle; each prediction
+has a negation that's a refutation shape.
 
 ### Label vs story — examples
 
 **Label (weak):** `?monitoring-probe: "this is an authorized monitoring probe"`
 
-**Story (testable):**
+**Hypothesis shape:**
+- `attached_to_vertex`: the observed rule-5710 alert event (an `attempted_auth` edge from source to target)
+- `proposed_edge.parent_vertex`: `{type: process, classification: scheduled-automation-health-check}`
+
+**Story (one-hop, testable):**
 ```
-Monitoring interval ticked on monitoring-host → cron fired the nagios
-health-check tool → nagios-check invoked `ssh monitorprobe@target-
-endpoint` → sshd rejected (unknown user) → rule 5710 fired.
-A correlating monitoring-system audit event exists for this tick.
+The scheduled-automation-health-check process invoked
+`ssh monitorprobe@target-endpoint` as a single-attempt reachability
+check. sshd on target-endpoint rejected the unknown user. Rule 5710
+fired. If the parent is genuinely a scheduled automation health-check,
+the monitoring system emits a corresponding audit event for this tick,
+and the attempt-shape matches what that class of tool produces.
 ```
 
-Each link produces a prediction:
-- "cron fired" → *prediction:* cron event on monitoring-host at alert timestamp ± 5s
-- "nagios-check invoked ssh (cron tools don't retry)" → *prediction:* single attempt per tick per tool
-- "correlating audit event" → *prediction:* monitoring-system audit event within ±5s of alert
+Note what's **not** in this story: "cron fired the tool" (that's a
+hop upstream — a separate hypothesis attached to the parent once
+it's confirmed) and "this is authorized" (that's a disposition claim).
 
-And each prediction produces a refutation:
-- no cron tick → refutes "cron fired" link
-- cluster has ≥2 same-user attempts within 1s → refutes "single attempt per tick"
-- no audit-correlation event → refutes "correlating audit event"
+Each prediction tests something about what the parent *is* (its
+scheduled-automation classification) or about the proposed edge's
+shape:
+
+- *prediction p1:* single SSH attempt per tick — cron/scheduler tools
+  don't burst-retry the same-millisecond. (Edge shape under parent's
+  classification.)
+- *prediction p2:* monitoring-system emits an audit event within ±5s
+  of the attempt timestamp. (Correlation signal implied by parent's
+  classification.)
+- *prediction p3:* the attempt is cadenced — comparable alerts from
+  the same parent occur at the documented schedule interval.
+  (Temporal attribute of the parent's classification.)
+
+Each prediction has a refutation shape:
+- *r1:* cluster has ≥2 same-user attempts within 1s → refutes p1
+- *r2:* no audit-correlation event in monitoring-system logs within
+  ±5s → refutes p2
+- *r3:* attempt is off-cadence (not near the documented interval) →
+  refutes p3
 
 **Label (weak):** `?post-exploit-interactive: "this looks like post-exploit access"`
 
-**Story (testable):**
+**Hypothesis shape:**
+- `attached_to_vertex`: the observed bash process vertex from rule 100001
+- `proposed_edge.parent_vertex`: `{type: session, classification: attacker-foothold-interactive-session}`
+
+**Story (one-hop, testable):**
 ```
-External foothold authenticated SSH to the container → attacker
-laterally moved within the container → attacker invoked docker exec
-to spawn an interactive bash session → whoami was their first
-reconnaissance command.
+The attacker-foothold-interactive-session spawned this bash process
+via docker exec, attaching an interactive tty. The session is a
+genuine foothold: authenticated from a novel source with no prior
+relationship to this container, and the commands issued after spawn
+are reconnaissance-shaped rather than scripted.
 ```
 
-Predictions: novel-user authenticated SSH session in auth logs within the
-container ancestry; new connection tuple visible in rule 100002;
-interactive tty on the bash process; command-sequence pattern consistent
-with manual recon (not scripted).
+Predictions test the parent's attributes: authenticated session record
+in auth logs with novel/unknown user; connection tuple in rule 100002
+tied to an unrecognized srcip; tty=interactive on the bash process;
+command sequence pattern consistent with manual recon (not a scripted
+single-command invocation). Each negation is a refutation shape.
 
 **Label (weak):** `?credential-stuffing: "this is credential stuffing"`
 
-**Story (testable):**
+**Hypothesis shape:**
+- `attached_to_vertex`: the observed rule-5710 alert event
+- `proposed_edge.parent_vertex`: `{type: process, classification: external-credential-stuffing-tool}`
+
+**Story (one-hop, testable):**
 ```
-Attacker with a leaked credential database picked `admin` as a
-high-value target → issued ssh attempts at ~1/sec cadence from an
-unknown external IP → sshd rejected each → rule 5710 fired.
-No prior authentication relationship exists between source IP
-and target.
+The external-credential-stuffing-tool issued an SSH attempt for
+`admin` from an unrecognized external IP as part of a broader
+username-cycling probe. sshd rejected. Rule 5710 fired. The tool's
+characteristics — wordlist-derived usernames, ~1/sec cadence, no
+prior relationship to this target — determine the edge shape.
 ```
 
-Predictions: source IP has no prior successful auth to target in recent
-history; username-cycling pattern (not single-user); inter-attempt cadence
-near wordlist-tool defaults; absence of any post-auth success.
+Predictions: source IP has no prior successful auth to this target;
+same IP attempts multiple different usernames in a short window (not
+single-user persistent); inter-attempt cadence near wordlist-tool
+defaults (~1/sec); no post-auth success from the IP. Each negation is
+a refutation shape.
 
 ### The discipline
 
