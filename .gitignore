@@ -44,6 +44,7 @@ logs/
 # Per-environment config (template is tracked, actual config is not)
 soc-agent/knowledge/environment/systems/wazuh/config.env
 soc-agent/knowledge/environment/systems/playground-ticket/config.env
+soc-agent/knowledge/environment/systems/elastic/config.env
 
 # IDE
 .vscode/
