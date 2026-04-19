@@ -2,7 +2,9 @@
 
 Schema v2.8. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes). Full spec: `docs/investigation-language.md`.
 
-**v2.8 delta:** legitimacy is a first-class edge attribute. Hypotheses whose disposition depends on authorization declare a `legitimacy_contract`; the resolving lead writes `legitimacy_resolutions` on the materialized or already-confirmed edge. Supersedes the former "maintain adversarial hypothesis until `--`" bookkeeping rule — teeth are structural via validator rules #19–#22.
+**v2.8 delta:** legitimacy is a first-class refinement attribute. Hypotheses whose disposition depends on authorization declare a `legitimacy_contract`; the resolving lead writes `legitimacy_resolutions[]` in its own `outcome` (a sibling of `attribute_updates`). Edge records remain write-once; an edge's current authorization state is a computed rollup over every lead that names the edge as its resolution `target`, in declaration order, with explicit `supersedes` chain support. Supersedes the former "maintain adversarial hypothesis until `--`" bookkeeping rule — teeth are structural via validator rules #10–#11 and #13–#16.
+
+**v2.9 delta:** authority-consultation primitive unified. `trust_anchor_result` carries `asks: expectation | authorization` with conditional `verdict` — the single lead-outcome record that feeds both the edge's rollup-computed legitimacy state and the report's `trust_anchors_consulted[]`. Baselines (`kind: telemetry-baseline`) ground expectation only; authorization verdicts are reserved for `kind: org-authority`. Unifies what was previously a duplicated mechanism (archetype grounding at the report layer, authorization at the edge layer) into one primitive at the lead-outcome layer.
 
 ---
 
@@ -104,24 +106,20 @@ status: observed           # omit; emit hypothesized | refuted when non-default
 authority:
   kind: siem-event | runtime-audit | authoritative-source
       | client-asserted | inferred-structural
+                           # Edge-authority taxonomy — distinct from the anchor
+                           # taxonomy used at `trust_anchor_result.kind` (which is
+                           # `org-authority | telemetry-baseline`). Do not copy
+                           # these edge values into `trust_anchor_result.kind`.
   source: <string>
   trust_chain: []          # omit if empty
-legitimacy_resolutions: [] # omit when no contract resolves against this edge.
-                           # Populated when a lead resolves a declared
-                           # legitimacy_contract against this edge — real edges
-                           # often face parallel policy layers (IAM ×
-                           # data-classification × time-of-day); each contract
-                           # gets its own resolution. See Hypothesis below for
-                           # the contract-declaration side. Per entry:
-                           #   verdict: authorized | unauthorized | indeterminate
-                           #   anchor_kind: <iam-policy | oncall-schedule | ...>
-                           #   anchor_query: <short human record of what was asked>
-                           #   as_of: <iso>
-                           #   resolved_by_lead: l-{id}
-                           #   fulfills_contract: h-{id}.lc{n}
-                           #   concerns: []   # optional
 concerns: []               # omit if empty
 ```
+
+**Where do legitimacy verdicts live?** On lead outcomes, not on edges. Edge
+records are write-once; the authorization state of an edge is a computed
+rollup over every lead whose `outcome.legitimacy_resolutions[]` names this
+edge as its `target`. See the *Lead outcome* section below for the
+resolution shape, and the validator rules for the legitimacy gate.
 
 ---
 
@@ -203,21 +201,70 @@ query_details:
 concerns: []                    # omit if empty
 outcome:
   attribute_updates:            # enriches existing confirmed vertices OR edges
-    - target: v-{id} | e-{id}   # exactly one; edge targets carry legitimacy resolutions
+    - target: v-{id} | e-{id}   # exactly one; edge or vertex id must be declared
       updates: {}
+  legitimacy_resolutions:       # append-only refinement — a lead whose trust_anchor_result
+                                # asks:authorization writes one entry per contract it resolves.
+                                # Edges themselves carry no resolution list; the current
+                                # authorization state of an edge is a rollup computed across
+                                # every lead that names it in `target`, in declaration order,
+                                # with `supersedes` pruning the chain. See validator rules
+                                # #20 (back-ref), #21 (legitimacy-gated disposition).
+    - id: lr-{n}                # unique run-wide; pattern ^lr\d+$
+      target: v-{id} | e-{id}   # graph element whose authorization this verdict refines.
+                                # May differ from the lead's own `target` — the lead's
+                                # target is "what I'm asking about," the resolution's
+                                # target is "which graph element this verdict applies to."
+      fulfills_contract: h-{id}.lc{n}   # back-reference to a declared legitimacy_contract
+      verdict: authorized | unauthorized | indeterminate
+      supersedes: lr-{m}        # optional; when a later lead revises an earlier verdict
+                                # on the same (fulfills_contract, target). Cross-contract
+                                # or cross-target supersession is a category error.
+      concerns: []              # optional
   observations:
     vertices: []
     edges: []
   trust_anchor_result:          # include when the lead queried a named trust anchor
-                                # (authoritative-source that can give a definitive verdict);
-                                # omit for SIEM queries that are not anchors.
-    anchor_id: <string>
-    kind: <string>
+                                # (a standing source of truth that can give a definitive
+                                # verdict on the question at hand); omit for SIEM queries
+                                # that are not anchors.
+    anchor_id: <string>         # stable id of the anchor registry (e.g. "approved-monitoring-sources")
+    anchor_name: <string>       # optional; specific authority within the registry
+                                # (e.g. "iam-policy", "oncall-schedule"). Free-form for
+                                # audit granularity; distinct from `kind` (classification).
+    kind: org-authority | telemetry-baseline
+                                # Anchor taxonomy — distinct from `edge.authority.kind`
+                                # (which is about observation provenance). Agents commonly
+                                # conflate the two vocabularies; do not write `siem-event`,
+                                # `runtime-audit`, or `authoritative-source` here.
+                                #   org-authority      — curated registry, policy doc, IAM
+                                #                        record, approved-* list
+                                #   telemetry-baseline — statistical baseline derived from
+                                #                        historical telemetry (e.g.
+                                #                        image-baseline, username-frequency)
+                                # This is the same enum the report frontmatter uses for
+                                # `trust_anchors_consulted[].kind`.
+    asks: expectation | authorization
+                                # Discriminator for what this consultation is asking:
+                                #   expectation   — "does this match the baseline / registry?"
+                                #                   (no verdict; telemetry-baseline anchors)
+                                #   authorization — "is this action sanctioned right now?"
+                                #                   (verdict required; org-authority anchors)
+                                # Telemetry baselines cannot answer authorization — validator
+                                # enforces `kind: telemetry-baseline` ⇒ `asks: expectation`.
+    verdict: authorized | unauthorized | indeterminate
+                                # Required when asks: authorization; forbidden when
+                                # asks: expectation. Baselines don't authorize.
+    input_triple:               # optional; echoes the query shape for audit
+      source_vertex: v-{id}
+      target_vertex: v-{id}
+      relation: <string>
     result: confirmed | refuted | unavailable
                                 # `unavailable` covers both "anchor returned partial coverage"
                                 # and "anchor had no data" — the grading cap for reduced
                                 # authority is expressed via `authority_for_question` below,
-                                # not by splitting the result enum.
+                                # not by splitting the result enum. asks:authorization with
+                                # result:unavailable pairs with verdict:indeterminate.
     as_of: <iso>                # timestamp the answer is authoritative ABOUT
     authority_for_question: full | partial
   trust_root_reached: v-{id}    # omit when null
@@ -439,7 +486,11 @@ A gathering lead whose outcome is interpretation-vulnerable but does not collaps
 6. **Partial authority cap.** A resolution grounded solely by `authority_for_question: partial` cannot push a hypothesis past `+` or `-`.
 7. **`screen_result` scope.** Only valid on `mode: screen` leads; only on the final lead in a SCREEN sequence. SCREEN-matched companions omit the top-level `hypothesize` block.
 8. **Lead-level predictions.** When present, each entry has `id` (matching `^lp\d+$`), `if`, `read_as`, `advance_to`. IDs are unique within the lead. `advance_to` is either the name of another lead in the same or subsequent loop, or one of `CONCLUDE` / `HYPOTHESIZE`. The actual next step should match at least one pre-committed branch — mismatches are flagged by the validator.
-9. **Legitimacy contract edge_ref (v2.8).** Every `hypothesis.legitimacy_contract[].edge_ref` is either the literal `proposed` (referring to the hypothesis's own `proposed_edge`) or an `e-*` id declared elsewhere in the companion.
-10. **Legitimacy back-reference (v2.8).** Every `edge.legitimacy_resolutions[].fulfills_contract` of shape `h-{id}.lc{n}` points to an existing hypothesis whose `legitimacy_contract` contains that entry.
-11. **Legitimacy-gated disposition (v2.8).** `conclude.disposition: benign` requires every `legitimacy_contract` on a live-weight hypothesis (weight `++`/`+`, status `confirmed`/`active`) to have at least one fulfilling `legitimacy_resolutions` entry with `verdict: authorized`. Unfulfilled contracts, or any non-`authorized` verdict, force escalation.
-12. **Attribute-update target shape (v2.8).** Every `attribute_updates` entry has exactly one of `target: v-{id}` or `target: e-{id}`, and the id exists. The legacy `vertex:` key is rejected.
+9. **Legitimacy contract edge_ref.** Every `hypothesis.legitimacy_contract[].edge_ref` is either the literal `proposed` (referring to the hypothesis's own `proposed_edge`) or an `e-*` id declared elsewhere in the companion.
+10. **Legitimacy back-reference.** Every `gather[].outcome.legitimacy_resolutions[].fulfills_contract` of shape `h-{id}.lc{n}` points to an existing hypothesis whose `legitimacy_contract` contains that entry.
+11. **Legitimacy-gated disposition.** `conclude.disposition: benign` requires every `legitimacy_contract` on a live-weight hypothesis (weight `++`/`+`, status `confirmed`/`active`) to have at least one fulfilling `legitimacy_resolutions` entry in the *effective* set (after supersede chain) with `verdict: authorized`. Unfulfilled contracts, or any non-`authorized` effective verdict, force escalation.
+12. **Target shape (attribute_updates + legitimacy_resolutions).** Every `attribute_updates[]` and `legitimacy_resolutions[]` entry has exactly one of `target: v-{id}` or `target: e-{id}`, and the id exists. The legacy `vertex:` key is rejected.
+13. **`asks` / `verdict` coherence.** When `trust_anchor_result.asks: authorization`, `verdict` is required and must be in `{authorized, unauthorized, indeterminate}`. When `asks: expectation`, `verdict` must be absent — baselines don't authorize.
+14. **`kind` / `asks` coherence.** When `trust_anchor_result.kind: telemetry-baseline`, `asks: expectation`. Baselines answer expectation only; using them for authorization is a category error.
+15. **Resolution requires authorization consultation.** A lead carrying `legitimacy_resolutions[]` must have a `trust_anchor_result` with `asks: authorization` — resolutions must be backed by an explicit authority consultation record.
+16. **Supersede chain.** `legitimacy_resolutions[].id` matches `^lr\d+$`, unique run-wide. `supersedes: lr-X` requires `lr-X` exists and has the same `(fulfills_contract, target)` pair. Cycles are rejected. Rule #21 filters superseded entries from the effective set; rule #10 still walks the full list so orphans aren't hidden by supersession.

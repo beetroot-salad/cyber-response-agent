@@ -77,8 +77,20 @@ entry authorizes the `(srcip, srcuser, target)` triple — carried as
 a `legitimacy_contract` on the hypothesis. Do **not** split into
 parallel `?sanctioned-*` vs. `?unsanctioned-*` hypotheses: same
 mechanism, same observables, only the authority answer differs — the
-textbook legitimacy-contract case. See
-`docs/investigation-language.md` §Legitimacy as edge attribute.
+textbook legitimacy-contract case.
+
+The resolving lead consults the anchor and writes two coupled records
+in its own `outcome`:
+- a `trust_anchor_result` with `asks: authorization`, `kind: org-authority`,
+  and `verdict: authorized | unauthorized | indeterminate` — the
+  consultation record itself;
+- a `legitimacy_resolutions[]` entry with `target: e-*` pointing at the
+  `attempted_auth` edge and `fulfills_contract: h-*.lc*` back-referencing
+  the hypothesis's contract. Edge records stay write-once; the edge's
+  current authorization state is a computed rollup over lead order.
+
+See `docs/investigation-language.md` §Legitimacy as edge attribute and
+`docs/design-v3-authority-consultation.md` for the full primitive.
 
 The contract's verdict routes to archetype:
 - `authorized` → `monitoring-probe` or `service-account-rotation`

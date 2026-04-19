@@ -62,7 +62,7 @@ Recommend which lead to pursue first and why.
 
 All must be true:
 1. Exactly one hypothesis remains with `++` support
-2. Every `legitimacy_contract` on a live-weight hypothesis has a fulfilling `legitimacy_resolutions` entry with `verdict: authorized`; any mechanism-level adversarial hypothesis (`?adversary-controlled-*`, etc.) has `--` refutation
+2. Every `legitimacy_contract` on a live-weight hypothesis has a fulfilling lead-outcome `legitimacy_resolutions[]` entry (authored in `gather[].outcome.legitimacy_resolutions[]`, backed by a sibling `trust_anchor_result` with `asks: authorization`) whose effective verdict after the supersede chain is `authorized`; any mechanism-level adversarial hypothesis (`?adversary-controlled-*`, etc.) has `--` refutation
 3. A matching precedent exists
 4. No escalation triggers present
 5. Confidence is high

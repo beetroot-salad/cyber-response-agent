@@ -75,10 +75,16 @@ lookups, not packed into the hypothesis label.
   depending on authorization (CFO vs. external identity reading
   payroll; operator shell on prod vs. attacker RCE on prod), declare
   a `legitimacy_contract` on the hypothesis naming the edge and the
-  authority — see `docs/investigation-language.md` §Legitimacy as
-  edge attribute. Do **not** write a parallel `?sanctioned` vs.
-  `?unsanctioned` hypothesis pair: the mechanism is identical, only
-  the verdict differs. Contracts answer policy, not integrity —
+  authority. The contract itself lives on the hypothesis; the
+  resolving lead writes a `legitimacy_resolutions[]` entry in its
+  own `outcome` (sibling of `attribute_updates`) with `target: e-*`
+  and `fulfills_contract: h-*.lc*`, backed by a `trust_anchor_result`
+  carrying `asks: authorization` and `verdict`. See
+  `docs/investigation-language.md` §Legitimacy as edge attribute and
+  `docs/design-v3-authority-consultation.md` for the full primitive.
+  Do **not** write a parallel `?sanctioned` vs. `?unsanctioned`
+  hypothesis pair: the mechanism is identical, only the verdict
+  differs. Contracts answer policy, not integrity —
   integrity questions (session hijack, process-hollowing,
   tool-masquerade) are mechanism-level discriminations (enumerate
   `?adversary-controlled-*` alongside benign classifications), not

@@ -36,7 +36,7 @@ its reasoning converges, not because a pattern matches. Even when an archetype
 cleanly matches, these items must hold:
 
 - [ ] Exactly one hypothesis has `++` support
-- [ ] **Every `legitimacy_contract` on a live-weight hypothesis** has a fulfilling `legitimacy_resolutions` entry with `verdict: authorized`. Any `unauthorized` or `indeterminate` verdict forces escalation. Mechanism-level adversarial hypotheses (`?adversary-controlled-*`) still require `--` refutation with explicit reasoning.
+- [ ] **Every `legitimacy_contract` on a live-weight hypothesis** has a fulfilling lead-outcome `legitimacy_resolutions[]` entry — written in `gather[].outcome.legitimacy_resolutions[]` as a sibling of `attribute_updates`, backed by a `trust_anchor_result` with `asks: authorization` on the same lead — whose effective verdict (after supersede-chain resolution) is `authorized`. Any `unauthorized` or `indeterminate` effective verdict forces escalation. Mechanism-level adversarial hypotheses (`?adversary-controlled-*`) still require `--` refutation with explicit reasoning.
 - [ ] The confirmed hypothesis explains every significant observation in the investigation log (no dangling evidence)
 - [ ] `leads_pursued` count meets minimum for the signature severity (low:1, medium:2, high:3, critical:4)
 - [ ] Confidence is `high`

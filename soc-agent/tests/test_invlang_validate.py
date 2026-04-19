@@ -39,6 +39,11 @@ from hooks.scripts.invlang_validate import (
     _check_legitimacy_resolution_backrefs,
     _check_legitimacy_gated_disposition,
     _check_attribute_updates_target_shape,
+    _check_asks_verdict_shape,
+    _check_kind_asks_coherence,
+    _check_legitimacy_resolution_target_shape,
+    _check_legitimacy_supersede_chain,
+    _check_resolution_requires_authorization_asks,
     _merge_blocks,
     collect_warnings,
     YAML_BLOCK_RE,
@@ -416,6 +421,45 @@ class TestCheckTrustAnchorCompleteness:
         errors = _check_trust_anchor_completeness(merged)
         assert errors
         assert "l-001" in errors[0]
+
+    def test_kind_from_edge_authority_taxonomy_rejected(self):
+        """The agent commonly writes `authoritative-source` (an edge-authority
+        term) into trust_anchor_result.kind — it must be caught at invlang
+        layer so the error points at the right schema slot."""
+        merged = {"gather": [{
+            "id": "l-004", "loop": 0, "name": "approved-monitoring-sources",
+            "target": "e-001", "mode": "screen",
+            "query_details": {}, "outcome": {
+                "trust_anchor_result": {
+                    "anchor_id": "approved-monitoring-sources",
+                    "kind": "authoritative-source",
+                    "result": "confirmed",
+                    "as_of": "2026-04-18T20:32:05Z",
+                    "authority_for_question": "full",
+                },
+            },
+            "resolutions": [],
+        }]}
+        errors = _check_trust_anchor_completeness(merged)
+        assert any("trust_anchor_result.kind must be one of" in e for e in errors)
+        assert any("l-004" in e for e in errors)
+        assert any("authoritative-source" in e for e in errors)
+
+    def test_kind_telemetry_baseline_passes(self):
+        merged = {"gather": [{
+            "id": "l-001", "loop": 0, "name": "image-baseline",
+            "target": "e-001", "query_details": {}, "outcome": {
+                "trust_anchor_result": {
+                    "anchor_id": "image-baseline",
+                    "kind": "telemetry-baseline",
+                    "result": "confirmed",
+                    "as_of": "2026-04-18T20:32:05Z",
+                    "authority_for_question": "full",
+                },
+            },
+            "resolutions": [],
+        }]}
+        assert _check_trust_anchor_completeness(merged) == []
 
 
 # ---------------------------------------------------------------------------
@@ -1352,12 +1396,19 @@ def _companion_with_contract(
     disposition: str = "benign",
     hypothesis_weight: str = "+",
     extra_edges: list[dict] | None = None,
+    trust_anchor_result: dict | None = None,
 ) -> dict:
     """Build a merged companion carrying one hypothesis with one legitimacy_contract.
 
-    Defaults shape a live-weight benign resolution with one `authorized` verdict
-    attached to the hypothesis's proposed edge. Override parameters to flip
-    individual dimensions for negative cases.
+    Post-migration shape: `legitimacy_resolutions[]` lives in
+    `gather[0].outcome.legitimacy_resolutions[]` as a sibling of
+    `attribute_updates`. The lead also carries a `trust_anchor_result`
+    with `asks: authorization` and `verdict: authorized` — resolutions
+    must be backed by an explicit authority consultation.
+
+    Defaults shape a live-weight benign resolution with one `authorized`
+    verdict targeting edge e-002. Override parameters to flip individual
+    dimensions for negative cases.
     """
     edges = [
         {
@@ -1370,22 +1421,30 @@ def _companion_with_contract(
     ]
     if extra_edges:
         edges.extend(extra_edges)
-    new_edge = {
+    observed_edge = {
         "id": "e-002",
         "relation": "classified_as",
         "source_vertex": "v-001",
         "target_vertex": "v-002",
         "authority": {"kind": "authoritative-source", "source": "registry"},
-        "legitimacy_resolutions": resolutions or [
-            {
-                "verdict": "authorized",
-                "anchor_kind": "approved-monitoring-sources",
-                "anchor_query": "registry lookup",
-                "as_of": "2026-04-18T00:00:00Z",
-                "resolved_by_lead": "l-001",
-                "fulfills_contract": f"h-001.{contract_id}",
-            }
-        ],
+    }
+    default_resolutions = [
+        {
+            "id": "lr1",
+            "target": "e-002",
+            "fulfills_contract": f"h-001.{contract_id}",
+            "verdict": "authorized",
+        }
+    ]
+    default_tar = {
+        "anchor_id": "approved-monitoring-sources",
+        "anchor_name": "approved-monitoring-sources",
+        "kind": "org-authority",
+        "asks": "authorization",
+        "verdict": "authorized",
+        "result": "confirmed",
+        "as_of": "2026-04-18T00:00:00Z",
+        "authority_for_question": "full",
     }
     return {
         "prologue": {
@@ -1426,7 +1485,17 @@ def _companion_with_contract(
                 "name": "trust-anchor-lookup",
                 "target": "v-001",
                 "query_details": {},
-                "outcome": {"observations": {"vertices": [], "edges": [new_edge]}},
+                "outcome": {
+                    "observations": {"vertices": [], "edges": [observed_edge]},
+                    "trust_anchor_result": (
+                        trust_anchor_result
+                        if trust_anchor_result is not None
+                        else default_tar
+                    ),
+                    "legitimacy_resolutions": (
+                        resolutions if resolutions is not None else default_resolutions
+                    ),
+                },
                 "resolutions": [
                     {
                         "hypothesis": "h-001",
@@ -1478,6 +1547,18 @@ class TestCheckLegitimacyContractEdgeRef:
         errors = _check_legitimacy_contract_edge_ref(merged)
         assert any("must be 'proposed' or an e-* id" in e for e in errors)
 
+    def test_missing_id(self):
+        merged = _companion_with_contract()
+        merged["hypothesize"]["hypotheses"][0]["legitimacy_contract"][0].pop("id")
+        errors = _check_legitimacy_contract_edge_ref(merged)
+        assert any("missing id" in e for e in errors)
+
+    def test_non_string_id(self):
+        merged = _companion_with_contract()
+        merged["hypothesize"]["hypotheses"][0]["legitimacy_contract"][0]["id"] = 1
+        errors = _check_legitimacy_contract_edge_ref(merged)
+        assert any("id must be a string" in e for e in errors)
+
 
 class TestCheckLegitimacyResolutionBackrefs:
     def test_valid_backref(self):
@@ -1525,6 +1606,33 @@ class TestCheckLegitimacyResolutionBackrefs:
         errors = _check_legitimacy_resolution_backrefs(merged)
         assert any("missing fulfills_contract" in e for e in errors)
 
+    def test_missing_verdict(self):
+        merged = _companion_with_contract(
+            resolutions=[{
+                "anchor_kind": "x",
+                "anchor_query": "q",
+                "as_of": "2026-04-18",
+                "resolved_by_lead": "l-001",
+                "fulfills_contract": "h-001.lc1",
+            }]
+        )
+        errors = _check_legitimacy_resolution_backrefs(merged)
+        assert any("missing verdict" in e for e in errors)
+
+    def test_non_string_verdict(self):
+        merged = _companion_with_contract(
+            resolutions=[{
+                "verdict": 1,
+                "anchor_kind": "x",
+                "anchor_query": "q",
+                "as_of": "2026-04-18",
+                "resolved_by_lead": "l-001",
+                "fulfills_contract": "h-001.lc1",
+            }]
+        )
+        errors = _check_legitimacy_resolution_backrefs(merged)
+        assert any("verdict must be a string" in e for e in errors)
+
     def test_bad_verdict(self):
         merged = _companion_with_contract(
             resolutions=[{
@@ -1547,9 +1655,6 @@ class TestCheckLegitimacyGatedDisposition:
 
     def test_benign_with_unfulfilled_contract(self):
         merged = _companion_with_contract(disposition="benign", resolutions=[])
-        # Remove the edge's legitimacy_resolutions entirely to simulate unfulfilled.
-        lead_edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
-        lead_edge.pop("legitimacy_resolutions", None)
         errors = _check_legitimacy_gated_disposition(merged)
         assert any("no fulfilling legitimacy_resolutions" in e for e in errors)
 
@@ -1630,11 +1735,8 @@ class TestCheckLegitimacyGatedDisposition:
             hypothesis_weight="--",
             resolutions=[],
         )
-        lead_edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
-        lead_edge.pop("legitimacy_resolutions", None)
-        # Matched_refutation_ids must be present for --; add one the hypothesis
-        # doesn't declare to keep the scope narrow — the refutation check is
-        # covered by other tests. Give the resolution a matched refutation id.
+        # Matched_refutation_ids must be present for --; the refutation check
+        # is covered by other tests, so just wire up a minimal id pair.
         merged["hypothesize"]["hypotheses"][0]["refutation_shape"] = [{"id": "r1", "claim": "x"}]
         merged["gather"][0]["resolutions"][0]["matched_refutation_ids"] = ["r1"]
         assert _check_legitimacy_gated_disposition(merged) == []
@@ -1692,3 +1794,354 @@ class TestCheckAttributeUpdatesTargetShape:
         merged = self._merged_with_update({"target": "v-001"})
         errors = _check_attribute_updates_target_shape(merged)
         assert any("missing or non-mapping `updates`" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Authority-consultation primitive (v2.9): asks / verdict / supersede chain
+# ---------------------------------------------------------------------------
+
+
+class TestCheckAsksVerdictShape:
+    """trust_anchor_result.asks discriminator gates the verdict field."""
+
+    def test_authorization_with_verdict_passes(self):
+        merged = _companion_with_contract()  # default TAR has asks:authorization + verdict:authorized
+        assert _check_asks_verdict_shape(merged) == []
+
+    def test_authorization_without_verdict_fails(self):
+        merged = _companion_with_contract()
+        merged["gather"][0]["outcome"]["trust_anchor_result"].pop("verdict")
+        errors = _check_asks_verdict_shape(merged)
+        assert any("authorization" in e and "verdict is missing" in e for e in errors)
+
+    def test_expectation_with_verdict_fails(self):
+        merged = _companion_with_contract(
+            trust_anchor_result={
+                "anchor_id": "image-baseline",
+                "kind": "telemetry-baseline",
+                "asks": "expectation",
+                "verdict": "authorized",  # category error
+                "result": "confirmed",
+                "as_of": "2026-04-18T00:00:00Z",
+                "authority_for_question": "full",
+            },
+            resolutions=[],  # expectation anchors don't emit resolutions
+        )
+        errors = _check_asks_verdict_shape(merged)
+        assert any("baselines don't authorize" in e for e in errors)
+
+    def test_unknown_asks_value_fails(self):
+        merged = _companion_with_contract()
+        merged["gather"][0]["outcome"]["trust_anchor_result"]["asks"] = "guess"
+        errors = _check_asks_verdict_shape(merged)
+        assert any("asks must be one of" in e for e in errors)
+
+    def test_unknown_verdict_value_fails(self):
+        merged = _companion_with_contract()
+        merged["gather"][0]["outcome"]["trust_anchor_result"]["verdict"] = "maybe"
+        errors = _check_asks_verdict_shape(merged)
+        assert any("verdict 'maybe' not in" in e for e in errors)
+
+    def test_authorization_unavailable_with_indeterminate_passes(self):
+        """asks:authorization + result:unavailable is fine as long as the lead
+        commits to verdict:indeterminate — the anchor had no data, but the
+        consultation is still honest."""
+        merged = _companion_with_contract()
+        tar = merged["gather"][0]["outcome"]["trust_anchor_result"]
+        tar["result"] = "unavailable"
+        tar["verdict"] = "indeterminate"
+        tar["authority_for_question"] = "partial"
+        # Non-benign disposition since the contract is unresolved-authorized:
+        merged["conclude"]["disposition"] = "inconclusive"
+        merged["gather"][0]["outcome"]["legitimacy_resolutions"][0]["verdict"] = "indeterminate"
+        assert _check_asks_verdict_shape(merged) == []
+
+    def test_legacy_tar_without_asks_passes(self):
+        """A TAR that predates v2.9 (no asks field) isn't flagged by this rule
+        — it's still legal under the completeness check. Only coherence is
+        enforced when asks IS present."""
+        merged = _companion_with_contract(
+            trust_anchor_result={
+                "anchor_id": "approved-monitoring-sources",
+                "kind": "org-authority",
+                "result": "confirmed",
+                "as_of": "2026-04-18T00:00:00Z",
+                "authority_for_question": "full",
+            },
+        )
+        assert _check_asks_verdict_shape(merged) == []
+
+
+class TestCheckKindAsksCoherence:
+    """kind: telemetry-baseline ⇒ asks: expectation. Baselines don't authorize."""
+
+    def test_org_authority_with_authorization_passes(self):
+        merged = _companion_with_contract()
+        assert _check_kind_asks_coherence(merged) == []
+
+    def test_telemetry_baseline_with_expectation_passes(self):
+        merged = _companion_with_contract(
+            trust_anchor_result={
+                "anchor_id": "image-baseline",
+                "kind": "telemetry-baseline",
+                "asks": "expectation",
+                "result": "confirmed",
+                "as_of": "2026-04-18T00:00:00Z",
+                "authority_for_question": "full",
+            },
+            resolutions=[],
+        )
+        assert _check_kind_asks_coherence(merged) == []
+
+    def test_telemetry_baseline_with_authorization_fails(self):
+        merged = _companion_with_contract(
+            trust_anchor_result={
+                "anchor_id": "image-baseline",
+                "kind": "telemetry-baseline",
+                "asks": "authorization",
+                "verdict": "authorized",
+                "result": "confirmed",
+                "as_of": "2026-04-18T00:00:00Z",
+                "authority_for_question": "full",
+            },
+        )
+        errors = _check_kind_asks_coherence(merged)
+        assert any("telemetry-baseline" in e and "expectation" in e for e in errors)
+
+
+class TestCheckResolutionTargetShape:
+    """gather[].outcome.legitimacy_resolutions[].target is v-*/e-* and declared."""
+
+    def test_valid_edge_target_passes(self):
+        merged = _companion_with_contract()  # default targets e-002
+        assert _check_legitimacy_resolution_target_shape(merged) == []
+
+    def test_vertex_target_passes(self):
+        """A lead consulting an oncall-roster vertex can resolve an edge-scoped
+        contract by writing verdict against either a vertex or an edge — the
+        plan's open-q #1 leaned 'both allowed' to mirror attribute_updates."""
+        merged = _companion_with_contract(
+            resolutions=[{
+                "id": "lr1",
+                "target": "v-001",
+                "fulfills_contract": "h-001.lc1",
+                "verdict": "authorized",
+            }],
+        )
+        assert _check_legitimacy_resolution_target_shape(merged) == []
+
+    def test_missing_target_fails(self):
+        merged = _companion_with_contract(
+            resolutions=[{
+                "id": "lr1",
+                "fulfills_contract": "h-001.lc1",
+                "verdict": "authorized",
+            }],
+        )
+        errors = _check_legitimacy_resolution_target_shape(merged)
+        assert any("missing `target:`" in e for e in errors)
+
+    def test_unknown_id_fails(self):
+        merged = _companion_with_contract(
+            resolutions=[{
+                "id": "lr1",
+                "target": "e-999",
+                "fulfills_contract": "h-001.lc1",
+                "verdict": "authorized",
+            }],
+        )
+        errors = _check_legitimacy_resolution_target_shape(merged)
+        assert any("e-999" in e and "does not resolve" in e for e in errors)
+
+    def test_bad_prefix_fails(self):
+        merged = _companion_with_contract(
+            resolutions=[{
+                "id": "lr1",
+                "target": "h-001",
+                "fulfills_contract": "h-001.lc1",
+                "verdict": "authorized",
+            }],
+        )
+        errors = _check_legitimacy_resolution_target_shape(merged)
+        assert any("must start with 'v-' or 'e-'" in e for e in errors)
+
+    def test_legacy_vertex_field_rejected(self):
+        merged = _companion_with_contract(
+            resolutions=[{
+                "id": "lr1",
+                "vertex": "v-001",  # legacy key
+                "fulfills_contract": "h-001.lc1",
+                "verdict": "authorized",
+            }],
+        )
+        errors = _check_legitimacy_resolution_target_shape(merged)
+        assert any("legacy `vertex:`" in e for e in errors)
+
+    def test_lead_target_differs_from_resolution_target(self):
+        """A lead with target:v-003 can still emit a resolution targeting e-001
+        — the lead's target is 'what I'm asking about', the resolution's
+        target is 'which graph element this verdict refines.'"""
+        merged = _companion_with_contract()
+        merged["gather"][0]["target"] = "v-001"  # lead asks about v-001
+        merged["gather"][0]["outcome"]["legitimacy_resolutions"][0]["target"] = "e-001"  # verdict on e-001
+        assert _check_legitimacy_resolution_target_shape(merged) == []
+
+
+class TestLegitimacyCoOccurrence:
+    """A lead emitting legitimacy_resolutions[] must have TAR.asks: authorization."""
+
+    def test_resolution_without_tar_fails(self):
+        merged = _companion_with_contract()
+        merged["gather"][0]["outcome"].pop("trust_anchor_result")
+        errors = _check_resolution_requires_authorization_asks(merged)
+        assert any("no trust_anchor_result" in e for e in errors)
+
+    def test_tar_without_asks_fails(self):
+        merged = _companion_with_contract()
+        merged["gather"][0]["outcome"]["trust_anchor_result"].pop("asks")
+        errors = _check_resolution_requires_authorization_asks(merged)
+        assert any("asks is not set" in e for e in errors)
+
+    def test_asks_expectation_with_resolution_fails(self):
+        merged = _companion_with_contract()
+        tar = merged["gather"][0]["outcome"]["trust_anchor_result"]
+        tar["asks"] = "expectation"
+        tar.pop("verdict", None)
+        errors = _check_resolution_requires_authorization_asks(merged)
+        assert any("asks is 'expectation'" in e for e in errors)
+
+
+class TestLegitimacySupersedeChain:
+    """Supersede chain invariants: id pattern, same contract+target, no cycles."""
+
+    def _with_chain(self, chain: list[dict]) -> dict:
+        """Replace default single resolution with a multi-entry chain."""
+        return _companion_with_contract(resolutions=chain)
+
+    def test_two_way_supersede_passes(self):
+        """Loop-1 indeterminate, loop-2 authorized supersedes it → benign OK."""
+        merged = self._with_chain([
+            {"id": "lr1", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "indeterminate"},
+            {"id": "lr2", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "authorized",
+             "supersedes": "lr1"},
+        ])
+        assert _check_legitimacy_supersede_chain(merged) == []
+        # And rule #21 should pass (effective verdict is authorized):
+        assert _check_legitimacy_gated_disposition(merged) == []
+
+    def test_chain_of_three_picks_latest(self):
+        merged = self._with_chain([
+            {"id": "lr1", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "indeterminate"},
+            {"id": "lr2", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "unauthorized",
+             "supersedes": "lr1"},
+            {"id": "lr3", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "authorized",
+             "supersedes": "lr2"},
+        ])
+        assert _check_legitimacy_supersede_chain(merged) == []
+        assert _check_legitimacy_gated_disposition(merged) == []
+
+    def test_dangling_supersede_fails(self):
+        merged = self._with_chain([
+            {"id": "lr1", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "authorized",
+             "supersedes": "lr99"},  # no such entry
+        ])
+        errors = _check_legitimacy_supersede_chain(merged)
+        assert any("lr99" in e and "does not resolve" in e for e in errors)
+
+    def test_cross_contract_supersede_fails(self):
+        merged = self._with_chain([
+            {"id": "lr1", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "authorized"},
+            {"id": "lr2", "target": "e-002",
+             "fulfills_contract": "h-001.lc2", "verdict": "authorized",  # different contract
+             "supersedes": "lr1"},
+        ])
+        errors = _check_legitimacy_supersede_chain(merged)
+        assert any("contract-scoped" in e for e in errors)
+
+    def test_cross_target_supersede_fails(self):
+        merged = self._with_chain([
+            {"id": "lr1", "target": "e-001",
+             "fulfills_contract": "h-001.lc1", "verdict": "indeterminate"},
+            {"id": "lr2", "target": "e-002",  # different target
+             "fulfills_contract": "h-001.lc1", "verdict": "authorized",
+             "supersedes": "lr1"},
+        ])
+        errors = _check_legitimacy_supersede_chain(merged)
+        assert any("target-scoped" in e for e in errors)
+
+    def test_cycle_detected(self):
+        merged = self._with_chain([
+            {"id": "lr1", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "authorized",
+             "supersedes": "lr2"},
+            {"id": "lr2", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "unauthorized",
+             "supersedes": "lr1"},
+        ])
+        errors = _check_legitimacy_supersede_chain(merged)
+        assert any("cycle" in e for e in errors)
+
+    def test_duplicate_lr_id_fails(self):
+        merged = self._with_chain([
+            {"id": "lr1", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "authorized"},
+            {"id": "lr1", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "unauthorized"},
+        ])
+        errors = _check_legitimacy_supersede_chain(merged)
+        assert any("already used" in e for e in errors)
+
+    def test_bad_lr_id_pattern_fails(self):
+        merged = self._with_chain([
+            {"id": "legit-1", "target": "e-002",
+             "fulfills_contract": "h-001.lc1", "verdict": "authorized"},
+        ])
+        errors = _check_legitimacy_supersede_chain(merged)
+        assert any("^lr\\d+$" in e for e in errors)
+
+
+class TestLegitimacyCrossContract:
+    """Two contracts on same hypothesis resolving differently — each is gated independently."""
+
+    def test_lc1_authorized_lc2_unauthorized_rejects_benign(self):
+        merged = _companion_with_contract()
+        # Add a second contract lc2
+        merged["hypothesize"]["hypotheses"][0]["legitimacy_contract"].append({
+            "id": "lc2",
+            "edge_ref": "proposed",
+            "anchor_kind": "change-management",
+            "predicate": "authorized iff ticket approved",
+            "on_unauthorized": "escalate",
+            "on_indeterminate": "escalate",
+        })
+        # Add lr-2 resolving lc2 = unauthorized in a second lead
+        merged["gather"].append({
+            "id": "l-002", "loop": 1, "name": "cm-ticket-lookup",
+            "target": "v-001", "query_details": {},
+            "outcome": {
+                "trust_anchor_result": {
+                    "anchor_id": "change-management",
+                    "kind": "org-authority",
+                    "asks": "authorization",
+                    "verdict": "unauthorized",
+                    "result": "confirmed",
+                    "as_of": "2026-04-18T01:00:00Z",
+                    "authority_for_question": "full",
+                },
+                "legitimacy_resolutions": [{
+                    "id": "lr2", "target": "e-002",
+                    "fulfills_contract": "h-001.lc2", "verdict": "unauthorized",
+                }],
+                "observations": {"vertices": [], "edges": []},
+            },
+            "resolutions": [],
+        })
+        errors = _check_legitimacy_gated_disposition(merged)
+        assert any("lc2" in e and "unauthorized" in e for e in errors)
