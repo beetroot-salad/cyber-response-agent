@@ -25,7 +25,7 @@ This is a one-off lead-definition edit; no wazuh_cli changes needed for (2).
 
 ## Context
 
-- Root cause is documented in detail in `.claude/skills/evaluate/SKILL.md` §15 (meta-findings).
+- Root cause is documented in detail in `.claude/skills/testrun/SKILL.md` §15 (meta-findings).
 - This block sits downstream of PR #74 (parallel Haiku judges) — PR #74 preserves structural reliability at lower cost but surfaces that Sonnet's dominant quality gap is semantic fabrication on top of this tool-output defect.
 - Pre-refactor inline self-check had the same blind spot; run #11 on 100001 produced the same false reverse-shell narrative. So fixing this is not a prerequisite for merging PR #74 — it's the logical next step after.
 - Fix priority is high because Sonnet-main on mature signatures is otherwise viable (runs #13, #14, #19) and this defect is the largest remaining quality gap visible in the eval corpus.
