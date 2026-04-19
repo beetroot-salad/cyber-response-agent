@@ -1,6 +1,6 @@
 ---
 title: Batch parallel reads in CONTEXTUALIZE section of SKILL.md
-status: backlog
+status: done
 groups: performance
 ---
 
