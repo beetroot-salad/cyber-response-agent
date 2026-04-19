@@ -8,7 +8,8 @@ match) and `related` (shares >=1 observable, grouped by distinct shared-dimensio
 Emits the YAML schema documented in soc-agent/agents/ticket-context.md.
 
 Inputs: --run-dir (has alert.json), --signature-id (for field-quirks.md).
-Output: fenced YAML block on stdout, matching the subagent's contract byte-for-byte.
+Output: fenced YAML block on stdout, matching the subagent's contract.
+Debug trace is written to stderr (prefix `[ticket_context]`).
 """
 from __future__ import annotations
 
@@ -21,10 +22,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WAZUH_CLI = REPO_ROOT / "scripts" / "tools" / "wazuh_cli.py"
 CLUSTER_COMPRESSION_THRESHOLD = 20
 HIGH_VOLUME_THRESHOLD = 100
+
+
+def _dbg(msg: str) -> None:
+    print(f"[ticket_context] {msg}", file=sys.stderr, flush=True)
 
 
 def parse_key_observables(field_quirks_path: Path) -> list[dict]:
@@ -65,6 +72,16 @@ def extract_json_path(obj: dict, dotted_path: str):
         else:
             return None
     return cur
+
+
+def _scalar(v):
+    """Coerce an observable value to a YAML/hash-safe scalar string, or None."""
+    if v is None:
+        return None
+    if isinstance(v, (str, int, float, bool)):
+        return str(v)
+    # Lists/dicts: stringify deterministically so clustering keys stay hashable.
+    return json.dumps(v, sort_keys=True, separators=(",", ":"))
 
 
 def iso_utc(dt: datetime) -> str:
@@ -111,8 +128,8 @@ def run_query(query: str, start: str, end: str, run_dir: str) -> tuple[str, list
 
 
 def extract_observables_from_event(event: dict, observables: list[dict]) -> dict:
-    """Pull the values of each Key Observable from a returned event."""
-    return {obs["json_path"]: extract_json_path(event, obs["json_path"]) for obs in observables}
+    """Pull the values of each Key Observable from a returned event, coerced to scalar strings."""
+    return {obs["json_path"]: _scalar(extract_json_path(event, obs["json_path"])) for obs in observables}
 
 
 def cluster_events(
@@ -162,7 +179,7 @@ def _summarize_repeats(events: list[dict]) -> list[dict]:
     if not events:
         return []
     events.sort(key=_event_ts)
-    ids = [ev.get("id") or extract_json_path(ev, "id") for ev in events if ev.get("id") or extract_json_path(ev, "id")]
+    ids = [ev.get("id") for ev in events if ev.get("id")]
     rules = sorted({_event_rule(ev) for ev in events if _event_rule(ev)})
     cluster = {
         "count": len(events),
@@ -203,8 +220,8 @@ def _summarize_related(groups: dict[frozenset, list[dict]]) -> list[dict]:
         if len(events) > CLUSTER_COMPRESSION_THRESHOLD:
             cluster["compressed"] = True
         else:
-            ids = [ev.get("id") or extract_json_path(ev, "id") for ev in events]
-            cluster["alert_ids"] = [i for i in ids if i]
+            ids = [ev.get("id") for ev in events if ev.get("id")]
+            cluster["alert_ids"] = ids
         out.append(cluster)
     # Stable sort: descending count, then by shared-dims cardinality desc
     out.sort(key=lambda c: (-c["count"], -len(c["shared"])))
@@ -222,10 +239,10 @@ def compute_high_volume(all_events: dict[str, dict], observables: list[dict]) ->
         for obs in observables:
             if obs["name"].lower() == "timestamp":
                 continue
-            val = extract_json_path(ev, obs["json_path"])
+            val = _scalar(extract_json_path(ev, obs["json_path"]))
             if val is None:
                 continue
-            key = (obs["json_path"], str(val))
+            key = (obs["json_path"], val)
             totals[key] += 1
             if rid:
                 counts[key].add(rid)
@@ -244,67 +261,31 @@ def compute_high_volume(all_events: dict[str, dict], observables: list[dict]) ->
 
 
 def emit_yaml(data: dict) -> str:
-    """Hand-emit YAML with the shape the main agent expects.
+    """Render the ticket_context payload as a fenced YAML block.
 
-    Avoid PyYAML dep — we control the shape, and stable key ordering matters.
+    Uses PyYAML's safe_dump so untrusted alert-derived strings are escaped
+    correctly. Insertion order is preserved (sort_keys=False); the schema
+    contract is {entities, high_volume_dimensions, repeats, related, [queries_failed|partial]}.
     """
-    lines = ["```yaml", "ticket_context:"]
-    # entities
-    lines.append("  entities:")
-    for k, v in data["entities"].items():
-        lines.append(f'    {k}: "{v}"')
-    # high_volume_dimensions
-    if data["high_volume_dimensions"]:
-        lines.append("  high_volume_dimensions:")
-        for d in data["high_volume_dimensions"]:
-            lines.append(f'    - dimension: "{d["dimension"]}"')
-            lines.append(f'      value: "{d["value"]}"')
-            lines.append(f'      total_count: {d["total_count"]}')
-            lines.append(f'      signature_count: {d["signature_count"]}')
-    else:
-        lines.append("  high_volume_dimensions: []")
-    # repeats
-    if data["repeats"]:
-        lines.append("  repeats:")
-        for c in data["repeats"]:
-            lines.append(f'    - count: {c["count"]}')
-            lines.append(f'      first_seen: "{c["first_seen"]}"')
-            lines.append(f'      last_seen: "{c["last_seen"]}"')
-            lines.append(f'      signatures: {json.dumps(c["signatures"])}')
-            if c.get("compressed"):
-                lines.append("      compressed: true")
-            if "alert_ids" in c:
-                lines.append(f'      alert_ids: {json.dumps(c["alert_ids"])}')
-    else:
-        lines.append("  repeats: []")
-    # related
-    if data["related"]:
-        lines.append("  related:")
-        for c in data["related"]:
-            lines.append("    - shared:")
-            for k, v in c["shared"].items():
-                lines.append(f'        {k}: "{v}"')
-            lines.append(f'      count: {c["count"]}')
-            lines.append(f'      first_seen: "{c["first_seen"]}"')
-            lines.append(f'      last_seen: "{c["last_seen"]}"')
-            lines.append(f'      signatures: {json.dumps(c["signatures"])}')
-            if "signatures_detail" in c:
-                lines.append("      signatures_detail:")
-                for rid, desc in c["signatures_detail"].items():
-                    safe = desc.replace('"', '\\"')
-                    lines.append(f'        "{rid}": "{safe}"')
-            if c.get("compressed"):
-                lines.append("      compressed: true")
-            if "alert_ids" in c:
-                lines.append(f'      alert_ids: {json.dumps(c["alert_ids"])}')
-    else:
-        lines.append("  related: []")
+    payload: dict = {
+        "entities": data["entities"],
+        "high_volume_dimensions": data["high_volume_dimensions"],
+        "repeats": data["repeats"],
+        "related": data["related"],
+    }
     if data.get("queries_failed"):
-        lines.append(f'  queries_failed: "{data["queries_failed"]}"')
+        payload["queries_failed"] = data["queries_failed"]
     if data.get("queries_partial"):
-        lines.append(f'  queries_partial: "{data["queries_partial"]}"')
-    lines.append("```")
-    return "\n".join(lines)
+        payload["queries_partial"] = data["queries_partial"]
+
+    body = yaml.safe_dump(
+        {"ticket_context": payload},
+        sort_keys=False,
+        default_flow_style=False,
+        allow_unicode=True,
+        width=10000,
+    )
+    return f"```yaml\n{body}```"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -318,11 +299,17 @@ def main(argv: list[str] | None = None) -> int:
     alert_path = run_dir / "alert.json"
     field_quirks_path = REPO_ROOT / "knowledge" / "signatures" / args.signature_id / "field-quirks.md"
 
+    _dbg(f"run_dir={run_dir} signature_id={args.signature_id} window={args.window}")
+    _dbg(f"alert={alert_path} field_quirks={field_quirks_path}")
+
     alert = json.loads(alert_path.read_text())
     observables = parse_key_observables(field_quirks_path)
+    _dbg(f"parsed {len(observables)} key observables: {[o['name'] for o in observables]}")
 
-    # Extract current observable values from alert
-    current_obs = {obs["json_path"]: extract_json_path(alert, obs["json_path"]) for obs in observables}
+    # Extract current observable values from alert (scalar-coerced for consistency)
+    current_obs = {obs["json_path"]: _scalar(extract_json_path(alert, obs["json_path"])) for obs in observables}
+    _dbg(f"current_obs={current_obs}")
+
     alert_ts = extract_json_path(alert, "timestamp") or alert.get("@timestamp")
     if not alert_ts:
         print("error: no timestamp on alert", file=sys.stderr)
@@ -336,6 +323,7 @@ def main(argv: list[str] | None = None) -> int:
     start_dt = end_dt - delta
     start = iso_utc(start_dt)
     end = iso_utc(end_dt)
+    _dbg(f"time window: start={start} end={end}")
 
     # Build queries: per-observable (exclude timestamp) + same-signature
     rule_id = str(extract_json_path(alert, "rule.id") or "")
@@ -346,28 +334,34 @@ def main(argv: list[str] | None = None) -> int:
         val = current_obs[obs["json_path"]]
         if val is None:
             continue
-        queries.append((obs["json_path"], f"{obs['json_path']}:{json.dumps(str(val))}"))
+        queries.append((obs["json_path"], f"{obs['json_path']}:{json.dumps(val)}"))
     if rule_id:
         queries.append(("same-signature", f"rule.id:{rule_id}"))
+    _dbg(f"dispatching {len(queries)} queries: {[label for label, _ in queries]}")
 
     # Parallel dispatch
     all_events: dict[str, dict] = {}
     failed_labels: list[str] = []
-    with ThreadPoolExecutor(max_workers=len(queries)) as ex:
+    with ThreadPoolExecutor(max_workers=max(1, len(queries))) as ex:
         futures = {ex.submit(run_query, q, start, end, str(run_dir)): label for label, q in queries}
         for fut in as_completed(futures):
             label = futures[fut]
             _, items, err = fut.result()
             if err:
+                _dbg(f"query[{label}] FAILED: {err}")
                 failed_labels.append(f"{label}({err})")
                 continue
+            new_ids = 0
             for ev in items:
-                eid = ev.get("id") or extract_json_path(ev, "id")
+                eid = ev.get("id")
                 if eid and eid not in all_events:
                     all_events[eid] = ev
+                    new_ids += 1
+            _dbg(f"query[{label}] returned {len(items)} events ({new_ids} new; dedup total={len(all_events)})")
 
     if not all_events and failed_labels:
         reason = f"all queries failed: {'; '.join(failed_labels)}"
+        _dbg(f"emitting queries_failed: {reason}")
         out = {
             "entities": {o["json_path"]: current_obs.get(o["json_path"], "") for o in observables},
             "high_volume_dimensions": [],
@@ -378,9 +372,10 @@ def main(argv: list[str] | None = None) -> int:
         print(emit_yaml(out))
         return 0
 
-    current_id = alert.get("id") or extract_json_path(alert, "id") or ""
+    current_id = alert.get("id") or ""
     repeats, related = cluster_events(all_events, current_obs, current_id, observables)
     high_vol = compute_high_volume(all_events, observables)
+    _dbg(f"clusters: repeats={len(repeats)} related_groups={len(related)} high_volume={len(high_vol)}")
 
     out = {
         "entities": {o["json_path"]: current_obs.get(o["json_path"], "") for o in observables},
@@ -390,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     if failed_labels:
         out["queries_partial"] = "; ".join(failed_labels)
+        _dbg(f"partial failures: {out['queries_partial']}")
 
     print(emit_yaml(out))
     return 0
