@@ -281,7 +281,7 @@ def health_check(config):
 
     if status != 200:
         print(f"error: elasticsearch HTTP {status}: {body}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(2 if status in (401, 403) else 1)
 
     cluster_status = body.get("status", "unknown")
     print("connected")
