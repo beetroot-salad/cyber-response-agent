@@ -1,0 +1,84 @@
+# Case metadata + gold labels. The case's investigation content lives
+# at source/alert.json + source/investigation.md, in the exact
+# production schema the hypothesize subagent consumes.
+#
+# For run-sourced cases: source/ is a verbatim copy of the run.
+# For synthetic cases: source/ is hand-authored to the same shape.
+#
+# The renderer cuts source/investigation.md at `cut_after_phase` and
+# projects into Arm A (YAML blocks only), Arm B (prose only), or
+# Arm C (alert only).
+
+meta:
+  id: case-{name}
+  surface: looks-benign | looks-malicious | mixed
+  truth: benign | malicious | ambiguous
+  origin: run | synthetic
+  source_run: path/to/run | null
+  signature: wazuh-rule-{id}
+  notes: |
+    One paragraph: why the surface reads the way it does, what the
+    right call is, why this is a useful stress point.
+
+truth:
+  disposition: benign | true_positive | false_positive | unclear
+  matched_archetype: <name> | null
+  rationale: |
+    Labeler's key — why this is the right call.
+
+# Depth cuts. `cut_after_phase` names a phase boundary in
+# source/investigation.md. Recognized values:
+#   CONTEXTUALIZE, SCREEN, HYPOTHESIZE_L{n}, GATHER_L{n}, ANALYZE_L{n}.
+
+depths:
+  shallow:
+    cut_after_phase: CONTEXTUALIZE
+    gold:
+      # The subagent may emit HYPOTHESIZE or GATHER depending on whether
+      # a mechanism fork is observable. Both are contract-compliant; the
+      # gold block declares which shape is expected (or `either` if both
+      # are acceptable) and scores accordingly.
+      expected_shape: hypothesize | gather | either
+
+      # Acceptable next-lead names (production-catalog names or `(new)`
+      # suggestions). Applies regardless of shape.
+      next_lead_set:
+        - name: <lead-name>
+          why: ...
+
+      # Leads that would burn a turn without discriminating. Applies
+      # regardless of shape.
+      trap_leads:
+        - name: <lead-name>
+          why: ...
+
+      # If expected_shape includes `hypothesize`: the classifications
+      # the subagent should enumerate. Names can be narrative-style
+      # (production investigations use them); scoring matches on the
+      # underlying parent-vertex classification.
+      expected_hypothesis_classifications:
+        - name: "?legitimate-automation"
+          classification: monitoring-probe-process
+          rationale: ...
+
+      # If expected_shape includes `gather`: the advance_to targets
+      # and read_as tags the lead-level predictions should cover.
+      # Scoring: at least one prediction each for the required
+      # outcome paths.
+      expected_gather_outcomes:
+        - read_as: success-after-failure
+          advance_to: CONCLUDE
+          rationale: ...
+
+      # Assessment of prior hypothesis weights at this cut (only
+      # meaningful for ANALYZE_L{n} cuts — describes what the subagent
+      # should understand entering its turn).
+      assessment_gold:
+        weighted_hypotheses:
+          - id: h-001
+            weight: live | live-leaning | dominant-live | weakly-refuted | refuted
+        note: ...
+
+  deep:
+    cut_after_phase: ANALYZE_L1
+    gold: ...
