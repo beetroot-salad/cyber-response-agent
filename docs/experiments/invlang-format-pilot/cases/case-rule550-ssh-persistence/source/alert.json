@@ -1,0 +1,42 @@
+{
+  "timestamp": "2026-04-21T03:47:22.143+0000",
+  "@timestamp": "2026-04-21T03:47:22.143Z",
+  "id": "1776937642.1234567",
+  "location": "syscheck",
+  "decoder": { "name": "syscheck_integrity_changed" },
+  "syscheck": {
+    "path": "/etc/ssh/sshd_config.d/99-crypto.conf",
+    "event": "modified",
+    "changed_attributes": ["size", "mtime", "md5", "sha1", "sha256"],
+    "size_before": "612",
+    "size_after": "654",
+    "md5_before": "a3f19b6c9e2d104781fb58c91aa4e203",
+    "md5_after": "b47e2c1ad88937f421905eec63b7c9f1",
+    "sha1_before": "4a7c1b9e0f82d5a3719bcd04e7fa2198cb4e5d11",
+    "sha1_after": "7d9e82ba1f3c40a895e2b7d018fc4e32d91b0ac7",
+    "sha256_before": "2e9dbfa041c85b8c24fd29e17c9e4f82ab1bcd6e9ea34527b19f6d4e802a16c5",
+    "sha256_after": "9a1b4ec2dd58f6a40e9c118b6fd7d9e8bc3e0a9a45b87a2c1e5d3b8f904a26d1",
+    "mtime_before": "2026-04-19T14:22:08",
+    "mtime_after": "2026-04-21T03:47:21",
+    "uid_after": "0",
+    "gid_after": "0",
+    "uname_after": "root",
+    "perm_after": "rw-r--r--",
+    "mode": "scheduled"
+  },
+  "agent": { "name": "target-endpoint", "id": "002" },
+  "manager": { "name": "wazuh.manager" },
+  "rule": {
+    "id": "550",
+    "level": 7,
+    "description": "Integrity checksum changed.",
+    "groups": ["ossec", "syscheck", "syscheck_entry_modified", "syscheck_file"],
+    "mitre": {
+      "technique": ["Stored Data Manipulation"],
+      "id": ["T1565.001"],
+      "tactic": ["Impact"]
+    },
+    "firedtimes": 1
+  },
+  "input": { "type": "log" }
+}

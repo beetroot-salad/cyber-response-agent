@@ -1,0 +1,155 @@
+meta:
+  id: case-rule5710-monitoring-probe
+  surface: looks-benign
+  truth: benign
+  origin: run
+  source_run: /workspace/runs/20260417-103641-rule5710/runs/1b7d817c-c420-4077-84d1-48ec6f583355/
+  signature: wazuh-rule-5710
+  notes: |
+    Easy-cell control. Internal monitoring host (172.22.0.10) runs SSH
+    health checks using the sanctioned `healthcheck` username against
+    target-endpoint at a ~600s cadence. Alert fires with firedtimes=3,
+    which is a Wazuh rule-frequency counter — not an attempt count.
+    Surface reads clearly benign once source IP and username are
+    classified. Tests whether structured prior adds any cost on an
+    obvious call.
+
+    A near-trap in the real run: `firedtimes: 3` nearly caused the
+    screen subagent to misread "3 recent attempts" — discriminating
+    move was querying `attempt_count_5min` directly rather than
+    trusting the alert field.
+
+truth:
+  disposition: benign
+  matched_archetype: monitoring-probe
+  rationale: |
+    (172.22.0.10, healthcheck, target-endpoint) triple is listed in
+    approved-monitoring-sources. Authentication-history confirms
+    single attempt in the 5-min window, ~600s periodic cadence,
+    exclusively monitoring-pattern usernames, zero successful logins.
+    Host-query confirms the monitoring-host is operationally alive
+    (cron active, openssh-client installed). All three anchor
+    components satisfied; adversarial hypotheses refuted by the
+    absence of username diversity and auth success.
+
+depths:
+  shallow:
+    cut_after_phase: CONTEXTUALIZE
+    gold:
+      expected_shape: gather   # sanity-check confirmed: subagent correctly skips HYPOTHESIZE at CONTEXTUALIZE
+      next_lead_set:
+        - name: authentication-history
+          why: |
+            Cheapest multi-axis lead: resolves attempt_count,
+            username diversity, cadence, and forward-success in one
+            SIEM query template.
+        - name: source-classification
+          why: |
+            Playbook lead #1 — partitions the archetype space before
+            articulating any mechanism fork. Strictly slower than
+            authentication-history (which discriminates directly) but
+            a defensible playbook-sequential choice.
+      trap_leads:
+        - name: source-reputation
+          why: |
+            Source is internal RFC1918 — threat-intel lookup returns
+            no useful signal at this stage.
+        - name: trust-source-firedtimes
+          why: |
+            Treating the alert's `firedtimes: 3` as attempt count and
+            escalating without querying the SIEM. The near-miss the
+            real investigation called out in Observations.
+        - name: speculative-hypothesize
+          why: |
+            Emitting HYPOTHESIZE with ?legitimate-automation / ?credential-
+            guessing / ?compromise-followup at this cut violates the
+            "no fork without observable divergence" discipline — at
+            CONTEXTUALIZE the attributes that would discriminate them
+            haven't been measured yet.
+      expected_gather_outcomes:
+        - read_as: success-after-failure
+          advance_to: CONCLUDE
+          rationale: |
+            A forward auth-success event from 172.22.0.10 in the 60s
+            window would route directly to CONCLUDE as
+            compromise-followup.
+        - read_as: periodic-probe-cadence
+          advance_to: HYPOTHESIZE
+          rationale: |
+            Evidence supporting the monitoring-probe shape without
+            direct confirmation — the next HYPOTHESIZE loop names a
+            mechanism hypothesis and selects the anchor-verification
+            lead.
+        - read_as: non-periodic-or-bursty-shape
+          advance_to: HYPOTHESIZE
+          rationale: |
+            Cadence inconsistent with documented monitoring-probe —
+            HYPOTHESIZE refines against adversarial variants.
+
+  deep:
+    cut_after_phase: ANALYZE_L1
+    gold:
+      expected_shape: either
+      # Sanity-check observed Arm A → HYPOTHESIZE-with-refinement
+      # (shelve+child h-001-001 + legitimacy_contract), Arm B → GATHER
+      # with lead-level predictions. Both land on the same
+      # next-lead intent (complete the approved-monitoring-sources
+      # anchor via host-query liveness check).
+      next_lead_set:
+        - name: approved-monitoring-sources-anchor
+          why: |
+            The third anchor component (monitoring-host operational
+            liveness) is the only outstanding requirement to advance
+            h-001 from "+" to "++". Single host-query verifies it.
+        - name: monitoring-host-liveness
+          why: |
+            Specialization of ad-hoc that targets exactly the same
+            observables — cron service-status + openssh-client
+            package-installed on monitoring-host. Equivalent gold.
+      trap_leads:
+        - name: rerun-authentication-history
+          why: |
+            Loop 1 already produced decisive evidence on this lead.
+        - name: process-lineage-target
+          why: |
+            Target-endpoint only logged a failed auth — there's no
+            session to trace, and this does not discriminate any
+            remaining hypothesis.
+        - name: premature-CONCLUDE
+          why: |
+            h-001 is at "+" not "++"; committing to disposition
+            without the operational-state anchor check violates the
+            two-leg resolution requirement.
+      expected_hypothesis_classifications:
+        # If HYPOTHESIZE shape: refinement on the live h-001 (shelve
+        # parent, emit child h-001-001) with a legitimacy_contract
+        # on the attempted_auth edge. Arm A did exactly this.
+        - name: "?legitimate-automation"
+          classification: monitoring-probe-process
+          rationale: |
+            Only hypothesis still live. Refinement binds a legitimacy
+            contract to edge e-001 asking `authorization` against
+            approved-monitoring-sources authority. Predictions
+            articulate scope coverage + sibling coverage for the
+            observed monitoring-pattern username set.
+      expected_gather_outcomes:
+        # If GATHER shape: Arm B's cover of the three outcomes —
+        # anchor-confirm / anchor-fail / anchor-unavailable.
+        - read_as: monitoring-host-operationally-alive
+          advance_to: CONCLUDE
+        - read_as: approved-source-not-operationally-alive
+          advance_to: CONCLUDE
+        - read_as: anchor-component-unavailable
+          advance_to: CONCLUDE
+      assessment_gold:
+        weighted_hypotheses:
+          - id: h-001
+            weight: live-leaning   # at "+", one component short
+          - id: h-002
+            weight: refuted
+          - id: h-003
+            weight: refuted
+        note: |
+          Benign hypothesis dominant but not yet confirmed. "+"
+          is not enough for resolution even when the surface feels
+          closed.

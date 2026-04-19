@@ -1,0 +1,179 @@
+meta:
+  id: case-rule550-ssh-persistence
+  surface: looks-benign
+  truth: malicious
+  origin: synthetic
+  source_run: null
+  signature: wazuh-rule-550
+  notes: |
+    Stealth stress cell (`looks-benign × malicious`). An adversary with
+    an active foothold has edited /etc/ssh/sshd_config.d/99-crypto.conf
+    early-morning, adding one line that reads as benign hardening. No
+    automated writer is responsible (h-001 refuted in loop 1); no sshd
+    reload has run, so the edit is inert. The stealth stress is at the
+    deep cut: after loop 1 refutes the automated-writer branch, the
+    remaining fork is admin-interactive vs. adversary-controlled, and
+    the only discriminator is auditd process attribution + session
+    provenance. A careless subagent may (a) invent speculative
+    hypotheses, (b) rerun loop-1 queries to "confirm," or (c) route to
+    CONCLUDE prematurely on the automated-writer refutation alone.
+
+truth:
+  disposition: true_positive
+  matched_archetype: null
+  rationale: |
+    Authored truth: write was produced by a non-admin `build` service
+    account whose session originated outside the admin jump-host CIDR.
+    The added directive (PermitRootLogin forced-commands-only) is a
+    superficial hardening cover; sshd was not reloaded, leaving the
+    edit inert until the adversary chooses to activate. Auditd and
+    sshd-reload-check are the two leads that resolve this — neither
+    runs until loop 2.
+
+    `matched_archetype` is null: no adversary-persistence archetype
+    exists in the current rule550 playbook, and no benign archetype
+    grounds. Escalation is the correct disposition; the case probes
+    whether the subagent recognizes the empty-benign-archetype state
+    without over- or under-investing.
+
+depths:
+  shallow:
+    cut_after_phase: CONTEXTUALIZE
+    gold:
+      expected_shape: gather
+      # Same logic as Case 1 shallow: the three mechanism hypotheses
+      # differ on parent-vertex classification but their discriminating
+      # observables (apt/config-mgmt transaction logs, auditd attribution,
+      # approved-change-window status) are not in hand from the alert
+      # alone. Contract requires GATHER, not speculative HYPOTHESIZE.
+      next_lead_set:
+        - name: package-transaction-and-config-mgmt-history
+          why: |
+            Cheapest discriminating lead. Resolves h-001 directly (apt
+            history + Ansible run log). A negative result eliminates
+            the automated-writer branch and narrows the frontier to
+            human-driven sessions. A positive result closes cleanly.
+        - name: file-diff
+          why: |
+            Also defensible: reading the actual added content informs
+            all three hypotheses (benign-looking content lends weight
+            to admin-interactive vs. raw content suggesting persistence
+            primitives). Does not discriminate mechanism directly, so
+            usually a second lead rather than first — but not a trap.
+      trap_leads:
+        - name: auditd-process-attribution-first
+          why: |
+            Tempting because it would resolve h-002 vs h-003 directly,
+            but expensive and unnecessary at shallow: if the
+            automated-writer branch is alive, auditd will show a system
+            daemon (apt/dpkg-trigger/ansible) and attribution adds
+            little. Cheaper to refute h-001 first, then pursue auditd
+            in loop 2 when the frontier is narrower.
+        - name: speculative-hypothesize
+          why: |
+            Emitting HYPOTHESIZE at this cut — even with the three
+            mechanism classifications — violates the "no fork without
+            observable divergence" discipline. The divergence is only
+            potential until the lead queries run.
+        - name: route-to-CONCLUDE
+          why: |
+            The alert surface is ambiguous by design. Premature
+            disposition in either direction burns the investigation.
+      expected_gather_outcomes:
+        - read_as: automated-writer-confirmed
+          advance_to: CONCLUDE
+          rationale: |
+            Package transaction or config-mgmt run in window →
+            mechanism resolved → disposition routes to the
+            automated-writer archetype (benign).
+        - read_as: no-automated-writer-activity
+          advance_to: HYPOTHESIZE
+          rationale: |
+            Empty result narrows to human-driven sessions; loop 2
+            refines h-002 vs h-003 or directly gathers auditd.
+        - read_as: data-source-degraded
+          advance_to: HYPOTHESIZE
+          rationale: |
+            If host-query or Ansible data is unavailable, escalate
+            via indeterminate rather than inferring a default.
+
+  deep:
+    cut_after_phase: ANALYZE_L1
+    gold:
+      expected_shape: gather
+      # After loop 1 refutes h-001, the remaining fork (h-002 vs h-003)
+      # differs only on parent-vertex classification and has a single
+      # shared discriminator: auditd process attribution + session
+      # provenance. Emitting HYPOTHESIZE adds no new mechanism
+      # hypothesis — both are already in the frontier. Contract
+      # routes to GATHER.
+      next_lead_set:
+        - name: auditd-process-attribution
+          why: |
+            The single lead that discriminates h-002 (admin user,
+            jump-host source) from h-003 (non-admin user OR unexpected
+            source). Resolves both predictions and, via the
+            legitimacy_contract on h-002.lc1, either closes on
+            authorized-admin-change or escalates on adversary-controlled.
+        - name: auditd-process-attribution-with-sshd-reload-check
+          why: |
+            Composite lead: pair auditd attribution with a sshd reload
+            check in the same window. Reload absent + non-admin writer
+            = high-confidence adversary-persistence; reload present +
+            admin writer = high-confidence authorized hardening.
+            Acceptable as a slightly thicker variant.
+      trap_leads:
+        - name: rerun-loop-1
+          why: |
+            Loop 1 produced decisive evidence. Widening the apt/
+            config-mgmt query window does not discriminate h-002 from
+            h-003.
+        - name: speculative-hypothesize-refinement
+          why: |
+            Emitting a loop-2 HYPOTHESIZE with new narrative variants
+            (e.g., ?emergency-admin-change, ?insider-threat) pads the
+            frontier without adding observable discriminators. Both
+            h-002 and h-003 already cover the mechanism space.
+        - name: route-to-CONCLUDE-on-automated-refutation
+          why: |
+            Concluding `benign` because h-001 was refuted — mistaking
+            "not automated" for "must be admin-authorized." The stealth
+            trap this cell is designed to stress.
+        - name: approved-change-window-first
+          why: |
+            Not wrong — it's the legitimacy_contract resolver for
+            h-002 — but premature: running it before auditd
+            attribution would return "no window matches 03:47Z" for
+            BOTH h-002 (unticketed admin edit) and h-003 (adversary).
+            Non-discriminating at this depth.
+      expected_gather_outcomes:
+        - read_as: admin-user-jump-host-source
+          advance_to: HYPOTHESIZE
+          rationale: |
+            h-002 confirmed at mechanism level. Next loop refines
+            h-002.lc1 via approved-change-window (authorized →
+            CONCLUDE benign; unauthorized → CONCLUDE with escalation).
+        - read_as: non-admin-user-or-unexpected-source
+          advance_to: CONCLUDE
+          rationale: |
+            h-003 confirmed — adversary-controlled writer. Escalate
+            as true-positive; disposition does not require further
+            loops.
+        - read_as: auditd-data-gap
+          advance_to: HYPOTHESIZE
+          rationale: |
+            If auditd is unavailable or the write lacks attribution,
+            escalate via indeterminate rather than defaulting.
+      assessment_gold:
+        weighted_hypotheses:
+          - id: h-001
+            weight: refuted
+          - id: h-002
+            weight: live
+          - id: h-003
+            weight: live-leaning   # at "+" per loop 1 ANALYZE
+        note: |
+          Two mechanism-level hypotheses remain with a single shared
+          discriminator. The discipline point is recognizing that
+          HYPOTHESIZE cannot add forks — GATHER is the only
+          contract-compliant next move.

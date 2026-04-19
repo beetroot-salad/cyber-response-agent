@@ -1,0 +1,145 @@
+meta:
+  id: case-rule550-fim-restart-artifact
+  surface: looks-malicious
+  truth: benign
+  origin: run
+  source_run: /workspace/runs/20260415-170752-rule550/runs/0402f02e-c353-429c-974c-053c34208d82/
+  signature: wazuh-rule-550
+  notes: |
+    Noisy-FP stress cell. 745+ rule-550 alerts across 6+ unrelated
+    files (SSL certs, motd, logrotate, cron) over 4 hours at 5-min
+    intervals. Root cause: Wazuh manager restart at 13:01:54Z triggered
+    a FIM database rebuild; first 550 alert landed exactly 295s (one
+    syscheck cycle) later. Surface reads as ransomware-like
+    mass-modification; the discriminating signals are
+    (a) `inode_before == inode_after` on the individual alert,
+    (b) temporal correlation to the rule-502 restart event,
+    (c) bulk pattern across logically-unrelated files.
+
+    **Schema gap.** The source investigation.md is prose-heavy and
+    only contains ONE YAML block (inline in ANALYZE). It predates the
+    full-schema production format. For the experiment to exercise Arm
+    A vs. Arm B fairly on this case, source/investigation.md needs
+    enrichment with prologue / hypothesize / gather YAML blocks in the
+    production schema. Flagged as follow-up work; this case is not
+    ready for full experimental runs yet.
+
+truth:
+  disposition: false_positive
+  matched_archetype: null  # no benign archetype in catalog for DB-rebuild artifacts
+  rationale: |
+    The 550 alerts are artifacts of Wazuh's FIM database being rebuilt
+    after the manager restart at 13:01:54Z. Zero real file changes —
+    every per-file discriminating signal (inode_before == inode_after,
+    mtime unchanged since 2025-11-19, no hash/size/perm/owner drift)
+    confirms this. Escalated because no catalog archetype covers the
+    DB-rebuild mechanism — disposition is clear, grounding is not.
+
+depths:
+  shallow:
+    cut_after_phase: CONTEXTUALIZE
+    gold:
+      expected_hypothesis_set:
+        - name: "?syscheck-db-artifact"
+          classification: fim-db-rebuild-event
+          rationale: |
+            A Wazuh manager restart or syscheck-DB reset would produce
+            the observed per-alert shape (inode-only "change", unchanged
+            content) systemically across many files. Must be in the
+            frontier given the ticket-context bulk pattern.
+        - name: "?cert-rotation-automation"
+          classification: automated-cert-rotation-process
+          rationale: |
+            Automated rotation of Filebeat SSL certs could explain the
+            SSL-cert-trio pattern. Discriminated by (a) whether the
+            event is one-time or persistent-repeat and (b) hash change
+            vs. no hash change.
+        - name: "?adversary-tampering"
+          classification: adversary-controlled-process
+          rationale: |
+            Mechanism-level adversarial variant. Predicts recent mtime,
+            hash change, and a targeted (not bulk) pattern. All three
+            predictions already pull against the observed evidence but
+            cannot be refuted without the bulk-pattern SIEM query.
+      next_lead_set:
+        - name: ad-hoc
+          why: |
+            Single ad-hoc lead querying (a) rule-502/504/506 events on
+            the Wazuh manager in the 4h preceding the alert and (b)
+            bulk 550-alert pattern across files. Resolves the
+            DB-artifact hypothesis directly; refutes cert-rotation
+            (5-min persistence) and adversary-tampering (bulk pattern
+            across unrelated files) in the same query set.
+        - name: temporal-correlation
+          why: |
+            Acceptable alternative — same discriminating observables,
+            different lead template. Either is defensible at this
+            depth.
+      trap_leads:
+        - name: file-classification-deep-dive
+          why: |
+            Characterizing /etc/ssl/filebeat.pem's sensitivity is
+            already done from the alert — re-running doesn't
+            discriminate. The frontier tension is about the event
+            mechanism, not the file.
+        - name: host-query-file-stat
+          why: |
+            Host-query won't reach the Wazuh manager's filesystem from
+            target-endpoint — would return "not found" (as the real
+            run found). Burns a turn on a connectivity dead-end.
+        - name: treat-bulk-pattern-as-mass-modification
+          why: |
+            Reading 745 alerts in 4h as "mass file tampering" without
+            checking per-alert `inode_before == inode_after` is the
+            surface trap this cell is designed to stress.
+      assessment_gold:
+        weighted_hypotheses:
+          - id: h-001  # ?syscheck-db-artifact
+            weight: live-leaning  # ticket-context bulk pattern already favors it
+          - id: h-002  # ?cert-rotation-automation
+            weight: live
+          - id: h-003  # ?adversary-tampering
+            weight: live-leaning-refuted  # per-alert signals already pull against
+        note: |
+          The CONTEXTUALIZE state already pulls against adversary-
+          tampering (inode==inode, old mtime, bulk ticket-context). But
+          "pulls against" is not refutation — ++/-- assessments
+          require the lead. Committing to benign here is premature.
+
+  deep:
+    cut_after_phase: ANALYZE_L1
+    gold:
+      expected_hypothesis_set:
+        # Loop 1 should have resolved all three; loop 2 is CONCLUDE,
+        # not HYPOTHESIZE. If the subagent is asked to produce a next
+        # HYPOTHESIZE block here, the correct answer is "no fork — emit
+        # GATHER-to-CONCLUDE or route to CONCLUDE."
+      next_lead_set:
+        - name: route-to-CONCLUDE
+          why: |
+            Loop 1 refuted both adversarial hypotheses (--) and
+            confirmed ?syscheck-db-artifact (++). No discriminating
+            fork remains. Subagent should skip HYPOTHESIZE and route
+            to CONCLUDE (escalated, no archetype match).
+      trap_leads:
+        - name: spurious-new-hypothesis
+          why: |
+            Inventing a new hypothesis (e.g., ?oom-killer-restart-cause)
+            when the frontier is empty is the failure mode to test —
+            subagent must recognize when no fork is observable.
+        - name: rerun-ad-hoc-different-window
+          why: |
+            The 4-hour bulk pattern is already established; widening
+            the window doesn't change the disposition.
+      assessment_gold:
+        weighted_hypotheses:
+          - id: h-001
+            weight: dominant-live  # ++
+          - id: h-002
+            weight: refuted        # --
+          - id: h-003
+            weight: refuted        # --
+        note: |
+          Tests whether the subagent correctly recognizes empty-frontier
+          + dominant-confirmed-benign state and doesn't invent spurious
+          hypotheses to pad the loop.
