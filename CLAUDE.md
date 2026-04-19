@@ -14,123 +14,182 @@ This file provides guidance to Claude Code when working with this repository.
 
 ### Investigation Loop
 
+HYPOTHESIZE is **on-demand**, not a mandatory gate. Between leads the agent runs an ASSESS step: if the next move branches on which explanation is true, enter HYPOTHESIZE and articulate the fork; otherwise go straight to GATHER.
+
 ```
 /investigate $signature_id $alert_json
         │
-        ├── !command: resolve_imports.py bakes knowledge into prompt
+        ├── !command: resolve_imports.py bakes signature knowledge into prompt
         │   (context.md + playbook.md + checklist.md + @import: atoms)
-        │
-        └── CONTEXTUALIZE → [SCREEN] → HYPOTHESIZE → GATHER → ANALYZE
-                                 │           ↑                    │
-                                 │           └────── loop ────────┘
-                                 │                                │
-                                 └──────────────────────┬─────────┘
-                                                        │
-                                                   CONCLUDE → report.md
+        ├── !command: setup_run.py creates run dir + alert.json
+        ├── !command: workspace_map.py emits on-disk orientation
+        └── CONTEXTUALIZE → [SCREEN] ──────────────────────────────┐
+                │                                                   │
+                ▼                                                   │
+             ASSESS ◀─────────────────────┐                         │
+              │                           │                         │
+              │  branching?               │                         │
+              ├── yes ─▶ HYPOTHESIZE      │                         │
+              │             │             │                         │
+              └── no ───────┤             │                         │
+                            ▼             │                         │
+                         GATHER ──────────┘                         │
+                            │                                       │
+                            ▼                                       │
+                         ANALYZE ──────────────────────┬────────────┘
+                                                       │
+                                                  CONCLUDE → report.md
 ```
 
-The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts fast pattern matching against playbook-defined screen patterns. If matched, skips the full loop. If not, passes gathered evidence into the full investigation.
+The optional SCREEN phase spawns a cheap subagent that attempts fast pattern matching against playbook-defined screen patterns; if matched, the full loop is skipped and evidence flows straight to CONCLUDE. Most phase-level reasoning now runs in dedicated plugin subagents (see below); the main investigate skill orchestrates.
 
 ### Core Components
 
 | Component | Path | Purpose |
 |-----------|------|---------|
-| **Investigate Skill** | `soc-agent/skills/investigate/SKILL.md` | Entry point + investigation loop (merged skill) |
-| **Screen Subagent** | `soc-agent/agents/screen.md` | Plugin-registered custom subagent for fast pattern matching (SCREEN phase) |
-| **Archetype-scan Subagent** | `soc-agent/agents/archetype-scan.md` | Plugin-registered custom subagent for CONTEXTUALIZE archetype ranking |
-| **Ticket-context Subagent** | `soc-agent/agents/ticket-context.md` | Plugin-registered custom subagent for CONTEXTUALIZE 4-hour correlation |
-| **Import Resolver** | `soc-agent/scripts/resolve_imports.py` | `!command` preprocessing: resolves signature knowledge |
-| **Validate Report Hook** | `soc-agent/hooks/scripts/validate_report.py` | PostToolUse hook (Write\|Edit): combined Tier 1 + Tier 2 validation |
-| **Judge Prompt** | `soc-agent/hooks/scripts/judge_prompt.md` | Prompt template for Tier 2 judge (5 criteria, two modes) |
-| **Infer State Hook** | `soc-agent/hooks/scripts/infer_state.py` | PostToolUse hook: infers state transitions from investigation.md headers |
-| **Investigation Summary Hook** | `soc-agent/hooks/scripts/investigation_summary.py` | JSONL outcome log per completed investigation |
-| **Tool Call Audit Hook** | `soc-agent/hooks/scripts/audit_tool_calls.py` | PostToolUse: audit + trace JSONL split |
+| **Investigate Skill** | `soc-agent/skills/investigate/SKILL.md` | Entry point + investigation loop orchestration |
+| **Author Skill** | `soc-agent/skills/author/SKILL.md` | Edits `knowledge/` + `config/signatures/` with validator + probe-evidence gates |
+| **Connect Skill** | `soc-agent/skills/connect/SKILL.md` | Onboards a new SIEM/EDR/identity/CMDB system — generates adapter CLI + environment knowledge |
+| **Handbook Skill** | `soc-agent/skills/handbook/SKILL.md` | On-demand plugin reference docs (architecture, loop, validation, retention) |
+| **Screen Subagent** | `soc-agent/agents/screen.md` | Fast pattern matching (SCREEN phase) |
+| **Archetype-scan Subagent** | `soc-agent/agents/archetype-scan.md` | CONTEXTUALIZE archetype ranking (story/trust-anchors split input) |
+| **Ticket-context Subagent** | `soc-agent/agents/ticket-context.md` | CONTEXTUALIZE 4-hour correlation (backed by `scripts/tools/ticket_context.py`) |
+| **Hypothesize Subagent** | `soc-agent/agents/hypothesize.md` | Lean one-hop seed generation with causal stories |
+| **Gather Subagent** | `soc-agent/agents/gather.md` | Single-lead execution |
+| **Gather-composite Subagent** | `soc-agent/agents/gather-composite.md` | Multi-lead composite dispatch |
+| **Analyze Subagent** | `soc-agent/agents/analyze.md` | Extraction-contract evidence analysis with shape verification |
+| **Conclude Subagent** | `soc-agent/agents/conclude.md` | Haiku-backed CONCLUDE assembly |
+| **Import Resolver** | `soc-agent/scripts/resolve_imports.py` | `!command` preprocessing: bakes signature knowledge into the prompt |
+| **Run Setup** | `soc-agent/scripts/setup_run.py` | Creates run dir + alert.json, maps session → run |
+| **Preflight** | `soc-agent/scripts/preflight.py` | Binary connectivity check across configured systems |
+| **Workspace Map** | `soc-agent/scripts/workspace_map.py` | On-disk orientation emitted into the skill prompt |
+| **Invlang CLI** | `soc-agent/scripts/invlang/` | Corpus query tool (invoked via `scripts/invlang/run.sh`) |
+
+### Hook Architecture
+
+All hooks live under `soc-agent/hooks/scripts/` and are registered in `soc-agent/.claude-plugin/plugin.json`. They only fire when the plugin is loaded.
+
+| Event | Matcher | Hook | Purpose |
+|-------|---------|------|---------|
+| PreToolUse | `Task\|Agent` | `inject_env_context.py` | Inject environment context into subagent prompts |
+| PreToolUse | `Write\|Edit` on `*/investigation.md` | `infer_state_pre.py` | Pre-write state transition check |
+| PreToolUse | `Write\|Edit` on `*/investigation.md` | `validate_conclude.py` | Pre-write CONCLUDE self-contradiction guards |
+| PreToolUse | `Write\|Edit` on `*/investigation.md` | `invlang_validate.py` | Pre-write schema validation (22 rules) — blocks writes on schema errors |
+| PostToolUse | `Task\|Agent` | `extract_subagent_yaml.py` | Extract subagent YAML output into the investigation record |
+| PostToolUse | `Write\|Edit\|Bash` | `infer_state.py` | Infer state transitions from `## PHASE` headers |
+| PostToolUse | `Write\|Edit` | `validate_report.py` | Two-tier report validation (Tier 1 structural + Tier 2 Haiku judge) |
+| PostToolUse | `Bash\|mcp__.*` / `Read(*/alert.json)` | `tag_tool_results.py` | Tag tool results with salted delimiters for injection safety |
+| PostToolUse | `*` | `audit_tool_calls.py` | Split audit (state-changing) + trace (read-only) JSONL logs |
+| PostToolUse | `*` | `budget_enforcer.py` | Enforce per-run budget caps |
+| Stop | `*` | `stop_handler.py` | Sequential entrypoint — calls `investigation_summary.py` then `close_ticket_action.py` |
+
+Shared helpers: `run_context.py` (session→run resolution), `permissions.py` (permissions.yaml loader), `frontmatter.py`, `investigation_parse.py`, `invlang_walkers.py`, `judge_runner.py`, `judge_prompt.md`, `conclude_judge_{A,B}_prompt.md`.
 
 ### Safety Architecture
 
-- **Two-tier validation** — `validate_report.py` is a PostToolUse hook (Write|Edit) that fires when report.md is written. Tier 1 enforces structural constraints deterministically. Tier 2 uses Haiku via claude CLI to validate report consistency, precedent match validity, and evidence sufficiency. Runs in full mode (5 checks) for resolved reports with precedent, or no-precedent mode (4 checks) for escalated reports. Untrusted content (alert data, investigation log) is wrapped in per-run salted delimiters to prevent prompt injection.
-- **Hooks registered in plugin.json** — hooks only fire when the plugin is loaded, not during development
-- **State machine** (`infer_state.py` PostToolUse hook) prevents phase skipping — inferred from `## PHASE` headers in `investigation.md`, agent must follow CONTEXTUALIZE→[SCREEN]→HYPOTHESIZE→GATHER→ANALYZE→(loop|CONCLUDE)
-- **Two-leg resolution requirement** — `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding: every `required_anchors` entry confirmed OR `matched_ticket_id` citing a valid precedent snapshot inside that archetype directory. Archetypes with no required anchors must be grounded by `matched_ticket_id`
-- **Legitimacy as edge attribute (invlang v2.8)** — hypotheses whose disposition depends on authorization declare a `legitimacy_contract`; resolving leads write `legitimacy_resolutions` on the edge. `disposition: benign` is structurally gated on every contract resolving `authorized` (invlang validator rule #21); `unauthorized`/`indeterminate` force escalation. Mechanism-level adversarial variants (`?adversary-controlled-*`) remain separate hypotheses — classification carries the claim.
+- **Two-tier report validation** — `validate_report.py` (PostToolUse Write|Edit) fires when `report.md` is written. Tier 1 enforces structural constraints deterministically. Tier 2 calls Haiku via the claude CLI to validate report consistency, precedent match validity, and evidence sufficiency (full mode = 5 checks for resolved-with-precedent; no-precedent mode = 4 checks for escalated). Untrusted content is wrapped in per-run salted delimiters to block prompt injection.
+- **Invlang schema validation** — `invlang_validate.py` (PreToolUse) blocks any write/edit to `investigation.md` that violates the 22 validator rules (see `docs/investigation-language.md`).
+- **CONCLUDE judges** — pre-CONCLUDE, `validate_conclude.py` runs parallel Haiku judges (prompts A/B) to catch self-contradictions before the CONCLUDE block lands.
+- **State machine** (`infer_state.py` PostToolUse + `infer_state_pre.py` PreToolUse) prevents phase skipping — inferred from `## PHASE` headers in `investigation.md`; agent must follow CONTEXTUALIZE→[SCREEN]→(ASSESS↔HYPOTHESIZE↔GATHER↔ANALYZE loop)→CONCLUDE.
+- **Two-leg resolution requirement** — `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding: every `required_anchors` entry confirmed OR `matched_ticket_id` citing a valid precedent snapshot inside that archetype directory. Archetypes with no required anchors must be grounded by `matched_ticket_id`.
+- **Legitimacy as edge attribute (invlang v2.8)** — hypotheses whose disposition depends on authorization declare a `legitimacy_contract`; resolving leads write `legitimacy_resolutions` on the edge. `disposition: benign` is structurally gated on every contract resolving `authorized` (validator rule #21); `unauthorized`/`indeterminate` force escalation. Mechanism-level adversarial variants (`?adversary-controlled-*`) remain separate hypotheses — classification carries the claim.
+- **Budget enforcement** — `budget_enforcer.py` caps per-run tool calls / cost per `schemas/budget.py`.
 
 ## Project Structure
 
 ```
 /workspace/
-├── soc-agent/                     # Claude Code plugin (all agent content)
+├── soc-agent/                     # Claude Code plugin (all shippable agent content)
 │   ├── .claude-plugin/
-│   │   └── plugin.json            # Plugin manifest
+│   │   └── plugin.json            # Plugin manifest (hooks + skills + agents registration)
+│   ├── agents/                    # Plugin-registered subagents (phase-level workers)
+│   │   ├── screen.md              # Fast pattern matching (SCREEN phase)
+│   │   ├── archetype-scan.md      # Archetype ranking (CONTEXTUALIZE)
+│   │   ├── ticket-context.md      # 4-hour ticket correlation (CONTEXTUALIZE)
+│   │   ├── hypothesize.md         # Lean one-hop hypothesis seeding
+│   │   ├── gather.md              # Single-lead GATHER
+│   │   ├── gather-composite.md    # Composite-lead GATHER dispatch
+│   │   ├── analyze.md             # Extraction-contract ANALYZE
+│   │   └── conclude.md            # Haiku-backed CONCLUDE
 │   ├── skills/
-│   │   └── investigate/
-│   │       ├── SKILL.md           # Merged investigation skill (entry point + loop)
-│   │       └── screen.md          # Subagent prompt for SCREEN fast pattern matching
+│   │   ├── investigate/           # Main loop orchestrator + past-investigations query
+│   │   ├── author/                # Edit knowledge/ + config/signatures/ with validator + probes
+│   │   ├── connect/               # Onboard a new security system (adapter CLI + env knowledge)
+│   │   └── handbook/              # On-demand plugin reference docs
+│   │       └── content/           # act-mode, design, investigation-loop, invlang, knowledge-base,
+│   │                              #   phases, retention, run-artifacts, validation
 │   ├── scripts/
 │   │   ├── resolve_imports.py     # !command resolver: signature knowledge → stdout
-│   │   └── tools/
-│   │       ├── wazuh_cli.py          # Wazuh SIEM CLI: auth, HTTP, query execution, output formatting
-│   │       └── stub_ticket_cli.py    # Reference ActionContract ticketing connector (dry-run-first)
+│   │   ├── setup_run.py           # Create run dir + alert.json; map session → run
+│   │   ├── fetch_alert.py         # Retrieve alerts by id for replay
+│   │   ├── preflight.py           # Per-system connectivity health check
+│   │   ├── workspace_map.py       # On-disk orientation for investigate prompt
+│   │   ├── query.py               # Wrapper over system CLIs for ad-hoc querying
+│   │   ├── cleanup_runs.py        # Retention / cleanup for runs/
+│   │   ├── init.sh                # One-shot dev bootstrap
+│   │   ├── invlang/               # Companion-query CLI (invoked via run.sh)
+│   │   │   ├── cli.py
+│   │   │   ├── corpus.py
+│   │   │   ├── queries.py
+│   │   │   └── run.sh
+│   │   └── tools/                 # Per-system CLI adapters + utilities
+│   │       ├── wazuh_cli.py
+│   │       ├── host_query.py
+│   │       ├── stub_ticket_cli.py         # Reference ActionContract ticketing adapter
+│   │       ├── playground_ticket_cli.py   # FastAPI mock ticketing client
+│   │       ├── ticket_context.py          # Backend for the ticket-context subagent
+│   │       ├── data_source_health.py      # Abstract health-check helper
+│   │       ├── data_source_health_wazuh_example.py
+│   │       └── list_lead_tags.py
 │   ├── hooks/
-│   │   └── scripts/
-│   │       ├── validate_report.py       # PostToolUse hook: combined Tier 1 + Tier 2 validation
-│   │       ├── judge_prompt.md          # Prompt template for Tier 2 judge
-│   │       ├── infer_state.py           # PostToolUse hook: state transitions from investigation.md headers
-│   │       ├── write_state.py           # Manual/debugging state tool (no longer called by agent)
-│   │       ├── stop_handler.py          # Stop hook: composes investigation_summary + close_ticket_action
-│   │       ├── investigation_summary.py # Stop-stage step: JSONL outcome log
-│   │       ├── close_ticket_action.py   # Stop-stage step: deterministic act-mode close dispatch
-│   │       ├── permissions.py           # Shared permissions.yaml loader (mode, mitigation actions)
-│   │       └── audit_tool_calls.py      # PostToolUse: audit + trace JSONL split
+│   │   └── scripts/               # See "Hook Architecture" above
 │   ├── knowledge/
 │   │   ├── common-investigation/  # Portable investigation methodology
-│   │   │   ├── SKILL.md           # Common investigation knowledge
-│   │   │   ├── checklist.md       # Investigation self-check guide
-│   │   │   ├── leads/             # Reusable lead definitions + per-vendor query templates
-│   │   │   │   ├── {lead}/definition.md      # Methodology: what to characterize, pitfalls
-│   │   │   │   └── {lead}/templates/{vendor}.md  # Query template: tagged frontmatter + field mapping + base query
-│   │   │   └── lessons/           # Cross-cutting investigation lessons
-│   │   ├── environment/           # Org-specific deployment knowledge (see design-v3-tool-execution.md §10 for the 4-layer mental model)
+│   │   │   ├── SKILL.md
+│   │   │   ├── checklist.md
+│   │   │   └── leads/             # Reusable lead defs + per-vendor query templates
+│   │   ├── invlang/
+│   │   │   └── schema.md          # Schema loaded into the investigate prompt
+│   │   ├── environment/           # Org-specific deployment knowledge (see design-v3-tool-execution.md §10)
 │   │   │   ├── context/           # Classification heuristics (IP ranges, identity patterns, etc.)
-│   │   │   ├── data-sources/      # Abstract data-tag reference docs (what's queryable in this org)
-│   │   │   ├── operations/        # Per-anchor grounding recipes (how to confirm a required_anchor in this deployment)
-│   │   │   └── systems/           # Vendor-specific field knowledge (quirks, query patterns, config, discovery primitives)
-│   │   │       └── wazuh/         # Wazuh field quirks, query patterns, config.env
+│   │   │   ├── data-sources/      # Abstract data-tag reference docs
+│   │   │   ├── operations/        # Per-anchor grounding recipes
+│   │   │   └── systems/           # Vendor-specific field knowledge
+│   │   │       ├── wazuh/         # Wazuh field quirks, auth queries, config.env
+│   │   │       ├── host-query/
+│   │   │       ├── stub-ticket/
+│   │   │       └── playground-ticket/
 │   │   └── signatures/
 │   │       ├── _template/         # Skeleton + onboarding guide for new signatures
-│   │       └── wazuh-rule-5710/   # SSH Invalid User (example signature)
-│   │           ├── context.md     # Signature reference + threat model
-│   │           ├── playbook.md    # Archetype catalog + leads + screen table
-│   │           └── archetypes/    # One subdir per archetype
-│   │               └── {name}/
-│   │                   ├── README.md         # Story + required_anchors
-│   │                   └── {TICKET-ID}.json  # Cached precedent snapshots
+│   │       ├── wazuh-rule-550/    # Example: file integrity
+│   │       ├── wazuh-rule-5710/   # Example: SSH invalid user
+│   │       ├── wazuh-rule-100001/ # Example: reference for lean one-hop playbook layering
+│   │       └── wazuh-rule-100110/ # Example
 │   ├── schemas/                   # Python dataclass validators (system contracts)
 │   │   ├── report_frontmatter.py
 │   │   ├── state.py
-│   │   └── precedent.py
+│   │   ├── precedent.py
+│   │   ├── adapter_contract.py    # Generic ABC base for system adapters
+│   │   ├── budget.py              # Budget enforcement config
+│   │   ├── retention.py           # Run retention policy
+│   │   └── enums.py
 │   ├── config/
 │   │   └── signatures/
-│   │       ├── _template/
-│   │       │   └── permissions.yaml  # Template for new signatures
-│   │       └── wazuh-rule-5710/
-│   │           └── permissions.yaml
-│   ├── tests/                     # pytest test suite
-│   │   ├── test_validate_report.py
-│   │   ├── test_state_transitions.py
-│   │   ├── test_kb_schema.py
-│   │   ├── test_resolve_imports.py
-│   │   ├── test_audit_hooks.py
-│   │   ├── test_e2e_mock.py
-│   │   ├── test_e2e_live.py
-│   │   └── fixtures/
+│   │       ├── _template/permissions.yaml
+│   │       ├── wazuh-rule-550/permissions.yaml
+│   │       ├── wazuh-rule-5710/permissions.yaml
+│   │       ├── wazuh-rule-100001/permissions.yaml
+│   │       └── wazuh-rule-100110/permissions.yaml
+│   ├── tests/                     # pytest test suite (see "Running Tests" below)
 │   └── runs/                      # Investigation run dirs (configurable via SOC_AGENT_RUNS_DIR)
 │
 ├── .claude/
-│   ├── settings.json              # Hook registration (Stop event)
-│   └── settings.local.json        # Dev permissions
+│   ├── settings.json              # (project-local, currently empty)
+│   ├── settings.local.json        # Dev permissions
+│   └── skills/                    # Personal dev skills (not shipped): analyze-pilot, invlang, ship, testrun
 │
 ├── docs/                          # Design documentation
-├── playground/                    # Container setup for testing
+├── playground/                    # Docker / Wazuh stack / ticket-server for dev + eval
 ├── tasks/                         # Kanban task files (one .md per task, frontmatter-driven)
 │   └── build.py                   # Renders board.html from tasks/*.md
 ├── board.html                     # Generated kanban board — open in browser, no server
@@ -151,20 +210,37 @@ All deps are declared as extras in `soc-agent/pyproject.toml` and installed into
 # All unit tests (no LLM required, ~25s — subprocess-heavy state tests)
 pytest soc-agent/tests/ -v -m "not llm"
 
-# Specific test suites
-pytest soc-agent/tests/test_validate_report.py -v    # Report validation
+# Common suites
+pytest soc-agent/tests/test_validate_report.py -v     # Report validation
+pytest soc-agent/tests/test_validate_conclude.py -v   # CONCLUDE pre-write guards
+pytest soc-agent/tests/test_invlang_validate.py -v    # Invlang schema rules
+pytest soc-agent/tests/test_invlang_queries.py -v     # Invlang corpus queries
 pytest soc-agent/tests/test_state_transitions.py -v   # State machine
-pytest soc-agent/tests/test_kb_schema.py -v           # Knowledge base
+pytest soc-agent/tests/test_infer_state.py -v         # State inference
+pytest soc-agent/tests/test_kb_schema.py -v           # Knowledge base schema
+pytest soc-agent/tests/test_archetype_fixtures.py -v  # Archetype precedent snapshots
+pytest soc-agent/tests/test_resolve_imports.py -v     # Import resolver
+pytest soc-agent/tests/test_setup_run.py -v           # Run setup
 pytest soc-agent/tests/test_audit_hooks.py -v         # Audit hooks
+pytest soc-agent/tests/test_budget_enforcer.py -v     # Budget enforcement
+pytest soc-agent/tests/test_tag_tool_results.py -v    # Salted-delimiter tagging
+pytest soc-agent/tests/test_stop_handler.py -v        # Stop-stage composition
+pytest soc-agent/tests/test_close_ticket_action.py -v # Act-mode close dispatch
+pytest soc-agent/tests/test_adapter_contract.py -v    # Generic adapter ABC
+pytest soc-agent/tests/test_wazuh_cli.py -v           # Wazuh adapter
+pytest soc-agent/tests/test_host_query.py -v          # Host adapter
+pytest soc-agent/tests/test_ticket_context.py -v      # Ticket-context backend
+pytest soc-agent/tests/test_preflight.py -v           # Preflight connectivity
 
 # Integration tests (require LLM)
-pytest soc-agent/tests/test_e2e_mock.py -m llm        # Mock SIEM
-pytest soc-agent/tests/test_e2e_live.py -m "llm and live"  # Live Wazuh
+pytest soc-agent/tests/test_e2e_mock.py -m llm              # Mock SIEM
+pytest soc-agent/tests/test_e2e_live.py -m "llm and live"   # Live Wazuh
+pytest soc-agent/tests/test_judge_report.py -m llm          # Tier 2 judge
 ```
 
 ## Investigation Flow Language
 
-**Full spec:** `docs/investigation-language.md` (v2.6, implemented). CLI query tool: `soc-agent/scripts/invlang/cli.py`.
+**Full spec:** `docs/investigation-language.md` (v2.8, implemented). Query CLI: invoke via `bash soc-agent/scripts/invlang/run.sh` (see the canonical invocation note — `python -m invlang` and direct `cli.py` calls fail). Schema loaded into the investigate prompt lives at `soc-agent/knowledge/invlang/schema.md`. Validator runs as a PreToolUse hook on `investigation.md` writes (`hooks/scripts/invlang_validate.py`).
 
 ### Purpose
 
@@ -226,11 +302,12 @@ The key invariants enforced by the validator (22 rules in total — see spec §V
 - Missing data or errors → escalate with context
 
 ### Auditability
-- Every investigation creates: alert.json, investigation.md, state.json, report.md
-- JSONL investigation outcomes in runs/audit.jsonl
-- JSONL tool call audit trail in runs/tool_audit.jsonl (state-changing tools)
-- JSONL tool call trace in runs/tool_trace.jsonl (read-only tools, for debugging)
-- Full phase-by-phase investigation log
+- Every investigation creates: `alert.json`, `investigation.md` (invlang companion), `state.json`, `report.md`
+- JSONL investigation outcomes in `runs/audit.jsonl`
+- JSONL tool call audit trail in `runs/tool_audit.jsonl` (state-changing tools)
+- JSONL tool call trace in `runs/tool_trace.jsonl` (read-only tools, for debugging)
+- Subagent YAML extracted into the companion via `extract_subagent_yaml.py` PostToolUse hook
+- Session → run dir mapping is stable under concurrent runs (use `run_context.resolve_run_dir`, not mtime fallback)
 
 ## Adding a New Signature
 
@@ -313,10 +390,15 @@ Detailed documentation in `docs/`:
 - `design-v3-architecture.md` — System architecture and component design
 - `design-v3-tool-execution.md` — Tool execution architecture: lead model, SIEM CLI, query templates, composite dispatch
 - `design-v3-hypothesis-archetype-rewrite.md` — Hypothesis-driven investigation and archetype model
+- `design-v3-authority-consultation.md` — Authority consultation primitive and legitimacy-gated disposition
 - `design-v3-reproduction.md` — Reproduction sandbox design
 - `design-v3-init-and-connect.md` — Initialization and SIEM connection
+- `design-v3-post-mortem.md` — Post-v3 retrospective notes
+- `investigation-language.md` — Invlang spec (v2.8) + validator rules
 - `evaluation-and-chaos-design.md` — Evaluation harness and chaos engineering
 - `security-model.md` — Threat model and defense layers
 - `packaging.md` — Dependency and packaging strategy
+- `playground-elastic-stack.md` — Elastic stack companion to the Wazuh playground
+- `decision-opus-sonnet-migration.md` — Model selection rationale
 
 Pre-v3 docs are in `docs/archive/`.
