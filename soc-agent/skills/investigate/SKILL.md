@@ -97,73 +97,36 @@ This means:
 
 ## Investigation Loop
 
-HYPOTHESIZE is **on-demand**, not a mandatory gate. Between leads, ASSESS: does the next step branch on which explanation is true? If yes, enter HYPOTHESIZE and articulate the fork. If no, go straight to GATHER.
+After CONTEXTUALIZE and after every ANALYZE, dispatch the HYPOTHESIZE subagent. The subagent owns the branching question ("does the hypothesis space fork at this anchor?") and picks the output shape accordingly — a `hypothesize:` block when there's a real fork, a `gather:` block (with lead-level pre-registered predictions on any interpretation-vulnerable outcome fields) when the next lead is mechanical or pure enrichment. Your job is to transcribe and proceed.
 
 ```
 CONTEXTUALIZE
       │
       ▼
-   ASSESS ◀─────────────────────┐
-    │                            │
-    │  branching?                │
-    ├──── yes ───▶ HYPOTHESIZE   │
-    │                 │          │
-    └──── no ─────────┤          │
-                      ▼          │
-                   GATHER         │   (in GATHER, pre-register readings
-                      │           │    iff the outcome is interpretation-
-                      ▼           │    vulnerable — see schema
-                   ANALYZE ───────┘    lead.predictions)
-                      │
-                      ▼
-                   CONCLUDE
+ HYPOTHESIZE ◀──────────────┐      (subagent emits:
+   │                         │       fork    → hypothesize:
+   ▼                         │       no fork → gather: with
+ GATHER                      │                 pre-registered
+   │                         │                 predictions)
+   ▼                         │
+ ANALYZE ────────────────────┘
+   │
+   ▼
+ CONCLUDE
 ```
 
-ASSESS is a decision step the agent performs in its head, not a phase header. The phase headers you write to investigation.md are `## CONTEXTUALIZE`, `## SCREEN`, `## HYPOTHESIZE`, `## GATHER`, `## ANALYZE`, `## CONCLUDE` — no `## ASSESS`.
+The phase headers you write to `investigation.md` are `## CONTEXTUALIZE`, `## SCREEN`, `## HYPOTHESIZE`, `## GATHER`, `## ANALYZE`, `## CONCLUDE`.
 
 Transitions (enforced by the state machine hook):
-- CONTEXTUALIZE → CONCLUDE (main-agent dedup when ticket-context surfaces a live repeat)
+- CONTEXTUALIZE → CONCLUDE (dedup when ticket-context surfaces a live repeat)
 - CONTEXTUALIZE → SCREEN (playbook has a ## Screen section)
-- CONTEXTUALIZE → HYPOTHESIZE (branching-first case — step-1 lead depends on which explanation is true)
-- CONTEXTUALIZE → GATHER (pure-gathering first lead — step-1 is the same regardless of explanation)
+- CONTEXTUALIZE → HYPOTHESIZE (default)
 - SCREEN → CONCLUDE | HYPOTHESIZE (matched | no-match)
 - HYPOTHESIZE → GATHER
-- GATHER → ANALYZE (normal path) or → HYPOTHESIZE (a new fork opened mid-lead)
+- GATHER → ANALYZE
 - ANALYZE → HYPOTHESIZE | CONCLUDE
 
 The state machine is enforced automatically — when you write a phase section header to `investigation.md`, a hook validates the transition and updates `state.json`. Phase headers must be exactly `## PHASENAME` with no prefix or suffix. If you attempt an illegal transition, the write is blocked. The hook reports loop count (every HYPOTHESIZE and every ANALYZE entry counts as one cycle); a hard cap is enforced — if you're approaching it without convergence, escalate.
-
----
-
-## ASSESS: choosing the next edge
-
-ASSESS is how you pick among the transitions above. It is an in-head decision step, not a phase — no `## ASSESS` header is written to `investigation.md`. You run ASSESS at the end of CONTEXTUALIZE and after every ANALYZE, before committing to the next edge.
-
-ASSESS answers one question: **does the hypothesis space fork at this anchor?** It does *not* pick the lead — that is a separate, downstream decision inside HYPOTHESIZE once a fork is established.
-
-Formally, two orthogonal axes govern how much pre-commitment the next lead warrants:
-
-- **Branching (hypothesis-space property)** — does the current anchor admit multiple competing one-hop parent classifications whose predictions are observationally distinguishable? Branching is a property of the *hypothesis space*, not of which lead you'd run. A real fork exists whenever there are ≥2 plausible classifications that would predict different world-states — even if one lead happens to discriminate them all. Conversely, a fork does *not* exist when the alert admits only one plausible upstream classification and the next query is just extracting its attributes (mechanical enrichment). Branching asks "are there competing explanations?"; lead selection asks "which edge measurement most efficiently discriminates them?" — keep these separate.
-- **Interpretation-vulnerability (lead-outcome property)** — would reading the outcome of the chosen lead post-hoc risk rationalization? (Per-field, not per-lead — a single lead can mix mechanical fields with interpretive ones.)
-
-| Hypothesis fork? | Chosen lead's outcome interp.-vulnerable? | What to do |
-|---|---|---|
-| yes | yes | HYPOTHESIZE: articulate the fork as one-hop proposals + per-hypothesis predictions. Select lead(s) that discriminate. Pre-register lead-level `predictions` on the interpretive outcome fields. |
-| yes | no | HYPOTHESIZE: articulate the fork + proposals. Select lead(s). Skip lead-level predictions — outcome reading is mechanical. |
-| no | yes | Skip HYPOTHESIZE. GATHER with pre-registered lead-level `predictions` on the interpretive outcome fields. |
-| no | no | Skip HYPOTHESIZE. Mechanical GATHER, no ceremony. |
-
-**Lead selection is inside HYPOTHESIZE, not ASSESS.** Once branching is established, choosing the discriminating edge measurement — single lead, composite dispatch, primary-plus-fallback — is lead-selection work governed by §HYPOTHESIZE → Selecting Leads. The branching question stays at the hypothesis-space layer: "are there competing classifications worth articulating?" A case where one clean lead partitions four hypotheses is still a branching case (four competing classifications exist) — the lead selection just happens to resolve efficiently.
-
-**Reclassification cue.** Before entering HYPOTHESIZE, name ≥2 competing one-hop classifications whose predictions diverge. If you can name only one plausible classification — or can't articulate how their predictions would differ — there's no fork yet. Stay in the mechanical / interpretive lane and re-assess after the next lead.
-
-**Worked examples** (from probe corpus under `docs/experiments/investigation-language-pilot/`):
-
-- **no / no — FIM sudoers modified, mechanical actor lookup.** Only one plausible classification at this step ("some actor modified the file"); we don't know enough to propose competing parent classifications. The branch opens *after* the identity lookup returns. Go straight to GATHER.
-- **no / yes — DLP access-volume anomaly.** The signal is a volume profile characterization — there's no competing-classifications fork yet, we're measuring a field to *then* know whether a fork opens. The reading is interpretive. Go to GATHER; pre-register lead-level `predictions` on the interpretive volume-shape field.
-- **yes / no — SSH invalid user, volume-count first.** Hypothesis space forks: scanner vs. targeted predict different volume counts. Enter HYPOTHESIZE, articulate the fork. Lead selection: volume count — the reading is mechanical (numbers), so no lead-level predictions needed.
-- **yes / yes — Prod DB outbound to low-rep IP.** Hypothesis space forks across competing classifications (sanctioned telemetry / extension-driven / adversary-controlled). Enter HYPOTHESIZE, articulate the fork. Lead selection may produce a single discriminating lead (e.g., Falco process-lineage partitions all three) or composite (if divergent systems are needed). Pre-register lead-level predictions on the interpretive ancestry field.
-- **yes / yes — cron-modification with single audit lead.** Hypothesis space forks (CM-deploy / interactive-admin / adversary-persistence). A single auditd query partitions all three — that's an *efficient lead selection*, not an absence of branching. The fork is real; lead selection resolved it in one shot.
 
 ---
 
@@ -389,9 +352,9 @@ Emit all screen leads in one write. Two constraints that trip up the validator i
 
 ### HYPOTHESIZE
 
-**Goal:** Form or update hypotheses and select the most diagnostic lead.
+**Goal:** Form or update hypotheses and select the most diagnostic lead — OR, when no fork is observable at this anchor, route directly to GATHER with pre-registered predictions on interpretation-vulnerable outcome fields.
 
-Enter only when the very next lead branches on which explanation is true (ASSESS governs entry).
+Always dispatched after CONTEXTUALIZE and after every ANALYZE. The subagent owns the branching determination — you do not pre-screen.
 
 #### Philosophy + vocabulary
 

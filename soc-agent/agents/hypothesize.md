@@ -160,47 +160,9 @@ Each prediction has a refutation shape:
 - *r3:* attempt is off-cadence (not near the documented interval) →
   refutes p3
 
-**Label (weak):** `?post-exploit-interactive: "this looks like post-exploit access"`
-
-**Hypothesis shape:**
-- `attached_to_vertex`: the observed bash process vertex from rule 100001
-- `proposed_edge.parent_vertex`: `{type: session, classification: attacker-foothold-interactive-session}`
-
-**Story (one-hop, testable):**
-```
-The attacker-foothold-interactive-session spawned this bash process
-via docker exec, attaching an interactive tty. The session is a
-genuine foothold: authenticated from a novel source with no prior
-relationship to this container, and the commands issued after spawn
-are reconnaissance-shaped rather than scripted.
-```
-
-Predictions test the parent's attributes: authenticated session record
-in auth logs with novel/unknown user; connection tuple in rule 100002
-tied to an unrecognized srcip; tty=interactive on the bash process;
-command sequence pattern consistent with manual recon (not a scripted
-single-command invocation). Each negation is a refutation shape.
-
-**Label (weak):** `?credential-stuffing: "this is credential stuffing"`
-
-**Hypothesis shape:**
-- `attached_to_vertex`: the observed rule-5710 alert event
-- `proposed_edge.parent_vertex`: `{type: process, classification: external-credential-stuffing-tool}`
-
-**Story (one-hop, testable):**
-```
-The external-credential-stuffing-tool issued an SSH attempt for
-`admin` from an unrecognized external IP as part of a broader
-username-cycling probe. sshd rejected. Rule 5710 fired. The tool's
-characteristics — wordlist-derived usernames, ~1/sec cadence, no
-prior relationship to this target — determine the edge shape.
-```
-
-Predictions: source IP has no prior successful auth to this target;
-same IP attempts multiple different usernames in a short window (not
-single-user persistent); inter-attempt cadence near wordlist-tool
-defaults (~1/sec); no post-auth success from the IP. Each negation is
-a refutation shape.
+For scenario variety (post-exploit sessions, credential-stuffing
+tools, refinement cases), see the full worked examples at the end of
+this file.
 
 ### The discipline
 
@@ -243,10 +205,7 @@ a refutation shape.
 
 ## Discipline
 
-- **Story-first.** See §Causal story above. Every hypothesis must have
-  a concrete `story` field before committing predictions or refutation
-  shapes. Predictions derive from story links; refutation shapes cite
-  the predictions they refute.
+- **Story-first.** See §Causal story above — non-negotiable.
 - **Lean.** ≤ 2 predictions per hypothesis. Three predictions signals
   an unlean label — split or defer. Multiple predictions should each
   test a *different story link*; two predictions testing the same link
