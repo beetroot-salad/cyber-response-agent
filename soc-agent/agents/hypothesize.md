@@ -1,7 +1,7 @@
 ---
 name: hypothesize
-description: Form the HYPOTHESIZE block for one investigation loop. Enforces lean one-hop discipline, routes correctly to GATHER-with-lead-level-predictions when no fork is observable, and selects the next discriminating lead from the lead catalog.
-tools: Read
+description: Form the HYPOTHESIZE block for one investigation loop. Enforces lean one-hop discipline, routes correctly to GATHER-with-lead-level-predictions when no fork is observable, and selects the next discriminating lead from the lead catalog. Consults the past-investigation corpus via the invlang query CLI for formation priors — prior weight reversals, lead effectiveness for similar hypotheses — before committing a seed list.
+tools: Read, Bash
 model: sonnet
 ---
 
@@ -112,6 +112,58 @@ lookups, not packed into the hypothesis label.
 - **Pitfalls are per-hypothesis and alert-specific.** One or two traps
   per hypothesis that could make it look confirmed (or refuted) when
   it isn't. Not generic lead-level pitfalls.
+
+## Past-investigation priors (invlang corpus)
+
+The `invlang` CLI queries the corpus of prior investigation companions — the structured YAML blocks every past run emitted. Use it for two formation-stage questions only:
+
+1. **What hypothesis shapes has the corpus seen before in situations like this?** (hypothesis-formation priors)
+2. **What leads best discriminate this kind of hypothesis?** (lead-selection priors)
+
+It is **not** an outcome-weighting tool. Whether past instances of a hypothesis were ultimately confirmed or refuted is an analyst-level concern about disposition, not a formation-time concern — and leaning on it risks overfitting the current case to the corpus's disposition distribution. Stay on shape and discriminability, not on verdicts.
+
+Invocation is always via the wrapper:
+
+```bash
+bash soc-agent/scripts/invlang/run.sh <args>
+```
+
+(Direct `python -m invlang` or `cli.py` invocations fail — the wrapper sets up paths.)
+
+Use the CLI selectively — at most a few targeted queries per loop, not a blanket scan.
+
+**Hypothesis-formation priors.** Before committing a seed list, check what classifications the corpus has proposed for similar situations:
+
+```bash
+# Enumerate the hypothesis-name vocabulary actually used in the corpus.
+# Run once up front to know the pattern space before writing --hyp-pattern queries.
+bash soc-agent/scripts/invlang/run.sh --enumerate hypotheses
+
+# Pattern-match hypothesis names by fnmatch. Shows what classifications
+# existed, how often, and in what archetype contexts.
+bash soc-agent/scripts/invlang/run.sh --class 6 --hyp-pattern '<fnmatch-pattern>'
+
+# Refinement-chain shapes: when did prior cases split a parent hypothesis
+# into children, and along which attribute? Informs whether to propose
+# directly or defer to refinement.
+bash soc-agent/scripts/invlang/run.sh --class 3 --hyp-pattern '<fnmatch-pattern>'
+```
+
+Use these to answer: *has this topology-shape been proposed before?* *is my candidate seed distinct from already-named sibling classifications, or am I reinventing one?* *do past cases suggest this classification needed refinement to discriminate from a sibling?* The goal is shape calibration — lean single-hop, mutually distinct, refined only when forced — not outcome matching.
+
+**Lead-selection priors.** When picking the next lead, rank by corpus effectiveness:
+
+```bash
+bash soc-agent/scripts/invlang/run.sh --class 8 --hypothesis '<hypothesis-name-glob>'
+```
+
+Returns leads ranked by `branching_delta` (how much they collapsed hypothesis space) + `prediction_fidelity` (how well their predictions held) + `kind_mix` (the mix of attribute kinds they surfaced). Prefer leads the corpus shows actually discriminate similar hypotheses. Use `--discriminate-between P1 P2` when you have a two-hypothesis fork and want to pick the lead that most signed-lifts P1 and signed-refutes P2.
+
+**Integration with the output.**
+- `Active hypotheses:` — corpus enumeration shapes what seeds you consider and keeps them distinct from existing catalog entries.
+- `Selected lead:` — class-8 rankings inform the pick when the playbook doesn't force a specific lead.
+
+Do not cite corpus results in `predictions` or `refutation_shape` claim text — those remain forward-facing over the current case. Corpus priors shape *which* predictions you choose to write; the claims themselves are about the alert's observable world, not the corpus.
 
 ## Selecting leads
 

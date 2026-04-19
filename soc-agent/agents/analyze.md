@@ -67,10 +67,16 @@ The current cycle is loop `{loop_n}`. The GATHER block for this loop is already 
 When routing CONCLUDE, state:
 - `disposition`: `benign` | `false_positive` | `true_positive` | `escalated`
 - `confidence`: `high` | `medium` | `low`
-- `matched_archetype`: the archetype directory name under `knowledge/signatures/{signature_id}/archetypes/`, or `null` if escalating without archetype match
+- `matched_archetype`: the archetype directory name under `knowledge/signatures/{signature_id}/archetypes/`, or `null` if no archetype cleanly fits
 - Brief rationale tying each surviving hypothesis's final grade to the disposition
 
 You make the archetype *claim* here. Anchor grounding (confirming `required_anchors` are satisfied or a precedent snapshot is cited) is enforced downstream at report validation — your job is to name the claim correctly based on the evidence weighted.
+
+**Before emitting a non-null `matched_archetype`, self-verify its shape.** Walk the archetype's `story.md` out-of-archetype conditions (the "disqualifier" clauses — *"disqualified if parent is not an application binary"*, *"disqualified if cmdline is non-interactive"*, etc.) against the full evidence gathered across this loop's leads, not just the single alert. If **any** disqualifier is triggered, set `matched_archetype: null` and name the triggered disqualifier in your rationale. The closest-label fallback is not allowed; forcing a near-match that has a live disqualifier is worse than escalating without an archetype.
+
+`matched_archetype: null` is a first-class outcome — novel variants, mixed shapes, and evidence the current catalog doesn't describe all legitimately produce null. Disposition and confidence are independent of archetype match: `escalated / true_positive / high / matched_archetype: null` is a valid shape. Do not force an archetype to satisfy a sense that the `matched_archetype` field "ought to be filled."
+
+The Tier 2 judge audits this shape-verification at report-write time; your job is to do it honestly in the first place so the judge's audit is a confirmation, not a rejection.
 
 ## Verification and Scoping (when a mechanism reaches `++`)
 

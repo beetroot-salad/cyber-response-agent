@@ -197,18 +197,19 @@ The subagent returns its findings alongside the code or query it executed. Treat
 
 ### CONTEXTUALIZE
 
-**Goal:** Understand what you're investigating before forming hypotheses.
+**Goal:** Produce scaffolding for the next phases — a transcription of what the alert says and what the subagents return. The output frames the investigation; it does not pre-judge it.
 
-1. Review the **Signature Knowledge** section above — it contains the signature context, playbook (archetype catalog + leads), archetype descriptions (one `story.md` + one `trust-anchors.md` per archetype), checklist, and any imported common knowledge
-2. Review the alert data you identified in Read the Alert
+**The analyst-glance bar.** An experienced analyst sitting in front of the queue, on seeing a new alert, (a) immediately recognizes the key fields and any signature quirks, (b) names the plausible explanations from prior cases, and (c) recalls related alerts they've already triaged. They do not write a thesis. CONTEXTUALIZE captures that same shape: short, factual, scaffolding-only. The same analyst posture applies in every later phase too — but here, glancing is the whole job.
 
-When reading multiple knowledge or environment files, batch independent reads into a single turn using parallel tool calls. Do not issue sequential Reads for files that don't depend on each other.
+**Procedure:**
 
-3. **Dispatch CONTEXTUALIZE subagents.** Both subagents produce YAML summaries the main agent reads before forming hypotheses. **Dispatch them in parallel** — two `Agent()` calls in a single assistant message so they run concurrently. Both are pinned to Haiku (cheap, mechanical work).
+1. Review the **Signature Knowledge** section above (already in context — do not spawn Explore to re-read it) and the alert data identified in Read the Alert.
 
-   **Archetype scan** — ranks this signature's archetype stories against the current alert by observable shape (entity relationship, volume/count, temporal pattern). Read-only, no SIEM queries.
+2. **Dispatch the two CONTEXTUALIZE subagents IN PARALLEL** — two `Agent()` calls in a single assistant message. Both are pinned to Haiku. Each subagent owns a piece of work that you would otherwise be tempted to do in your own context; your job here is to assemble their inputs and dispatch them, not to duplicate the work.
 
-   You already have playbook.md loaded, which lists every archetype name under this signature. Build the `story_paths` list from those names — one `.../archetypes/{name}/story.md` per archetype — and pass it to the subagent. Do not send the subagent to enumerate archetype directories; it should only read the exact paths you hand it.
+   **`soc-agent:archetype-scan`** — *owns archetype ranking.* The subagent reads the alert plus this signature's archetype stories and returns the ranked match list and the adversarial archetype. Read-only, no SIEM queries. You do not rank archetypes yourself.
+
+   You already have playbook.md loaded, which lists every archetype name under this signature. Your only prep work is to assemble the `story_paths` list from those names — one `.../archetypes/{name}/story.md` per archetype — and pass it to the subagent. Do not send the subagent to enumerate archetype directories; it should only read the exact paths you hand it.
    ```
    Agent(
      subagent_type="soc-agent:archetype-scan",
@@ -216,9 +217,8 @@ When reading multiple knowledge or environment files, batch independent reads in
      prompt="alert_path={run_dir}/alert.json\nfield_quirks_path=/workspace/soc-agent/knowledge/signatures/{signature_id}/field-quirks.md\nstory_paths=/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_1}/story.md,/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_2}/story.md,..."
    )
    ```
-   When the subagent returns, read its `archetype_scan` ranked list AND its `adversarial_archetype` entry. Archetypes are starting hypotheses, not conclusions. Strong-match archetypes inform hypothesis seeds; any archetype with `required_anchors` needing reverification means the match cannot transfer without fresh confirmation. Record both in `investigation.md` §CONTEXTUALIZE (see template below) — the adversarial archetype is the citable surface the CONCLUDE self-check's `archetype_shape_match` question asks about, so you need it in writing. If the subagent returned no useful output (malformed YAML, empty ranking), continue with the rest of CONTEXTUALIZE — archetypes are a useful prior, not required.
 
-   **Ticket context** — queries the SIEM for alerts on the same entities in the last 4 hours and clusters them mechanically. Pure correlation; no characterization, no prior-investigation comparison.
+   **`soc-agent:ticket-context`** — *owns alert correlation.* The subagent queries the SIEM for alerts on the same entities in the last 4 hours and clusters them mechanically. Correlation is delegated to this subagent; your job is to transcribe its output and act on it, not to re-do the correlation.
    ```
    Agent(
      subagent_type="soc-agent:ticket-context",
@@ -226,16 +226,29 @@ When reading multiple knowledge or environment files, batch independent reads in
      prompt="run_dir={run_dir}\nsignature_id={signature_id}"
    )
    ```
-   When the subagent returns, read `entities`, `repeats`, `related`, and `high_volume_dimensions`. Interpretation is yours:
-   - **Duplicate / fast-resolve path** — if `repeats` shows the same alert firing minutes ago on the same entities (especially if a prior ticket is open or recently resolved), you may transition directly CONTEXTUALIZE → CONCLUDE with `status=duplicate` or transfer a recent disposition. Verify the prior ticket exists before citing it; the subagent does not check.
-   - **Hypothesis seeding** — use `related` clusters to widen your mental model of what's happening on the host. High-volume dimensions are a weak signal (noisy entity or high-activity window) — note them but don't over-weight.
-   - **Entity classification stays with you.** The subagent returns raw values (IPs, usernames). You decide whether `172.22.0.10` is a NAT gateway or `healthcheck` is a known monitoring alias using `knowledge/environment/context/`.
 
-   **Related alerts are seeds for thinking, not evidence for grading.** Use them to notice patterns you would otherwise miss and prompt new hypothesis branches. Do not cite them as grading evidence (`+`/`++`/`-`/`--`) in ANALYZE unless you can (a) name a specific causal mechanism linking them to the current alert and (b) point to a concrete observation that establishes the link. "Temporally concurrent," "same host," and "high combined alert volume" are not mechanisms — they are coincidence shapes that any multi-cron or high-baseline environment produces naturally. A related alert that seeds a new hypothesis must then be investigated through the normal HYPOTHESIZE → GATHER → ANALYZE loop, not treated as pre-confirmed by its proximity.
+3. **Wait for both subagents.** While waiting, you may load mental model — read the signature's playbook in more depth, an archetype `story.md`, an environment context file. You may NOT analyze the alert, grade hypotheses, decide disposition, or interpret evidence in advance of the subagent results. Loading is fine; analyzing is not.
 
-4. **Environment readiness.** The `## Environment Readiness` section at the top of this skill is the preflight output — which configured adapters responded to `health-check`. For any system marked unreachable or degraded, scan `knowledge/common-investigation/leads/*/definition.md` for leads whose `data_tags` depend on that system and record them in `investigation.md` as affected (see the template below). Preflight is deliberately a connectivity check only; it does not verify per-index freshness. If a GATHER query later returns suspect results (zero matches, stale latest event, unexpectedly low count), follow `knowledge/common-investigation/leads/data-source-debug/definition.md` to diagnose whether it's a coverage gap, field-schema drift, or true absence.
+4. **Transcribe the returns.** When the subagents return:
 
-Write an initial section in `{run_dir}/investigation.md`:
+   **Parsing YAML-strict subagents.** Both `archetype-scan` and `ticket-context` are declared YAML-strict: their full response is a single fenced ```yaml block. A PostToolUse hook (`extract_subagent_yaml.py`) appends a `## Canonical {subagent} output` section right after the raw tool_result, containing the first fenced block extracted from the response. **When the canonical section is present, parse it and ignore any preamble prose or duplicate blocks in the raw response.** If the canonical section is absent, no fenced YAML was returned (usually a subagent failure); treat as an empty/unusable result and continue.
+
+   **From archetype-scan:** transcribe its `archetype_scan` ranked list AND its `adversarial_archetype` entry into the markdown summary. Archetypes are starting hypotheses, not conclusions; the strong matches inform hypothesis seeds, the adversarial one is the citable surface CONCLUDE's self-check expects in writing. If the subagent returned no useful output (malformed YAML, empty ranking), continue without it — archetypes are a useful prior, not required.
+
+   **From ticket-context:** transcribe `entities`, `repeats`, `related`, and `high_volume_dimensions`.
+
+   - **Fast-resolve / cluster-resolution.** Trust the subagent's correlation signal. Many alert families fire in clusters or refire on the same entity — auth alerts that retry, EDR behavioural rules that batch, monitoring probes. When `repeats` shows the same alert firing minutes ago on the same entities, or `related` shows a tight cluster of alerts pointing to the same activity, the right move is to investigate the earliest alert and resolve the rest by reference: transition CONTEXTUALIZE → CONCLUDE with `status=duplicate` and cite the prior ticket (verify it exists before citing — the subagent does not check). Reinvestigating cluster duplicates wastes resources and adds no signal.
+   - **Drill only when needed.** Each `related` cluster carries `signatures_detail: {rule_id: rule.description}` so you can judge the cluster's character without running your own query. Drill into a cluster with a targeted query **only** when the description leaves ambiguity that actually gates a downstream hypothesis (e.g. two possible mechanisms behind the same rule description). A cluster whose description already explains itself does not need a drill.
+
+   **Entity classification stays with you.** The subagent returns raw values (IPs, usernames). You decide whether `172.22.0.10` is a NAT gateway or `healthcheck` is a known monitoring alias using `knowledge/environment/context/`. This is *labelling*, not weighting evidence.
+
+   **Related alerts are seeds for thinking, not evidence for grading.** Use them later in HYPOTHESIZE to notice patterns. Do not cite them as grading evidence (`+`/`++`/`-`/`--`) in ANALYZE unless you can (a) name a specific causal mechanism linking them to the current alert and (b) point to a concrete observation that establishes the link. "Temporally concurrent," "same host," and "high combined alert volume" are not mechanisms — they are coincidence shapes that any multi-cron or high-baseline environment produces naturally.
+
+5. **Environment readiness.** The `## Environment Readiness` section at the top of this skill is the preflight output. For any system marked unreachable or degraded, scan `knowledge/common-investigation/leads/*/definition.md` for leads whose `data_tags` depend on that system and record them as affected. Preflight is connectivity-only; if a GATHER query later returns suspect results, follow `knowledge/common-investigation/leads/data-source-debug/definition.md`.
+
+6. **Write the section.** Produce the markdown summary + `prologue:` YAML below, then proceed to HYPOTHESIZE.
+
+**Markdown template:**
 ```markdown
 ## CONTEXTUALIZE
 
@@ -246,7 +259,7 @@ Write an initial section in `{run_dir}/investigation.md`:
 **Playbook hypotheses:** ?hypothesis-1, ?hypothesis-2, ...
 **Available leads:** lead-1, lead-2, ...
 **Archetype matches:** {ranked list from archetype-scan, one line each: name (strength) — key features}
-**Adversarial archetype:** {name} — {one-line reason why a real threat would hide inside this archetype, and how the current alert does or doesn't resemble it}
+**Adversarial archetype:** {name from archetype-scan} — {one-line transcribed reason}
 **Data environment:** {reachable systems per preflight; any degraded systems and the leads they affect}
 ```
 
@@ -256,6 +269,63 @@ prologue:
   vertices: [...]   # one vertex per distinct entity from the alert
   edges: [...]      # one edge per observed relationship/event between entities
 ```
+
+**Worked example** (synthetic — Wazuh SSH failed-auth alert from `203.0.113.47` targeting `root` on `web-01.corp.local`):
+
+```markdown
+## CONTEXTUALIZE
+
+**Alert:** 1776600000.12345678 — wazuh-rule-5710
+**Source entity:** External IP `203.0.113.47` (no prior knowledge)
+**Target entity:** `web-01.corp.local` (internal-server); targeted user `root`
+**Key observables:**
+- SSH password auth failure for user `root`
+- Single event; firedtimes=1
+- Wazuh time: 2026-04-19T14:22:08Z
+**Playbook hypotheses:** ?opportunistic-probe, ?credential-stuffing-burst, ?misconfigured-client
+**Available leads:** auth-history (lead 1), peer-targets (lead 2), source-reputation (lead 3)
+**Archetype matches** (from archetype-scan):
+1. opportunistic-internet-scan (STRONG) — single failure, public source IP, common username
+2. credential-stuffing-burst (WEAK) — no burst evidence yet
+**Adversarial archetype:** persistent-internet-bruteforce — single failure indistinguishable from first probe of a slow campaign; widening the time window in GATHER would discriminate.
+**Data environment:** All systems reachable. No degraded systems.
+```
+
+```yaml
+prologue:
+  vertices:
+    - id: v-001
+      type: endpoint
+      classification: unclassified-endpoint
+      identifier: "203.0.113.47"
+      attributes:
+        knowledge: partial
+    - id: v-002
+      type: endpoint
+      classification: internal-server
+      identifier: "web-01.corp.local"
+    - id: v-003
+      type: identity
+      classification: local-account
+      identifier: "root"
+      attributes:
+        kind: user
+  edges:
+    - id: e-001
+      relation: attempted_auth
+      source_vertex: v-001
+      target_vertex: v-002
+      when:
+        timestamp: "2026-04-19T14:22:08Z"
+      attributes:
+        target_user: "root"
+        outcome: failed
+        method: ssh-password
+      authority:
+        kind: siem-event
+        source: "wazuh-indexer (rule 5710)"
+```
+
 
 ### SCREEN (optional)
 
@@ -320,128 +390,46 @@ Emit all screen leads in one write. Two constraints that trip up the validator i
 
 **Goal:** Form or update hypotheses and select the most diagnostic lead.
 
-Entry is governed by the ASSESS rubric above — arrive here only when the very next lead branches on which explanation is true.
+Enter only when the very next lead branches on which explanation is true (ASSESS governs entry).
 
-#### Generating Hypotheses
+#### Philosophy + vocabulary
 
-A hypothesis is a **one-hop proposed extension of the confirmed graph**: it proposes that a specific upstream vertex exists, connected to an already-confirmed vertex by exactly one edge, with 1–2 predictions that discriminate it from competing proposals. See `docs/investigation-language.md` §Hypothesis for the structural spec (`attached_to_vertex`, `proposed_edge.parent_vertex`, `predictions`, `refutation_shape`).
+A **hypothesis** is a one-hop proposed extension of the confirmed graph — one upstream vertex with a classification, one edge relation back to an already-confirmed vertex, 1–2 predictions that discriminate it from competing proposals, and a refutation shape. Not a narrative. `?monitoring-probe` the label names a classification of a process vertex; it does not mean *"a monitoring system performed a health check via SSH using a test credential"* — that packs actor + intent + tool + configuration into one name.
 
-**One hop, not a narrative.** Do not pre-commit to a deep causal chain at hypothesis formation time. `?monitoring-probe` is not "a monitoring system performed a health check via SSH using a test credential that doesn't exist on this host" — that packs an actor classification, an intent, a tool, and a configuration choice into a single label. The lean form is: "the upstream process initiating this `attempted_auth` edge has classification `sanctioned-monitoring-probe`." One predicted attribute on one proposed vertex. Depth is added later by decomposition (§Refinement below), not upfront.
+A **lead** is an edge measurement that collapses the proposed frontier. Playbooks carry hypothesis seeds (candidate one-hop classifications) and archetypes (a cache of past-ticket outcomes with required anchors); both inform formation but neither is authoritative. Umbrella classes like `?compromise-confirmed` or `?malicious-activity` are not hypotheses — they aggregate two or more independent one-hops under a label that carries no new information.
 
-**Lean predictions.** 1–2 predictions per hypothesis. A single prediction captures the core discriminating claim. Add a second only when two independent facts each partially confirm the hypothesis and neither alone suffices. Three or more predictions almost always signals an unlean hypothesis — split it, or defer the extra predictions to a refinement after a lead confirms the parent.
+For the full structural spec (attached_to_vertex, proposed_edge, predictions, refutation_shape, legitimacy_contract) see `docs/investigation-language.md` §Hypothesis.
 
-**Two layers, not one.** Playbooks for known signatures carry two complementary catalogs:
+#### Dispatch the HYPOTHESIZE subagent
 
-- **Hypothesis seeds** (in the playbook body) are candidate one-hop proposals — the classifications of upstream vertex to consider first. They are skeletal by design; the agent keeps or prunes them based on observables.
-- **Archetype catalog** (under `archetypes/{name}/`) is a pattern-recognition *cache* of past ticket outcomes, with required trust anchors and discriminating boundaries. Archetypes inform which hypotheses to prioritize and provide a fast-path resolution when a clean match + confirmed grounding can auto-resolve. They are recommendations, not source of truth: novel variants, shape mutations, and adversaries mimicking benign patterns all require reasoning from proposed edges, not from cached patterns alone.
+Hypothesis formation is owned by `soc-agent:hypothesize` (Sonnet, `agents/hypothesize.md`). The subagent reads the alert, `investigation.md`, the signature's playbook + context, and returns the `hypothesize:` YAML block plus `Selected lead:` and `Pitfalls:` lines. The methodology — anchor location, one-hop parent enumeration, refinement via hierarchical IDs, three shapes of adversariness, legitimacy-contract declaration, lead selection — lives in the subagent's prompt, not here.
 
-Work from both layers together. Start from the hypothesis seeds — including adversarial-mechanism variants (`?adversary-controlled-*`, `?runtime-exec-injection`) when they predict observationally distinct world-states, and `legitimacy_contract`s on hypotheses whose disposition hinges on authorization. As evidence accumulates, check whether the emerging shape matches an archetype. If the evidence doesn't fit any archetype, the hypothesis loop keeps running until one hypothesis is confirmed with `++` evidence and every active `legitimacy_contract` has a fulfilling resolution with `verdict: authorized` — at which point the outcome is either escalation or, rarely, a novel pattern that deserves a new archetype after the fact.
-
-The COMPLETENESS criterion in Tier 2 captures the discipline: the judge expects you to have exhausted the shape space *inside and outside* the catalog. Forcing an alert into the closest archetype when the evidence has features the archetype doesn't describe is a failure mode the judge will catch.
-
-For novel alerts (no playbook), generate hypotheses by:
-
-1. **Locate the anchor.** Which confirmed vertex is this hypothesis attaching upstream of? Usually the alert's observed edge (e.g., the `attempted_auth` edge) or its source/target vertex. Every hypothesis must name its `attached_to_vertex`.
-
-2. **Enumerate one-hop parents.** What kinds of upstream vertices, connected by what relation, would explain the anchor? For an `attempted_auth` edge: a process on the source endpoint initiated it — so the parent_vertex is `{type: process, classification: X}` for varying X. Enumerate the plausible X values (sanctioned-monitoring, bait-workload, operator-shell, adversary-controlled), one hypothesis each.
-
-3. **Constrain with observables.** The alert already contains data. Use it to prune the classification set: if the source is internal, don't propose an external-scanner classification.
-
-4. **Keep it lean.** 1–2 predictions per hypothesis. Prefer a single predicted attribute on the proposed parent vertex (cadence, parent-process chain, username-scatter shape) over a multi-hop narrative about how that parent came to exist. Deeper ancestry (who triggered the bait? was the monitoring system compromised?) is a *next loop* after the current hop is confirmed — not this one.
-
-5. **No umbrellas.** Umbrella hypotheses like `?compromise-confirmed` or `?malicious-activity` mask two or more distinct one-hop proposals under a parent class that carries no new information. If the evidence is consistent with both `?dga-malware` and `?dns-tunneling` and discriminates neither, the correct state is both live concurrently, not merged.
-
-#### Refinement, not upfront detail
-
-When a lead confirms the one-hop parent and the investigation needs to distinguish sub-cases (retry-loop vs. enumeration-misconfig, legitimate-bait vs. bait-triggered-by-adversary), **decompose via hierarchical IDs**: allocate child hypotheses `h-{parent}-{ordinal}` in the lead's `new_hypotheses` and shelve the parent in the same block. Children inherit no weight from the parent; their histories are independent. This is the machinery for deepening — use it instead of pre-committing to the refined narrative at HYPOTHESIZE time.
-
-**Completeness checks** — verify before proceeding:
-- **Classification coverage:** For each anchor edge, have you enumerated the plausible upstream parent classifications? Three shapes of adversariness (see `docs/investigation-language.md` §Legitimacy as edge attribute):
-  - **Mechanism-level** — when adversarial variants predict observationally distinct world-states (`?adversary-controlled-*`, `?runtime-exec-injection`), enumerate them as normal mechanism hypotheses alongside benign classifications. No contract needed — classification carries the claim.
-  - **Attribute-level (legitimacy contract)** — when the same mechanism is consistent with benign or adversarial intent depending on authorization (CFO vs. external identity reading payroll; operator shell on prod vs. attacker RCE on prod), declare a `legitimacy_contract` on the hypothesis naming the edge(s) and the authority that resolves them. Contracts answer *policy*, not integrity — integrity questions (session hijack, process-hollowing, tool-masquerade) are mechanism-level discriminations resolved by behavioral observation, not contracts. Do **not** write parallel `?sanctioned` vs. `?unsanctioned` hypotheses for the same mechanism; the mechanism is identical, only the verdict differs.
-  - **Future-edge** — when the adversarial signal is a separate downstream edge (a failed-auth alert followed by an unexpected success), write it as its own hypothesis attached to the hypothetical future edge. Topology question, not a legitimacy attribute.
-- **Behavioral-consistency prediction (optional):** A contract resolved `authorized` establishes policy compliance, not integrity. A hypothesis MAY carry one baseline-consistency prediction — positive ("expect corroborating activity X") or negative ("expect NOT to see >Nσ deviation / access outside baseline / concurrent geo-distant sessions"). Gates (all three must hold): baseline queryable, scoped to the alert's entities, weight-sensitive (skip if already `++`/`--`). Caps at `moderate` severity. Unavailable baseline → note `indeterminate` in `concerns`; do not confabulate.
-- **Leanness:** Each hypothesis has ≤2 predictions. If a hypothesis has more, something should be refined out or split.
-
-#### Selecting Leads
-
-Lead selection is the **second step** of HYPOTHESIZE, logically distinct from fork articulation. ASSESS already determined there is a real branching fork (multiple competing one-hop classifications); now choose the edge measurement(s) that most efficiently discriminate them.
-
-A lead is an edge measurement that collapses the proposed frontier. For each active hypothesis, identify the observable that its predicted attribute turns on — the query that would confirm the proposed parent vertex (moving toward `+`/`++`) or produce the refutation shape (`-`/`--`).
-
-Then pick the lead whose outcome **discriminates most across the hypothesis set**:
-
-- **Single lead (preferred when available)** — one edge measurement whose outcome field partitions all active hypotheses. Example: a Falco process-lineage query on a connecting process's ancestry discriminates sanctioned-telemetry vs. extension-triggered vs. adversary-controlled in one query.
-- **Composite dispatch** — multiple leads, same entity + window, dispatched together. Use when no single measurement partitions the fork but several scoped to the same anchor would (e.g., process-lineage + forward-window auth-history to simultaneously resolve "who initiated this" and "did compromise follow").
-- **Primary-plus-deferred** — pick the highest-discrimination lead now and defer secondary leads to subsequent loops, conditional on outcome. Use when secondary leads genuinely depend on the first lead's result and running them early is wasteful.
-
-Single-lead elegance is a goal, not a constraint. If the cleanest discrimination requires two measurements, dispatch composite — don't collapse hypotheses just to fit them under one lead.
-
-**Absence is evidence.** A hypothesis predicts what you WILL find and what you WON'T find. If `?brute-force` predicts high volume and you see exactly 1 attempt, that's refuting evidence. Some classifications are defined by the conjunction of "event X present AND event Y absent" — actively verify both sides. Don't assume absence; query for it.
-
-**Quantify predictions relative to a baseline.** Prefer statistical framing to absolute thresholds — "within 1σ of historical cadence," "count in lowest decile for this signature," "rate consistent with approved-monitoring-sources baseline," ">3σ deviation from typical wordlist-scan volume." Relative predictions are environment-agnostic and make refutation shapes unambiguous. When no baseline exists, say so and state the refutation shape qualitatively ("refuted if success event observed in follow-up window"). Vague predictions ("consistent with monitoring activity") cannot be refuted and should be rewritten.
-
-**Pre-enumerate pitfalls per hypothesis.** For each hypothesis note 1–2 alert-specific traps that could make it look confirmed when it isn't — attacker-controllable signals (reverse DNS, user-agent), known false-positive patterns, or circumstantial observations easy to mistake for authoritative. These are alert-specific, not the static lead-level pitfalls from `leads/{lead}/definition.md`. Pitfalls are your pre-registered "how could I be wrong."
-
-If primary evidence sources are unavailable, consider secondary artifacts — the hypothesized activity would also leave traces in network traffic, authentication logs, file system changes, etc. Don't give up on a lead because the obvious data source is missing.
-
-Reference `knowledge/common-investigation/leads/` for lead methodology. Each lead is a directory containing `definition.md` (what to characterize, pitfalls) and optionally `templates/` (pre-built query templates per SIEM). If no lead directory exists for what you need, follow `leads/ad-hoc/definition.md`.
-
-#### Past Investigation Patterns
-
-The archetype scan from CONTEXTUALIZE step 3 already ranked the archetype stories for this signature against the current alert — one entry per `story.md` under `knowledge/signatures/{signature_id}/archetypes/*/`. Review that ranking at HYPOTHESIZE time: strong-match archetypes inform hypothesis seeds, and their `required_anchors` tell you what needs confirmation. If you need grounding detail beyond the ranking (specific past tickets, concrete anchor confirmations), read the archetype's `trust-anchors.md` and the precedent snapshot JSONs under the matched archetype directory (`archetypes/{name}/*.json`). Past investigations inform both hypothesis generation and lead selection — they reveal which leads tend to be most diagnostic for this signature type. Remember that a precedent with `temporal: true` anchor entries needs re-confirmation against live anchors before the match transfers to the current alert.
-
-#### Output
-
-Append to `{run_dir}/investigation.md`. Each hypothesis is a one-hop proposal — state its anchor, its proposed upstream edge, and 1–2 predictions. Do not pack multi-hop narrative into a single entry.
-
-```markdown
-## HYPOTHESIZE (loop {N})
-
-**Active hypotheses:**
-
-- `?hypothesis-1` — attaches upstream of `v-{anchor}` via `<relation>`; proposed parent: `{type, classification}`. Predicts: {1–2 discriminating observations, quantified relative to baseline where possible}. Refutation shape: {what observation would contradict}.
-- `?hypothesis-2` — ...
-
-**Selected lead:** `{lead-name}` — what it measures on which vertex/edge, and which hypotheses its outcome discriminates.
-
-**Pitfalls:** 1–2 alert-specific traps per hypothesis that could make it look confirmed when it isn't (attacker-controllable signals, known false-positive patterns, observations easy to mistake for authoritative). Alert-specific only; not the static lead-level pitfalls from `leads/{lead}/definition.md`.
+```python
+Agent(
+  subagent_type="soc-agent:hypothesize",
+  description="hypothesize loop {N} for {signature_id}",
+  prompt="run_dir={run_dir}\nsignature_id={signature_id}\nloop_n={N}"
+)
 ```
 
-Then append the `hypothesize:` YAML block. Run first to confirm the ID namespace (prologue IDs already exist):
-```
-bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
-```
-```yaml
-hypothesize:
-  hypotheses: [...]   # one entry per active hypothesis; weight: null; status: active
-```
+**When the subagent returns:**
+- Transcribe the YAML verbatim under `## HYPOTHESIZE (loop {N})` along with `Selected lead:` and `Pitfalls:`. Run `bash scripts/invlang/run.sh --ids {run_dir}/investigation.md` first to confirm the ID namespace.
+- If it returned a `gather:` block instead (no fork observable — discriminating data not yet in hand, or already resolved by prior leads), transcribe under `## GATHER (loop {N})` with the lead-level `predictions` triples and proceed to GATHER.
+- If it returned `error:`, surface the reason and stop. Do not form hypotheses inline.
+
+#### Verify leanness before accepting the subagent's output
+
+One structural check before transcribing: each hypothesis has **≤2 predictions**. Three or more signals an unlean hypothesis — the subagent should either split it or defer extras to post-lead refinement. This is the single check worth running at main-agent context; the rest of the discipline is audited structurally (invlang validator) or by the Tier 2 judge. If a hypothesis has 3+ predictions, re-dispatch with a one-line note pointing at the offending entry.
+
 Omit the `hypothesize:` block entirely for SCREEN-matched cases.
 
 ### GATHER
 
 **Goal:** Execute the selected lead(s) — query SIEM, read data, collect evidence.
 
-#### Dispatch modes
+#### Dispatch
 
-Choose the dispatch mode based on the investigative question:
-
-- **Single lead:** One subagent, one lead. Use for independent evidence-gathering where cross-lead context doesn't help.
-- **Composite lead:** One subagent, multiple leads executed sequentially. Use when profiling an entity across multiple data sources — earlier lead results can refine later queries (e.g., auth session boundaries narrow the time window for data access queries). See `docs/design-v3-tool-execution.md §11` for the full design.
-
-**When to use composite dispatch:**
-- The leads share the same entity (user, IP, host) and time window
-- The investigative question is a profiling question ("what did this entity do?")
-- Earlier lead results can meaningfully improve later queries (session boundaries, entity disambiguation, time refinement)
-
-**When NOT to use composite dispatch:**
-- Leads target different entities — dispatch independently (parallel if possible)
-- Leads are fully independent (e.g., source reputation + process lineage for unrelated entities)
-- Only one lead is needed
-
-#### Model selection
-
-**Single lead, template available** — dispatch the gather subagent; it runs a generic data-source health probe, then executes the template-driven lead. The subagent is pinned to Haiku in its frontmatter and escalates on non-normal probe verdicts or any condition requiring real reasoning (see `agents/gather.md`). This is the cost lever for the common case.
+**Default: `gather` subagent** (Haiku, `agents/gather.md`). Single lead, template available, one entity set. This is the cost lever.
 
 ```python
 Agent(
@@ -451,39 +439,25 @@ Agent(
 )
 ```
 
-When the subagent returns `result: escalate`, read the `trigger` and re-dispatch accordingly — in all cases below, re-run the lead (or follow-up work) with `model="sonnet"` overriding the Haiku default so stronger reasoning can handle the non-template-driven work:
+**Fallback: `gather-composite` subagent** (Sonnet, `agents/gather-composite.md`). Use when the shape is composite (multiple leads, cross-lead refinement), ad-hoc (no vendor template), or the `gather` subagent returned `result: escalate` with `trigger: missing_template | binding_mismatch | follow_up_needed | siem_error | elevated | low | broken`.
 
-- `elevated | low | broken` — the data-source rate signal itself is anomalous. Either record the probe output as the GATHER outcome (e.g., pipeline outage *is* the finding) or re-dispatch to characterize the spike with stronger reasoning.
-- `missing_template | binding_mismatch | follow_up_needed` — the work is no longer template-driven; re-dispatch so the subagent can construct queries.
-- `siem_error` — the SIEM-CLI failed in a way Haiku couldn't resolve. Re-dispatch on the main model so Sonnet-grade reasoning can debug (following `leads/data-source-debug/definition.md`) rather than silently retrying.
+```python
+Agent(
+  subagent_type="soc-agent:gather-composite",
+  description="gather-composite {lead_names} for {reporting_agent}",
+  prompt="run_dir={run_dir}\nsignature_id={signature_id}\nvendor={vendor}\nincident_start={incident_start}\nincident_end={incident_end}\nmode={composite|ad-hoc|redispatch}\nleads=<ordered list of {lead_name, entity_bindings, reporting_agent}>\ncross_lead_hint=<one-line reason they are composite; omit for ad-hoc/redispatch>"
+)
+```
 
-**Composite dispatch** (cross-lead refinement, session-window narrowing, consistency checks) and **ad-hoc** leads (no template, custom query construction) do not use the Haiku gather subagent — handle them inline or omit the model override on a custom subagent. The Haiku gather path is template-strict by design.
+**When a subagent returns**, transcribe its `characterization` fields + `cross_lead_notes` (composite only) into `## GATHER (loop {N})`. Per-lead `status != ok` is a lead-level caveat — record it; don't re-characterize. Neither subagent writes to disk; the main agent persists.
 
-#### Lead execution (composite / ad-hoc / re-dispatched after escalation)
-
-When you are not using the Haiku gather subagent — composite dispatch, ad-hoc leads, or re-dispatch after a `follow_up_needed` escalation — the per-lead procedure is:
-
-1. Read `knowledge/common-investigation/leads/{lead-name}/definition.md` for what to characterize and pitfalls to avoid. If no lead directory exists, follow `leads/ad-hoc/definition.md`.
-
-2. **Query execution:** Check if `{lead-name}/templates/` has a template for your SIEM. If yes, read it — it contains the base query in native syntax and entity field mappings. Plug in the relevant entities and time range, then execute via the SIEM CLI documented in the relevant `knowledge/environment/systems/{vendor}/SKILL.md` for your environment's SIEM. If no template exists, construct the query yourself using the same vendor SKILL.md for field mappings and any vendor-specific quirks file alongside it.
-
-3. **Validate results:** Check the data source health section in the output. If results are suspect (zero matches, unexpectedly low count, stale latest event), follow `leads/data-source-debug/definition.md`.
-
-4. **Record faithfully:** Characterize, do not interpret. "Timing is periodic, 5min ±3s" is characterization. "This is a monitoring probe" is interpretation — save that for ANALYZE.
-
-For composite dispatch, additionally:
-- **Refine later leads** using earlier results where applicable (e.g., narrow time window to observed session boundaries)
-- **Note cross-lead observations** — consistencies, contradictions, or patterns that span leads
-- **Do not skip leads** or change their methodology based on earlier results — each lead's "What to Characterize" requirements still apply in full
-
-Append to `{run_dir}/investigation.md`:
 ```markdown
 ## GATHER (loop {N})
 
-**Lead:** {lead-name} (or: **Leads:** lead-1, lead-2, lead-3 for composite)
-**Query:** {what you searched for}
-**Raw observation:** {what you found — be specific with numbers, IPs, usernames}
-**Cross-lead notes:** {for composite only — consistencies, contradictions, refinements applied}
+**Lead:** {lead-name} (or: **Leads:** lead-1, lead-2 for composite)
+**Query:** {executed query}
+**Raw observation:** {subagent's characterization — specific values, not interpretation}
+**Cross-lead notes:** {composite only}
 ```
 
 **No YAML block at GATHER.** Characterize the raw observation in prose; do not interpret. The complete `gather:` lead block — including `query_details`, `outcome`, and `resolutions` — is written at ANALYZE once both observation and analysis are complete.
@@ -573,8 +547,7 @@ Retry the same write after the fix — no state-machine recovery needed.
 4. Determine disposition: `benign` (correct detection, harmless), `false_positive` (rule misfired), `true_positive` (confirmed threat), or `inconclusive` (can't determine)
    - For SCREEN-resolved investigations, use the disposition, confidence, matched_archetype, and matched_ticket_id from the validated screen result
 5. If `resolved`:
-   - `matched_archetype` must name an archetype directory under `knowledge/signatures/{signature_id}/archetypes/` (the directory containing the archetype's `story.md` + `trust-anchors.md`)
-   - **Shape re-verification (mandatory before writing any non-null `matched_archetype`)** — Read `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/story.md` AND `trust-anchors.md` in a single batched turn. Walk through each out-of-archetype condition the story names and confirm the GATHER evidence does not trigger it. The scanner's `disqualifiers` list from CONTEXTUALIZE is a starting point but was judged against the single-alert view only — the out-of-archetype check must apply to the full broader evidence gathered during the loop (ticket-context window, authentication-history, any correlated queries). If any disqualifier is triggered, `matched_archetype: null` and `status: escalated` — the closest-label fallback is not allowed. This step re-introduces the story's shape constraints into context right before slot-filling the frontmatter and is the structural fix for the "ANALYZE said escalate, CONCLUDE wrote resolved" self-contradiction.
+   - `matched_archetype` must name an archetype directory under `knowledge/signatures/{signature_id}/archetypes/` (the directory containing the archetype's `story.md` + `trust-anchors.md`). Shape verification — walking the archetype's out-of-archetype conditions against the loop's evidence — is owned by the ANALYZE subagent's contract and audited by the Tier 2 judge at report-write time; do not re-verify inline here.
    - **Grounding leg** (at least one of):
      - Every anchor in the archetype's `required_anchors` frontmatter appears in `trust_anchors_consulted` with `result: confirmed` and a concrete citation, OR
      - `matched_ticket_id` names a precedent snapshot JSON file inside the matched archetype's directory
