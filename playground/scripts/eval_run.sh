@@ -146,6 +146,11 @@ cd "$EVAL_DIR"
 # repo are wazuh-rule-*, so prefix accordingly.
 SIGNATURE_ID="wazuh-rule-$RULE_ID"
 PROMPT="/investigate $SIGNATURE_ID '$ALERT_JSON'"
+if [ -n "${SOC_EVAL_PROMPT_SUFFIX:-}" ]; then
+    PROMPT="$PROMPT
+
+$SOC_EVAL_PROMPT_SUFFIX"
+fi
 
 echo "[+] Launching claude (isolated, transcript → $EVAL_DIR/transcript.jsonl)..."
 echo "    cwd: $(pwd)"
@@ -158,8 +163,14 @@ echo
 # failures, judge denials, etc.) doesn't prevent the transcript renderer
 # from running. We still report the exit status afterwards.
 set +e
+EFFORT_ARGS=()
+if [ -n "${SOC_EVAL_EFFORT:-}" ]; then
+    EFFORT_ARGS=(--effort "$SOC_EVAL_EFFORT")
+fi
+
 stdbuf -oL -eL claude \
     --model "${SOC_EVAL_MODEL:-sonnet}" \
+    "${EFFORT_ARGS[@]}" \
     --allowedTools \
         "Bash(cd *)" \
         "Bash(ls *)" \
@@ -172,6 +183,7 @@ stdbuf -oL -eL claude \
         "Bash(python3 scripts/workspace_map.py *)" \
         "Bash(python3 scripts/tools/wazuh_cli.py *)" \
         "Bash(python3 scripts/tools/host_query.py *)" \
+        "Bash(python3 scripts/tools/ticket_context.py *)" \
         "Bash(python3 scripts/invlang/cli.py *)" \
         "Bash(bash scripts/invlang/run.sh *)" \
         "Bash(python3 hooks/scripts/write_state.py *)" \
@@ -183,6 +195,7 @@ stdbuf -oL -eL claude \
         "Bash(python3 /workspace/soc-agent/scripts/workspace_map.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/tools/wazuh_cli.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/tools/host_query.py *)" \
+        "Bash(python3 /workspace/soc-agent/scripts/tools/ticket_context.py *)" \
         "Bash(python3 /workspace/soc-agent/scripts/invlang/cli.py *)" \
         "Bash(bash /workspace/soc-agent/scripts/invlang/run.sh *)" \
         "Bash(python3 /workspace/soc-agent/hooks/scripts/write_state.py *)" \

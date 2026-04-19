@@ -84,9 +84,9 @@ VERDICT_LINE_RE = re.compile(
 def check_ticket_context_spawned(run_dir: Path) -> str | None:
     """Return None on pass, error message on fail.
 
-    Primary signal is the audit log scan for a Task/Agent call mentioning
-    ticket-context. The `ticket_context.yaml` file path is a legacy/test
-    convenience marker.
+    Accepts either (a) a Bash invocation of `ticket_context.py`, or (b) a
+    Task/Agent call mentioning ticket-context (legacy subagent path). The
+    `ticket_context.yaml` file path is a legacy/test convenience marker.
     """
     if (run_dir / "ticket_context.yaml").exists():
         return None
@@ -107,20 +107,23 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
             ev = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if ev.get("tool_name") not in ("Task", "Agent"):
-            continue
+        tool_name = ev.get("tool_name")
         blob = json.dumps(ev.get("tool_input", {})).lower()
-        if "ticket-context" in blob or "ticket_context" in blob:
+        if tool_name == "Bash" and "ticket_context.py" in blob:
+            return None
+        if tool_name in ("Task", "Agent") and (
+            "ticket-context" in blob or "ticket_context" in blob
+        ):
             return None
 
     return (
-        "ticket-context subagent was not dispatched during CONTEXTUALIZE. "
-        "The main agent is expected to spawn it inline via Agent() as "
-        "described in SKILL.md §CONTEXTUALIZE step 3; the audit log has no "
-        "matching Task/Agent call. Dispatch the subagent using "
-        "Agent(subagent_type=\"ticket-context\") before re-issuing this "
-        "CONCLUDE write. Next action: stay in CONCLUDE, run the subagent, "
-        "then retry the write."
+        "ticket-context was not dispatched during CONTEXTUALIZE. The main "
+        "agent is expected to invoke it inline via "
+        "Bash(python3 scripts/tools/ticket_context.py --run-dir X "
+        "--signature-id Y) (or the legacy Agent subagent), as described in "
+        "SKILL.md §CONTEXTUALIZE step 2; the audit log has no matching call. "
+        "Dispatch it before re-issuing this CONCLUDE write. Next action: "
+        "stay in CONCLUDE, run ticket_context.py, then retry the write."
     )
 
 
