@@ -85,7 +85,7 @@ This means:
 1. **When uncertain, escalate.** A missed threat is catastrophically worse than escalating a benign alert. If two interpretations remain plausible after pursuing all leads, escalate. Your value is knowing when you *don't* know.
 2. **No remediation.** You investigate and recommend only. No blocking IPs, no account changes, no firewall rules.
 3. **Evidence over assumption.** If you don't have evidence, you don't know. Say so.
-4. **Maintain adversarial hypothesis.** Always keep at least one threat hypothesis active until explicitly refuted with `--` evidence. This is the "don't miss" principle — dangerous explanations stay on the table regardless of probability until the evidence rules them out. Adversarial hypotheses are *upstream causal questions* — "did the attacker have what they needed?" — not downstream consequence checks ("did they succeed? is there lateral movement?"). Verifying downstream consequences (post-compromise scope, lateral movement, persistence) is incident response work; this agent's scope is triage. If evidence strongly suggests success and downstream scope is unknown, escalate — don't attempt IR inline.
+4. **Resolve legitimacy through lead-outcome resolutions.** When a hypothesis's disposition depends on authorization (same mechanism is consistent with benign or adversarial intent depending on who/what ran it), declare a `legitimacy_contract` on the hypothesis naming the edge(s) and the authority that resolves them. The resolving lead writes two coupled records in its own `outcome`: a `trust_anchor_result` with `asks: authorization` (the consultation itself) and a `legitimacy_resolutions[]` entry with `target: e-*` and `fulfills_contract: h-*.lc*` (the back-reference to the contract). Edge records stay write-once; an edge's current authorization state is a computed rollup over lead order with `supersedes` chain support. See `docs/investigation-language.md` §Legitimacy as edge attribute and `docs/design-v3-authority-consultation.md`. Disposition is structurally gated: `benign` requires every contract on a live-weight hypothesis to have an *effective* `authorized` verdict (after supersede resolution); any `indeterminate` or `unauthorized` effective verdict forces `status: escalated`. The "don't miss" principle sits in that structure — dangerous explanations can't be quietly deprioritized, they have to be answered by an authority. Contracts answer *policy* (is this allowed?), not integrity (was it executed as it appears?); integrity questions — session hijack, process-hollowing, tool-masquerade — are mechanism-level discriminations resolved by behavioral observation. Hypotheses remain *upstream causal questions* — "did the cause have what it needed?" — not downstream consequence checks ("did they succeed? is there lateral movement?"). Verifying downstream consequences (post-compromise scope, lateral movement, persistence) is incident-response work; this agent's scope is triage. If evidence strongly suggests success and downstream scope is unknown, escalate — don't attempt IR inline.
 5. **No auto-close without archetype + grounding.** `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding — either every `required_anchors` entry confirmed OR a `matched_ticket_id` citing a valid precedent snapshot under the same archetype. An archetype that declares no required anchors cannot resolve without `matched_ticket_id`.
 6. **Fail safe.** Errors, timeouts, missing data — escalate with context gathered so far.
 7. **Stay in scope.** Investigate within the signature's detection domain. Don't expand scope — escalate instead.
@@ -335,7 +335,7 @@ A hypothesis is a **one-hop proposed extension of the confirmed graph**: it prop
 - **Hypothesis seeds** (in the playbook body) are candidate one-hop proposals — the classifications of upstream vertex to consider first. They are skeletal by design; the agent keeps or prunes them based on observables.
 - **Archetype catalog** (under `archetypes/{name}/`) is a pattern-recognition *cache* of past ticket outcomes, with required trust anchors and discriminating boundaries. Archetypes inform which hypotheses to prioritize and provide a fast-path resolution when a clean match + confirmed grounding can auto-resolve. They are recommendations, not source of truth: novel variants, shape mutations, and adversaries mimicking benign patterns all require reasoning from proposed edges, not from cached patterns alone.
 
-Work from both layers together. Start from the hypothesis seeds (plus any adversarial hypothesis the severity demands). As evidence accumulates, check whether the emerging shape matches an archetype. If the evidence doesn't fit any archetype, the hypothesis loop keeps running until one hypothesis is confirmed with `++` evidence and the adversarial hypothesis is explicitly refuted — at which point the outcome is either escalation or, rarely, a novel pattern that deserves a new archetype after the fact.
+Work from both layers together. Start from the hypothesis seeds — including adversarial-mechanism variants (`?adversary-controlled-*`, `?runtime-exec-injection`) when they predict observationally distinct world-states, and `legitimacy_contract`s on hypotheses whose disposition hinges on authorization. As evidence accumulates, check whether the emerging shape matches an archetype. If the evidence doesn't fit any archetype, the hypothesis loop keeps running until one hypothesis is confirmed with `++` evidence and every active `legitimacy_contract` has a fulfilling resolution with `verdict: authorized` — at which point the outcome is either escalation or, rarely, a novel pattern that deserves a new archetype after the fact.
 
 The COMPLETENESS criterion in Tier 2 captures the discipline: the judge expects you to have exhausted the shape space *inside and outside* the catalog. Forcing an alert into the closest archetype when the evidence has features the archetype doesn't describe is a failure mode the judge will catch.
 
@@ -356,8 +356,11 @@ For novel alerts (no playbook), generate hypotheses by:
 When a lead confirms the one-hop parent and the investigation needs to distinguish sub-cases (retry-loop vs. enumeration-misconfig, legitimate-bait vs. bait-triggered-by-adversary), **decompose via hierarchical IDs**: allocate child hypotheses `h-{parent}-{ordinal}` in the lead's `new_hypotheses` and shelve the parent in the same block. Children inherit no weight from the parent; their histories are independent. This is the machinery for deepening — use it instead of pre-committing to the refined narrative at HYPOTHESIZE time.
 
 **Completeness checks** — verify before proceeding:
-- **Classification coverage:** For each anchor edge, have you considered plausible upstream parent classifications (automated, human-authorized, human-unauthorized, adversarial)?
-- **Adversarial:** At least one adversarial hypothesis must survive until explicitly refuted with `--` evidence. It may be attached to the same anchor as benign hypotheses, or to a different not-yet-observed edge (e.g., `?compromise-followup` attached to a hypothetical future `authenticated_as` edge).
+- **Classification coverage:** For each anchor edge, have you enumerated the plausible upstream parent classifications? Three shapes of adversariness (see `docs/investigation-language.md` §Legitimacy as edge attribute):
+  - **Mechanism-level** — when adversarial variants predict observationally distinct world-states (`?adversary-controlled-*`, `?runtime-exec-injection`), enumerate them as normal mechanism hypotheses alongside benign classifications. No contract needed — classification carries the claim.
+  - **Attribute-level (legitimacy contract)** — when the same mechanism is consistent with benign or adversarial intent depending on authorization (CFO vs. external identity reading payroll; operator shell on prod vs. attacker RCE on prod), declare a `legitimacy_contract` on the hypothesis naming the edge(s) and the authority that resolves them. Contracts answer *policy*, not integrity — integrity questions (session hijack, process-hollowing, tool-masquerade) are mechanism-level discriminations resolved by behavioral observation, not contracts. Do **not** write parallel `?sanctioned` vs. `?unsanctioned` hypotheses for the same mechanism; the mechanism is identical, only the verdict differs.
+  - **Future-edge** — when the adversarial signal is a separate downstream edge (a failed-auth alert followed by an unexpected success), write it as its own hypothesis attached to the hypothetical future edge. Topology question, not a legitimacy attribute.
+- **Behavioral-consistency prediction (optional):** A contract resolved `authorized` establishes policy compliance, not integrity. A hypothesis MAY carry one baseline-consistency prediction — positive ("expect corroborating activity X") or negative ("expect NOT to see >Nσ deviation / access outside baseline / concurrent geo-distant sessions"). Gates (all three must hold): baseline queryable, scoped to the alert's entities, weight-sensitive (skip if already `++`/`--`). Caps at `moderate` severity. Unavailable baseline → note `indeterminate` in `concerns`; do not confabulate.
 - **Leanness:** Each hypothesis has ≤2 predictions. If a hypothesis has more, something should be refined out or split.
 
 #### Selecting Leads
@@ -438,18 +441,17 @@ Choose the dispatch mode based on the investigative question:
 
 #### Model selection
 
-**Single lead, template available** — dispatch the gather subagent on Haiku; it runs a generic data-source health probe, then executes the template-driven lead. The subagent escalates on non-normal probe verdicts or any condition requiring real reasoning (see `gather.md`). This is the cost lever for the common case.
+**Single lead, template available** — dispatch the gather subagent; it runs a generic data-source health probe, then executes the template-driven lead. The subagent is pinned to Haiku in its frontmatter and escalates on non-normal probe verdicts or any condition requiring real reasoning (see `agents/gather.md`). This is the cost lever for the common case.
 
 ```python
 Agent(
-  subagent_type="general-purpose",
-  model="haiku",
+  subagent_type="soc-agent:gather",
   description="gather {lead_name} for {reporting_agent}",
-  prompt="Read ${CLAUDE_SKILL_DIR}/gather.md for your complete instructions. Substitute: run_dir={run_dir}, signature_id={signature_id}, lead_name={lead_name}, reporting_agent={reporting_agent}, incident_start={incident_start}, incident_end={incident_end}, entity_bindings={entity_bindings}, vendor={vendor}"
+  prompt="run_dir={run_dir}\nsignature_id={signature_id}\nlead_name={lead_name}\nreporting_agent={reporting_agent}\nincident_start={incident_start}\nincident_end={incident_end}\nentity_bindings={entity_bindings}\nvendor={vendor}"
 )
 ```
 
-When the subagent returns `result: escalate`, read the `trigger` and re-dispatch accordingly — in all cases below, re-run the lead (or follow-up work) without the `model="haiku"` override so the subagent inherits the main model:
+When the subagent returns `result: escalate`, read the `trigger` and re-dispatch accordingly — in all cases below, re-run the lead (or follow-up work) with `model="sonnet"` overriding the Haiku default so stronger reasoning can handle the non-template-driven work:
 
 - `elevated | low | broken` — the data-source rate signal itself is anomalous. Either record the probe output as the GATHER outcome (e.g., pipeline outage *is* the finding) or re-dispatch to characterize the spike with stronger reasoning.
 - `missing_template | binding_mismatch | follow_up_needed` — the work is no longer template-driven; re-dispatch so the subagent can construct queries.
@@ -554,7 +556,7 @@ ANALYZE runs as a dedicated subagent. You do not grade hypotheses inline — you
 
 If the gate rejects the write, the error message names the failed criterion. Respond by fixing the underlying gap in `investigation.md` and retrying:
 
-- Adversarial hypothesis not refuted with `--` evidence → run a discriminating lead, or escalate.
+- Unfulfilled or `indeterminate` `legitimacy_contract` on a live-weight hypothesis → run the resolving lead against the declared authority, or escalate.
 - A `++` grade with no falsification path → downgrade to `+`, or run a check that could have refuted it.
 - Dangling evidence (observations the confirmed hypothesis doesn't explain) → add an ANALYZE pass that accounts for them, or expand the hypothesis space.
 - Archetype shape mismatch or sibling archetype unaddressed → revisit archetype selection or escalate as a novel variant.
@@ -567,7 +569,7 @@ Retry the same write after the fix — no state-machine recovery needed.
 1. Review the **Investigation Checklist** in the Signature Knowledge section above — verify every item before writing the report
 2. Generate a trace line summarizing the investigation path
    - For SCREEN-resolved investigations, use the format: `screen({pattern}, {leads}) → disposition:hypothesis`
-3. Determine status: `resolved` (confident — archetype matched AND grounding satisfied) or `escalated` (uncertain, adversarial, grounding unsatisfied, or insufficient evidence)
+3. Determine status: `resolved` (confident — archetype matched AND grounding satisfied) or `escalated` (uncertain, unfulfilled/`indeterminate`/`unauthorized` legitimacy contract on a live-weight hypothesis, grounding unsatisfied, or insufficient evidence)
 4. Determine disposition: `benign` (correct detection, harmless), `false_positive` (rule misfired), `true_positive` (confirmed threat), or `inconclusive` (can't determine)
    - For SCREEN-resolved investigations, use the disposition, confidence, matched_archetype, and matched_ticket_id from the validated screen result
 5. If `resolved`:

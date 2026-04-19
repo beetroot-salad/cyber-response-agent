@@ -10,8 +10,10 @@ from typing import Optional
 from schemas.enums import (
     VALID_ANCHOR_KINDS,
     VALID_ANCHOR_RESULTS,
+    VALID_ASKS,
     VALID_CONFIDENCES,
     VALID_DISPOSITIONS,
+    VALID_LEGITIMACY_VERDICTS,
     VALID_STATUSES,
 )
 
@@ -113,6 +115,32 @@ class ReportFrontmatter:
                         errors.append(
                             f"trust_anchors_consulted[{i}] result must be one of "
                             f"{VALID_ANCHOR_RESULTS}, got '{result}'"
+                        )
+                    # Optional fields added with the authority-consultation
+                    # unification (v2.9). Entries authored pre-v2.9 omit
+                    # these; entries sourced from lead-outcome rollups
+                    # carry them.
+                    asks = entry.get("asks")
+                    if asks is not None and asks not in VALID_ASKS:
+                        errors.append(
+                            f"trust_anchors_consulted[{i}] asks must be one of "
+                            f"{VALID_ASKS}, got '{asks}'"
+                        )
+                    verdict = entry.get("verdict")
+                    if verdict is not None and verdict not in VALID_LEGITIMACY_VERDICTS:
+                        errors.append(
+                            f"trust_anchors_consulted[{i}] verdict must be one of "
+                            f"{VALID_LEGITIMACY_VERDICTS}, got '{verdict}'"
+                        )
+                    if asks == "authorization" and verdict is None:
+                        errors.append(
+                            f"trust_anchors_consulted[{i}] asks is 'authorization' "
+                            f"but verdict is missing"
+                        )
+                    if asks == "expectation" and verdict is not None:
+                        errors.append(
+                            f"trust_anchors_consulted[{i}] asks is 'expectation' "
+                            f"but verdict={verdict!r} is set — baselines don't authorize"
                         )
 
         return errors

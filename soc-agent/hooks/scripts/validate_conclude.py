@@ -19,7 +19,7 @@ Two gates run:
 
 2. **Two-judge investigation soundness check.** Two Haiku judges run
    in parallel via the claude CLI:
-     - Judge A (log integrity): ADVERSARIAL_CHECK,
+     - Judge A (log integrity): LEGITIMACY_CHECK,
        PLUS_PLUS_FALSIFICATION, DANGLING_EVIDENCE,
        ESCALATION_RATIONALE.
      - Judge B (archetype/grounding): SHAPE_MATCH, COMPLETENESS,

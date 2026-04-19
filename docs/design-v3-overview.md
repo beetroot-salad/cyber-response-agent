@@ -63,7 +63,7 @@ The challenge is balancing **reliability** (never miss a real threat), **securit
 
 **Epistemic foundation:** The investigation loop follows the hypothetico-deductive method:
 
-1. **Falsificationism (Popper):** The agent must always maintain at least one adversarial hypothesis (a threat scenario) and actively seek evidence that would *support* it. A benign conclusion is strongest when built on the *absence* of threat indicators, not just the *presence* of benign ones.
+1. **Falsificationism (Popper):** For hypotheses where adversarial-vs-benign is a mechanism-level distinction (same mechanism produces distinct observable world-states), the agent enumerates the adversarial variant alongside benign ones and actively seeks evidence that would *support* it. For hypotheses where the same mechanism is consistent with benign or adversarial intent depending on authorization (CFO vs. external identity reading payroll; operator vs. attacker shell on prod), the agent declares a `legitimacy_contract` on the hypothesis naming the edge and authority; the resolving lead writes a `legitimacy_resolutions` entry on the edge and disposition is structurally gated on `verdict: authorized`. See `docs/investigation-language.md` §Legitimacy as edge attribute. A benign conclusion is strongest when built on the *absence* of threat indicators and the *presence* of an authoritative `authorized` verdict, not just the presence of benign ones.
 
 2. **Maximum information gain:** At each iteration, pursue the lead whose result would most change the belief distribution across hypotheses, regardless of direction.
 
@@ -76,7 +76,7 @@ Exit:   CONCLUDE
 ```
 
 - **CONTEXTUALIZE** — Load all available context. One-time entry point.
-- **HYPOTHESIZE** — Form or update candidate explanations. Must include at least one adversarial (threat) hypothesis.
+- **HYPOTHESIZE** — Form or update candidate explanations. Enumerate mechanism-level adversarial variants alongside benign ones when they predict observationally distinct states; attach a `legitimacy_contract` when disposition depends on authorization (same mechanism, authority resolves the verdict).
 - **GATHER** — Execute leads via scripts, MCP, or subagents.
 - **ANALYZE** — Interpret results against predictions. Determine: conclude or iterate?
 - **CONCLUDE** — Output recommendation. Only reachable after at least one full HYPOTHESIZE→GATHER→ANALYZE cycle.

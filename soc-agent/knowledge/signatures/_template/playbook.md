@@ -15,7 +15,7 @@ Description of the first candidate explanation.
 **Typical profile:** Key indicators that characterize this hypothesis.
 
 ### ?hypothesis-2
-Description of the second candidate explanation (must include at least one adversarial hypothesis).
+Description of the second candidate explanation. If an adversarial variant predicts observationally distinct world-states (`?adversary-controlled-*`, `?runtime-exec-injection`), enumerate it as its own hypothesis — classification carries the claim. When the same mechanism is consistent with benign or adversarial intent depending on authorization (CFO vs external identity, operator vs attacker), declare a `legitimacy_contract` on the hypothesis instead of forking into `?sanctioned-*`/`?unsanctioned-*` pairs. See `docs/investigation-language.md` §Legitimacy as edge attribute.
 
 **Typical profile:** Key indicators.
 
@@ -62,7 +62,7 @@ Recommend which lead to pursue first and why.
 
 All must be true:
 1. Exactly one hypothesis remains with `++` support
-2. All adversarial hypotheses have `--` refutation
+2. Every `legitimacy_contract` on a live-weight hypothesis has a fulfilling lead-outcome `legitimacy_resolutions[]` entry (authored in `gather[].outcome.legitimacy_resolutions[]`, backed by a sibling `trust_anchor_result` with `asks: authorization`) whose effective verdict after the supersede chain is `authorized`; any mechanism-level adversarial hypothesis (`?adversary-controlled-*`, etc.) has `--` refutation
 3. A matching precedent exists
 4. No escalation triggers present
 5. Confidence is high

@@ -22,3 +22,15 @@ VALID_ANCHOR_KINDS = ("org-authority", "telemetry-baseline")
 
 # Result of a trust anchor consultation
 VALID_ANCHOR_RESULTS = ("confirmed", "refuted", "unavailable")
+
+# What an authority consultation is asking about. Distinct from `result`:
+#   asks: authorization  — "is this action sanctioned right now?"
+#                          → emits a verdict (authorized/unauthorized/indeterminate)
+#   asks: expectation    — "does this match our historical baseline / registry?"
+#                          → no verdict; baselines don't authorize
+VALID_ASKS = ("expectation", "authorization")
+
+# Verdict returned by an authorization-class authority consultation.
+# Required when trust_anchor_result.asks == "authorization"; forbidden
+# when asks == "expectation" (telemetry baselines don't authorize).
+VALID_LEGITIMACY_VERDICTS = ("authorized", "unauthorized", "indeterminate")

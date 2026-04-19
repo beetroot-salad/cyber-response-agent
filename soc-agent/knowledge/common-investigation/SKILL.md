@@ -12,12 +12,12 @@ Portable methodology for hypothesis-driven security alert investigation.
 ### checklist.md
 **Read this at CONTEXTUALIZE and verify before CONCLUDE.** Self-check guide covering:
 - Investigation completeness criteria
-- Adversarial hypothesis requirements
+- Legitimacy-contract declaration + resolution (v2.8)
 - Report structure requirements
 - Common mistakes to avoid
 
 ### leads/
-Shared investigation vocabulary — reusable lead definitions. Each lead is a directory containing `definition.md` (what to characterize, pitfalls, data tags) and optionally `templates/` (pre-built query templates per SIEM in native syntax). Browse subdirectories for available leads. `_template/` shows the standard structure. `ad-hoc/` and `data-source-debug/` are meta-leads for handling undefined leads and debugging suspect results.
+Shared investigation vocabulary — reusable lead definitions. Each lead is a directory containing `definition.md` (what to characterize, pitfalls, data tags) and optionally `templates/` (pre-built query templates per SIEM in native syntax). Browse subdirectories for available leads. `_template/` shows the standard structure. `ad-hoc/` and `data-source-debug/` are meta-leads for handling undefined leads and debugging suspect results. `TAGS.md` enumerates the `data_tags` and `baseline` vocabulary used in lead frontmatter.
 
 ### lessons/
 Cross-cutting lessons from past investigations.

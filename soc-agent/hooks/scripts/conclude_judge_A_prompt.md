@@ -16,7 +16,7 @@ Mode: **{judge_mode}**
   escalation. All criteria except ESCALATION_RATIONALE apply as hard
   gates.
 - `escalation` — `status=escalated`. The agent intends to escalate.
-  ADVERSARIAL_CHECK and DANGLING_EVIDENCE apply as advisory context.
+  LEGITIMACY_CHECK and DANGLING_EVIDENCE apply as advisory context.
   ESCALATION_RATIONALE applies as a hard gate. PLUS_PLUS_FALSIFICATION
   outputs `N/A`.
 
@@ -25,24 +25,50 @@ The investigation status comes from the `**Verdict:**` line in the
 
 ## Criteria
 
-### 1. ADVERSARIAL_CHECK
+### 1. LEGITIMACY_CHECK
 
-Were threat hypotheses genuinely refuted with evidence, not just
-deprioritized or ignored? Check that:
+For hypotheses whose disposition hinges on authorization (same
+mechanism, benign vs. adversarial turns on who/what ran it — CFO vs.
+external identity reading payroll, on-call operator vs. attacker RCE),
+did the investigation declare a `legitimacy_contract` and resolve it
+against an authority? See `docs/investigation-language.md` §Legitimacy
+as edge attribute for the schema. Check that:
 
-- At least one adversarial (threat) hypothesis was explicitly listed
-  during the investigation.
-- Threat hypotheses were refuted with `--` evidence in an ANALYZE
-  block, not just outweighed by benign evidence.
-- The refutation reasoning is specific (cites concrete observations
-  from a GATHER block), not generic ("unlikely given context").
+- Any hypothesis whose disposition depends on authorization carries a
+  `legitimacy_contract` entry on the hypothesis record naming the edge
+  (or `edge_ref: proposed`) and the authority. If the adversarial
+  reading IS the mechanism (e.g., `?adversary-controlled-process`,
+  `?runtime-exec-injection`), no contract is needed — classification
+  carries the claim; mechanism-level refutation via `--` on concrete
+  evidence is the discipline there.
+- Every declared contract has a fulfilling `legitimacy_resolutions`
+  entry on a contracted edge, with `verdict` in
+  {authorized, unauthorized, indeterminate} and a back-reference
+  (`fulfills_contract: h-{id}.lc{n}`) pointing at the declaring
+  hypothesis's contract entry.
+- For `disposition: benign`, every contract on a live-weight
+  hypothesis (weight `++`/`+`, status `confirmed`/`active`) resolves
+  with `verdict: authorized`.
+- `verdict: unauthorized` or `verdict: indeterminate` forces
+  escalation (disposition ∈ {unclear, true_positive}); they cannot
+  coexist with `disposition: benign`.
+- For mechanism-level adversarial hypotheses (no contract), the agent
+  must still show the `--` refutation is specific (cites concrete
+  observations from a GATHER block), not generic ("unlikely given
+  context").
 
 In `escalation` mode, advisory: a well-escalated investigation may
-deliberately leave an adversarial hypothesis live, which is fine
-provided the ESCALATION_RATIONALE check captures why.
+deliberately leave a contract at `indeterminate` (the anchor was
+unavailable), which is fine provided the ESCALATION_RATIONALE check
+captures why.
 
-FLAG if (full mode): adversarial hypotheses disappeared without
-refutation, OR refutation reasoning is vague.
+FLAG if (full mode): a hypothesis whose disposition hinges on
+authorization has no declared `legitimacy_contract`; OR a declared
+contract has no fulfilling `legitimacy_resolutions` entry; OR
+`disposition: benign` coexists with a non-`authorized` verdict; OR the
+resolution's reasoning is vague ("consistent with sanctioned sources"
+instead of a specific authority answer); OR a mechanism-level
+adversarial hypothesis disappeared without specific refutation.
 
 ### 2. PLUS_PLUS_FALSIFICATION
 
@@ -108,7 +134,7 @@ grounded in a specific ANALYZE-recorded uncertainty.
 Return EXACTLY this format (no other text):
 
 ```
-ADVERSARIAL_CHECK: PASS|FLAG|N/A — reason
+LEGITIMACY_CHECK: PASS|FLAG|N/A — reason
 PLUS_PLUS_FALSIFICATION: PASS|FLAG|N/A — reason
 DANGLING_EVIDENCE: PASS|FLAG|N/A — reason
 ESCALATION_RATIONALE: PASS|FLAG|N/A — reason
@@ -118,7 +144,7 @@ VERDICT: PASS|FLAG — summary reason
 VERDICT is PASS only if all evaluated hard-gate criteria pass (`N/A`
 counts as pass, advisory FLAGs do not drag VERDICT to FLAG).
 
-In `full` mode, hard gates are ADVERSARIAL_CHECK, PLUS_PLUS_FALSIFICATION,
+In `full` mode, hard gates are LEGITIMACY_CHECK, PLUS_PLUS_FALSIFICATION,
 DANGLING_EVIDENCE.
 
 In `escalation` mode, the only hard gate is ESCALATION_RATIONALE; the

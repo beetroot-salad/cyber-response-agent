@@ -138,7 +138,7 @@ Unbounded loops invite two failure modes:
 1. **Drift** — the agent keeps pulling new leads that feel relevant but don't discriminate between surviving hypotheses. It burns budget without converging.
 2. **Gaming the safety check** — if loops were unlimited, the agent could technically satisfy "pursued enough leads" by running many low-severity leads, none of which actually refute threat hypotheses.
 
-The `MAX_LOOPS = 12` cap makes both impossible. Combined with the CONCLUDE-transition self-check (see `content/validation.md`) and the adversarial hypothesis rule, the loop has both a ceiling and a floor: you must articulate refutation and grounding evidence before resolving, and you cannot run more than a bounded number of rounds before escalating.
+The `MAX_LOOPS = 12` cap makes both impossible. Combined with the CONCLUDE-transition self-check (see `content/validation.md`) and legitimacy-gated disposition (every `legitimacy_contract` on a live-weight hypothesis must resolve `authorized` before `disposition: benign` is allowed), the loop has both a ceiling and a floor: you must articulate contract resolutions and grounding evidence before resolving, and you cannot run more than a bounded number of rounds before escalating.
 
 ## How `investigation.md` relates to the state machine
 

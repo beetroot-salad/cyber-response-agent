@@ -7,7 +7,7 @@ reflects the investigation** — it claims only what the log supports,
 and (when a precedent is cited) the precedent actually transfers.
 
 A separate pre-CONCLUDE gate has already verified that the
-investigation itself is sound (adversarial check, archetype shape,
+investigation itself is sound (legitimacy check, archetype shape,
 completeness, anchor-leg grounding, falsification attempts, dangling
 evidence). Do not re-run those — focus on the delta from
 `investigation.md` to `report.md`.

@@ -52,7 +52,7 @@ The optional SCREEN phase spawns a cheap subagent (Sonnet/Haiku) that attempts f
 - **Hooks registered in plugin.json** — hooks only fire when the plugin is loaded, not during development
 - **State machine** (`infer_state.py` PostToolUse hook) prevents phase skipping — inferred from `## PHASE` headers in `investigation.md`, agent must follow CONTEXTUALIZE→[SCREEN]→HYPOTHESIZE→GATHER→ANALYZE→(loop|CONCLUDE)
 - **Two-leg resolution requirement** — `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding: every `required_anchors` entry confirmed OR `matched_ticket_id` citing a valid precedent snapshot inside that archetype directory. Archetypes with no required anchors must be grounded by `matched_ticket_id`
-- **Adversarial hypothesis** — agent must maintain at least one threat hypothesis until explicitly refuted
+- **Legitimacy as edge attribute (invlang v2.8)** — hypotheses whose disposition depends on authorization declare a `legitimacy_contract`; resolving leads write `legitimacy_resolutions` on the edge. `disposition: benign` is structurally gated on every contract resolving `authorized` (invlang validator rule #21); `unauthorized`/`indeterminate` force escalation. Mechanism-level adversarial variants (`?adversary-controlled-*`) remain separate hypotheses — classification carries the claim.
 
 ## Project Structure
 
@@ -203,7 +203,7 @@ conclude:       # CONCLUDE: termination category, disposition, confidence, match
   matched_archetype: <name> | null
 ```
 
-The key invariants enforced by the validator (18 rules in total — see spec §Validator rules):
+The key invariants enforced by the validator (22 rules in total — see spec §Validator rules):
 - **Edge authority** — `++`/`--` resolutions must cite at least one `siem-event`, `runtime-audit`, or `authoritative-source` edge.
 - **Append-only** — no existing record is ever mutated; decomposition adds sub-vertices, attribution adds `identified_as` links.
 - **Mechanical leads stay within their data source** — a lead's observations contain only entities the queried system directly names by native identity.
@@ -212,7 +212,7 @@ The key invariants enforced by the validator (18 rules in total — see spec §V
 
 ### Hypothesis-Driven Investigation
 - Agent forms candidate explanations, makes predictions, gathers evidence
-- Must maintain adversarial hypothesis until explicitly refuted
+- Legitimacy-gated disposition — `disposition: benign` requires every `legitimacy_contract` on a live-weight hypothesis to resolve `authorized`; mechanism-level adversarial variants (`?adversary-controlled-*`) still require `--` refutation
 - Structured assessments (++/+/-/--) replace subjective confidence
 
 ### Hook-Enforced Safety

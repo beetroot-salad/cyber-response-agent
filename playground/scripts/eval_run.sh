@@ -154,6 +154,10 @@ echo
 
 # stdbuf to keep the tee buffer flushing in real time
 # Main-agent model — override via SOC_EVAL_MODEL env var (e.g. SOC_EVAL_MODEL=sonnet)
+# `set +e` around the pipeline so a non-zero claude exit (timeouts, hook
+# failures, judge denials, etc.) doesn't prevent the transcript renderer
+# from running. We still report the exit status afterwards.
+set +e
 stdbuf -oL -eL claude \
     --model "${SOC_EVAL_MODEL:-sonnet}" \
     --allowedTools \
@@ -198,9 +202,11 @@ stdbuf -oL -eL claude \
     --permission-mode acceptEdits \
     "$PROMPT" \
     | tee "$EVAL_DIR/transcript.jsonl"
+CLAUDE_EXIT=${PIPESTATUS[0]}
+set -e
 
 echo
-echo "[+] Eval run complete: $RUN_ID"
+echo "[+] Eval run complete: $RUN_ID (claude exit=$CLAUDE_EXIT)"
 echo "    transcript: $EVAL_DIR/transcript.jsonl"
 echo "    runs:       $EVAL_DIR/runs/"
 ls "$EVAL_DIR/runs/" 2>/dev/null | head -5 || true
@@ -209,3 +215,5 @@ ls "$EVAL_DIR/runs/" 2>/dev/null | head -5 || true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python3 "$SCRIPT_DIR/render_transcript.py" "$EVAL_DIR" || \
     echo "[!] render_transcript.py failed (non-fatal)"
+
+exit "$CLAUDE_EXIT"

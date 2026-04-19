@@ -10,7 +10,7 @@ This is your self-check — not a rigid schema, but a guide to ensure your inves
 
 ### Hypotheses
 - [ ] At least two hypotheses formed (from playbook + your own)
-- [ ] At least one **adversarial hypothesis** (represents a real threat) maintained until explicitly refuted with `--` evidence
+- [ ] **Legitimacy contracts declared** where disposition depends on authorization (same mechanism, benign vs. adversarial turns on who/what ran it — CFO vs. external identity, operator vs. attacker). Do not split into parallel `?sanctioned-*`/`?unsanctioned-*` pairs. When the adversarial reading IS the mechanism (`?adversary-controlled-*`, `?runtime-exec-injection`), enumerate it as its own hypothesis — classification carries the claim, no contract needed.
 - [ ] Each hypothesis has a clear, testable profile (what you'd expect to see if true)
 
 ### Leads
@@ -36,7 +36,7 @@ its reasoning converges, not because a pattern matches. Even when an archetype
 cleanly matches, these items must hold:
 
 - [ ] Exactly one hypothesis has `++` support
-- [ ] **All** adversarial hypotheses have `--` refutation with explicit reasoning
+- [ ] **Every `legitimacy_contract` on a live-weight hypothesis** has a fulfilling lead-outcome `legitimacy_resolutions[]` entry — written in `gather[].outcome.legitimacy_resolutions[]` as a sibling of `attribute_updates`, backed by a `trust_anchor_result` with `asks: authorization` on the same lead — whose effective verdict (after supersede-chain resolution) is `authorized`. Any `unauthorized` or `indeterminate` effective verdict forces escalation. Mechanism-level adversarial hypotheses (`?adversary-controlled-*`) still require `--` refutation with explicit reasoning.
 - [ ] The confirmed hypothesis explains every significant observation in the investigation log (no dangling evidence)
 - [ ] `leads_pursued` count meets minimum for the signature severity (low:1, medium:2, high:3, critical:4)
 - [ ] Confidence is `high`
@@ -78,7 +78,7 @@ work above still runs — but the outcome is escalation, not auto-close.
 
 ## Common Mistakes
 
-- **Confirming without refuting:** Finding evidence for your preferred hypothesis is not enough. You must also show why the adversarial hypothesis is wrong.
+- **Confirming without refuting:** Finding evidence for your preferred hypothesis is not enough. For mechanism-level adversarial variants (`?adversary-controlled-*`), you must show why the adversarial hypothesis is wrong. For attribute-level legitimacy questions, you must resolve the `legitimacy_contract` against the declared authority — "deprioritized" or "unlikely given context" is not a resolution.
 - **Forcing an alert into the closest archetype:** The archetype catalog is a pattern-recognition cache, not the source of truth. If the evidence has features the matched archetype's story doesn't describe, that's a sign the archetype isn't the right fit — escalate as a novel variant rather than force-closing under a close-but-wrong archetype. Tier 2's COMPLETENESS criterion catches this.
 - **Skipping sibling archetypes:** When multiple archetypes under the same signature share primitives, resolving to one without running the discriminating lead that would have refuted the other(s) is incomplete. The archetype `story.md` files document the discriminating boundaries ("what takes an alert *out* of this archetype") — read them.
 - **Resolving without grounding:** `status=resolved` requires BOTH a `matched_archetype` AND grounding (required anchors confirmed, OR a `matched_ticket_id` citation). An archetype match without grounding is not enough; a ticket citation without a matching archetype is not enough.
