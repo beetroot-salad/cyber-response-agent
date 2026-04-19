@@ -24,3 +24,10 @@ Where to find process telemetry in this org.
   alert fired. Use it to confirm a still-running process, not to
   reconstruct past activity.
 - **One host only.** No fleet-wide process search.
+
+## Elastic Stack
+
+- **Adapter:** `scripts/tools/elastic_cli.py` (`query` subcommand).
+- **Query language:** KQL-like pass-through via Elasticsearch `query_string`.
+- **Coverage:** Process/metric telemetry from Elastic Agent `system` integration on enrolled hosts — `event.category: "process"`, `process.name`, `process.pid`, `process.parent.pid`. Fleet-wide (any host with the `system` integration), unlike the Falco/host-query pair which only cover `target-endpoint`.
+- **Retention:** Deployment-specific; not yet characterized.
