@@ -1,6 +1,6 @@
 ---
 title: Hypothesis atomicity invariant (one mechanism per hypothesis)
-status: doing
+status: done
 groups: hypothesize, validation, knowledge
 ---
 

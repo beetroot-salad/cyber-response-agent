@@ -1,6 +1,6 @@
 ---
 title: Context window management: migrate detailed investigation reasoning to a subagent
-status: backlog
+status: done
 groups: optional, context management
 ---
 

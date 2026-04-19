@@ -9,7 +9,7 @@ Primary plan for the Opus → Sonnet migration. Stages 2 and 3 (phase-specific s
 Prerequisites:
 
 - Signature-scaffolding maturation on 100001 and any other thin-playbook signatures — the #11 failure was a scaffolding gap, not a model-capability gap. Primary defense per the decision doc.
-- `/evaluate` suite larger than 1 run per configuration, including at least one deliberately-degraded data source run per the real-world caveat.
+- `/testrun` suite larger than 1 run per configuration, including at least one deliberately-degraded data source run per the real-world caveat.
 - Post-mortem screen-miss detection (reliability-screen-miss-detection) landed and catalogued.
 
 Sub-tasks:

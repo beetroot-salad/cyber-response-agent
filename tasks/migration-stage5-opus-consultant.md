@@ -1,6 +1,6 @@
 ---
 title: Opus consultant subagent (deep-reason, Sonnet escalates for hard calls)
-status: todo
+status: doing
 groups: cost, phase-2
 ---
 

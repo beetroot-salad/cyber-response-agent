@@ -1,6 +1,6 @@
 ---
 title: Add good/bad hypothesis examples to the HYPOTHESIZE prompt (few-shot)
-status: todo
+status: done
 groups: hypothesize, prompt, knowledge
 ---
 
