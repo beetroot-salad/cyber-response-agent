@@ -210,14 +210,16 @@ outcome:
                                 # every lead that names it in `target`, in declaration order,
                                 # with `supersedes` pruning the chain. See validator rules
                                 # #20 (back-ref), #21 (legitimacy-gated disposition).
-    - id: lr-{n}                # unique run-wide; pattern ^lr\d+$
+    - id: lr{n}                 # unique run-wide; pattern ^lr\d+$ (e.g. lr1, lr2).
+                                # Follows the `lp{n}` / `lc{n}` sub-id convention — no
+                                # hyphen, distinct from top-level `v-{id}` / `e-{id}`.
       target: v-{id} | e-{id}   # graph element whose authorization this verdict refines.
                                 # May differ from the lead's own `target` — the lead's
                                 # target is "what I'm asking about," the resolution's
                                 # target is "which graph element this verdict applies to."
       fulfills_contract: h-{id}.lc{n}   # back-reference to a declared legitimacy_contract
       verdict: authorized | unauthorized | indeterminate
-      supersedes: lr-{m}        # optional; when a later lead revises an earlier verdict
+      supersedes: lr{m}         # optional; when a later lead revises an earlier verdict
                                 # on the same (fulfills_contract, target). Cross-contract
                                 # or cross-target supersession is a category error.
       concerns: []              # optional
