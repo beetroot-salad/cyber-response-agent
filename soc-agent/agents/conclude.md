@@ -27,9 +27,9 @@ Read in parallel on your first turn:
 
 After reading these, **if the investigation matched an archetype** (either (a) the last ANALYZE's routing names a non-null `matched_archetype`, or (b) SCREEN returned `screen_result: match` with a `matched_archetype` field), also read these in one parallel batch:
 
-- `/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/story.md`
-- `/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/trust-anchors.md`
-- Every `*.json` file directly under `/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/` — use `Glob` with pattern `/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/*.json` to list them, then Read each returned file in the same parallel turn. These are precedent snapshots (one per prior closed ticket). You need to know what precedents exist to decide whether to cite one.
+- `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/story.md`
+- `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/trust-anchors.md`
+- Every `*.json` file directly under `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/` — use `Glob` with pattern `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/*.json` to list them, then Read each returned file in the same parallel turn. These are precedent snapshots (one per prior closed ticket). You need to know what precedents exist to decide whether to cite one.
 
 These reference files serve three narrow purposes:
 1. Confirming `required_anchors` names from `trust-anchors.md` frontmatter (so you know which anchors are mandatory for the grounding leg).

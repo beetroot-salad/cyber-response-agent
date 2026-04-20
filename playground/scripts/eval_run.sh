@@ -3,18 +3,18 @@
 # in an isolated environment with full transcript capture.
 #
 # Isolation strategy:
-#   - Run dir lives under /workspace/runs/ (gitignored via **/runs/*). The project
-#     CLAUDE.md at /workspace/CLAUDE.md is still on the traversal path — claude picks
-#     it up because we cd into the run dir (a /workspace descendant). That's the
-#     intended behavior: eval runs should see the same project context a real
-#     investigation would. The conversation auto-memory at
-#     /root/.claude/projects/-workspace/ is still skipped (different path root).
-#   - --plugin-dir loads the soc-agent plugin for this session only.
-#   - --setting-sources user keeps user-level settings but skips project/local
-#     (which would be empty in /tmp anyway, but explicit is better).
+#   - Run dir lives under /tmp/soc-agent-eval/ (outside /workspace) so no
+#     CLAUDE.md on the cwd→root traversal path leaks into the agent.
+#   - Plugin is COPIED to $EVAL_DIR/plugin at run start and --plugin-dir points
+#     at the copy, not /workspace/soc-agent. The agent sees a snapshot of the
+#     plugin — it cannot mutate the canonical source, and plugin edits made
+#     during a running eval are not picked up by that eval. If you want your
+#     plugin edits reflected, start a new eval after saving.
+#   - --setting-sources user keeps user-level settings but skips project/local.
 #   - --strict-mcp-config + --mcp-config loads only the wazuh MCP server,
 #     not whatever else might be configured at user level.
-#   - --no-session-persistence avoids polluting ~/.claude/projects with eval runs.
+#   - --no-session-persistence avoids polluting ~/.claude/projects with eval runs,
+#     and keeps auto-memory from loading (cwd-keyed).
 #
 # Transcript capture:
 #   - --output-format stream-json + --include-hook-events emits every event
@@ -24,7 +24,7 @@
 # Usage:
 #   playground/scripts/eval_run.sh <rule_id> [--window 4h] [--offset 0]
 #
-# Outputs (under /workspace/runs/{run_id}/):
+# Outputs (under /tmp/soc-agent-eval/{run_id}/):
 #   alert.json        — the raw alert this run is investigating
 #   transcript.jsonl  — full event stream (model + tool + hook events)
 #   runs/{uuid}/      — the soc-agent run directory (investigation.md, report.md, state.json, ...)
@@ -58,14 +58,14 @@ fi
 # ---------------------------------------------------------------------------
 
 REPO_ROOT=/workspace
-PLUGIN_DIR="$REPO_ROOT/soc-agent"
+SOURCE_PLUGIN_DIR="$REPO_ROOT/soc-agent"
 MCP_CONFIG="$REPO_ROOT/.claude/mcp_config.json"
-TOOLS_VENV="$PLUGIN_DIR/.venv/bin/python3"
-FETCH_ALERT="$PLUGIN_DIR/scripts/fetch_alert.py"
+TOOLS_VENV="$SOURCE_PLUGIN_DIR/.venv/bin/python3"
+FETCH_ALERT="$SOURCE_PLUGIN_DIR/scripts/fetch_alert.py"
 
 if [ ! -x "$TOOLS_VENV" ]; then
     echo "error: soc-agent venv not found at $TOOLS_VENV" >&2
-    echo "hint: cd $PLUGIN_DIR && uv sync --extra dev" >&2
+    echo "hint: cd $SOURCE_PLUGIN_DIR && uv sync --extra dev" >&2
     exit 2
 fi
 
@@ -83,18 +83,31 @@ set -a; source "$REPO_ROOT/.env"; set +a
 # Deps are declared as extras in pyproject.toml; install with:
 #   cd soc-agent && uv sync --extra dev
 # shellcheck disable=SC1091
-source "$PLUGIN_DIR/.venv/bin/activate"
+source "$SOURCE_PLUGIN_DIR/.venv/bin/activate"
 
 # ---------------------------------------------------------------------------
-# Run dir
+# Run dir + plugin snapshot
 # ---------------------------------------------------------------------------
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)-rule${RULE_ID}"
-EVAL_DIR="$REPO_ROOT/runs/$RUN_ID"
-mkdir -p "$EVAL_DIR/runs"
+EVAL_DIR="/tmp/soc-agent-eval/$RUN_ID"
+PLUGIN_DIR="$EVAL_DIR/plugin"
+mkdir -p "$EVAL_DIR/runs" "$PLUGIN_DIR"
 
 echo "[+] Eval run: $RUN_ID"
 echo "    dir: $EVAL_DIR"
+
+# Snapshot the plugin so the agent cannot mutate the canonical source and so
+# in-flight edits to /workspace/soc-agent don't bleed into the run. Skips the
+# venv (shell activates the source venv for python deps) and dev/build cruft.
+echo "[+] Snapshotting plugin → $PLUGIN_DIR"
+tar -C "$SOURCE_PLUGIN_DIR" \
+    --exclude='./.venv' \
+    --exclude='./.pytest_cache' \
+    --exclude='./__pycache__' \
+    --exclude='./runs' \
+    --exclude='./.git' \
+    -cf - . | tar -C "$PLUGIN_DIR" -xf -
 
 # ---------------------------------------------------------------------------
 # Fetch alert
@@ -182,23 +195,25 @@ stdbuf -oL -eL claude \
         "Bash(python3 scripts/search_precedents.py *)" \
         "Bash(python3 scripts/workspace_map.py *)" \
         "Bash(python3 scripts/tools/wazuh_cli.py *)" \
+        "Bash(python3 scripts/tools/data_source_health_wazuh.py *)" \
         "Bash(python3 scripts/tools/host_query.py *)" \
         "Bash(python3 scripts/tools/ticket_context.py *)" \
         "Bash(python3 scripts/invlang/cli.py *)" \
         "Bash(bash scripts/invlang/run.sh *)" \
         "Bash(python3 hooks/scripts/write_state.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/contextualize_preload.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/preflight.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/resolve_imports.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/setup_run.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/search_precedents.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/workspace_map.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/tools/wazuh_cli.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/tools/host_query.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/tools/ticket_context.py *)" \
-        "Bash(python3 /workspace/soc-agent/scripts/invlang/cli.py *)" \
-        "Bash(bash /workspace/soc-agent/scripts/invlang/run.sh *)" \
-        "Bash(python3 /workspace/soc-agent/hooks/scripts/write_state.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/contextualize_preload.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/preflight.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/resolve_imports.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/setup_run.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/search_precedents.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/workspace_map.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/tools/wazuh_cli.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/tools/data_source_health_wazuh.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/tools/host_query.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/tools/ticket_context.py *)" \
+        "Bash(python3 $PLUGIN_DIR/scripts/invlang/cli.py *)" \
+        "Bash(bash $PLUGIN_DIR/scripts/invlang/run.sh *)" \
+        "Bash(python3 $PLUGIN_DIR/hooks/scripts/write_state.py *)" \
         "mcp__wazuh__*" \
         "Task" \
         "Agent" \

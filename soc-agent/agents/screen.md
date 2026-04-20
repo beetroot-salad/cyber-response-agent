@@ -23,7 +23,7 @@ If either is missing from the prompt, emit `screen_result: error` with `reason: 
 Issue a single assistant turn with both Reads in parallel:
 
 1. `{run_dir}/alert.json`
-2. `/workspace/soc-agent/knowledge/signatures/{signature_id}/playbook.md`
+2. `knowledge/signatures/{signature_id}/playbook.md`
 
 Do **not** read `investigation.md`. Do **not** read `context.md`. Do **not** explore the directory tree with `ls`, `Glob`, or `find`.
 
@@ -37,9 +37,9 @@ If there is no `## Screen` section → `screen_result: error`, `reason: "playboo
 
 For every lead named in the Screen table, Read in one parallel turn:
 
-- `/workspace/soc-agent/knowledge/common-investigation/leads/{lead}/definition.md` — the lead's data source and output shape
+- `knowledge/common-investigation/leads/{lead}/definition.md` — the lead's data source and output shape
 - If the definition references environment classification (e.g. `environment/context/ip-ranges.md`, `environment/context/identity-patterns.md`, `environment/operations/{anchor}.md`) — also Read those now
-- If the definition routes to the SIEM — also Read `/workspace/soc-agent/knowledge/environment/systems/{vendor}/SKILL.md` to learn the query entrypoint. Infer `{vendor}` from the `signature_id` prefix (`wazuh-rule-*` → `wazuh`). If `{vendor}` cannot be inferred → `screen_result: error` with reason.
+- If the definition routes to the SIEM — also Read `knowledge/environment/systems/{vendor}/SKILL.md` to learn the query entrypoint. Infer `{vendor}` from the `signature_id` prefix (`wazuh-rule-*` → `wazuh`). If `{vendor}` cannot be inferred → `screen_result: error` with reason.
 
 ### Step 4 — Run the screen leads
 

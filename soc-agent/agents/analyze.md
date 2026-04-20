@@ -123,6 +123,93 @@ Respond with exactly the following two sections, in order, and nothing else:
   - {or a single "none" entry if no anomalies}
 ```
 
+## Examples
+
+### Example 1 — clean resolution: `++` with failed refutation → CONCLUDE benign
+
+**State:** rule-5710 SSH invalid user (`monitorprobe` from `10.0.1.99`). Loop 2. Loop 1 confirmed source classification as `internal-monitoring-host` via source-classification lead, resolving legitimacy_contract e-001.lc1 to `authorized` (approved-monitoring-sources registry). `?monitoring-probe` predictions p1 (single-attempt-per-tick), p3 (cadenced, 60s interval); refutation shapes r1 (≥2 same-user attempts within 1s), r3 (off-cadence). Current GATHER: cadence-check returned four prior alerts from 10.0.1.99 at T-60, T-120, T-180, T-240 (±2s drift).
+
+```markdown
+## ANALYZE (loop 2)
+
+**Evidence:** cadence-check — 4 prior rule-5710 alerts from 10.0.1.99 for user `monitorprobe` at 60s intervals (T-60, T-120, T-180, T-240, ±2s drift from documented 60s schedule).
+
+**Assessment:**
+- ?monitoring-probe: ++ (was +) — matched prediction p3 (cadenced at documented interval); named refutation r3 (off-cadence) failed to materialize (max drift 2s vs. documented 60s tolerance). Legitimacy contract e-001.lc1 resolved `authorized` in loop 1 via approved-monitoring-sources anchor.
+
+**Surviving hypotheses:** ?monitoring-probe
+**Next action:** CONCLUDE → disposition: benign, confidence: high, matched_archetype: scheduled-monitoring-probe, rationale: cadence matches documented interval within tolerance; legitimacy authority confirmed source as sanctioned monitoring host.
+```
+
+```markdown
+## Self-report
+
+- **Context wished for:** none
+- **Uncertain claims:** none
+- **Anomalies:**
+  - none
+```
+
+### Example 2 — pitfall: circumstantial evidence graded as `++` (data-exfil domain)
+
+**State:** DLP alert on anomalous S3 upload volume (`rule-dlp-4421`). Loop 2. Active hypothesis `?scheduled-bulk-backup` predicts p1 (volume shape is monotonic, size ≥ historical daily backup mean) and p2 (uploader process is the backup daemon); refutation r1 (volume shape is bursty / retry-shaped, not monotonic) would refute p1. Loop 1 confirmed destination bucket `acme-prod-backups` belongs to the backup-service account — legitimacy_contract e-001.lc1 resolved `authorized` via asset-inventory anchor. Current GATHER: volume-profile returned 180 GB uploaded over 45 min, monotonic (no retry spikes, no burst pattern).
+
+**⚠ Wrong shape (do NOT emit):**
+```markdown
+## ANALYZE (loop 2)
+
+**Evidence:** volume-profile — 180 GB uploaded to acme-prod-backups over 45 min, monotonic.
+
+**Assessment:**
+- ?scheduled-bulk-backup: ++ (was +) — volume shape consistent with backup AND destination is sanctioned ⚠ two +-strength signals stacked
+
+**Next action:** CONCLUDE → disposition: benign, confidence: high, matched_archetype: scheduled-nightly-backup ⚠ forced archetype match without mechanism confirmation
+```
+
+Pitfalls this shape embodies:
+- **Stacking circumstantial signals and calling it `++`.** Volume-shape consistency is a `+`; sanctioned destination is a contract-resolution signal. Neither is a *failed refutation*. `++` requires one specific check whose negative outcome would have falsified the mechanism — not two observations that individually merit `+`.
+- **Conflating legitimacy resolution with mechanism confirmation.** The authority answered "is this destination allowed?" — not "is this the backup daemon?". Contract resolution closes one edge-level question; the mechanism hypothesis still needs its own authoritative anchor.
+- **Forcing `matched_archetype` to fill the field.** The archetype's story almost certainly carries a "disqualified if uploader process is not the backup daemon" clause — which cannot be self-verified here because the uploader has not been identified. Force-matching an archetype with a live disqualifier is worse than `matched_archetype: null`.
+
+**Correct shape:**
+```markdown
+## ANALYZE (loop 2)
+
+**Evidence:** volume-profile — 180 GB uploaded to acme-prod-backups over 45 min, monotonic (no retry/burst pattern).
+
+**Assessment:**
+- ?scheduled-bulk-backup: + (was +) — monotonic shape matches p1 consistently; refutation r1 (bursty/retry shape) did not materialize. But volume-profile cannot distinguish the backup daemon from any other long-running monotonic uploader — mechanism remains circumstantial. Legitimacy_contract e-001.lc1 resolved `authorized` in loop 1; the mechanism-level question is still open.
+
+**Surviving hypotheses:** ?scheduled-bulk-backup
+**Next action:** HYPOTHESIZE — next lead must test the mechanism authoritatively. Candidates: (a) backup-service job-log query for a scheduled job ID active during T±45min (direct mechanism anchor, flips p1/p2 to authoritative), (b) process-lineage on the uploader PID to confirm it's the backup-daemon binary (tests p2 directly). Either flips `+` → `++` via a named failed refutation.
+```
+
+### Example 3 — `--` with matched refutation shape ID → drops a hypothesis (container-runtime domain)
+
+**State:** rule-100001 shell in container (`bash` with cmdline `"bash"`, parent `sh`, ancestry truncated at event capture). Loop 2. Two live hypotheses from loop 1: `?runtime-process` (h-001, parent classification `in-container-runtime-descendant`) predicts p1 "ancestry above /app/launcher.sh resolves to an in-container init wrapper with no runtime exec primitive"; `?underlying-host` (h-002, parent classification `runtime-exec-injection`) predicts p1 "extending ancestry shows a runtime exec primitive immediately above /app/launcher.sh", with refutation r1 "chain continues to a container-init wrapper with no exec primitive". Current GATHER: shell-context (extended) via container runtime API returned full ancestry.
+
+```markdown
+## ANALYZE (loop 2)
+
+**Evidence:** shell-context (extended) — full ancestry from container runtime API: `tini(pid 1) → /app/launcher.sh → node → sh → bash`. No runc / containerd-shim / docker-exec / crictl present anywhere in the chain.
+
+**Assessment:**
+- ?underlying-host: -- (was +) — matched refutation r1 (chain continues to a container-init wrapper with no exec primitive); ancestry terminates at `tini` with no runtime exec primitive above /app/launcher.sh. The runtime-exec-injection edge is directly falsified.
+- ?runtime-process: + (was +) — compatible with observed chain (all vertices container-internal, traceable to image's init sequence). Not yet `++`: no authoritative confirmation that /app/launcher.sh is the image's sanctioned entrypoint. The same topology can also be produced by post-exploit RCE through node — identical chain, different verdict. Pattern-match without an image-baseline anchor keeps this at `+`.
+
+**Surviving hypotheses:** ?runtime-process
+**Next action:** HYPOTHESIZE — ?runtime-process survived by elimination but has no failed refutation of its own named. Next lead must provide one: image-baseline anchor to confirm /app/launcher.sh is the documented entrypoint (flips `+` → `++` by failing a "launcher.sh is not in the image spec" refutation), OR node-process-argv inspection to verify the workload matches the container's declared role. Without this, disposition remains open (benign runtime vs. same-topology post-exploit RCE).
+```
+
+```markdown
+## Self-report
+
+- **Context wished for:** none
+- **Uncertain claims:** "same topology from post-exploit RCE" is a known confounder for `?runtime-process`; keeping the hypothesis at `+` reflects that, but the reader should treat survival-by-elimination as weaker than survival-by-failed-refutation
+- **Anomalies:**
+  - none
+```
+
 ## Rules
 
 - Do NOT run additional leads. Your job is grading and routing on the evidence already gathered.

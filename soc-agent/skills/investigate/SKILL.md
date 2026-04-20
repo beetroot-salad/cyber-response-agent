@@ -177,14 +177,14 @@ The subagent returns its findings alongside the code or query it executed. Treat
    Agent(
      subagent_type="soc-agent:archetype-scan",
      description="archetype-scan for {signature_id}",
-     prompt="alert_path={run_dir}/alert.json\nfield_quirks_path=/workspace/soc-agent/knowledge/signatures/{signature_id}/field-quirks.md\nstory_paths=/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_1}/story.md,/workspace/soc-agent/knowledge/signatures/{signature_id}/archetypes/{archetype_2}/story.md,..."
+     prompt="alert_path={run_dir}/alert.json\nfield_quirks_path=knowledge/signatures/{signature_id}/field-quirks.md\nstory_paths=knowledge/signatures/{signature_id}/archetypes/{archetype_1}/story.md,knowledge/signatures/{signature_id}/archetypes/{archetype_2}/story.md,..."
    )
    ```
 
    **`scripts/tools/ticket_context.py`** (Python script) — *owns alert correlation.* The script dispatches parallel SIEM queries for the alert's Key Observables + same-signature over a 4-hour window and clusters returned alerts mechanically into `repeats`, `related`, and `high_volume_dimensions`. Runs in ~5-10s; output is a single fenced YAML block on stdout. Correlation is delegated to this script; your job is to transcribe its output, not to re-do the correlation.
    ```
    Bash(
-     command="python3 /workspace/soc-agent/scripts/tools/ticket_context.py --run-dir {run_dir} --signature-id {signature_id}",
+     command="python3 scripts/tools/ticket_context.py --run-dir {run_dir} --signature-id {signature_id}",
      description="ticket-context for {identifier}"
    )
    ```

@@ -33,15 +33,15 @@ Always read:
 1. `{run_dir}/alert.json` — the alert (untrusted external data).
 2. `{run_dir}/investigation.md` — the full current investigation state,
    including the prior `hypothesize:` and `gather:` YAML blocks if any.
-3. `/workspace/soc-agent/knowledge/signatures/{signature_id}/playbook.md`
+3. `knowledge/signatures/{signature_id}/playbook.md`
    — the signature's hypothesis seeds, starter lead order, and archetype
    map.
-4. `/workspace/soc-agent/knowledge/signatures/{signature_id}/context.md`
+4. `knowledge/signatures/{signature_id}/context.md`
    — detection logic and threat/legitimacy context for this signature.
 
 Read if relevant to the lead you're about to name:
 
-5. `/workspace/soc-agent/knowledge/common-investigation/leads/{lead-name}/definition.md`
+5. `knowledge/common-investigation/leads/{lead-name}/definition.md`
    — what the lead characterizes and its pitfalls.
 
 ## Hypothesis shape
@@ -238,6 +238,34 @@ this file.
   only correct when the adversarial signal is *itself* a distinct
   future edge (a failed-auth alert followed by an unexpected
   success) — that's a topology question, not legitimacy.
+- **Story-diff before selecting a lead.** For each pair of active
+  hypotheses, name one observable whose predicted value differs between
+  them; that observable is what the `Selected lead:` must measure. If no
+  pair has a diverging observable, the hypotheses don't fork — collapse
+  or refine before emitting. This is what the validator's fork-distinctness
+  rule (#23) enforces structurally: co-attached siblings sharing a
+  `parent_vertex.classification` are rejected as non-forking.
+- **Identity-of-use precedes mechanism fork.** When the known vertex's
+  identity is *inferred from patterns* (sentinel username lists, naming
+  conventions, IP-range guesses) rather than *confirmed by authority*
+  (IAM record, audit-log correlation, runtime attestation, anchor
+  lookup), fork at identity-of-use before forking at mechanism. A
+  sanctioned `(srcip, srcuser, target)` triple in an approval registry
+  confirms the triple is *registered*; it does not confirm that the
+  registered actor was *the one who used it now* — another process on
+  the same host, or an actor spoofing the source, can also produce the
+  same credential string on the wire. Root fork for these cases is
+  `?registered-actor-is-the-user` vs `?credentials-used-outside-
+  registered-actor`; mechanism-layer classes (tool-misfire, schedule-
+  change, retry-storm, etc.) register as refinement children only after
+  the identity fork resolves. Skipping the identity fork bakes in an
+  unverified premise, and the mechanism hypotheses inherit its
+  unresolvable-ness. Discriminators for the identity fork are usually
+  *not* process-lineage on the source host (often unavailable) but
+  correlation queries on adjacent systems: the registered actor's own
+  audit log for a matching action at t-0, historical baseline for the
+  observed shape under that actor, output-channel confirmation of the
+  action.
 - **No HYPOTHESIZE without a fork.** Enter only when ≥ 2 competing
   classifications have predictions that diverge on already-observable
   fields. If the discriminating data is not yet known, emit a GATHER
@@ -318,7 +346,7 @@ HYPOTHESIZE block is being emitted). Even when you skip HYPOTHESIZE,
 you still name the next lead on the `Selected lead:` line.
 
 Lead catalog lives at
-`/workspace/soc-agent/knowledge/common-investigation/leads/`. One
+`knowledge/common-investigation/leads/`. One
 directory per lead, each with a `definition.md` whose frontmatter
 carries `data_tags` (abstract data types the lead consumes —
 `auth-events`, `process-events`, `network-events`, `asset-state`,
