@@ -406,11 +406,11 @@ Omit the `hypothesize:` block entirely for SCREEN-matched cases.
 Agent(
   subagent_type="soc-agent:gather",
   description="gather {lead_name} for {reporting_agent}",
-  prompt="run_dir={run_dir}\nsignature_id={signature_id}\nlead_name={lead_name}\nreporting_agent={reporting_agent}\nincident_start={incident_start}\nincident_end={incident_end}\nentity_bindings={entity_bindings}\nvendor={vendor}"
+  prompt="run_dir={run_dir}\nsignature_id={signature_id}\nloop_n={loop_n}\nlead_name={lead_name}\nreporting_agent={reporting_agent}\nincident_start={incident_start}\nincident_end={incident_end}\nentity_bindings={entity_bindings}\nvendor={vendor}"
 )
 ```
 
-**Fallback: `gather-composite` subagent** (Sonnet, `agents/gather-composite.md`). Use when the shape is composite (multiple leads, cross-lead refinement), ad-hoc (no vendor template), or the `gather` subagent returned `result: escalate` with `trigger: missing_template | binding_mismatch | follow_up_needed | siem_error | elevated | low | broken`.
+**Fallback: `gather-composite` subagent** (Sonnet, `agents/gather-composite.md`). Use when the shape is composite (multiple leads, cross-lead refinement), ad-hoc (no vendor template), or the `gather` subagent returned `result: escalate` with `trigger: missing_template | binding_mismatch | follow_up_needed | siem_error | empty_result | elevated | low | broken`.
 
 ```python
 Agent(
@@ -420,13 +420,18 @@ Agent(
 )
 ```
 
-**When a subagent returns**, transcribe its `characterization` fields + `cross_lead_notes` (composite only) into `## GATHER (loop {N})`. Per-lead `status != ok` is a lead-level caveat — record it; don't re-characterize. The main agent persists to `investigation.md`; `gather-composite` also writes a progress checkpoint for recovery (see below).
+**When a subagent returns**, transcribe its `characterization` fields + `cross_lead_notes` (composite only) into `## GATHER (loop {N})`. Per-lead `status != ok` is a lead-level caveat — record it; don't re-characterize. The main agent persists to `investigation.md`; both `gather` and `gather-composite` write a progress checkpoint for recovery (see below).
 
-**Silent-termination recovery for `gather-composite`.** The composite subagent has been observed to hit internal turn caps mid-compile and terminate without emitting its YAML block. It now writes a progress checkpoint at `{run_dir}/subagent_checkpoints/gather-composite-loop-{loop_n}.yaml` (see `agents/gather-composite.md` for the schema). If a dispatch returns a tool_result with **no YAML block, truncated YAML, or missing trailing fields** (no `cross_lead_notes`, no final `notes:`), don't accept it — instead:
+**Silent-termination recovery.** Both gather subagents have been observed to hit internal turn caps mid-execution and terminate without emitting their YAML block. Each writes a progress checkpoint under `{run_dir}/subagent_checkpoints/`:
 
-1. Read `{run_dir}/subagent_checkpoints/gather-composite-loop-{loop_n}.yaml` (the loop you just dispatched in).
-2. Respawn: `Agent(subagent_type="soc-agent:gather-composite", description="Resume from checkpoint", prompt="run_dir={run_dir}\nloop_n={loop_n}\nresume_from_checkpoint=true\n\nRead your checkpoint at {run_dir}/subagent_checkpoints/gather-composite-loop-{loop_n}.yaml. Continue from `next_intended_step`. Finish the YAML block per the Output contract and emit it — no additional tool calls unless the checkpoint says you were mid-query.")`
-3. If the checkpoint says `status: complete` but the subagent still didn't emit YAML, read its `leads` map directly and transcribe — the characterizations are there.
+- `gather`: `gather-loop-{loop_n}-{lead_name}.yaml` (see `agents/gather.md`)
+- `gather-composite`: `gather-composite-loop-{loop_n}.yaml` (see `agents/gather-composite.md`)
+
+If a dispatch returns a tool_result with **no YAML block, truncated YAML, or missing trailing fields** (for composite: no `cross_lead_notes`, no final `notes:`; for gather: no `result:` line or no closing `characterization`/`context`), don't accept it — instead:
+
+1. Read the matching checkpoint for the loop (and lead, for `gather`) you just dispatched in.
+2. Respawn the **same subagent type** with `resume_from_checkpoint=true`. For `gather`: `Agent(subagent_type="soc-agent:gather", description="Resume from checkpoint", prompt="run_dir={run_dir}\nloop_n={loop_n}\nlead_name={lead_name}\nresume_from_checkpoint=true\n\nRead your checkpoint at {run_dir}/subagent_checkpoints/gather-loop-{loop_n}-{lead_name}.yaml. Continue from `next_intended_step`. Finish the Decision YAML per the contract and emit it — no additional tool calls unless the checkpoint says you were mid-query.")`. For `gather-composite`: same shape, swap paths per the file above.
+3. If the checkpoint says `status: complete` but the subagent still didn't emit YAML, read its `result` block (gather) or `leads` map (composite) directly and transcribe — the characterizations are there.
 
 Do not try to reconstruct from raw query output files; the checkpoint has the structured work already.
 
