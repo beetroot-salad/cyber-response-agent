@@ -74,7 +74,7 @@ All hooks live under `soc-agent/hooks/scripts/` and are registered in `soc-agent
 | PreToolUse | `Task\|Agent` | `inject_env_context.py` | Inject environment context into subagent prompts |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `infer_state_pre.py` | Pre-write state transition check |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `validate_conclude.py` | Pre-write CONCLUDE self-contradiction guards |
-| PreToolUse | `Write\|Edit` on `*/investigation.md` | `invlang_validate.py` | Pre-write schema validation (22 rules) — blocks writes on schema errors |
+| PreToolUse | `Write\|Edit` on `*/investigation.md` | `invlang_validate.py` | Pre-write schema validation (23 rules) — blocks writes on schema errors |
 | PostToolUse | `Task\|Agent` | `extract_subagent_yaml.py` | Extract subagent YAML output into the investigation record |
 | PostToolUse | `Write\|Edit\|Bash` | `infer_state.py` | Infer state transitions from `## PHASE` headers |
 | PostToolUse | `Write\|Edit` | `validate_report.py` | Two-tier report validation (Tier 1 structural + Tier 2 Haiku judge) |
@@ -139,7 +139,7 @@ Shared helpers: `run_context.py` (session→run resolution), `permissions.py` (p
 │   │       ├── playground_ticket_cli.py   # FastAPI mock ticketing client
 │   │       ├── ticket_context.py          # Backend for the ticket-context subagent
 │   │       ├── data_source_health.py      # Abstract health-check helper
-│   │       ├── data_source_health_wazuh_example.py
+│   │       ├── data_source_health_wazuh.py
 │   │       └── list_lead_tags.py
 │   ├── hooks/
 │   │   └── scripts/               # See "Hook Architecture" above
@@ -279,7 +279,7 @@ conclude:       # CONCLUDE: termination category, disposition, confidence, match
   matched_archetype: <name> | null
 ```
 
-The key invariants enforced by the validator (22 rules in total — see spec §Validator rules):
+The key invariants enforced by the validator (23 rules in total — see spec §Validator rules; rule #23 enforces sibling-hypothesis classification uniqueness so proposed forks are structurally distinct):
 - **Edge authority** — `++`/`--` resolutions must cite at least one `siem-event`, `runtime-audit`, or `authoritative-source` edge.
 - **Append-only** — no existing record is ever mutated; decomposition adds sub-vertices, attribution adds `identified_as` links.
 - **Mechanical leads stay within their data source** — a lead's observations contain only entities the queried system directly names by native identity.

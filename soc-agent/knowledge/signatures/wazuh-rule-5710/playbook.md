@@ -70,45 +70,92 @@ lane per §ASSESS.
 Most investigations resolve through enrichment alone: the archetype
 catalog above captures the cross-product of (source sanctioned?) ×
 (username class) × (volume shape) × (forward success?) that these
-leads discriminate. If enrichment leaves disposition ambiguous, the
-fork that typically opens is a single legitimacy question on the
-`attempted_auth` edge — whether an `approved-monitoring-sources`
-entry authorizes the `(srcip, srcuser, target)` triple — carried as
-a `legitimacy_contract` on the hypothesis. Do **not** split into
-parallel `?sanctioned-*` vs. `?unsanctioned-*` hypotheses: same
-mechanism, same observables, only the authority answer differs — the
-textbook legitimacy-contract case.
+leads discriminate.
 
-The resolving lead consults the anchor and writes two coupled records
-in its own `outcome`:
+### Fork structure when enrichment leaves disposition ambiguous
+
+If the starter leads leave disposition ambiguous **and the source is
+internal-monitoring-host with a monitoring-pattern username**, the
+approved-monitoring-sources anchor will typically confirm the triple
+is registered. That confirms the triple *could* be used by the
+monitoring system — it does **not** confirm the monitoring system
+was the actor on this specific alert. Anyone with shell access to
+the monitoring host (a different script, a manual operator, a
+compromised process) can produce the same `(srcip, srcuser, target)`
+string on the wire. The anchor answers registration, not
+identity-of-use.
+
+**Root fork is identity-of-use, not mechanism.** Fork into:
+
+- `?monitoring-system-is-the-actor` — the registered monitoring
+  tool itself produced this attempt. Predictions: the monitoring
+  system's own audit/output channel records a scheduled action at
+  t-0 ±jitter; the observed (srcport, cadence, cluster-shape)
+  matches the historical baseline for this tool's traffic to this
+  target; the tool's process on monitoring-host is alive and
+  scheduled around t-0.
+- `?credentials-used-outside-registered-actor` — some other actor
+  on monitoring-host (or spoofing its identity) produced the
+  attempt using the registered credential string. Predictions:
+  no matching monitoring-system audit entry at t-0; observed shape
+  deviates from the tool's historical baseline (burst, off-cadence,
+  unfamiliar srcport pattern); the monitoring tool's own process
+  is idle or running a separate cycle at t-0.
+
+These siblings share the registered triple. Their discriminators
+are **correlation queries on adjacent systems**, not process-lineage
+on the source host (which is typically unavailable — the monitoring
+host often has no endpoint agent). See the new-lead suggestions
+below the starter lead order.
+
+**Refinement after identity-of-use resolves.** Only after the root
+fork resolves `++` on one side do mechanism-layer children register:
+
+- Children of `?monitoring-system-is-the-actor`: `?scheduled-retry-
+  misfire`, `?scheduled-behavior-drift`, `?operator-manual-probe`
+  (an operator ran a sibling monitoring-class script whose shape
+  differs from the approved tool's — e.g., a test/bait variant).
+- Children of `?credentials-used-outside-registered-actor`:
+  `?local-process-credential-reuse`, `?tunnel-hijack`,
+  `?source-spoofed-from-elsewhere`.
+
+Do not register these at loop 1 — they depend on the root fork
+having resolved. Identity-of-use first, mechanism second.
+
+### Legitimacy-contract case (when the triple is NOT registered)
+
+When the source/username pair is NOT in the registry — external
+source or internal-other — the fork is a single legitimacy question
+on the `attempted_auth` edge carried as a `legitimacy_contract`
+(same mechanism, only the authority answer differs). The resolving
+lead writes two coupled records in its own `outcome`:
+
 - a `trust_anchor_result` with `asks: authorization`, `kind: org-authority`,
-  and `verdict: authorized | unauthorized | indeterminate` — the
-  consultation record itself;
-- a `legitimacy_resolutions[]` entry with `target: e-*` pointing at the
-  `attempted_auth` edge and `fulfills_contract: h-*.lc*` back-referencing
-  the hypothesis's contract. Edge records stay write-once; the edge's
-  current authorization state is a computed rollup over lead order.
-
-See `docs/investigation-language.md` §Legitimacy as edge attribute and
-`docs/design-v3-authority-consultation.md` for the full primitive.
+  and `verdict: authorized | unauthorized | indeterminate`;
+- a `legitimacy_resolutions[]` entry with `target: e-*` pointing at
+  the `attempted_auth` edge and `fulfills_contract: h-*.lc*`.
 
 The contract's verdict routes to archetype:
 - `authorized` → `monitoring-probe` or `service-account-rotation`
-  depending on username class (sanction registry ×
-  `scheduled-jobs` resolves the benign sub-case).
+  depending on username class.
 - `unauthorized` → `credential-stuffing` or `external-bruteforce`
   depending on username class × volume shape.
 - `indeterminate` → escalate; the anchor gap is the rationale.
 
+### Always-on checks
+
 Forward-window success (a 5501/5715 from the same srcip within 60s)
 is a mandatory attribute check inside `authentication-history`, not
-a separate hypothesis slot. If observed, it overrides the contract
-verdict — success-after-failure is always severe (escalation).
+a separate hypothesis slot. If observed, it overrides every root
+fork — success-after-failure is always severe (escalation).
 
 The escalation archetypes (`credential-stuffing`, `external-bruteforce`)
 are adversarial-by-mechanism: classification carries the claim and
 no contract is declared. Their `--` refutation comes from concrete
 volume/shape evidence, not from an anchor lookup.
+
+See `docs/investigation-language.md` §Legitimacy as edge attribute and
+`docs/design-v3-authority-consultation.md` for the full primitive.
 
 ## Starter lead order
 

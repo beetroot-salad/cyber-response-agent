@@ -6,9 +6,9 @@ random windows from the recent past and compares the rate against the
 incident window. Returns a structured verdict the gather subagent uses to
 decide whether to proceed (Haiku-cheap) or escalate (Sonnet/Opus).
 
-This module is vendor-agnostic. For a working CLI binding, see the example
-at `scripts/tools/data_source_health_wazuh_example.py` — new vendors should
-copy that shape, pointing `count_fn` at their own query CLI.
+This module is vendor-agnostic. For a working CLI binding, see
+`scripts/tools/data_source_health_wazuh.py` — new vendors should copy that
+shape, pointing `count_fn` at their own query CLI.
 
 Verdicts (drive the gather subagent's escalate-vs-proceed decision):
     normal        — incident rate within k·stdev of baseline mean. Proceed.

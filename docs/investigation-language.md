@@ -775,3 +775,13 @@ coverage.
 22. **Attribute-update target shape.** Every `attribute_updates` entry
     has exactly one of `target: v-{id}` or `target: e-{id}`, and the
     id exists in the companion.
+
+23. **Hypothesis fork distinctness.** Within a sibling group —
+    hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` —
+    no two may share `proposed_edge.parent_vertex.classification`.
+    Duplicates propose the same causal upstream under two ids and
+    cannot be discriminated by any lead. The HYPOTHESIZE subagent
+    applies a story-diff self-check before emitting (each pair of
+    active hypotheses must have at least one observable whose
+    predicted value differs); this rule is the structural backstop
+    when the check is skipped.

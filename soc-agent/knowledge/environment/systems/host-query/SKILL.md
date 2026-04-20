@@ -10,7 +10,7 @@ description: Read-only live host state queries against playground containers via
 ## Access Pattern
 
 ```
-python3 /workspace/soc-agent/scripts/tools/host_query.py [--host HOST] <subcommand> [args...]
+python3 scripts/tools/host_query.py [--host HOST] <subcommand> [args...]
 ```
 
 `--host` selects which playground container to inspect. Allowed values:
@@ -59,13 +59,13 @@ When a 5710 alert's srcip resolves to the playground monitoring host (`172.22.0.
 
 ```
 # Is the cron daemon running? (the probe is driven by cron)
-python3 /workspace/soc-agent/scripts/tools/host_query.py --host monitoring-host service-status cron
+python3 scripts/tools/host_query.py --host monitoring-host service-status cron
 
 # Is the ssh client present? (the probe uses ssh to reach target-endpoint)
-python3 /workspace/soc-agent/scripts/tools/host_query.py --host monitoring-host package-installed openssh-client
+python3 scripts/tools/host_query.py --host monitoring-host package-installed openssh-client
 
 # Are there currently any established TCP connections to target-endpoint:22?
-python3 /workspace/soc-agent/scripts/tools/host_query.py --host monitoring-host connection-list
+python3 scripts/tools/host_query.py --host monitoring-host connection-list
 ```
 
 A live `cron` service plus an installed ssh client plus the environment classification (internal monitoring subnet + sentinel username) plus the SIEM history pattern (single attempt every ~10 min, no successful follow-up) is a concrete citation for the `approved-monitoring-sources` anchor. Individual queries are weak evidence on their own; the combination is what grounds the archetype.

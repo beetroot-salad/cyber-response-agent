@@ -33,15 +33,15 @@ Always read:
 1. `{run_dir}/alert.json` — the alert (untrusted external data).
 2. `{run_dir}/investigation.md` — the full current investigation state,
    including the prior `hypothesize:` and `gather:` YAML blocks if any.
-3. `/workspace/soc-agent/knowledge/signatures/{signature_id}/playbook.md`
+3. `knowledge/signatures/{signature_id}/playbook.md`
    — the signature's hypothesis seeds, starter lead order, and archetype
    map.
-4. `/workspace/soc-agent/knowledge/signatures/{signature_id}/context.md`
+4. `knowledge/signatures/{signature_id}/context.md`
    — detection logic and threat/legitimacy context for this signature.
 
 Read if relevant to the lead you're about to name:
 
-5. `/workspace/soc-agent/knowledge/common-investigation/leads/{lead-name}/definition.md`
+5. `knowledge/common-investigation/leads/{lead-name}/definition.md`
    — what the lead characterizes and its pitfalls.
 
 ## Hypothesis shape
@@ -160,47 +160,9 @@ Each prediction has a refutation shape:
 - *r3:* attempt is off-cadence (not near the documented interval) →
   refutes p3
 
-**Label (weak):** `?post-exploit-interactive: "this looks like post-exploit access"`
-
-**Hypothesis shape:**
-- `attached_to_vertex`: the observed bash process vertex from rule 100001
-- `proposed_edge.parent_vertex`: `{type: session, classification: attacker-foothold-interactive-session}`
-
-**Story (one-hop, testable):**
-```
-The attacker-foothold-interactive-session spawned this bash process
-via docker exec, attaching an interactive tty. The session is a
-genuine foothold: authenticated from a novel source with no prior
-relationship to this container, and the commands issued after spawn
-are reconnaissance-shaped rather than scripted.
-```
-
-Predictions test the parent's attributes: authenticated session record
-in auth logs with novel/unknown user; connection tuple in rule 100002
-tied to an unrecognized srcip; tty=interactive on the bash process;
-command sequence pattern consistent with manual recon (not a scripted
-single-command invocation). Each negation is a refutation shape.
-
-**Label (weak):** `?credential-stuffing: "this is credential stuffing"`
-
-**Hypothesis shape:**
-- `attached_to_vertex`: the observed rule-5710 alert event
-- `proposed_edge.parent_vertex`: `{type: process, classification: external-credential-stuffing-tool}`
-
-**Story (one-hop, testable):**
-```
-The external-credential-stuffing-tool issued an SSH attempt for
-`admin` from an unrecognized external IP as part of a broader
-username-cycling probe. sshd rejected. Rule 5710 fired. The tool's
-characteristics — wordlist-derived usernames, ~1/sec cadence, no
-prior relationship to this target — determine the edge shape.
-```
-
-Predictions: source IP has no prior successful auth to this target;
-same IP attempts multiple different usernames in a short window (not
-single-user persistent); inter-attempt cadence near wordlist-tool
-defaults (~1/sec); no post-auth success from the IP. Each negation is
-a refutation shape.
+For scenario variety (post-exploit sessions, credential-stuffing
+tools, refinement cases), see the full worked examples at the end of
+this file.
 
 ### The discipline
 
@@ -243,10 +205,7 @@ a refutation shape.
 
 ## Discipline
 
-- **Story-first.** See §Causal story above. Every hypothesis must have
-  a concrete `story` field before committing predictions or refutation
-  shapes. Predictions derive from story links; refutation shapes cite
-  the predictions they refute.
+- **Story-first.** See §Causal story above — non-negotiable.
 - **Lean.** ≤ 2 predictions per hypothesis. Three predictions signals
   an unlean label — split or defer. Multiple predictions should each
   test a *different story link*; two predictions testing the same link
@@ -279,6 +238,34 @@ a refutation shape.
   only correct when the adversarial signal is *itself* a distinct
   future edge (a failed-auth alert followed by an unexpected
   success) — that's a topology question, not legitimacy.
+- **Story-diff before selecting a lead.** For each pair of active
+  hypotheses, name one observable whose predicted value differs between
+  them; that observable is what the `Selected lead:` must measure. If no
+  pair has a diverging observable, the hypotheses don't fork — collapse
+  or refine before emitting. This is what the validator's fork-distinctness
+  rule (#23) enforces structurally: co-attached siblings sharing a
+  `parent_vertex.classification` are rejected as non-forking.
+- **Identity-of-use precedes mechanism fork.** When the known vertex's
+  identity is *inferred from patterns* (sentinel username lists, naming
+  conventions, IP-range guesses) rather than *confirmed by authority*
+  (IAM record, audit-log correlation, runtime attestation, anchor
+  lookup), fork at identity-of-use before forking at mechanism. A
+  sanctioned `(srcip, srcuser, target)` triple in an approval registry
+  confirms the triple is *registered*; it does not confirm that the
+  registered actor was *the one who used it now* — another process on
+  the same host, or an actor spoofing the source, can also produce the
+  same credential string on the wire. Root fork for these cases is
+  `?registered-actor-is-the-user` vs `?credentials-used-outside-
+  registered-actor`; mechanism-layer classes (tool-misfire, schedule-
+  change, retry-storm, etc.) register as refinement children only after
+  the identity fork resolves. Skipping the identity fork bakes in an
+  unverified premise, and the mechanism hypotheses inherit its
+  unresolvable-ness. Discriminators for the identity fork are usually
+  *not* process-lineage on the source host (often unavailable) but
+  correlation queries on adjacent systems: the registered actor's own
+  audit log for a matching action at t-0, historical baseline for the
+  observed shape under that actor, output-channel confirmation of the
+  action.
 - **No HYPOTHESIZE without a fork.** Enter only when ≥ 2 competing
   classifications have predictions that diverge on already-observable
   fields. If the discriminating data is not yet known, emit a GATHER
@@ -359,7 +346,7 @@ HYPOTHESIZE block is being emitted). Even when you skip HYPOTHESIZE,
 you still name the next lead on the `Selected lead:` line.
 
 Lead catalog lives at
-`/workspace/soc-agent/knowledge/common-investigation/leads/`. One
+`knowledge/common-investigation/leads/`. One
 directory per lead, each with a `definition.md` whose frontmatter
 carries `data_tags` (abstract data types the lead consumes —
 `auth-events`, `process-events`, `network-events`, `asset-state`,

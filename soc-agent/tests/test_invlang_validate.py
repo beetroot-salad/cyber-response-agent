@@ -44,6 +44,7 @@ from hooks.scripts.invlang_validate import (
     _check_legitimacy_resolution_target_shape,
     _check_legitimacy_supersede_chain,
     _check_resolution_requires_authorization_asks,
+    _check_hypothesis_fork_distinctness,
     _merge_blocks,
     collect_warnings,
     YAML_BLOCK_RE,
@@ -2145,3 +2146,82 @@ class TestLegitimacyCrossContract:
         })
         errors = _check_legitimacy_gated_disposition(merged)
         assert any("lc2" in e and "unauthorized" in e for e in errors)
+
+
+class TestHypothesisForkDistinctness:
+    """Rule #23 — sibling hypotheses may not share parent_vertex.classification."""
+
+    @staticmethod
+    def _h(hid, attached, classification):
+        return {
+            "id": hid,
+            "name": f"?{classification}",
+            "attached_to_vertex": attached,
+            "proposed_edge": {
+                "relation": "spawned",
+                "parent_vertex": {"type": "process", "classification": classification},
+            },
+            "predictions": [{"id": "p1", "claim": "..."}],
+        }
+
+    def test_distinct_classifications_pass(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", "v-001", "runtime-descendant"),
+            self._h("h-002", "v-001", "runtime-exec-injection"),
+        ]}}
+        assert _check_hypothesis_fork_distinctness(merged) == []
+
+    def test_duplicate_classification_same_vertex_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", "v-001", "runtime-descendant"),
+            self._h("h-002", "v-001", "runtime-descendant"),
+        ]}}
+        errors = _check_hypothesis_fork_distinctness(merged)
+        assert len(errors) == 1
+        assert "h-001" in errors[0] and "h-002" in errors[0]
+        assert "runtime-descendant" in errors[0]
+
+    def test_same_classification_different_vertex_passes(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", "v-001", "runtime-descendant"),
+            self._h("h-002", "v-002", "runtime-descendant"),
+        ]}}
+        assert _check_hypothesis_fork_distinctness(merged) == []
+
+    def test_same_classification_different_parent_passes(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001-001", "v-001", "x"),
+            self._h("h-002-001", "v-001", "x"),
+        ]}}
+        assert _check_hypothesis_fork_distinctness(merged) == []
+
+    def test_child_duplicates_under_same_parent_fail(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001-001", "v-001", "subcase-a"),
+            self._h("h-001-002", "v-001", "subcase-a"),
+        ]}}
+        errors = _check_hypothesis_fork_distinctness(merged)
+        assert len(errors) == 1
+        assert "h-001-001" in errors[0] and "h-001-002" in errors[0]
+
+    def test_missing_classification_skipped(self):
+        merged = {"hypothesize": {"hypotheses": [
+            {"id": "h-001", "attached_to_vertex": "v-001",
+             "proposed_edge": {"parent_vertex": {"type": "process"}}},
+            self._h("h-002", "v-001", "runtime-descendant"),
+        ]}}
+        assert _check_hypothesis_fork_distinctness(merged) == []
+
+    def test_new_hypotheses_in_leads_participate(self):
+        merged = {
+            "hypothesize": {"hypotheses": [
+                self._h("h-001", "v-001", "runtime-descendant"),
+            ]},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {}, "resolutions": [],
+                "new_hypotheses": [self._h("h-002", "v-001", "runtime-descendant")],
+            }],
+        }
+        errors = _check_hypothesis_fork_distinctness(merged)
+        assert len(errors) == 1

@@ -32,6 +32,7 @@ Checks performed (deterministic — no LLM):
 20. kind/asks coherence: kind:telemetry-baseline ⇒ asks:expectation (baselines don't authorize)
 21. Resolution requires authorization consultation: a lead with legitimacy_resolutions[] must have trust_anchor_result.asks:authorization
 22. Supersede chain: lr-{n} ids unique run-wide, supersedes same (fulfills_contract, target), no cycles
+23. Hypothesis fork distinctness: within a sibling group (same parent, same attached_to_vertex), no two hypotheses share proposed_edge.parent_vertex.classification — catches duplicates that don't actually fork
 
 Warnings (non-blocking, printed to stderr with exit 0):
 - Route compliance: when a lead with `predictions` is followed by another lead in
@@ -1332,6 +1333,64 @@ def _check_legitimacy_supersede_chain(merged: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _check_hypothesis_fork_distinctness(merged: dict[str, Any]) -> list[str]:
+    """Reject sibling hypotheses that share parent_vertex.classification.
+
+    Two hypotheses that attach to the same confirmed vertex under the same
+    parent refinement group must not share the same
+    `proposed_edge.parent_vertex.classification`. Sharing a classification
+    among co-attached siblings means the fork is cosmetic — the same
+    causal upstream is being proposed twice under two ids, and no lead
+    can discriminate between them because every prediction about
+    "parent has classification X" resolves identically on both.
+
+    Scope: grouping by `(parent_hypothesis_id, attached_to_vertex)` — a
+    refinement child-of-h-001 and a refinement child-of-h-002 live in
+    separate groups, as do hypotheses attached to different vertices.
+    Missing fields are skipped silently; other rules flag malformed
+    records.
+    """
+    errors: list[str] = []
+    # group -> {classification: [hypothesis_id, ...]}
+    groups: dict[tuple[str | None, Any], dict[Any, list[str]]] = {}
+    for h in iter_hypotheses(merged):
+        hid = h.get("id")
+        if not isinstance(hid, str):
+            continue
+        attached = h.get("attached_to_vertex")
+        proposed = h.get("proposed_edge")
+        if not isinstance(proposed, dict):
+            continue
+        parent_vertex = proposed.get("parent_vertex")
+        if not isinstance(parent_vertex, dict):
+            continue
+        classification = parent_vertex.get("classification")
+        if classification is None:
+            continue
+        key = (parent_hypothesis_id(hid), attached)
+        groups.setdefault(key, {}).setdefault(classification, []).append(hid)
+
+    for (parent_id, attached), by_cls in groups.items():
+        for classification, hids in by_cls.items():
+            if len(hids) < 2:
+                continue
+            where = (
+                f"attached_to_vertex={attached!r}"
+                if parent_id is None
+                else f"parent={parent_id!r}, attached_to_vertex={attached!r}"
+            )
+            errors.append(
+                f"hypotheses {sorted(hids)} share "
+                f"proposed_edge.parent_vertex.classification={classification!r} "
+                f"within the same sibling group ({where}). Sibling hypotheses "
+                f"must fork on classification — two entries with the same "
+                f"classification propose the same causal upstream and cannot "
+                f"be discriminated by any lead. Collapse to one hypothesis, "
+                f"or refine one of them to a distinct classification."
+            )
+    return errors
+
+
 def _check_resolution_requires_authorization_asks(merged: dict[str, Any]) -> list[str]:
     """A lead emitting `legitimacy_resolutions[]` must have `trust_anchor_result.asks: authorization`.
 
@@ -1653,6 +1712,7 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_legitimacy_resolution_target_shape(merged))
     errors.extend(_check_legitimacy_supersede_chain(merged))
     errors.extend(_check_resolution_requires_authorization_asks(merged))
+    errors.extend(_check_hypothesis_fork_distinctness(merged))
 
     # Prediction-lifecycle guard needs the on-disk companion as well.
     if current_text is not None:

@@ -354,6 +354,15 @@ def format_output(query_string, time_start, time_end, config, items, match_count
         for u, cnt in users.most_common(10):
             parts.append(f"  {u}: {cnt}")
 
+        srcports = Counter(
+            str(p) for e in items
+            if (p := e.get("data", {}).get("srcport"))
+        )
+        if srcports:
+            parts.append(f"By source port ({len(srcports)} unique):")
+            for p, cnt in srcports.most_common(10):
+                parts.append(f"  {p}: {cnt}")
+
         hours = Counter(e.get("timestamp", "")[:13] for e in items)
         parts.append("By hour:")
         for h, cnt in sorted(hours.items()):

@@ -16,7 +16,7 @@ Schema v2.8. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on 
 
 **Relations as edges.** Observed connections and events between entities become edges. Each edge carries authority (how reliably the source recorded it) and optional temporal data.
 
-**Hypotheses as proposed edges.** A hypothesis proposes that one specific upstream vertex exists, connected to a confirmed vertex by exactly one edge (`proposed_edge`). Predictions describe what observable evidence would confirm or contradict it; keep to 1–2 predictions — the minimum that distinguishes this hypothesis from competing ones.
+**Hypotheses as proposed edges.** A hypothesis proposes that one specific upstream vertex exists, connected to a confirmed vertex by exactly one edge (`proposed_edge`). Predictions describe what observable evidence would confirm or contradict it; keep to 1–2 predictions — the minimum that distinguishes this hypothesis from competing ones. **Prediction scope is unbounded** — predictions may reference observables from any system or time range (parent's ancestry on a different host, correlating audit-log entries on another system, aggregated telemetry baselines). The one-hop discipline governs what extends the confirmed graph on `++`, not where evidence may be queried.
 
 **Attributes.** Facts about a vertex that don't add topology (identity role, file creation time, IP classification, listening port) stay as `attributes` on the vertex or as `attribute_updates` in a lead outcome. Don't materialize a vertex just to carry an attribute.
 
@@ -496,3 +496,5 @@ A gathering lead whose outcome is interpretation-vulnerable but does not collaps
 14. **`kind` / `asks` coherence.** When `trust_anchor_result.kind: telemetry-baseline`, `asks: expectation`. Baselines answer expectation only; using them for authorization is a category error.
 15. **Resolution requires authorization consultation.** A lead carrying `legitimacy_resolutions[]` must have a `trust_anchor_result` with `asks: authorization` — resolutions must be backed by an explicit authority consultation record.
 16. **Supersede chain.** `legitimacy_resolutions[].id` matches `^lr\d+$`, unique run-wide. `supersedes: lr-X` requires `lr-X` exists and has the same `(fulfills_contract, target)` pair. Cycles are rejected. Rule #21 filters superseded entries from the effective set; rule #10 still walks the full list so orphans aren't hidden by supersession.
+
+17. **Hypothesis fork distinctness.** Within a sibling group — hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` — no two may share `proposed_edge.parent_vertex.classification`. Duplicates propose the same causal upstream under two ids and cannot be discriminated by any lead; collapse to one, or refine one side to a distinct classification.

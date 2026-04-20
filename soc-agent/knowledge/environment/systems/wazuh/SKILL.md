@@ -15,7 +15,7 @@ The agent issues SIEM queries against the Wazuh indexer through:
 python3 scripts/tools/wazuh_cli.py <subcommand> [options]
 ```
 
-Run from the soc-agent root (e.g. `cd /workspace/soc-agent && python3 scripts/tools/wazuh_cli.py …`). The CLI is the only sanctioned path to issue alert queries — there is no `mcp__wazuh__QueryAlertsTool` in this deployment, so MCP tools are limited to agent management, rules, and SCA.
+Run from the plugin root (agent's default cwd). The CLI is the only sanctioned path to issue alert queries — there is no `mcp__wazuh__QueryAlertsTool` in this deployment, so MCP tools are limited to agent management, rules, and SCA.
 
 ### Subcommands
 
@@ -37,21 +37,21 @@ python3 scripts/tools/wazuh_cli.py health-check
 python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND data.srcip:10.0.0.5' \
   --window 2h \
-  --run-dir /workspace/runs/.../runs/<uuid>
+  --run-dir {run_dir}
 
 # All sshd events for an agent across an explicit time range
 python3 scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sshd AND agent.name:web-server-01' \
   --start 2026-04-03T10:00:00Z --end 2026-04-04T10:00:00Z \
-  --run-dir /workspace/runs/.../runs/<uuid>
+  --run-dir {run_dir}
 ```
 
 ## Data-source health probe
 
-The gather subagent runs a generic baseline-rate health probe before executing template-driven leads, to detect data-source pipeline issues and rate anomalies cheaply (so it can stay on Haiku for normal cases). The probe library is vendor-agnostic (`scripts/tools/data_source_health.py`); the Wazuh binding lives in an example CLI alongside it:
+The gather subagent runs a generic baseline-rate health probe before executing template-driven leads, to detect data-source pipeline issues and rate anomalies cheaply (so it can stay on Haiku for normal cases). The probe library is vendor-agnostic (`scripts/tools/data_source_health.py`); the Wazuh binding lives alongside it:
 
 ```bash
-python3 scripts/tools/data_source_health_wazuh_example.py \
+python3 scripts/tools/data_source_health_wazuh.py \
   --query 'rule.groups:sshd AND agent.name:web-server-01' \
   --reporting-agent web-server-01 \
   --incident-start 2026-04-17T11:00:00Z \

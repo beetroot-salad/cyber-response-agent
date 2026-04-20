@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Example CLI: wire the generic data-source health probe to Wazuh.
+"""Wazuh binding for the generic data-source health probe.
 
-This is a **reference example**, not a pre-baked integration. It shows how
-to bind `data_source_health.assess_health()` to a concrete SIEM by supplying
-a `count_fn` that closes over the vendor's query CLI. New vendors should
-copy this file, rename it `data_source_health_{vendor}_example.py`, and
-swap the count_fn body to call their own adapter (same contract as the
+Binds `data_source_health.assess_health()` to the Wazuh query CLI by
+supplying a `count_fn` that closes over `wazuh_cli.py`. To add another
+vendor, copy this file as `data_source_health_{vendor}.py` and swap the
+count_fn body to call the vendor's adapter (same contract as the
 `/connect` skill generates).
 
 Usage:
-    python3 scripts/tools/data_source_health_wazuh_example.py \\
+    python3 scripts/tools/data_source_health_wazuh.py \\
         --query 'rule.groups:sshd AND agent.name:web-server-01' \\
         --reporting-agent web-server-01 \\
         --incident-start 2026-04-17T11:00:00Z \\
