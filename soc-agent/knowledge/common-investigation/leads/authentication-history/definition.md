@@ -41,6 +41,16 @@ available" or "not observed." Omission is ambiguous to the main agent.
 - **Source context**: Classify source IP (internal/external, RFC1918,
   loopback). If org-specific subnet metadata is available under
   environment/context/, use it; otherwise note the basic classification.
+- **Source-port distribution**: transcribe the query's `By source port`
+  aggregation (always emitted by the SIEM CLI for auth events) as a
+  list with per-value count. Single value across N rows = one TCP
+  connection duplicated in the index; N distinct values = N real
+  connections. Always report as a list, even when there is one element
+  (`[56984: 10]`) — the list shape is the discriminator, not the
+  per-alert srcport which the envelope carries. For large sets, report
+  the top 5 distinct ports + a trailing `+N more distinct` count; do
+  not collapse to `~many`. No `--raw` enumeration required — the
+  aggregation is already in the query summary.
 
 ## Common Pitfalls
 

@@ -88,4 +88,4 @@ empty, report that explicitly — `0 → N` is stronger than
 
 - To filter specific rule IDs (e.g., failed auth only): add `AND rule.id:5710`
 - Unfiltered count (data source health) is included automatically in formatted output
-- Formatted output already embeds the first 3 events' full `_source` JSON — inspect it for discriminator fields the summary lines elide (notably `data.srcport`, the source-port discriminator called out in `definition.md`). `--raw` is only needed when you want every event's JSON.
+- Formatted output carries a `By source port` count-breakdown aggregation — transcribe it directly into the characterization's "Source-port distribution" bullet. The first 3 events' full `_source` JSON is also embedded for other per-event discriminators (connection tuple, process name, etc.). `--raw` is only needed when you want every event's JSON.

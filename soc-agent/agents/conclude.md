@@ -13,19 +13,19 @@ You do not run leads, re-grade hypotheses, query SIEM, or second-guess the ANALY
 
 ## Inputs (substituted by the caller in the user message)
 
-- `run_dir` — absolute path to the run directory (contains `alert.json` and `investigation.md`)
+- `run_dir` — absolute path to the run directory (contains `investigation.md`)
 - `signature_id` — e.g. `wazuh-rule-5710`
+- `identifier` — the alert's `ticket_id` (e.g. `1776663722.6369973`); goes verbatim into the report frontmatter's `ticket_id` field
 
-If any substitution is missing, stop and emit a short error naming the missing value. Do not guess.
+If any substitution is missing, stop and emit a short error naming the missing value. Do not guess. Do **not** Read `alert.json` to recover a missing `identifier` — fail loud instead.
 
 ## Context
 
-Read in parallel on your first turn:
+Read on your first turn:
 
-- `{run_dir}/alert.json` — raw alert data (for `ticket_id` and identifier extraction)
 - `{run_dir}/investigation.md` — full investigation log; the routing decision you must honor lives in the last `## ANALYZE` block
 
-After reading these, **if the investigation matched an archetype** (either (a) the last ANALYZE's routing names a non-null `matched_archetype`, or (b) SCREEN returned `screen_result: match` with a `matched_archetype` field), also read these in one parallel batch:
+After reading it, **if the investigation matched an archetype** (either (a) the last ANALYZE's routing names a non-null `matched_archetype`, or (b) SCREEN returned `screen_result: match` with a `matched_archetype` field), also read these in one parallel batch:
 
 - `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/story.md`
 - `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/trust-anchors.md`
@@ -107,7 +107,7 @@ conclude:
 
 ````markdown
 ---
-ticket_id: "{identifier from alert.json}"
+ticket_id: "{identifier — the value passed in via the caller's prompt}"
 signature_id: {signature_id}
 status: {resolved|escalated}
 disposition: {benign|false_positive|true_positive|inconclusive}

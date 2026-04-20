@@ -20,7 +20,7 @@ argument-hint: "<signature_id> <alert_json>"
 
 ## Workspace Map
 
-A starting orientation derived from the on-disk knowledge tree. Your shell cwd at startup is the soc-agent root, so the script paths shown below are relative to it. When in doubt about a path, run `ls` or `pwd` — this map is a starting point, not an exhaustive index.
+A starting orientation derived from the on-disk knowledge tree. Your shell cwd at startup is the soc-agent plugin root, so **all** paths shown — scripts AND `knowledge/...` AND any other reference — are relative to it. `knowledge/` sits at the plugin root (sibling of `skills/`, `scripts/`, `agents/`), **not** nested under `skills/investigate/`. If you ever find yourself constructing a path like `skills/investigate/knowledge/...`, drop the `skills/investigate/` prefix — that path doesn't exist. When in doubt, run `pwd` or `ls` — this map is a starting point, not an exhaustive index.
 
 !`cd ${CLAUDE_SKILL_DIR}/../.. && python3 scripts/workspace_map.py`
 
@@ -339,16 +339,19 @@ gather:
     mode: screen
     query_details: { ... }
     outcome:
-      observations: { vertices: [...], edges: [...] }
-      # final screen lead only:
-      screen_result: match  # or no_match
+      # attribute_updates: include only if the lead refined a vertex/edge attribute
+      # trust_anchor_result: include only on anchor-consulting leads
+      # observations: OMIT if the lead materialized no new vertices/edges
+      # screen_result: match | no_match — final screen lead only
     resolutions: []
 ```
 
-Emit all screen leads in one write. Two constraints that trip up the validator if violated:
+Emit all screen leads in one write. Four constraints that trip up the validator or bloat output if violated:
 
 - `resolutions: []` is required (validator rejects missing `resolutions` even when empty) — it encodes "this lead didn't grade any hypothesis," which is the correct state for SCREEN.
 - **Do not set `tests` on screen leads.** `tests: [h-...]` means "this lead discriminates these hypotheses," but no hypothesis IDs exist yet at SCREEN time (HYPOTHESIZE comes after). A screen lead with `tests: [h-001]` is rejected as an unknown-ID reference. Omit `tests` entirely on `mode: screen` leads.
+- **Omit empty subblocks** — do not write `observations: { vertices: [], edges: [] }`, `attribute_updates: []`, or `resolutions: []` placeholders inside `outcome`. The validator reads these defensively with safe defaults; the only *required* top-level keys inside `outcome` are the ones your lead actually produced. `resolutions: []` at the lead level stays required; `outcome.*` sub-keys do not.
+- **Classification and anchor leads have no observations.** A source-classification, username-classification, or approved-monitoring-sources lookup refines an attribute or records a trust-anchor verdict — it does not materialize new graph vertices/edges. Leave `observations` out entirely.
 
 ### HYPOTHESIZE
 
@@ -413,11 +416,19 @@ Agent(
 Agent(
   subagent_type="soc-agent:gather-composite",
   description="gather-composite {lead_names} for {reporting_agent}",
-  prompt="run_dir={run_dir}\nsignature_id={signature_id}\nvendor={vendor}\nincident_start={incident_start}\nincident_end={incident_end}\nmode={composite|ad-hoc|redispatch}\nleads=<ordered list of {lead_name, entity_bindings, reporting_agent}>\ncross_lead_hint=<one-line reason they are composite; omit for ad-hoc/redispatch>"
+  prompt="run_dir={run_dir}\nsignature_id={signature_id}\nloop_n={loop_n}\nvendor={vendor}\nincident_start={incident_start}\nincident_end={incident_end}\nmode={composite|ad-hoc|redispatch}\nleads=<ordered list of {lead_name, entity_bindings, reporting_agent}>\ncross_lead_hint=<one-line reason they are composite; omit for ad-hoc/redispatch>"
 )
 ```
 
-**When a subagent returns**, transcribe its `characterization` fields + `cross_lead_notes` (composite only) into `## GATHER (loop {N})`. Per-lead `status != ok` is a lead-level caveat — record it; don't re-characterize. Neither subagent writes to disk; the main agent persists.
+**When a subagent returns**, transcribe its `characterization` fields + `cross_lead_notes` (composite only) into `## GATHER (loop {N})`. Per-lead `status != ok` is a lead-level caveat — record it; don't re-characterize. The main agent persists to `investigation.md`; `gather-composite` also writes a progress checkpoint for recovery (see below).
+
+**Silent-termination recovery for `gather-composite`.** The composite subagent has been observed to hit internal turn caps mid-compile and terminate without emitting its YAML block. It now writes a progress checkpoint at `{run_dir}/subagent_checkpoints/gather-composite-loop-{loop_n}.yaml` (see `agents/gather-composite.md` for the schema). If a dispatch returns a tool_result with **no YAML block, truncated YAML, or missing trailing fields** (no `cross_lead_notes`, no final `notes:`), don't accept it — instead:
+
+1. Read `{run_dir}/subagent_checkpoints/gather-composite-loop-{loop_n}.yaml` (the loop you just dispatched in).
+2. Respawn: `Agent(subagent_type="soc-agent:gather-composite", description="Resume from checkpoint", prompt="run_dir={run_dir}\nloop_n={loop_n}\nresume_from_checkpoint=true\n\nRead your checkpoint at {run_dir}/subagent_checkpoints/gather-composite-loop-{loop_n}.yaml. Continue from `next_intended_step`. Finish the YAML block per the Output contract and emit it — no additional tool calls unless the checkpoint says you were mid-query.")`
+3. If the checkpoint says `status: complete` but the subagent still didn't emit YAML, read its `leads` map directly and transcribe — the characterizations are there.
+
+Do not try to reconstruct from raw query output files; the checkpoint has the structured work already.
 
 ```markdown
 ## GATHER (loop {N})
@@ -516,9 +527,11 @@ CONCLUDE authoring is owned by `soc-agent:conclude` (Haiku, `agents/conclude.md`
 Agent(
   subagent_type="soc-agent:conclude",
   description="conclude authoring for {identifier}",
-  prompt="run_dir={run_dir}\nsignature_id={signature_id}"
+  prompt="run_dir={run_dir}\nsignature_id={signature_id}\nidentifier={identifier}"
 )
 ```
+
+The `identifier` is the alert's `ticket_id` — you already have it from CONTEXTUALIZE. Passing it inline spares the subagent one redundant `alert.json` Read.
 
 **When the subagent returns**, it emits exactly three fenced blocks in order: a `## CONCLUDE` markdown block, a `conclude:` YAML block, and a `report.md` markdown block. Transcribe each to its destination:
 
