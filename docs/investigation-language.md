@@ -1,7 +1,9 @@
 # Investigation Language
 
-**Status:** Implemented. Spec v2.8.
+**Status:** Implemented. Spec v2.9 (rules 24–25 pending implementation; prompt alignment in `agents/analyze.md` pending).
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
+
+**v2.9 delta:** validator rules #24 (hypothesis persistence at CONCLUDE) and #25 (same-level sibling rollup for `matched_prediction_ids`). Closes two bias gaps identified during the ANALYZE-phase state-machine cutover: silent hypothesis drop across loops, and cross-sibling prediction-ID citation. See `.claude/skills/migrate-state-machine/SKILL.md` for the design context.
 
 **v2.8 delta:** legitimacy as first-class edge attribute (`edge.legitimacy_resolutions`) driven by hypothesis-declared contracts (`hypothesis.legitimacy_contract`); `attribute_updates` extended to edge targets; validator rules #19–#22; supersedes the former "maintain adversarial hypothesis until `--`" bookkeeping rule.
 
@@ -545,12 +547,20 @@ conclude:
   disposition: benign | true_positive | unclear
   confidence: high | medium | low
   matched_archetype: <name> | null
-  ceiling_test:                         # required when category = severity-ceiling
+  surviving_hypotheses: [h-001, h-002]   # IDs of declared hypotheses whose final weight is not `--`; required by rule 24
+  ceiling_test:                          # required when category = severity-ceiling
     kind: out-of-band-human-contact | tool-unavailable | legal-authorization | other
     subject: <string>
-  ceiling_rationale: <string>           # required when category = severity-ceiling
+  ceiling_rationale: <string>            # required when category = severity-ceiling
   summary: <string>
 ```
+
+**`surviving_hypotheses`.** When a `conclude:` block is written, every
+declared hypothesis whose final effective weight is not `--` must appear in
+this list (validator rule 24). Empty list is valid — it means every
+hypothesis reached `--`. For `disposition: benign` the list is typically
+empty; for escalation shapes it names the hypotheses that kept the
+investigation from closing and should be included in the analyst handoff.
 
 **Termination categories.**
 - `trust-root` — confirmed graph reached a vertex with no accessible
@@ -785,3 +795,30 @@ coverage.
     active hypotheses must have at least one observable whose
     predicted value differs); this rule is the structural backstop
     when the check is skipped.
+
+24. **Hypothesis persistence — no orphaned hypotheses at CONCLUDE.**
+    When a `conclude:` block is present, every hypothesis declared in
+    `hypothesize.hypotheses[]` or any prior `lead.outcome.new_hypotheses[]`
+    must either (a) have its final effective weight be `--` across the
+    resolutions chain, OR (b) be cited in the conclude block (as the
+    termination target, as the matched archetype's mechanism, or as a
+    surviving-but-indeterminate hypothesis driving `status: escalated`).
+    A hypothesis declared and then silently ignored — never refuted,
+    never carried into CONCLUDE — fails this rule. Closes the "silent
+    hypothesis drop across loops" bias: grading blindness on one
+    mechanism cannot be papered over by forgetting the hypothesis
+    existed. The ANALYZE subagent is the proximate enforcer (it
+    decides when weights are terminal); this rule is the structural
+    backstop at the CONCLUDE write boundary.
+
+25. **Same-level sibling rollup — prediction IDs are hypothesis-scoped.**
+    On any `gather[i].resolutions[j]` entry for target hypothesis `H`,
+    every id in `matched_prediction_ids[]` must appear in `H`'s own
+    declared `predictions[]`. Rule 5 already enforces the equivalent
+    for `matched_refutation_ids[]` on `--` resolutions; rule 25
+    extends coverage to `matched_prediction_ids[]` on every weight
+    and closes the same-level sibling-rollup loophole (upgrading `H`
+    on the strength of a sibling's confirmed prediction). Rule 6's
+    per-hypothesis coverage aggregation would silently ignore a
+    mis-cited ID; rule 25 rejects it loudly so the grade is forced
+    to rest on this hypothesis's own evidence.

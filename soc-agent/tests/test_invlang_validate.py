@@ -45,6 +45,8 @@ from hooks.scripts.invlang_validate import (
     _check_legitimacy_supersede_chain,
     _check_resolution_requires_authorization_asks,
     _check_hypothesis_fork_distinctness,
+    _check_hypothesis_persistence,
+    _check_prediction_id_hypothesis_scope,
     _merge_blocks,
     collect_warnings,
     YAML_BLOCK_RE,
@@ -91,6 +93,9 @@ hypothesize:
       predictions:
         - id: p1
           claim: "source IP appears in threat-intel scanner list"
+      refutation_shape:
+        - id: r1
+          shape: "source IP authenticated previously in last 90d"
       weight: null
 """
 
@@ -124,11 +129,11 @@ gather:
     resolutions:
       - hypothesis: h-001
         before: null
-        after: "+"
-        severity_of_test: weak
+        after: "--"
+        severity_of_test: strong
         matched_prediction_ids: []
-        matched_refutation_ids: []
-        reasoning: "No prior authenticated sessions — consistent with scanner"
+        matched_refutation_ids: [r1]
+        reasoning: "source IP authenticated from web-server-01 six hours prior — refutation r1 matched"
         supporting_edges: [e-001]
 """
 
@@ -140,6 +145,7 @@ conclude:
   disposition: benign
   confidence: high
   matched_archetype: external-bruteforce
+  surviving_hypotheses: []
   summary: "SSH brute force from external scanner; no successful auth"
 """
 
@@ -2225,3 +2231,276 @@ class TestHypothesisForkDistinctness:
         }
         errors = _check_hypothesis_fork_distinctness(merged)
         assert len(errors) == 1
+
+
+# ---------------------------------------------------------------------------
+# Rule 24 — Hypothesis persistence at CONCLUDE
+# ---------------------------------------------------------------------------
+
+
+class TestCheckHypothesisPersistence:
+    """Rule #24 — declared hypotheses must reach `--` or appear in
+    conclude.surviving_hypotheses[] when a conclude: block is present."""
+
+    @staticmethod
+    def _hypothesis(hid: str) -> dict:
+        return {
+            "id": hid,
+            "name": f"?{hid}",
+            "attached_to_vertex": "v-001",
+            "proposed_edge": {
+                "relation": "spawned",
+                "parent_vertex": {"type": "process", "classification": f"cls-{hid}"},
+            },
+            "predictions": [{"id": "p1", "claim": "..."}],
+        }
+
+    @staticmethod
+    def _resolution(hid: str, after: str) -> dict:
+        return {
+            "hypothesis": hid,
+            "before": None,
+            "after": after,
+            "severity_of_test": "weak",
+            "matched_prediction_ids": [],
+            "matched_refutation_ids": ["r1"] if after == "--" else [],
+            "reasoning": "...",
+            "supporting_edges": ["e-001"],
+        }
+
+    def test_no_conclude_block_skips(self):
+        merged = {"hypothesize": {"hypotheses": [self._hypothesis("h-001")]}}
+        assert _check_hypothesis_persistence(merged) == []
+
+    def test_hypothesis_refuted_passes(self):
+        merged = {
+            "hypothesize": {"hypotheses": [self._hypothesis("h-001")]},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {},
+                "resolutions": [self._resolution("h-001", "--")],
+            }],
+            "conclude": {
+                "termination": {"category": "adversarial-refuted"},
+                "disposition": "benign",
+                "confidence": "high",
+                "surviving_hypotheses": [],
+            },
+        }
+        assert _check_hypothesis_persistence(merged) == []
+
+    def test_hypothesis_in_surviving_list_passes(self):
+        merged = {
+            "hypothesize": {"hypotheses": [self._hypothesis("h-001")]},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {},
+                "resolutions": [self._resolution("h-001", "+")],
+            }],
+            "conclude": {
+                "termination": {"category": "severity-ceiling"},
+                "disposition": "unclear",
+                "confidence": "medium",
+                "surviving_hypotheses": ["h-001"],
+            },
+        }
+        assert _check_hypothesis_persistence(merged) == []
+
+    def test_silent_drop_fails(self):
+        merged = {
+            "hypothesize": {"hypotheses": [
+                self._hypothesis("h-001"),
+                self._hypothesis("h-002"),
+            ]},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {},
+                "resolutions": [self._resolution("h-001", "--")],
+            }],
+            "conclude": {
+                "termination": {"category": "adversarial-refuted"},
+                "disposition": "benign",
+                "confidence": "high",
+                "surviving_hypotheses": [],
+            },
+        }
+        errors = _check_hypothesis_persistence(merged)
+        assert len(errors) == 1
+        assert "h-002" in errors[0]
+        assert "surviving_hypotheses" in errors[0]
+
+    def test_plus_weight_not_listed_fails(self):
+        merged = {
+            "hypothesize": {"hypotheses": [self._hypothesis("h-001")]},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {},
+                "resolutions": [self._resolution("h-001", "+")],
+            }],
+            "conclude": {
+                "termination": {"category": "exhaustion-escalation"},
+                "disposition": "unclear",
+                "confidence": "low",
+                "surviving_hypotheses": [],
+            },
+        }
+        errors = _check_hypothesis_persistence(merged)
+        assert len(errors) == 1
+        assert "h-001" in errors[0]
+
+    def test_shelved_hypothesis_passes(self):
+        merged = {
+            "hypothesize": {"hypotheses": [self._hypothesis("h-001")]},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {},
+                "resolutions": [],
+                "shelved": ["h-001"],
+            }],
+            "conclude": {
+                "termination": {"category": "trust-root"},
+                "disposition": "benign",
+                "confidence": "high",
+                "surviving_hypotheses": [],
+            },
+        }
+        assert _check_hypothesis_persistence(merged) == []
+
+    def test_surviving_hypotheses_wrong_type_fails(self):
+        merged = {
+            "hypothesize": {"hypotheses": [self._hypothesis("h-001")]},
+            "conclude": {
+                "termination": {"category": "exhaustion-escalation"},
+                "disposition": "unclear",
+                "confidence": "low",
+                "surviving_hypotheses": "h-001",  # must be a list
+            },
+        }
+        errors = _check_hypothesis_persistence(merged)
+        assert errors
+        assert "list" in errors[0]
+
+    def test_new_hypotheses_in_leads_participate(self):
+        merged = {
+            "hypothesize": {"hypotheses": []},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {},
+                "resolutions": [],
+                "new_hypotheses": [self._hypothesis("h-002")],
+            }],
+            "conclude": {
+                "termination": {"category": "adversarial-refuted"},
+                "disposition": "benign",
+                "confidence": "high",
+                "surviving_hypotheses": [],
+            },
+        }
+        errors = _check_hypothesis_persistence(merged)
+        assert len(errors) == 1
+        assert "h-002" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Rule 25 — Same-level sibling rollup (matched_prediction_ids scope)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPredictionIdHypothesisScope:
+    """Rule #25 — matched_prediction_ids on a resolution for H must cite
+    only IDs declared on H's own predictions[]."""
+
+    @staticmethod
+    def _h(hid: str, pred_ids: list[str]) -> dict:
+        return {
+            "id": hid,
+            "name": f"?{hid}",
+            "attached_to_vertex": "v-001",
+            "proposed_edge": {
+                "relation": "spawned",
+                "parent_vertex": {"type": "process", "classification": f"cls-{hid}"},
+            },
+            "predictions": [{"id": pid, "claim": "..."} for pid in pred_ids],
+        }
+
+    @staticmethod
+    def _lead(rid: str, hid: str, matched: list[str]) -> dict:
+        return {
+            "id": rid, "loop": 1, "name": "x", "target": "v-001",
+            "query_details": {}, "outcome": {},
+            "resolutions": [{
+                "hypothesis": hid,
+                "before": None,
+                "after": "+",
+                "severity_of_test": "weak",
+                "matched_prediction_ids": matched,
+                "matched_refutation_ids": [],
+                "reasoning": "...",
+                "supporting_edges": ["e-001"],
+            }],
+        }
+
+    def test_own_prediction_ids_pass(self):
+        merged = {
+            "hypothesize": {"hypotheses": [self._h("h-001", ["p1", "p2"])]},
+            "gather": [self._lead("l-001", "h-001", ["p1"])],
+        }
+        assert _check_prediction_id_hypothesis_scope(merged) == []
+
+    def test_foreign_prediction_id_fails(self):
+        merged = {
+            "hypothesize": {"hypotheses": [
+                self._h("h-001", ["pA"]),
+                self._h("h-002", ["pB"]),
+            ]},
+            "gather": [self._lead("l-001", "h-001", ["pB"])],
+        }
+        errors = _check_prediction_id_hypothesis_scope(merged)
+        assert len(errors) == 1
+        assert "h-001" in errors[0]
+        assert "pB" in errors[0]
+
+    def test_empty_matched_passes(self):
+        merged = {
+            "hypothesize": {"hypotheses": [self._h("h-001", ["p1"])]},
+            "gather": [self._lead("l-001", "h-001", [])],
+        }
+        assert _check_prediction_id_hypothesis_scope(merged) == []
+
+    def test_mixed_own_and_foreign_flags_only_foreign(self):
+        merged = {
+            "hypothesize": {"hypotheses": [
+                self._h("h-001", ["p1"]),
+                self._h("h-002", ["p2"]),
+            ]},
+            "gather": [self._lead("l-001", "h-001", ["p1", "p2"])],
+        }
+        errors = _check_prediction_id_hypothesis_scope(merged)
+        assert len(errors) == 1
+        # Only p2 should be named as a foreign citation (p1 is legitimately declared on h-001);
+        # the error message quotes the foreign-id list distinctly from declared predictions.
+        assert "['p2']" in errors[0]
+
+    def test_undeclared_hypothesis_treated_as_empty(self):
+        merged = {
+            "hypothesize": {"hypotheses": [self._h("h-001", ["p1"])]},
+            "gather": [self._lead("l-001", "h-999", ["p1"])],
+        }
+        errors = _check_prediction_id_hypothesis_scope(merged)
+        assert len(errors) == 1
+        assert "h-999" in errors[0]
+
+    def test_new_hypotheses_predictions_counted(self):
+        merged = {
+            "hypothesize": {"hypotheses": []},
+            "gather": [
+                {
+                    "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                    "query_details": {}, "outcome": {},
+                    "resolutions": [],
+                    "new_hypotheses": [self._h("h-002", ["pX"])],
+                },
+                self._lead("l-002", "h-002", ["pX"]),
+            ],
+        }
+        assert _check_prediction_id_hypothesis_scope(merged) == []

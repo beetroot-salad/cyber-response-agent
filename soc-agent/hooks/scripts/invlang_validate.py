@@ -33,6 +33,8 @@ Checks performed (deterministic — no LLM):
 21. Resolution requires authorization consultation: a lead with legitimacy_resolutions[] must have trust_anchor_result.asks:authorization
 22. Supersede chain: lr-{n} ids unique run-wide, supersedes same (fulfills_contract, target), no cycles
 23. Hypothesis fork distinctness: within a sibling group (same parent, same attached_to_vertex), no two hypotheses share proposed_edge.parent_vertex.classification — catches duplicates that don't actually fork
+24. Hypothesis persistence: when conclude: is written, every declared hypothesis must either reach final weight `--` or appear in conclude.surviving_hypotheses[] — catches silent drop
+25. Prediction-ID hypothesis scope: matched_prediction_ids[] on a resolution for hypothesis H must only cite H's own declared predictions — catches same-level sibling rollup
 
 Warnings (non-blocking, printed to stderr with exit 0):
 - Route compliance: when a lead with `predictions` is followed by another lead in
@@ -1438,6 +1440,90 @@ def _check_resolution_requires_authorization_asks(merged: dict[str, Any]) -> lis
     return errors
 
 
+def _check_hypothesis_persistence(merged: dict[str, Any]) -> list[str]:
+    """Rule 24 — no orphaned hypotheses at CONCLUDE.
+
+    When a `conclude:` block is present, every declared hypothesis must
+    either have reached final weight `--` across the resolutions chain, or
+    appear in `conclude.surviving_hypotheses[]`. A hypothesis neither
+    terminally refuted nor listed as surviving has been silently dropped —
+    the investigation cannot close without accounting for it.
+    """
+    conclude = merged.get("conclude")
+    if not isinstance(conclude, dict):
+        return []
+    errors: list[str] = []
+    raw_surviving = conclude.get("surviving_hypotheses") or []
+    if not isinstance(raw_surviving, list):
+        return [
+            "conclude.surviving_hypotheses must be a list of hypothesis IDs "
+            f"(got {type(raw_surviving).__name__})"
+        ]
+    surviving = {s for s in raw_surviving if isinstance(s, str)}
+    seen: set[str] = set()
+    for h in iter_hypotheses(merged):
+        hid = h.get("id")
+        if not isinstance(hid, str) or hid in seen:
+            continue
+        seen.add(hid)
+        # Shelved hypotheses count as terminal — they were explicitly deferred.
+        status = compute_final_status(merged, hid)
+        if status == "shelved":
+            continue
+        final = compute_final_weight(merged, hid)
+        if final == "--":
+            continue
+        if hid in surviving:
+            continue
+        errors.append(
+            f"hypothesis {hid}: declared but neither terminally refuted "
+            f"(final weight {final!r}) nor listed in "
+            f"conclude.surviving_hypotheses[]. A hypothesis cannot be "
+            f"silently dropped — either refute it with a matched refutation "
+            f"shape or list it as surviving for escalation."
+        )
+    return errors
+
+
+def _check_prediction_id_hypothesis_scope(merged: dict[str, Any]) -> list[str]:
+    """Rule 25 — matched_prediction_ids must be hypothesis-scoped.
+
+    Each id in `matched_prediction_ids[]` on a resolution for hypothesis H
+    must appear in H's own declared `predictions[]`. Rule 5 enforces the
+    equivalent for `matched_refutation_ids` on `--` resolutions; rule 25
+    closes the equivalent loophole for prediction IDs on every weight.
+    Mis-citing a sibling's prediction ID is same-level sibling rollup —
+    upgrading H on the strength of a peer's confirmed prediction.
+    """
+    errors: list[str] = []
+    declared = _index_hypothesis_id_field_ids(merged)
+    for lead in merged.get("gather", []) or []:
+        if not isinstance(lead, dict):
+            continue
+        lid = lead.get("id", "?")
+        for res in lead.get("resolutions", []) or []:
+            if not isinstance(res, dict):
+                continue
+            hid = res.get("hypothesis")
+            if not isinstance(hid, str):
+                continue
+            matched = res.get("matched_prediction_ids") or []
+            if not isinstance(matched, list):
+                continue
+            h_preds = declared.get(hid, {}).get("predictions", set())
+            foreign = [m for m in matched if isinstance(m, str) and m not in h_preds]
+            if foreign:
+                errors.append(
+                    f"lead {lid}: resolution for {hid} cites "
+                    f"matched_prediction_ids {sorted(foreign)} that do not "
+                    f"appear in {hid}'s declared predictions "
+                    f"{sorted(h_preds) or '[]'}. Each prediction ID on a "
+                    f"resolution must belong to the target hypothesis — "
+                    f"mis-citing a sibling's ID is same-level sibling rollup."
+                )
+    return errors
+
+
 def _check_lead_dedup_warnings(merged: dict[str, Any]) -> list[str]:
     """Warn when two leads share the same template + query + substitutions.
 
@@ -1713,6 +1799,8 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_legitimacy_supersede_chain(merged))
     errors.extend(_check_resolution_requires_authorization_asks(merged))
     errors.extend(_check_hypothesis_fork_distinctness(merged))
+    errors.extend(_check_hypothesis_persistence(merged))
+    errors.extend(_check_prediction_id_hypothesis_scope(merged))
 
     # Prediction-lifecycle guard needs the on-disk companion as well.
     if current_text is not None:
