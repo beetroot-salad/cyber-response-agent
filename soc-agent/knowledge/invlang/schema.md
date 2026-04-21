@@ -139,9 +139,11 @@ proposed_edge:
     attributes: {}         # omit if empty
 predictions:
   - id: p1
+    subject: proposed_parent   # one of: proposed_parent | attached_vertex | proposed_edge
     claim: "<source-agnostic claim about world state>"
 refutation_shape:          # omit if no clean refutation shape exists
   - id: r1
+    refutes_predictions: [p1]  # non-empty list of prediction ids on THIS hypothesis
     claim: "<observation that would contradict a core prediction>"
 legitimacy_contract: []    # optional; present when disposition depends on
                            # policy authorization. Same mechanism, same
