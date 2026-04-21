@@ -1,0 +1,489 @@
+"""SCREEN phase handler.
+
+Replaces the SCREEN section of `skills/investigate/SKILL.md` with a Python
+orchestration that dispatches two narrow subagents in sequence:
+
+    1. `screen`         — pattern-match the alert against the playbook's
+                          Screen table, run the named leads, emit summary YAML.
+    2. `screen-invlang` — transcribe the screen summary + prologue into the
+                          invlang `gather:` block (one `mode: screen` entry per
+                          `leads_run` item).
+
+Between the two calls the handler runs a Python structural verifier on the
+screen subagent's match claim: matched_pattern must name a loaded Screen row,
+and every lead in that row's Leads column must appear in `leads_run`. Failures
+downgrade the result to `error` and route to HYPOTHESIZE.
+
+Input (Context):
+    ctx.run_dir, ctx.signature_id, ctx.ticket_id, ctx.alert
+
+Output:
+    PhaseResult
+      - match → Phase.CONCLUDE, payload carrying the match summary
+      - no_match | error | structural-downgraded → Phase.HYPOTHESIZE
+      - empty Screen section → Phase.HYPOTHESIZE without any subagent call
+
+Files written:
+    {run_dir}/investigation.md — appends a `## SCREEN` markdown block + the
+    fenced `gather:` YAML. Append is pre-validated via
+    `hooks/scripts/invlang_validate.validate_companion()` lazy-imported as a
+    library call; the PreToolUse hook is the write-time backstop.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Optional
+
+import yaml
+
+from schemas.state import Phase
+from scripts.orchestrate import Context, OrchestrationError, PhaseResult
+
+from scripts.handlers._subagent import (
+    extract_terminal_yaml,
+    invoke_subagent as _shared_invoke,
+)
+
+
+SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
+LEADS_DIR = SOC_AGENT_ROOT / "knowledge" / "common-investigation" / "leads"
+
+
+SUBAGENT_TIMEOUT_SECONDS = int(
+    os.environ.get("SOC_AGENT_SCREEN_TIMEOUT_SECONDS", "300")
+)
+
+
+# ---------------------------------------------------------------------------
+# Subagent invocation (mockable)
+# ---------------------------------------------------------------------------
+
+
+def _invoke_screen(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> str:
+    """Module-level wrapper over the shared subagent dispatcher.
+
+    Kept as a module-level function so tests can monkeypatch it with
+    `monkeypatch.setattr(screen_handler, "_invoke_screen", stub)`.
+    """
+    return _shared_invoke("screen", prompt, timeout=timeout)
+
+
+def _invoke_screen_invlang(
+    prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS,
+) -> str:
+    return _shared_invoke("screen-invlang", prompt, timeout=timeout)
+
+
+# ---------------------------------------------------------------------------
+# Playbook Screen table parsing
+# ---------------------------------------------------------------------------
+
+
+_SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+_TABLE_ROW_RE = re.compile(r"^\|(.+)\|\s*$", re.MULTILINE)
+
+
+def _load_screen_rows(signature_id: str) -> list[dict[str, str]]:
+    """Parse the `## Screen` table of a signature's playbook.
+
+    Returns a list of row dicts keyed by the table's header names, lowercased
+    and stripped. Empty list when the section is absent OR present-but-empty
+    (no data rows after the header separator). Missing playbook file raises
+    OrchestrationError — that's a signature-config bug, not a silent skip.
+    """
+    playbook_path = (
+        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "playbook.md"
+    )
+    if not playbook_path.exists():
+        raise OrchestrationError(
+            f"playbook not found for {signature_id}: {playbook_path}"
+        )
+    text = playbook_path.read_text()
+    sections = {
+        m.group(1).lower(): m.start() for m in _SECTION_RE.finditer(text)
+    }
+    start = sections.get("screen")
+    if start is None:
+        return []
+    next_start = min(
+        (s for s in sections.values() if s > start), default=len(text),
+    )
+    block = text[start:next_start]
+
+    table_rows = [m.group(1) for m in _TABLE_ROW_RE.finditer(block)]
+    if len(table_rows) < 2:
+        # No table at all, or only a header with no separator.
+        return []
+    header_cells = [c.strip().lower() for c in table_rows[0].split("|")]
+    # Row 1 should be the `| --- | --- | ...` separator. Rows 2+ are data.
+    data_rows = []
+    for raw in table_rows[1:]:
+        cells = [c.strip() for c in raw.split("|")]
+        if _is_separator_row(cells):
+            continue
+        if len(cells) != len(header_cells):
+            # Skip malformed rows rather than crash; validator catches later.
+            continue
+        data_rows.append({header_cells[i]: cells[i] for i in range(len(cells))})
+    return data_rows
+
+
+def _is_separator_row(cells: list[str]) -> bool:
+    """Detect the `| --- | --- |` separator row. A cell is a separator if it's
+    only dashes (and optional leading/trailing colons for alignment)."""
+    return all(
+        re.fullmatch(r":?-+:?", c or "") for c in cells if c != ""
+    ) and any(cells)
+
+
+def _parse_leads_column(leads_cell: str) -> list[str]:
+    """Split the playbook's Leads column into a list of lead names.
+
+    The column is comma-separated. Names may carry a trailing ` anchor`
+    annotation (e.g. `approved-monitoring-sources anchor`) — strip it.
+    """
+    names = []
+    for token in leads_cell.split(","):
+        t = token.strip()
+        if not t:
+            continue
+        # Strip trailing " anchor" (with or without hyphenation markers).
+        t = re.sub(r"\s+anchor\s*$", "", t).strip()
+        if t:
+            names.append(t)
+    return names
+
+
+# ---------------------------------------------------------------------------
+# Prologue extraction
+# ---------------------------------------------------------------------------
+
+
+def _extract_prologue_yaml(run_dir: Path) -> str:
+    """Return the fenced `prologue:` YAML block from `investigation.md` as a
+    YAML string (no fence markers).
+
+    Raises OrchestrationError if `investigation.md` is missing or has no
+    prologue — the SCREEN handler cannot run before CONTEXTUALIZE has written
+    one.
+    """
+    inv_path = run_dir / "investigation.md"
+    if not inv_path.exists():
+        raise OrchestrationError(
+            f"investigation.md not found at {inv_path}; CONTEXTUALIZE must run first"
+        )
+    text = inv_path.read_text()
+    fence = "```yaml"
+    i = 0
+    while True:
+        start = text.find(fence, i)
+        if start == -1:
+            break
+        body_start = start + len(fence)
+        if body_start < len(text) and text[body_start] == "\n":
+            body_start += 1
+        stop = text.find("```", body_start)
+        if stop == -1:
+            break
+        block = text[body_start:stop]
+        if re.search(r"^\s*prologue\s*:", block, re.MULTILINE):
+            return block
+        i = stop + 3
+    raise OrchestrationError(
+        f"investigation.md at {inv_path} has no `prologue:` YAML block"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Screen subagent dispatch + validation
+# ---------------------------------------------------------------------------
+
+
+_VALID_SCREEN_RESULTS = {"match", "no_match", "error"}
+
+
+def _assemble_screen_prompt(ctx: Context) -> str:
+    return f"run_dir={ctx.run_dir}\nsignature_id={ctx.signature_id}"
+
+
+def _validate_screen_result(parsed: dict) -> dict:
+    screen_result = parsed.get("screen_result")
+    if screen_result not in _VALID_SCREEN_RESULTS:
+        raise OrchestrationError(
+            f"screen subagent returned unknown screen_result {screen_result!r}; "
+            f"expected one of {sorted(_VALID_SCREEN_RESULTS)}"
+        )
+    return parsed
+
+
+def _structural_verify(
+    parsed: dict, screen_rows: list[dict[str, str]],
+) -> tuple[dict, Optional[str]]:
+    """Verify a `screen_result: match` claim against the playbook Screen table.
+
+    Returns (parsed, downgrade_reason). When downgrade_reason is non-None the
+    caller must treat the result as `error` with that reason. On pass-through
+    (no downgrade), returns the parsed dict unchanged.
+
+    Check 1: `matched_pattern` names a row loaded from the Screen table.
+    Check 2: every lead named in that row's `leads` column appears in
+             `leads_run` with a non-null `observation`.
+    """
+    if parsed.get("screen_result") != "match":
+        return parsed, None
+    matched_pattern = parsed.get("matched_pattern")
+    row = next(
+        (r for r in screen_rows if r.get("pattern") == matched_pattern), None,
+    )
+    if row is None:
+        return parsed, (
+            f"matched_pattern {matched_pattern!r} does not name any row in the "
+            f"Screen table (rows: {[r.get('pattern') for r in screen_rows]})"
+        )
+    required_leads = _parse_leads_column(row.get("leads", "") or "")
+    leads_run = parsed.get("leads_run") or []
+    ran_names = {
+        (entry or {}).get("lead") for entry in leads_run
+        if (entry or {}).get("observation") not in (None, "")
+    }
+    missing = [lead for lead in required_leads if lead not in ran_names]
+    if missing:
+        return parsed, (
+            f"matched_pattern {matched_pattern!r} requires leads {required_leads} "
+            f"but leads_run missing: {missing}"
+        )
+    return parsed, None
+
+
+# ---------------------------------------------------------------------------
+# Screen-invlang subagent dispatch
+# ---------------------------------------------------------------------------
+
+
+def _enumerate_lead_def_paths(leads_run: list[dict]) -> list[Path]:
+    """Return paths to definition.md for each named lead that has one in
+    knowledge/common-investigation/leads/. Unknown leads are silently
+    dropped — the subagent falls back to heuristics on them."""
+    seen = set()
+    paths: list[Path] = []
+    for entry in leads_run or []:
+        name = (entry or {}).get("lead")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        candidate = LEADS_DIR / name / "definition.md"
+        if candidate.exists():
+            paths.append(candidate)
+    return paths
+
+
+def _assemble_invlang_prompt(
+    ctx: Context, screen_yaml: str, prologue_yaml: str, lead_def_paths: list[Path],
+) -> str:
+    playbook_path = (
+        SOC_AGENT_ROOT / "knowledge" / "signatures" / ctx.signature_id / "playbook.md"
+    )
+    paths_csv = ",".join(str(p) for p in lead_def_paths)
+    return (
+        "screen_yaml:\n"
+        "```yaml\n"
+        f"{screen_yaml.rstrip()}\n"
+        "```\n\n"
+        "prologue_yaml:\n"
+        "```yaml\n"
+        f"{prologue_yaml.rstrip()}\n"
+        "```\n\n"
+        f"playbook_path={playbook_path}\n"
+        f"lead_def_paths={paths_csv}\n"
+    )
+
+
+def _dump_screen_yaml(parsed: dict) -> str:
+    """Serialize the screen subagent's parsed dict back to YAML for inlining
+    in the screen-invlang prompt. Using the parsed form (not the raw string)
+    strips any preamble and keeps field ordering deterministic."""
+    return yaml.safe_dump(parsed, sort_keys=False)
+
+
+# ---------------------------------------------------------------------------
+# Markdown + YAML composition
+# ---------------------------------------------------------------------------
+
+
+def _compose_markdown(
+    screen_result: dict, downgrade_reason: Optional[str],
+) -> str:
+    """Append a `## SCREEN` human-readable section.
+
+    Template mirrors `skills/investigate/SKILL.md:322-329`.
+    """
+    result_tag = screen_result.get("screen_result", "error")
+    if downgrade_reason:
+        result_tag = f"error (structural downgrade)"
+
+    leads_run = screen_result.get("leads_run") or []
+    if leads_run:
+        leads_lines = "\n".join(
+            f"- {(entry or {}).get('lead', '?')}: "
+            f"{(entry or {}).get('observation', '')}"
+            for entry in leads_run
+        )
+    else:
+        leads_lines = "- (none — screen subagent ran no leads)"
+
+    outcome_parts: list[str] = []
+    if downgrade_reason:
+        outcome_parts.append(f"structural-verification downgrade: {downgrade_reason}")
+        outcome_parts.append("falling through to HYPOTHESIZE")
+    elif screen_result.get("screen_result") == "match":
+        matched = screen_result.get("matched_pattern", "?")
+        archetype = screen_result.get("matched_archetype") or "?"
+        ticket = screen_result.get("matched_ticket_id") or "?"
+        outcome_parts.append(
+            f"matched pattern={matched}, archetype={archetype}, "
+            f"precedent={ticket} — proceeding to CONCLUDE"
+        )
+    elif screen_result.get("screen_result") == "no_match":
+        reason = screen_result.get("reason") or "(no reason given)"
+        outcome_parts.append(f"no_match: {reason} — falling through to HYPOTHESIZE")
+    else:  # error
+        reason = screen_result.get("reason") or "(no reason given)"
+        outcome_parts.append(f"error: {reason} — falling through to HYPOTHESIZE")
+    outcome_line = " | ".join(outcome_parts)
+
+    return (
+        f"## SCREEN\n\n"
+        f"**Result:** {result_tag}\n"
+        f"**Leads run:**\n{leads_lines}\n"
+        f"**Outcome:** {outcome_line}\n"
+    )
+
+
+def _extract_gather_yaml(raw: str) -> str:
+    """Pull the fenced `gather:` YAML block from the screen-invlang output
+    and return it as a YAML string (without fence markers)."""
+    parsed = extract_terminal_yaml(raw)
+    if "gather" not in parsed:
+        raise OrchestrationError(
+            f"screen-invlang output missing top-level `gather:` — got keys {list(parsed)}"
+        )
+    return yaml.safe_dump({"gather": parsed["gather"]}, sort_keys=False)
+
+
+# ---------------------------------------------------------------------------
+# Validate + append
+# ---------------------------------------------------------------------------
+
+
+def _validate_and_write(ctx: Context, new_section: str) -> None:
+    """Append `new_section` to investigation.md after running
+    `validate_companion` as a library check."""
+    hooks_scripts = str(SOC_AGENT_ROOT / "hooks")
+    if hooks_scripts not in sys.path:
+        sys.path.insert(0, hooks_scripts)
+    from scripts.invlang_validate import validate_companion  # type: ignore
+
+    inv_path = ctx.run_dir / "investigation.md"
+    current = inv_path.read_text() if inv_path.exists() else ""
+    proposed = current + ("\n" if current and not current.endswith("\n") else "") + new_section
+
+    errors = validate_companion(proposed, current if current else None)
+    if errors:
+        raise OrchestrationError(
+            "SCREEN invlang validation failed:\n" + "\n".join(errors)
+        )
+
+    inv_path.write_text(proposed)
+
+
+# ---------------------------------------------------------------------------
+# Payload builders
+# ---------------------------------------------------------------------------
+
+
+def _match_payload(parsed: dict) -> dict:
+    return {
+        "screen_result": "match",
+        "matched_pattern": parsed.get("matched_pattern"),
+        "matched_archetype": parsed.get("matched_archetype"),
+        "matched_ticket_id": parsed.get("matched_ticket_id"),
+        "disposition": parsed.get("disposition"),
+        "confidence": parsed.get("confidence"),
+        "leads_run": parsed.get("leads_run") or [],
+        "evidence_summary": parsed.get("evidence_summary"),
+    }
+
+
+def _fallthrough_payload(parsed: dict, override_reason: Optional[str] = None) -> dict:
+    return {
+        "screen_result": "error" if override_reason else parsed.get("screen_result"),
+        "leads_run": parsed.get("leads_run") or [],
+        "evidence_summary": parsed.get("evidence_summary"),
+        "reason": override_reason or parsed.get("reason"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def handle(ctx: Context) -> PhaseResult:
+    # Step 0: preflight — empty Screen section short-circuits.
+    screen_rows = _load_screen_rows(ctx.signature_id)
+    if not screen_rows:
+        return PhaseResult(
+            next_phase=Phase.HYPOTHESIZE,
+            payload={
+                "screen_result": "skipped",
+                "reason": "empty_screen_section",
+            },
+        )
+
+    # Step 1: dispatch the screen subagent.
+    screen_prompt = _assemble_screen_prompt(ctx)
+    screen_raw = _invoke_screen(screen_prompt)
+    parsed = _validate_screen_result(extract_terminal_yaml(screen_raw))
+
+    # Step 2: structural verifier on match claim.
+    parsed, downgrade_reason = _structural_verify(parsed, screen_rows)
+    if downgrade_reason is not None:
+        # Rewrite screen_result so screen-invlang emits a consistent audit
+        # trail — the invlang's final-lead `screen_result` must agree with
+        # the handler's verdict, not the pre-downgrade subagent claim.
+        parsed["screen_result"] = "error"
+        parsed["reason"] = downgrade_reason
+
+    # Step 3: dispatch screen-invlang when there's anything to transcribe.
+    leads_run = parsed.get("leads_run") or []
+    gather_yaml = ""
+    if leads_run:
+        screen_yaml = _dump_screen_yaml(parsed)
+        prologue_yaml = _extract_prologue_yaml(ctx.run_dir)
+        lead_def_paths = _enumerate_lead_def_paths(leads_run)
+        invlang_prompt = _assemble_invlang_prompt(
+            ctx, screen_yaml, prologue_yaml, lead_def_paths,
+        )
+        invlang_raw = _invoke_screen_invlang(invlang_prompt)
+        gather_yaml = _extract_gather_yaml(invlang_raw)
+
+    # Step 4: compose + validate + append to investigation.md.
+    markdown = _compose_markdown(parsed, downgrade_reason)
+    new_section = markdown
+    if gather_yaml:
+        new_section = markdown + "\n```yaml\n" + gather_yaml + "```\n"
+    _validate_and_write(ctx, new_section)
+
+    # Step 5: route.
+    if parsed.get("screen_result") == "match" and downgrade_reason is None:
+        return PhaseResult(
+            next_phase=Phase.CONCLUDE, payload=_match_payload(parsed),
+        )
+    return PhaseResult(
+        next_phase=Phase.HYPOTHESIZE,
+        payload=_fallthrough_payload(parsed, downgrade_reason),
+    )

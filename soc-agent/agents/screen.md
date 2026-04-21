@@ -35,15 +35,18 @@ If there is no `## Screen` section → `screen_result: error`, `reason: "playboo
 
 ### Step 3 — Read per-lead dependencies in ONE parallel batch
 
-For every lead named in the Screen table, Read in one parallel turn:
+For every lead named in the Screen table, read the relevant files in one parallel turn. A lead's shape tells you where its definition lives:
 
-- `knowledge/common-investigation/leads/{lead}/definition.md` — the lead's data source and output shape
-- If the definition references environment classification (e.g. `environment/context/ip-ranges.md`, `environment/context/identity-patterns.md`, `environment/operations/{anchor}.md`) — also Read those now
-- If the definition routes to the SIEM — also Read `knowledge/environment/systems/{vendor}/SKILL.md` to learn the query entrypoint. Infer `{vendor}` from the `signature_id` prefix (`wazuh-rule-*` → `wazuh`). If `{vendor}` cannot be inferred → `screen_result: error` with reason.
+- **Classification leads** (names ending in `-classification`, e.g. `source-classification`, `username-classification`) — read `knowledge/environment/context/*.md` as named by the playbook's "Indicator resolution" section. There is no `common-investigation/leads/{name}/definition.md` for these; the playbook itself documents the resolution.
+- **Anchor leads** (names matching `approved-*`, or that the playbook calls "anchor" in its Leads column) — read the anchor file named by the playbook's "Indicator resolution" section, typically `knowledge/environment/operations/{anchor}.md`. Again, no `common-investigation/leads/{name}/definition.md` is required.
+- **Common leads** (all others: `authentication-history`, `source-reputation`, etc.) — read `knowledge/common-investigation/leads/{lead}/definition.md`. If a lead named by the Screen table has no definition.md under `common-investigation/leads/`, AND is not a classification or anchor lookup by name, emit `screen_result: error` with `reason: "unknown lead {name}: no classification/anchor mapping and no common-investigation/leads/{name}/definition.md"`.
+- **SIEM entrypoint** — if any lead routes to the SIEM, also read `knowledge/environment/systems/{vendor}/SKILL.md` to learn the query entrypoint. Infer `{vendor}` from the `signature_id` prefix (`wazuh-rule-*` → `wazuh`). If `{vendor}` cannot be inferred → `screen_result: error` with reason.
 
 ### Step 4 — Run the screen leads
 
 Execute **exactly** the leads the Screen table names. Nothing more. Batch queries when independent. Use the CLI or MCP tool named by `systems/{vendor}/SKILL.md` for SIEM leads.
+
+**Classification and anchor lookups count as runs.** A `*-classification` lead that resolves an identifier against `environment/context/*.md` is a run. An `approved-*` anchor lookup against `environment/operations/*.md` is a run. Every lead named in the matched row's `Leads` column produces one entry in `leads_run`, even when the lead is a file lookup with no SIEM query. Do NOT collapse multiple indicators into a single lead entry — if the playbook names three leads, `leads_run` has three entries, even when one lead's observation answers multiple indicators.
 
 If a query errors, a named field is absent from results, or a required environment file is missing → `screen_result: error`, `reason: "<specific failure>"`. Stop. Do not fall through to `no_match`.
 
@@ -67,8 +70,19 @@ matched_archetype: "{archetype-name or null}"
 matched_ticket_id: "{SEC-YYYY-NNN or null}"
 confidence: "{high or null}"
 leads_run:
+  # One entry per lead in the matched row's Leads column. For monitoring-probe
+  # on rule-5710 that is FOUR entries (source-classification,
+  # username-classification, approved-monitoring-sources, authentication-history)
+  # — never one.
   - lead: "{lead-name}"
     observation: "{specific raw value — exact count, exact IP, exact username}"
+  - lead: "{next-lead-name}"
+    observation: "{specific raw value}"
+  # ... one entry per lead
+evaluated_indicators:            # optional; lists which indicators each lead
+  - indicator: "{indicator-name}" # resolved, useful when one lead covers multiple
+    lead: "{lead-name}"
+    passed: true | false
 evidence_summary: "{1-2 sentences — what was observed}"
 reason: "{required when no_match or error — which indicator failed or what errored}"
 ```

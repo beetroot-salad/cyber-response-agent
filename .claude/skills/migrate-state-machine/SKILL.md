@@ -71,19 +71,22 @@ the subagent's output into the next-phase payload.
 ## Current state
 
 **Orchestrator skeleton:** landed (`scripts/orchestrate.py` + tests). Handles
-transitions, persistence, loop cap, error modes. All handlers are still stubs
-supplied by tests.
+transitions, persistence, loop cap, error modes. Shared subagent wrapper at
+`scripts/handlers/_subagent.py` dispatches plugin subagents via
+`claude -p --system-prompt-file` (the `--agent` CLI flag doesn't route plugin
+subagents). `scripts/handlers/__init__.py` exposes `default_handlers()`;
+unwired phases loud-fail.
 
 **Phase cutover status:**
 
 | Phase          | Status   | Handler file | Subagent | Notes |
 |----------------|----------|--------------|----------|-------|
-| CONTEXTUALIZE  | doing    | scripts/handlers/contextualize.py | archetype-scan, ticket-context, contextualize-prologue | Handler + 14 unit tests landed. Ticket-context subagent rewritten to run `scripts/tools/ticket_context.py` + emit dedup verdict. New Haiku `contextualize-prologue` subagent builds prologue YAML (mechanical compose hit its limit at graph-shape mapping). Shared `_subagent.invoke_subagent` + `Context.ticket_id` added; `conclude.py` refactored to both. Pending: default-handler wiring + fixture run + SKILL.md prose removal |
-| SCREEN         | pending  | —            | screen.md | Simplest cutover; good candidate for pilot |
+| CONTEXTUALIZE  | done     | scripts/handlers/contextualize.py | archetype-scan, ticket-context, contextualize-prologue | PR #99. Handler fans out 3 Haiku subagents in parallel, composes section markdown, validates invlang via library import, routes to CONCLUDE/SCREEN/HYPOTHESIZE. Live e2e on rule-5710 passed. Follow-up: second-shape live run + SKILL.md prose removal (deferred until all phases migrated) |
+| SCREEN         | done     | scripts/handlers/screen.py | screen.md, screen-invlang.md | PR #TBD. Two-subagent design: `screen` runs pattern match + leads; new Haiku `screen-invlang` transcribes to the invlang `gather:` block. Handler adds Python structural verifier (matched_pattern names a Screen row AND every lead in the row's Leads column appears in `leads_run` with a non-null observation) — downgrades malformed match claims to error. Empty-Screen short-circuit bypasses both subagents. `screen.md` tightened so classification + anchor lookups count as runs and every lead in the row's Leads column gets a `leads_run` entry. 31 unit tests + live e2e on rule-5710 (nagios/172.22.0.10 → monitoring-probe match). Path D (declarative lead-output frontmatter) filed as `tasks/declarative-lead-invlang-frontmatter.md` for long-term replacement of `screen-invlang` |
 | HYPOTHESIZE    | pending  | —            | hypothesize.md | |
 | GATHER         | pending  | —            | gather.md / gather-composite.md | Handler chooses single vs. composite |
 | ANALYZE        | pending  | —            | analyze.md | Contract decision pending — see `analyze-pilot` skill |
-| CONCLUDE       | doing    | scripts/handlers/conclude.py | conclude.md | Handler + subagent rewrite + 15 unit tests landed. Blocked on ANALYZE before default-map wiring + fixture run. Orchestrator amended to dispatch a registered CONCLUDE handler before returning summary; `Context.forced_conclude` propagates MAX_LOOPS signal |
+| CONCLUDE       | done     | scripts/handlers/conclude.py | conclude.md | PR #99. Handler onto shared `_subagent` wrapper, 15 unit tests; `Context.ticket_id` + `Context.forced_conclude` first-class dataclass fields; orchestrator dispatches registered CONCLUDE handler before returning summary. Follow-up: live e2e run (deferred to next cutover) |
 
 Update this table after each cutover. `status` values: `pending`, `doing`,
 `done`, `deferred`.
@@ -117,9 +120,8 @@ skipping the tests or the fixture run has bitten us before.
    right context items, parsing handles well-formed + malformed output,
    routing picks the right next phase for each output shape.
 5. **Wire the handler into the default handler map.** Add an entry to
-   `scripts/handlers/__init__.py` or wherever the default map lives (create
-   this file on the first cutover). The investigate skill will eventually call
-   `run(ctx, default_handlers())`.
+   `scripts/handlers/__init__.py` (exposes `default_handlers()`). The investigate
+   skill will eventually call `run(ctx, default_handlers())`.
 6. **End-to-end fixture run.** Use `/testrun` against one real alert for the
    signature. Confirm:
    - `investigation.md` still validates against invlang.
