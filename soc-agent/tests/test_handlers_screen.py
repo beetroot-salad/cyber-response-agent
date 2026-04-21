@@ -257,7 +257,7 @@ class TestPlaybookParsing:
 
     @pytest.mark.parametrize(
         "signature_id",
-        ["wazuh-rule-550", "wazuh-rule-100001", "wazuh-rule-100110"],
+        ["wazuh-rule-100001", "wazuh-rule-100110"],
     )
     def test_signatures_without_screen_return_empty(self, signature_id):
         rows = screen_handler._load_screen_rows(signature_id)
@@ -309,7 +309,7 @@ class TestPlaybookEmptyShortCircuit:
 
     def test_real_signature_without_screen_short_circuits(self, tmp_path, monkeypatch):
         """Integration-style: use a real playbook that lacks ## Screen."""
-        ctx = make_ctx(tmp_path, signature_id="wazuh-rule-550")
+        ctx = make_ctx(tmp_path, signature_id="wazuh-rule-100001")
         screen_calls: list[str] = []
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke(screen_calls, ""),
