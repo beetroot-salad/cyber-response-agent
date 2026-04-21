@@ -40,6 +40,11 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._markdown import (
+    iter_yaml_fences,
+    parse_markdown,
+    table_rows_after_heading,
+)
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
@@ -73,10 +78,6 @@ def _invoke_screen(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> s
 # ---------------------------------------------------------------------------
 
 
-_SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
-_TABLE_ROW_RE = re.compile(r"^\|(.+)\|\s*$", re.MULTILINE)
-
-
 def _load_screen_rows(signature_id: str) -> list[dict[str, str]]:
     """Parse the `## Screen` table of a signature's playbook.
 
@@ -92,42 +93,18 @@ def _load_screen_rows(signature_id: str) -> list[dict[str, str]]:
         raise OrchestrationError(
             f"playbook not found for {signature_id}: {playbook_path}"
         )
-    text = playbook_path.read_text()
-    sections = {
-        m.group(1).lower(): m.start() for m in _SECTION_RE.finditer(text)
-    }
-    start = sections.get("screen")
-    if start is None:
+    tokens = parse_markdown(playbook_path.read_text())
+    rows = table_rows_after_heading(tokens, "Screen")
+    if len(rows) < 1:
         return []
-    next_start = min(
-        (s for s in sections.values() if s > start), default=len(text),
-    )
-    block = text[start:next_start]
-
-    table_rows = [m.group(1) for m in _TABLE_ROW_RE.finditer(block)]
-    if len(table_rows) < 2:
-        # No table at all, or only a header with no separator.
-        return []
-    header_cells = [c.strip().lower() for c in table_rows[0].split("|")]
-    # Row 1 should be the `| --- | --- | ...` separator. Rows 2+ are data.
-    data_rows = []
-    for raw in table_rows[1:]:
-        cells = [c.strip() for c in raw.split("|")]
-        if _is_separator_row(cells):
+    header = [c.strip().lower() for c in rows[0]]
+    data_rows: list[dict[str, str]] = []
+    for row in rows[1:]:
+        cells = [c.strip() for c in row]
+        if len(cells) != len(header):
             continue
-        if len(cells) != len(header_cells):
-            # Skip malformed rows rather than crash; validator catches later.
-            continue
-        data_rows.append({header_cells[i]: cells[i] for i in range(len(cells))})
+        data_rows.append({header[i]: cells[i] for i in range(len(cells))})
     return data_rows
-
-
-def _is_separator_row(cells: list[str]) -> bool:
-    """Detect the `| --- | --- |` separator row. A cell is a separator if it's
-    only dashes (and optional leading/trailing colons for alignment)."""
-    return all(
-        re.fullmatch(r":?-+:?", c or "") for c in cells if c != ""
-    ) and any(cells)
 
 
 def _parse_leads_column(leads_cell: str) -> list[str]:
@@ -166,23 +143,13 @@ def _extract_prologue_yaml(run_dir: Path) -> str:
         raise OrchestrationError(
             f"investigation.md not found at {inv_path}; CONTEXTUALIZE must run first"
         )
-    text = inv_path.read_text()
-    fence = "```yaml"
-    i = 0
-    while True:
-        start = text.find(fence, i)
-        if start == -1:
-            break
-        body_start = start + len(fence)
-        if body_start < len(text) and text[body_start] == "\n":
-            body_start += 1
-        stop = text.find("```", body_start)
-        if stop == -1:
-            break
-        block = text[body_start:stop]
-        if re.search(r"^\s*prologue\s*:", block, re.MULTILINE):
-            return block
-        i = stop + 3
+    for body in iter_yaml_fences(inv_path.read_text()):
+        try:
+            parsed = yaml.safe_load(body)
+        except yaml.YAMLError:
+            continue
+        if isinstance(parsed, dict) and "prologue" in parsed:
+            return body
     raise OrchestrationError(
         f"investigation.md at {inv_path} has no `prologue:` YAML block"
     )

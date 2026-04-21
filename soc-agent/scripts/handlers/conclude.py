@@ -358,16 +358,12 @@ def _load_required_anchors(archetype_dir: Path) -> list[str]:
     trust_anchors_path = archetype_dir / "trust-anchors.md"
     if not trust_anchors_path.exists():
         return []
-    text = trust_anchors_path.read_text()
-    if not text.startswith("---\n"):
-        return []
-    end = text.find("\n---", 4)
-    if end == -1:
-        return []
-    try:
-        fm = yaml.safe_load(text[4:end]) or {}
-    except yaml.YAMLError:
-        return []
+    hooks_dir = str(SOC_AGENT_ROOT / "hooks")
+    if hooks_dir not in sys.path:
+        sys.path.insert(0, hooks_dir)
+    from scripts.frontmatter import parse_yaml_frontmatter  # type: ignore
+
+    fm = parse_yaml_frontmatter(trust_anchors_path.read_text())
     required = fm.get("required_anchors") or []
     return [str(r) for r in required if r]
 

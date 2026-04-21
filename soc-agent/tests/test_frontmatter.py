@@ -313,3 +313,16 @@ offset: -5
         fm = parse_yaml_frontmatter(text)
         assert fm["offset"] == -5
         assert isinstance(fm["offset"], int)
+
+    def test_utf8_bom_at_file_start(self):
+        """A UTF-8 BOM before the opening ``---`` should not defeat parsing."""
+        text = "﻿---\ntitle: foo\nstatus: ok\n---\nbody"
+        fm = parse_yaml_frontmatter(text)
+        assert fm["title"] == "foo"
+        assert fm["status"] == "ok"
+
+    def test_trailing_whitespace_after_delimiter(self):
+        """Trailing whitespace after the ``---`` delimiter is tolerated."""
+        text = "--- \ntitle: foo\n--- \nbody"
+        fm = parse_yaml_frontmatter(text)
+        assert fm["title"] == "foo"
