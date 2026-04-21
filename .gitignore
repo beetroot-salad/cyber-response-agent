@@ -51,6 +51,7 @@ soc-agent/knowledge/environment/systems/elastic/config.env
 .idea/
 /.claude/settings.local.json
 /.claude/scheduled_tasks.lock
+/.claude/worktrees/
 *.swp
 *.swo
 *~
