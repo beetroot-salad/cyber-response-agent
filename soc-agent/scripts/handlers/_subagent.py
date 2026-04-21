@@ -207,6 +207,16 @@ def invoke_subagent(
     if tools:
         argv.extend(["--allowed-tools", ",".join(tools)])
 
+    # Optional per-agent effort override. Read from `effort:` frontmatter or
+    # a per-agent env var `SOC_AGENT_{AGENT}_EFFORT`. CLI flag values:
+    # low | medium | high | xhigh | max.
+    effort = (
+        frontmatter.get("effort")
+        or os.environ.get(f"SOC_AGENT_{agent.upper().replace('-', '_')}_EFFORT")
+    )
+    if effort:
+        argv.extend(["--effort", str(effort)])
+
     # Ensure the subagent's Bash tool resolves `python3` to the same venv the
     # handler is running in — otherwise the subagent hits system python which
     # is missing the soc-agent extras (wazuh, elastic, etc.) and `ticket_context.py`

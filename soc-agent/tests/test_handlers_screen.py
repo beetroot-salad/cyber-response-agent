@@ -1,11 +1,11 @@
 """Unit tests for the SCREEN phase handler.
 
-Both subagent invocations (`_invoke_screen`, `_invoke_screen_invlang`) are
-mocked via monkeypatch. These tests exercise: playbook parsing, the empty-
-screen short-circuit, prompt assembly, terminal YAML parsing, the structural
-verifier, invlang dispatch, markdown+yaml composition, invlang library-mode
-validation, routing, and orchestrator integration. They do not spawn a
-Claude subprocess.
+The merged `screen` subagent's invocation (`_invoke_screen`) is mocked via
+monkeypatch. Exercised paths: playbook parsing, empty-screen short-circuit,
+prompt assembly (prologue inlined), terminal YAML parsing (single block
+carrying both `screen_result` fields and the invlang `gather` key), the
+structural verifier, markdown+yaml composition, invlang library-mode
+validation, routing, and orchestrator integration. No Claude subprocess.
 """
 
 from __future__ import annotations
@@ -98,7 +98,8 @@ def stub_invoke(captured: list[str], response: str):
     return fn
 
 
-# Canonical well-formed screen subagent outputs used across tests.
+# Canonical merged screen subagent output — pattern match + invlang gather
+# block in a single terminal YAML.
 SCREEN_MATCH_YAML = textwrap.dedent("""\
     ```yaml
     screen_result: match
@@ -118,48 +119,6 @@ SCREEN_MATCH_YAML = textwrap.dedent("""\
         observation: "cluster_count=5, max_cluster_size=2, no successful logins after"
     evidence_summary: "approved monitoring triple with periodic cadence and no successful login follow-up"
     reason: null
-    ```
-""").strip()
-
-
-SCREEN_NOMATCH_YAML = textwrap.dedent("""\
-    ```yaml
-    screen_result: no_match
-    matched_pattern: null
-    disposition: null
-    matched_archetype: null
-    matched_ticket_id: null
-    confidence: null
-    leads_run:
-      - lead: source-classification
-        observation: "172.22.0.10 -> internal-monitoring-host"
-      - lead: username-classification
-        observation: "admin -> unclassified-identity"
-    evidence_summary: "username does not match monitoring-pattern sentinels"
-    reason: "username_classification did not match"
-    ```
-""").strip()
-
-
-SCREEN_ERROR_EMPTY_LEADS = textwrap.dedent("""\
-    ```yaml
-    screen_result: error
-    matched_pattern: null
-    disposition: null
-    matched_archetype: null
-    matched_ticket_id: null
-    confidence: null
-    leads_run: []
-    evidence_summary: null
-    reason: "missing required substitution: signature_id"
-    ```
-""").strip()
-
-
-# Canonical well-formed screen-invlang subagent output — covers all three
-# outcome variants in one gather block.
-INVLANG_MATCH_YAML = textwrap.dedent("""\
-    ```yaml
     gather:
       - id: l-001
         loop: 0
@@ -222,6 +181,66 @@ INVLANG_MATCH_YAML = textwrap.dedent("""\
 """).strip()
 
 
+SCREEN_NOMATCH_YAML = textwrap.dedent("""\
+    ```yaml
+    screen_result: no_match
+    matched_pattern: null
+    disposition: null
+    matched_archetype: null
+    matched_ticket_id: null
+    confidence: null
+    leads_run:
+      - lead: source-classification
+        observation: "172.22.0.10 -> internal-monitoring-host"
+      - lead: username-classification
+        observation: "admin -> unclassified-identity"
+    evidence_summary: "username does not match monitoring-pattern sentinels"
+    reason: "username_classification did not match"
+    gather:
+      - id: l-001
+        loop: 0
+        name: source-classification
+        target: v-001
+        mode: screen
+        query_details: {system: classification-lookup}
+        outcome:
+          attribute_updates:
+            - target: v-001
+              updates:
+                classification: internal-monitoring-host
+        resolutions: []
+      - id: l-002
+        loop: 0
+        name: username-classification
+        target: v-003
+        mode: screen
+        query_details: {system: classification-lookup}
+        outcome:
+          attribute_updates:
+            - target: v-003
+              updates:
+                classification: unclassified-identity
+          screen_result: no_match
+        resolutions: []
+    ```
+""").strip()
+
+
+SCREEN_ERROR_EMPTY_LEADS = textwrap.dedent("""\
+    ```yaml
+    screen_result: error
+    matched_pattern: null
+    disposition: null
+    matched_archetype: null
+    matched_ticket_id: null
+    confidence: null
+    leads_run: []
+    evidence_summary: null
+    reason: "missing required substitution: signature_id"
+    ```
+""").strip()
+
+
 # ---------------------------------------------------------------------------
 # Playbook parsing
 # ---------------------------------------------------------------------------
@@ -238,7 +257,7 @@ class TestPlaybookParsing:
 
     @pytest.mark.parametrize(
         "signature_id",
-        ["wazuh-rule-550", "wazuh-rule-100001", "wazuh-rule-100110"],
+        ["wazuh-rule-100001", "wazuh-rule-100110"],
     )
     def test_signatures_without_screen_return_empty(self, signature_id):
         rows = screen_handler._load_screen_rows(signature_id)
@@ -275,12 +294,8 @@ class TestPlaybookEmptyShortCircuit:
         ctx = make_ctx(tmp_path)
         monkeypatch.setattr(screen_handler, "_load_screen_rows", lambda _sig: [])
         screen_calls: list[str] = []
-        invlang_calls: list[str] = []
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke(screen_calls, ""),
-        )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang", stub_invoke(invlang_calls, ""),
         )
 
         result = screen_handler.handle(ctx)
@@ -289,13 +304,12 @@ class TestPlaybookEmptyShortCircuit:
         assert result.payload["screen_result"] == "skipped"
         assert result.payload["reason"] == "empty_screen_section"
         assert screen_calls == []
-        assert invlang_calls == []
         # Handler must not have touched investigation.md either.
         assert (ctx.run_dir / "investigation.md").read_text() == SEED_CONTEXTUALIZE
 
     def test_real_signature_without_screen_short_circuits(self, tmp_path, monkeypatch):
         """Integration-style: use a real playbook that lacks ## Screen."""
-        ctx = make_ctx(tmp_path, signature_id="wazuh-rule-550")
+        ctx = make_ctx(tmp_path, signature_id="wazuh-rule-100001")
         screen_calls: list[str] = []
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke(screen_calls, ""),
@@ -312,20 +326,22 @@ class TestPlaybookEmptyShortCircuit:
 
 
 class TestScreenDispatch:
-    def test_prompt_carries_run_dir_and_signature(self, tmp_path, monkeypatch):
+    def test_prompt_carries_run_dir_signature_and_prologue(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path)
         captured: list[str] = []
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke(captured, SCREEN_MATCH_YAML),
         )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang",
-            stub_invoke([], INVLANG_MATCH_YAML),
-        )
         screen_handler.handle(ctx)
         assert len(captured) == 1
-        assert f"run_dir={ctx.run_dir}" in captured[0]
-        assert "signature_id=wazuh-rule-5710" in captured[0]
+        prompt = captured[0]
+        assert f"run_dir={ctx.run_dir}" in prompt
+        assert "signature_id=wazuh-rule-5710" in prompt
+        # Prologue is inlined so the merged subagent can pick `target: v-*`
+        # without reading investigation.md.
+        assert "prologue_yaml:" in prompt
+        assert "v-001" in prompt
+        assert "attempted_auth" in prompt
 
     def test_unknown_screen_result_raises(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path)
@@ -415,67 +431,25 @@ class TestStructuralVerifier:
 
 
 # ---------------------------------------------------------------------------
-# Screen-invlang subagent dispatch
+# Gather extraction (unit)
 # ---------------------------------------------------------------------------
 
 
-class TestScreenInvlangDispatch:
-    def test_prompt_inlines_screen_and_prologue_yaml(self, tmp_path, monkeypatch):
-        ctx = make_ctx(tmp_path)
-        invlang_calls: list[str] = []
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen", stub_invoke([], SCREEN_MATCH_YAML),
-        )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang",
-            stub_invoke(invlang_calls, INVLANG_MATCH_YAML),
-        )
-        screen_handler.handle(ctx)
-        assert len(invlang_calls) == 1
-        prompt = invlang_calls[0]
-        assert "screen_yaml:" in prompt
-        assert "screen_result: match" in prompt
-        assert "prologue_yaml:" in prompt
-        assert "v-001" in prompt
-        assert "playbook_path=" in prompt
-        # lead_def_paths enumerates only leads that have on-disk definitions.
-        assert "authentication-history/definition.md" in prompt
+class TestGatherExtraction:
+    def test_extracts_gather_from_parsed(self):
+        parsed = {
+            "gather": [
+                {"id": "l-001", "loop": 0, "name": "x"},
+                {"id": "l-002", "loop": 0, "name": "y"},
+            ],
+        }
+        out = screen_handler._extract_gather_yaml_from_parsed(parsed)
+        assert out.startswith("gather:")
+        assert "l-001" in out and "l-002" in out
 
-    def test_skipped_when_leads_run_empty_on_error(self, tmp_path, monkeypatch):
-        ctx = make_ctx(tmp_path)
-        invlang_calls: list[str] = []
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen",
-            stub_invoke([], SCREEN_ERROR_EMPTY_LEADS),
-        )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang",
-            stub_invoke(invlang_calls, ""),
-        )
-        # Handler should skip screen-invlang and still write the SCREEN markdown.
-        monkeypatch.setattr(
-            screen_handler, "_validate_and_write", lambda _c, _s: None,
-        )
-        result = screen_handler.handle(ctx)
-        assert invlang_calls == []
-        assert result.next_phase == Phase.HYPOTHESIZE
-        assert result.payload["screen_result"] == "error"
-
-    def test_invlang_output_missing_gather_raises(self, tmp_path, monkeypatch):
-        ctx = make_ctx(tmp_path)
-        bad_invlang = textwrap.dedent("""\
-            ```yaml
-            not_gather: []
-            ```
-        """).strip()
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen", stub_invoke([], SCREEN_MATCH_YAML),
-        )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang", stub_invoke([], bad_invlang),
-        )
-        with pytest.raises(OrchestrationError, match="missing top-level .gather"):
-            screen_handler.handle(ctx)
+    def test_empty_when_gather_absent(self):
+        assert screen_handler._extract_gather_yaml_from_parsed({}) == ""
+        assert screen_handler._extract_gather_yaml_from_parsed({"gather": []}) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -517,16 +491,11 @@ class TestInvestigationWrite:
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke([], SCREEN_MATCH_YAML),
         )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang",
-            stub_invoke([], INVLANG_MATCH_YAML),
-        )
         screen_handler.handle(ctx)
         text = (ctx.run_dir / "investigation.md").read_text()
         assert "## SCREEN" in text
         assert "**Result:** match" in text
         assert "monitoring-probe fast-path" in text
-        # Every lead from the invlang gather block should be present.
         assert "source-classification" in text
         assert "authentication-history" in text
         # Final lead carries screen_result.
@@ -534,48 +503,8 @@ class TestInvestigationWrite:
 
     def test_no_match_write_has_no_match_section(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path)
-
-        # For no_match we want to exercise the write path, but the screen-invlang
-        # subagent would normally still produce a gather block. We stub a minimal
-        # gather block that matches the no_match leads_run.
-        invlang_nomatch = textwrap.dedent("""\
-            ```yaml
-            gather:
-              - id: l-001
-                loop: 0
-                name: source-classification
-                target: v-001
-                mode: screen
-                query_details:
-                  system: classification-lookup
-                outcome:
-                  attribute_updates:
-                    - target: v-001
-                      updates:
-                        classification: internal-monitoring-host
-                resolutions: []
-              - id: l-002
-                loop: 0
-                name: username-classification
-                target: v-003
-                mode: screen
-                query_details:
-                  system: classification-lookup
-                outcome:
-                  attribute_updates:
-                    - target: v-003
-                      updates:
-                        classification: unclassified-identity
-                  screen_result: no_match
-                resolutions: []
-            ```
-        """).strip()
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke([], SCREEN_NOMATCH_YAML),
-        )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang",
-            stub_invoke([], invlang_nomatch),
         )
         screen_handler.handle(ctx)
         text = (ctx.run_dir / "investigation.md").read_text()
@@ -587,8 +516,27 @@ class TestInvestigationWrite:
         file write, not after — library-mode validate_companion is the guard."""
         ctx = make_ctx(tmp_path)
         original = (ctx.run_dir / "investigation.md").read_text()
-        bad_invlang = textwrap.dedent("""\
+        # Merged subagent emits screen verdict + gather block; the gather
+        # references a nonexistent vertex v-999.
+        bad = textwrap.dedent("""\
             ```yaml
+            screen_result: match
+            matched_pattern: monitoring-probe fast-path
+            disposition: benign
+            matched_archetype: monitoring-probe
+            matched_ticket_id: SEC-2024-001
+            confidence: high
+            leads_run:
+              - lead: source-classification
+                observation: "172.22.0.10 -> internal-monitoring-host"
+              - lead: username-classification
+                observation: "nagios -> monitoring-pattern"
+              - lead: approved-monitoring-sources
+                observation: "(triple) -> authorized"
+              - lead: authentication-history
+                observation: "n=1"
+            evidence_summary: fake
+            reason: null
             gather:
               - id: l-001
                 loop: 0
@@ -599,21 +547,17 @@ class TestInvestigationWrite:
                   system: classification-lookup
                 outcome:
                   attribute_updates:
-                    - target: v-999         # nonexistent vertex reference
+                    - target: v-999
                       updates:
                         classification: x
                 resolutions: []
             ```
         """).strip()
         monkeypatch.setattr(
-            screen_handler, "_invoke_screen", stub_invoke([], SCREEN_MATCH_YAML),
-        )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang", stub_invoke([], bad_invlang),
+            screen_handler, "_invoke_screen", stub_invoke([], bad),
         )
         with pytest.raises(OrchestrationError, match="invlang validation failed"):
             screen_handler.handle(ctx)
-        # File unchanged.
         assert (ctx.run_dir / "investigation.md").read_text() == original
 
 
@@ -628,10 +572,6 @@ class TestRouting:
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke([], SCREEN_MATCH_YAML),
         )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang",
-            stub_invoke([], INVLANG_MATCH_YAML),
-        )
         result = screen_handler.handle(ctx)
         assert result.next_phase == Phase.CONCLUDE
         assert result.payload["screen_result"] == "match"
@@ -642,52 +582,17 @@ class TestRouting:
 
     def test_no_match_routes_to_hypothesize(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path)
-        invlang_nomatch = textwrap.dedent("""\
-            ```yaml
-            gather:
-              - id: l-001
-                loop: 0
-                name: source-classification
-                target: v-001
-                mode: screen
-                query_details: {system: classification-lookup}
-                outcome:
-                  attribute_updates:
-                    - target: v-001
-                      updates:
-                        classification: internal-monitoring-host
-                resolutions: []
-              - id: l-002
-                loop: 0
-                name: username-classification
-                target: v-003
-                mode: screen
-                query_details: {system: classification-lookup}
-                outcome:
-                  attribute_updates:
-                    - target: v-003
-                      updates:
-                        classification: unclassified-identity
-                  screen_result: no_match
-                resolutions: []
-            ```
-        """).strip()
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke([], SCREEN_NOMATCH_YAML),
-        )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang", stub_invoke([], invlang_nomatch),
         )
         result = screen_handler.handle(ctx)
         assert result.next_phase == Phase.HYPOTHESIZE
         assert result.payload["screen_result"] == "no_match"
 
     def test_structural_downgrade_routes_to_hypothesize(self, tmp_path, monkeypatch):
-        """Screen subagent claims match but is missing a required lead —
-        handler must downgrade and fall through."""
+        """Merged subagent claims match but is missing a required lead —
+        handler must downgrade, drop the gather block, and fall through."""
         ctx = make_ctx(tmp_path)
-        # Drop authentication-history from leads_run, breaking structural
-        # verification for monitoring-probe fast-path.
         broken = textwrap.dedent("""\
             ```yaml
             screen_result: match
@@ -705,11 +610,6 @@ class TestRouting:
                 observation: "(triple) -> authorized"
             evidence_summary: "fake match"
             reason: null
-            ```
-        """).strip()
-        # Handler will still call screen-invlang for the audit trail.
-        broken_invlang = textwrap.dedent("""\
-            ```yaml
             gather:
               - id: l-001
                 loop: 0
@@ -756,13 +656,17 @@ class TestRouting:
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke([], broken),
         )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang", stub_invoke([], broken_invlang),
-        )
         result = screen_handler.handle(ctx)
         assert result.next_phase == Phase.HYPOTHESIZE
         assert result.payload["screen_result"] == "error"
         assert "authentication-history" in result.payload["reason"]
+        # Gather block dropped on downgrade — investigation.md has the SCREEN
+        # markdown but no fenced yaml block.
+        text = (ctx.run_dir / "investigation.md").read_text()
+        assert "## SCREEN" in text
+        # The only `````yaml block already present is the CONTEXTUALIZE
+        # prologue; no new one was appended.
+        assert text.count("```yaml") == 1
 
     def test_error_routes_to_hypothesize(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path)
@@ -770,16 +674,9 @@ class TestRouting:
             screen_handler, "_invoke_screen",
             stub_invoke([], SCREEN_ERROR_EMPTY_LEADS),
         )
-        # No screen-invlang call because leads_run is empty.
-        screen_invlang_calls: list[str] = []
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang",
-            stub_invoke(screen_invlang_calls, ""),
-        )
         result = screen_handler.handle(ctx)
         assert result.next_phase == Phase.HYPOTHESIZE
         assert result.payload["screen_result"] == "error"
-        assert screen_invlang_calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -802,7 +699,6 @@ class TestOrchestratorIntegration:
         def ctx_handler(_c):
             return PhaseResult(next_phase=Phase.SCREEN, payload={"dedup": False})
 
-        # Stub CONCLUDE to avoid hitting that handler's own subagent.
         from scripts.handlers import conclude as conclude_handler
         conclude_response = textwrap.dedent("""\
             ```yaml
@@ -820,10 +716,6 @@ class TestOrchestratorIntegration:
         )
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke([], SCREEN_MATCH_YAML),
-        )
-        monkeypatch.setattr(
-            screen_handler, "_invoke_screen_invlang",
-            stub_invoke([], INVLANG_MATCH_YAML),
         )
 
         handlers = {
