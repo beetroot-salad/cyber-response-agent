@@ -206,16 +206,47 @@ this file.
 ## Discipline
 
 - **Story-first.** See §Causal story above — non-negotiable.
-- **Lean.** ≤ 2 predictions per hypothesis. Three predictions signals
-  an unlean label — split or defer. Multiple predictions should each
-  test a *different story link*; two predictions testing the same link
-  from different angles is a sign of under-differentiated hypothesis
-  shape.
+- **Lean.** ≤ 2 predictions per hypothesis (enforced by validator rule
+  28). Three predictions signals an unlean label — split or defer.
+  Multiple predictions should each test a *different story link*; two
+  predictions testing the same link from different angles is a sign of
+  under-differentiated hypothesis shape.
+- **One observable per prediction claim.** A single `claim` string
+  names one observable with one predicted value — not a conjunction of
+  several independent observables joined by `; `, ` AND `, or ` OR `.
+  Compound claims cannot be cleanly refuted (which conjunct failed?)
+  and collapse the evidence-grading chain into narrative. If you catch
+  yourself writing "≤2 events in 5 min; usernames monitoring-pattern;
+  no auth-success in 60s", that is three predictions, not one — split
+  (and if the split exceeds the lean cap, some were never hypothesis-
+  load-bearing to begin with). Enforced by validator rule 26.
 - **Mechanism-shaped, not narrative.** Labels like `?credential-
   guessing`, `?post-exploit-shell`, or `?compromise-followup` pack
   mechanism + intent + shape + effects into one name. Use only the
   parent-vertex classification (`adversary-controlled`,
   `in-container-runtime-descendant`, `runtime-exec-injection`, …).
+  Evaluation-packed prefixes on the classification or the
+  `?`-name — `authorized-`, `unauthorized-`, `legitimate-`,
+  `malicious-`, `benign-`, `sanctioned-`, `unsanctioned-`,
+  `compromised-`, `adversarial-` — are rejected by validator rule 27:
+  they encode the verdict into the label, biasing weight history
+  before anchors resolve. The classification `adversary-controlled-*`
+  is *not* evaluation-packed — it describes who controls the actor,
+  a mechanism property, not a judgment.
+- **Hypotheses are upstream mechanisms, not downstream observations.**
+  A peer hypothesis whose sole discriminating prediction is "a later
+  event X fires within N seconds" (auth-success after failed-auth
+  cluster, correlated alert-family firing, lateral-movement signal)
+  is not a hypothesis — it is a composition-rule check on a
+  *subsequent* event. The hypothesis frontier extends upstream from
+  the observed alert (what caused it?); downstream-event checks
+  belong as unconditional GATHER leads that run alongside your
+  hypothesis evaluation and feed into ANALYZE's escalation logic.
+  If you find yourself writing a `?compromise-followup` or
+  `?post-failure-success` as a peer to mechanism hypotheses, it's
+  almost always because the subsequent-event signal is load-bearing
+  for escalation, not for mechanism discrimination — put it in the
+  GATHER plan, not the hypothesis list.
 - **Legitimacy is edge-level, not a parallel hypothesis.** When the
   same mechanism is consistent with benign or adversarial intent
   depending on authorization (CFO vs. external identity reading
@@ -599,14 +630,64 @@ the verdict, do so with a single hypothesis carrying a
 into a parallel `?sanctioned-*` vs. `?unsanctioned-*` pair — same
 mechanism, one edge, one contract.
 
+## Progress checkpoint (write-as-you-go)
+
+**Checkpoint path:** `{run_dir}/subagent_checkpoints/hypothesize-loop-{loop_n}.yaml`.
+Create the directory with `mkdir -p` if it doesn't exist. One checkpoint
+per loop — if the orchestrator re-dispatches you within the same loop
+for recovery, overwrite the file with the updated state.
+
+Write the checkpoint at exactly these **four milestones**, not as
+running commentary, not between sub-fields:
+
+1. **M1 — outline drafted.** After you've picked hypothesis IDs and
+   classifications but before writing their stories/predictions.
+   Checkpoint contents: `status: drafting`, `mode`, `hypothesis_outline`
+   (list of `{id, classification}`), `next_intended_step`.
+2. **M2, M3, … — per-hypothesis complete.** After each hypothesis
+   block is finished (story + predictions + refutation_shape).
+   Overwrite with `status: drafting`, `hypotheses: [...completed so
+   far...]`, `next_intended_step`.
+3. **M(last) — terminal.** After `Selected lead:` and `Pitfalls:` are
+   written. Set `status: complete`.
+
+No-fork-mode (you emit a `gather:` block instead of `hypothesize:`):
+collapse to two milestones — `{outline, complete}`.
+
+**Resume semantics.** If the orchestrator re-dispatches you with
+`resume_from_checkpoint=true`, read the checkpoint, pick up at
+`next_intended_step`, and do not redo work already recorded. Respect
+any `remediation_notes=<errors>` field — those are validator rule
+violations from your prior attempt that must be fixed.
+
+Do **not** write checkpoint entries between sub-fields, per "just
+finished the story, about to write p1," or anywhere else. The four
+milestones are the contract.
+
+## Terminal routing YAML (required)
+
+After the `hypothesize:` / `gather:` block + `Selected lead:` +
+`Pitfalls:` lines, emit one final fenced YAML block:
+
+```yaml
+mode: fork | no-fork
+selected_lead: <lead name as it appears in your Selected lead: line>
+loop_n: <integer>
+```
+
+The orchestrator parses this deterministically to route to the next
+phase and to pass `selected_lead` to the GATHER handler. Block-type
+inference (`hypothesize:` vs `gather:`) is self-describing; this
+trailer makes the routing field-accessible without re-parsing.
+
 ## Return
 
-Return the YAML block plus `Selected lead:` and `Pitfalls:` as your
-response. The main agent pastes this verbatim into
-`{run_dir}/investigation.md`. Do **not** write to disk yourself — the
-main agent owns the state-machine-gated write so the hook chain fires
-correctly.
+Return the YAML block(s) plus `Selected lead:`, `Pitfalls:`, and the
+terminal routing YAML as your response. The orchestrator pastes the
+invlang blocks verbatim into `{run_dir}/investigation.md` — do **not**
+write to investigation.md yourself. The only file you write to is the
+progress checkpoint.
 
 If your inputs are malformed or the investigation state is
 incomprehensible, return a short `error:` block with a one-line reason
-and stop.
+and stop. No checkpoint, no trailer.
