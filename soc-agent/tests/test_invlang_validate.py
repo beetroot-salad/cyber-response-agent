@@ -47,6 +47,9 @@ from hooks.scripts.invlang_validate import (
     _check_hypothesis_fork_distinctness,
     _check_hypothesis_persistence,
     _check_prediction_id_hypothesis_scope,
+    _check_compound_prediction_claim,
+    _check_classification_evaluation_prefix,
+    _check_predictions_leanness,
     _merge_blocks,
     collect_warnings,
     YAML_BLOCK_RE,
@@ -2504,3 +2507,239 @@ class TestCheckPredictionIdHypothesisScope:
             ],
         }
         assert _check_prediction_id_hypothesis_scope(merged) == []
+
+
+# ---------------------------------------------------------------------------
+# Rule 26 — Compound prediction claim
+# ---------------------------------------------------------------------------
+
+
+class TestCheckCompoundPredictionClaim:
+    """Rule 26 — a predictions[].claim must not join multiple independent
+    observable claims via `; `, ` AND `, or ` OR `."""
+
+    @staticmethod
+    def _h(hid: str, claims: list[str]) -> dict:
+        return {
+            "id": hid,
+            "name": f"?m-{hid}",
+            "attached_to_vertex": "v-001",
+            "proposed_edge": {"relation": "r", "parent_vertex": {"type": "t", "classification": "c"}},
+            "predictions": [{"id": f"p{i+1}", "claim": c} for i, c in enumerate(claims)],
+        }
+
+    def test_single_observable_claim_passes(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["attempt volume exceeds 3 per 5 minutes"]),
+        ]}}
+        assert _check_compound_prediction_claim(merged) == []
+
+    def test_semicolon_separated_compound_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", [
+                "SIEM shows ≤2 events in 5 min; all usernames are "
+                "monitoring-pattern; no auth-success within 60s"
+            ]),
+        ]}}
+        errors = _check_compound_prediction_claim(merged)
+        assert len(errors) == 1
+        assert "h-001" in errors[0] and "p1" in errors[0]
+        assert "semicolon" in errors[0]
+
+    def test_uppercase_AND_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["volume ≥5 AND usernames outside sentinel list"]),
+        ]}}
+        errors = _check_compound_prediction_claim(merged)
+        assert len(errors) == 1
+        assert "'AND'" in errors[0]
+
+    def test_uppercase_OR_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["fixed-length identifiers OR variable-length chunks"]),
+        ]}}
+        errors = _check_compound_prediction_claim(merged)
+        assert len(errors) == 1
+        assert "'OR'" in errors[0]
+
+    def test_lowercase_or_in_single_observable_passes(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["username matches monitor-probe or monitorprobe pattern"]),
+        ]}}
+        assert _check_compound_prediction_claim(merged) == []
+
+    def test_one_complaint_per_prediction(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["a; b AND c"]),
+        ]}}
+        errors = _check_compound_prediction_claim(merged)
+        assert len(errors) == 1
+
+    def test_each_hypothesis_reported_independently(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["a; b"]),
+            self._h("h-002", ["c OR d"]),
+        ]}}
+        errors = _check_compound_prediction_claim(merged)
+        assert len(errors) == 2
+
+    def test_non_dict_prediction_skipped(self):
+        merged = {"hypothesize": {"hypotheses": [
+            {"id": "h-001", "predictions": ["not a dict", {"id": "p1", "claim": "ok"}]},
+        ]}}
+        assert _check_compound_prediction_claim(merged) == []
+
+    def test_new_hypotheses_in_leads_participate(self):
+        merged = {
+            "hypothesize": {"hypotheses": []},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {}, "resolutions": [],
+                "new_hypotheses": [self._h("h-002", ["a; b"])],
+            }],
+        }
+        errors = _check_compound_prediction_claim(merged)
+        assert len(errors) == 1
+        assert "h-002" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Rule 27 — Evaluation-prefixed classification
+# ---------------------------------------------------------------------------
+
+
+class TestCheckClassificationEvaluationPrefix:
+    """Rule 27 — classifications and hypothesis names must not start with
+    legitimacy/intent prefixes."""
+
+    @staticmethod
+    def _h(hid: str, classification: str, name: str | None = None) -> dict:
+        return {
+            "id": hid,
+            "name": name if name is not None else f"?{classification}",
+            "attached_to_vertex": "v-001",
+            "proposed_edge": {
+                "relation": "r",
+                "parent_vertex": {"type": "process", "classification": classification},
+            },
+            "predictions": [{"id": "p1", "claim": "..."}],
+        }
+
+    def test_mechanism_classification_passes(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", "scheduled-automation-health-check"),
+            self._h("h-002", "runtime-exec-injection"),
+            self._h("h-003", "adversary-controlled-monitoring-host"),
+        ]}}
+        assert _check_classification_evaluation_prefix(merged) == []
+
+    @pytest.mark.parametrize("prefix", [
+        "authorized-", "unauthorized-", "legitimate-", "illegitimate-",
+        "malicious-", "benign-", "sanctioned-", "unsanctioned-",
+        "compromised-", "adversarial-",
+    ])
+    def test_evaluation_prefixed_classification_fails(self, prefix):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", f"{prefix}monitoring-system"),
+        ]}}
+        errors = _check_classification_evaluation_prefix(merged)
+        assert any(prefix in e for e in errors)
+
+    def test_evaluation_prefixed_name_with_clean_classification_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", "monitoring-system", name="?authorized-monitoring-system"),
+        ]}}
+        errors = _check_classification_evaluation_prefix(merged)
+        assert len(errors) == 1
+        assert "?authorized-" in errors[0] and "h-001" in errors[0]
+
+    def test_adversary_controlled_not_flagged(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", "adversary-controlled-tool"),
+        ]}}
+        assert _check_classification_evaluation_prefix(merged) == []
+
+    def test_missing_classification_and_name_skipped(self):
+        merged = {"hypothesize": {"hypotheses": [
+            {"id": "h-001", "attached_to_vertex": "v-001", "proposed_edge": {"parent_vertex": {}}},
+        ]}}
+        assert _check_classification_evaluation_prefix(merged) == []
+
+    def test_new_hypotheses_in_leads_participate(self):
+        merged = {
+            "hypothesize": {"hypotheses": []},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {}, "resolutions": [],
+                "new_hypotheses": [self._h("h-002", "malicious-tool")],
+            }],
+        }
+        errors = _check_classification_evaluation_prefix(merged)
+        assert any("h-002" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Rule 28 — Predictions leanness
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPredictionsLeanness:
+    """Rule 28 — hypotheses carry ≤ 2 predictions."""
+
+    @staticmethod
+    def _h(hid: str, n_preds: int) -> dict:
+        return {
+            "id": hid,
+            "name": f"?m-{hid}",
+            "attached_to_vertex": "v-001",
+            "proposed_edge": {"relation": "r", "parent_vertex": {"type": "t", "classification": "c"}},
+            "predictions": [
+                {"id": f"p{i+1}", "claim": f"claim {i+1}"}
+                for i in range(n_preds)
+            ],
+        }
+
+    def test_one_prediction_passes(self):
+        merged = {"hypothesize": {"hypotheses": [self._h("h-001", 1)]}}
+        assert _check_predictions_leanness(merged) == []
+
+    def test_two_predictions_passes(self):
+        merged = {"hypothesize": {"hypotheses": [self._h("h-001", 2)]}}
+        assert _check_predictions_leanness(merged) == []
+
+    def test_three_predictions_fails(self):
+        merged = {"hypothesize": {"hypotheses": [self._h("h-001", 3)]}}
+        errors = _check_predictions_leanness(merged)
+        assert len(errors) == 1
+        assert "h-001" in errors[0] and "3 predictions" in errors[0]
+
+    def test_zero_predictions_passes(self):
+        merged = {"hypothesize": {"hypotheses": [self._h("h-001", 0)]}}
+        assert _check_predictions_leanness(merged) == []
+
+    def test_non_dict_predictions_not_counted(self):
+        merged = {"hypothesize": {"hypotheses": [
+            {
+                "id": "h-001",
+                "predictions": [
+                    {"id": "p1", "claim": "a"},
+                    {"id": "p2", "claim": "b"},
+                    "stray string",
+                    None,
+                ],
+            }
+        ]}}
+        assert _check_predictions_leanness(merged) == []
+
+    def test_new_hypotheses_in_leads_participate(self):
+        merged = {
+            "hypothesize": {"hypotheses": []},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {}, "resolutions": [],
+                "new_hypotheses": [self._h("h-002", 4)],
+            }],
+        }
+        errors = _check_predictions_leanness(merged)
+        assert len(errors) == 1
+        assert "h-002" in errors[0]

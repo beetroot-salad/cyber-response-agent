@@ -35,6 +35,9 @@ Checks performed (deterministic — no LLM):
 23. Hypothesis fork distinctness: within a sibling group (same parent, same attached_to_vertex), no two hypotheses share proposed_edge.parent_vertex.classification — catches duplicates that don't actually fork
 24. Hypothesis persistence: when conclude: is written, every declared hypothesis must either reach final weight `--` or appear in conclude.surviving_hypotheses[] — catches silent drop
 25. Prediction-ID hypothesis scope: matched_prediction_ids[] on a resolution for hypothesis H must only cite H's own declared predictions — catches same-level sibling rollup
+26. Compound prediction claim: a predictions[].claim must name one observable, not join multiple independent claims via `; `, ` AND `, or ` OR ` — compound claims cannot be cleanly refuted
+27. Evaluation-prefixed classification: proposed_edge.parent_vertex.classification (and hypothesis.name) must not carry legitimacy/intent prefixes (authorized-, malicious-, compromised-, adversarial-, …) — legitimacy is a contract attribute, not part of the mechanism label
+28. Hypothesis leanness: each hypothesis carries ≤ 2 predictions — 3+ signals an unlean label that should be split or deferred to post-lead refinement
 
 Warnings (non-blocking, printed to stderr with exit 0):
 - Route compliance: when a lead with `predictions` is followed by another lead in
@@ -1529,6 +1532,138 @@ def _check_prediction_id_hypothesis_scope(merged: dict[str, Any]) -> list[str]:
     return errors
 
 
+_COMPOUND_CLAIM_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("; ", "semicolon-separated clauses"),
+    (" AND ", "'AND' conjunction between clauses"),
+    (" OR ", "'OR' conjunction between clauses"),
+)
+
+
+def _check_compound_prediction_claim(merged: dict[str, Any]) -> list[str]:
+    """Rule 26 — a predictions[].claim names one observable, not several.
+
+    Packing multiple independent observable claims into one `claim` string
+    (joined by `; `, ` AND `, or ` OR `) makes the prediction unrefutable:
+    which conjunct failed? The discipline is one prediction per observable
+    — split compound claims into separate predictions.
+
+    Detects three unambiguous patterns. Lowercase `and`/`or` inside a
+    single-observable disjunction (e.g. "pattern matches foo or bar") is
+    tolerated; the corpus-observed compound failures all use the
+    uppercase/semicolon form.
+    """
+    errors: list[str] = []
+    for h in iter_hypotheses(merged):
+        hid = h.get("id", "?")
+        for pred in h.get("predictions", []) or []:
+            if not isinstance(pred, dict):
+                continue
+            claim = pred.get("claim")
+            if not isinstance(claim, str):
+                continue
+            pid = pred.get("id", "?")
+            for token, description in _COMPOUND_CLAIM_PATTERNS:
+                if token in claim:
+                    errors.append(
+                        f"hypothesis {hid} prediction {pid}: claim contains "
+                        f"{description} ({token!r}). A prediction names one "
+                        f"observable with one predicted value; split "
+                        f"compound claims into separate prediction entries."
+                    )
+                    break  # one complaint per prediction is enough
+    return errors
+
+
+_EVALUATION_PREFIXES: tuple[str, ...] = (
+    "authorized-",
+    "unauthorized-",
+    "legitimate-",
+    "illegitimate-",
+    "malicious-",
+    "benign-",
+    "sanctioned-",
+    "unsanctioned-",
+    "compromised-",
+    "adversarial-",
+)
+
+
+def _check_classification_evaluation_prefix(merged: dict[str, Any]) -> list[str]:
+    """Rule 27 — mechanism classifications carry no legitimacy/intent prefix.
+
+    A hypothesis classification names an upstream *mechanism* — the kind of
+    vertex (process, identity, scheduled-automation, runtime-exec-injection,
+    …). Evaluation-packed prefixes (`authorized-`, `malicious-`, `compromised-`,
+    `adversarial-`, …) smuggle the verdict into the label, biasing weight
+    history before anchors resolve and producing sibling pairs that differ
+    only on authority — a shape the `legitimacy_contract` primitive exists
+    to collapse.
+
+    Checked on both `proposed_edge.parent_vertex.classification` and the
+    hypothesis `name` (which typically mirrors the classification as
+    `?{classification}`).
+    """
+    errors: list[str] = []
+    for h in iter_hypotheses(merged):
+        hid = h.get("id", "?")
+        classification = (
+            h.get("proposed_edge", {})
+             .get("parent_vertex", {})
+             .get("classification")
+        )
+        if isinstance(classification, str):
+            for prefix in _EVALUATION_PREFIXES:
+                if classification.startswith(prefix):
+                    errors.append(
+                        f"hypothesis {hid}: classification "
+                        f"{classification!r} starts with evaluation-packed "
+                        f"prefix {prefix!r}. Classifications name a mechanism, "
+                        f"not a verdict — move legitimacy into a "
+                        f"legitimacy_contract on the hypothesis."
+                    )
+                    break
+        name = h.get("name")
+        if isinstance(name, str):
+            stripped = name[1:] if name.startswith("?") else name
+            for prefix in _EVALUATION_PREFIXES:
+                if stripped.startswith(prefix):
+                    errors.append(
+                        f"hypothesis {hid}: name {name!r} starts with "
+                        f"evaluation-packed prefix {('?' + prefix)!r}. Name "
+                        f"the mechanism, not the verdict."
+                    )
+                    break
+    return errors
+
+
+_MAX_PREDICTIONS_PER_HYPOTHESIS = 2
+
+
+def _check_predictions_leanness(merged: dict[str, Any]) -> list[str]:
+    """Rule 28 — at most two predictions per hypothesis.
+
+    Three or more predictions signals an unlean label: the subagent is
+    enumerating properties of a narrative instead of selecting the 1–2
+    that most cleanly discriminate this hypothesis from siblings. Split
+    into child hypotheses or defer extras until a lead forces refinement.
+    """
+    errors: list[str] = []
+    for h in iter_hypotheses(merged):
+        hid = h.get("id", "?")
+        preds = h.get("predictions") or []
+        if not isinstance(preds, list):
+            continue
+        count = sum(1 for p in preds if isinstance(p, dict))
+        if count > _MAX_PREDICTIONS_PER_HYPOTHESIS:
+            errors.append(
+                f"hypothesis {hid}: carries {count} predictions — lean "
+                f"discipline caps at {_MAX_PREDICTIONS_PER_HYPOTHESIS}. "
+                f"Split into child hypotheses or defer extras until a "
+                f"lead forces refinement."
+            )
+    return errors
+
+
 def _check_lead_dedup_warnings(merged: dict[str, Any]) -> list[str]:
     """Warn when two leads share the same template + query + substitutions.
 
@@ -1806,6 +1941,9 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_hypothesis_fork_distinctness(merged))
     errors.extend(_check_hypothesis_persistence(merged))
     errors.extend(_check_prediction_id_hypothesis_scope(merged))
+    errors.extend(_check_compound_prediction_claim(merged))
+    errors.extend(_check_classification_evaluation_prefix(merged))
+    errors.extend(_check_predictions_leanness(merged))
 
     # Prediction-lifecycle guard needs the on-disk companion as well.
     if current_text is not None:
