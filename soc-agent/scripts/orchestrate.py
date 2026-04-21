@@ -14,6 +14,7 @@ come later, one phase at a time.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,6 +88,14 @@ def run(ctx: Context, handlers: dict[Phase, PhaseHandler]) -> dict:
     Returns a summary dict: {status, history, outputs}. Raises
     OrchestrationError if an illegal transition or missing handler is hit.
     """
+    # Export run identity so `_subagent.invoke_subagent` can (1) write the
+    # session→run mapping for each `claude -p` child — keeping the inner hooks'
+    # session-id resolution on the fast path — and (2) persist per-invocation
+    # artifacts under the run dir. Env is the lightest coupling that avoids
+    # threading ctx through every handler signature.
+    os.environ["SOC_AGENT_RUN_DIR"] = str(ctx.run_dir)
+    os.environ["SOC_AGENT_SIGNATURE_ID"] = ctx.signature_id
+
     proposed = Phase.CONTEXTUALIZE
     forced = False
 

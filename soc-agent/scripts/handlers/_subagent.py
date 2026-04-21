@@ -14,10 +14,15 @@ Also centralizes:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
+import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +31,13 @@ import yaml
 from scripts.orchestrate import OrchestrationError
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Make hooks/scripts/run_context importable without forcing callers to set up
+# sys.path themselves — tests import this module directly.
+if str(SOC_AGENT_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOC_AGENT_ROOT))
+
+from hooks.scripts.run_context import write_session_mapping  # noqa: E402
 
 DEFAULT_TIMEOUT_SECONDS = int(
     os.environ.get("SOC_AGENT_SUBAGENT_TIMEOUT_SECONDS", "300")
@@ -119,6 +131,20 @@ def _inject_env_context(subagent_name: str, prompt: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_run_context() -> tuple[Optional[Path], str]:
+    """Read the current run_dir / signature_id from env.
+
+    Set by `orchestrate.run()` at state-machine startup so every
+    `invoke_subagent` call can write its session→run mapping and persist
+    per-invocation artifacts without plumbing the Context through every
+    handler.
+    """
+    run_dir_val = os.environ.get("SOC_AGENT_RUN_DIR", "")
+    run_dir = Path(run_dir_val) if run_dir_val else None
+    signature_id = os.environ.get("SOC_AGENT_SIGNATURE_ID", "")
+    return run_dir, signature_id
+
+
 def invoke_subagent(
     agent: str,
     prompt: str,
@@ -132,14 +158,36 @@ def invoke_subagent(
     `soc-agent:archetype-scan` prefixed form. The plugin prefix is a Task-tool
     convention, not a CLI one.
 
-    Implementation: reads `agents/{agent}.md`, passes body as
-    `--system-prompt-file`, passes the user prompt via stdin. Model defaults
-    to the subagent's frontmatter `model:` if not overridden.
+    Implementation:
+        - Reads `agents/{agent}.md`, passes body as `--system-prompt-file`,
+          passes the user prompt via stdin.
+        - Loads the soc-agent plugin via `--plugin-dir` so the subagent's
+          PreToolUse/PostToolUse hooks (invlang_validate, tag_tool_results,
+          audit_tool_calls, etc.) fire inside the child session.
+        - Forces a UUID session id via `--session-id` and writes the
+          session→run mapping before invocation so hooks resolve run_dir
+          deterministically (no race with mtime fallback).
+        - After invocation, persists the prompt+stdout and a JSONL audit
+          record under the run dir. Advisory: these never block the handler.
+
+    Model defaults to the subagent's frontmatter `model:` if not overridden.
     """
     body, frontmatter = _load_agent_definition(agent)
     effective_model = model or frontmatter.get("model") or "haiku"
     tools = _tools_list(frontmatter)
     final_prompt = _inject_env_context(agent, prompt)
+
+    # Eagerly establish a session → run mapping so inner hooks resolve run_dir
+    # via the fast path instead of the racy mtime-scan fallback.
+    session_id = str(uuid.uuid4())
+    run_dir, signature_id = _resolve_run_context()
+    if run_dir is not None and run_dir.exists():
+        try:
+            write_session_mapping(
+                session_id, run_dir, signature_id, run_dir.parent
+            )
+        except Exception:
+            pass  # advisory — mapping is best-effort
 
     # Write body to a temp file so `--system-prompt-file` can read it.
     with tempfile.NamedTemporaryFile(
@@ -152,6 +200,8 @@ def invoke_subagent(
         "claude", "-p",
         "--model", effective_model,
         "--system-prompt-file", tmp_path,
+        "--session-id", session_id,
+        "--plugin-dir", str(SOC_AGENT_ROOT),
         "--output-format", "text",
     ]
     if tools:
@@ -167,6 +217,7 @@ def invoke_subagent(
         env["PATH"] = f"{venv_bin}:{env.get('PATH', '')}"
         env["VIRTUAL_ENV"] = str(SOC_AGENT_ROOT / ".venv")
 
+    started = time.monotonic()
     try:
         result = subprocess.run(
             argv,
@@ -186,12 +237,98 @@ def invoke_subagent(
             os.unlink(tmp_path)
         except OSError:
             pass
+    duration_ms = int((time.monotonic() - started) * 1000)
+
+    if run_dir is not None and run_dir.exists():
+        try:
+            _append_subagent_log(
+                run_dir, agent, session_id,
+                final_prompt, result.stdout, result.stderr,
+            )
+            _append_subagent_audit(
+                run_dir, agent, session_id, effective_model,
+                duration_ms, result.returncode,
+                len(final_prompt), len(result.stdout),
+            )
+        except Exception:
+            pass  # advisory — persistence must never crash a handler
 
     if result.returncode != 0:
         raise OrchestrationError(
             f"subagent {agent} exited {result.returncode}: {result.stderr.strip()}"
         )
     return result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Outer-layer persistence helpers
+# ---------------------------------------------------------------------------
+
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _ts_filename() -> str:
+    # Sortable UTC timestamp safe for filenames.
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def _append_subagent_log(
+    run_dir: Path,
+    agent: str,
+    session_id: str,
+    prompt: str,
+    stdout: str,
+    stderr: str,
+) -> None:
+    """Persist the full invocation under `{run_dir}/subagent_outputs/` for
+    post-mortem. One file per call, named by timestamp + agent."""
+    out_dir = run_dir / "subagent_outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{_ts_filename()}-{agent}.txt"
+    parts = [
+        f"=== agent: {agent} ===",
+        f"=== session_id: {session_id} ===",
+        "",
+        "=== PROMPT ===",
+        prompt,
+        "",
+        "=== STDOUT ===",
+        stdout,
+    ]
+    if stderr:
+        parts.extend(["", "=== STDERR ===", stderr])
+    path.write_text("\n".join(parts))
+
+
+def _append_subagent_audit(
+    run_dir: Path,
+    agent: str,
+    session_id: str,
+    model: str,
+    duration_ms: int,
+    returncode: int,
+    prompt_chars: int,
+    stdout_chars: int,
+) -> None:
+    """Append a one-line JSONL record per invocation to `subagent_audit.jsonl`.
+    Distinct from the plugin's `tool_audit.jsonl` — that log captures tools the
+    subagent used; this log captures the *spawn* event itself, which the
+    orchestrator shells out to via subprocess and is invisible to PostToolUse."""
+    audit_path = run_dir / "subagent_audit.jsonl"
+    entry = {
+        "timestamp": _iso_now(),
+        "agent": agent,
+        "session_id": session_id,
+        "model": model,
+        "duration_ms": duration_ms,
+        "returncode": returncode,
+        "prompt_chars": prompt_chars,
+        "stdout_chars": stdout_chars,
+    }
+    with open(audit_path, "a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------------------
