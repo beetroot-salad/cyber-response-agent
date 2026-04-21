@@ -1,0 +1,5 @@
+# Generated run artifacts — regenerable via run.py / run_ab.py /
+# run_baseline_ablation.py. findings.md quotes the load-bearing excerpts
+# inline, so reviewers do not need the raw outputs in-tree.
+outputs/
+ab-outputs/
