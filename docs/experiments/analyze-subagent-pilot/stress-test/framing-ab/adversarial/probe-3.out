@@ -1,0 +1,1 @@
+If the prod-webserver-01 baseline had identified 'postgres', 'tomcat', 'jenkins', 'nagios' as legitimate active service accounts on the system — contradicting the observation of "zero env-specific names" — why do you claim the ++ grade for opportunistic-scanner still holds?

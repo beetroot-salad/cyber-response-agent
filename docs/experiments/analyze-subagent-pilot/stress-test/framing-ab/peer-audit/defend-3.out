@@ -1,0 +1,15 @@
+```yaml
+verdict: defend
+probe_engaged: yes
+new_grade: null
+rationale: |
+  The ++ for ?opportunistic-scanner is carried by the username scatter, not the rate.
+  The pre-committed refutation shape was "→ -- if usernames ≤2 names OR env-specific names
+  present" — at 0.04/s, neither leg materializes: 20 generic wordlist names, zero
+  application-stack identifiers. The rate (0.26/s) is cited as corroborating automated
+  execution but it does not appear in the refutation condition for this hypothesis and is
+  not what lifts the grade from + to ++. What justifies ++ is that the SIEM query is a
+  direct answer (authoritative source, named failed refutation) — that qualification is
+  unchanged at 0.04/s. A slower rate would weaken one leg of the ?credential-stuffing-external
+  -- (the rate floor), but that affects a separate hypothesis's grade, not this one.
+```

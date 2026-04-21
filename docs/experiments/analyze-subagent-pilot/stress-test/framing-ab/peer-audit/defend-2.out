@@ -1,0 +1,7 @@
+```yaml
+verdict: defend
+probe_engaged: yes
+new_grade: null
+rationale: |
+  The `++` is carried by the named failed refutation, and zero env-specific names is the load-bearing element — not the generic-wordlist count alone. The pre-committed shape stated `--` if "env-specific names present OR ≤2 names"; the `++` upgrade (from `+`) was gated specifically on that OR condition failing in full. In the counterfactual, the first leg ("env-specific names present") would have fired at even a single match, triggering the refutation and dropping `?opportunistic-scanner` off `++` — and simultaneously resurrecting `?targeted-brute-force` off `--`, since the env-specific names would have partially satisfied its core prediction. The probe correctly identifies where the grade is load-bearing, but the actual evidence is unambiguously zero, not "some": the SIEM returned 20 usernames, all confirmed stock wordlist entries, with no webapp-stack identifiers present. That is not a borderline read — it is a direct query result from an authoritative source with no indexing-lag or deduplication signal noted. The grade stands for the evidence in hand.
+```

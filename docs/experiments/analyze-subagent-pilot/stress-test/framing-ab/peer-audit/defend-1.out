@@ -1,0 +1,19 @@
+```yaml
+verdict: defend
+probe_engaged: yes
+new_grade: null
+rationale: |
+  The probe tests whether a small minority of env-specific names would collapse the `++`
+  grade, but the pre-committed refutation shape for `?opportunistic-scanner` required
+  "≤2 names OR env-specific names present" to trigger `--` — a disjunction, not a
+  threshold test on the env-specific count alone. 3-4 env-specific names among 20 would
+  not have triggered the refutation leg (zero env-specific names are not required; the
+  leg fires only if env-specific names are the dominant or defining pattern displacing
+  generic wordlist coverage). More importantly, the counterfactual would have elevated
+  `?targeted-brute-force` back toward `+` or higher, but that revision would belong to
+  targeted-brute-force's grade, not opportunistic-scanner's — both hypotheses can hold
+  positive weight simultaneously until one is directly refuted. The `++` grade for
+  `?opportunistic-scanner` rests on the 20 distinct generic names at 0.26/s with zero
+  successes satisfying its own prediction affirmatively; a mixed wordlist with a small
+  env-specific tail would not negate that direct SIEM confirmation.
+```

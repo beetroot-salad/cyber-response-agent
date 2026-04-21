@@ -1,0 +1,1 @@
+If the '20 distinct usernames' in authentication-history-extended had included environment-specific account names that the Wazuh parser normalized to generic form—like 'prod-admin' → 'admin'—wouldn't the claim of "zero env-specific names from the prod-webserver-01 application stack" be false and render the `++` grade indefensible?
