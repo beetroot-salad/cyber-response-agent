@@ -223,25 +223,15 @@ def hypothesis_topology(
     (pass `companion.hypotheses` for corpus use; the handler passes its parsed
     frontier). This hypothesis is filtered out by id.
 
-    Handles both schema shapes:
-      - legacy v2.5 — `proposed_edge: "e-001"` (prologue edge id); resolve
-        relation + parent via prologue lookup. Parent = the edge endpoint that
-        isn't the attached vertex.
-      - structured v2.8 — `proposed_edge: {relation, parent_vertex: {...}}`;
-        read fields directly.
-
-    Name/label drift: `hypothesis.get("name") or hypothesis.get("label")`.
-    Missing lookups degrade to None — the narrowing ladder copes with gaps.
+    Expects the v2.8 structured shape: `proposed_edge: {relation, parent_vertex:
+    {type, classification}}`. Attached-vertex type/classification are resolved
+    from `prologue.vertices` by id. Missing lookups degrade to None — the
+    narrowing ladder copes with gaps.
     """
     vertices_by_id = {
         v.get("id"): v
         for v in (prologue.get("vertices") or [])
         if isinstance(v, dict)
-    }
-    edges_by_id = {
-        e.get("id"): e
-        for e in (prologue.get("edges") or [])
-        if isinstance(e, dict)
     }
 
     attached_id = hypothesis.get("attached_to_vertex")
@@ -264,26 +254,13 @@ def hypothesis_topology(
                 "type": pv.get("type"),
                 "classification": pv.get("classification"),
             }
-    elif isinstance(proposed, str):
-        edge = edges_by_id.get(proposed)
-        if isinstance(edge, dict):
-            relation = edge.get("relation")
-            src = edge.get("source_vertex")
-            tgt = edge.get("target_vertex")
-            parent_id = tgt if src == attached_id else src
-            parent_v = vertices_by_id.get(parent_id)
-            if isinstance(parent_v, dict):
-                parent_vertex = {
-                    "type": parent_v.get("type"),
-                    "classification": parent_v.get("classification"),
-                }
 
     this_id = hypothesis.get("id")
     peer_names: list[str] = []
     for h in siblings or []:
         if h.get("id") == this_id:
             continue
-        nm = h.get("name") or h.get("label")
+        nm = h.get("name")
         if nm:
             peer_names.append(nm)
     peers = tuple(sorted(peer_names))

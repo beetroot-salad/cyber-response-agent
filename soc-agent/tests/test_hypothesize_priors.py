@@ -56,51 +56,21 @@ def _companion(
 
 def _hyp(
     hid: str,
-    name_or_label: str,
+    name: str,
     attached_to: str,
     proposed_edge: Any,
-    *,
-    use_label: bool = False,
 ) -> dict[str, Any]:
-    h: dict[str, Any] = {
+    return {
         "id": hid,
+        "name": name,
         "attached_to_vertex": attached_to,
         "proposed_edge": proposed_edge,
     }
-    if use_label:
-        h["label"] = name_or_label
-    else:
-        h["name"] = name_or_label
-    return h
 
 
 # ---------------------------------------------------------------------------
-# hypothesis_topology — schema-shape handling
+# hypothesis_topology — v2.8 structured shape
 # ---------------------------------------------------------------------------
-
-
-def test_hypothesis_topology_legacy_shape():
-    prologue = _prologue(
-        vertices=[
-            {"id": "v-001", "type": "endpoint", "classification": "monitoring-host"},
-            {"id": "v-002", "type": "endpoint", "classification": "internal-server"},
-        ],
-        edges=[
-            {
-                "id": "e-001",
-                "relation": "attempted_auth",
-                "source_vertex": "v-001",
-                "target_vertex": "v-002",
-            }
-        ],
-    )
-    # Attached to target — parent should resolve to the source side (v-001).
-    h = _hyp("h-001", "?monitoring-probe", "v-002", "e-001", use_label=True)
-    fp = hypothesis_topology(prologue, h, [h])
-    assert fp["attached_vertex"] == {"type": "endpoint", "classification": "internal-server"}
-    assert fp["relation"] == "attempted_auth"
-    assert fp["parent_vertex"] == {"type": "endpoint", "classification": "monitoring-host"}
-    assert fp["peers"] == ()
 
 
 def test_hypothesis_topology_structured_shape():
@@ -130,15 +100,16 @@ def test_hypothesis_topology_structured_shape():
     assert fp["peers"] == ("?underlying-host",)
 
 
-def test_hypothesis_topology_missing_edge_returns_partial():
+def test_hypothesis_topology_missing_parent_returns_partial():
     prologue = _prologue(
         vertices=[{"id": "v-001", "type": "endpoint", "classification": "host"}]
     )
-    # proposed_edge refers to an edge that doesn't exist in the prologue.
-    h = _hyp("h-001", "?orphan", "v-001", "e-missing")
+    # proposed_edge carries relation but omits parent_vertex — attached-vertex
+    # fields still resolve, parent fields degrade to None.
+    h = _hyp("h-001", "?orphan", "v-001", {"relation": "spawned"})
     fp = hypothesis_topology(prologue, h, [h])
     assert fp["attached_vertex"] == {"type": "endpoint", "classification": "host"}
-    assert fp["relation"] is None
+    assert fp["relation"] == "spawned"
     assert fp["parent_vertex"] is None
 
 
@@ -178,7 +149,10 @@ def _build_ssh_case(
         "id": "h-001",
         "name": hyp_name,
         "attached_to_vertex": "v-002",
-        "proposed_edge": "e-001",
+        "proposed_edge": {
+            "relation": "attempted_auth",
+            "parent_vertex": {"type": "endpoint", "classification": source_class},
+        },
     }
     lead = {
         "id": "l-001",
@@ -286,6 +260,10 @@ def test_topology_ranking_uses_normalized_score():
             }
         ],
     )
+    structured_edge = {
+        "relation": "attempted_auth",
+        "parent_vertex": {"type": "endpoint", "classification": "monitoring-host"},
+    }
     cases = []
     # Five cases with lead A
     for i in range(5):
@@ -293,7 +271,7 @@ def test_topology_ranking_uses_normalized_score():
             "id": f"h-{i}",
             "name": "?monitoring-probe",
             "attached_to_vertex": "v-001",
-            "proposed_edge": "e-001",
+            "proposed_edge": structured_edge,
         }
         lead_a = {
             "id": "l-a",
@@ -309,7 +287,7 @@ def test_topology_ranking_uses_normalized_score():
             "id": f"h-b{i}",
             "name": "?monitoring-probe",
             "attached_to_vertex": "v-001",
-            "proposed_edge": "e-001",
+            "proposed_edge": structured_edge,
         }
         lead_b = {
             "id": "l-b",
@@ -392,18 +370,23 @@ def test_peer_hypothesis_distribution():
         ],
     )
 
+    structured_edge = {
+        "relation": "attempted_auth",
+        "parent_vertex": {"type": "endpoint", "classification": "source"},
+    }
+
     def _case(case_id: str, peer_name: str, peer_final: str) -> Companion:
         h_a = {
             "id": "h-a",
             "name": "?A",
             "attached_to_vertex": "v-001",
-            "proposed_edge": "e-001",
+            "proposed_edge": structured_edge,
         }
         h_peer = {
             "id": "h-peer",
             "name": peer_name,
             "attached_to_vertex": "v-001",
-            "proposed_edge": "e-001",
+            "proposed_edge": structured_edge,
         }
         lead = {
             "id": "l-001",
@@ -431,8 +414,11 @@ def test_peer_hypothesis_distribution():
     result = peer_hypothesis_distribution_for_topology(corpus, fp)
     assert result["tier_used"] == 0
     hits = {h["classification"]: h for h in result["hits"]}
-    # ?A matches the topology itself — it's in every in-scope case; the caller
-    # uses its presence as confirmation that the current pick isn't novel.
+    # Topology is a position, not a named pick; classifications at the same
+    # position (including ?A itself) are all in-scope. ?A appears in every
+    # in-scope case so its peer_count equals the case count — the caller
+    # reads this as "this classification has been proposed here before, so
+    # the current pick isn't novel."
     assert set(hits.keys()) == {"?A", "?B", "?C"}
     assert hits["?A"]["peer_count"] == 3
     assert hits["?B"]["peer_count"] == 2
@@ -453,7 +439,7 @@ def test_format_priors_stamps_tier_and_label():
             "name": "?monitoring-probe",
             "fingerprint": {},
             "tier_used": 2,
-            "tier_label": "dropped parent-type",
+            "tier_label": "also dropped parent-type",
             "leads": [
                 {
                     "lead_name": "auth-history",
@@ -474,7 +460,7 @@ def test_format_priors_stamps_tier_and_label():
     ]
     out = _format_priors(priors)
     assert "## Past-investigation priors" in out
-    assert "?monitoring-probe (tier 2 — dropped parent-type)" in out
+    assert "?monitoring-probe (tier 2 — also dropped parent-type)" in out
     assert "auth-history" in out
     assert "score=0.750" in out
     assert "n=3" in out

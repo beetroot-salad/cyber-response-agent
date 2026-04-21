@@ -236,7 +236,11 @@ hypothesize:
     - id: h-001
       name: "?monitoring-probe"
       attached_to_vertex: v-002
-      proposed_edge: e-001
+      proposed_edge:
+        relation: attempted_auth
+        parent_vertex:
+          type: endpoint
+          classification: monitoring-host
 ```
 """).strip() + "\n"
 
@@ -266,7 +270,13 @@ def _synthetic_companion():
                     "id": "h-001",
                     "name": "?monitoring-probe",
                     "attached_to_vertex": "v-002",
-                    "proposed_edge": "e-001",
+                    "proposed_edge": {
+                        "relation": "attempted_auth",
+                        "parent_vertex": {
+                            "type": "endpoint",
+                            "classification": "monitoring-host",
+                        },
+                    },
                 }
             ]
         },
@@ -319,9 +329,12 @@ class TestPriorsIntegration:
 
         prompt = hypothesize_handler._assemble_prompt(ctx)
         assert "## Past-investigation priors" in prompt
-        # Playbook for rule-5710 has hypothesis seeds. Assert at least one
-        # seed-shaped section header appears in the rendered block.
-        assert "tier 4" in prompt or "(no frontier extracted)" in prompt
+        # Playbook for rule-5710 has hypothesis seeds, so loop-1 synthesizes a
+        # frontier. Loop-1 fingerprints have relation=None, so tiers 0-3 fail
+        # and retrieval must land at tier 4 — the empty-frontier sentinel
+        # would indicate seed extraction broke.
+        assert "tier 4" in prompt
+        assert "(no frontier extracted)" not in prompt
 
     def test_priors_failure_is_non_fatal(self, tmp_path, monkeypatch):
         ctx = make_ctx(

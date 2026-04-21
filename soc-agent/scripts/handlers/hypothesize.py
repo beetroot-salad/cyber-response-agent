@@ -195,9 +195,9 @@ def _extract_current_frontier(ctx: Context) -> list[dict]:
         ]
 
     # Loop 1 fallback — seeds from the signature playbook.
-    from scripts.handlers.contextualize import _load_playbook_metadata  # type: ignore
+    from scripts.handlers.contextualize import load_playbook_metadata
 
-    meta = _load_playbook_metadata(ctx.signature_id)
+    meta = load_playbook_metadata(ctx.signature_id)
     seeds = meta.hypothesis_seeds or []
     peers = tuple(sorted(seeds))
     frontier: list[dict] = []
@@ -236,7 +236,7 @@ def _parse_prologue_and_last_hypothesize(
 
 
 def _hyp_name(h: dict) -> str:
-    return h.get("name") or h.get("label") or ""
+    return h.get("name") or ""
 
 
 def _compute_priors(frontier: list[dict]) -> list[dict]:
@@ -308,7 +308,7 @@ def _format_priors(priors: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _fmt_num(v) -> str:
+def _fmt_num(v: float | None) -> str:
     if v is None:
         return "—"
     return f"{v:.3f}"

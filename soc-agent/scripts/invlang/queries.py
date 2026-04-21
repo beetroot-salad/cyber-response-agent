@@ -37,8 +37,8 @@ from .corpus import Companion, conclude_field, hypothesis_topology
 
 
 def _hypothesis_name(h: dict[str, Any]) -> str:
-    """Return the hypothesis display name, handling v2.5 `label` / v2.8 `name` drift."""
-    return h.get("name") or h.get("label", "") or ""
+    """Return the hypothesis display name."""
+    return h.get("name", "") or ""
 
 
 # ---------------------------------------------------------------------------
@@ -683,11 +683,14 @@ def lead_discrimination_score(
 # ---------------------------------------------------------------------------
 
 
+# Labels describe the *cumulative* relaxation at each tier. Tier N drops
+# every field tier N-1 already dropped, plus the one named; the label names
+# only the newly-relaxed field so the reader sees what each step gave up.
 _TIER_LABELS = {
     0: "exact",
     1: "dropped parent-class",
-    2: "dropped parent-type",
-    3: "dropped attached-class",
+    2: "also dropped parent-type",
+    3: "also dropped attached-class",
     4: "name-glob fallback",
 }
 
@@ -845,6 +848,12 @@ def peer_hypothesis_distribution_for_topology(
     `final_weight_histogram` counts the peer's final weight as recorded in the
     case's resolutions (last-resolution-wins per peer within its case); buckets
     are `++ / + / null / - / --`. Sorted by `peer_count` desc.
+
+    The matched-hypothesis classifications themselves appear in the output —
+    they *are* peers at the query position (a topology is a position, not a
+    named pick; classifications that sit at the same position are the
+    alternatives we care about). Their presence is useful signal: the caller
+    reads it as "this classification has been proposed here N times before."
 
     Returns `{hits, count, tier_used, tier_label}`.
     """
