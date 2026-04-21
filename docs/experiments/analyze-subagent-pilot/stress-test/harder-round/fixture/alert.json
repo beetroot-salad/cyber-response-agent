@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-04-21T09:47:23.112+0000",
+  "rule": {
+    "id": "db-anomaly-7701",
+    "level": 9,
+    "description": "Anomalous database read volume from service principal"
+  },
+  "agent": {
+    "id": "003",
+    "name": "db-primary",
+    "ip": "10.0.3.17"
+  },
+  "data": {
+    "principal": "svc:reporting-api",
+    "target_db": "prod-customer-db",
+    "target_schema": "public",
+    "targeted_tables": ["customers", "customer_profiles", "billing_contacts"],
+    "columns_sensitive": true,
+    "query_count_in_window": 47,
+    "window_seconds": 600,
+    "bytes_returned_approx": 3200000000,
+    "baseline_daily_avg_bytes": 180000000
+  },
+  "decoder": { "name": "db-query-anomaly" }
+}

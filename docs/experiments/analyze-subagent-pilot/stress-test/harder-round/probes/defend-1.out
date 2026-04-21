@@ -1,0 +1,7 @@
+```yaml
+verdict: revise
+probe_engaged: yes
+new_grade: "+"
+rationale: |
+  The probe correctly identifies that p2's prediction ("wide column selection, minimal/absent WHERE") was miscalibrated for a hypothesis that posits the adversary controls the service principal. An adversary operating through a compromised svc:reporting-api would use the service's own query templates — bounded SELECT with date-range WHERE clauses — precisely to blend in; treating the observed query shape as partially contradicting h-002 was wrong. Removing the p2 moderation corrects the signal mix: p1 confirms (+), p2 is now neutral (consistent with both h-001 and h-002), p3 remains unresolved. The grade stays at + because one confirmation with no refutation and one open signal is + territory; reaching ++ still requires a failed refutation, and r1 (schedule-registry lookup) is untested.
+```

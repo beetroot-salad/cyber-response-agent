@@ -1,0 +1,1 @@
+As an attacker, I could have copied `svc:reporting-api`'s actual query pattern from production (empty session_tag, bounded-parametric SELECT, date-range filters), executed my exfiltration in those same templates, and made it look like normal h-001 behavior — which is exactly the shape you observed. How do you know I didn't?

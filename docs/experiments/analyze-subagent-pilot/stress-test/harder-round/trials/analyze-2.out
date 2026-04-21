@@ -1,0 +1,35 @@
+## ANALYZE (loop 2)
+
+**Evidence:** query-profile (db-audit-prod) — all 47 queries from `svc:reporting-api` against `prod-customer-db` match a single bounded-SELECT template (`SELECT <columns> FROM <table> WHERE created_at BETWEEN :since AND :until LIMIT :n`); `wildcard_select: false`; `has_date_range_filter: true`; 3 distinct query templates; `estimated_rows_returned: 3,200,000`. The `session_tag` column in the db-audit output was **empty for all 47 queries** — no job correlator, CI tag, or session annotation is present in any record.
+
+**Assessment:**
+
+- ?scheduled-reporting-pipeline (h-001): `+` (was `+`) — p2 confirmed: all queries are bounded SELECT with explicit date-range WHERE clauses and no SELECT *, consistent with structured reporting behavior. r1 refutation shape attempted: r1 requires BOTH no-job-correlator AND SELECT-bulk-columns-with-no-date-range-bound. The second conjunct failed (queries ARE date-range-bounded), so r1 as a whole did not materialize — the shape-based refutation was not matched. However, p1 directly failed: session_tag empty for all 47 queries contradicts the prediction that a declared job's session metadata or CI correlator would be present. p1's failure is material — a properly instrumented scheduled pipeline would ordinarily carry this. Net: bounded-shape positive and r1 non-match offset by p1 failure and unresolved archetype anchors a1 and a3. Cannot grade `++`: r1 failed only on its shape conjunct (not because a job was confirmed), archetype anchor a1 is unresolved/failed, and p1's failure is a direct negative on a core prediction. Maintained at `+`.
+
+- ?adversary-controlled-service-principal (h-002): `-` (was `+`) — p1 confirmed: no session correlator, consistent with adversary-controlled credential use. But p2 directly failed: queries carry date-range WHERE filters and no wildcard select, inconsistent with the bulk-extraction prediction of wide column selection with minimal/absent filters. p3 (one-shot burst) is ambiguous — the 47-query burst in 10 minutes is equally consistent with a triggered reporting job. r1 refutation shape not matched: r1 requires a scheduled-job correlator to appear AND schedule confirmation of a declared run; no correlator was found, so r1's second condition is unreachable and the full shape is unmet. p2's failure is a genuine prediction miss — no pre-registered refutation shape in h-002 covers "bounded SELECT with date-range," so maximum grade from this miss is `-` not `--`. Downgraded to `-`.
+
+**Surviving hypotheses:** ?scheduled-reporting-pipeline, ?adversary-controlled-service-principal
+**Next action:** HYPOTHESIZE
+
+h-001 is at `+` with a critical unresolved gap: p1 failed (no job correlator) and archetype anchor a1 (job schedule metadata) is unconfirmed. The 17× daily baseline volume in 10 minutes has no causal explanation yet — the bounded date-range shape hints at a historical backfill window, but l-002 captured only the query template shape, not the `:since`/`:until` parameter values actually bound in the 47 queries. The actual time span being queried is unknown. Two leads directly discriminate:
+
+1. **Job-scheduler lookup**: Does a declared job for `svc:reporting-api` exist (in the job scheduler, CI platform, or workflow orchestrator) that covers the 09:47 window on 2026-04-21? A confirmed job record with this run logged flips h-001's p1 from failed to confirmed and provides the a1 anchor for `++`; absence of any job record deepens the unexplained-behavior concern and forces escalation regardless of query shape.
+
+2. **Query date-range parameter inspection**: What historical window do the `:since`/`:until` bindings span across the 47 queries? A multi-month backfill range would explain 17× daily volume from legitimate bounded queries (p3) and would discriminate against h-002's one-shot-burst framing. This check does not require a job scheduler — db-audit bind-variable capture suffices if available.
+
+Either lead can resolve the investigation: confirmed job + SLA-consistent date range → h-001 to `++` and CONCLUDE benign; no job record → h-001 stays `+` at best and disposition must escalate with surviving h-002 at `-`.
+
+---
+
+## Self-report
+
+- **Context wished for:** `:since`/`:until` bind-variable values from the 47 queries — l-002 captured query template shape but not the parameter bindings, leaving the actual historical window queried unknown. This is the single most useful missing datum for explaining the volume anomaly.
+- **Uncertain claims:** The characterization of p1's failure as "material" for h-001 — it's possible this principal's job is intentionally tag-free (e.g., a legacy pipeline or a one-off analyst-triggered export via the reporting API). Bounded query shape remains the stronger positive signal; the missing correlator is a weakness, not a decisive refutation.
+- **Anomalies:**
+  - **Loop 1 has no formal `## ANALYZE (loop 1)` block.** HYPOTHESIZE (loop 2) asserts "both h-001 and h-002 remain `+`" but no ANALYZE block assigned those weights. They appear to derive from the informal inline "Assessment:" note appended to GATHER (loop 1). This means the `+` weights entering loop 2 have no graded assessment block backing them — a gap in refutation discipline (no `++` claim was made, so no rule was violated, but the audit trail is incomplete).
+  - **Both `l-001` and `l-002` carry `resolutions: []`.** The companion's `gather[].resolutions[]` chain is empty for both leads, so no formal weight-update records have been written. The legitimacy_resolution for lc1 is present in `l-001.outcome.legitimacy_resolutions[]` (correct placement), but hypothesis weight updates for h-001 and h-002 have never been formally recorded in either gather block's resolutions. The weights currently exist only as asserted prose, not as structured resolution records the validator can traverse.
+
+```yaml
+next_action: HYPOTHESIZE
+discriminator: "Does a declared job for svc:reporting-api exist in the job scheduler covering the 09:47 window on 2026-04-21, and what historical date range do the :since/:until bind parameters actually span across the 47 queries (backfill hypothesis for 17x volume)?"
+```

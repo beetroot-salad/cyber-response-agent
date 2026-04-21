@@ -1,0 +1,1 @@
+> As an attacker, I could have compromised `svc:reporting-api` and queried using the exact reporting template (bounded-SELECT, date-range filter) you observed — producing the identical shape with no session correlators — while intentionally leaving them blank to mimic a legacy or analyst-triggered pipeline. How do you know this wasn't a compromised credential?

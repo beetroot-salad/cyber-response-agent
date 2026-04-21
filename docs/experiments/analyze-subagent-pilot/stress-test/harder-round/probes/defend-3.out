@@ -1,0 +1,17 @@
+```yaml
+verdict: defend
+probe_engaged: yes
+new_grade: null
+rationale: |
+  The probe targets a grade advantage for h-001 that the ANALYZE block does not actually
+  assign: both h-001 and h-002 sit at `-`, and the self-report explicitly flags that the
+  equal grades feel "more symmetric than the evidence warrants" — the investigative
+  discipline already absorbed this concern. For h-002 specifically, the bounded parametric
+  shape was treated as a p2 inconsistency (not a triggered refutation), so the grade is
+  already `-` rather than `--`; the ANALYZE stopped short of penalizing h-002 beyond what
+  pre-registered predictions support. Accepting the probe's framing would require treating
+  every prediction mismatch as a potential mimicry artifact, which is unfalsifiable and
+  would make h-002 ungradeably immune to any query-shape evidence — the job-schedule
+  registry check, not attacker-capability speculation, is the correct mechanism to
+  differentiate the two hypotheses.
+```
