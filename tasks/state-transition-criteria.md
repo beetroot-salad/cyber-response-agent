@@ -1,6 +1,6 @@
 ---
 title: State machine transition verification criteria (7 transitions)
-status: todo
+status: done
 groups: reliability, state
 ---
 

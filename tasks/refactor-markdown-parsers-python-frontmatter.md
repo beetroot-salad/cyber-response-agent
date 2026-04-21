@@ -1,6 +1,6 @@
 ---
 title: Refactor hand-rolled markdown/frontmatter parsers to python-frontmatter + markdown-it-py
-status: backlog
+status: doing
 groups: robustness, refactor
 ---
 

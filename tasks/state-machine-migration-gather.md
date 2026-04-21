@@ -1,6 +1,6 @@
 ---
 title: Migrate GATHER to orchestrator handler
-status: todo
+status: doing
 groups: state-machine-migration, state
 depends_on: state-machine-migration-hypothesize
 ---

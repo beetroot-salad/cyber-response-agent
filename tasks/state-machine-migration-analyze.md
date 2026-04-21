@@ -1,6 +1,6 @@
 ---
 title: Migrate ANALYZE to orchestrator handler
-status: todo
+status: done
 groups: state-machine-migration, state
 depends_on: state-machine-migration-gather
 ---

@@ -1,6 +1,6 @@
 ---
 title: State machine bypass: decide and implement mitigation strategy
-status: backlog
+status: deferred
 groups: state
 ---
 
