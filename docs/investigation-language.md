@@ -1,6 +1,6 @@
 # Investigation Language
 
-**Status:** Implemented. Spec v2.9 (rules 24–25 pending implementation; prompt alignment in `agents/analyze.md` pending).
+**Status:** Implemented. Spec v2.9.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
 
 **v2.9 delta:** validator rules #24 (hypothesis persistence at CONCLUDE) and #25 (same-level sibling rollup for `matched_prediction_ids`). Closes two bias gaps identified during the ANALYZE-phase state-machine cutover: silent hypothesis drop across loops, and cross-sibling prediction-ID citation. See `.claude/skills/migrate-state-machine/SKILL.md` for the design context.

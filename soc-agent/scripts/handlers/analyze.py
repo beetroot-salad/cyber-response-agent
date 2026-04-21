@@ -157,25 +157,34 @@ def _validate_routing(payload: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _strip_terminal_yaml(raw: str) -> str:
-    """Return `raw` with the last ```yaml...``` fenced block removed.
+def _strip_yaml_fences(raw: str) -> str:
+    """Return `raw` with every ```yaml...``` fenced block removed.
 
-    The subagent's output is `## ANALYZE...\n## Self-report...\n```yaml\n...\n````.
-    For writing to investigation.md we want only the markdown sections — the
-    terminal YAML is a routing-only payload.
+    The subagent contract forbids companion-YAML emission from ANALYZE
+    (the main agent composes `gather[].resolutions[]` downstream) and the
+    routing YAML is consumed out-of-band before this strip runs. So any
+    `yaml` fence in the appended text is either the terminal routing block
+    or an out-of-contract emission — in both cases, it must not land in
+    `investigation.md` where the invlang validator would merge it into
+    the companion graph. Strip all of them.
     """
     fence = "```yaml"
     end_marker = "```"
-    last_start = raw.rfind(fence)
-    if last_start == -1:
-        return raw.rstrip()
-    # Find the closing fence AFTER this start
-    body_start = last_start + len(fence)
-    last_end = raw.find(end_marker, body_start)
-    if last_end == -1:
-        # Unterminated — keep full text up to the opening fence and move on.
-        return raw[:last_start].rstrip()
-    return raw[:last_start].rstrip() + "\n"
+    out: list[str] = []
+    i = 0
+    while True:
+        start = raw.find(fence, i)
+        if start == -1:
+            out.append(raw[i:])
+            break
+        out.append(raw[i:start])
+        body_start = start + len(fence)
+        stop = raw.find(end_marker, body_start)
+        if stop == -1:
+            # Unterminated fence — drop the remainder and stop.
+            break
+        i = stop + len(end_marker)
+    return "".join(out).rstrip() + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +200,12 @@ def _validate_and_write(ctx: Context, new_section: str) -> None:
     present in the text; appending markdown-only prose leaves the YAML set
     unchanged so the validator is effectively idempotent on this path, but
     we run it anyway to catch any drift in the accumulated document.
+
+    Note: validation runs *after* the subagent has been spawned, so a
+    failure here sinks the subagent's cost — there's no pre-spawn path
+    that could catch it, since the text being validated is the subagent's
+    own output. On failure, `OrchestrationError` bubbles up and the
+    orchestrator halts the run.
     """
     hooks_scripts = str(SOC_AGENT_ROOT / "hooks")
     if hooks_scripts not in sys.path:
@@ -225,7 +240,7 @@ def handle(ctx: Context) -> PhaseResult:
 
     payload = _validate_routing(extract_terminal_yaml(raw))
 
-    sections = _strip_terminal_yaml(raw)
+    sections = _strip_yaml_fences(raw)
     _validate_and_write(ctx, sections)
 
     next_phase = (

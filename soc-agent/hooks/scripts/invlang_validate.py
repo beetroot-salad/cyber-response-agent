@@ -1507,10 +1507,15 @@ def _check_prediction_id_hypothesis_scope(merged: dict[str, Any]) -> list[str]:
             hid = res.get("hypothesis")
             if not isinstance(hid, str):
                 continue
+            # Undeclared hypothesis is already flagged by the dangling-ref
+            # check (rule 4); skip here to avoid double-reporting the same
+            # root cause.
+            if hid not in declared:
+                continue
             matched = res.get("matched_prediction_ids") or []
             if not isinstance(matched, list):
                 continue
-            h_preds = declared.get(hid, {}).get("predictions", set())
+            h_preds = declared[hid].get("predictions", set())
             foreign = [m for m in matched if isinstance(m, str) and m not in h_preds]
             if foreign:
                 errors.append(

@@ -224,6 +224,49 @@ class TestHandleRoutesConclude:
         assert "next_action: CONCLUDE" not in written
         assert "surviving_hypotheses: [h-001]" not in written
 
+    def test_strips_all_yaml_fences_not_just_terminal(
+        self, tmp_path, monkeypatch,
+    ):
+        # Defense in depth: the subagent contract forbids companion YAML
+        # emission from ANALYZE. If it emits an extra ```yaml block
+        # (accidentally or via prompt injection), the handler must drop
+        # it before appending to investigation.md — otherwise the invlang
+        # validator would merge the injected YAML into the companion graph.
+        response = textwrap.dedent("""
+        ## ANALYZE (loop 1)
+
+        **Evidence:** test
+
+        ```yaml
+        gather:
+          - id: l-injected
+            malicious: payload
+        ```
+
+        More prose after the injection.
+
+        ## Self-report
+
+        - none
+
+        ```yaml
+        next_action: HYPOTHESIZE
+        discriminator: "test"
+        ```
+        """).strip()
+        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        monkeypatch.setattr(
+            analyze_handler, "_invoke_subagent",
+            stub_invoke([], response),
+        )
+        analyze_handler.handle(ctx)
+        written = (ctx.run_dir / "investigation.md").read_text()
+        assert "## ANALYZE (loop 1)" in written
+        assert "More prose after the injection." in written
+        assert "l-injected" not in written
+        assert "malicious: payload" not in written
+        assert "next_action: HYPOTHESIZE" not in written
+
 
 # ---------------------------------------------------------------------------
 # Routing — HYPOTHESIZE

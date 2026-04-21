@@ -2481,14 +2481,14 @@ class TestCheckPredictionIdHypothesisScope:
         # the error message quotes the foreign-id list distinctly from declared predictions.
         assert "['p2']" in errors[0]
 
-    def test_undeclared_hypothesis_treated_as_empty(self):
+    def test_undeclared_hypothesis_skipped(self):
+        # Rule 4 (dangling-ref) owns the undeclared-hypothesis case; rule 25
+        # stays silent to avoid double-reporting the same root cause.
         merged = {
             "hypothesize": {"hypotheses": [self._h("h-001", ["p1"])]},
             "gather": [self._lead("l-001", "h-999", ["p1"])],
         }
-        errors = _check_prediction_id_hypothesis_scope(merged)
-        assert len(errors) == 1
-        assert "h-999" in errors[0]
+        assert _check_prediction_id_hypothesis_scope(merged) == []
 
     def test_new_hypotheses_predictions_counted(self):
         merged = {
