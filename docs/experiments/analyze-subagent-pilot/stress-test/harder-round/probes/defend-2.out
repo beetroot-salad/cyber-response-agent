@@ -1,0 +1,17 @@
+```yaml
+verdict: revise
+probe_engaged: yes
+new_grade: "+"
+rationale: |
+  The probe reveals that p2 was built on a naive threat-model assumption: that a
+  credential-compromised service account would produce crude, wide-column, filter-absent
+  queries. A principal that is already svc:reporting-api has its query logic governed by
+  that service's existing templates — an attacker exercising its credentials would naturally
+  emit bounded-SELECT, date-range-filtered queries, not raw bulk extraction. p2's "failure"
+  is therefore not a genuine prediction miss; it was evidence I couldn't actually expect to
+  see from a sophisticated compromise of this specific account. With p2 neutralized, the
+  remaining signals are p1 confirmed (no session correlator, a positive for h-002) and p3
+  ambiguous (volume burst consistent with both hypotheses), leaving no substantive negative
+  evidence against h-002. The downgrade to `-` depended entirely on p2; removing that weight
+  restores h-002 to `+`, correctly reflecting that query shape does not discriminate here.
+```

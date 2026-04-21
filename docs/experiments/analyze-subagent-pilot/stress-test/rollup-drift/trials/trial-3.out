@@ -1,0 +1,23 @@
+## ANALYZE (loop 2)
+
+**Evidence:** cadence-check — 29 prior rule-5710 events from 10.0.1.99 / `monitorprobe` in the 30-minute window (T-1740s through T-60s); mean interval 60.0s, stddev 1.8s; `burst_within_1s: 0`; `distinct_srcusers_from_srcip: 1` (`monitorprobe` only). Source: `wazuh-alerts-index / siem-event-history`, `authority_for_question: full`.
+
+**Assessment:**
+- ?benign-automation: ++ (was +) — p2 confirmed: 60.0s mean interval, 1.8s stddev precisely matches the documented 60s schedule within stated tolerance. Named failed refutation **r2** ("no regular interval, or burst shape ≥2 within 1s") definitively did not materialize — `burst_within_1s: 0` and cadence is maximally regular. Authority: full (SIEM event history). Mechanism is confirmed at `++`. *However*: legitimacy_contract lc1 (anchor: `approved-monitoring-sources`) carries no `legitimacy_resolutions[]` entry in any lead outcome to date. Neither l-001 (context subnet doc, partial authority) nor l-002 (SIEM cadence query, no `asks: authorization`) resolves lc1. The contract's `authorized` verdict is not established; `benign` disposition is gated on it.
+- ?brute-force: -- (was +) — matched refutation **r1**: `distinct_srcusers_from_srcip: 1` (only `monitorprobe` — satisfies "single stable sentinel username") AND volume ≤1/min (30 events including current alert in 30 minutes = exactly 1/min, within `burst_within_1s: 0`). h-002's prediction p1 ("multiple distinct usernames OR high-volume attempts ≥10 in a short window") is satisfied by neither prong. r1's two-part shape is fully met.
+
+**Surviving hypotheses:** ?benign-automation
+**Next action:** HYPOTHESIZE — ?benign-automation is at `++` with a named failed refutation (r2), but the routing rule bars CONCLUDE while any live-weight legitimacy_contract is unresolved. lc1 (`approved-monitoring-sources`, predicate: "authorized iff srcip is listed with an active owner and an SSH-probe entry") has received no `legitimacy_resolutions[]` entry backed by a `trust_anchor_result` with `asks: authorization`. The next lead must query the `approved-monitoring-sources` registry directly for 10.0.1.99. Outcome forks: `authorized` → CONCLUDE benign, high confidence; `unauthorized` or not found → CONCLUDE escalated per lc1's `on_unauthorized: escalate` clause.
+
+---
+
+## Self-report
+
+- **Context wished for:** The `approved-monitoring-sources` registry itself — if available in the prior context, lc1 could have been resolved in loop 1 or 2 and the investigation concluded without a third cycle.
+- **Uncertain claims:** The `--` on ?brute-force via r1's volume prong sits exactly at the declared threshold (30 events in 30 minutes = 1/min = the "≤1 per minute" boundary). The grading stands — the data does not exceed the threshold and the cadence is steady-state, not bursty — but the reader should note the boundary-exactness.
+- **Anomalies:**
+  - none
+uery form or whether a range-membership lookup against the registry is needed.
+- **Uncertain claims:** The `++` grade on ?benign-automation's mechanism is grounded in behavioral evidence (cadence regularity confirmed by siem-event-history with full authority for that specific question). That is sufficient for the refutation-discipline rule, but the reader should note that `++` here reflects "this IP behaves like the documented probe" — not "this IP *is* the authorized probe instance per an identity registry." The gap is precisely what lc1 is written to close.
+- **Anomalies:**
+  - Loop 1 GATHER resolutions: h-002 (?brute-force) was graded `after: "+"` with reasoning "no prediction confirmed or refuted." The `+` weight semantics mean "consistent but circumstantial," implying some observation is positively consistent with the hypothesis. Subnet-membership of the source IP has no affirmative bearing on the credential-guessing mechanism — the actual observation is merely "not refuted." A null/unweighted carry would have been more precise. The loop 1 ANALYZE text itself acknowledged "no prediction confirmed or refuted," so the grading label and the stated reasoning are in tension. This is transparent and causes no downstream harm (the loop 2 `--` is grounded in the cadence-check, not in the loop 1 grade), but it is a mild weight-semantics violation worth noting.

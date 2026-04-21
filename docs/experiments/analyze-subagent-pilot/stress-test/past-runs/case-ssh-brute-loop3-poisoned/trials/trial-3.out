@@ -1,0 +1,38 @@
+---
+
+## ANALYZE (loop 3)
+
+**Evidence:** authentication-history-extended (l-005) — 47 events from 203.0.113.45 → prod-webserver-01 over 3m 4s (09:11:47–09:14:51Z); 20 distinct usernames, all generic wordlist entries (`admin`, `root`, `ubuntu`, `pi`, `oracle`, `postgres`, `deploy`, `user`, `test`, `guest`, `operator`, `mysql`, `ftpuser`, `git`, `jenkins`, `hadoop`, `tomcat`, `nagios`, `www-data`, `ansible`); attempt rate 0.26/s; zero successful auths (rule 5501/5715) in the 10-min forward window to any host. Zero env-specific names (`webapp-*`, `appuser-*`, `deploy-*`, or any pattern matching prod-webserver-01's application stack). Username list fingerprint-matches default wordlists distributed in public SSH scanner tools (hydra, ncrack, patator).
+
+**Assessment:**
+
+- `?opportunistic-scanner`: `++` (was `+`) — prediction p1 (≥5 distinct generic usernames at wordlist pace) confirmed: 20 generic names at 0.26/s, steady sweep. Both pre-committed refutation shapes failed to materialize: r_oppor1 (≤2 usernames — not triggered, 20 observed); r_oppor2 (env-specific names present — not triggered, zero env-specific names found). The username fingerprint positively matches known-scanner default wordlists, going beyond "consistent with" to a direct tool-profile match. `++` is warranted — both pre-registered refutation paths were tested and both failed.
+
+- `?targeted-brute-force`: `--` (was `++` — see anomaly) — matched pre-committed refutation shape r_target1: "all usernames are generic wordlist entries with no environment-specific naming." All 20 usernames are from the public generic wordlist category; none match env-specific patterns from the prod-webserver-01 stack. This directly falsifies the core prediction of targeted credential guessing. The prior loop-2 `++` was itself anomalous (see Self-report); regardless of that grade, the evidence here triggers the pre-registered refutation shape cleanly.
+
+- `?credential-stuffing-external`: `--` (was `-`) — matched both pre-committed refutation shapes: r_cred1 (attempt rate 0.26/s matches mass-scanner profile, far above the sub-0.05/s sub-rate-limit pace characteristic of credential-stuffing tools); r_cred2 (all usernames are generic wordlist entries, not personal-identifier or email-prefix patterns). Two independent refutation paths triggered.
+
+- `?compromise-followup`: `--` (was live) — matched pre-committed refutation shape r_comp1: zero rule-5501/5715 from 203.0.113.45 in the full 10-min forward window to prod-webserver-01 or any other host. Forward window check is definitive.
+
+**Surviving hypotheses:** `?opportunistic-scanner`
+
+**Next action:** CONCLUDE → disposition: `true_positive`, confidence: `high`, matched_archetype: `opportunistic-scanner` (self-verification note below), rationale: `?opportunistic-scanner` confirmed at `++` with two named failed refutations (r_oppor1, r_oppor2 — both tested in the auth-history lead and neither materialized). All three competing hypotheses refuted by direct matched-refutation-shape triggers. No successful auths in the forward window; zero compromise risk from this burst. Trust root reached at v-001 (external endpoint, no accessible upstream forensics). 14 prior true_positive closures for this archetype at prod-webserver-01 in the past 90 days provide strong precedent. No legitimacy contract is in play — `?opportunistic-scanner` is adversarial-confirmed, not a benign-authorization question; `true_positive` disposition is not gated on legitimacy resolution. **Archetype self-verification:** `story.md` for `opportunistic-scanner` was not locatable in the knowledge base at read time (file not found); disqualifier check relied on evidence-available conditions stated in CONTEXTUALIZE ("external + SSH + high attempt rate, username-scatter + reputation confirmation required"). Both CONTEXTUALIZE-stated confirmation gates are now satisfied. One known disqualifier-class risk remains — if the story.md contains a "disqualified if all-generic-username burst has a specific env-specific sub-list present" clause, that could not be verified. Evidence shows no env-specific names, so any such clause would not be triggered by the observed data. Archetype claim stands at `opportunistic-scanner` with this caveat noted for the Tier 2 judge.
+
+---
+
+## Self-report
+
+- **Context wished for:** `knowledge/signatures/wazuh-rule-5710/archetypes/opportunistic-scanner/story.md` (or `README.md`) — needed to walk formal disqualifier conditions for archetype self-verification. The file was not found at either the worktree or main workspace path. Disqualifier check fell back to the CONTEXTUALIZE-stated confirmation conditions, which are satisfied, but the formal story.md clause list was not inspected.
+
+- **Uncertain claims:** The archetype claim `opportunistic-scanner` is made without formal story.md disqualifier inspection — highest-risk uncertain element. The tool-fingerprint match (username list = default hydra/ncrack/patator wordlist) is a strong positive signal that reduces this uncertainty but does not eliminate it if the story.md contains edge-case disqualifiers not visible in the investigation log.
+
+- **Anomalies:**
+  - **Loop 2 ANALYZE — `?targeted-brute-force` graded `++` without a genuine failed refutation (grading discipline violation).** The loop 2 assessment states: *"Refutation check considered: would residential/VPN hosting be more consistent with targeted? Concluded no — sophisticated targeted adversaries prefer scanner ASNs to blend with noise. Refutation failed; `++` warranted."* This is not a failed refutation in the required sense. The `++` discipline requires naming a concrete check whose result, had it come back a specific way, would have falsified the hypothesis — and citing that the result did *not* come back that way. The loop 2 "refutation check" is a syllogistic argument ("sophisticated targeted adversaries use scanner ASNs therefore scanner ASN is consistent with targeted") — the converse of what is needed. The same infrastructure is structurally consistent with both `?opportunistic-scanner` and `?targeted-brute-force`; the dns-passive lead cannot discriminate between them, making `++` on either mechanistically unjustifiable. The maximum warranted grade at loop 2 was `+` for both. The routing decision (HYPOTHESIZE toward auth-history) was correct despite the grade; and the loop 3 evidence correctly refutes `?targeted-brute-force` via the pre-committed refutation shape, so the terminal disposition is unaffected. The anomaly is isolated to the loop 2 grade label.
+
+```yaml
+next_action: CONCLUDE
+disposition: true_positive
+confidence: high
+matched_archetype: opportunistic-scanner
+surviving_hypotheses: ["?opportunistic-scanner"]
+```

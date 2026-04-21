@@ -1,0 +1,1 @@
+If authentication-history-extended had returned 4-5 environment-specific usernames (like 'prod-app-deploy' or 'webapp-service' from the prod-webserver-01 stack) instead of zero, would this `++` grade still hold? I want to understand what's carrying the ++.

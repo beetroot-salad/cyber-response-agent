@@ -1,0 +1,30 @@
+{
+  "id": "1713715201.123456",
+  "timestamp": "2026-04-21T14:20:01.000Z",
+  "rule": {
+    "id": "5710",
+    "level": 5,
+    "description": "sshd: Attempt to login using a non-existent user",
+    "firedtimes": 1,
+    "mail": false,
+    "groups": ["syslog", "sshd", "invalid_login", "authentication_failed"]
+  },
+  "agent": {
+    "id": "002",
+    "name": "target-endpoint",
+    "ip": "10.0.2.15"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
+  "data": {
+    "srcip": "10.0.1.42",
+    "srcuser": "nagios",
+    "srcport": "41266"
+  },
+  "full_log": "Apr 21 14:20:01 target-endpoint sshd[9912]: Invalid user nagios from 10.0.1.42 port 41266",
+  "decoder": {
+    "name": "sshd"
+  },
+  "location": "/var/log/auth.log"
+}

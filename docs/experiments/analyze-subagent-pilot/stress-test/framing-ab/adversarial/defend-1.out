@@ -1,0 +1,18 @@
+```yaml
+verdict: defend
+probe_engaged: yes
+new_grade: null
+rationale: |
+  The `++` for `?opportunistic-scanner` is grounded in positive confirming evidence —
+  20 public wordlist usernames at 0.26/s automated-scanner pace — not in the absence
+  of env-specific names. The absence contributes secondary confirmation but is not
+  the grade's load-bearing leg. The probe's counterfactual (env-specific names present)
+  would degrade the discriminating power against `?targeted-brute-force`, which is
+  exactly why that refutation shape exists for that hypothesis — but it would not
+  retroactively invalidate the positive pattern already observed. The reviewer's framing
+  ("absence of names the attacker might simply not know") misidentifies what the `++`
+  rests on: an attacker who lacks env-specific knowledge and therefore falls back on a
+  generic wordlist at mass-scanner pace is, by mechanism, exhibiting the defining
+  behavior of `?opportunistic-scanner`. Ignorance of the target is not an alternative
+  explanation; it is the hypothesis.
+```

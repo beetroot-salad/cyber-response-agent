@@ -1,0 +1,31 @@
+## ANALYZE (loop 3)
+
+**Evidence:** authentication-history-extended (wazuh, l-005) — 47 events from 203.0.113.45 to prod-webserver-01 in a 3m04s burst (09:11:47–09:14:51Z); 20 distinct usernames, all generic wordlist (`admin`, `root`, `ubuntu`, `pi`, `oracle`, `postgres`, `deploy`, `user`, `test`, `guest`, `operator`, `mysql`, `ftpuser`, `git`, `jenkins`, `hadoop`, `tomcat`, `nagios`, `www-data`, `ansible`); attempt rate 0.26/s; zero env-specific names; zero rule-5501/5715 events from 203.0.113.45 in the 10-min forward window (09:14:51Z–09:24:51Z). Trust root reached at v-001 (external endpoint, no accessible upstream forensics).
+
+**Assessment:**
+- `?opportunistic-scanner`: `++` (was `+`) — positively matched predictions (≥5 generic wordlist usernames: 20 observed; automation rate 0.26/s consistent with documented scanner tool profiles for hydra/ncrack/patator). Named failed refutations: pre-committed r-opp1 ("≤2 usernames") failed — 20 distinct names observed; r-opp2 ("env-specific names present") failed — zero names match prod-webserver-01's application stack across all 20 entries. Both discriminating refutation checks missed; combined with loop 1's scanner-ASN confirmation, the mechanism is authoritatively confirmed.
+- `?targeted-brute-force`: `--` (was `++`) — matched pre-committed refutation shape r-tgt1: all 20 usernames are generic wordlist entries with zero environment-specific naming patterns. No `webapp-*`, `appuser-*`, `deploy-*`, or any name matching the prod-webserver-01 application stack. This directly falsifies the hypothesis's core prediction that env-specific names would be present; the mechanism is refuted. (The `++` carried from loop 2 was itself methodologically suspect — see Self-report anomalies.)
+- `?credential-stuffing-external`: `--` (was `-`) — matched pre-committed refutation shapes r-cred1 (rate 0.26/s is mass-scanner profile, not the sub-0.05/s slow-drip pace credential-stuffing tools use to evade per-source rate limits) AND r-cred2 (all 20 usernames are generic wordlist entries, not personal/email-prefix identifiers). Both independent discriminators fire.
+- `?compromise-followup`: `--` (was live/unweighted) — matched pre-committed refutation shape r-comp1: zero rule-5501/5715 events from 203.0.113.45 to prod-webserver-01 or any other host in the 10-min forward window (09:14:51Z–09:24:51Z). No successful authentication materialized.
+
+**Archetype self-verification (`external-bruteforce`):** Read `story.md`. Disqualifiers: (1) *"single attempt / not multiple distinct usernames"* — NOT triggered (20 distinct usernames, well above the ≥5-in-5-min threshold); (2) *"attempts from an internal source"* — NOT triggered (203.0.113.45 classified external per `ip-ranges.md`). No disqualifiers triggered. `required_anchors: []`; the two-leg grounding requirement (precedent snapshot `SEC-2024-003.json` exists in the archetype directory) is a CONCLUDE-stage task.
+
+**Surviving hypotheses:** `?opportunistic-scanner`
+**Next action:** CONCLUDE → disposition: `true_positive`, confidence: `high`, matched_archetype: `external-bruteforce`, rationale: `?opportunistic-scanner` confirmed `++` via two named failed refutations (20-name wordlist, zero env-specific names); all three competing hypotheses eliminated by pre-committed refutation shapes firing on this loop's auth-history evidence; no successful auth in forward window; trust root reached at v-001. The `external-bruteforce` archetype story matches precisely: external source + multiple distinct generic usernames + high volume = adversarial by definition, no legitimacy path.
+
+---
+
+## Self-report
+
+- **Context wished for:** Hypothesis IDs (h-001 etc.) from the invlang companion YAML are not present in the provided `investigation.md` — this fixture shows the narrative blocks only, not the companion YAML that would carry explicit IDs. I assigned `h-001` to `?opportunistic-scanner` on declaration-order convention; the orchestrator should verify against the actual companion YAML before writing the CONCLUDE block.
+- **Uncertain claims:** None substantive. The 20-name wordlist evidence is unambiguous; both refutation checks for `?targeted-brute-force` and `?credential-stuffing-external` fired cleanly on pre-committed shapes; the forward-window check is authoritative.
+- **Anomalies:**
+  - **Loop 2 ANALYZE — `?targeted-brute-force: ++` granted without a named failed refutation from a concrete check.** The stated "refutation check considered" was internally constructed: *"Would residential/VPN hosting be more consistent with targeted? Concluded no — sophisticated targeted adversaries prefer scanner ASNs to blend with noise."* This is a self-answered counterfactual, not an observable outcome from a check that was actually run. The `++` discipline requires either citing the just-run GATHER as a failed refutation or naming an earlier GATHER observation whose negative result would have been distinctive. The loop 2 GATHER (dns-passive) returned "dedicated scanner ASN, no DNS history" — a result equally consistent with opportunistic and targeted; the HYPOTHESIZE loop 1 pitfall note explicitly flagged this: *"scanner reputation alone does not confirm opportunistic — a targeted attacker may deliberately use flagged IPs for cover."* The loop 2 ANALYZE committed the mirror error: treating the same ambiguous infrastructure signal as confirming targeted, stacking it with "no DNS presence" (also ambiguous), and calling the pair a failed refutation. The correct loop 2 grade was `+`. The erroneous `++` did not propagate into a wrong final disposition — pre-committed refutation r-tgt1 correctly fires in loop 3 and brings it to `--` — but the grading-discipline violation is present in the audit trail and warrants note.
+
+```yaml
+next_action: CONCLUDE
+disposition: true_positive
+confidence: high
+matched_archetype: external-bruteforce
+surviving_hypotheses: [h-001]
+```

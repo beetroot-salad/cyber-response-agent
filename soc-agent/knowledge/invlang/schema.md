@@ -299,6 +299,9 @@ conclude:
   confidence: high | medium | low
   matched_archetype: <name> | null   # use the archetype directory name from
                                      # knowledge/signatures/{sig}/archetypes/{name}/
+  surviving_hypotheses: [h-001, ...] # IDs of declared hypotheses whose final
+                                     # weight is not `--` — validator rule 24
+                                     # rejects silent drops at CONCLUDE write time
   ceiling_test:                   # required when category = severity-ceiling
     kind: out-of-band-human-contact | tool-unavailable | legal-authorization | other
     subject: <string>

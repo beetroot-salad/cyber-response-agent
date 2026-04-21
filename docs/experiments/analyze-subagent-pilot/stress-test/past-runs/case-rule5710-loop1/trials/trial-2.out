@@ -1,0 +1,44 @@
+Both files are read. Producing the ANALYZE block now.
+
+---
+
+## ANALYZE (loop 1)
+
+**Evidence:**
+- *authentication-history (extended, 1h before + 5m after)* — 10 rule-5710 events, all from 172.22.0.10 against target-endpoint; sub-200ms micro-burst at 03:30:49 (timestamps .481, .483, .488, .492, .588) cycling 5 distinct sentinel usernames (sensu, healthcheck, monitorprobe, nagios, zabbix); zero rule-5501/5715/5712/5719 in the full window.
+- *recent-alert-correlation (4h, any signature, monitoring-host / srcip)* — 19 events total, **all rule-5710**; zero non-sshd, non-5710 alerts on monitoring-host; 5 distinct usernames, all sanctioned sentinels; hourly rate 01h=5, 02h=6, 03h=8 — volume consistent with approved ~6/h cadence.
+- *process-lineage (host-query point-in-time)* — no `monitoring_probe` or `monitoring_bait` process found; cron active (sysv).
+
+**Assessment:**
+
+- **?probe-retry-stuck**: `--` (was new) — micro-burst cycles through 5 distinct sentinel usernames in <200ms, directly refuting the core prediction of "repeated attempts on exactly ONE sentinel username." HYPOTHESIZE narratively documents this as the explicit refutation shape: *"a burst across multiple sentinel identities refutes this hypothesis outright."* No formal `r{N}` ID assigned in HYPOTHESIZE block — see self-report.
+
+- **?probe-enumeration-misconfigured**: `+` (was new) — sub-200ms burst across all 5 sanctioned sentinels in a single tick is fully consistent with "full sentinel list fired in one invocation." Cron active and zero non-5710 alerts support an operational monitoring host. Cannot upgrade: observationally indistinguishable from `?monitoring-bait-triggered`; process-list inconclusive (short-lived script already exited); no workload-ownership anchor available. Prior-hour per-event timing not reported — needed to determine if this burst pattern recurs (which would flip toward misconfiguration) or is isolated (bait).
+
+- **?monitoring-bait-triggered**: `+` (was new) — single discrete sub-200ms burst consistent with a one-off manual trigger; only sanctioned sentinel usernames; zero successful auth; no `monitoring_bait` process found (inconclusive — short-lived scripts exit, absence cannot refute). Cannot upgrade: no ownership evidence confirming manual trigger; process absence is formally uninformative.
+
+- **?monitoring-host-compromise**: `-` (was new) — all predicted indicators absent: zero non-sentinel usernames across 4h, zero 5501/5715 from 172.22.0.10 in the 4h+5min window, zero non-5710 alerts on monitoring-host, cron active, no anomalous processes. Strongly disfavored but bounded by two explicit epistemic limits from HYPOTHESIZE: (a) *adversary may stay within sentinel set deliberately*, (b) FIM coverage on monitoring-host unverified (alert absence ≠ event absence). No pre-registered refutation shape met.
+
+- **?internal-credential-guessing**: `--` (was new) — sub-200ms automated burst of 5 events with 5 distinct sentinel usernames directly contradicts both core predictions (manual implies low volume; "real-looking usernames"). HYPOTHESIZE flagged "preliminary refutation already holds" from SCREEN; GATHER makes it unambiguous. No formal `r{N}` ID — see self-report.
+
+- **?compromise-followup**: `--` (was new) — zero rule-5501/5715 events from 172.22.0.10 across the comprehensive 4h+5min window (far exceeding the 60s checked in SCREEN). HYPOTHESIZE explicitly defined the refutation shape: *"Absence over the full burst window + 5 min forward = `?compromise-followup` cleared."* Named narrative refutation: absence-of-success-in-forward-window. No formal `r{N}` ID — see self-report.
+
+**Surviving hypotheses:** ?probe-enumeration-misconfigured, ?monitoring-bait-triggered, ?monitoring-host-compromise
+
+**Next action:** HYPOTHESIZE — two undifferentiated `+` hypotheses (?probe-enumeration-misconfigured and ?monitoring-bait-triggered) are observationally indistinguishable with current evidence; neither can be upgraded to `++` without workload-ownership or temporal-pattern evidence. Also, ?monitoring-host-compromise remains live at `-` with no runnable refutation yet attempted. The next lead must answer: (1) **Was the 03:30:49 burst isolated or recurring?** Per-event timestamps for the 01h and 02h windows would reveal whether sub-second clustering appeared in earlier ticks — recurring pattern strongly supports misconfiguration; isolated first occurrence supports bait. (2) **What does the monitoring-host cron table contain?** Presence of `monitoring_bait.sh` in crontab directly supports bait; its absence with only `monitoring_probe.sh` favors misconfiguration. (3) **Is FIM active on monitoring-host?** Confirming active file-integrity monitoring would allow stronger weakening of ?monitoring-host-compromise by making "zero FIM alerts in 4h" authoritative rather than coverage-ambiguous.
+
+---
+
+## Self-report
+
+- **Context wished for:** Per-event timestamps within the 01h (01:30–02:30) and 02h (02:30–03:30) windows — GATHER reports only hourly event counts (5, 6, 8), not individual timing. Whether those earlier events show sub-second clustering is the primary discriminator between recurring misconfiguration and isolated bait trigger, and it was not captured in the queries as run.
+- **Uncertain claims:** Grade `--` on `?probe-retry-stuck`, `?internal-credential-guessing`, and `?compromise-followup` is logically clean in each case, but the HYPOTHESIZE block assigns no formal `r{N}` IDs to any refutation shape. I've cited narrative shapes as name proxies. Downstream YAML composition requiring `matched_refutation_ids` non-empty on `--` will reject these entries unless IDs are backfilled into the HYPOTHESIZE block. The grades are correct; the documentation is deficient.
+- **Anomalies:**
+  - The HYPOTHESIZE block omits formal `r{N}` IDs on all refutation shapes. Three hypotheses (?probe-retry-stuck, ?internal-credential-guessing, ?compromise-followup) are logically refuted by clean evidence, but per grading discipline the `--` grades cannot be ID-anchored downstream. This is a structural omission in the prior phase, not a logic error — it should be flagged before the investigation log is finalized so the HYPOTHESIZE block can be corrected retroactively rather than deferring the problem to validator rejection at CONCLUDE write time.
+
+---
+
+```yaml
+next_action: HYPOTHESIZE
+discriminator: Was the 03:30:49 sub-second burst isolated or a recurring pattern within the 4h window (per-event timestamps in 01h and 02h would decide bait vs. misconfiguration), and what does the monitoring-host cron table show for monitoring_bait.sh vs. monitoring_probe.sh?
+```

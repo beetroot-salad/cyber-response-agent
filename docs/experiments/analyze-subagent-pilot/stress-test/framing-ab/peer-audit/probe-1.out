@@ -1,0 +1,1 @@
+If the authentication-history-extended had identified 3-4 prod-webserver-01 environment-specific names among the 20 usernames instead of zero, would the `?opportunistic-scanner` grade still be `++`?

@@ -85,7 +85,7 @@ unwired phases loud-fail.
 | SCREEN         | done     | scripts/handlers/screen.py | screen.md, screen-invlang.md | PR #TBD. Two-subagent design: `screen` runs pattern match + leads; new Haiku `screen-invlang` transcribes to the invlang `gather:` block. Handler adds Python structural verifier (matched_pattern names a Screen row AND every lead in the row's Leads column appears in `leads_run` with a non-null observation) — downgrades malformed match claims to error. Empty-Screen short-circuit bypasses both subagents. `screen.md` tightened so classification + anchor lookups count as runs and every lead in the row's Leads column gets a `leads_run` entry. 31 unit tests + live e2e on rule-5710 (nagios/172.22.0.10 → monitoring-probe match). Path D (declarative lead-output frontmatter) filed as `tasks/declarative-lead-invlang-frontmatter.md` for long-term replacement of `screen-invlang` |
 | HYPOTHESIZE    | pending  | —            | hypothesize.md | |
 | GATHER         | pending  | —            | gather.md / gather-composite.md | Handler chooses single vs. composite |
-| ANALYZE        | pending  | —            | analyze.md | Contract decision pending — see `analyze-pilot` skill |
+| ANALYZE        | doing    | —            | analyze.md | Design landed (see §ANALYZE design below). Stress-tested (9/9 clean on rollup-drift, archetype-forcing, legitimacy-gate — `docs/experiments/analyze-subagent-pilot/stress-test/findings.md`). Validator rules 24–25 added to spec (v2.9) but not yet implemented. Subagent prompt alignment pending: analyze.md needs terminal-YAML trailer + invlang `conclude:` block emission + rule 24/25 semantics |
 | CONCLUDE       | done     | scripts/handlers/conclude.py | conclude.md | PR #99. Handler onto shared `_subagent` wrapper, 15 unit tests; `Context.ticket_id` + `Context.forced_conclude` first-class dataclass fields; orchestrator dispatches registered CONCLUDE handler before returning summary. Follow-up: live e2e run (deferred to next cutover) |
 
 Update this table after each cutover. `status` values: `pending`, `doing`,
@@ -140,6 +140,147 @@ SCREEN is the smallest surface (boolean match + optional early CONCLUDE) and
 already has a clean subagent boundary (`agents/screen.md`). Cut it over first
 to shake out the handler pattern, the `claude --print` wrapper, and the
 parsing conventions before taking on HYPOTHESIZE/GATHER/ANALYZE.
+
+---
+
+## ANALYZE design (landed)
+
+This section captures the design decisions for the ANALYZE cutover. Nothing
+here is implemented yet; it's the plan the handler + prompt alignment work
+must match.
+
+### Phase-role split: ANALYZE owns termination, CONCLUDE is render-only
+
+The state-machine migration makes an **implicit role re-split explicit**:
+
+- **CONCLUDE's only job is writing `report.md`** from an already-terminal
+  `investigation.md`. It does not decide when to stop, does not verify
+  archetype disqualifiers, does not gate on legitimacy — by the time
+  CONCLUDE runs, all of that is settled.
+- **ANALYZE owns termination.** When ANALYZE routes to CONCLUDE, it must
+  have produced an `investigation.md` that is **terminal-valid**: the
+  `conclude:` block is complete (`termination.category`, `disposition`,
+  `confidence`, `matched_archetype`, `trace`), every live-weight
+  hypothesis's `legitimacy_contract` is either resolved or the escalation
+  rationale justifies its unresolved state, and the `matched_archetype`
+  claim has been self-verified against disqualifiers.
+
+Consequence: the `validate_conclude.py` Haiku judges (A/B) currently fire
+PreToolUse on CONCLUDE writes; conceptually they want to fire at the
+**ANALYZE→CONCLUDE boundary** instead, because by CONCLUDE-write time the
+contradictions they would catch are already committed upstream. Move is
+filed as a follow-up task; not required for the cutover itself.
+
+### Three-phase co-ownership of `gather[]` lead blocks
+
+Each lead's invlang block has three writers across the loop:
+
+- **HYPOTHESIZE** writes the skeleton: `id`, `mechanism_being_tested`,
+  `predictions[]` (each with `id`, `if`, `read_as`, `advance_to`),
+  `refutation_shape[]`, `new_hypotheses[]`.
+- **GATHER** writes `outcome.observations`, `outcome.anomalies`,
+  `trust_anchor_result`.
+- **ANALYZE** writes `resolutions[]` (per-hypothesis grade updates with
+  `matched_prediction_ids` / `matched_refutation_ids` citations), the
+  terminal `conclude:` block when routing to CONCLUDE, and the routing
+  decision itself.
+
+First cutover keeps writer ownership clean: each subagent writes its own
+section. If transient validator-invariant issues emerge at shared-block
+boundaries, the tension point will surface and we can decide composition
+ownership then (candidate: ANALYZE handler composes the full block from
+GATHER + ANALYZE payloads in Python). Not preemptively split.
+
+### Validator rules 24–25 (spec v2.9)
+
+Two net-new rules added to `docs/investigation-language.md` to absorb
+failure modes mechanically:
+
+- **Rule 24 — Hypothesis persistence at CONCLUDE.** Every declared
+  hypothesis must either reach final weight `--` or be cited in
+  `conclude` (as the termination target, the matched archetype's
+  mechanism, or a surviving-but-indeterminate hypothesis driving
+  escalation). Closes silent-drop.
+- **Rule 25 — Same-level sibling rollup (`matched_prediction_ids`).**
+  Prediction IDs cited on a resolution for hypothesis H must be H's own
+  declared predictions. Rule 5 already covers this for
+  `matched_refutation_ids` on `--`; rule 25 closes the equivalent loophole
+  for `matched_prediction_ids` on every weight.
+
+Both rules need Python implementation in `hooks/scripts/invlang_validate.py`
+and corresponding tests in `tests/test_invlang_validate.py`. Cost: small
+(~40 LOC + tests each).
+
+### Prompt alignment in `agents/analyze.md`
+
+The subagent prompt must land two changes:
+
+1. **Terminal YAML trailer**, matching the CONCLUDE subagent's pattern. The
+   handler parses this deterministically to extract `next_action`,
+   `disposition`, `confidence`, `matched_archetype`. Today `analyze.md`
+   emits only Markdown; the handler cannot robustly parse routing from
+   prose.
+2. **Rule 24 / 25 semantics**, explicit. Current prompt says "no rollup
+   across hypotheses" in prose; rewrite to reference the validator rules
+   so failures surface as prompt instructions, not as mysterious blocks.
+   Also: add hypothesis-persistence discipline — if a prior hypothesis is
+   not addressed in the current resolution set, explain in the ANALYZE
+   block why (not a silent omission).
+
+### Stress-test baseline
+
+Three targeted fixtures, 3 trials each, against the current
+`agents/analyze.md`:
+
+- **Rollup drift** (`?benign-automation` primed to upgrade on evidence
+  ambiguous toward `?brute-force`): 3/3 clean. Sibling rollup did not
+  occur; HYPOTHESIZE routing on unresolved legitimacy contract held in
+  every trial.
+- **Archetype disqualifier** (monitoring-probe with T+18s 5501 success):
+  3/3 clean. `r3` (the pre-registered disqualifier) was named in every
+  trial; no forced `matched_archetype: monitoring-probe` claim.
+- **Legitimacy-gate bypass** (++ mechanism with unresolved contracts +
+  22 prior benign precedents): 3/3 clean. HYPOTHESIZE in every trial;
+  authority leads named precisely; precedent did not override
+  per-instance authority.
+
+Full findings: `docs/experiments/analyze-subagent-pilot/stress-test/findings.md`.
+Caveats: N=3 per fixture, all 2-loop, stacked-circumstantial `++` (Example
+2 trap) not covered. Those are the residual risk surface.
+
+### Post-cutover: sensitivity probe (optional, deferred)
+
+For the stacked-`++` residual risk not caught by validator rules: an
+evidence-level counterfactual probe. Haiku reads ANALYZE output, picks the
+highest-grade hypothesis, perturbs one observation, asks Sonnet to re-grade.
+If the grade flips on minor perturbation, the `++` was brittle. Scope is
+evidence perturbation only (never hypothesis generation — that's
+HYPOTHESIZE's job). Single round, output into Self-report.
+
+Not part of the initial cutover. Add only if post-merge observation
+surfaces the failure mode.
+
+### Information-preservation reversibility (eval, not runtime)
+
+The reversibility test — can a cold reader reconstruct which observations
+drove each grade from the ANALYZE block alone? — is an eval property, not a
+runtime gate. Use it to sample N production ANALYZE outputs during the
+post-cutover observation window; failures are prompt-clarity bugs to fix.
+
+### Cutover sequencing
+
+1. Implement validator rules 24 + 25 (~2 hours with tests).
+2. Align `agents/analyze.md` prompt: terminal YAML trailer + rule 24/25
+   language + invlang `conclude:` block emission contract.
+3. Write `scripts/handlers/analyze.py` — handler parses terminal YAML,
+   routes HYPOTHESIZE vs. CONCLUDE on `next_action`, passes payload to
+   CONCLUDE handler (which becomes near-trivial: pre-determined verdict
+   → report.md).
+4. Unit-test handler with mocked subagent on routing paths (HYPOTHESIZE,
+   CONCLUDE with each disposition).
+5. Live e2e via `/testrun`. Verify invlang remains valid, state history
+   matches, hook regressions zero.
+6. Remove ANALYZE prose from `skills/investigate/SKILL.md`.
 
 ---
 

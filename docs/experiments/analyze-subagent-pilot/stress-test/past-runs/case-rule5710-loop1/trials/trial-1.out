@@ -1,0 +1,59 @@
+I've carefully read both files. The GATHER for loop 1 contains a critical internal contradiction that affects every hypothesis grade. I'll resolve it first before scoring.
+
+---
+
+## ANALYZE (loop 1)
+
+**Evidence:** composite-gather (authentication-history 1h+5m, recent-alert-correlation 4h, host-query process-list + service-status) —
+
+- **Auth-history (Query 1, target-endpoint scope, 1h+5m):** 10 rule-5710 events, all srcip 172.22.0.10; 5 distinct sentinel usernames across the full window: sensu×5, healthcheck×2, monitorprobe×1, nagios×1, zabbix×1; sub-second micro-burst at 03:30:49 (5 events at .481, .483, .488, .492, .588 — <200ms); ZERO rule 5501/5715/5712/5719 anywhere in window; forward 5 min clean.
+- **Recent-alert-correlation (Query 2, 4h, any target):** 19 events — 100% rule 5710 from 172.22.0.10; zero non-5710, zero non-sshd, zero FIM (55x) / process-anomaly / rootkit / brute-force-composite (5712) / auth-success (5501/5715) on monitoring-host or this srcip; 5 distinct sentinel usernames (sensu×5, zabbix×5, monitorprobe×4, nagios×3, healthcheck×2 across all targets); hourly rate 01h=5, 02h=6, 03h=8.
+- **Host-query:** no matching processes (`monitoring_probe`, `monitoring_bait` absent at query time — short-lived scripts may have exited); cron: active (sysv).
+
+**Assessment:**
+
+**⚠ Pre-grading note — GATHER burst username contradiction:** The GATHER states "each with a different sentinel username" for the 5 micro-burst events at .481–.588, then immediately parenthesizes "(the sample shows 5× sensu but the username breakdown demands the mix is cycled rapidly)." These claims directly contradict each other. The raw sample output shows 5× `sensu` for the burst events. The narrative claim of per-event username diversity is *inferred* from the 1h username totals — but that inference is unsound: 5 distinct usernames across 10 events over 1 hour is fully explained by normal per-tick cron cadence (one sentinel per invocation), not by within-burst rotation. Query 1 shows sensu×5 total in 1h; if the burst = 5× sensu, all sensu events fall inside it and zero outside — which is exactly consistent with normal cron operation plus one stuck tick. I cannot rely on the narrative's inference to grade hypotheses; I score from the raw sample data. No hypothesis is graded `--` on the strength of the contradicted narrative claim.
+
+---
+
+- **`?probe-retry-stuck`: `+` (was new)** — Predicted "repeated attempts clustering on exactly ONE sentinel username, retry cadence." The raw GATHER sample for the micro-burst shows 5× `sensu` — same username, <200ms inter-event gaps. This is the strongest pattern-match for the retry-stuck mechanism among all hypotheses. However, the GATHER's own internal inconsistency prevents an authoritative read: the narrative ("different sentinel per event") would refute this hypothesis, but the raw sample data ("5× sensu") supports it. Cannot grade `++` on a contradicted observation; cannot grade `--` for the same reason. Held at `+` pending burst username verification.
+
+- **`?probe-enumeration-misconfigured`: `-` (was new)** — Predicted "rotation through the full sentinel set (all 5 approved identities) in a single sub-second tick." If the micro-burst = 5× sensu (raw sample), this prediction is directly not met — a same-username burst is the opposite of full-sentinel rotation per tick. The 1h username diversity (5 distinct sentinel names over 10 events across 60+ minutes) is consistent with normal per-tick cron cadence, not a single-invocation enumeration. The GATHER cross-lead note ("micro-burst across 5 sentinels") is the author's inference, not a raw observation, and the evidence underpinning it is contradicted by the sample data. Graded `-`; the burst shape as read from raw data does not match the core prediction. Cron-active is consistent with normal operation, not specific to misconfig.
+
+- **`?monitoring-bait-triggered`: `+` (was new)** — Predicted "single discrete burst event, sentinel usernames only, no compromise precursors." Observed: single concentrated burst at 03:30:49, sentinel-only usernames across the 4h window, zero non-5710 alerts on monitoring-host, zero auth-success. Process-list empty — bait may have already exited; HYPOTHESIZE pitfall explicitly noted "absence-of-name cannot refute." Bait could retry a single sentinel (sensu) or cycle multiple; the raw burst data (5× sensu) is compatible with either design. Cannot distinguish from `?probe-retry-stuck` on process presence alone. Held at `+`; the overall burst shape and sentinel-only pattern are consistent, but no workload-ownership evidence available to confirm bait specifically.
+
+- **`?monitoring-host-compromise`: `-` (was new)** — Zero non-5710 alerts in 4h on monitoring-host/srcip across all signatures (no FIM, no process-anomaly, no rootkit, no brute-force-composite). Zero auth-success from 172.22.0.10 to any target in 4h+5m. Hourly rate (5/6/8) roughly consistent with sanctioned ~6/hr cadence. Burst is a single concentrated event rather than sustained across the hour. All HYPOTHESIZE-listed supporting shapes failed to materialize. However, pitfall explicitly states "adversary may stay within sentinel set deliberately; absence of rotation is NOT proof of innocence," and FIM coverage on monitoring-host is unverified (zero FIM alerts ≠ zero FIM events on this host). No pre-registered refutation shape formally met. Hypothesis weakened but held at `-`.
+
+- **`?internal-credential-guessing`: `-` (was new)** — Predicted "low volume, real-looking usernames." Observed: sentinel-only usernames across all 10 events in 1h (contradicts "real-looking"); burst of 5 events in <200ms plus 5 others in the window (contradicts "low volume"). HYPOTHESIZE affirmed "preliminary refutation holds, lead will confirm." Both core predictions are contradicted. Formally constrained to `-` by absence of any registered `r{N}` refutation ID in the HYPOTHESIZE block; see anomaly below.
+
+- **`?compromise-followup`: `--` (was new)** — Hypothesis declared: "any successful auth from 172.22.0.10 within the forward window — the hypothesis is defined by this observable; absence is the refutation shape." Query 1 (target-endpoint scope, 1h+5m) and Query 2 (any target, 4h): ZERO rule 5501/5715/5712/5719 from 172.22.0.10 in the combined 4h+5m window. The 5-min forward window explicitly required by the HYPOTHESIZE is fully covered. Both Wazuh auth-success signatures were named in the query and returned nothing — this is authoritative absence, not a data-gap. Prose-declared refutation shape ("absence is the refutation shape") met. Graded `--`; no formal `r{N}` ID exists (anomaly flagged).
+
+---
+
+**Surviving hypotheses:** ?probe-retry-stuck, ?probe-enumeration-misconfigured, ?monitoring-bait-triggered, ?monitoring-host-compromise, ?internal-credential-guessing
+
+**Next action:** HYPOTHESIZE
+
+`?probe-retry-stuck` (`+`) and `?monitoring-bait-triggered` (`+`) are undifferentiated on burst shape if the burst = 5× sensu. `?probe-enumeration-misconfigured` (`-`) is weakened under the raw-data reading but not formally refuted — the GATHER's own narrative contradicts the sample, and I cannot apply `--` on that basis. The decisive unresolved question is the **per-event `data.srcuser` value for each of the 5 burst events at 03:30:49.481, .483, .488, .492, .588**: if all five return `sensu`, `?probe-retry-stuck` gains strong support and `?probe-enumeration-misconfigured` can be graded `--`; if they return 5 distinct sentinel names, the reverse holds and `?probe-retry-stuck` is refuted. A simultaneous workload-ownership check (monitoring-host cron execution log at ~03:30) would disambiguate `?monitoring-bait-triggered` from probe-retry-stuck on the same loop.
+
+---
+
+```markdown
+## Self-report
+
+- **Context wished for:** Per-event `data.srcuser` field broken out explicitly in the GATHER output — the composite query returned aggregate username counts rather than a per-timestamp field map, which forced a secondary inferential step that introduced the contradiction. Had the query returned a table of (timestamp, srcuser), this loop would be conclusive.
+
+- **Uncertain claims:**
+  - "The raw burst = 5× sensu" — this reading is from the GATHER parenthetical; there is non-zero chance the parenthetical itself is the garbled claim and the burst actually did have 5 distinct usernames. I cannot resolve this without re-querying.
+  - FIM coverage on monitoring-host: my reasoning that "zero FIM alerts weakens `?monitoring-host-compromise`" rests on the assumption that Wazuh FIM is configured on 172.22.0.10. The investigation provides no evidence either way. If FIM is not configured on monitoring-host, the absence-of-alert carries no evidentiary weight.
+
+- **Anomalies:**
+  - **[Critical] GATHER burst username contradiction — affects hypothesis grading.** Line 82: "each with a different sentinel username (the sample shows 5× sensu but the username breakdown demands the mix is cycled rapidly)." The parenthetical's inference ("demands") is unsound: Query 1 total sensu×5 over 1h is fully explained by normal-cadence cron (one sentinel per tick), not by within-burst rotation. The raw sample reading (5× sensu in the burst) is internally consistent with Query 1's total counts (all 5 sensu events in the burst, other sentinels distributed across non-burst ticks). The GATHER author's narrative overcorrects toward the enumeration interpretation and produces an internally contradictory observation. Consequence: `?probe-retry-stuck` cannot be graded `--` (the evidence the refutation relies on is the contradicted narrative) and `?probe-enumeration-misconfigured` cannot be upgraded (the supporting narrative is undermined by raw data).
+  - **[Minor] Numerical tension between SCREEN sensu count and GATHER total.** SCREEN reports "5× sensu + 1× monitorprobe" in the 5-min prior window (6 events). If the 5-min window contains 5× sensu as prior events plus 1× sensu (the alert), that implies 6× sensu in 5 min — exceeding GATHER's total of sensu×5 across 1h. The most likely explanation is a boundary artifact (SCREEN counted the alert event within its "prior" window, or the time boundary rounds inclusively). Not load-bearing for grading, but relevant when computing event-count cross-checks.
+  - **[Systemic] HYPOTHESIZE block lacks formal r{N} refutation IDs throughout.** No hypothesis uses `refutation_shape: [{id: r1, ...}]` notation. Consequences: (a) `?internal-credential-guessing` is formally constrained to `-` even though both core predictions are contradicted by observations; (b) `?compromise-followup` is graded `--` on a prose-declared refutation shape ("absence is the refutation shape") — which is unambiguous prose but produces no `matched_refutation_ids` for downstream YAML composition; (c) future loops cannot cite prior `r{N}` entries to confirm elimination. The HYPOTHESIZE author for loop 2 should register formal IDs.
+```
+
+```yaml
+next_action: HYPOTHESIZE
+discriminator: "What is the exact data.srcuser value for each of the 5 micro-burst events at 03:30:49.481, .483, .488, .492, .588 — are all five 'sensu' (supporting ?probe-retry-stuck, refuting ?probe-enumeration-misconfigured) or five distinct sentinel names (reversing those grades)?"
+```

@@ -1,0 +1,19 @@
+```yaml
+verdict: defend
+probe_engaged: yes
+new_grade: null
+rationale: |
+  The counterfactual posits a Wazuh parser normalization artifact that would strip
+  env-specific prefixes (e.g., "prod-admin" → "admin") before the SIEM event is
+  written. But Wazuh rule 5710 is triggered by the SSH daemon's own invalid-user
+  log line ("Invalid user <name> from <ip>"), which records the literal username
+  as presented by the connecting client — the attacker's payload, not a
+  normalized field. There is no Wazuh parsing stage between the SSH auth log and
+  the rule 5710 event that collapses "prod-admin" to "admin"; the field is
+  pass-through. The counterfactual therefore requires the attacker to have
+  sent exactly the prod-specific account names in their wordlist and for the SSH
+  daemon to have stripped the prefix, which is not how sshd logs work. The
+  authoritative-source basis for `++` holds: the 20 usernames in the SIEM record
+  are the literal strings the attacker transmitted, and all 20 are stock public
+  wordlist entries.
+```

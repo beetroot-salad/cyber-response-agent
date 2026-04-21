@@ -1,0 +1,19 @@
+## ANALYZE (loop 2)
+
+**Evidence:** cadence-check — 29 prior rule-5710 events from 10.0.1.99/`monitorprobe` in the 30-minute window 13:33:12–14:03:12Z (wazuh-indexer); interval_sec_mean=60.0, interval_sec_stddev=1.8, all 29 events at exact 60s offsets (T−60 through T−1740); burst_within_1s=0; distinct_srcusers_from_srcip=1 ("monitorprobe" only). Trust anchor: wazuh-alerts-index / siem-event-history / authority_for_question: full.
+
+**Assessment:**
+- ?benign-automation: ++ (was +) — matched prediction p2 (prior events from srcip=10.0.1.99, srcuser=`monitorprobe` recur at stable documented 60s interval, ±1.8s); named refutation r2 ("no regular interval or burst shape") failed to materialize: interval_sec_mean=60.0, stddev=1.8, burst_within_1s=0 across 29 events over 30 minutes. Mechanism is confirmed. Legitimacy_contract lc1 (approved-monitoring-sources) remains open — no `legitimacy_resolutions[]` entry exists for lc1 in any GATHER block to date; the cadence-check trust anchor (wazuh-alerts-index / siem-event-history) answers the cadence question only, not the authorization question. `++` is valid on the mechanism edge; CONCLUDE is blocked by the unresolved lc1.
+- ?brute-force: -- (was +) — matched refutation r1: 29 events over 30 minutes show a single stable sentinel username ("monitorprobe" only, distinct_srcusers_from_srcip=1) AND volume ≤1 per minute (mean cadence 60.0s, i.e., exactly 1/min). Both conjuncts of r1 are directly satisfied by the wazuh-indexer result (full authority). Refuted; dropped from surviving set.
+
+**Surviving hypotheses:** ?benign-automation
+**Next action:** HYPOTHESIZE — ?benign-automation is at `++` on the mechanism edge, but routing rules block CONCLUDE: legitimacy_contract lc1 has no fulfilling `legitimacy_resolutions[]` entry in any effective GATHER outcome. The next lead must query the approved-monitoring-sources registry with `asks: authorization` and ask: "Is 10.0.1.99 listed in approved-monitoring-sources with an active owner and an SSH-probe entry?" A `verdict: authorized` closes lc1 and enables CONCLUDE / benign / high. A `verdict: unauthorized` or `indeterminate` forces escalation per lc1's `on_unauthorized` and `on_indeterminate` clauses.
+
+---
+
+## Self-report
+
+- **Context wished for:** The approved-monitoring-sources registry — specifically, whether 10.0.1.99 appears with an active owner and an SSH-probe entry. Without it, lc1 cannot close and disposition cannot be finalized.
+- **Uncertain claims:** The `--` grade on ?brute-force rests on wazuh-indexer event history showing a single username and exactly 1/min volume. A sophisticated attacker mimicking the monitoring probe's exact 60s cadence and sentinel username would satisfy the same shape; event-history alone cannot rule that out. The `--` is correct given the pre-registered r1 shape and the authority of the siem-event-history anchor, but the approved-monitoring-sources lead in loop 3 will independently corroborate or surface that concern.
+- **Anomalies:**
+  - The loop 1 GATHER block includes a `resolutions:` section with `before`/`after` weights that prefigured what the ANALYZE (loop 1) later stated. Those grades are consistent — loop 1 ANALYZE correctly echoed `+`/`+` — so no grading drift occurred. Noting it for transparency; not an anomaly requiring correction.

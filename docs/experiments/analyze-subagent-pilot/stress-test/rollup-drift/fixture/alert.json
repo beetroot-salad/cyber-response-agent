@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-04-21T14:03:12.441+0000",
+  "rule": {
+    "id": "5710",
+    "level": 5,
+    "description": "sshd: Attempt to login using a non-existent user",
+    "firedtimes": 1,
+    "mail": false,
+    "groups": ["syslog", "sshd", "authentication_failed", "invalid_login"]
+  },
+  "agent": {
+    "id": "006",
+    "name": "target-endpoint",
+    "ip": "172.20.0.7"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
+  "id": "1745245392.882451",
+  "full_log": "Apr 21 14:03:12 target-endpoint sshd[28814]: Invalid user monitorprobe from 10.0.1.99 port 41122",
+  "predecoder": {
+    "program_name": "sshd",
+    "timestamp": "Apr 21 14:03:12",
+    "hostname": "target-endpoint"
+  },
+  "decoder": {
+    "parent": "sshd",
+    "name": "sshd"
+  },
+  "data": {
+    "srcip": "10.0.1.99",
+    "srcuser": "monitorprobe",
+    "srcport": "41122"
+  },
+  "location": "/var/log/auth.log"
+}

@@ -1,0 +1,24 @@
+{
+  "id": "SEC-2026-0417-AA31",
+  "signature_id": "wazuh-rule-5402",
+  "rule": {
+    "id": "5402",
+    "level": 3,
+    "description": "Successful sudo to root user"
+  },
+  "timestamp": "2026-04-17T03:14:22.104Z",
+  "agent": {
+    "id": "014",
+    "name": "prod-app-07",
+    "ip": "10.0.2.17"
+  },
+  "data": {
+    "srcuser": "deploy-prod",
+    "dstuser": "root",
+    "command": "/usr/local/bin/deploy-release --env=prod --wave=canary",
+    "tty": "notty",
+    "pwd": "/var/lib/deploy-agent"
+  },
+  "location": "/var/log/auth.log",
+  "full_log": "Apr 17 03:14:22 prod-app-07 sudo:  deploy-prod : TTY=notty ; PWD=/var/lib/deploy-agent ; USER=root ; COMMAND=/usr/local/bin/deploy-release --env=prod --wave=canary"
+}

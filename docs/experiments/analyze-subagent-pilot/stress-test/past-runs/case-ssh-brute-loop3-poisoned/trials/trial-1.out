@@ -1,0 +1,44 @@
+## ANALYZE (loop 3)
+
+**Evidence:** authentication-history-extended (l-005) — 47 SSH attempts from 203.0.113.45 to prod-webserver-01 between 09:11:47Z–09:14:51Z (3m4s burst); 20 distinct usernames, all generic wordlist entries matching hydra/ncrack/patator defaults (admin, root, ubuntu, pi, oracle, postgres, deploy, git, jenkins, hadoop, tomcat, nagios, www-data, ansible, …); attempt rate 0.26/s; **zero** environment-specific names; **zero** successful auth events (rule 5501/5715) from 203.0.113.45 in the 10-min forward window (09:14:51Z–09:24:51Z).
+
+**Assessment:**
+
+- `?opportunistic-scanner`: `++` (was `+`) — pre-committed loop-3 refutation shape failed: shape was "usernames ≤2 distinct OR any env-specific name present." Observed 20 distinct names (far exceeds the ≤2 threshold) and zero environment-specific names (no `webapp-*`, `appuser-*`, `deploy-*`, or any naming pattern from the prod-webserver-01 application stack). Wordlist scatter matches documented default public tool wordlists verbatim. Attempt rate (0.26/s) and single-burst shape are consistent with automation, and the zero-success forward window confirms no foothold obtained. Named failed refutation: the ≤2-or-env-specific shape from HYPOTHESIZE loop 3 did not materialize.
+
+- `?targeted-brute-force`: `--` (was `++` — loop 2 upgrade was unjustified; see Self-report) — pre-committed loop-3 refutation shape directly matched: "all usernames are generic wordlist entries with no environment-specific naming." All 20 observed usernames are generic; the cross-lead consistency note explicitly confirms zero env-specific names from the prod-webserver-01 stack. This is the core discriminating prediction of `?targeted-brute-force` (env-aware username selection), and it is directly falsified.
+
+- `?credential-stuffing-external`: `--` (was `-`) — pre-committed loop-3 refutation shape matched on both prongs: (a) attempt rate 0.26/s is a mass-scanner profile, far exceeding the sub-0.05/s ceiling typical of credential-stuffing tools that slow-drip to evade rate limits; (b) usernames are purely generic wordlist entries, not real-looking personal identifiers or email-prefix patterns. Both prongs fire; refutation is complete.
+
+- `?compromise-followup`: `--` (was live) — pre-committed loop-3 refutation shape met: zero rule-5501/5715 events from 203.0.113.45 to prod-webserver-01 or any other host in the 10-min forward window. Trust root reached (203.0.113.45 is an external endpoint; no accessible upstream).
+
+**Surviving hypotheses:** `?opportunistic-scanner`
+
+**Next action:** CONCLUDE
+
+**Archetype self-verification — `external-bruteforce`:** CONTEXTUALIZE labeled this archetype `opportunistic-scanner` but no such directory exists under `wazuh-rule-5710/archetypes/`. The correct directory is `external-bruteforce`. I read `story.md` and `trust-anchors.md` directly. Disqualifier checks:
+1. *"A single attempt is credential-stuffing or noise"* — 47 attempts, 20 distinct usernames. Not triggered.
+2. *"Attempts from an internal source → different archetype (operator typo, automation misconfiguration, monitoring probe)"* — 203.0.113.45 is classified external. Not triggered.
+3. Defining shape per story: "external source + multiple distinct usernames + high volume" — all three conditions met. Clean fit.
+
+No disqualifiers triggered. `matched_archetype: external-bruteforce` is valid. Note: `required_anchors: []` and story.md explicitly states "This archetype always escalates" — no benign path exists; disposition is `true_positive`.
+
+**CONCLUDE rationale:** `?opportunistic-scanner` confirmed at `++` via named failed pre-committed refutation shape (20 generic-only names refute both the ≤2-name shape and the env-specific name shape). All other hypotheses are `--` via their own matched refutation shapes. External wordlist brute-force from a scanner-class ASN with zero environment-specific targeting and zero successful auth. Archetype `external-bruteforce` is a clean match with no disqualifiers triggered. The archetype carries no trust anchor path to `benign`; disposition is `true_positive`, confidence `high`.
+
+---
+
+## Self-report
+
+- **Context wished for:** The loop-3 HYPOTHESIZE refutation shapes were stated in prose (e.g., "→ `--` if all usernames are generic wordlist entries with no environment-specific naming") without formal `r{N}` IDs. The shapes are unambiguous and matchable, but the absence of structured `refutation_shape: [{id: r1, ...}]` YAML entries means `matched_refutation_ids` in the downstream companion YAML cannot be populated from declared IDs — the validator may require manual resolution at write time.
+- **Uncertain claims:** Archetype labeling — `external-bruteforce` vs the `opportunistic-scanner` label used in CONTEXTUALIZE. Resolved by reading the on-disk archetype directory; high confidence in the correction.
+- **Anomalies:**
+  - **Loop 2 ANALYZE: `?targeted-brute-force` graded `++` without a valid named failed refutation.** The dns-passive evidence (dedicated scanner ASN, no DNS history) is equally consistent with `?opportunistic-scanner` — both hypotheses predict scanner-class infrastructure (the `?opportunistic-scanner` predictions explicitly include "source IP flagged in GreyNoise/Shodan/AbuseIPDB as scanner"). The "refutation" constructed was: "would residential/VPN hosting be more consistent with targeted? Concluded no." This tests the negative of a prediction `?opportunistic-scanner` *also* makes, so it cannot discriminate the two — it is not a refutation of `?targeted-brute-force`'s core prediction (env-specific usernames). No pre-registered refutation shape with an r-ID was declared in the loop-2 HYPOTHESIZE block, so the `++` requirement of "name the failed refutation" cannot be satisfied. The correct loop-2 grade for dns-passive on `?targeted-brute-force` was at most `+`. The inflated `++` did not change the final outcome — loop-3 evidence definitively refutes `?targeted-brute-force` regardless — but the upgrade was structurally unsound.
+  - **CONTEXTUALIZE archetype label mismatch:** CONTEXTUALIZE names the archetype `opportunistic-scanner` — no such directory exists under `wazuh-rule-5710/archetypes/`. The correct match is `external-bruteforce`. This is a CONTEXTUALIZE drafting error, not an ANALYZE-phase error, but it would propagate to the report if uncorrected.
+
+```yaml
+next_action: CONCLUDE
+disposition: true_positive
+confidence: high
+matched_archetype: external-bruteforce
+surviving_hypotheses: ["?opportunistic-scanner"]
+```

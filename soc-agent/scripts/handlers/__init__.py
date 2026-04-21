@@ -14,12 +14,13 @@ self-surfacing.
 
 from schemas.state import Phase
 from scripts.orchestrate import PhaseHandler
-from scripts.handlers import contextualize, conclude, screen
+from scripts.handlers import analyze, contextualize, conclude, screen
 
 
 def default_handlers() -> dict[Phase, PhaseHandler]:
     return {
         Phase.CONTEXTUALIZE: contextualize.handle,
         Phase.SCREEN: screen.handle,
+        Phase.ANALYZE: analyze.handle,
         Phase.CONCLUDE: conclude.handle,
     }

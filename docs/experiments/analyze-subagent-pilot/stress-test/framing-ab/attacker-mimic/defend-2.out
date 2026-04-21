@@ -1,0 +1,7 @@
+```yaml
+verdict: defend
+probe_engaged: yes
+new_grade: null
+rationale: |
+  The `++` grade rates the fit between the observed SSH evidence and `?opportunistic-scanner` — 20 generic wordlist usernames at 0.26/s with zero auth success is unambiguously scanner-shaped activity whether the scanning was organic or deliberately staged as cover fire. The probe describes an additive scenario (scanner + concurrent non-SSH exploit) not an exclusive one, so it does not falsify the characterization of the SSH traffic; even under the probe's scenario the `++` grade remains accurate for the evidence it was issued against. What the probe does reveal is a genuine gap in hypothesis coverage: `?decoy-scanner-with-parallel-exploit` was never formed and the forward-window check only covered SSH auth success (rules 5501/5715), leaving non-SSH compromise indicators — web access logs, process audit, outbound connection initiations, file integrity events — unqueried on prod-webserver-01. That gap belongs to the `confidence: high` CONCLUDE claim, not to the `++` grade; the right correction is to add a GATHER lead for non-SSH host indicators before concluding at high confidence, not to downgrade a grade that correctly describes the SSH evidence in hand.
+```

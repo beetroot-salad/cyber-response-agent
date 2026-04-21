@@ -1,0 +1,19 @@
+```yaml
+verdict: revise
+probe_engaged: yes
+new_grade: "+"
+rationale: |
+  The counterfactual reveals that "zero env-specific names" was factually
+  imprecise: postgres, tomcat, jenkins, nagios are confirmed active service
+  accounts on prod-webserver-01, so the "env-specific names present" leg of
+  the pre-committed refutation shape is triggered. The `++` grade required a
+  clean named failed refutation; that requirement is no longer met, so the
+  grade drops to `+`. The positive mechanism evidence remains intact —
+  authoritative SIEM source, 0.26/s rate, 20-name scatter, zero success —
+  and still supports `?opportunistic-scanner`. The downgrade does not revive
+  `?targeted-brute-force`: coincidence of top-10 public-wordlist entries with
+  real service accounts is not attacker-demonstrated knowledge of the stack;
+  the scatter shows no hostname-derived names, no internal naming-convention
+  patterns, and no narrow targeting. But the refutation logic as stated was
+  over-broad, and the grade must reflect that.
+```

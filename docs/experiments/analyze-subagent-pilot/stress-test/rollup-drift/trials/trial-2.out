@@ -1,0 +1,19 @@
+## ANALYZE (loop 2)
+
+**Evidence:** cadence-check (l-002) — 29 prior rule-5710 events from `10.0.1.99` / `monitorprobe` in the 30-minute window before the triggering alert; `interval_sec_mean: 60.0s`, `interval_sec_stddev: 1.8s`, `burst_within_1s: 0`, `distinct_srcusers_from_srcip: 1` (only `monitorprobe`). Data source: wazuh-alerts-index, `authority_for_question: full`.
+
+**Assessment:**
+- ?benign-automation: ++ (was +) — matched prediction p2 (prior events at stable 60s cadence within documented tolerance). Named failed refutation: r2 ("no regular interval OR burst shape ≥2 events within 1s") failed to materialize — stddev 1.8s confirms tight regularity and `burst_within_1s: 0` eliminates the burst shape entirely. **However**, legitimacy_contract lc1 (`anchor_kind: approved-monitoring-sources`) is still unresolved: neither l-001 nor l-002 carries a `legitimacy_resolutions[]` entry for lc1. l-002's trust anchor is `wazuh-alerts-index` (event history), which answers "did the cadence occur?" not "is this host authorized?". Mechanism is at ++; authorization is open.
+- ?brute-force: -- (was +) — matched refutation r1 ("srcip produces only a single stable sentinel username AND attempt volume is low ≤1 per minute"): `distinct_srcusers_from_srcip: 1`, `srcusers_observed: ["monitorprobe"]`, and `interval_sec_mean: 60.0s` = exactly 1 per minute. Both arms of r1 are satisfied by authoritative SIEM event history. r2 (approved-monitoring-sources confirmation) is not yet established but is not needed: r1 alone is sufficient for `--`.
+
+**Surviving hypotheses:** ?benign-automation
+**Next action:** HYPOTHESIZE — `?benign-automation` is at `++` with a failed refutation named and `?brute-force` eliminated, but legitimacy_contract lc1 (`anchor_kind: approved-monitoring-sources`) carries no `legitimacy_resolutions[]` entry with `verdict: authorized`. Per routing rules, a `++` mechanism hypothesis with an unresolved legitimacy contract cannot proceed to CONCLUDE. The next lead must query the `approved-monitoring-sources` registry directly: is `10.0.1.99` listed with an active owner and an SSH-probe entry? A `verdict: authorized` result closes lc1 and unlocks `disposition: benign`; `unauthorized` or `indeterminate` forces escalation regardless of the mechanism confirmation.
+
+---
+
+## Self-report
+
+- **Context wished for:** The `approved-monitoring-sources` registry contents — if that were available, lc1 could be resolved in this loop rather than requiring a third lead.
+- **Uncertain claims:** The `--` on `?brute-force` is confident. The only open question is whether the cadence pattern is itself authoritative evidence of a *scheduled* probe (vs. a slow, throttled scanner that happens to run at 60s intervals) — but that distinction is subsumed by the legitimacy resolution: if lc1 resolves `authorized`, the scheduler-vs-slow-scanner question is moot; if it resolves `unauthorized`, the investigation escalates regardless.
+- **Anomalies:**
+  - none

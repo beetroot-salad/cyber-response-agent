@@ -1,0 +1,20 @@
+```yaml
+verdict: defend
+probe_engaged: yes
+new_grade: null
+rationale: |
+  The counterfactual requires the stolen credential database to contain personal
+  accounts named tomcat, nagios, hadoop, pi, ftpuser, and www-data — daemon and
+  service-role identifiers that do not appear in personal-credential breaches.
+  Credential databases from breached services hold personal handles, email
+  prefixes, and real names; filtering such a database cannot produce this exact
+  set because the source material does not contain these entries. An attacker
+  who "filtered to generic usernames" from a real credential DB would produce
+  personal-account residue, not a clean system-account wordlist. Even granting
+  the counterfactual's mechanism (deliberate filtering), the resulting behavior
+  IS wordlist-based opportunistic scanning — the hypothesis distinction tracks
+  mechanism, not attacker intent. The `++` grade for ?opportunistic-scanner holds
+  because the named failed-refutation shape (≤2 names OR env-specific names) did
+  not materialize, and the observed username profile is structurally inconsistent
+  with credential-database provenance.
+```

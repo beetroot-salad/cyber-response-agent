@@ -1,0 +1,1 @@
+> "As an attacker, I could have deliberately selected this exact public wordlist and paced my authentication requests at 0.26/s specifically to match the opportunistic-scanner profile you're detecting—making my attack indistinguishable from background noise. How do you know I didn't?"

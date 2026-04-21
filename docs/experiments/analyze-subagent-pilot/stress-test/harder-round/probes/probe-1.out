@@ -1,0 +1,1 @@
+I could have compromised svc:reporting-api and executed these 47 queries directly with the stolen credentials — producing the empty session_tag on all queries, exactly as you observed. How do you know I didn't?
