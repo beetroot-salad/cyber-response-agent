@@ -477,6 +477,23 @@ class TestPrologueExtraction:
         with pytest.raises(OrchestrationError, match="no .prologue"):
             screen_handler._extract_prologue_yaml(ctx.run_dir)
 
+    def test_extracts_from_tilde_fence(self, tmp_path):
+        """A ``~~~yaml`` fenced block is an equally valid CommonMark fence;
+        markdown-it-py handles it natively."""
+        ctx = make_ctx(tmp_path, seed_investigation=False)
+        (ctx.run_dir / "investigation.md").write_text(
+            "## CONTEXTUALIZE\n\n"
+            "~~~yaml\n"
+            "prologue:\n"
+            "  vertices:\n"
+            "    - id: v-001\n"
+            "      kind: ip\n"
+            "~~~\n"
+        )
+        block = screen_handler._extract_prologue_yaml(ctx.run_dir)
+        assert "prologue:" in block
+        assert "v-001" in block
+
 
 # ---------------------------------------------------------------------------
 # Investigation.md write + library invlang validation

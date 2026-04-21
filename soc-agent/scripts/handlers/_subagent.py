@@ -28,6 +28,7 @@ from typing import Optional
 
 import yaml
 
+from scripts.handlers._markdown import iter_yaml_fences
 from scripts.orchestrate import OrchestrationError
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -355,21 +356,8 @@ def extract_terminal_yaml(raw: str) -> dict:
     depth).
     """
     block: Optional[str] = None
-    fence = "```yaml"
-    end = "```"
-    i = 0
-    while True:
-        start = raw.find(fence, i)
-        if start == -1:
-            break
-        start_body = start + len(fence)
-        if start_body < len(raw) and raw[start_body] == "\n":
-            start_body += 1
-        stop = raw.find(end, start_body)
-        if stop == -1:
-            break
-        block = raw[start_body:stop]
-        i = stop + len(end)
+    for body in iter_yaml_fences(raw):
+        block = body
 
     if block is None:
         raise OrchestrationError(

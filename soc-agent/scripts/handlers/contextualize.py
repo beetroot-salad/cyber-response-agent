@@ -39,6 +39,7 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._markdown import parse_markdown, table_rows_after_heading
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
@@ -86,7 +87,7 @@ class PlaybookMetadata:
     leads: list[str]
 
 
-_ARCHETYPE_ROW_RE = re.compile(r"^\|\s*`([a-z0-9-]+)`\s*\|", re.MULTILINE)
+_ARCHETYPE_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 _SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 
 
@@ -99,21 +100,23 @@ def _load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
             f"playbook not found for {signature_id}: {playbook_path}"
         )
     text = playbook_path.read_text()
+    tokens = parse_markdown(text)
     sections = {
         m.group(1).lower(): m.start() for m in _SECTION_RE.finditer(text)
     }
 
-    archetypes_start = sections.get("archetypes")
-    if archetypes_start is None:
+    if "archetypes" not in sections:
         raise OrchestrationError(
             f"playbook {playbook_path} has no ## Archetypes section"
         )
-    next_section_offset = min(
-        (s for s in sections.values() if s > archetypes_start),
-        default=len(text),
-    )
-    archetypes_block = text[archetypes_start:next_section_offset]
-    archetype_names = _ARCHETYPE_ROW_RE.findall(archetypes_block)
+    archetype_rows = table_rows_after_heading(tokens, "Archetypes")
+    archetype_names: list[str] = []
+    for row in archetype_rows[1:]:  # skip header row
+        if not row:
+            continue
+        cell = row[0].strip().strip("`").strip()
+        if _ARCHETYPE_NAME_RE.fullmatch(cell):
+            archetype_names.append(cell)
     if not archetype_names:
         raise OrchestrationError(
             f"playbook {playbook_path} ## Archetypes section has no archetype rows"
