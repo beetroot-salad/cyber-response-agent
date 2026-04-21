@@ -42,13 +42,13 @@ python3 scripts/tools/elastic_cli.py health-check
 python3 scripts/tools/elastic_cli.py query \
   'event.dataset: "system.auth" AND event.outcome: "failure"' \
   --start 2026-04-19T17:00:00Z --limit 50 \
-  --run-dir /workspace/soc-agent/runs/<run-id>
+  --run-dir runs/<run-id>
 
 # High-severity detection signals from the last 24h
 python3 scripts/tools/elastic_cli.py alerts \
   'kibana.alert.severity: "high" OR kibana.alert.severity: "critical"' \
   --start 2026-04-18T18:00:00Z --limit 100 \
-  --run-dir /workspace/soc-agent/runs/<run-id>
+  --run-dir runs/<run-id>
 
 # Override index pattern for a narrow sweep
 python3 scripts/tools/elastic_cli.py query '*' \

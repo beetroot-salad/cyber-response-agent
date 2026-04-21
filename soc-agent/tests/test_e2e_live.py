@@ -112,7 +112,7 @@ def assert_budget_tracked(result: InvestigationResult):
     budget = result.budget_json
     assert budget, (
         f"budget.json missing in {result.run_dir} — plugin hooks may not be firing. "
-        f"Run 'claude plugin validate /workspace/soc-agent' to check plugin.json."
+        f"Run 'claude plugin validate {SOC_AGENT_ROOT}' to check plugin.json."
     )
     assert "tool_calls" in budget, "budget.json missing tool_calls"
     assert budget["tool_calls"] > 0, "budget.json tool_calls should be > 0"

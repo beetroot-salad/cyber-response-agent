@@ -19,7 +19,7 @@ Excludes: hidden files, __pycache__, _template/, .venv/, venv/, ad-hoc
 (the lead fallback is called out in the skill itself).
 
 Usage:
-  cd /workspace/soc-agent && python3 scripts/workspace_map.py
+  cd soc-agent && python3 scripts/workspace_map.py
 """
 
 import sys
