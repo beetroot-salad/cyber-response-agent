@@ -5,19 +5,23 @@ at minimum a 'count' key and a 'hits' or 'values' list. Most functions
 are side-effect-free; a few emit warnings to stderr when results are empty
 and the caller is likely querying against the wrong vocabulary.
 
-Classes:
-  1  coarse_case_lookup            — filter by conclude-block fields
-  2  anchor_calibration            — distribution of anchor results × authority → disposition
-  3  refinement_chain_shapes       — hypothesis refinement tree depth/branching
-  4  dead_lead_lookup              — leads that errored or returned degraded data
-  5  lead_sequence_pattern         — serialize gather blocks as trace strings
-  6  hypothesis_name_wildcard      — fnmatch on hypothesis names; filter by final weight
-  7  prose_substring               — substring scan across all prose fields
-  8  lead_effectiveness            — score leads on branching_delta + prediction_fidelity + kind_mix
-  9  weight_reversal_mining        — resolutions where weight moved positive→negative
-  10 lead_pair_synergy             — composite-dispatch pairs where combined > sum of individual deltas
-  11 post_failure_recovery         — after a dead lead, what lead came next and how effective was it?
-  12 independent_datasource_metric — distinct system count per case, grouped by disposition + confidence
+Classes (phase tag = which investigation phase typically consumes the output):
+  1  coarse_case_lookup            — [ad-hoc]        filter by conclude-block fields
+  2  anchor_calibration            — [GATHER]        anchor results × authority → disposition
+  3  refinement_chain_shapes       — [HYPOTHESIZE]   hypothesis refinement tree depth/branching
+  4  dead_lead_lookup              — [GATHER]        leads that errored or returned degraded data
+  5  lead_sequence_pattern         — [ad-hoc]        serialize gather blocks as trace strings
+  6  hypothesis_name_wildcard      — [HYPOTHESIZE]   fnmatch on hypothesis names; filter by final weight
+  7  prose_substring               — [ad-hoc]        substring scan across all prose fields
+  8  lead_effectiveness            — [HYPOTHESIZE]   score leads on branching_delta + prediction_fidelity + kind_mix
+  9  weight_reversal_mining        — [ANALYZE]       resolutions where weight moved positive→negative
+  10 lead_pair_synergy             — [HYPOTHESIZE]   composite-dispatch pairs where combined > sum of individual deltas
+  11 post_failure_recovery         — [GATHER]        after a dead lead, what lead came next and how effective was it?
+  12 independent_datasource_metric — [CONCLUDE]      distinct system count per case, grouped by disposition + confidence
+
+Handler-facing topology retrieval (separate from the numbered classes):
+  lead_effectiveness_for_topology            — [HYPOTHESIZE] pre-baked class-8 conditioned on frontier topology
+  peer_hypothesis_distribution_for_topology  — [HYPOTHESIZE] co-proposed classifications at the same topology
 """
 
 from __future__ import annotations
@@ -29,7 +33,12 @@ from typing import Any, Iterator
 
 import polars as pl
 
-from .corpus import Companion, conclude_field
+from .corpus import Companion, conclude_field, hypothesis_topology
+
+
+def _hypothesis_name(h: dict[str, Any]) -> str:
+    """Return the hypothesis display name, handling v2.5 `label` / v2.8 `name` drift."""
+    return h.get("name") or h.get("label", "") or ""
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +54,7 @@ _FINAL_WEIGHT_SORT: dict[Any, int] = {"++": 4, "+": 3, None: 2, "-": 1, "--": 0}
 
 
 # ---------------------------------------------------------------------------
-# Class 1 — coarse case lookup
+# Class 1 — coarse case lookup (ad-hoc / general exploration)
 # ---------------------------------------------------------------------------
 
 def coarse_case_lookup(
@@ -88,11 +97,11 @@ def coarse_case_lookup(
 
 
 # ---------------------------------------------------------------------------
-# Class 2 — anchor calibration
+# Class 2 — anchor calibration (GATHER — authority consultation priors)
 # ---------------------------------------------------------------------------
 
 def _anchor_rows(corpus: list[Companion]) -> list[dict[str, Any]]:
-    rows = []
+    rows: list[dict[str, Any]] = []
     for c in corpus:
         for lead in c.leads:
             tar = (lead.get("outcome") or {}).get("trust_anchor_result")
@@ -146,7 +155,7 @@ def anchor_calibration(
 
 
 # ---------------------------------------------------------------------------
-# Class 3 — refinement chain shapes
+# Class 3 — refinement chain shapes (HYPOTHESIZE — refine vs propose directly)
 # ---------------------------------------------------------------------------
 
 def _parse_hypothesis_chain(h_id: str) -> list[str]:
@@ -183,7 +192,7 @@ def refinement_chain_shapes(corpus: list[Companion]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Class 4 — dead-lead lookup
+# Class 4 — dead-lead lookup (GATHER — data-source-debug / recovery)
 # ---------------------------------------------------------------------------
 
 def dead_lead_lookup(
@@ -223,7 +232,7 @@ def dead_lead_lookup(
 
 
 # ---------------------------------------------------------------------------
-# Class 5 — lead sequence pattern
+# Class 5 — lead sequence pattern (ad-hoc / retrospective — full investigation trace)
 # ---------------------------------------------------------------------------
 
 def _lead_kind(lead: dict[str, Any]) -> str:
@@ -295,7 +304,7 @@ def lead_sequence_pattern(
 
 
 # ---------------------------------------------------------------------------
-# Class 6 — hypothesis name wildcard
+# Class 6 — hypothesis name wildcard (HYPOTHESIZE — seed-vocabulary discovery)
 # ---------------------------------------------------------------------------
 
 def hypothesis_name_wildcard(
@@ -337,7 +346,7 @@ def hypothesis_name_wildcard(
 
 
 # ---------------------------------------------------------------------------
-# Class 7 — prose substring
+# Class 7 — prose substring (ad-hoc / general exploration)
 # ---------------------------------------------------------------------------
 
 def _prose_snippets(c: Companion) -> Iterator[tuple[str, str]]:
@@ -393,7 +402,7 @@ def prose_substring(
 
 
 # ---------------------------------------------------------------------------
-# Class 8 — lead effectiveness
+# Class 8 — lead effectiveness (HYPOTHESIZE — lead-selection priors; pre-baked into handler)
 # ---------------------------------------------------------------------------
 
 def _abs_delta(before: Any, after: Any) -> float:
@@ -410,57 +419,66 @@ _LEAD_KINDS = ("branching", "interpretive", "trust", "fail", "mechanical")
 def _lead_effectiveness_rows(
     corpus: list[Companion],
     patterns: tuple[str, ...] = (),
+    *,
+    hypothesis_id_filter: set[tuple[int, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Core aggregation for lead_effectiveness and lead_effectiveness_for_hypothesis.
 
     patterns — fnmatch patterns, all of which must match a hypothesis name (conjunction).
                Empty = match all hypotheses.
+    hypothesis_id_filter — optional `{(case_idx, hypothesis_id)}` restriction, used by
+               topology-conditioned callers. When set, takes precedence over `patterns`.
 
-    Two orthogonal scores per lead name:
-      branching_delta    — log1p(count) × mean_abs_weight_delta, over leads with
-                           non-empty `tests`. N/A (None) when no branching occurrences.
-      prediction_fidelity — log1p(count) × fraction-of-routes-matched, over leads
-                           with non-empty `predictions`. N/A when no interpretive
-                           occurrences. Route match = the next lead in the same
-                           companion has a name equal to one of this lead's
-                           `advance_to` values, or the companion terminated and
-                           `advance_to` names CONCLUDE.
-      kind_mix          — histogram of kinds ({branching, interpretive, trust,
-                           fail, mechanical}) for this lead name across the corpus.
-                           Lets gathering-dominant leads be visible rather than
-                           penalised by a zero score.
+    Scores per lead name (both count-weighted and per-occurrence forms):
+      branching_delta        — log1p(count) × mean_abs_weight_delta (count-weighted;
+                               retained for CLI class 8 compat).
+      mean_branching_delta   — per-occurrence mean_abs_weight_delta. Use this for
+                               retrieval ranking; `branching_support` is its n.
+      prediction_fidelity    — log1p(count) × route-match rate (count-weighted).
+      fidelity_rate          — per-occurrence route-match rate. `fidelity_support` is n.
+      kind_mix               — histogram of kinds for this lead name across the corpus.
     """
-    def matches(h_name: str) -> bool:
+    def matches(case_idx: int, hyp_id: str, h_name: str) -> bool:
+        if hypothesis_id_filter is not None:
+            return (case_idx, hyp_id) in hypothesis_id_filter
         return all(fnmatch.fnmatchcase(h_name, p) for p in patterns)
+
+    filter_active = bool(patterns) or hypothesis_id_filter is not None
 
     branching_deltas: dict[str, list[float]] = {}
     fidelity_hits: dict[str, list[int]] = {}  # 1 if route matched, 0 otherwise
     kind_mix: dict[str, dict[str, int]] = {}
     total_counts: dict[str, int] = {}
 
-    for c in corpus:
-        h_names: dict[str, str] = {h["id"]: h.get("name", "") for h in c.iter_new_hypotheses()}
+    for case_idx, c in enumerate(corpus):
+        h_names: dict[str, str] = {
+            h["id"]: _hypothesis_name(h) for h in c.iter_new_hypotheses()
+        }
         leads = c.leads
         for idx, lead in enumerate(leads):
             name = lead.get("name", "?")
             kind = _lead_kind(lead)
 
-            # Pattern filtering applies per-score, not per-lead: a --hypothesis
-            # filter excludes a lead from the branching-delta accounting when
-            # its resolutions never touched a matching hypothesis, but the
-            # lead's interpretive routing (prediction_fidelity) and kind_mix
-            # are orthogonal to resolution targeting — gathering-dominant leads
+            # Filter applies per-score, not per-lead: a hypothesis filter
+            # excludes a lead from the branching-delta accounting when its
+            # resolutions never touched a matching hypothesis, but the lead's
+            # interpretive routing (prediction_fidelity) and kind_mix are
+            # orthogonal to resolution targeting — gathering-dominant leads
             # should remain visible. Only drop the lead entirely when no score
             # would accept it.
-            touches_pattern = True
-            if patterns:
-                touches_pattern = any(
-                    matches(h_names.get(r.get("hypothesis", ""), ""))
+            touches_filter = True
+            if filter_active:
+                touches_filter = any(
+                    matches(
+                        case_idx,
+                        r.get("hypothesis", ""),
+                        h_names.get(r.get("hypothesis", ""), ""),
+                    )
                     for r in (lead.get("resolutions", []) or [])
                 )
                 # If the lead has no branching contribution and no predictions,
                 # the filter has nothing orthogonal to preserve — skip.
-                if not touches_pattern and not lead.get("predictions"):
+                if not touches_filter and not lead.get("predictions"):
                     continue
 
             total_counts[name] = total_counts.get(name, 0) + 1
@@ -468,13 +486,17 @@ def _lead_effectiveness_rows(
 
             # Branching-delta: only over leads with declared tests (fork-collapsing)
             # AND (if filter set) touching a matching hypothesis.
-            if lead.get("tests") and touches_pattern:
+            if lead.get("tests") and touches_filter:
                 resolutions = lead.get("resolutions", []) or []
-                if patterns:
+                if filter_active:
                     deltas = [
                         _abs_delta(r.get("before"), r.get("after"))
                         for r in resolutions
-                        if matches(h_names.get(r.get("hypothesis", ""), ""))
+                        if matches(
+                            case_idx,
+                            r.get("hypothesis", ""),
+                            h_names.get(r.get("hypothesis", ""), ""),
+                        )
                     ]
                 else:
                     deltas = [_abs_delta(r.get("before"), r.get("after")) for r in resolutions]
@@ -483,7 +505,7 @@ def _lead_effectiveness_rows(
                     branching_deltas.setdefault(name, []).append(lead_mean)
 
             # Prediction-fidelity: route compliance for leads with predictions.
-            # Orthogonal to --hypothesis filtering.
+            # Orthogonal to the hypothesis filter.
             if lead.get("predictions"):
                 advance_tos = {
                     p.get("advance_to")
@@ -505,21 +527,29 @@ def _lead_effectiveness_rows(
         if bd:
             mean_bd = sum(bd) / len(bd)
             branching_delta = round(log1p(len(bd)) * mean_bd, 4)
+            mean_branching_delta = round(mean_bd, 4)
         else:
             branching_delta = None
+            mean_branching_delta = None
 
         fh = fidelity_hits.get(name, [])
         if fh:
             rate = sum(fh) / len(fh)
             prediction_fidelity = round(log1p(len(fh)) * rate, 4)
+            fidelity_rate = round(rate, 4)
         else:
             prediction_fidelity = None
+            fidelity_rate = None
 
         rows.append({
             "lead_name": name,
             "count": count,
             "branching_delta": branching_delta,
             "prediction_fidelity": prediction_fidelity,
+            "mean_branching_delta": mean_branching_delta,
+            "fidelity_rate": fidelity_rate,
+            "branching_support": len(bd),
+            "fidelity_support": len(fh),
             "kind_mix": kind_mix[name],
         })
 
@@ -597,7 +627,9 @@ def lead_discrimination_score(
     per_lead: dict[str, list[tuple[float, float]]] = {}
 
     for c in corpus:
-        h_names: dict[str, str] = {h["id"]: h.get("name", "") for h in c.iter_new_hypotheses()}
+        h_names: dict[str, str] = {
+            h["id"]: _hypothesis_name(h) for h in c.iter_new_hypotheses()
+        }
 
         # Check whether this case contains both pattern classes
         has_p1 = any(fnmatch.fnmatchcase(name, pattern1) for name in h_names.values())
@@ -621,7 +653,7 @@ def lead_discrimination_score(
             mean_h2 = sum(deltas_h2) / len(deltas_h2) if deltas_h2 else 0.0
             per_lead.setdefault(lead.get("name", "?"), []).append((mean_h1, mean_h2))
 
-    rows = []
+    rows: list[dict[str, Any]] = []
     for name, case_pairs in per_lead.items():
         case_count = len(case_pairs)
         mean_h1 = sum(p[0] for p in case_pairs) / case_count
@@ -634,7 +666,7 @@ def lead_discrimination_score(
             "mean_signed_delta_h2": round(mean_h2, 4),
             "case_count": case_count,
         })
-    rows.sort(key=lambda r: abs(r["discrimination_score"]), reverse=True)
+    rows.sort(key=lambda r: abs(float(r["discrimination_score"])), reverse=True)
     if not rows:
         print(
             f"warning: no cases contain hypotheses matching both {pattern1!r} and {pattern2!r}.\n"
@@ -647,7 +679,230 @@ def lead_discrimination_score(
 
 
 # ---------------------------------------------------------------------------
-# Class 9 — weight-reversal mining (pitfall extraction)
+# Topology-conditioned retrieval (handler-facing; library-only, no CLI flag)
+# ---------------------------------------------------------------------------
+
+
+_TIER_LABELS = {
+    0: "exact",
+    1: "dropped parent-class",
+    2: "dropped parent-type",
+    3: "dropped attached-class",
+    4: "name-glob fallback",
+}
+
+
+def _fp_get(fp: dict[str, Any], *path: str) -> Any:
+    cur: Any = fp
+    for key in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+
+def _topology_match_at_tier(fp_case: dict[str, Any], fp_query: dict[str, Any], tier: int) -> bool:
+    """Return True when a case-side fingerprint matches the query at the given tier.
+
+    Tiers narrow the match by dropping fields cumulatively:
+      0 — exact: attached.type, attached.class, relation, parent.type, parent.class
+      1 — drop parent.classification      → {attached.type, attached.class, relation, parent.type}
+      2 — also drop parent.type           → {attached.type, attached.class, relation}
+      3 — also drop attached.classification → {attached.type, relation}
+      4 — name-glob fallback (handled in the caller, not here)
+
+    Any required field that's None on either side fails the match at tiers 0–3 —
+    topology matching needs concrete values; gaps fall through to the next tier.
+    """
+    if tier >= 4:
+        return False
+
+    pairs: list[tuple[Any, Any]] = [
+        (_fp_get(fp_case, "attached_vertex", "type"), _fp_get(fp_query, "attached_vertex", "type")),
+        (_fp_get(fp_case, "relation"), _fp_get(fp_query, "relation")),
+    ]
+    if tier <= 2:
+        pairs.append((
+            _fp_get(fp_case, "attached_vertex", "classification"),
+            _fp_get(fp_query, "attached_vertex", "classification"),
+        ))
+    if tier <= 1:
+        pairs.append(
+            (_fp_get(fp_case, "parent_vertex", "type"), _fp_get(fp_query, "parent_vertex", "type"))
+        )
+    if tier <= 0:
+        pairs.append((
+            _fp_get(fp_case, "parent_vertex", "classification"),
+            _fp_get(fp_query, "parent_vertex", "classification"),
+        ))
+
+    for case_val, query_val in pairs:
+        if case_val is None or query_val is None:
+            return False
+        if case_val != query_val:
+            return False
+    return True
+
+
+def _collect_topology_ids(
+    corpus: list[Companion],
+    fp_query: dict[str, Any],
+    tier: int,
+) -> set[tuple[int, str]]:
+    """Return {(case_idx, hypothesis_id)} for hypotheses matching `fp_query` at `tier`.
+
+    Tier 4 uses fnmatch on hypothesis name, keyed on parent_vertex.classification:
+        ?<parent-class>*  (matches '?authorized-monitoring-probe', '?monitoring-probe', …)
+    When parent classification is missing at tier 4, returns the empty set.
+    """
+    out: set[tuple[int, str]] = set()
+    if tier == 4:
+        parent_class = _fp_get(fp_query, "parent_vertex", "classification")
+        if not parent_class:
+            return out
+        name_pattern = f"?*{parent_class}*"
+        for case_idx, c in enumerate(corpus):
+            for h in c.iter_new_hypotheses():
+                h_id = h.get("id")
+                h_name = _hypothesis_name(h)
+                if not h_id or not h_name:
+                    continue
+                if fnmatch.fnmatchcase(h_name, name_pattern):
+                    out.add((case_idx, h_id))
+        return out
+
+    for case_idx, c in enumerate(corpus):
+        prologue = c.prologue
+        siblings = c.hypotheses
+        for h in c.iter_new_hypotheses():
+            h_id = h.get("id")
+            if not h_id:
+                continue
+            fp_case = hypothesis_topology(prologue, h, siblings)
+            if _topology_match_at_tier(fp_case, fp_query, tier):
+                out.add((case_idx, h_id))
+    return out
+
+
+def _walk_tiers(
+    corpus: list[Companion],
+    fp_query: dict[str, Any],
+) -> tuple[set[tuple[int, str]], int]:
+    """Walk tiers 0→4; return (matched_ids, tier_used). Empty set → tier 4."""
+    for tier in range(0, 5):
+        ids = _collect_topology_ids(corpus, fp_query, tier)
+        if ids:
+            return ids, tier
+    return set(), 4
+
+
+def lead_effectiveness_for_topology(
+    corpus: list[Companion],
+    fp: dict[str, Any],
+) -> dict[str, Any]:
+    """Lead effectiveness ranked for a topology fingerprint.
+
+    Walks tiers 0→4 (exact → name-glob) and returns the first non-empty tier's
+    rows. Rows are ranked by per-occurrence effectiveness — `mean_branching_delta`
+    desc, then `fidelity_rate` desc, then `branching_support` desc — with
+    `branching_support` / `fidelity_support` surfaced as `n` for the reader.
+
+    Returns `{hits, count, tier_used, tier_label}`. When no tier produces hits,
+    returns `{hits: [], count: 0, tier_used: 4, tier_label: "no match"}`.
+    """
+    ids, tier_used = _walk_tiers(corpus, fp)
+    if not ids:
+        return {"hits": [], "count": 0, "tier_used": 4, "tier_label": "no match"}
+    rows = _lead_effectiveness_rows(corpus, hypothesis_id_filter=ids)
+    rows.sort(
+        key=lambda r: (
+            r["mean_branching_delta"] if r["mean_branching_delta"] is not None else float("-inf"),
+            r["fidelity_rate"] if r["fidelity_rate"] is not None else float("-inf"),
+            r["branching_support"],
+        ),
+        reverse=True,
+    )
+    return {
+        "hits": rows,
+        "count": len(rows),
+        "tier_used": tier_used,
+        "tier_label": _TIER_LABELS[tier_used],
+    }
+
+
+def peer_hypothesis_distribution_for_topology(
+    corpus: list[Companion],
+    fp: dict[str, Any],
+) -> dict[str, Any]:
+    """Peer-classification distribution for a topology fingerprint.
+
+    For each hypothesis in the corpus matching the topology at the first
+    non-empty tier, enumerate its co-attached peers (other hypotheses in the
+    same `hypothesize:` block of the same case) and aggregate:
+
+      [{classification, peer_count, final_weight_histogram}]
+
+    `final_weight_histogram` counts the peer's final weight as recorded in the
+    case's resolutions (last-resolution-wins per peer within its case); buckets
+    are `++ / + / null / - / --`. Sorted by `peer_count` desc.
+
+    Returns `{hits, count, tier_used, tier_label}`.
+    """
+    ids, tier_used = _walk_tiers(corpus, fp)
+    if not ids:
+        return {"hits": [], "count": 0, "tier_used": 4, "tier_label": "no match"}
+
+    # Group matched ids by case — a case is in-scope if it contains ≥1
+    # hypothesis at the query topology.
+    cases_in_scope: set[int] = {case_idx for case_idx, _ in ids}
+
+    peer_counts: dict[str, int] = {}
+    peer_weights: dict[str, dict[str, int]] = {}
+    weight_buckets = ("++", "+", "null", "-", "--")
+
+    for case_idx in cases_in_scope:
+        c = corpus[case_idx]
+        # Resolve last-weight per hypothesis_id in this case from resolutions.
+        last_weight: dict[str, Any] = {}
+        for lead in c.leads:
+            for r in lead.get("resolutions", []) or []:
+                h_id = r.get("hypothesis")
+                if h_id:
+                    last_weight[h_id] = r.get("after")
+        # Count each classification once per in-scope case (dedup per case).
+        seen_this_case: set[str] = set()
+        for sib in c.hypotheses:
+            classification = _hypothesis_name(sib)
+            sib_id = sib.get("id")
+            if not classification or not sib_id or classification in seen_this_case:
+                continue
+            seen_this_case.add(classification)
+            peer_counts[classification] = peer_counts.get(classification, 0) + 1
+            bucket_key = "null" if last_weight.get(sib_id) is None else str(last_weight[sib_id])
+            hist = peer_weights.setdefault(
+                classification, {b: 0 for b in weight_buckets}
+            )
+            if bucket_key in hist:
+                hist[bucket_key] += 1
+
+    hits = [
+        {
+            "classification": name,
+            "peer_count": peer_counts[name],
+            "final_weight_histogram": peer_weights[name],
+        }
+        for name in sorted(peer_counts.keys(), key=lambda n: (-peer_counts[n], n))
+    ]
+    return {
+        "hits": hits,
+        "count": len(hits),
+        "tier_used": tier_used,
+        "tier_label": _TIER_LABELS[tier_used],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Class 9 — weight-reversal mining (ANALYZE — pitfall extraction before grading)
 # ---------------------------------------------------------------------------
 
 _POSITIVE_WEIGHTS = {None, "+", "++"}
@@ -705,7 +960,7 @@ def weight_reversal_mining(
 
 
 # ---------------------------------------------------------------------------
-# Class 10 — lead pair synergy
+# Class 10 — lead pair synergy (HYPOTHESIZE / GATHER — composite-dispatch design)
 # ---------------------------------------------------------------------------
 
 def lead_pair_synergy(corpus: list[Companion]) -> dict[str, Any]:
@@ -761,7 +1016,7 @@ def lead_pair_synergy(corpus: list[Companion]) -> dict[str, Any]:
                             (synergy, h_names.get(h_id, h_id))
                         )
 
-    rows = []
+    rows: list[dict[str, Any]] = []
     for (name_a, name_b), observations in pair_data.items():
         case_count = len(observations)
         mean_synergy = sum(s for s, _ in observations) / case_count
@@ -774,12 +1029,12 @@ def lead_pair_synergy(corpus: list[Companion]) -> dict[str, Any]:
             "case_count": case_count,
             "example_hypothesis": example_hyp,
         })
-    rows.sort(key=lambda r: r["mean_synergy"], reverse=True)
+    rows.sort(key=lambda r: float(r["mean_synergy"]), reverse=True)
     return {"hits": rows, "count": len(rows)}
 
 
 # ---------------------------------------------------------------------------
-# Class 11 — post-failure recovery map
+# Class 11 — post-failure recovery map (GATHER — recovery-lead planning after a dead lead)
 # ---------------------------------------------------------------------------
 
 def post_failure_recovery(
@@ -829,7 +1084,7 @@ def post_failure_recovery(
                 key = (failed_name, lead_system, next_name)
                 recovery.setdefault(key, []).append(next_eff)
 
-    rows = []
+    rows: list[dict[str, Any]] = []
     for (failed_name, lead_system, next_name), effs in recovery.items():
         case_count = len(effs)
         mean_eff = sum(effs) / case_count if effs else 0.0
@@ -843,7 +1098,7 @@ def post_failure_recovery(
     rows.sort(
         key=lambda r: (
             r["mean_effectiveness_of_next"] is None,
-            -(r["mean_effectiveness_of_next"] or 0),
+            -float(r["mean_effectiveness_of_next"] or 0),
         )
     )
     if rows and all(r["case_count"] == 1 for r in rows):
@@ -856,7 +1111,7 @@ def post_failure_recovery(
 
 
 # ---------------------------------------------------------------------------
-# Class 12 — independent data source metric
+# Class 12 — independent data source metric (CONCLUDE — termination / confidence grounding)
 # ---------------------------------------------------------------------------
 
 def independent_datasource_metric(
@@ -872,7 +1127,7 @@ def independent_datasource_metric(
 
     Default sort: hits by distinct_system_count desc; distribution by group key.
     """
-    rows = []
+    rows: list[dict[str, Any]] = []
     for c in corpus:
         disp = c.conclude.get("disposition")
         if disposition is not None and disp != disposition:
@@ -885,7 +1140,7 @@ def independent_datasource_metric(
         rows.append({
             "case_id": c.case_id,
             "distinct_system_count": len(systems),
-            "systems": sorted(systems),
+            "systems": sorted(s for s in systems if isinstance(s, str)),
             "termination_category": conclude_field(c.conclude, "termination", "category"),
             "disposition": disp,
             "confidence": c.conclude.get("confidence"),

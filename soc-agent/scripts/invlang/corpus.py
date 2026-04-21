@@ -204,6 +204,98 @@ def extract_ids(body: dict[str, Any]) -> dict[str, list[str]]:
     return {"vertices": vertices, "edges": edges, "hypotheses": hypotheses, "leads": leads}
 
 
+def hypothesis_topology(
+    prologue: dict[str, Any],
+    hypothesis: dict[str, Any],
+    siblings: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return the topology fingerprint of one hypothesis.
+
+    Shape:
+        {
+          attached_vertex: {type, classification} | None,
+          relation: str | None,
+          parent_vertex: {type, classification} | None,
+          peers: tuple[str, ...],   # sorted names of sibling hypotheses
+        }
+
+    `siblings` is the list of other hypotheses co-proposed in the same block
+    (pass `companion.hypotheses` for corpus use; the handler passes its parsed
+    frontier). This hypothesis is filtered out by id.
+
+    Handles both schema shapes:
+      - legacy v2.5 — `proposed_edge: "e-001"` (prologue edge id); resolve
+        relation + parent via prologue lookup. Parent = the edge endpoint that
+        isn't the attached vertex.
+      - structured v2.8 — `proposed_edge: {relation, parent_vertex: {...}}`;
+        read fields directly.
+
+    Name/label drift: `hypothesis.get("name") or hypothesis.get("label")`.
+    Missing lookups degrade to None — the narrowing ladder copes with gaps.
+    """
+    vertices_by_id = {
+        v.get("id"): v
+        for v in (prologue.get("vertices") or [])
+        if isinstance(v, dict)
+    }
+    edges_by_id = {
+        e.get("id"): e
+        for e in (prologue.get("edges") or [])
+        if isinstance(e, dict)
+    }
+
+    attached_id = hypothesis.get("attached_to_vertex")
+    attached_v = vertices_by_id.get(attached_id)
+    attached_vertex: dict[str, Any] | None = None
+    if attached_v is not None:
+        attached_vertex = {
+            "type": attached_v.get("type"),
+            "classification": attached_v.get("classification"),
+        }
+
+    proposed = hypothesis.get("proposed_edge")
+    relation: str | None = None
+    parent_vertex: dict[str, Any] | None = None
+    if isinstance(proposed, dict):
+        relation = proposed.get("relation")
+        pv = proposed.get("parent_vertex")
+        if isinstance(pv, dict):
+            parent_vertex = {
+                "type": pv.get("type"),
+                "classification": pv.get("classification"),
+            }
+    elif isinstance(proposed, str):
+        edge = edges_by_id.get(proposed)
+        if isinstance(edge, dict):
+            relation = edge.get("relation")
+            src = edge.get("source_vertex")
+            tgt = edge.get("target_vertex")
+            parent_id = tgt if src == attached_id else src
+            parent_v = vertices_by_id.get(parent_id)
+            if isinstance(parent_v, dict):
+                parent_vertex = {
+                    "type": parent_v.get("type"),
+                    "classification": parent_v.get("classification"),
+                }
+
+    this_id = hypothesis.get("id")
+    peer_names: list[str] = []
+    for h in siblings or []:
+        if h.get("id") == this_id:
+            continue
+        nm = h.get("name") or h.get("label")
+        if nm:
+            peer_names.append(nm)
+    peers = tuple(sorted(peer_names))
+
+    return {
+        "attached_vertex": attached_vertex,
+        "relation": relation,
+        "parent_vertex": parent_vertex,
+        "peers": peers,
+    }
+
+
 def discover_run_investigations(root: Path) -> list[Companion]:
     """Walk `root` for `**/investigation.md` and load each as one companion.
 

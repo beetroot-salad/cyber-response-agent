@@ -14,6 +14,7 @@ import pytest
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
+sys.path.insert(0, str(SOC_AGENT_ROOT / "scripts"))
 
 from schemas.state import Phase  # noqa: E402
 from scripts.handlers import hypothesize as hypothesize_handler  # noqa: E402
@@ -201,6 +202,151 @@ class TestPromptAssembly:
         assert "semicolon-separated" in captured[1]
         # First prompt has no remediation, second does.
         assert "resume_from_checkpoint" not in captured[0]
+
+
+# ---------------------------------------------------------------------------
+# Past-investigation priors integration
+# ---------------------------------------------------------------------------
+
+
+_INVESTIGATION_WITH_HYPOTHESIZE = textwrap.dedent("""
+## CONTEXTUALIZE
+
+```yaml
+prologue:
+  vertices:
+    - id: v-001
+      type: endpoint
+      classification: monitoring-host
+    - id: v-002
+      type: endpoint
+      classification: internal-server
+  edges:
+    - id: e-001
+      relation: attempted_auth
+      source_vertex: v-001
+      target_vertex: v-002
+```
+
+## HYPOTHESIZE (loop 1)
+
+```yaml
+hypothesize:
+  hypotheses:
+    - id: h-001
+      name: "?monitoring-probe"
+      attached_to_vertex: v-002
+      proposed_edge: e-001
+```
+""").strip() + "\n"
+
+
+def _synthetic_companion():
+    """Build one in-memory companion the handler can retrieve priors against."""
+    from invlang.corpus import Companion  # imported lazily; test-only path
+
+    body = {
+        "prologue": {
+            "vertices": [
+                {"id": "v-001", "type": "endpoint", "classification": "monitoring-host"},
+                {"id": "v-002", "type": "endpoint", "classification": "internal-server"},
+            ],
+            "edges": [
+                {
+                    "id": "e-001",
+                    "relation": "attempted_auth",
+                    "source_vertex": "v-001",
+                    "target_vertex": "v-002",
+                }
+            ],
+        },
+        "hypothesize": {
+            "hypotheses": [
+                {
+                    "id": "h-001",
+                    "name": "?monitoring-probe",
+                    "attached_to_vertex": "v-002",
+                    "proposed_edge": "e-001",
+                }
+            ]
+        },
+        "gather": [
+            {
+                "id": "l-001",
+                "name": "auth-history",
+                "tests": [{"id": "t1"}],
+                "resolutions": [
+                    {"hypothesis": "h-001", "before": None, "after": "++"}
+                ],
+                "outcome": {},
+            }
+        ],
+        "conclude": {"disposition": "benign"},
+    }
+    return Companion(case_id="synthetic", source_path=Path("."), body=body)
+
+
+class TestPriorsIntegration:
+    def test_assemble_prompt_includes_priors_section(self, tmp_path, monkeypatch):
+        ctx = make_ctx(
+            tmp_path,
+            existing_investigation=_INVESTIGATION_WITH_HYPOTHESIZE,
+        )
+        import invlang
+        monkeypatch.setattr(invlang, "load_corpus", lambda *a, **k: [_synthetic_companion()])
+
+        prompt = hypothesize_handler._assemble_prompt(ctx)
+        assert "## Past-investigation priors" in prompt
+        assert "?monitoring-probe (tier 0 — exact)" in prompt
+        assert "auth-history" in prompt
+        assert "n=1" in prompt
+
+    def test_assemble_prompt_loop1_fallback_uses_playbook_seeds(self, tmp_path, monkeypatch):
+        # Only CONTEXTUALIZE written — no prior hypothesize block yet.
+        prologue_only = textwrap.dedent("""
+            ## CONTEXTUALIZE
+
+            ```yaml
+            prologue:
+              vertices: []
+              edges: []
+            ```
+        """).strip() + "\n"
+        ctx = make_ctx(tmp_path, existing_investigation=prologue_only)
+        import invlang
+        # Empty corpus → seeds will narrow to "no match" banners.
+        monkeypatch.setattr(invlang, "load_corpus", lambda *a, **k: [])
+
+        prompt = hypothesize_handler._assemble_prompt(ctx)
+        assert "## Past-investigation priors" in prompt
+        # Playbook for rule-5710 has hypothesis seeds. Assert at least one
+        # seed-shaped section header appears in the rendered block.
+        assert "tier 4" in prompt or "(no frontier extracted)" in prompt
+
+    def test_priors_failure_is_non_fatal(self, tmp_path, monkeypatch):
+        ctx = make_ctx(
+            tmp_path,
+            existing_investigation=_INVESTIGATION_WITH_HYPOTHESIZE,
+        )
+        import invlang
+
+        def _boom(*a, **k):
+            raise RuntimeError("corpus env unset")
+
+        monkeypatch.setattr(invlang, "load_corpus", _boom)
+
+        prompt = hypothesize_handler._assemble_prompt(ctx)
+        assert "## Past-investigation priors" in prompt
+        assert "(priors unavailable" in prompt
+        # Handler still dispatches cleanly when priors fail.
+        captured: list[str] = []
+        monkeypatch.setattr(hypothesize_handler, "_invoke_subagent",
+                            stub_invoke(captured, [_FORK_RESPONSE]))
+        monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
+                            stub_validator([[]]))
+        result = hypothesize_handler.handle(ctx)
+        assert result.next_phase == Phase.GATHER
+        assert "(priors unavailable" in captured[0]
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ from .corpus import (
     Companion,
     PILOT_CORPUS_FILES,
     conclude_field,
+    hypothesis_topology,
     load_corpus,
 )
 from .queries import (
@@ -28,8 +29,10 @@ from .queries import (
     lead_discrimination_score,
     lead_effectiveness,
     lead_effectiveness_for_hypothesis,
+    lead_effectiveness_for_topology,
     lead_pair_synergy,
     lead_sequence_pattern,
+    peer_hypothesis_distribution_for_topology,
     post_failure_recovery,
     prose_substring,
     refinement_chain_shapes,
@@ -62,4 +65,8 @@ __all__ = [
     "lead_pair_synergy",
     "post_failure_recovery",
     "independent_datasource_metric",
+    # topology-conditioned retrieval (handler-facing)
+    "hypothesis_topology",
+    "lead_effectiveness_for_topology",
+    "peer_hypothesis_distribution_for_topology",
 ]
