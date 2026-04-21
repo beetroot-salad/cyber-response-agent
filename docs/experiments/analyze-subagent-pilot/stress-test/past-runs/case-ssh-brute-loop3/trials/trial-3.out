@@ -1,0 +1,35 @@
+## ANALYZE (loop 3)
+
+**Evidence:** authentication-history-extended (wazuh) — 47 events from 203.0.113.45 → prod-webserver-01 between 09:11:47–09:14:51Z; 20 distinct usernames, all standard public wordlist entries (`admin`, `root`, `ubuntu`, `pi`, `oracle`, `postgres`, `deploy`, `user`, `test`, `guest`, `operator`, `mysql`, `ftpuser`, `git`, `jenkins`, `hadoop`, `tomcat`, `nagios`, `www-data`, `ansible`); attempt rate 0.26/s; zero environment-specific names (no `webapp-*`, `appuser-*`, app-specific deploy accounts); zero rule-5501/5715 events from 203.0.113.45 in the 10-minute forward window (09:14:51–09:24:51Z).
+
+**Assessment:**
+
+- `?opportunistic-scanner`: `++` (was `+`) — Pre-committed refutation shape ("≤2 names OR env-specific names present") failed to materialize: 20 distinct names observed, all drawn from the standard public wordlist profile (hydra/ncrack/patator default sets), zero environment-specific names. Rate 0.26/s is consistent with automation at wordlist pace. This is the named failed refutation: the refutation gate was "≤2 names or env-specific names" — neither condition holds. Combined with scanner-class reputation (GreyNoise `mass-ssh-scanner`/`port-scanner`/`ssh-brute`, AS64496 Scanner-Hosting-Inc) and dedicated-scanner-infrastructure ASN from prior loops, the mechanism is now confirmed by a SIEM-event-authoritative observation that passed the pre-committed falsification test.
+
+- `?targeted-brute-force`: `--` (was `+`) — Matched pre-committed refutation shape: "all usernames are generic wordlist entries with no environment-specific naming" directly materialized. Zero of the 20 observed usernames match prod-webserver-01's application stack naming patterns (no `webapp-*`, `appuser-*`, `deploy-*`, or equivalent). This is the core prediction of `?targeted-brute-force` (environment-aware credential selection) directly falsified by the full username list.
+
+- `?credential-stuffing-external`: `--` (was `−`) — Both pre-committed refutation conditions met simultaneously: (1) attempt rate 0.26/s matches mass-scanner profile, far above the sub-0.05/s slow-drip pattern characteristic of credential-stuffing tools evading rate limits; (2) all 20 usernames are generic wordlist role/service entries, not real-looking personal identifiers or email-prefix patterns. Double refutation on independent axes.
+
+- `?compromise-followup`: `--` (was live/unchecked) — Matched pre-committed refutation shape: zero rule-5501 or rule-5715 events from 203.0.113.45 to prod-webserver-01 or any other host in the full forward window (09:14:51–09:24:51Z, 10 min). No successful authentication followed the burst.
+
+**Surviving hypotheses:** `?opportunistic-scanner`
+
+**Next action:** CONCLUDE → disposition: `true_positive`, confidence: `high`, matched_archetype: `external-bruteforce`, rationale: `?opportunistic-scanner` reaches `++` with a named failed refutation (pre-committed refutation shape "≤2 names OR env-specific names" did not materialize across 20 observed usernames); all three competing hypotheses reach `--` on pre-committed refutation shapes via SIEM-event-authoritative evidence. `external-bruteforce` archetype verified: disqualifiers checked — (1) single-attempt → not triggered (47 events, 20 usernames); (2) internal source → not triggered (203.0.113.45 is external). `required_anchors: []` — archetype always escalates; no legitimacy contract exists on `?opportunistic-scanner` (adversarial activity is not subject to authorization review). Note: the CONTEXTUALIZE block named this archetype candidate "opportunistic-scanner" but the canonical catalog name is `external-bruteforce`; the archetype story confirms the match. Fourteen prior true_positive closures on prod-webserver-01 from scanner-class ASNs (ticket-context from CONTEXTUALIZE) are consistent with this archetype.
+
+---
+
+## Self-report
+
+- **Context wished for:** The archetype directory for wazuh-rule-5710 was accessible in the worktree (`soc-agent/knowledge/signatures/wazuh-rule-5710/archetypes/external-bruteforce/story.md`), so shape self-verification was completed. No context gaps that affected grading.
+- **Uncertain claims:** The `?targeted-brute-force` → `--` grade is highly confident — all 20 usernames are unambiguously generic wordlist entries, and the pre-committed refutation shape is unambiguous. The one minor uncertainty: "environment-specific patterns from prod-webserver-01's application stack" are inferred from the GATHER observation ("no `webapp-*`, no `appuser-*`, no app-specific deploy account names") — the investigation does not show the full expected-account inventory against which this was checked. If the application stack uses a naming convention not anticipated, the negative could be incomplete. However, 20 generic wordlist role names with no unusual entries is strong evidence the check was comprehensive.
+- **Anomalies:**
+  - **CONTEXTUALIZE archetype naming vs. catalog:** The CONTEXTUALIZE block referred to the archetype candidate as "opportunistic-scanner" throughout the investigation, but no such archetype exists in `knowledge/signatures/wazuh-rule-5710/archetypes/`. The correct catalog name is `external-bruteforce`. The mismatch propagated through HYPOTHESIZE and ANALYZE loops 1–2 without correction. This does not affect grading (the mechanism description is identical), but the investigation log uses a name that won't resolve at CONCLUDE write-time — the reporter should cite `external-bruteforce`, not `opportunistic-scanner`.
+  - **`?compromise-followup` held "live" without a formal weight for two loops:** Loops 1 and 2 noted it as "live, not yet checked" rather than assigning a provisional grade. This is not an error — no evidence was gathered on it in those loops — but the companion schema may require a provisional weight entry even before the lead runs. Worth noting for downstream YAML composition: the weight series starts at `null` → `--` rather than some intermediate.
+
+```yaml
+next_action: CONCLUDE
+disposition: true_positive
+confidence: high
+matched_archetype: external-bruteforce
+surviving_hypotheses: ["?opportunistic-scanner"]
+```

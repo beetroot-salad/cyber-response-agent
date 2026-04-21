@@ -1,0 +1,42 @@
+## ANALYZE (loop 3)
+
+**Evidence:** authentication-history-extended (l-005) — 47 rule-5710 events from 203.0.113.45 against prod-webserver-01 over 3 min 4 s (09:11:47Z–09:14:51Z); 20 distinct usernames at 0.26/s steady sweep; all 20 names are generic public wordlist entries (`admin`, `root`, `ubuntu`, `pi`, `oracle`, `postgres`, `deploy`, `user`, `test`, `guest`, `operator`, `mysql`, `ftpuser`, `git`, `jenkins`, `hadoop`, `tomcat`, `nagios`, `www-data`, `ansible`); zero environment-specific names (no `webapp-*`, `appuser-*`, deploy account patterns matching the prod-webserver-01 stack); zero 5501/5715 events from 203.0.113.45 in the 10-min forward window (09:14:51Z–09:24:51Z), and zero successful auth from 203.0.113.45 to any other host in the full 40-min window.
+
+**Assessment:**
+
+- `?opportunistic-scanner`: `++` (was `+`) — 20 distinct generic usernames at 0.26/s matching the default wordlist profile of public scanner tools (hydra, ncrack, patator). Named failed refutation: pre-committed r1 (usernames ≤2 names OR include env-specific names) failed to materialize — 20 names, all generic, zero env-specific. Both the scatter profile (≥5 generic names, confirmed ×4) and the rate (0.26/s, well above the sub-0.05/s credential-stuffing threshold) are mechanism-confirming at the SIEM-event level. No legitimacy_contract required (adversarial true_positive pathway).
+
+- `?targeted-brute-force`: `--` (was `+`) — matched pre-committed refutation shape: all 20 observed usernames are generic wordlist entries with zero environment-specific naming. The hypothesis predicted env-specific names would appear (`webapp-*`, `appuser-*`, `deploy-*`); none did. Direct refutation via the pre-registered shape — not just "looks unlikely."
+
+- `?credential-stuffing-external`: `--` (was `−`) — matched pre-committed refutation shape (dual condition): (1) attempt rate 0.26/s matches mass-scanner profile, not the sub-0.05/s slow-drip rate typical of credential-stuffing tools; AND (2) all 20 usernames are generic wordlist entries, not personal/email-prefix identifiers characteristic of breach-list replay. Both conditions triggered independently.
+
+- `?compromise-followup`: `--` (was live) — matched pre-committed refutation shape: zero 5501/5715 events from 203.0.113.45 in the 10-min forward window. Extended check also clear: zero successful auth from 203.0.113.45 to any host in the full 40-min window. Trust root reached (v-001 is an external endpoint; no upstream forensics accessible).
+
+**Archetype self-verification — `external-bruteforce`:**
+Disqualifier clauses from `archetypes/external-bruteforce/story.md` checked against full evidence:
+- *"Single attempt → credential-stuffing or noise"* — 47 attempts. **NOT triggered.**
+- *"Attempts from an internal source → different archetype"* — 203.0.113.45 classified external (SCREEN, ip-ranges.md). **NOT triggered.**
+- *"Volume profile out of range"* — 47 attempts, 20 distinct names, 0.26/s. **NOT triggered.**
+Defining elements satisfied: external source ✓ + multiple distinct usernames ✓ + high volume ✓. Clean archetype fit.
+
+**Surviving hypotheses:** `?opportunistic-scanner`
+**Next action:** CONCLUDE → disposition: true_positive, confidence: high, matched_archetype: external-bruteforce, rationale: `?opportunistic-scanner` confirmed at `++` via named failed refutation (r1: env-specific or ≤2-name username set — did not materialize); all three competing hypotheses refuted by direct match to their pre-committed refutation shapes; no successful access in a 40-min window including a 10-min forward buffer. Precedent: 14 prior true_positive closures against this same host from scanner-class ASNs recorded in ticket-context.
+
+---
+
+## Self-report
+
+- **Context wished for:** The `story.md` for `external-bruteforce` was in the plugin codebase, not the run directory — required a secondary read outside the run dir. This worked, but it means the archetype self-verification step is workspace-path-dependent. A run-dir copy or a pre-resolved archetype summary would make this step more robust.
+- **Uncertain claims:** The archetype directory name `external-bruteforce` diverges from the working shorthand `opportunistic-scanner` used throughout the CONTEXTUALIZE and HYPOTHESIZE blocks. The claim is accurate (I confirmed the actual directory listing), but a downstream validator matching the CONTEXTUALIZE narrative against the terminal YAML may surface a label mismatch — worth flagging to the main agent.
+- **Anomalies:**
+  - None. Loop 2 ANALYZE's decision to hold `?targeted-brute-force` at `+` despite accumulated ASN signals was correct — the pre-committed refutation shape was username-profile-based, not ASN-type-based, and the loop correctly deferred grading to the authoritative lead (auth-history). Holding at `+` rather than force-moving to `-` was disciplined, not lenient.
+
+---
+
+```yaml
+next_action: CONCLUDE
+disposition: true_positive
+confidence: high
+matched_archetype: external-bruteforce
+surviving_hypotheses: ["?opportunistic-scanner"]
+```
