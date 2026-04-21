@@ -19,6 +19,7 @@ The caller substitutes these values:
 - `run_dir` — absolute path to the investigation run directory.
 - `signature_id` — the signature under investigation (e.g., `wazuh-rule-100001`).
 - `loop_n` — the loop number to stamp on this block (integer, ≥ 1).
+- A `## Past-investigation priors` markdown block — corpus-derived lead and peer-hypothesis priors keyed on the current frontier topology, pre-computed by the orchestrator. Each entry stamps a tier label (`exact` → `name-glob fallback`) indicating how closely the corpus match fits the current position; lower tier = stronger signal. Consult when picking seeds and the `Selected lead:`; no CLI needed.
 
 If any substitution is missing, return an error note and stop. Do not
 guess paths.
@@ -333,57 +334,24 @@ this file.
   per hypothesis that could make it look confirmed (or refuted) when
   it isn't. Not generic lead-level pitfalls.
 
-## Past-investigation priors (invlang corpus)
+## Corpus queries
 
-The `invlang` CLI queries the corpus of prior investigation companions — the structured YAML blocks every past run emitted. Use it for two formation-stage questions only:
+Lead effectiveness and peer-hypothesis priors for your current frontier topology are **pre-computed in the `## Past-investigation priors` block of your input**. Use those directly — do not re-run class-8 via CLI. `tier_used` is the signal: tier 0 (exact) is strongest; tier 4 (name-glob fallback) means corpus depth was thin at this topology and you should weight the prior lightly.
 
-1. **What hypothesis shapes has the corpus seen before in situations like this?** (hypothesis-formation priors)
-2. **What leads best discriminate this kind of hypothesis?** (lead-selection priors)
-
-It is **not** an outcome-weighting tool. Whether past instances of a hypothesis were ultimately confirmed or refuted is an analyst-level concern about disposition, not a formation-time concern — and leaning on it risks overfitting the current case to the corpus's disposition distribution. Stay on shape and discriminability, not on verdicts.
-
-Invocation is always via the wrapper:
+The CLI remains for shape-calibration questions the pre-baked priors don't answer — vocabulary enumeration, pattern-matching classifications, refinement-chain shapes. Invoke via the wrapper (direct `python -m invlang` fails):
 
 ```bash
-bash soc-agent/scripts/invlang/run.sh <args>
-```
-
-(Direct `python -m invlang` or `cli.py` invocations fail — the wrapper sets up paths.)
-
-Use the CLI selectively — at most a few targeted queries per loop, not a blanket scan.
-
-**Hypothesis-formation priors.** Before committing a seed list, check what classifications the corpus has proposed for similar situations:
-
-```bash
-# Enumerate the hypothesis-name vocabulary actually used in the corpus.
-# Run once up front to know the pattern space before writing --hyp-pattern queries.
+# Vocabulary — run once per loop before writing patterns.
 bash soc-agent/scripts/invlang/run.sh --enumerate hypotheses
 
-# Pattern-match hypothesis names by fnmatch. Shows what classifications
-# existed, how often, and in what archetype contexts.
+# Pattern-match hypothesis names by fnmatch.
 bash soc-agent/scripts/invlang/run.sh --class 6 --hyp-pattern '<fnmatch-pattern>'
 
-# Refinement-chain shapes: when did prior cases split a parent hypothesis
-# into children, and along which attribute? Informs whether to propose
-# directly or defer to refinement.
+# Refinement-chain shapes — did past cases split a parent hypothesis, and along which attribute?
 bash soc-agent/scripts/invlang/run.sh --class 3 --hyp-pattern '<fnmatch-pattern>'
 ```
 
-Use these to answer: *has this topology-shape been proposed before?* *is my candidate seed distinct from already-named sibling classifications, or am I reinventing one?* *do past cases suggest this classification needed refinement to discriminate from a sibling?* The goal is shape calibration — lean single-hop, mutually distinct, refined only when forced — not outcome matching.
-
-**Lead-selection priors.** When picking the next lead, rank by corpus effectiveness:
-
-```bash
-bash soc-agent/scripts/invlang/run.sh --class 8 --hypothesis '<hypothesis-name-glob>'
-```
-
-Returns leads ranked by `branching_delta` (how much they collapsed hypothesis space) + `prediction_fidelity` (how well their predictions held) + `kind_mix` (the mix of attribute kinds they surfaced). Prefer leads the corpus shows actually discriminate similar hypotheses. Use `--discriminate-between P1 P2` when you have a two-hypothesis fork and want to pick the lead that most signed-lifts P1 and signed-refutes P2.
-
-**Integration with the output.**
-- `Active hypotheses:` — corpus enumeration shapes what seeds you consider and keeps them distinct from existing catalog entries.
-- `Selected lead:` — class-8 rankings inform the pick when the playbook doesn't force a specific lead.
-
-Do not cite corpus results in `predictions` or `refutation_shape` claim text — those remain forward-facing over the current case. Corpus priors shape *which* predictions you choose to write; the claims themselves are about the alert's observable world, not the corpus.
+Shape-calibration goal: lean single-hop, mutually distinct, refined only when forced. Do not cite corpus results in `predictions` or `refutation_shape` claim text — those remain forward-facing over the current case.
 
 ## Selecting leads
 

@@ -38,10 +38,10 @@ is cross-checked against the inferred block type; mismatch raises.
 
 Not in this cutover:
     - Sibling-pair embedding-distance check for semantic non-discrimination.
-      Rationale: 1/28 corpus blocks exhibits the failure; shipping the
-      embedding infrastructure does not pay for itself at this rate. Filed as
-      a post-cutover enhancement; revisit after ~20 fresh runs accumulate or
-      if the failure rate rises.
+      Rationale: one corpus companion out of the current handful exhibits the
+      failure; shipping the embedding infrastructure does not pay for itself
+      at this rate. Filed as a post-cutover enhancement; revisit as corpus
+      grows or if the failure rate rises.
 
 Input (Context):
     ctx.run_dir, ctx.signature_id, ctx.history, ctx.alert
@@ -71,6 +71,10 @@ from scripts.handlers._subagent import (
     extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
 )
+
+# Lazy imports for priors (invlang + contextualize) live inside the priors
+# helpers themselves — keeps import-time cycles avoided and lets failures in
+# those subsystems degrade to a banner rather than block handler import.
 
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -121,15 +125,193 @@ def _compute_loop_n(ctx: Context) -> int:
 
 def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None) -> str:
     loop_n = _compute_loop_n(ctx)
+    priors_section = _safe_priors_section(ctx)
     lines = [
         f"run_dir={ctx.run_dir}",
         f"signature_id={ctx.signature_id}",
         f"loop_n={loop_n}",
+        "",
+        priors_section,
     ]
     if remediation_notes:
+        lines.append("")
         lines.append("resume_from_checkpoint=true")
         lines.append("remediation_notes=" + " | ".join(remediation_notes))
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Past-investigation priors (topology-conditioned corpus retrieval)
+# ---------------------------------------------------------------------------
+
+
+def _safe_priors_section(ctx: Context) -> str:
+    """Produce the `## Past-investigation priors` markdown block.
+
+    All exceptions degrade to a banner — priors must never block the loop.
+    """
+    try:
+        frontier = _extract_current_frontier(ctx)
+        priors = _compute_priors(frontier)
+        return _format_priors(priors)
+    except Exception as exc:  # noqa: BLE001 — intentional broad catch
+        return (
+            "## Past-investigation priors\n"
+            f"(priors unavailable: {type(exc).__name__}: {exc})"
+        )
+
+
+def _extract_current_frontier(ctx: Context) -> list[dict]:
+    """Return a list of `{name, fingerprint}` entries describing the frontier.
+
+    Loop N (N ≥ 2): use the *last* `hypothesize:` yaml block in
+    `investigation.md`; resolve each hypothesis's topology against the
+    investigation's own prologue (first yaml block carrying `prologue:`).
+
+    Loop 1 (no prior `hypothesize:`): synthesize one entry per playbook
+    hypothesis seed, with `relation=None` and parent classification = the
+    seed name stripped of the leading `?`. Loop-1 fingerprints never match
+    tiers 0–3 (relation is required); retrieval naturally falls back to the
+    name-glob tier, which is what the subagent expects at loop 1.
+    """
+    inv_path = ctx.run_dir / "investigation.md"
+    text = inv_path.read_text() if inv_path.exists() else ""
+
+    prologue, last_hypothesize = _parse_prologue_and_last_hypothesize(text)
+
+    from invlang import hypothesis_topology  # type: ignore
+
+    if last_hypothesize is not None:
+        hypotheses = last_hypothesize.get("hypotheses") or []
+        shelved = set(last_hypothesize.get("shelved") or [])
+        active = [h for h in hypotheses if h.get("id") not in shelved]
+        return [
+            {
+                "name": _hyp_name(h),
+                "fingerprint": hypothesis_topology(prologue or {}, h, active),
+            }
+            for h in active
+            if _hyp_name(h)
+        ]
+
+    # Loop 1 fallback — seeds from the signature playbook.
+    from scripts.handlers.contextualize import load_playbook_metadata
+
+    meta = load_playbook_metadata(ctx.signature_id)
+    seeds = meta.hypothesis_seeds or []
+    peers = tuple(sorted(seeds))
+    frontier: list[dict] = []
+    for seed in seeds:
+        classification = seed.lstrip("?")
+        frontier.append({
+            "name": seed if seed.startswith("?") else f"?{seed}",
+            "fingerprint": {
+                "attached_vertex": None,
+                "relation": None,
+                "parent_vertex": {"type": None, "classification": classification},
+                "peers": peers,
+            },
+        })
+    return frontier
+
+
+def _parse_prologue_and_last_hypothesize(
+    text: str,
+) -> tuple[dict | None, dict | None]:
+    """Walk all yaml fences once; return (prologue, last_hypothesize)."""
+    prologue: dict | None = None
+    last_hyp: dict | None = None
+    for m in _FIRST_FENCE_RE.finditer(text):
+        try:
+            parsed = yaml.safe_load(m.group("body"))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        if prologue is None and "prologue" in parsed and isinstance(parsed["prologue"], dict):
+            prologue = parsed["prologue"]
+        if "hypothesize" in parsed and isinstance(parsed["hypothesize"], dict):
+            last_hyp = parsed["hypothesize"]
+    return prologue, last_hyp
+
+
+def _hyp_name(h: dict) -> str:
+    return h.get("name") or ""
+
+
+def _compute_priors(frontier: list[dict]) -> list[dict]:
+    """Compute `{name, fingerprint, tier_used, tier_label, leads, peers}` per entry."""
+    from invlang import (  # type: ignore
+        lead_effectiveness_for_topology,
+        load_corpus,
+        peer_hypothesis_distribution_for_topology,
+    )
+
+    corpus = load_corpus()
+    out: list[dict] = []
+    for entry in frontier:
+        fp = entry["fingerprint"]
+        leads = lead_effectiveness_for_topology(corpus, fp)
+        peers = peer_hypothesis_distribution_for_topology(corpus, fp)
+        out.append({
+            "name": entry["name"],
+            "fingerprint": fp,
+            "tier_used": leads.get("tier_used"),
+            "tier_label": leads.get("tier_label"),
+            "leads": leads.get("hits") or [],
+            "peers": peers.get("hits") or [],
+        })
+    return out
+
+
+_PRIORS_LEADS_TOP_N = 5
+_PRIORS_PEERS_TOP_N = 5
+
+
+def _format_priors(priors: list[dict]) -> str:
+    """Render a concise markdown block. Empty frontier or empty retrieval
+    both still emit the section — honesty beats silent omission."""
+    lines = ["## Past-investigation priors"]
+    if not priors:
+        lines.append("(no frontier extracted)")
+        return "\n".join(lines)
+    for entry in priors:
+        lines.append("")
+        lines.append(
+            f"### {entry['name']} (tier {entry['tier_used']} — {entry['tier_label']})"
+        )
+        leads = entry["leads"][:_PRIORS_LEADS_TOP_N]
+        if not leads:
+            lines.append("Leads: (no corpus matches at any tier)")
+        else:
+            lines.append("Leads (per-occurrence effectiveness; n = support):")
+            for row in leads:
+                score = row.get("mean_branching_delta")
+                fidelity = row.get("fidelity_rate")
+                n = row.get("branching_support") or 0
+                lines.append(
+                    f"  - {row['lead_name']}: "
+                    f"score={_fmt_num(score)}, fidelity={_fmt_num(fidelity)}, n={n}"
+                )
+        peers = entry["peers"][:_PRIORS_PEERS_TOP_N]
+        if peers:
+            lines.append("Peer hypotheses co-proposed at this topology:")
+            for p in peers:
+                hist = p.get("final_weight_histogram") or {}
+                hist_str = ", ".join(
+                    f"{k}={v}" for k, v in hist.items() if v
+                ) or "—"
+                lines.append(
+                    f"  - {p['classification']} "
+                    f"({p['peer_count']} cases, weights: {hist_str})"
+                )
+    return "\n".join(lines)
+
+
+def _fmt_num(v: float | None) -> str:
+    if v is None:
+        return "—"
+    return f"{v:.3f}"
 
 
 # ---------------------------------------------------------------------------
