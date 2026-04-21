@@ -23,8 +23,9 @@ This handler:
     - detects and raises on `error:` blocks
     - extracts the terminal routing YAML via `extract_terminal_yaml`
     - validates the proposed append against the invlang validator
-      (`validate_companion`) as a library call — catching rules 26/27/28
-      (compound claim, evaluation prefix, leanness) + 1-25
+      (`validate_companion`) as a library call — catching rules 26/27/28/29/30
+      (compound claim, evaluation prefix, leanness, prediction subject scope,
+      refutation→prediction links) + 1-25
     - on validation failure: respawns with `resume_from_checkpoint=true` and
       the validator errors as `remediation_notes`; accepts the second attempt
       only if it validates, else raises
@@ -76,8 +77,10 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 SUBAGENT_TIMEOUT_SECONDS = int(
-    os.environ.get("SOC_AGENT_HYPOTHESIZE_TIMEOUT_SECONDS", "300")
+    os.environ.get("SOC_AGENT_HYPOTHESIZE_TIMEOUT_SECONDS", "450")
 )
+# Timeout fails fast — the handler does not respawn on timeout. The
+# validator-error retry path (which the handler does walk) is separate.
 
 _VALID_MODES = {"fork", "no-fork"}
 

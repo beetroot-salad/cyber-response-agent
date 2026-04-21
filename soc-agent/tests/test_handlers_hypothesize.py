@@ -95,9 +95,9 @@ hypothesize:
         relation: initiated_by
         parent_vertex: {type: identity, classification: scheduled-automation-health-check}
       predictions:
-        - {id: p1, claim: "event cadence matches documented probe interval within ±5s"}
+        - {id: p1, subject: proposed_parent, claim: "event cadence matches documented probe interval within ±5s"}
       refutation_shape:
-        - {id: r1, claim: "event cadence is off-documented-interval"}
+        - {id: r1, refutes_predictions: [p1], claim: "event cadence is off-documented-interval"}
       weight: null
 ```
 

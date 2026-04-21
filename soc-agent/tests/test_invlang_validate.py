@@ -50,6 +50,8 @@ from hooks.scripts.invlang_validate import (
     _check_compound_prediction_claim,
     _check_classification_evaluation_prefix,
     _check_predictions_leanness,
+    _check_prediction_subject_scope,
+    _check_refutation_prediction_links,
     _merge_blocks,
     collect_warnings,
     YAML_BLOCK_RE,
@@ -95,9 +97,11 @@ hypothesize:
           classification: automated-scanner
       predictions:
         - id: p1
+          subject: proposed_parent
           claim: "source IP appears in threat-intel scanner list"
       refutation_shape:
         - id: r1
+          refutes_predictions: [p1]
           shape: "source IP authenticated previously in last 90d"
       weight: null
 """
@@ -2741,5 +2745,181 @@ class TestCheckPredictionsLeanness:
             }],
         }
         errors = _check_predictions_leanness(merged)
+        assert len(errors) == 1
+        assert "h-002" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Rule 29 — Prediction subject scope
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPredictionSubjectScope:
+    """Rule 29 — predictions[].subject must be within the one-hop scope
+    (proposed_parent | attached_vertex | proposed_edge)."""
+
+    @staticmethod
+    def _h(hid: str, preds: list[dict]) -> dict:
+        return {
+            "id": hid,
+            "name": f"?m-{hid}",
+            "attached_to_vertex": "v-001",
+            "proposed_edge": {"relation": "r", "parent_vertex": {"type": "t", "classification": "c"}},
+            "predictions": preds,
+        }
+
+    @pytest.mark.parametrize("subject", [
+        "proposed_parent", "attached_vertex", "proposed_edge",
+    ])
+    def test_valid_subjects_pass(self, subject):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", [{"id": "p1", "subject": subject, "claim": "..."}]),
+        ]}}
+        assert _check_prediction_subject_scope(merged) == []
+
+    def test_missing_subject_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", [{"id": "p1", "claim": "..."}]),
+        ]}}
+        errors = _check_prediction_subject_scope(merged)
+        assert len(errors) == 1
+        assert "missing required `subject`" in errors[0]
+
+    def test_invalid_subject_fails(self):
+        # A prediction claiming to test "monitoring-host container" is out of
+        # scope — that's a lead masquerading as a prediction.
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", [{"id": "p1", "subject": "v-042", "claim": "..."}]),
+        ]}}
+        errors = _check_prediction_subject_scope(merged)
+        assert len(errors) == 1
+        assert "v-042" in errors[0] and "outside the hypothesis's one-hop" in errors[0]
+
+    def test_multiple_predictions_each_checked(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", [
+                {"id": "p1", "subject": "proposed_parent", "claim": "a"},
+                {"id": "p2", "subject": "external_vertex", "claim": "b"},
+            ]),
+        ]}}
+        errors = _check_prediction_subject_scope(merged)
+        assert len(errors) == 1
+        assert "p2" in errors[0]
+
+    def test_new_hypotheses_in_leads_participate(self):
+        merged = {
+            "hypothesize": {"hypotheses": []},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {}, "resolutions": [],
+                "new_hypotheses": [self._h("h-002", [
+                    {"id": "p1", "subject": "wrong", "claim": "..."},
+                ])],
+            }],
+        }
+        errors = _check_prediction_subject_scope(merged)
+        assert len(errors) == 1
+        assert "h-002" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Rule 30 — Refutation→prediction link
+# ---------------------------------------------------------------------------
+
+
+class TestCheckRefutationPredictionLinks:
+    """Rule 30 — refutation_shape[].refutes_predictions must be non-empty
+    and cite prediction ids declared on the same hypothesis."""
+
+    @staticmethod
+    def _h(hid: str, pred_ids: list[str], refutations: list[dict]) -> dict:
+        return {
+            "id": hid,
+            "name": f"?m-{hid}",
+            "attached_to_vertex": "v-001",
+            "proposed_edge": {"relation": "r", "parent_vertex": {"type": "t", "classification": "c"}},
+            "predictions": [
+                {"id": pid, "subject": "proposed_parent", "claim": "..."}
+                for pid in pred_ids
+            ],
+            "refutation_shape": refutations,
+        }
+
+    def test_valid_link_passes(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["p1"], [
+                {"id": "r1", "refutes_predictions": ["p1"], "claim": "..."},
+            ]),
+        ]}}
+        assert _check_refutation_prediction_links(merged) == []
+
+    def test_missing_refutes_predictions_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["p1"], [
+                {"id": "r1", "claim": "..."},
+            ]),
+        ]}}
+        errors = _check_refutation_prediction_links(merged)
+        assert len(errors) == 1
+        assert "missing required `refutes_predictions`" in errors[0]
+
+    def test_empty_list_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["p1"], [
+                {"id": "r1", "refutes_predictions": [], "claim": "..."},
+            ]),
+        ]}}
+        errors = _check_refutation_prediction_links(merged)
+        assert len(errors) == 1
+        assert "non-empty list" in errors[0]
+
+    def test_foreign_prediction_id_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["p1"], [
+                {"id": "r1", "refutes_predictions": ["p99"], "claim": "..."},
+            ]),
+        ]}}
+        errors = _check_refutation_prediction_links(merged)
+        assert len(errors) == 1
+        assert "'p99'" in errors[0]
+        assert "do not appear" in errors[0]
+
+    def test_mixed_valid_and_foreign_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["p1", "p2"], [
+                {"id": "r1", "refutes_predictions": ["p1", "p99"], "claim": "..."},
+            ]),
+        ]}}
+        errors = _check_refutation_prediction_links(merged)
+        assert len(errors) == 1
+        # The foreign-id list quotes only p99; the declared-id list quotes p1 and p2.
+        # Check the foreign list comes first and contains only p99.
+        assert "refutes_predictions ['p99']" in errors[0]
+
+    def test_sibling_prediction_id_is_foreign(self):
+        # h-002.p1 is not the same as h-001.p1 — sibling boundaries matter.
+        # This is the refutation analog of the rule-25 same-level rollup.
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", ["p1"], [
+                {"id": "r1", "refutes_predictions": ["p2"], "claim": "..."},
+            ]),
+            self._h("h-002", ["p2"], []),
+        ]}}
+        errors = _check_refutation_prediction_links(merged)
+        # h-001 complains because p2 isn't in its own predictions.
+        assert any("h-001" in e and "p2" in e for e in errors)
+
+    def test_new_hypotheses_in_leads_participate(self):
+        merged = {
+            "hypothesize": {"hypotheses": []},
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+                "query_details": {}, "outcome": {}, "resolutions": [],
+                "new_hypotheses": [self._h("h-002", ["p1"], [
+                    {"id": "r1", "claim": "..."},
+                ])],
+            }],
+        }
+        errors = _check_refutation_prediction_links(merged)
         assert len(errors) == 1
         assert "h-002" in errors[0]
