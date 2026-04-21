@@ -1,18 +1,15 @@
 """SCREEN phase handler.
 
 Replaces the SCREEN section of `skills/investigate/SKILL.md` with a Python
-orchestration that dispatches two narrow subagents in sequence:
+orchestration that dispatches one merged Sonnet subagent (`screen`). The
+subagent emits a single terminal YAML block carrying both the pattern-match
+verdict and the invlang `gather:` transcription — replacing the previous
+Haiku screen + Haiku screen-invlang split.
 
-    1. `screen`         — pattern-match the alert against the playbook's
-                          Screen table, run the named leads, emit summary YAML.
-    2. `screen-invlang` — transcribe the screen summary + prologue into the
-                          invlang `gather:` block (one `mode: screen` entry per
-                          `leads_run` item).
-
-Between the two calls the handler runs a Python structural verifier on the
-screen subagent's match claim: matched_pattern must name a loaded Screen row,
-and every lead in that row's Leads column must appear in `leads_run`. Failures
-downgrade the result to `error` and route to HYPOTHESIZE.
+The handler runs a Python structural verifier on the match claim:
+matched_pattern must name a loaded Screen row, and every lead in that row's
+Leads column must appear in `leads_run`. Failures downgrade the result to
+`error` and route to HYPOTHESIZE.
 
 Input (Context):
     ctx.run_dir, ctx.signature_id, ctx.ticket_id, ctx.alert
@@ -50,7 +47,6 @@ from scripts.handlers._subagent import (
 
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
-LEADS_DIR = SOC_AGENT_ROOT / "knowledge" / "common-investigation" / "leads"
 
 
 SUBAGENT_TIMEOUT_SECONDS = int(
@@ -70,12 +66,6 @@ def _invoke_screen(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> s
     `monkeypatch.setattr(screen_handler, "_invoke_screen", stub)`.
     """
     return _shared_invoke("screen", prompt, timeout=timeout)
-
-
-def _invoke_screen_invlang(
-    prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS,
-) -> str:
-    return _shared_invoke("screen-invlang", prompt, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -206,8 +196,15 @@ def _extract_prologue_yaml(run_dir: Path) -> str:
 _VALID_SCREEN_RESULTS = {"match", "no_match", "error"}
 
 
-def _assemble_screen_prompt(ctx: Context) -> str:
-    return f"run_dir={ctx.run_dir}\nsignature_id={ctx.signature_id}"
+def _assemble_screen_prompt(ctx: Context, prologue_yaml: str) -> str:
+    return (
+        f"run_dir={ctx.run_dir}\n"
+        f"signature_id={ctx.signature_id}\n\n"
+        "prologue_yaml:\n"
+        "```yaml\n"
+        f"{prologue_yaml.rstrip()}\n"
+        "```\n"
+    )
 
 
 def _validate_screen_result(parsed: dict) -> dict:
@@ -257,56 +254,6 @@ def _structural_verify(
             f"but leads_run missing: {missing}"
         )
     return parsed, None
-
-
-# ---------------------------------------------------------------------------
-# Screen-invlang subagent dispatch
-# ---------------------------------------------------------------------------
-
-
-def _enumerate_lead_def_paths(leads_run: list[dict]) -> list[Path]:
-    """Return paths to definition.md for each named lead that has one in
-    knowledge/common-investigation/leads/. Unknown leads are silently
-    dropped — the subagent falls back to heuristics on them."""
-    seen = set()
-    paths: list[Path] = []
-    for entry in leads_run or []:
-        name = (entry or {}).get("lead")
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        candidate = LEADS_DIR / name / "definition.md"
-        if candidate.exists():
-            paths.append(candidate)
-    return paths
-
-
-def _assemble_invlang_prompt(
-    ctx: Context, screen_yaml: str, prologue_yaml: str, lead_def_paths: list[Path],
-) -> str:
-    playbook_path = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures" / ctx.signature_id / "playbook.md"
-    )
-    paths_csv = ",".join(str(p) for p in lead_def_paths)
-    return (
-        "screen_yaml:\n"
-        "```yaml\n"
-        f"{screen_yaml.rstrip()}\n"
-        "```\n\n"
-        "prologue_yaml:\n"
-        "```yaml\n"
-        f"{prologue_yaml.rstrip()}\n"
-        "```\n\n"
-        f"playbook_path={playbook_path}\n"
-        f"lead_def_paths={paths_csv}\n"
-    )
-
-
-def _dump_screen_yaml(parsed: dict) -> str:
-    """Serialize the screen subagent's parsed dict back to YAML for inlining
-    in the screen-invlang prompt. Using the parsed form (not the raw string)
-    strips any preamble and keeps field ordering deterministic."""
-    return yaml.safe_dump(parsed, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -363,15 +310,19 @@ def _compose_markdown(
     )
 
 
-def _extract_gather_yaml(raw: str) -> str:
-    """Pull the fenced `gather:` YAML block from the screen-invlang output
-    and return it as a YAML string (without fence markers)."""
-    parsed = extract_terminal_yaml(raw)
-    if "gather" not in parsed:
-        raise OrchestrationError(
-            f"screen-invlang output missing top-level `gather:` — got keys {list(parsed)}"
-        )
-    return yaml.safe_dump({"gather": parsed["gather"]}, sort_keys=False)
+def _extract_gather_yaml_from_parsed(parsed: dict) -> str:
+    """Re-serialize the `gather` key from the merged screen subagent's
+    parsed dict back to a YAML string (without fence markers) for inlining
+    into investigation.md.
+
+    Returns an empty string when `gather` is absent — the handler still
+    writes the markdown section but skips the invlang block (consistent
+    with the empty-Screen short-circuit).
+    """
+    gather = parsed.get("gather")
+    if not gather:
+        return ""
+    return yaml.safe_dump({"gather": gather}, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +366,10 @@ def _match_payload(parsed: dict) -> dict:
         "confidence": parsed.get("confidence"),
         "leads_run": parsed.get("leads_run") or [],
         "evidence_summary": parsed.get("evidence_summary"),
+        # Preserve the invlang gather block so the CONCLUDE handler can
+        # compose trust_anchors_consulted mechanically without re-reading
+        # investigation.md.
+        "gather": parsed.get("gather") or [],
     }
 
 
@@ -444,41 +399,32 @@ def handle(ctx: Context) -> PhaseResult:
             },
         )
 
-    # Step 1: dispatch the screen subagent.
-    screen_prompt = _assemble_screen_prompt(ctx)
+    # Step 1: dispatch the merged screen subagent. Prologue is inlined so the
+    # subagent can pick `target: v-*` / `e-*` for each lead without reading
+    # investigation.md.
+    prologue_yaml = _extract_prologue_yaml(ctx.run_dir)
+    screen_prompt = _assemble_screen_prompt(ctx, prologue_yaml)
     screen_raw = _invoke_screen(screen_prompt)
     parsed = _validate_screen_result(extract_terminal_yaml(screen_raw))
 
     # Step 2: structural verifier on match claim.
     parsed, downgrade_reason = _structural_verify(parsed, screen_rows)
     if downgrade_reason is not None:
-        # Rewrite screen_result so screen-invlang emits a consistent audit
-        # trail — the invlang's final-lead `screen_result` must agree with
-        # the handler's verdict, not the pre-downgrade subagent claim.
         parsed["screen_result"] = "error"
         parsed["reason"] = downgrade_reason
+        # Downgrade invalidates the gather block — drop it so we don't write
+        # an invlang audit trail claiming a match that the verifier rejected.
+        parsed.pop("gather", None)
 
-    # Step 3: dispatch screen-invlang when there's anything to transcribe.
-    leads_run = parsed.get("leads_run") or []
-    gather_yaml = ""
-    if leads_run:
-        screen_yaml = _dump_screen_yaml(parsed)
-        prologue_yaml = _extract_prologue_yaml(ctx.run_dir)
-        lead_def_paths = _enumerate_lead_def_paths(leads_run)
-        invlang_prompt = _assemble_invlang_prompt(
-            ctx, screen_yaml, prologue_yaml, lead_def_paths,
-        )
-        invlang_raw = _invoke_screen_invlang(invlang_prompt)
-        gather_yaml = _extract_gather_yaml(invlang_raw)
-
-    # Step 4: compose + validate + append to investigation.md.
+    # Step 3: compose + validate + append to investigation.md.
+    gather_yaml = _extract_gather_yaml_from_parsed(parsed)
     markdown = _compose_markdown(parsed, downgrade_reason)
     new_section = markdown
     if gather_yaml:
         new_section = markdown + "\n```yaml\n" + gather_yaml + "```\n"
     _validate_and_write(ctx, new_section)
 
-    # Step 5: route.
+    # Step 4: route.
     if parsed.get("screen_result") == "match" and downgrade_reason is None:
         return PhaseResult(
             next_phase=Phase.CONCLUDE, payload=_match_payload(parsed),

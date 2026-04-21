@@ -13,3 +13,4 @@ Classification rules and interpretation heuristics. Use these as fallbacks when 
 - **identity-patterns.md** — Username classification: service accounts, admin patterns
 - **data-classification.md** — Data sensitivity categories and patterns
 - **criticality.md** — System criticality tier definitions and naming patterns
+- **sensitive-paths.md** — Filesystem path classification: authentication, autostart, trust-execution, logging-integrity, setuid-binary

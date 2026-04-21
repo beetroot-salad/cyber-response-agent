@@ -405,3 +405,288 @@ class TestOrchestratorIntegration:
         assert "routing_source=forced_exhaustion" in prompt
         assert "forced_exhaustion=true" in prompt
         assert result["outputs"]["CONCLUDE"]["status_frontmatter"] == "escalated"
+
+
+# ---------------------------------------------------------------------------
+# Mechanical CONCLUDE composer (SCREEN-match fast-path)
+# ---------------------------------------------------------------------------
+
+
+def _seed_ctx_for_mechanical(tmp_path: Path, *, matched_ticket_id: str | None) -> Context:
+    """Build a ctx with a SCREEN payload complete enough to trigger the
+    mechanical CONCLUDE composer."""
+    run_dir = tmp_path / "run-mech"
+    run_dir.mkdir()
+    # Seed investigation.md with a minimal prologue so the mechanical path's
+    # investigation.md append produces valid cumulative text.
+    (run_dir / "investigation.md").write_text(
+        "## CONTEXTUALIZE\n\n"
+        "**Alert:** SEC-2026-042 — wazuh-rule-5710\n\n"
+        "```yaml\n"
+        "prologue:\n"
+        "  vertices:\n"
+        "  - id: v-001\n"
+        "    type: endpoint\n"
+        "    classification: internal-monitoring-host\n"
+        "    identifier: 172.22.0.10\n"
+        "  edges: []\n"
+        "```\n"
+    )
+    screen_payload = {
+        "screen_result": "match",
+        "matched_pattern": "monitoring-probe fast-path",
+        "matched_archetype": "monitoring-probe",
+        "matched_ticket_id": matched_ticket_id,
+        "disposition": "benign",
+        "confidence": "high",
+        "evidence_summary": "approved source, single attempt, no successful login follow-up",
+        "leads_run": [
+            {"lead": "source-classification", "observation": "172.22.0.10 -> internal-monitoring-host"},
+            {"lead": "username-classification", "observation": "nagios -> monitoring-pattern"},
+            {
+                "lead": "approved-monitoring-sources",
+                "observation": "(172.22.0.10, nagios, target-endpoint) -> authorized",
+            },
+            {
+                "lead": "authentication-history",
+                "observation": "cluster_count=1, no successful logins after",
+            },
+        ],
+        "gather": [
+            {
+                "id": "l-001", "loop": 0, "name": "source-classification",
+                "target": "v-001", "mode": "screen",
+                "outcome": {"attribute_updates": [{"target": "v-001", "updates": {"classification": "internal-monitoring-host"}}]},
+            },
+            {
+                "id": "l-003", "loop": 0, "name": "approved-monitoring-sources",
+                "target": "e-001", "mode": "screen",
+                "outcome": {
+                    "trust_anchor_result": {
+                        "anchor_id": "approved-monitoring-sources",
+                        "kind": "org-authority",
+                        "asks": "authorization",
+                        "verdict": "authorized",
+                        "result": "confirmed",
+                        "as_of": "2026-04-20T19:25:01Z",
+                        "authority_for_question": "full",
+                    },
+                },
+            },
+        ],
+    }
+    return Context(
+        run_dir=run_dir,
+        signature_id="wazuh-rule-5710",
+        ticket_id="1776748918.3300232",
+        alert={"id": "1776748918.3300232"},
+        outputs={Phase.SCREEN: screen_payload},
+    )
+
+
+class TestMechanicalScreenCompose:
+    def test_mechanical_path_skips_subagent_and_writes_report(
+        self, tmp_path, monkeypatch,
+    ):
+        ctx = _seed_ctx_for_mechanical(tmp_path, matched_ticket_id="SEC-2024-001")
+        captured: list[str] = []
+        monkeypatch.setattr(
+            conclude_handler, "_invoke_subagent", stub_invoke(captured, "UNEXPECTED"),
+        )
+
+        result = conclude_handler.handle(ctx)
+
+        # Subagent must not be called on the mechanical fast-path.
+        assert captured == []
+        assert result.next_phase == Phase.CONCLUDE
+        assert result.payload["status"] == "written"
+        assert result.payload["compose_mode"] == "screen_mechanical_grounded"
+        assert result.payload["matched_archetype"] == "monitoring-probe"
+        assert result.payload["status_frontmatter"] == "resolved"
+
+        report_path = ctx.run_dir / "report.md"
+        assert report_path.exists()
+        report = report_path.read_text()
+        # Frontmatter grounds on the precedent.
+        assert 'matched_ticket_id: SEC-2024-001' in report
+        # Wazuh ids contain a dot; yaml.safe_dump single-quotes them so they
+        # aren't parsed as floats when the frontmatter is re-read.
+        assert "1776748918.3300232" in report
+        assert "ticket_id: '1776748918.3300232'" in report
+        assert "status: resolved" in report
+        assert "## Summary" in report
+        assert "## Investigation Trace" in report
+        assert "## Hypothesis Outcomes" in report
+        assert "## Key Evidence" in report
+        assert "## Verdict" in report
+        # No For Analyst section on resolved.
+        assert "## For Analyst" not in report
+
+        # investigation.md carries the CONCLUDE markdown + fenced conclude YAML.
+        inv = (ctx.run_dir / "investigation.md").read_text()
+        assert "## CONCLUDE" in inv
+        assert "conclude:" in inv
+        assert "category: trust-root" in inv
+
+    def test_mechanical_path_falls_back_to_anchor_leg_when_precedent_missing(
+        self, tmp_path, monkeypatch,
+    ):
+        """SCREEN claimed a matched_ticket_id that does not exist on disk.
+        Handler must drop the precedent cite and ground via the anchor leg."""
+        ctx = _seed_ctx_for_mechanical(tmp_path, matched_ticket_id="SEC-9999-999")
+        monkeypatch.setattr(
+            conclude_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
+        )
+        result = conclude_handler.handle(ctx)
+        assert result.payload["status"] == "written"
+        assert result.payload["status_frontmatter"] == "resolved"
+        # Report frontmatter has matched_ticket_id: null (anchor leg only).
+        report = (ctx.run_dir / "report.md").read_text()
+        assert "matched_ticket_id: null" in report
+
+    def test_level_2_partial_grounding_escalates_mechanically(
+        self, tmp_path, monkeypatch,
+    ):
+        """Archetype exists but grounding is incomplete (precedent file
+        missing AND anchor not confirmed). Handler composes mechanically at
+        Level 2: status=escalated, SCREEN's disposition preserved, confidence
+        clamped to medium. No subagent call, no raise."""
+        ctx = _seed_ctx_for_mechanical(tmp_path, matched_ticket_id="SEC-9999-999")
+        # Drop the confirmed trust_anchor_result so the anchor leg also fails.
+        screen = ctx.outputs[Phase.SCREEN]
+        screen["gather"] = [
+            {
+                "id": "l-001", "loop": 0, "name": "source-classification",
+                "target": "v-001", "mode": "screen",
+                "outcome": {"attribute_updates": [{"target": "v-001", "updates": {"classification": "x"}}]},
+            },
+        ]
+        captured: list[str] = []
+        monkeypatch.setattr(
+            conclude_handler, "_invoke_subagent", stub_invoke(captured, "UNEXPECTED"),
+        )
+
+        result = conclude_handler.handle(ctx)
+        assert captured == []  # still mechanical, still no subagent
+        assert result.payload["compose_mode"] == "screen_mechanical_partial"
+        assert result.payload["status_frontmatter"] == "escalated"
+        assert result.payload["disposition"] == "benign"  # SCREEN's call preserved
+        assert result.payload["confidence"] == "medium"   # clamped from high
+
+        report = (ctx.run_dir / "report.md").read_text()
+        assert "status: escalated" in report
+        assert "disposition: benign" in report
+        assert "confidence: medium" in report
+        # For Analyst section appears on escalated.
+        assert "## For Analyst" in report
+        # Rationale names the missing precedent.
+        inv = (ctx.run_dir / "investigation.md").read_text()
+        assert "grounding incomplete" in inv
+        assert "SEC-9999-999" in inv
+
+    def test_level_3_fallback_when_archetype_missing(
+        self, tmp_path, monkeypatch,
+    ):
+        """Archetype directory does not exist → mechanical composer raises
+        _MechanicalFallback; handler dispatches the conclude subagent with
+        the fallback reason noted in the payload."""
+        ctx = _seed_ctx_for_mechanical(tmp_path, matched_ticket_id="SEC-2024-001")
+        # Point at a non-existent archetype.
+        ctx.outputs[Phase.SCREEN]["matched_archetype"] = "does-not-exist-arch"
+
+        captured: list[str] = []
+        response = textwrap.dedent("""
+        ```yaml
+        status: written
+        report_path: /tmp/report.md
+        disposition: benign
+        confidence: high
+        matched_archetype: does-not-exist-arch
+        status_frontmatter: escalated
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            conclude_handler, "_invoke_subagent", stub_invoke(captured, response),
+        )
+
+        result = conclude_handler.handle(ctx)
+        assert len(captured) == 1  # subagent dispatched
+        assert result.payload["compose_mode"] == "subagent"
+        assert "archetype dir missing" in result.payload["mechanical_fallback_reason"]
+
+    def test_level_3_fallback_rolls_back_partial_writes(
+        self, tmp_path, monkeypatch,
+    ):
+        """If Tier-1 validation fails on a mechanically-composed report, the
+        handler rolls back the investigation.md append and the report.md
+        write before falling back to the subagent. The subagent must see the
+        run dir in its pre-mechanical state."""
+        ctx = _seed_ctx_for_mechanical(tmp_path, matched_ticket_id="SEC-2024-001")
+        inv_before = (ctx.run_dir / "investigation.md").read_text()
+
+        # Force Tier-1 to always fail, simulating a schema-assumption violation.
+        def fail_tier1(_path):
+            from scripts.orchestrate import OrchestrationError
+            raise OrchestrationError("simulated tier-1 rejection")
+        monkeypatch.setattr(conclude_handler, "_run_tier1_validation", fail_tier1)
+
+        response = textwrap.dedent("""
+        ```yaml
+        status: written
+        report_path: /tmp/report.md
+        disposition: benign
+        confidence: high
+        matched_archetype: monitoring-probe
+        status_frontmatter: resolved
+        ```
+        """).strip()
+        captured: list[str] = []
+        monkeypatch.setattr(
+            conclude_handler, "_invoke_subagent", stub_invoke(captured, response),
+        )
+
+        result = conclude_handler.handle(ctx)
+        assert len(captured) == 1  # subagent was dispatched
+        assert result.payload["compose_mode"] == "subagent"
+        assert "Tier-1" in result.payload["mechanical_fallback_reason"]
+
+        # Rollback invariants: investigation.md back to pre-mechanical text,
+        # report.md deleted (the subagent would create it).
+        assert (ctx.run_dir / "investigation.md").read_text() == inv_before
+        assert not (ctx.run_dir / "report.md").exists()
+
+    def test_subagent_still_used_when_screen_payload_incomplete(
+        self, tmp_path, monkeypatch,
+    ):
+        """Missing gather block → mechanical composer gated off, handler
+        dispatches the conclude subagent as before."""
+        run_dir = tmp_path / "run-fallback"
+        run_dir.mkdir()
+        ctx = Context(
+            run_dir=run_dir,
+            signature_id="wazuh-rule-5710",
+            ticket_id="SEC-2026-042",
+            alert={"id": "alert-1"},
+            outputs={Phase.SCREEN: {
+                "screen_result": "match",
+                "matched_archetype": "monitoring-probe",
+                # no gather key
+            }},
+        )
+        captured: list[str] = []
+        response = textwrap.dedent("""
+        ```yaml
+        status: written
+        report_path: /runs/run-fallback/report.md
+        disposition: benign
+        confidence: high
+        matched_archetype: monitoring-probe
+        status_frontmatter: resolved
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            conclude_handler, "_invoke_subagent", stub_invoke(captured, response),
+        )
+        result = conclude_handler.handle(ctx)
+        assert captured != []  # subagent was called
+        assert result.payload["compose_mode"] == "subagent"
