@@ -1,6 +1,6 @@
 ---
 title: Migrate CONCLUDE to orchestrator handler
-status: doing
+status: done
 groups: state-machine-migration, state
 depends_on: state-machine-migration-analyze
 ---
