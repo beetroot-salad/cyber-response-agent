@@ -4,7 +4,7 @@ All three subagent invocations are mocked — these tests exercise:
     - playbook metadata loading (against real knowledge/signatures/wazuh-rule-5710/)
     - markdown composition
     - investigation.md validation + write (real invlang_validate, not mocked)
-    - routing (CONCLUDE on dedup, SCREEN when playbook has_screen, HYPOTHESIZE default)
+    - routing (SCREEN when playbook has_screen, HYPOTHESIZE default; dedup retired)
     - payload keys required downstream by conclude.py
 """
 
@@ -166,7 +166,7 @@ def _wire_subagents(monkeypatch, scan=SCAN_RESPONSE, ticket=TICKET_RESPONSE_NO_D
 
 class TestPlaybookMetadata:
     def test_loads_rule_5710_archetypes_and_screen(self):
-        meta = ctx_handler._load_playbook_metadata("wazuh-rule-5710")
+        meta = ctx_handler.load_playbook_metadata("wazuh-rule-5710")
         assert "monitoring-probe" in meta.archetype_names
         assert "external-bruteforce" in meta.archetype_names
         assert meta.has_screen is True
@@ -176,7 +176,7 @@ class TestPlaybookMetadata:
 
     def test_missing_playbook_raises(self):
         with pytest.raises(OrchestrationError, match="playbook not found"):
-            ctx_handler._load_playbook_metadata("wazuh-rule-does-not-exist")
+            ctx_handler.load_playbook_metadata("wazuh-rule-does-not-exist")
 
 
 # ---------------------------------------------------------------------------
@@ -198,23 +198,27 @@ class TestRouting:
         _wire_subagents(monkeypatch)
         ctx = make_ctx(tmp_path)
 
-        original = ctx_handler._load_playbook_metadata
+        original = ctx_handler.load_playbook_metadata
         def fake_meta(sig):
             meta = original(sig)
             meta.has_screen = False
             return meta
-        monkeypatch.setattr(ctx_handler, "_load_playbook_metadata", fake_meta)
+        monkeypatch.setattr(ctx_handler, "load_playbook_metadata", fake_meta)
 
         result = ctx_handler.handle(ctx)
         assert result.next_phase == Phase.HYPOTHESIZE
 
-    def test_dedup_candidate_routes_to_conclude(self, tmp_path, monkeypatch):
+    def test_dedup_candidate_no_longer_routes_to_conclude(self, tmp_path, monkeypatch):
+        """Dedup fast-path is retired — see tasks/dedup-fast-path.md. A
+        dedup_candidate in the ticket-context payload is kept as telemetry but
+        must not steer routing: the 5710 playbook has a Screen section so we
+        still go to SCREEN."""
         _wire_subagents(monkeypatch, ticket=TICKET_RESPONSE_WITH_DEDUP)
         ctx = make_ctx(tmp_path)
 
         result = ctx_handler.handle(ctx)
-        assert result.next_phase == Phase.CONCLUDE
-        assert result.payload["dedup"] is True
+        assert result.next_phase == Phase.SCREEN
+        assert result.payload["dedup"] is False
         assert result.payload["dedup_matched_ticket_id"] == "1776500000.11111111"
 
 
@@ -317,21 +321,25 @@ class TestPreflightIntegration:
 
 
 class TestPayloadContract:
-    """The CONCLUDE handler reads `ctx.outputs[CONTEXTUALIZE].dedup` to take
-    the screen-shaped fast path. That key MUST be present."""
+    """The `dedup` + `dedup_matched_ticket_id` keys are retained as telemetry
+    for future re-introduction of the dedup fast-path (tasks/dedup-fast-path.md).
+    They MUST stay in the payload, but `dedup` is always False while the
+    fast-path is retired."""
 
-    def test_payload_has_dedup_bool_when_no_dedup(self, tmp_path, monkeypatch):
+    def test_payload_has_dedup_false_when_no_dedup(self, tmp_path, monkeypatch):
         _wire_subagents(monkeypatch)
         ctx = make_ctx(tmp_path)
         result = ctx_handler.handle(ctx)
         assert "dedup" in result.payload
-        assert isinstance(result.payload["dedup"], bool)
+        assert result.payload["dedup"] is False
+        assert result.payload["dedup_matched_ticket_id"] is None
 
-    def test_payload_has_dedup_bool_when_dedup(self, tmp_path, monkeypatch):
+    def test_payload_has_dedup_false_even_when_candidate_present(self, tmp_path, monkeypatch):
         _wire_subagents(monkeypatch, ticket=TICKET_RESPONSE_WITH_DEDUP)
         ctx = make_ctx(tmp_path)
         result = ctx_handler.handle(ctx)
-        assert result.payload["dedup"] is True
+        assert result.payload["dedup"] is False
+        assert result.payload["dedup_matched_ticket_id"] == "1776500000.11111111"
 
     def test_payload_carries_archetype_ranking_for_downstream(
         self, tmp_path, monkeypatch

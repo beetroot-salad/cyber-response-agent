@@ -114,16 +114,20 @@ def test_full_loop_two_cycles(tmp_path):
     ]
 
 
-def test_contextualize_dedup_short_circuit(tmp_path):
-    """CONTEXTUALIZE -> CONCLUDE direct (status=duplicate dedup)."""
+def test_contextualize_to_conclude_direct(tmp_path):
+    """CONTEXTUALIZE -> CONCLUDE remains a legal transition in the TRANSITIONS
+    table so orchestrator mechanics support future short-circuits. The live
+    dedup fast-path that used this edge is retired (see
+    tasks/dedup-fast-path.md); the structural test stays to catch regressions
+    in the state machine itself."""
     ctx = make_ctx(tmp_path)
     handlers = {
-        Phase.CONTEXTUALIZE: const_handler(Phase.CONCLUDE, payload={"dedup": True}),
+        Phase.CONTEXTUALIZE: const_handler(Phase.CONCLUDE, payload={"dedup": False}),
     }
     result = run(ctx, handlers)
     assert result["status"] == "complete"
     assert result["history"] == ["CONTEXTUALIZE", "CONCLUDE"]
-    assert result["outputs"]["CONTEXTUALIZE"] == {"dedup": True}
+    assert result["outputs"]["CONTEXTUALIZE"] == {"dedup": False}
 
 
 def test_gather_to_hypothesize_reentry(tmp_path):

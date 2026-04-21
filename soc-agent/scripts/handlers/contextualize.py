@@ -13,13 +13,13 @@ combined new section against the invlang schema (by importing
 `{run_dir}/investigation.md`.
 
 Routes:
-    - CONCLUDE      — ticket-context named a dedup_candidate
     - SCREEN        — playbook has a `## Screen` section
     - HYPOTHESIZE   — default
 
-Output payload keys required by the CONCLUDE handler:
-    - dedup: bool
-    - dedup_matched_ticket_id: str | None
+The dedup fast-path (CONTEXTUALIZE→CONCLUDE on ticket_context.dedup_candidate) is
+retired pending a proper design; see tasks/dedup-fast-path.md. The ticket-context
+subagent still emits `dedup_candidate`; the handler carries it forward as
+`dedup_matched_ticket_id` telemetry only and does not steer routing on it.
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ _ARCHETYPE_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 _SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 
 
-def _load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
+def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
     playbook_path = (
         SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "playbook.md"
     )
@@ -415,12 +415,12 @@ def _validate_and_write(ctx: Context, new_section: str) -> None:
 
 def _route(ticket: dict, playbook: PlaybookMetadata) -> tuple[Phase, Optional[str]]:
     tc = ticket.get("ticket_context", {}) or {}
-    dedup = tc.get("dedup_candidate")
-    if dedup:
-        return Phase.CONCLUDE, str(dedup)
+    dedup_id = tc.get("dedup_candidate")
+    # Dedup fast-path retired — see module docstring. `dedup_id` is still returned
+    # as telemetry in the handler payload but does not change routing.
     if playbook.has_screen:
-        return Phase.SCREEN, None
-    return Phase.HYPOTHESIZE, None
+        return Phase.SCREEN, str(dedup_id) if dedup_id else None
+    return Phase.HYPOTHESIZE, str(dedup_id) if dedup_id else None
 
 
 # ---------------------------------------------------------------------------
@@ -435,7 +435,7 @@ def handle(ctx: Context) -> PhaseResult:
             "Context construction by the /investigate entrypoint"
         )
 
-    playbook = _load_playbook_metadata(ctx.signature_id)
+    playbook = load_playbook_metadata(ctx.signature_id)
     preflight = _run_preflight()
     preflight_summary = _summarize_preflight(preflight)
 
@@ -459,7 +459,9 @@ def handle(ctx: Context) -> PhaseResult:
     return PhaseResult(
         next_phase=next_phase,
         payload={
-            "dedup": dedup_id is not None,
+            # Retained as telemetry only; handler does not steer routing on these.
+            # See module docstring + tasks/dedup-fast-path.md.
+            "dedup": False,
             "dedup_matched_ticket_id": dedup_id,
             "entities": ticket.get("ticket_context", {}).get("entities", {}),
             "archetype_ranking": scan.get("archetype_scan", []),

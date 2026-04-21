@@ -26,8 +26,7 @@ Input:
     ctx.ticket_id                               — resolved at Context construction
     ctx.forced_conclude                         — true on MAX_LOOPS path
     ctx.outputs[Phase.ANALYZE]  OR
-    ctx.outputs[Phase.SCREEN]   OR
-    ctx.outputs[Phase.CONTEXTUALIZE].dedup      (fast-path)
+    ctx.outputs[Phase.SCREEN]
 
 Output:
     PhaseResult(
@@ -90,16 +89,14 @@ def _select_routing_source(ctx: Context) -> tuple[str, bool]:
     forced_exhaustion is True when the orchestrator reached CONCLUDE via the
     MAX_LOOPS path (`ctx.forced_conclude`). Otherwise the routing source is
     whichever upstream phase routed here:
-    - CONTEXTUALIZE with `dedup=True` → screen-shaped fast-path
-    - SCREEN present → screen
     - ANALYZE present → analyze
+    - SCREEN present → screen
+
+    Dedup fast-path (CONTEXTUALIZE→CONCLUDE on dedup_candidate) is retired —
+    see handlers/contextualize.py module docstring + tasks/dedup-fast-path.md.
     """
     if ctx.forced_conclude:
         return "forced_exhaustion", True
-    if Phase.CONTEXTUALIZE in ctx.outputs:
-        ctx_payload = ctx.outputs[Phase.CONTEXTUALIZE]
-        if ctx_payload.get("dedup"):
-            return "screen", False
     if Phase.ANALYZE in ctx.outputs:
         return "analyze", False
     if Phase.SCREEN in ctx.outputs:

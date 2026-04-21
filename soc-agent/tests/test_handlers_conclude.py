@@ -119,7 +119,13 @@ class TestPromptAssembly:
         conclude_handler.handle(ctx)
         assert "routing_source=screen" in captured[0]
 
-    def test_contextualize_dedup_routes_as_screen(self, tmp_path, monkeypatch):
+    def test_contextualize_dedup_falls_through_to_forced_exhaustion(self, tmp_path, monkeypatch):
+        """Dedup fast-path is retired (tasks/dedup-fast-path.md). A
+        CONTEXTUALIZE payload with `dedup=True` is no longer produced by the
+        handler, but even if it were, the CONCLUDE routing source selector
+        must not treat it as screen. With no SCREEN or ANALYZE output, this
+        case falls through to `forced_exhaustion` (telemetry-only shape that
+        an operator can investigate)."""
         ctx = make_ctx(
             tmp_path,
             contextualize={"dedup": True},
@@ -129,16 +135,17 @@ class TestPromptAssembly:
         ```yaml
         status: written
         report_path: /tmp/report.md
-        disposition: benign
-        confidence: medium
+        disposition: inconclusive
+        confidence: low
         matched_archetype: null
-        status_frontmatter: resolved
+        status_frontmatter: escalated
         ```
         """).strip()
         monkeypatch.setattr(conclude_handler, "_invoke_subagent", stub_invoke(captured, response))
 
         conclude_handler.handle(ctx)
-        assert "routing_source=screen" in captured[0]
+        assert "routing_source=forced_exhaustion" in captured[0]
+        assert "forced_exhaustion=true" in captured[0]
 
     def test_forced_exhaustion_when_no_upstream_terminal_payload(
         self, tmp_path, monkeypatch
@@ -321,9 +328,13 @@ class TestOrchestratorIntegration:
         )
 
         def ctx_handler(c):
+            # Structural test — confirms the orchestrator dispatches the
+            # CONCLUDE handler when an upstream phase routes there.
+            # CONTEXTUALIZE→CONCLUDE remains a legal edge in TRANSITIONS
+            # even though the live handler no longer routes on dedup.
             return PhaseResult(
                 next_phase=Phase.CONCLUDE,
-                payload={"dedup": True},
+                payload={"dedup": False},
             )
 
         response = textwrap.dedent("""
