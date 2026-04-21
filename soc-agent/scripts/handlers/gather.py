@@ -59,7 +59,10 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
-from scripts.handlers._subagent import invoke_subagent as _shared_invoke
+from scripts.handlers._subagent import (
+    extract_terminal_yaml,
+    invoke_subagent as _shared_invoke,
+)
 
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -310,60 +313,43 @@ def _assemble_prompt_composite(
 # ---------------------------------------------------------------------------
 
 
-def _first_yaml_block(raw: str) -> Optional[dict]:
-    """Return the first fenced ```yaml block parsed as a dict, or None."""
-    fence = "```yaml"
-    end = "```"
-    i = 0
-    while True:
-        start = raw.find(fence, i)
-        if start == -1:
-            return None
-        body_start = start + len(fence)
-        stop = raw.find(end, body_start)
-        if stop == -1:
-            return None
-        body = raw[body_start:stop]
-        try:
-            parsed = yaml.safe_load(body)
-        except yaml.YAMLError:
-            i = stop + len(end)
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-        i = stop + len(end)
+def _try_extract_terminal_yaml(raw: str) -> Optional[dict]:
+    """Return the terminal YAML block parsed as a mapping, or None on miss.
+
+    Wraps the shared `extract_terminal_yaml`, converting its "no block / parse
+    failure" raises into `None` so callers can treat absence as a truncation
+    signal and route to the checkpoint-recovery path.
+    """
+    try:
+        return extract_terminal_yaml(raw)
+    except OrchestrationError:
+        return None
 
 
-def _parse_gather_output(raw: str) -> dict:
+def _parse_gather_output(raw: str) -> Optional[dict]:
     """Parse the single-gather subagent's terminal YAML.
 
-    Returns the parsed dict. Raises OrchestrationError if no `result:` key is
-    found — that's a truncation, caller handles it.
+    Returns the parsed dict when the expected `result:` key is present;
+    returns None on truncation / missing-key so the caller triggers recovery.
     """
-    parsed = _first_yaml_block(raw)
+    parsed = _try_extract_terminal_yaml(raw)
     if parsed is None or "result" not in parsed:
-        raise OrchestrationError(
-            "gather subagent: no `result:` YAML block found in output"
-        )
+        return None
     return parsed
 
 
-def _parse_composite_output(raw: str) -> dict:
+def _parse_composite_output(raw: str) -> Optional[dict]:
     """Parse the composite subagent's terminal YAML.
 
-    Returns the parsed dict. Accepts either the normal `gather_composite:`
-    top-level or the degraded `error:` top-level shape.
+    Returns a dict carrying either `gather_composite:` or `error:` at the
+    top level; returns None on truncation / unrecognized shape so the caller
+    triggers recovery.
     """
-    parsed = _first_yaml_block(raw)
+    parsed = _try_extract_terminal_yaml(raw)
     if parsed is None:
-        raise OrchestrationError(
-            "gather-composite subagent: no YAML block found in output"
-        )
+        return None
     if "gather_composite" not in parsed and "error" not in parsed:
-        raise OrchestrationError(
-            "gather-composite subagent: output is missing both "
-            "`gather_composite:` and `error:` top-level keys"
-        )
+        return None
     return parsed
 
 
@@ -389,10 +375,10 @@ def _checkpoint_path_composite(ctx: Context, loop_n: int) -> Path:
 
 
 def _load_checkpoint(path: Path) -> Optional[dict]:
-    if not path.exists():
-        return None
     try:
         return yaml.safe_load(path.read_text())
+    except FileNotFoundError:
+        return None
     except yaml.YAMLError:
         return None
 
@@ -446,28 +432,6 @@ def _reconstruct_composite_from_checkpoint(checkpoint: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _needs_single_recovery(raw: str, parsed: Optional[dict]) -> bool:
-    """Heuristic: the subagent truncated before emitting its Decision YAML."""
-    if parsed is not None and "result" in parsed:
-        return False
-    # No well-formed YAML with `result:` found. That's a truncation.
-    return True
-
-
-def _needs_composite_recovery(raw: str, parsed: Optional[dict]) -> bool:
-    if parsed is None:
-        return True
-    if "error" in parsed:
-        return False  # explicit dispatch-unparseable; don't re-run blindly
-    gc = parsed.get("gather_composite")
-    if not isinstance(gc, dict):
-        return True
-    # If the final `cross_lead_notes` key is missing entirely, assume
-    # truncation mid-compile — the subagent contract requires it even when
-    # empty string for single-lead modes.
-    return "cross_lead_notes" not in gc
-
-
 def _dispatch_single(
     ctx: Context, scope: Scope, loop_n: int,
 ) -> dict:
@@ -476,17 +440,10 @@ def _dispatch_single(
     Returns a normalized payload dict.
     """
     prompt = _assemble_prompt_single(ctx, scope, loop_n)
-    raw = _invoke_gather(prompt)
+    parsed = _parse_gather_output(_invoke_gather(prompt))
 
-    try:
-        parsed = _parse_gather_output(raw)
-    except OrchestrationError:
-        parsed = None
-
-    if _needs_single_recovery(raw, parsed):
+    if parsed is None:
         parsed = _recover_single(ctx, scope, loop_n)
-
-    assert parsed is not None  # _recover_single either returns dict or raises
 
     if parsed.get("result") == "escalate":
         trigger = parsed.get("trigger")
@@ -511,25 +468,21 @@ def _recover_single(ctx: Context, scope: Scope, loop_n: int) -> dict:
         return _reconstruct_single_from_checkpoint(ckpt)
     # In-progress or unclear: re-dispatch with resume flag.
     resume_prompt = _assemble_prompt_single(ctx, scope, loop_n, resume=True)
-    raw = _invoke_gather(resume_prompt)
-    return _parse_gather_output(raw)
+    parsed = _parse_gather_output(_invoke_gather(resume_prompt))
+    if parsed is None:
+        raise OrchestrationError(
+            "gather subagent emitted no Decision YAML after resume re-dispatch"
+        )
+    return parsed
 
 
 def _dispatch_composite(
     ctx: Context, scope: Scope, loop_n: int, *, mode: str,
 ) -> dict:
     prompt = _assemble_prompt_composite(ctx, scope, loop_n, mode=mode)
-    raw = _invoke_gather_composite(prompt)
-
-    try:
-        parsed = _parse_composite_output(raw)
-    except OrchestrationError:
-        parsed = None
-
-    if _needs_composite_recovery(raw, parsed):
-        parsed = _recover_composite(ctx, scope, loop_n, mode)
-
-    assert parsed is not None
+    parsed = _parse_composite_output(_invoke_gather_composite(prompt))
+    if parsed is None:
+        return _recover_composite(ctx, scope, loop_n, mode)
     return parsed
 
 
@@ -548,8 +501,12 @@ def _recover_composite(
     resume_prompt = _assemble_prompt_composite(
         ctx, scope, loop_n, mode=mode, resume=True,
     )
-    raw = _invoke_gather_composite(resume_prompt)
-    return _parse_composite_output(raw)
+    parsed = _parse_composite_output(_invoke_gather_composite(resume_prompt))
+    if parsed is None:
+        raise OrchestrationError(
+            "gather-composite subagent emitted no YAML after resume re-dispatch"
+        )
+    return parsed
 
 
 # ---------------------------------------------------------------------------
