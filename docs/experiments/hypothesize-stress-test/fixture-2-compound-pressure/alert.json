@@ -1,0 +1,19 @@
+{
+  "id": "SEC-STRESS-002",
+  "rule": {"id": "100001", "description": "Interactive shell spawned in container"},
+  "timestamp": "2026-04-21T09:14:32Z",
+  "agent": {"name": "target-endpoint"},
+  "data": {
+    "container.id": "a3f9c2",
+    "container.name": "web-api",
+    "proc.name": "bash",
+    "proc.cmdline": "bash",
+    "proc.pname": "sh",
+    "proc.aname.2": "sh",
+    "proc.aname.3": "node",
+    "proc.aname.4": "/app/launcher.sh",
+    "proc.tty": "pts/0",
+    "container.uptime_s": "87"
+  },
+  "full_log": "09:14:32.108 Notice interactive shell started in container a3f9c2 (web-api): bash spawned by sh; ancestry sh -> node -> /app/launcher.sh"
+}

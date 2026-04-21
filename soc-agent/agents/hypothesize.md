@@ -203,19 +203,67 @@ this file.
    answer "does the event look like what this source is *documented*
    to do?". A `++` grade needs both.
 
+7. **Baseline anchoring when available.** When the observed vertex has
+   a history on this environment (prior alerts on same host/user,
+   historical cadence of similar events, prior classification of the
+   source), one story sentence names the baseline and the delta since:
+   *"source 172.22.0.10 has emitted rule-5710 at a ~10-minute cadence
+   for the past 72 hours; this alert is on-cadence with that history."*
+   When no baseline exists, say so explicitly: *"source has no prior
+   rule-5710 history in the 30-day window."* Baseline-less stories and
+   baseline-fabricated stories both produce predictions that read as
+   narrative ("this is the kind of thing that could happen"); baseline-
+   grounded stories produce predictions that make falsifiable claims
+   against the environment's own prior state. This step is optional
+   only if CONTEXTUALIZE's ticket-context output is empty *and* no
+   related leads in the investigation state mention prior observations
+   — otherwise it is required.
+
 ## Discipline
 
 - **Story-first.** See §Causal story above — non-negotiable.
-- **Lean.** ≤ 2 predictions per hypothesis. Three predictions signals
-  an unlean label — split or defer. Multiple predictions should each
-  test a *different story link*; two predictions testing the same link
-  from different angles is a sign of under-differentiated hypothesis
-  shape.
+- **Lean.** ≤ 2 predictions per hypothesis (enforced by validator rule
+  28). Three predictions signals an unlean label — split or defer.
+  Multiple predictions should each test a *different story link*; two
+  predictions testing the same link from different angles is a sign of
+  under-differentiated hypothesis shape.
+- **One observable per prediction claim.** A single `claim` string
+  names one observable with one predicted value — not a conjunction
+  of several independent observables. If refuting the claim would
+  require more than one query (one for count, one for username
+  pattern, one for auth-success presence), it is more than one
+  prediction — split. Splitting a compound claim that then pushes
+  past the lean cap is a signal some of those predictions were never
+  hypothesis-load-bearing to begin with; drop them to a lead, or to a
+  different hypothesis. Single-observable disjunctions (`color is
+  blue or green`) are fine — one attribute, one test, a disjunctive
+  accepted-value set.
 - **Mechanism-shaped, not narrative.** Labels like `?credential-
   guessing`, `?post-exploit-shell`, or `?compromise-followup` pack
   mechanism + intent + shape + effects into one name. Use only the
   parent-vertex classification (`adversary-controlled`,
   `in-container-runtime-descendant`, `runtime-exec-injection`, …).
+  Do not encode the verdict into the label with evaluation-packed
+  prefixes like `authorized-`, `unauthorized-`, `legitimate-`,
+  `malicious-`, `benign-`, `sanctioned-`, `unsanctioned-`,
+  `compromised-`, or `adversarial-` — they bias weight history
+  before anchors resolve. The classification `adversary-controlled-*`
+  is *not* evaluation-packed — it describes who controls the actor,
+  a mechanism property, not a judgment.
+- **Hypotheses are upstream mechanisms, not downstream observations.**
+  A peer hypothesis whose sole discriminating prediction is "a later
+  event X fires within N seconds" (auth-success after failed-auth
+  cluster, correlated alert-family firing, lateral-movement signal)
+  is not a hypothesis — it is a composition-rule check on a
+  *subsequent* event. The hypothesis frontier extends upstream from
+  the observed alert (what caused it?); downstream-event checks
+  belong as unconditional GATHER leads that run alongside your
+  hypothesis evaluation and feed into ANALYZE's escalation logic.
+  If you find yourself writing a `?compromise-followup` or
+  `?post-failure-success` as a peer to mechanism hypotheses, it's
+  almost always because the subsequent-event signal is load-bearing
+  for escalation, not for mechanism discrimination — put it in the
+  GATHER plan, not the hypothesis list.
 - **Legitimacy is edge-level, not a parallel hypothesis.** When the
   same mechanism is consistent with benign or adversarial intent
   depending on authorization (CFO vs. external identity reading
@@ -398,11 +446,25 @@ hypothesize:
         2-4 sentence causal chain. One sentence per mechanism link.
         Name concrete processes, timing relationships, correlation signals.
       predictions:
-        - {id: p1, claim: "...", from_story_link: "<short phrase naming the link>"}
+        - {id: p1, subject: proposed_parent, claim: "...", from_story_link: "<short phrase naming the link>"}
       refutation_shape:
-        - {id: r1, claim: "...", refutes_predictions: [p1]}
+        - {id: r1, refutes_predictions: [p1], claim: "..."}
       weight: null
 ```
+
+**`subject` (required on every prediction)** — one of `proposed_parent`
+(an attribute of the newly-hypothesized upstream vertex), `attached_vertex`
+(an attribute of the already-confirmed observed vertex), or `proposed_edge`
+(an attribute of the edge between them). These are the only three entities
+in a hypothesis's one-hop scope; a prediction about any other entity is a
+lead masquerading as a prediction. Validator rule 29 rejects out-of-scope
+subjects. If you find yourself reaching for a vertex id (e.g. "monitoring-
+host container is alive"), stop — that belongs in GATHER.
+
+**`refutes_predictions` (required on every refutation_shape entry)** —
+non-empty list of prediction ids declared on *this* hypothesis. A
+refutation cites the specific prediction(s) it would overturn. Validator
+rule 30 rejects empty lists and foreign ids.
 
 Then one line `Selected lead:` and one line per hypothesis under
 `Pitfalls:`.
@@ -464,12 +526,13 @@ hypothesize:
         traceable to the image's own init sequence.
       predictions:
         - id: p1
+          subject: proposed_parent
           claim: "ancestry above /app/launcher.sh resolves to an in-container init wrapper (tini / dumb-init / custom launcher) with no runtime exec primitive in the chain"
           from_story_link: "chain never crosses the container boundary"
       refutation_shape:
         - id: r1
-          claim: "runc / containerd-shim / docker-exec / crictl appears above /app/launcher.sh"
           refutes_predictions: [p1]
+          claim: "runc / containerd-shim / docker-exec / crictl appears above /app/launcher.sh"
       weight: null
     - id: h-002
       name: "?underlying-host"
@@ -487,12 +550,13 @@ hypothesize:
         attacker with host compromise.
       predictions:
         - id: p1
+          subject: proposed_parent
           claim: "extending ancestry shows a runtime exec primitive immediately above /app/launcher.sh"
           from_story_link: "chain crosses the container boundary at a runtime exec primitive"
       refutation_shape:
         - id: r1
-          claim: "chain continues to a container-init wrapper with no exec primitive"
           refutes_predictions: [p1]
+          claim: "chain continues to a container-init wrapper with no exec primitive"
       weight: null
 ```
 
@@ -519,9 +583,11 @@ hypothesize:
         relation: classified_as
         parent_vertex: {type: command, classification: base-N-encoded-payload-channel}
       predictions:
-        - {id: p1, claim: "over the 162 labels, ≥95% of characters are drawn from a base32/base64/hex restricted alphabet AND length distribution clusters near 32/44/63-char payload boundaries (not unimodal near a UUID-shaped value)"}
+        - {id: p1, subject: proposed_parent, claim: "over the 162 labels, ≥95% of characters are drawn from a base32/base64/hex restricted alphabet"}
+        - {id: p2, subject: proposed_parent, claim: "length distribution clusters near 32/44/63-char payload boundaries rather than being unimodal near a UUID-shaped value"}
       refutation_shape:
-        - {id: r1, claim: "alphabet is unrestricted OR length is unimodal near a UUID-shaped value with low variance"}
+        - {id: r1, refutes_predictions: [p1], claim: "alphabet is unrestricted across the 162 labels"}
+        - {id: r2, refutes_predictions: [p2], claim: "length is unimodal near a UUID-shaped value with low variance"}
       weight: null
     - id: h-pre-001-002
       name: "?beacon-heartbeat-channel"
@@ -530,9 +596,11 @@ hypothesize:
         relation: classified_as
         parent_vertex: {type: command, classification: templated-beacon-channel}
       predictions:
-        - {id: p1, claim: "labels share a common prefix or suffix with a 4–12-char unique segment AND inter-query cadence CoV < 0.2 over the 45-min window"}
+        - {id: p1, subject: proposed_parent, claim: "labels share a common prefix or suffix with a 4–12-char unique segment"}
+        - {id: p2, subject: proposed_edge, claim: "inter-query cadence CoV < 0.2 over the 45-min window"}
       refutation_shape:
-        - {id: r1, claim: "no common template AND cadence CoV ≥ 0.2 (bursty, not periodic)"}
+        - {id: r1, refutes_predictions: [p1], claim: "no common template across the 162 labels"}
+        - {id: r2, refutes_predictions: [p2], claim: "cadence CoV ≥ 0.2 — bursty, not periodic"}
       weight: null
 ```
 
@@ -563,10 +631,10 @@ hypothesize:
       proposed_edge:
         parent_vertex: {classification: adversarial-credential-attack}   # ⚠ mechanism + legitimacy conflated
       predictions:
-        - {id: p1, claim: "srcip not in approved-monitoring-sources"}
-        - {id: p2, claim: "admin classifies as wordlist-common"}
-        - {id: p3, claim: "additional failed attempts from srcip in 5-min window"}
-        - {id: p4, claim: "no successful login in forward 60-sec window"}   # ⚠ 4 predictions on 4 different vertices, none tied to a named story link
+        - {id: p1, claim: "srcip not in approved-monitoring-sources"}           # ⚠ no subject; really a lead-check (rule 29)
+        - {id: p2, claim: "admin classifies as wordlist-common"}                # ⚠ no subject; this is about the username vertex, not this hypothesis's parent (rule 29)
+        - {id: p3, claim: "additional failed attempts from srcip in 5-min window"}  # ⚠ four predictions violate the lean cap (rule 28)
+        - {id: p4, claim: "no successful login in forward 60-sec window"}       # ⚠ downstream-event check — not an upstream-mechanism prediction at all
     - id: h-003
       name: "?compromise-followup"   # ⚠ parallel adversarial hypothesis — forward-success belongs either on the proposed edge (legitimacy contract + resolution) or on a distinct future `authenticated_as` edge (future-edge hypothesis), not as a sibling mechanism
 ```
@@ -599,14 +667,93 @@ the verdict, do so with a single hypothesis carrying a
 into a parallel `?sanctioned-*` vs. `?unsanctioned-*` pair — same
 mechanism, one edge, one contract.
 
+## Progress checkpoint (write-as-you-go)
+
+The checkpoint is a recovery artifact — a mirror of your in-progress
+state written to disk so a resumed dispatch can continue after a
+silent mid-execution termination. It is not a substitute for the
+stdout response; on successful completion you still emit the full
+response per §Return.
+
+**Checkpoint path:** `{run_dir}/subagent_checkpoints/hypothesize-loop-{loop_n}.yaml`.
+Create the directory with `mkdir -p` if it doesn't exist. One checkpoint
+per loop — if the orchestrator re-dispatches you within the same loop
+for recovery, overwrite the file with the updated state.
+
+Write the checkpoint at exactly these **four milestones**, not as
+running commentary, not between sub-fields:
+
+1. **M1 — outline drafted.** After you've picked hypothesis IDs and
+   classifications but before writing their stories/predictions.
+   Checkpoint contents: `status: drafting`, `mode`, `hypothesis_outline`
+   (list of `{id, classification}`), `next_intended_step`.
+2. **M2, M3, … — per-hypothesis complete.** After each hypothesis
+   block is finished (story + predictions + refutation_shape).
+   Overwrite with `status: drafting`, `hypotheses: [...completed so
+   far...]`, `next_intended_step`.
+3. **M(last) — terminal.** After `Selected lead:` and `Pitfalls:` are
+   written. Set `status: complete`.
+
+No-fork-mode (you emit a `gather:` block instead of `hypothesize:`):
+collapse to two milestones — `{outline, complete}`.
+
+**Resume semantics.** If the orchestrator re-dispatches you with
+`resume_from_checkpoint=true`, read the checkpoint, pick up at
+`next_intended_step`, and do not redo work already recorded. Respect
+any `remediation_notes=<errors>` field — those are validator rule
+violations from your prior attempt that must be fixed.
+
+Do **not** write checkpoint entries between sub-fields, per "just
+finished the story, about to write p1," or anywhere else. The four
+milestones are the contract.
+
+## Terminal routing YAML (required)
+
+After the `hypothesize:` / `gather:` block + `Selected lead:` +
+`Pitfalls:` lines, emit one final fenced YAML block:
+
+```yaml
+mode: fork | no-fork
+selected_lead: <lead name as it appears in your Selected lead: line>
+loop_n: <integer>
+```
+
+The orchestrator parses this deterministically to route to the next
+phase and to pass `selected_lead` to the GATHER handler. Block-type
+inference (`hypothesize:` vs `gather:`) is self-describing; this
+trailer makes the routing field-accessible without re-parsing.
+
 ## Return
 
-Return the YAML block plus `Selected lead:` and `Pitfalls:` as your
-response. The main agent pastes this verbatim into
-`{run_dir}/investigation.md`. Do **not** write to disk yourself — the
-main agent owns the state-machine-gated write so the hook chain fires
-correctly.
+Emit exactly this shape, in this order:
+
+~~~
+```yaml
+hypothesize:             # or `gather:` for no-fork mode
+  # ... the full invlang block per §Output schema ...
+```
+
+**Selected lead:** <lead-name> — <one-line reason>
+
+**Pitfalls:**
+- <hypothesis-id or lead-id>: <trap>
+- ...
+
+```yaml
+mode: fork               # or no-fork
+selected_lead: <lead-name>
+loop_n: <integer>
+```
+~~~
+
+Preamble prose before the first fence is optional (e.g. a short
+corpus-calibration note). The fenced content above is the deliverable
+— a prose summary of it is not.
+
+The orchestrator pastes the invlang blocks verbatim into
+`{run_dir}/investigation.md` — do **not** write to investigation.md
+yourself. The only file you write to is the progress checkpoint.
 
 If your inputs are malformed or the investigation state is
 incomprehensible, return a short `error:` block with a one-line reason
-and stop.
+and stop. No checkpoint, no trailer.

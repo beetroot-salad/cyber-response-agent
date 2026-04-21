@@ -1,0 +1,13 @@
+{
+  "id": "SEC-STRESS-001",
+  "rule": {"id": "5710", "description": "SSH invalid user"},
+  "timestamp": "2026-04-21T14:22:08Z",
+  "agent": {"name": "app-api-02"},
+  "data": {
+    "srcip": "10.1.2.3",
+    "srcuser": "healthcheck",
+    "dstuser": "healthcheck",
+    "dstip": "10.4.1.5"
+  },
+  "full_log": "Apr 21 14:22:08 app-api-02 sshd[4812]: Invalid user healthcheck from 10.1.2.3 port 52118"
+}

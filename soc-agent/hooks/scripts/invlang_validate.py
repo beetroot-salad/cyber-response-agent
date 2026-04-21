@@ -35,6 +35,9 @@ Checks performed (deterministic — no LLM):
 23. Hypothesis fork distinctness: within a sibling group (same parent, same attached_to_vertex), no two hypotheses share proposed_edge.parent_vertex.classification — catches duplicates that don't actually fork
 24. Hypothesis persistence: when conclude: is written, every declared hypothesis must either reach final weight `--` or appear in conclude.surviving_hypotheses[] — catches silent drop
 25. Prediction-ID hypothesis scope: matched_prediction_ids[] on a resolution for hypothesis H must only cite H's own declared predictions — catches same-level sibling rollup
+28. Hypothesis leanness: each hypothesis carries ≤ 2 predictions — 3+ signals an unlean label that should be split or deferred to post-lead refinement
+29. Prediction subject scope: every predictions[].subject is one of {proposed_parent, attached_vertex, proposed_edge} — catches predictions that narrate about entities outside the hypothesis's one-hop graph
+30. Refutation→prediction link: every refutation_shape[].refutes_predictions[] is non-empty and each id resolves to a declared prediction on the same hypothesis — makes refutation adequacy mechanically auditable
 
 Warnings (non-blocking, printed to stderr with exit 0):
 - Route compliance: when a lead with `predictions` is followed by another lead in
@@ -1529,6 +1532,127 @@ def _check_prediction_id_hypothesis_scope(merged: dict[str, Any]) -> list[str]:
     return errors
 
 
+_MAX_PREDICTIONS_PER_HYPOTHESIS = 2
+
+_VALID_PREDICTION_SUBJECTS = frozenset({
+    "proposed_parent",
+    "attached_vertex",
+    "proposed_edge",
+})
+
+
+def _check_prediction_subject_scope(merged: dict[str, Any]) -> list[str]:
+    """Rule 29 — a prediction's subject is within the hypothesis's one-hop scope.
+
+    Each `predictions[].subject` must be one of `proposed_parent` (the newly-
+    hypothesized upstream vertex), `attached_vertex` (the already-confirmed
+    observed vertex), or `proposed_edge` (the edge between them). Any other
+    value signals the prediction is really testing some entity outside the
+    hypothesis's graph — typically a lead-in-disguise ("container has cron
+    service installed", "auth-success edge appears later") that belongs to
+    GATHER, not to the hypothesis.
+    """
+    errors: list[str] = []
+    for h in iter_hypotheses(merged):
+        hid = h.get("id", "?")
+        for pred in h.get("predictions", []) or []:
+            if not isinstance(pred, dict):
+                continue
+            pid = pred.get("id", "?")
+            subject = pred.get("subject")
+            if subject is None:
+                errors.append(
+                    f"hypothesis {hid} prediction {pid}: missing required "
+                    f"`subject` field (one of "
+                    f"{sorted(_VALID_PREDICTION_SUBJECTS)})"
+                )
+                continue
+            if subject not in _VALID_PREDICTION_SUBJECTS:
+                errors.append(
+                    f"hypothesis {hid} prediction {pid}: subject "
+                    f"{subject!r} is outside the hypothesis's one-hop graph "
+                    f"scope (must be one of "
+                    f"{sorted(_VALID_PREDICTION_SUBJECTS)}). A prediction about "
+                    f"any other entity is a lead masquerading as a prediction "
+                    f"— move it to GATHER."
+                )
+    return errors
+
+
+def _check_refutation_prediction_links(merged: dict[str, Any]) -> list[str]:
+    """Rule 30 — every refutation_shape entry cites the predictions it refutes.
+
+    `refutation_shape[].refutes_predictions` must be a non-empty list of
+    prediction ids declared on the same hypothesis. A refutation that cites
+    no prediction is a free-floating negation (unclear what it overturns); a
+    refutation citing a prediction id not on the hypothesis is pointing
+    across a sibling boundary (the kind of rollup rule 25 catches for
+    resolutions).
+    """
+    errors: list[str] = []
+    for h in iter_hypotheses(merged):
+        hid = h.get("id", "?")
+        declared_preds = {
+            p.get("id")
+            for p in (h.get("predictions") or [])
+            if isinstance(p, dict) and isinstance(p.get("id"), str)
+        }
+        for r in h.get("refutation_shape", []) or []:
+            if not isinstance(r, dict):
+                continue
+            rid = r.get("id", "?")
+            refutes = r.get("refutes_predictions")
+            if refutes is None:
+                errors.append(
+                    f"hypothesis {hid} refutation {rid}: missing required "
+                    f"`refutes_predictions` field — name the prediction "
+                    f"id(s) this shape refutes."
+                )
+                continue
+            if not isinstance(refutes, list) or not refutes:
+                errors.append(
+                    f"hypothesis {hid} refutation {rid}: "
+                    f"`refutes_predictions` must be a non-empty list of "
+                    f"prediction ids, got {refutes!r}."
+                )
+                continue
+            foreign = [p for p in refutes if not isinstance(p, str) or p not in declared_preds]
+            if foreign:
+                errors.append(
+                    f"hypothesis {hid} refutation {rid}: refutes_predictions "
+                    f"{sorted(str(f) for f in foreign)} do not appear in "
+                    f"{hid}'s declared predictions {sorted(declared_preds) or '[]'}. "
+                    f"A refutation can only overturn predictions on its own "
+                    f"hypothesis."
+                )
+    return errors
+
+
+def _check_predictions_leanness(merged: dict[str, Any]) -> list[str]:
+    """Rule 28 — at most two predictions per hypothesis.
+
+    Three or more predictions signals an unlean label: the subagent is
+    enumerating properties of a narrative instead of selecting the 1–2
+    that most cleanly discriminate this hypothesis from siblings. Split
+    into child hypotheses or defer extras until a lead forces refinement.
+    """
+    errors: list[str] = []
+    for h in iter_hypotheses(merged):
+        hid = h.get("id", "?")
+        preds = h.get("predictions") or []
+        if not isinstance(preds, list):
+            continue
+        count = sum(1 for p in preds if isinstance(p, dict))
+        if count > _MAX_PREDICTIONS_PER_HYPOTHESIS:
+            errors.append(
+                f"hypothesis {hid}: carries {count} predictions — lean "
+                f"discipline caps at {_MAX_PREDICTIONS_PER_HYPOTHESIS}. "
+                f"Split into child hypotheses or defer extras until a "
+                f"lead forces refinement."
+            )
+    return errors
+
+
 def _check_lead_dedup_warnings(merged: dict[str, Any]) -> list[str]:
     """Warn when two leads share the same template + query + substitutions.
 
@@ -1806,6 +1930,9 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_hypothesis_fork_distinctness(merged))
     errors.extend(_check_hypothesis_persistence(merged))
     errors.extend(_check_prediction_id_hypothesis_scope(merged))
+    errors.extend(_check_predictions_leanness(merged))
+    errors.extend(_check_prediction_subject_scope(merged))
+    errors.extend(_check_refutation_prediction_links(merged))
 
     # Prediction-lifecycle guard needs the on-disk companion as well.
     if current_text is not None:

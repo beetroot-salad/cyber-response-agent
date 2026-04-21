@@ -1,0 +1,13 @@
+{
+  "id": "SEC-STRESS-003",
+  "rule": {"id": "5710", "description": "SSH invalid user"},
+  "timestamp": "2026-04-21T11:07:15Z",
+  "agent": {"name": "db-prod-04"},
+  "data": {
+    "srcip": "198.51.100.7",
+    "srcuser": "root",
+    "dstuser": "root",
+    "dstip": "10.8.2.14"
+  },
+  "full_log": "Apr 21 11:07:15 db-prod-04 sshd[9214]: Invalid user root from 198.51.100.7 port 34291"
+}
