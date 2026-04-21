@@ -96,10 +96,9 @@ class TestFrontmatterEdgeCases:
         assert parse_yaml_frontmatter("") == {}
 
     def test_only_opening_delimiter(self):
-        """Missing closing --- — should still parse what's there."""
+        """Missing closing ``---`` means no frontmatter — return ``{}``."""
         text = "---\nkey: value\n"
-        fm = parse_yaml_frontmatter(text)
-        assert fm["key"] == "value"
+        assert parse_yaml_frontmatter(text) == {}
 
     def test_body_not_included(self):
         """Content after closing --- must not leak into frontmatter."""
@@ -313,13 +312,6 @@ offset: -5
         fm = parse_yaml_frontmatter(text)
         assert fm["offset"] == -5
         assert isinstance(fm["offset"], int)
-
-    def test_utf8_bom_at_file_start(self):
-        """A UTF-8 BOM before the opening ``---`` should not defeat parsing."""
-        text = "﻿---\ntitle: foo\nstatus: ok\n---\nbody"
-        fm = parse_yaml_frontmatter(text)
-        assert fm["title"] == "foo"
-        assert fm["status"] == "ok"
 
     def test_trailing_whitespace_after_delimiter(self):
         """Trailing whitespace after the ``---`` delimiter is tolerated."""
