@@ -78,12 +78,12 @@ supplied by tests.
 
 | Phase          | Status   | Handler file | Subagent | Notes |
 |----------------|----------|--------------|----------|-------|
-| CONTEXTUALIZE  | pending  | —            | archetype-scan, ticket-context | Composite — runs multiple subagents + merges |
+| CONTEXTUALIZE  | doing    | scripts/handlers/contextualize.py | archetype-scan, ticket-context, contextualize-prologue | Handler + 14 unit tests landed. Ticket-context subagent rewritten to run `scripts/tools/ticket_context.py` + emit dedup verdict. New Haiku `contextualize-prologue` subagent builds prologue YAML (mechanical compose hit its limit at graph-shape mapping). Shared `_subagent.invoke_subagent` + `Context.ticket_id` added; `conclude.py` refactored to both. Pending: default-handler wiring + fixture run + SKILL.md prose removal |
 | SCREEN         | pending  | —            | screen.md | Simplest cutover; good candidate for pilot |
 | HYPOTHESIZE    | pending  | —            | hypothesize.md | |
 | GATHER         | pending  | —            | gather.md / gather-composite.md | Handler chooses single vs. composite |
 | ANALYZE        | pending  | —            | analyze.md | Contract decision pending — see `analyze-pilot` skill |
-| CONCLUDE       | pending  | —            | conclude.md | Terminal; no outgoing transition to wire |
+| CONCLUDE       | doing    | scripts/handlers/conclude.py | conclude.md | Handler + subagent rewrite + 15 unit tests landed. Blocked on ANALYZE before default-map wiring + fixture run. Orchestrator amended to dispatch a registered CONCLUDE handler before returning summary; `Context.forced_conclude` propagates MAX_LOOPS signal |
 
 Update this table after each cutover. `status` values: `pending`, `doing`,
 `done`, `deferred`.

@@ -1,6 +1,6 @@
 ---
 title: Migrate CONTEXTUALIZE to orchestrator handler
-status: todo
+status: doing
 groups: state-machine-migration, state
 depends_on: done-state-machine-orchestrator
 ---

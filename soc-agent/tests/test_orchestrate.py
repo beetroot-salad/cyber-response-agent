@@ -34,6 +34,7 @@ def make_ctx(tmp_path: Path, run_id: str = "run-test") -> Context:
     return Context(
         run_dir=run_dir,
         signature_id="wazuh-rule-5710",
+        ticket_id="alert-1",
         alert={"id": "alert-1"},
     )
 
