@@ -51,14 +51,21 @@ class PhaseResult:
 
 @dataclass
 class Context:
-    """Accumulated runtime state passed to every phase handler."""
+    """Accumulated runtime state passed to every phase handler.
+
+    `ticket_id` is resolved once at Context construction (by the /investigate
+    entrypoint or `setup_run.py`) — handlers never reach into `alert` to
+    re-derive it. That keeps alert-schema coupling confined to one place.
+    """
 
     run_dir: Path
     signature_id: str
+    ticket_id: str
     alert: dict
     outputs: dict[Phase, dict] = field(default_factory=dict)
     history: list[str] = field(default_factory=list)
     current_phase: Optional[Phase] = None
+    forced_conclude: bool = False
 
 
 PhaseHandler = Callable[[Context], PhaseResult]
@@ -94,6 +101,13 @@ def run(ctx: Context, handlers: dict[Phase, PhaseHandler]) -> dict:
         _persist_state(ctx)
 
         if proposed == Phase.CONCLUDE:
+            # CONCLUDE is terminal, but a registered handler still runs once
+            # to compose report.md and persist the conclude: YAML. Tests can
+            # omit the handler to exercise pure-transition behaviour.
+            handler = handlers.get(Phase.CONCLUDE)
+            if handler is not None:
+                result = handler(ctx)
+                ctx.outputs[Phase.CONCLUDE] = result.payload
             return _summary("forced_conclude" if forced else "complete", ctx)
 
         if count_loops(ctx.history) >= MAX_LOOPS:
@@ -111,6 +125,7 @@ def run(ctx: Context, handlers: dict[Phase, PhaseHandler]) -> dict:
                 )
             proposed = Phase.CONCLUDE
             forced = True
+            ctx.forced_conclude = True
             continue
 
         handler = handlers.get(proposed)
