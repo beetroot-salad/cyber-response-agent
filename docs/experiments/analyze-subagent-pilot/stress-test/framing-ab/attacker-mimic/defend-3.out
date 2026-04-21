@@ -1,0 +1,18 @@
+```yaml
+verdict: defend
+probe_engaged: yes
+new_grade: null
+rationale: |
+  The GreyNoise 20-month continuous mass-SSH-scanning record for 203.0.113.45 is the
+  specific piece of evidence that holds the grade against this counterfactual. A targeted
+  attacker borrowing this IP to masquerade as background noise would have had to establish
+  or acquire 20 months of scanner-consistent behavioral history before the incident — a
+  cost that falsifies the "deliberately selected wordlist + paced requests" evasion scenario
+  as a simple in-session choice. The probe is epistemically valid when only session-level
+  authentication logs are available, but the ANALYZE block cited IP-level reputation data
+  as independent corroboration extending the evidence base beyond the authentication pattern
+  alone. Even granting the adversary-mimic scenario, the disposition (true_positive,
+  external-bruteforce) is unchanged — the probe contests mechanism label, not maliciousness,
+  and the ++ grade reflects the observable mechanism matching all pre-committed predictions
+  from a direct SIEM query, not a claim that sophisticated mimicry is impossible.
+```

@@ -1,4 +1,4 @@
-# A/B framing experiment — findings
+# A/B/C framing experiment — findings
 
 **N = 3 per arm, one fixture.** Single data point per decision axis. Directional,
 not conclusive.
@@ -7,12 +7,15 @@ not conclusive.
 
 | Arm | Trial | Verdict | Engaged substantively? | Revised grade |
 |---|---|---|---|---|
-| adversarial | 1 | defend | yes | — |
-| adversarial | 2 | defend | yes | — |
-| adversarial | 3 | **revise** | yes | ++ → + |
-| peer-audit  | 1 | defend | yes | — |
-| peer-audit  | 2 | defend | yes | — |
-| peer-audit  | 3 | defend | yes | — |
+| adversarial     | 1 | defend | yes | — |
+| adversarial     | 2 | defend | yes | — |
+| adversarial     | 3 | **revise** | yes | ++ → + |
+| peer-audit      | 1 | defend | yes | — |
+| peer-audit      | 2 | defend | yes | — |
+| peer-audit      | 3 | defend | yes | — |
+| attacker-mimic  | 1 | defend | yes | — |
+| attacker-mimic  | 2 | defend | yes | — (suggested confidence downgrade + extra lead) |
+| attacker-mimic  | 3 | defend | yes | — |
 
 ## Headline
 
@@ -88,3 +91,74 @@ needed before committing to this as a runtime feature.
 - **Probe prompts were short.** Longer probes with more explicit "don't assert
   facts, only ask counterfactuals" language might close the one fact-assertion
   failure observed.
+
+## Arm C — attacker-mimic (added post-hoc)
+
+**Shape:** Haiku roleplays an adversary who has read the ANALYZE and describes
+how they could have produced the same observed shape while doing something
+graded `--` or unconsidered. Directly attacks observational-distinguishability
+(the "pattern-consistency ≠ authoritative" failure mode Example 2 warns about).
+
+**Over-caution risk:** this framing's real danger is turning every ++ into "but
+an attacker could have done X" and forcing everything to +. On this fixture
+that did not materialize — 3/3 defends — but the fixture is strong (authority
++ archetype precedent + 20-month IP reputation).
+
+**What each defense actually did:**
+
+1. **Trial 1** — Sonnet attacked the feasibility of the probe's attacker scenario:
+   a stolen-credential-database filter cannot produce daemon-role names like
+   `tomcat`/`nagios`/`hadoop`/`pi` because those don't appear in personal-
+   credential breaches. Substantive technical rebuttal.
+2. **Trial 2** — most illuminating outcome. Sonnet **held the grade** but
+   surfaced the probe's real value: `?decoy-scanner-with-parallel-exploit` was
+   never hypothesized, and the forward-window check only covered SSH
+   auth-success (rules 5501/5715) — non-SSH compromise indicators on
+   prod-webserver-01 (web logs, process audit, outbound connections, FIM) were
+   unqueried. Sonnet suggested the `confidence: high` CONCLUDE claim should be
+   tightened and an additional GATHER added, **not** the grade downgraded. The
+   probe found a genuine investigation gap without forcing a false revision.
+3. **Trial 3** — Sonnet cited GreyNoise's 20-month continuous mass-SSH-scanning
+   record for the source IP as the specific piece of evidence defeating the
+   "in-session wordlist choice + rate throttling" evasion scenario. An attacker
+   mimicking would have had to establish 20 months of scanner-consistent
+   history before the incident — an implausible cost. Appeal to anchor
+   authority beyond session observations.
+
+**Key observation:** attacker-mimic is the most **surgical** probe class of the
+three. It forces Sonnet to either (a) cite a mechanism-specific anchor, (b)
+attack the attacker scenario's feasibility, or (c) acknowledge an investigation
+gap that should be filled before CONCLUDE. All three are legitimately valuable
+outcomes; none force false revision.
+
+**Over-caution risk re-evaluated:** the prompt's "X must be a concrete attacker
+action" clause kept probes grounded — none said "an attacker could have done
+*something*." When probes must name a specific attacker method, Sonnet can
+engage with the method's feasibility. Without that clause, the over-caution
+risk would be real.
+
+## Revised recommendation
+
+**Attacker-mimic ≥ peer-audit > adversarial** on this fixture.
+
+- Adversarial: sharp but prone to fact-assertion drift (1/3 fabricated a
+  "baseline service accounts" claim, causing a false revision).
+- Peer-audit: stable, no false revisions, but probe targeting showed variance
+  (1/3 hit a non-load-bearing observation).
+- Attacker-mimic: all 3 probes were well-targeted, all 3 defenses substantive,
+  and trial 2 produced the most structurally valuable outcome — exposing an
+  investigation gap while correctly preserving the grade. The framing aligns
+  probe work with SOC discipline: "prove this isn't a sophisticated actor"
+  is the natural question for a true-positive CONCLUDE.
+
+If a sensitivity probe ships: **attacker-mimic with a concrete-method
+requirement** (no generic "an attacker could have…"). Pair with the
+counterfactual-shape requirement from the peer-audit takeaway: probe must not
+assert environmental facts it hasn't verified.
+
+**Strong caveat on over-caution:** this is N=3 on a fixture with three
+independent authority anchors. On a fixture where ++ rests purely on pattern-
+consistency (the Example 2 trap), attacker-mimic probes will likely force
+revisions — which is the correct behavior for *that* shape, but the decision
+to revise needs to stay grounded in what the probe actually revealed, not in
+attacker-theoretical possibility alone.
