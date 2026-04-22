@@ -60,7 +60,7 @@ prologue:
         source: wazuh-indexer
 """
 
-VALID_HYPOTHESIZE_YAML = """\
+VALID_PREDICT_YAML = """\
 hypothesize:
   hypotheses:
     - id: h-001
@@ -140,12 +140,12 @@ FULL_COMPANION_MD = f"""## CONTEXTUALIZE
 {VALID_PROLOGUE_YAML}
 ```
 
-## HYPOTHESIZE (loop 1)
+## PREDICT (loop 1)
 
 **Active hypotheses:** ?opportunistic-scanner
 
 ```yaml
-{VALID_HYPOTHESIZE_YAML}
+{VALID_PREDICT_YAML}
 ```
 
 ## GATHER (loop 1)
@@ -357,12 +357,12 @@ class TestCheckRouteCompliance:
         assert "terminal" in warnings[0].lower()
 
     def test_hypothesize_advance_does_not_require_next_lead(self):
-        # advance_to HYPOTHESIZE is valid even on a terminal lead — the
-        # companion may continue in a follow-up HYPOTHESIZE block elsewhere.
-        # Here we check the non-terminal case: if next lead isn't HYPOTHESIZE-
+        # advance_to PREDICT is valid even on a terminal lead — the
+        # companion may continue in a follow-up PREDICT block elsewhere.
+        # Here we check the non-terminal case: if next lead isn't PREDICT-
         # flavored (which it won't be — phases aren't leads), that's still a
         # mismatch, and the warning is correct.
-        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "HYPOTHESIZE"}]
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "PREDICT"}]
         merged = _merged_with_leads([_lead("first", preds), _lead("some-other")])
         warnings = _check_route_compliance(merged)
         assert warnings

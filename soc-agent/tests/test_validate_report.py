@@ -239,9 +239,9 @@ Screen-resolved monitoring probe.
         assert is_screen_resolved(tmp_path) is False
 
     def test_is_screen_resolved_with_hypothesize(self, tmp_path):
-        """SCREEN in history but also HYPOTHESIZE means fallthrough, not screen-resolved."""
+        """SCREEN in history but also PREDICT means fallthrough, not screen-resolved."""
         state = {
-            "history": ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+            "history": ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
         }
         (tmp_path / "state.json").write_text(json.dumps(state))
         assert is_screen_resolved(tmp_path) is False

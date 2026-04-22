@@ -40,7 +40,7 @@ from schemas.state import (
 def extract_phases(file_path: Path) -> list[str]:
     """Extract ordered phase names from ## headers in investigation.md.
 
-    Returns a list like ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE"].
+    Returns a list like ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE"].
     Ignores suffixes like (loop N) — only the phase name matters.
     """
     if not file_path.exists():

@@ -144,7 +144,7 @@ def load_signature_text(signature_id: str, soc_agent_root: Path) -> dict[str, st
 
 
 # ---------------------------------------------------------------------------
-# Lead catalog (common-investigation leads used by HYPOTHESIZE)
+# Lead catalog (common-investigation leads used by PREDICT)
 # ---------------------------------------------------------------------------
 
 
@@ -198,7 +198,7 @@ def _parse_investigation_sections(text: str) -> list[dict]:
     """Split investigation.md into ordered `## `-delimited sections.
 
     Each section is `{header, phase, loop_n, body}`. `phase` is lowercased
-    and dash-separated (e.g. `contextualize`, `hypothesize`, `gather`,
+    and dash-separated (e.g. `contextualize`, `predict`, `gather`,
     `analyze`, `self-report`). `loop_n` is int or None. `body` is the full
     section body including blank lines and fenced blocks, header line
     excluded. Leading content before the first header is dropped (current
@@ -250,7 +250,7 @@ def _trim_gather_section(section: dict) -> str:
 
     This is the dominant bulk-contributor in `investigation.md` growth
     across loops: each GATHER can be 2-5KB of observation prose that
-    HYPOTHESIZE does not need for picking the next fork — the structured
+    PREDICT does not need for picking the next fork — the structured
     outcome lives either in a `gather:` YAML fence (when authored) or is
     summarized into the downstream ANALYZE block.
     """
@@ -331,7 +331,7 @@ def format_investigation_block(
     - `full` — entire file verbatim. Default. Used by CONCLUDE, which
       needs access to every phase for citation resolution.
 
-    - `hypothesize` — CONTEXTUALIZE + every HYPOTHESIZE block verbatim +
+    - `predict` — CONTEXTUALIZE + every PREDICT block verbatim +
       every GATHER block with its raw-observation prose elided (top-matter
       and YAML fences kept) + the latest ANALYZE block + the latest
       Self-report. Prior loops' GATHER raw observations are the dominant
@@ -339,15 +339,15 @@ def format_investigation_block(
       of N for the next-fork decision. Typical reduction: 50-70% on
       2-loop-deep investigations.
 
-    - `analyze` — CONTEXTUALIZE + current loop's HYPOTHESIZE and GATHER
+    - `analyze` — CONTEXTUALIZE + current loop's PREDICT and GATHER
       verbatim (needed to grade against pre-declared predictions /
       refutation shapes) + prior ANALYZE blocks summarized to grade lines
       only (for weight-carryover / rollup-discipline). Current loop is
-      the highest loop_n found across HYPOTHESIZE/GATHER.
+      the highest loop_n found across PREDICT/GATHER.
 
-    - `conclude-narrative` — CONTEXTUALIZE + the latest HYPOTHESIZE and
+    - `conclude-narrative` — CONTEXTUALIZE + the latest PREDICT and
       latest ANALYZE blocks verbatim. GATHER sections, Self-report
-      sections, and prior-loop HYPOTHESIZE/ANALYZE blocks are dropped
+      sections, and prior-loop PREDICT/ANALYZE blocks are dropped
       entirely. Used by the narrow narrative subagent that authors
       `## Summary` / `## For Analyst` prose; it doesn't need raw GATHER
       observations because the final ANALYZE already summarizes what
@@ -359,16 +359,16 @@ def format_investigation_block(
     if not body_raw:
         return "<investigation>\n(empty — no prior phases recorded)\n</investigation>"
 
-    if mode not in {"hypothesize", "analyze", "conclude-narrative"}:
+    if mode not in {"predict", "analyze", "conclude-narrative"}:
         return f"<investigation>\n{body_raw}\n</investigation>"
 
     sections = _parse_investigation_sections(body_raw)
     if not sections:
         return f"<investigation>\n{body_raw}\n</investigation>"
 
-    if mode == "hypothesize":
+    if mode == "predict":
         # Latest ANALYZE + Self-report carry the routing rationale for why
-        # we're back in HYPOTHESIZE — always include those in full.
+        # we're back in PREDICT — always include those in full.
         analyze_sections = [s for s in sections if s["phase"] == "analyze"]
         selfreport_sections = [s for s in sections if s["phase"] == "self-report"]
         latest_analyze_idx = (
@@ -381,7 +381,7 @@ def format_investigation_block(
         for i, s in enumerate(sections):
             if s["phase"] == "contextualize":
                 parts.append(_section_text(s))
-            elif s["phase"] == "hypothesize":
+            elif s["phase"] == "predict":
                 parts.append(_section_text(s))
             elif s["phase"] == "gather":
                 parts.append(_trim_gather_section(s))
@@ -389,13 +389,13 @@ def format_investigation_block(
                 if i == latest_analyze_idx:
                     parts.append(_section_text(s))
                 # else: drop older ANALYZE narrative (its grades are already
-                # rolled into the downstream hypothesize/gather YAML state)
+                # rolled into the downstream predict/gather YAML state)
             elif s["phase"] == "self-report":
                 if i == latest_selfreport_idx:
                     parts.append(_section_text(s))
             # Unknown phase sections are dropped.
         body = "\n\n".join(p.rstrip() for p in parts if p.strip())
-        return f"<investigation mode=\"hypothesize\">\n{body}\n</investigation>"
+        return f"<investigation mode=\"predict\">\n{body}\n</investigation>"
 
     if mode == "analyze":
         loops = [s["loop_n"] for s in sections if s["loop_n"] is not None]
@@ -404,10 +404,10 @@ def format_investigation_block(
         for s in sections:
             if s["phase"] == "contextualize":
                 parts.append(_section_text(s))
-            elif s["phase"] in {"hypothesize", "gather"}:
+            elif s["phase"] in {"predict", "gather"}:
                 if s["loop_n"] == current_loop:
                     parts.append(_section_text(s))
-                # prior-loop hypothesize/gather: their structured outcome is
+                # prior-loop predict/gather: their structured outcome is
                 # rolled into the ANALYZE grade lines we render below.
             elif s["phase"] == "analyze":
                 # Always summarize — the current loop's ANALYZE doesn't exist
@@ -418,9 +418,9 @@ def format_investigation_block(
         return f"<investigation mode=\"analyze\">\n{body}\n</investigation>"
 
     # mode == "conclude-narrative"
-    hypothesize_sections = [s for s in sections if s["phase"] == "hypothesize"]
+    predict_sections = [s for s in sections if s["phase"] == "predict"]
     analyze_sections = [s for s in sections if s["phase"] == "analyze"]
-    latest_hyp = hypothesize_sections[-1] if hypothesize_sections else None
+    latest_hyp = predict_sections[-1] if predict_sections else None
     latest_ana = analyze_sections[-1] if analyze_sections else None
     parts: list[str] = []
     for s in sections:
@@ -428,7 +428,7 @@ def format_investigation_block(
             parts.append(_section_text(s))
         elif s is latest_hyp or s is latest_ana:
             parts.append(_section_text(s))
-        # Everything else (GATHER, self-report, prior HYPOTHESIZE/ANALYZE) dropped.
+        # Everything else (GATHER, self-report, prior PREDICT/ANALYZE) dropped.
     body = "\n\n".join(p.rstrip() for p in parts if p.strip())
     return f"<investigation mode=\"conclude-narrative\">\n{body}\n</investigation>"
 
@@ -503,7 +503,7 @@ def format_lead_definitions_summary_block(defs: dict[str, str]) -> str:
     """Render the lead catalog as {name, data_tags, Goal body} only — omits
     pitfalls, variants, and per-vendor templates.
 
-    Use from HYPOTHESIZE where the subagent picks a lead name and the
+    Use from PREDICT where the subagent picks a lead name and the
     downstream GATHER handler has the full definition. Empty catalog →
     `<lead-catalog/>` (self-closing).
     """
@@ -530,7 +530,7 @@ def format_lead_definitions_summary_block(defs: dict[str, str]) -> str:
 # Vocabulary: the archetype-scan subagent emits two disjoint sets — candidates
 # (alert shape is consistent with the archetype's story) and ruled-out (a
 # disqualifier tripped, or shape is incompatible). No confidence rating; those
-# imply pre-commitment that biases downstream HYPOTHESIZE toward a premature
+# imply pre-commitment that biases downstream PREDICT toward a premature
 # fork on ambiguous alerts.
 #
 # Renderer output in investigation.md:

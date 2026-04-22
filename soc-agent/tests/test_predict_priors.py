@@ -2,7 +2,7 @@
 
 Covers the new invlang corpus helpers (`hypothesis_topology`,
 `lead_effectiveness_for_topology`, `peer_hypothesis_distribution_for_topology`)
-and the hypothesize handler's `_format_priors` rendering.
+and the predict handler's `_format_priors` rendering.
 
 Uses in-memory Companion fixtures — no file I/O, no Claude subprocess.
 """
@@ -23,7 +23,7 @@ from invlang.queries import (  # noqa: E402
     lead_effectiveness_for_topology,
     peer_hypothesis_distribution_for_topology,
 )
-from scripts.handlers.hypothesize import _format_priors  # noqa: E402
+from scripts.handlers.predict import _format_priors  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

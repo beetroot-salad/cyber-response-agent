@@ -10,7 +10,7 @@ Subagent invocation is mocked via `monkeypatch.setattr` on the module-level
     - silent-termination recovery via resume re-dispatch
     - invlang validation failure on appended section
     - routing: always Phase.ANALYZE
-    - HYPOTHESIZE-payload precondition checks
+    - PREDICT-payload precondition checks
     - scope derivation (vendor, reporting_agent, entity_bindings, window)
 """
 
@@ -63,12 +63,12 @@ def make_ctx(
         alert=alert if alert is not None else default_alert,
         history=history or [
             Phase.CONTEXTUALIZE.value,
-            Phase.HYPOTHESIZE.value,
+            Phase.PREDICT.value,
             Phase.GATHER.value,
         ],
         current_phase=Phase.GATHER,
         outputs={
-            Phase.HYPOTHESIZE: {
+            Phase.PREDICT: {
                 "mode": "fork",
                 "selected_lead": selected_lead,
                 "loop_n": loop_n,
@@ -476,18 +476,18 @@ class TestHandleOutput:
 class TestPreconditions:
     def test_missing_hypothesize_payload_raises(self, tmp_path):
         ctx = make_ctx(tmp_path)
-        ctx.outputs.pop(Phase.HYPOTHESIZE, None)
-        with pytest.raises(OrchestrationError, match="HYPOTHESIZE payload not found"):
+        ctx.outputs.pop(Phase.PREDICT, None)
+        with pytest.raises(OrchestrationError, match="PREDICT payload not found"):
             gather_handler.handle(ctx)
 
     def test_empty_selected_lead_raises(self, tmp_path):
         ctx = make_ctx(tmp_path)
-        ctx.outputs[Phase.HYPOTHESIZE]["selected_lead"] = ""
+        ctx.outputs[Phase.PREDICT]["selected_lead"] = ""
         with pytest.raises(OrchestrationError, match="selected_lead"):
             gather_handler.handle(ctx)
 
     def test_non_int_loop_n_raises(self, tmp_path):
         ctx = make_ctx(tmp_path)
-        ctx.outputs[Phase.HYPOTHESIZE]["loop_n"] = "2"
+        ctx.outputs[Phase.PREDICT]["loop_n"] = "2"
         with pytest.raises(OrchestrationError, match="int loop_n"):
             gather_handler.handle(ctx)

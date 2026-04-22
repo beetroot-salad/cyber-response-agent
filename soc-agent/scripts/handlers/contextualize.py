@@ -13,8 +13,8 @@ combined new section against the invlang schema (by importing
 `{run_dir}/investigation.md`.
 
 Routes:
-    - SCREEN        — playbook has a `## Screen` section
-    - HYPOTHESIZE   — default
+    - SCREEN   — playbook has a `## Screen` section
+    - PREDICT  — default
 
 The dedup fast-path (CONTEXTUALIZE→CONCLUDE on ticket_context.dedup_candidate) is
 retired pending a proper design; see tasks/dedup-fast-path.md. The ticket-context
@@ -436,7 +436,7 @@ def _route(ticket: dict, playbook: PlaybookMetadata) -> tuple[Phase, Optional[st
     # as telemetry in the handler payload but does not change routing.
     if playbook.has_screen:
         return Phase.SCREEN, str(dedup_id) if dedup_id else None
-    return Phase.HYPOTHESIZE, str(dedup_id) if dedup_id else None
+    return Phase.PREDICT, str(dedup_id) if dedup_id else None
 
 
 # ---------------------------------------------------------------------------

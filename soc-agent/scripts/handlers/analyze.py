@@ -10,7 +10,7 @@ The ANALYZE subagent (agents/analyze.md, model=sonnet) emits three sections:
     3. terminal fenced `yaml`  — machine-parsed routing decision
 
 This handler:
-    - computes `loop_n` from ctx.history (count of HYPOTHESIZE entries)
+    - computes `loop_n` from ctx.history (count of PREDICT entries)
     - invokes the subagent via the shared `_subagent.invoke_subagent` wrapper
     - extracts the terminal routing YAML via `extract_terminal_yaml`
     - validates the routing payload (next_action, disposition, etc.)
@@ -28,8 +28,8 @@ Input (Context):
 
 Output:
     PhaseResult
-      - next_action=CONCLUDE    → Phase.CONCLUDE
-      - next_action=HYPOTHESIZE → Phase.HYPOTHESIZE
+      - next_action=CONCLUDE → Phase.CONCLUDE
+      - next_action=PREDICT  → Phase.PREDICT
 
 Files written:
     {run_dir}/investigation.md — appends `## ANALYZE (loop N)` + `## Self-report`
@@ -67,7 +67,7 @@ SUBAGENT_TIMEOUT_SECONDS = int(
     os.environ.get("SOC_AGENT_ANALYZE_TIMEOUT_SECONDS", "300")
 )
 
-_VALID_NEXT_ACTIONS = {"CONCLUDE", "HYPOTHESIZE"}
+_VALID_NEXT_ACTIONS = {"CONCLUDE", "PREDICT"}
 _VALID_DISPOSITIONS = {"benign", "false_positive", "true_positive", "escalated"}
 _VALID_CONFIDENCES = {"high", "medium", "low"}
 
@@ -94,12 +94,12 @@ def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) ->
 def _compute_loop_n(ctx: Context) -> int:
     """Infer the current loop number from ctx.history.
 
-    loop_n is the count of HYPOTHESIZE entries observed — every loop begins
-    with HYPOTHESIZE, so the most recent HYPOTHESIZE closes the current loop.
+    loop_n is the count of PREDICT entries observed — every loop begins
+    with PREDICT, so the most recent PREDICT closes the current loop.
     Fallback to 1 for safety (shouldn't happen — ANALYZE should always
-    follow at least one HYPOTHESIZE in a well-formed run).
+    follow at least one PREDICT in a well-formed run).
     """
-    return sum(1 for p in ctx.history if p == Phase.HYPOTHESIZE.value) or 1
+    return sum(1 for p in ctx.history if p == Phase.PREDICT.value) or 1
 
 
 def _assemble_prompt(ctx: Context) -> str:
@@ -164,11 +164,11 @@ def _validate_routing(payload: dict) -> dict:
                 "surviving_hypotheses[] (empty list if every hypothesis is "
                 f"refuted) — got {type(surviving).__name__}"
             )
-    else:  # HYPOTHESIZE
+    else:  # PREDICT
         discriminator = payload.get("discriminator")
         if not isinstance(discriminator, str) or not discriminator.strip():
             raise OrchestrationError(
-                "analyze subagent: routing HYPOTHESIZE requires a non-empty "
+                "analyze subagent: routing PREDICT requires a non-empty "
                 "discriminator field (one-line question the next lead must answer)"
             )
 
@@ -268,6 +268,6 @@ def handle(ctx: Context) -> PhaseResult:
 
     next_phase = (
         Phase.CONCLUDE if payload["next_action"] == "CONCLUDE"
-        else Phase.HYPOTHESIZE
+        else Phase.PREDICT
     )
     return PhaseResult(next_phase=next_phase, payload=payload)

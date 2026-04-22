@@ -303,7 +303,7 @@ def validate_archetype_anchors(
 def is_screen_resolved(run_dir: Path) -> bool:
     """Check if this investigation was resolved via the SCREEN phase.
 
-    Reads state.json and checks if SCREEN is in history but HYPOTHESIZE
+    Reads state.json and checks if SCREEN is in history but PREDICT
     is not (i.e., the investigation didn't enter the full loop).
     """
     state_path = run_dir / "state.json"
@@ -312,7 +312,7 @@ def is_screen_resolved(run_dir: Path) -> bool:
     try:
         state = json.loads(state_path.read_text())
         history = state.get("history", [])
-        return "SCREEN" in history and "HYPOTHESIZE" not in history
+        return "SCREEN" in history and "PREDICT" not in history
     except (json.JSONDecodeError, KeyError):
         return False
 

@@ -98,7 +98,8 @@ class Companion:
         return self.body.get("conclude", {})
 
     def iter_new_hypotheses(self) -> Iterator[dict[str, Any]]:
-        """Yields hypotheses from HYPOTHESIZE + any new_hypotheses spawned in leads."""
+        """Yields hypotheses from the `hypothesize:` block (emitted by PREDICT) +
+        any new_hypotheses spawned in leads."""
         yield from self.hypotheses
         for lead in self.leads:
             for h in lead.get("new_hypotheses", []) or []:
@@ -145,7 +146,7 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
     """Merge every ```yaml block in an investigation.md into one companion body.
 
     Live investigations write one block per phase (prologue at CONTEXTUALIZE,
-    hypothesize at HYPOTHESIZE, gather lead at ANALYZE, conclude at CONCLUDE);
+    hypothesize at PREDICT, gather lead at ANALYZE, conclude at CONCLUDE);
     gather blocks may appear multiple times. This mirrors the merge in cli.py's
     `--ids` handler.
     """

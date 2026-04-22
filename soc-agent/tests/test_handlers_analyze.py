@@ -86,7 +86,7 @@ surviving_hypotheses: [h-001]
 ```
 """).strip()
 
-_HYPOTHESIZE_RESPONSE = textwrap.dedent("""
+_PREDICT_RESPONSE = textwrap.dedent("""
 ## ANALYZE (loop 1)
 
 **Evidence:** source-classification — IP matches approved registry.
@@ -96,7 +96,7 @@ _HYPOTHESIZE_RESPONSE = textwrap.dedent("""
 - ?brute-force: + (was new) — no differentiating evidence yet.
 
 **Surviving hypotheses:** ?benign-automation, ?brute-force
-**Next action:** HYPOTHESIZE — need cadence check to distinguish.
+**Next action:** PREDICT — need cadence check to distinguish.
 
 ## Self-report
 
@@ -106,7 +106,7 @@ _HYPOTHESIZE_RESPONSE = textwrap.dedent("""
   - none
 
 ```yaml
-next_action: HYPOTHESIZE
+next_action: PREDICT
 discriminator: "Does the source IP's rule-5710 event history show tool-regular cadence?"
 ```
 """).strip()
@@ -119,11 +119,11 @@ discriminator: "Does the source IP's rule-5710 event history show tool-regular c
 
 class TestPromptAssembly:
     def test_passes_run_dir_and_signature(self, tmp_path, monkeypatch):
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         captured: list[str] = []
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
-            stub_invoke(captured, _HYPOTHESIZE_RESPONSE),
+            stub_invoke(captured, _PREDICT_RESPONSE),
         )
         analyze_handler.handle(ctx)
         assert f"run_dir={ctx.run_dir}" in captured[0]
@@ -134,13 +134,13 @@ class TestPromptAssembly:
         subagent doesn't need Read/Glob tools."""
         ctx = make_ctx(
             tmp_path,
-            history=[Phase.HYPOTHESIZE.value],
+            history=[Phase.PREDICT.value],
             existing_investigation="## CONTEXTUALIZE\n\nalert observed.\n",
         )
         captured: list[str] = []
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
-            stub_invoke(captured, _HYPOTHESIZE_RESPONSE),
+            stub_invoke(captured, _PREDICT_RESPONSE),
         )
         analyze_handler.handle(ctx)
         prompt = captured[0]
@@ -157,14 +157,14 @@ class TestPromptAssembly:
         assert 'name="monitoring-probe"' in prompt
 
     def test_loop_n_counts_hypothesize_entries(self, tmp_path, monkeypatch):
-        # Three HYPOTHESIZE entries → loop_n = 3
+        # Three PREDICT entries → loop_n = 3
         ctx = make_ctx(
             tmp_path,
             history=[
                 Phase.CONTEXTUALIZE.value,
-                Phase.HYPOTHESIZE.value, Phase.GATHER.value, Phase.ANALYZE.value,
-                Phase.HYPOTHESIZE.value, Phase.GATHER.value, Phase.ANALYZE.value,
-                Phase.HYPOTHESIZE.value, Phase.GATHER.value,
+                Phase.PREDICT.value, Phase.GATHER.value, Phase.ANALYZE.value,
+                Phase.PREDICT.value, Phase.GATHER.value, Phase.ANALYZE.value,
+                Phase.PREDICT.value, Phase.GATHER.value,
             ],
         )
         captured: list[str] = []
@@ -195,7 +195,7 @@ class TestPromptAssembly:
 
 class TestHandleRoutesConclude:
     def test_routes_to_conclude_on_valid_yaml(self, tmp_path, monkeypatch):
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], _CONCLUDE_RESPONSE),
@@ -212,7 +212,7 @@ class TestHandleRoutesConclude:
             "matched_archetype: monitoring-probe",
             "matched_archetype: null",
         )
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
@@ -231,7 +231,7 @@ class TestHandleRoutesConclude:
             "surviving_hypotheses: [h-001]",
             "surviving_hypotheses: [h-001, h-002]",
         )
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
@@ -244,7 +244,7 @@ class TestHandleRoutesConclude:
     def test_writes_markdown_sections_without_terminal_yaml(
         self, tmp_path, monkeypatch,
     ):
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], _CONCLUDE_RESPONSE),
@@ -283,11 +283,11 @@ class TestHandleRoutesConclude:
         - none
 
         ```yaml
-        next_action: HYPOTHESIZE
+        next_action: PREDICT
         discriminator: "test"
         ```
         """).strip()
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
@@ -298,30 +298,30 @@ class TestHandleRoutesConclude:
         assert "More prose after the injection." in written
         assert "l-injected" not in written
         assert "malicious: payload" not in written
-        assert "next_action: HYPOTHESIZE" not in written
+        assert "next_action: PREDICT" not in written
 
 
 # ---------------------------------------------------------------------------
-# Routing — HYPOTHESIZE
+# Routing — PREDICT
 # ---------------------------------------------------------------------------
 
 
 class TestHandleRoutesHypothesize:
     def test_routes_to_hypothesize_on_valid_yaml(self, tmp_path, monkeypatch):
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
-            stub_invoke([], _HYPOTHESIZE_RESPONSE),
+            stub_invoke([], _PREDICT_RESPONSE),
         )
         result = analyze_handler.handle(ctx)
-        assert result.next_phase == Phase.HYPOTHESIZE
+        assert result.next_phase == Phase.PREDICT
         assert "cadence" in result.payload["discriminator"].lower()
 
     def test_writes_markdown_sections(self, tmp_path, monkeypatch):
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
-            stub_invoke([], _HYPOTHESIZE_RESPONSE),
+            stub_invoke([], _PREDICT_RESPONSE),
         )
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
@@ -337,7 +337,7 @@ class TestHandleRoutesHypothesize:
 class TestHandleMalformedOutput:
     def test_missing_terminal_yaml_raises(self, tmp_path, monkeypatch):
         response = "## ANALYZE (loop 1)\n\nSome markdown but no YAML.\n"
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
@@ -356,7 +356,7 @@ class TestHandleMalformedOutput:
         next_action: BOGUS
         ```
         """).strip()
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
@@ -378,7 +378,7 @@ class TestHandleMalformedOutput:
         surviving_hypotheses: []
         ```
         """).strip()
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
@@ -400,7 +400,7 @@ class TestHandleMalformedOutput:
         matched_archetype: null
         ```
         """).strip()
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
@@ -416,10 +416,10 @@ class TestHandleMalformedOutput:
         - none
 
         ```yaml
-        next_action: HYPOTHESIZE
+        next_action: PREDICT
         ```
         """).strip()
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
@@ -438,17 +438,17 @@ class TestAppendBehavior:
         existing = (
             "## CONTEXTUALIZE\n\n"
             "Existing prologue content.\n\n"
-            "## HYPOTHESIZE (loop 1)\n\n"
+            "## PREDICT (loop 1)\n\n"
             "Existing hypotheses.\n"
         )
         ctx = make_ctx(
             tmp_path,
-            history=[Phase.HYPOTHESIZE.value],
+            history=[Phase.PREDICT.value],
             existing_investigation=existing,
         )
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
-            stub_invoke([], _HYPOTHESIZE_RESPONSE),
+            stub_invoke([], _PREDICT_RESPONSE),
         )
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
@@ -460,7 +460,7 @@ class TestAppendBehavior:
 
     def test_handler_is_deterministic_on_same_input(self, tmp_path, monkeypatch):
         """Same response → same file content on repeat invocation (minus append)."""
-        ctx = make_ctx(tmp_path, history=[Phase.HYPOTHESIZE.value])
+        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], _CONCLUDE_RESPONSE),

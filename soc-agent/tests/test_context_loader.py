@@ -194,7 +194,7 @@ class TestFormatInvestigationBlock:
             "**Alert:** test\n"
             "candidate archetype: X\n"
             "```yaml\nprologue:\n  vertices: []\n```\n"
-            "## HYPOTHESIZE (loop 1)\n"
+            "## PREDICT (loop 1)\n"
             "**Selected lead:** l1\n"
             "```yaml\nhypothesize:\n  hypotheses: []\n```\n"
             "## GATHER (loop 1)\n"
@@ -212,11 +212,11 @@ class TestFormatInvestigationBlock:
             "- **?h1**: `+` (new) — grade narrative first sentence. followup sentence.\n"
             "- **?h2**: `-` (new) — another grade narrative.\n"
             "**Surviving hypotheses:** ?h1, ?h2\n"
-            "**Next action:** HYPOTHESIZE\n"
+            "**Next action:** PREDICT\n"
             "---\n"
             "## Self-report\n"
             "- anomaly note\n"
-            "## HYPOTHESIZE (loop 2)\n"
+            "## PREDICT (loop 2)\n"
             "**Selected lead:** l2\n"
             "```yaml\nhypothesize:\n  hypotheses: [h-001]\n```\n"
             "## GATHER (loop 2)\n"
@@ -230,14 +230,14 @@ class TestFormatInvestigationBlock:
 
     def test_hypothesize_mode_trims_prior_gather_raw_obs(self):
         block = format_investigation_block(
-            self._multiloop_fixture(), mode="hypothesize"
+            self._multiloop_fixture(), mode="predict"
         )
         # Mode attribute is emitted
-        assert 'mode="hypothesize"' in block
-        # CONTEXTUALIZE + all HYPOTHESIZE blocks preserved verbatim
+        assert 'mode="predict"' in block
+        # CONTEXTUALIZE + all PREDICT blocks preserved verbatim
         assert "## CONTEXTUALIZE" in block
-        assert "## HYPOTHESIZE (loop 1)" in block
-        assert "## HYPOTHESIZE (loop 2)" in block
+        assert "## PREDICT (loop 1)" in block
+        assert "## PREDICT (loop 2)" in block
         # GATHER top-matter kept
         assert "**Lead:** l1" in block
         assert "**Lead:** l2" in block
@@ -255,7 +255,7 @@ class TestFormatInvestigationBlock:
     def test_hypothesize_mode_is_smaller_than_full(self):
         fx = self._multiloop_fixture()
         full = format_investigation_block(fx, mode="full")
-        hyp = format_investigation_block(fx, mode="hypothesize")
+        hyp = format_investigation_block(fx, mode="predict")
         assert len(hyp) < len(full)
 
     def test_analyze_mode_keeps_current_loop_verbatim(self):
@@ -264,10 +264,10 @@ class TestFormatInvestigationBlock:
         )
         assert 'mode="analyze"' in block
         # Current loop (loop 2) H + G present verbatim
-        assert "## HYPOTHESIZE (loop 2)" in block
+        assert "## PREDICT (loop 2)" in block
         assert "fresh bulky line with current-loop detail" in block
         # Prior loop H + G dropped (rolled up via ANALYZE summary)
-        assert "## HYPOTHESIZE (loop 1)" not in block
+        assert "## PREDICT (loop 1)" not in block
         assert "bulky line one with lots of detail" not in block
         # Prior ANALYZE rendered as grade-summary (kept minimal grade line)
         assert "## ANALYZE (loop 1)" in block

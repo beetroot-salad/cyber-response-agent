@@ -82,30 +82,30 @@ class TestExtractPhases:
         f = tmp_path / "investigation.md"
         f.write_text(
             "## CONTEXTUALIZE\nstuff\n"
-            "## HYPOTHESIZE (loop 1)\nstuff\n"
+            "## PREDICT (loop 1)\nstuff\n"
             "## GATHER (loop 1)\nstuff\n"
             "## ANALYZE (loop 1)\nstuff\n"
             "## CONCLUDE\nverdicts\n"
         )
         assert extract_phases(f) == [
-            "CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"
+            "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"
         ]
 
     def test_loop_suffixes_stripped(self, tmp_path):
         f = tmp_path / "investigation.md"
         f.write_text(
             "## CONTEXTUALIZE\n"
-            "## HYPOTHESIZE (loop 1)\n"
+            "## PREDICT (loop 1)\n"
             "## GATHER (loop 1)\n"
             "## ANALYZE (loop 1)\n"
-            "## HYPOTHESIZE (loop 2)\n"
+            "## PREDICT (loop 2)\n"
             "## GATHER (loop 2)\n"
             "## ANALYZE (loop 2)\n"
         )
         assert extract_phases(f) == [
             "CONTEXTUALIZE",
-            "HYPOTHESIZE", "GATHER", "ANALYZE",
-            "HYPOTHESIZE", "GATHER", "ANALYZE",
+            "PREDICT", "GATHER", "ANALYZE",
+            "PREDICT", "GATHER", "ANALYZE",
         ]
 
     def test_ignores_non_phase_headers(self, tmp_path):
@@ -114,9 +114,9 @@ class TestExtractPhases:
             "## CONTEXTUALIZE\n"
             "## Key Evidence\n"
             "## Summary\n"
-            "## HYPOTHESIZE (loop 1)\n"
+            "## PREDICT (loop 1)\n"
         )
-        assert extract_phases(f) == ["CONTEXTUALIZE", "HYPOTHESIZE"]
+        assert extract_phases(f) == ["CONTEXTUALIZE", "PREDICT"]
 
     def test_empty_file(self, tmp_path):
         f = tmp_path / "investigation.md"
@@ -156,7 +156,7 @@ class TestInferStateHook:
         assert state["run_id"] == "run-test"
 
     def test_valid_transition_hypothesize(self, tmp_path):
-        """CONTEXTUALIZE -> HYPOTHESIZE is valid."""
+        """CONTEXTUALIZE -> PREDICT is valid."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
@@ -165,20 +165,20 @@ class TestInferStateHook:
         # First: CONTEXTUALIZE
         write_investigation(run_dir, "## CONTEXTUALIZE\nstuff\n", runs_dir)
 
-        # Then: append HYPOTHESIZE
+        # Then: append PREDICT
         result = write_investigation(
             run_dir,
-            "## CONTEXTUALIZE\nstuff\n## HYPOTHESIZE (loop 1)\npredictions\n",
+            "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\npredictions\n",
             runs_dir,
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
 
         state = load_state(run_dir)
-        assert state["phase"] == "HYPOTHESIZE"
-        assert state["history"] == ["CONTEXTUALIZE", "HYPOTHESIZE"]
+        assert state["phase"] == "PREDICT"
+        assert state["history"] == ["CONTEXTUALIZE", "PREDICT"]
 
     def test_illegal_transition_rejected(self, tmp_path):
-        """CONTEXTUALIZE -> ANALYZE (skipping HYPOTHESIZE and GATHER) is rejected."""
+        """CONTEXTUALIZE -> ANALYZE (skipping PREDICT and GATHER) is rejected."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
@@ -209,12 +209,12 @@ class TestInferStateHook:
 
         phases_content = [
             "## CONTEXTUALIZE\nstuff\n",
-            "## CONTEXTUALIZE\nstuff\n## HYPOTHESIZE (loop 1)\nstuff\n",
-            "## CONTEXTUALIZE\nstuff\n## HYPOTHESIZE (loop 1)\nstuff\n## GATHER (loop 1)\nstuff\n",
-            "## CONTEXTUALIZE\nstuff\n## HYPOTHESIZE (loop 1)\nstuff\n## GATHER (loop 1)\nstuff\n## ANALYZE (loop 1)\nstuff\n",
-            "## CONTEXTUALIZE\nstuff\n## HYPOTHESIZE (loop 1)\nstuff\n## GATHER (loop 1)\nstuff\n## ANALYZE (loop 1)\nstuff\n## CONCLUDE\nverdicts\n",
+            "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\nstuff\n",
+            "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\nstuff\n## GATHER (loop 1)\nstuff\n",
+            "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\nstuff\n## GATHER (loop 1)\nstuff\n## ANALYZE (loop 1)\nstuff\n",
+            "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\nstuff\n## GATHER (loop 1)\nstuff\n## ANALYZE (loop 1)\nstuff\n## CONCLUDE\nverdicts\n",
         ]
-        expected_phases = ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        expected_phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
 
         for i, content in enumerate(phases_content):
             result = write_investigation(run_dir, content, runs_dir)
@@ -251,10 +251,10 @@ class TestInferStateHook:
         run_dir.mkdir(parents=True)
         write_meta(run_dir)
 
-        phases = ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
         content = ""
         for phase in phases:
-            suffix = " (loop 1)" if phase in ("HYPOTHESIZE", "GATHER", "ANALYZE") else ""
+            suffix = " (loop 1)" if phase in ("PREDICT", "GATHER", "ANALYZE") else ""
             content += f"## {phase}{suffix}\nstuff\n"
             result = write_investigation(run_dir, content, runs_dir)
             assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
@@ -291,16 +291,16 @@ class TestInferStateHook:
 
         phases = [
             "CONTEXTUALIZE",
-            "HYPOTHESIZE", "GATHER", "ANALYZE",
-            "HYPOTHESIZE", "GATHER", "ANALYZE",
+            "PREDICT", "GATHER", "ANALYZE",
+            "PREDICT", "GATHER", "ANALYZE",
             "CONCLUDE",
         ]
         content = ""
         loop = 0
         for phase in phases:
-            if phase == "HYPOTHESIZE":
+            if phase == "PREDICT":
                 loop += 1
-            suffix = f" (loop {loop})" if phase in ("HYPOTHESIZE", "GATHER", "ANALYZE") else ""
+            suffix = f" (loop {loop})" if phase in ("PREDICT", "GATHER", "ANALYZE") else ""
             content += f"## {phase}{suffix}\nstuff\n"
             result = write_investigation(run_dir, content, runs_dir)
             assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
@@ -323,13 +323,13 @@ class TestInferStateHook:
         # of full cycles that still fits under the cap.
         full_cycles = MAX_LOOPS // 2
         for i in range(1, full_cycles + 1):
-            for phase in ["HYPOTHESIZE", "GATHER", "ANALYZE"]:
+            for phase in ["PREDICT", "GATHER", "ANALYZE"]:
                 content += f"## {phase} (loop {i})\nstuff\n"
                 result = write_investigation(run_dir, content, runs_dir)
                 assert result.returncode == 0, f"Loop {i} {phase} failed: {result.stderr}"
 
-        # Next HYPOTHESIZE pushes the counter past MAX_LOOPS → rejected.
-        content += f"## HYPOTHESIZE (loop {full_cycles + 1})\nstuff\n"
+        # Next PREDICT pushes the counter past MAX_LOOPS → rejected.
+        content += f"## PREDICT (loop {full_cycles + 1})\nstuff\n"
         result = write_investigation(run_dir, content, runs_dir)
         assert result.returncode == 2
         assert "Maximum" in result.stderr
@@ -390,11 +390,11 @@ class TestInferStateHook:
         write_meta(run_dir)
 
         # Write C -> H
-        content = "## CONTEXTUALIZE\nstuff\n## HYPOTHESIZE (loop 1)\nstuff\n"
+        content = "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\nstuff\n"
         write_investigation(run_dir, content, runs_dir)
 
         # Now rewrite with sections reordered (H before C)
-        bad_content = "## HYPOTHESIZE (loop 1)\nstuff\n## CONTEXTUALIZE\nstuff\n"
+        bad_content = "## PREDICT (loop 1)\nstuff\n## CONTEXTUALIZE\nstuff\n"
         result = write_investigation(run_dir, bad_content, runs_dir)
         assert result.returncode == 2
         assert "mismatch" in result.stderr
@@ -409,8 +409,8 @@ class TestInferStateHook:
         content = "## CONTEXTUALIZE\nstuff\n## CONCLUDE\nverdicts\n"
         write_investigation(run_dir, content, runs_dir)
 
-        # Try to add HYPOTHESIZE after CONCLUDE
-        content += "## HYPOTHESIZE (loop 1)\nstuff\n"
+        # Try to add PREDICT after CONCLUDE
+        content += "## PREDICT (loop 1)\nstuff\n"
         result = write_investigation(run_dir, content, runs_dir)
         assert result.returncode == 2
 
@@ -437,7 +437,7 @@ class TestInferStateHook:
         content = "## CONTEXTUALIZE\nstuff\n"
         write_investigation(run_dir, content, runs_dir)
 
-        content += "## HYPOTHESIZE (loop 1)\nstuff\n"
+        content += "## PREDICT (loop 1)\nstuff\n"
         result = write_investigation(run_dir, content, runs_dir)
         assert "loop" in result.stdout.lower()
         assert result.returncode == 0
@@ -449,7 +449,7 @@ class TestInferStateHook:
         run_dir.mkdir(parents=True)
         write_meta(run_dir)
 
-        result = write_investigation(run_dir, "## HYPOTHESIZE (loop 1)\nstuff\n", runs_dir)
+        result = write_investigation(run_dir, "## PREDICT (loop 1)\nstuff\n", runs_dir)
         assert result.returncode == 2
         assert not (run_dir / "state.json").exists()
 
@@ -463,7 +463,7 @@ class TestInferStateHook:
         # Write C, H, G all at once
         content = (
             "## CONTEXTUALIZE\nstuff\n"
-            "## HYPOTHESIZE (loop 1)\nstuff\n"
+            "## PREDICT (loop 1)\nstuff\n"
             "## GATHER (loop 1)\nstuff\n"
         )
         result = write_investigation(run_dir, content, runs_dir)
@@ -471,7 +471,7 @@ class TestInferStateHook:
 
         state = load_state(run_dir)
         assert state["phase"] == "GATHER"
-        assert state["history"] == ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER"]
+        assert state["history"] == ["CONTEXTUALIZE", "PREDICT", "GATHER"]
 
 
 # ---------------------------------------------------------------------------
@@ -519,15 +519,15 @@ class TestBashDispatch:
         # content, and the Bash command string references the path.
         inv.write_text(
             "## CONTEXTUALIZE\nalert\n"
-            "## HYPOTHESIZE (loop 1)\npredictions\n"
+            "## PREDICT (loop 1)\npredictions\n"
         )
-        command = f"cat >> {inv} <<'EOF'\n## HYPOTHESIZE (loop 1)\npredictions\nEOF"
+        command = f"cat >> {inv} <<'EOF'\n## PREDICT (loop 1)\npredictions\nEOF"
         r2 = run_hook(make_bash_hook_event(command), runs_dir)
         assert r2.returncode == 0, f"stderr: {r2.stderr}"
 
         state = load_state(run_dir)
-        assert state["phase"] == "HYPOTHESIZE"
-        assert state["history"] == ["CONTEXTUALIZE", "HYPOTHESIZE"]
+        assert state["phase"] == "PREDICT"
+        assert state["history"] == ["CONTEXTUALIZE", "PREDICT"]
 
     def test_bash_full_walk_in_one_append(self, tmp_path):
         """A single Bash append that adds multiple phases transitions cleanly."""
@@ -539,19 +539,19 @@ class TestBashDispatch:
 
         inv.write_text(
             "## CONTEXTUALIZE\nalert\n"
-            "## HYPOTHESIZE (loop 1)\nh\n"
+            "## PREDICT (loop 1)\nh\n"
             "## GATHER (loop 1)\ng\n"
             "## ANALYZE (loop 1)\na\n"
             "## CONCLUDE\nend\n"
         )
-        command = f"cat >> {inv} <<'EOF'\n## HYPOTHESIZE ...\nEOF"
+        command = f"cat >> {inv} <<'EOF'\n## PREDICT ...\nEOF"
         r = run_hook(make_bash_hook_event(command), runs_dir)
         assert r.returncode == 0, f"stderr: {r.stderr}"
 
         state = load_state(run_dir)
         assert state["phase"] == "CONCLUDE"
         assert state["history"] == [
-            "CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE",
+            "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE",
         ]
 
     def test_tee_append_path_form(self, tmp_path):
@@ -564,12 +564,12 @@ class TestBashDispatch:
 
         inv.write_text(
             "## CONTEXTUALIZE\nalert\n"
-            "## HYPOTHESIZE (loop 1)\nh\n"
+            "## PREDICT (loop 1)\nh\n"
         )
-        command = f"echo '## HYPOTHESIZE (loop 1)' | tee -a {inv}"
+        command = f"echo '## PREDICT (loop 1)' | tee -a {inv}"
         r = run_hook(make_bash_hook_event(command), runs_dir)
         assert r.returncode == 0, f"stderr: {r.stderr}"
-        assert load_state(run_dir)["history"] == ["CONTEXTUALIZE", "HYPOTHESIZE"]
+        assert load_state(run_dir)["history"] == ["CONTEXTUALIZE", "PREDICT"]
 
     def test_bash_without_investigation_md_is_ignored(self, tmp_path):
         """A Bash command not touching investigation.md must not mutate state."""
@@ -669,10 +669,10 @@ class TestSessionMapping:
         first_created_at = json.loads(mapping_path.read_text())["created_at"]
 
         # Second write
-        inv.write_text("## CONTEXTUALIZE\nalert\n## HYPOTHESIZE\nhyp\n")
+        inv.write_text("## CONTEXTUALIZE\nalert\n## PREDICT\nhyp\n")
         event2 = json.dumps({
             "tool_name": "Write",
-            "tool_input": {"file_path": str(inv), "content": "## CONTEXTUALIZE\nalert\n## HYPOTHESIZE\nhyp\n"},
+            "tool_input": {"file_path": str(inv), "content": "## CONTEXTUALIZE\nalert\n## PREDICT\nhyp\n"},
             "session_id": session_id,
         })
         run_hook(event2, runs_dir)

@@ -9,7 +9,7 @@ Haiku screen + Haiku screen-invlang split.
 The handler runs a Python structural verifier on the match claim:
 matched_pattern must name a loaded Screen row, and every lead in that row's
 Leads column must appear in `leads_run`. Failures downgrade the result to
-`error` and route to HYPOTHESIZE.
+`error` and route to PREDICT.
 
 Input (Context):
     ctx.run_dir, ctx.signature_id, ctx.ticket_id, ctx.alert
@@ -17,8 +17,8 @@ Input (Context):
 Output:
     PhaseResult
       - match → Phase.CONCLUDE, payload carrying the match summary
-      - no_match | error | structural-downgraded → Phase.HYPOTHESIZE
-      - empty Screen section → Phase.HYPOTHESIZE without any subagent call
+      - no_match | error | structural-downgraded → Phase.PREDICT
+      - empty Screen section → Phase.PREDICT without any subagent call
 
 Files written:
     {run_dir}/investigation.md — appends a `## SCREEN` markdown block + the
@@ -252,7 +252,7 @@ def _compose_markdown(
     outcome_parts: list[str] = []
     if downgrade_reason:
         outcome_parts.append(f"structural-verification downgrade: {downgrade_reason}")
-        outcome_parts.append("falling through to HYPOTHESIZE")
+        outcome_parts.append("falling through to PREDICT")
     elif screen_result.get("screen_result") == "match":
         matched = screen_result.get("matched_pattern", "?")
         archetype = screen_result.get("matched_archetype") or "?"
@@ -263,10 +263,10 @@ def _compose_markdown(
         )
     elif screen_result.get("screen_result") == "no_match":
         reason = screen_result.get("reason") or "(no reason given)"
-        outcome_parts.append(f"no_match: {reason} — falling through to HYPOTHESIZE")
+        outcome_parts.append(f"no_match: {reason} — falling through to PREDICT")
     else:  # error
         reason = screen_result.get("reason") or "(no reason given)"
-        outcome_parts.append(f"error: {reason} — falling through to HYPOTHESIZE")
+        outcome_parts.append(f"error: {reason} — falling through to PREDICT")
     outcome_line = " | ".join(outcome_parts)
 
     return (
@@ -359,7 +359,7 @@ def handle(ctx: Context) -> PhaseResult:
     screen_rows = _load_screen_rows(ctx.signature_id)
     if not screen_rows:
         return PhaseResult(
-            next_phase=Phase.HYPOTHESIZE,
+            next_phase=Phase.PREDICT,
             payload={
                 "screen_result": "skipped",
                 "reason": "empty_screen_section",
@@ -397,6 +397,6 @@ def handle(ctx: Context) -> PhaseResult:
             next_phase=Phase.CONCLUDE, payload=_match_payload(parsed),
         )
     return PhaseResult(
-        next_phase=Phase.HYPOTHESIZE,
+        next_phase=Phase.PREDICT,
         payload=_fallthrough_payload(parsed, downgrade_reason),
     )

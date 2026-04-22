@@ -49,7 +49,7 @@ def const_handler(next_phase: Phase, payload: dict | None = None):
 def scripted_handler(*next_phases: Phase):
     """Handler that returns each next_phase in order across successive calls.
 
-    Lets one handler be reused for multi-loop tests (e.g. ANALYZE → HYPOTHESIZE
+    Lets one handler be reused for multi-loop tests (e.g. ANALYZE → PREDICT
     on loop 1, ANALYZE → CONCLUDE on loop 2).
     """
     it = iter(next_phases)
@@ -81,35 +81,35 @@ def test_screen_match_path(tmp_path):
 
 
 def test_full_loop_single_cycle(tmp_path):
-    """C -> HYPOTHESIZE -> GATHER -> ANALYZE -> CONCLUDE."""
+    """C -> PREDICT -> GATHER -> ANALYZE -> CONCLUDE."""
     ctx = make_ctx(tmp_path)
     handlers = {
-        Phase.CONTEXTUALIZE: const_handler(Phase.HYPOTHESIZE),
-        Phase.HYPOTHESIZE: const_handler(Phase.GATHER),
+        Phase.CONTEXTUALIZE: const_handler(Phase.PREDICT),
+        Phase.PREDICT: const_handler(Phase.GATHER),
         Phase.GATHER: const_handler(Phase.ANALYZE),
         Phase.ANALYZE: const_handler(Phase.CONCLUDE),
     }
     result = run(ctx, handlers)
     assert result["status"] == "complete"
     assert result["history"] == [
-        "CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE",
+        "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE",
     ]
 
 
 def test_full_loop_two_cycles(tmp_path):
-    """Two HYPOTHESIZE/GATHER/ANALYZE cycles before CONCLUDE."""
+    """Two PREDICT/GATHER/ANALYZE cycles before CONCLUDE."""
     ctx = make_ctx(tmp_path)
     handlers = {
-        Phase.CONTEXTUALIZE: const_handler(Phase.HYPOTHESIZE),
-        Phase.HYPOTHESIZE: const_handler(Phase.GATHER),
+        Phase.CONTEXTUALIZE: const_handler(Phase.PREDICT),
+        Phase.PREDICT: const_handler(Phase.GATHER),
         Phase.GATHER: const_handler(Phase.ANALYZE),
-        Phase.ANALYZE: scripted_handler(Phase.HYPOTHESIZE, Phase.CONCLUDE),
+        Phase.ANALYZE: scripted_handler(Phase.PREDICT, Phase.CONCLUDE),
     }
     result = run(ctx, handlers)
     assert result["history"] == [
         "CONTEXTUALIZE",
-        "HYPOTHESIZE", "GATHER", "ANALYZE",
-        "HYPOTHESIZE", "GATHER", "ANALYZE",
+        "PREDICT", "GATHER", "ANALYZE",
+        "PREDICT", "GATHER", "ANALYZE",
         "CONCLUDE",
     ]
 
@@ -131,20 +131,20 @@ def test_contextualize_to_conclude_direct(tmp_path):
 
 
 def test_gather_to_hypothesize_reentry(tmp_path):
-    """GATHER -> HYPOTHESIZE is legal (mid-lead fork realization)."""
+    """GATHER -> PREDICT is legal (mid-lead fork realization)."""
     ctx = make_ctx(tmp_path)
     handlers = {
-        Phase.CONTEXTUALIZE: const_handler(Phase.HYPOTHESIZE),
-        Phase.HYPOTHESIZE: const_handler(Phase.GATHER),
-        # First GATHER realizes a new fork; jump back to HYPOTHESIZE.
-        Phase.GATHER: scripted_handler(Phase.HYPOTHESIZE, Phase.ANALYZE),
+        Phase.CONTEXTUALIZE: const_handler(Phase.PREDICT),
+        Phase.PREDICT: const_handler(Phase.GATHER),
+        # First GATHER realizes a new fork; jump back to PREDICT.
+        Phase.GATHER: scripted_handler(Phase.PREDICT, Phase.ANALYZE),
         Phase.ANALYZE: const_handler(Phase.CONCLUDE),
     }
     result = run(ctx, handlers)
     assert result["history"] == [
         "CONTEXTUALIZE",
-        "HYPOTHESIZE", "GATHER",
-        "HYPOTHESIZE", "GATHER", "ANALYZE",
+        "PREDICT", "GATHER",
+        "PREDICT", "GATHER", "ANALYZE",
         "CONCLUDE",
     ]
 
@@ -169,23 +169,23 @@ def test_missing_handler_raises(tmp_path):
     """Orchestrator must fail loudly if a phase has no handler."""
     ctx = make_ctx(tmp_path)
     handlers = {
-        Phase.CONTEXTUALIZE: const_handler(Phase.HYPOTHESIZE),
-        # No HYPOTHESIZE handler registered
+        Phase.CONTEXTUALIZE: const_handler(Phase.PREDICT),
+        # No PREDICT handler registered
     }
-    with pytest.raises(OrchestrationError, match="no handler registered for phase HYPOTHESIZE"):
+    with pytest.raises(OrchestrationError, match="no handler registered for phase PREDICT"):
         run(ctx, handlers)
 
 
 def test_loop_cap_forces_conclude(tmp_path):
-    """After MAX_LOOPS HYPOTHESIZE/ANALYZE entries the orchestrator forces CONCLUDE."""
+    """After MAX_LOOPS PREDICT/ANALYZE entries the orchestrator forces CONCLUDE."""
     ctx = make_ctx(tmp_path)
     # Build a handler set that would loop forever without the cap:
     # C -> H -> G -> A -> H -> G -> A -> ...
     handlers = {
-        Phase.CONTEXTUALIZE: const_handler(Phase.HYPOTHESIZE),
-        Phase.HYPOTHESIZE: const_handler(Phase.GATHER),
+        Phase.CONTEXTUALIZE: const_handler(Phase.PREDICT),
+        Phase.PREDICT: const_handler(Phase.GATHER),
         Phase.GATHER: const_handler(Phase.ANALYZE),
-        Phase.ANALYZE: const_handler(Phase.HYPOTHESIZE),  # never concludes on its own
+        Phase.ANALYZE: const_handler(Phase.PREDICT),  # never concludes on its own
     }
     result = run(ctx, handlers)
     assert result["status"] == "forced_conclude"
@@ -193,7 +193,7 @@ def test_loop_cap_forces_conclude(tmp_path):
     assert result["history"][-1] == "CONCLUDE"
     # Loop cap: count of H or A entries in history before the forced CONCLUDE
     # should be >= MAX_LOOPS.
-    ha_count = sum(1 for p in result["history"] if p in {"HYPOTHESIZE", "ANALYZE"})
+    ha_count = sum(1 for p in result["history"] if p in {"PREDICT", "ANALYZE"})
     assert ha_count >= MAX_LOOPS
 
 
@@ -216,8 +216,8 @@ def test_state_json_is_persisted_every_transition(tmp_path):
         return handler
 
     handlers = {
-        Phase.CONTEXTUALIZE: recorder(Phase.HYPOTHESIZE),
-        Phase.HYPOTHESIZE: recorder(Phase.GATHER),
+        Phase.CONTEXTUALIZE: recorder(Phase.PREDICT),
+        Phase.PREDICT: recorder(Phase.GATHER),
         Phase.GATHER: recorder(Phase.ANALYZE),
         Phase.ANALYZE: recorder(Phase.CONCLUDE),
     }
@@ -226,12 +226,12 @@ def test_state_json_is_persisted_every_transition(tmp_path):
 
     # At handler-call time, state.json reflects the phase that was just entered.
     phases_seen = [s["phase"] for s in recorded]
-    assert phases_seen == ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE"]
+    assert phases_seen == ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE"]
 
     # History grows monotonically.
     histories = [s["history"] for s in recorded]
     assert histories[0] == ["CONTEXTUALIZE"]
-    assert histories[-1] == ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE"]
+    assert histories[-1] == ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE"]
 
     # Final state.json after CONCLUDE
     final = json.loads(state_path.read_text())
