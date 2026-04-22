@@ -128,6 +128,19 @@ def _case_id_from_path(path: Path) -> str:
     return path.parent.name if path.parent.name not in {"", "."} else path.stem
 
 
+_SIGNATURE_ID_RE = re.compile(r"rule(\d+)")
+
+
+def signature_id_from_path(path: Path) -> str | None:
+    """Recover `wazuh-rule-<N>` from a companion source path when the eval-run
+    directory encodes it (e.g. `/workspace/runs/20260422-.../rule100001/...`).
+    Returns None if no match — the corpus loader doesn't guarantee this field,
+    so callers must tolerate absence.
+    """
+    m = _SIGNATURE_ID_RE.search(str(path))
+    return f"wazuh-rule-{m.group(1)}" if m else None
+
+
 def _merge_md_blocks(text: str) -> dict[str, Any]:
     """Merge every ```yaml block in an investigation.md into one companion body.
 

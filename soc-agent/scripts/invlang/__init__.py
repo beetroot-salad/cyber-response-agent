@@ -29,9 +29,11 @@ from .queries import (
     lead_discrimination_score,
     lead_effectiveness,
     lead_effectiveness_for_hypothesis,
+    lead_effectiveness_for_prologue,
     lead_effectiveness_for_topology,
     lead_pair_synergy,
     lead_sequence_pattern,
+    peer_hypothesis_distribution_for_prologue,
     peer_hypothesis_distribution_for_topology,
     post_failure_recovery,
     prose_substring,
@@ -69,4 +71,7 @@ __all__ = [
     "hypothesis_topology",
     "lead_effectiveness_for_topology",
     "peer_hypothesis_distribution_for_topology",
+    # prologue-conditioned retrieval (loop-1 priors, no hypothesis yet)
+    "lead_effectiveness_for_prologue",
+    "peer_hypothesis_distribution_for_prologue",
 ]

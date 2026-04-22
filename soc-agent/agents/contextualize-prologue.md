@@ -43,16 +43,35 @@ directories, do not read anything else.
      - admin patterns → `privileged-account`
      - attack-wordlist names (admin, root, user, test, oracle, postgres) → `generic-account`
      - otherwise → `unclassified-identity`
+   - **Process-ancestor fields** (`pname`, `parent`, `parent_pid`, `proc.pname`) →
+     when the alert carries a named parent/ancestor process, **promote it to its
+     own vertex** of `type: process`. Classify by name:
+     - `runc`, `containerd-shim`, `docker`, `docker-exec`, `crun`, `kata-runtime` →
+       `classification: runtime-exec-primitive`
+     - `sshd`, `systemd`, `init`, `cron`, `crond` → `classification: system-service-process`
+     - `tini`, `dumb-init` → `classification: container-entrypoint`
+     - otherwise → `classification: unclassified-process`
+     Do NOT fold a named parent into the child process's `attributes` — the
+     parent is a distinct vertex because downstream HYPOTHESIZE attaches the
+     proposed upstream edge to it (not to the child shell). Missing / null
+     parent → omit the vertex (no invention).
    - **Other fields named in field-quirks** → pick the closest matching type; if
      none apply, skip the field rather than invent a vertex type.
 4. Emit one edge per observed relationship between vertices in the alert:
    - For auth-style alerts: `attempted_auth` from source-endpoint → target-endpoint
      with `target_user` in attributes
    - For file-access alerts: `accessed` from identity → resource
-   - For process-exec alerts: `executed` from identity → process (with parent
-     pointer if present)
+   - For process-exec alerts with a named ancestor: emit **two edges** —
+     (a) `spawned` from parent-process vertex → child-process vertex (authority:
+     `runtime-audit` when the alert came from an eBPF/syscall source like Falco,
+     `siem-event` otherwise), and (b) `executed` from identity → child-process.
+     When no parent is named, emit only (b).
    - In general: pick the relation that captures what the alert's detection
-     trigger literally observed, not what an analyst would infer.
+     trigger literally observed, not what an analyst would infer. Edges that
+     attach to the *parent* process (not the child) are the load-bearing
+     ones for signatures whose playbook seeds fork on who invoked the child
+     (container-shell, docker-exec, sudo, setuid) — don't collapse them into
+     child-vertex attributes.
 5. Every edge carries `authority: { kind: siem-event, source: "{siem-product} (rule {rule_id})" }`
    derived from the alert.
 

@@ -361,7 +361,7 @@ class TestPriorsIntegration:
         assert "auth-history" in prompt
         assert "n=1" in prompt
 
-    def test_assemble_prompt_loop1_fallback_uses_playbook_seeds(self, tmp_path, monkeypatch):
+    def test_assemble_prompt_loop1_empty_corpus_renders_no_match_banner(self, tmp_path, monkeypatch):
         # Only CONTEXTUALIZE written — no prior hypothesize block yet.
         prologue_only = textwrap.dedent("""
             ## CONTEXTUALIZE
@@ -374,16 +374,19 @@ class TestPriorsIntegration:
         """).strip() + "\n"
         ctx = make_ctx(tmp_path, existing_investigation=prologue_only)
         import invlang
-        # Empty corpus → seeds will narrow to "no match" banners.
+        # Empty corpus → prologue retrieval returns no matches at any tier.
         monkeypatch.setattr(invlang, "load_corpus", lambda *a, **k: [])
 
         prompt = hypothesize_handler._assemble_prompt(ctx)
+        # Loop-1 now takes the prologue-keyed retrieval path, which renders
+        # a single block keyed on the prologue shape (not per-seed). With an
+        # empty corpus we expect the "no match" sentinel at tier 3.
         assert "## Past-investigation priors" in prompt
-        # Playbook for rule-5710 has hypothesis seeds, so loop-1 synthesizes a
-        # frontier. Loop-1 fingerprints have relation=None, so tiers 0-3 fail
-        # and retrieval must land at tier 4 — the empty-frontier sentinel
-        # would indicate seed extraction broke.
-        assert "tier 4" in prompt
+        assert "Loop 1 — keyed on prologue topology" in prompt
+        assert "tier 3: no match" in prompt
+        assert "Leads: (no corpus matches)" in prompt
+        # Sentinel that would fire if the loop-1 detection silently broke
+        # and fell through to the loop-2+ per-seed path.
         assert "(no frontier extracted)" not in prompt
 
     def test_priors_failure_is_non_fatal(self, tmp_path, monkeypatch):
