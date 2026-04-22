@@ -32,9 +32,16 @@ def make_ctx(
     analyze: dict | None = None,
     screen: dict | None = None,
     forced_conclude: bool = False,
+    investigation_md: str = "## CONTEXTUALIZE\n\nalert observed.\n",
 ) -> Context:
     run_dir = tmp_path / "run-test"
     run_dir.mkdir()
+    # alert.json + investigation.md are now pre-loaded by the handler into the
+    # prompt, so both must exist on disk.
+    alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
+    import json as _json
+    (run_dir / "alert.json").write_text(_json.dumps(alert))
+    (run_dir / "investigation.md").write_text(investigation_md)
     outputs: dict[Phase, dict] = {}
     if contextualize is not None:
         outputs[Phase.CONTEXTUALIZE] = contextualize
@@ -46,10 +53,21 @@ def make_ctx(
         run_dir=run_dir,
         signature_id="wazuh-rule-5710",
         ticket_id=ticket_id,
-        alert={"id": "alert-1"},
+        alert=alert,
         outputs=outputs,
         forced_conclude=forced_conclude,
     )
+
+
+def _prepare_run_dir(run_dir: Path, *, investigation_md: str = "## CONTEXTUALIZE\n\nalert observed.\n") -> None:
+    """Create alert.json + investigation.md on disk so the handler's preloaded
+    prompt assembly doesn't FileNotFoundError. Kept small — tests that need
+    specific alert content or investigation shape override per-call."""
+    import json as _json
+    alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
+    run_dir.mkdir(exist_ok=True)
+    (run_dir / "alert.json").write_text(_json.dumps(alert))
+    (run_dir / "investigation.md").write_text(investigation_md)
 
 
 def stub_invoke(captured: list[str], response: str):
@@ -67,6 +85,61 @@ def stub_invoke(captured: list[str], response: str):
 
 
 class TestPromptAssembly:
+    def test_prompt_inlines_alert_investigation_archetypes_with_precedents(self, tmp_path, monkeypatch):
+        """Non-forced path preloads alert + investigation + archetype shapes
+        with precedents into the prompt so the subagent needs no Read/Glob."""
+        ctx = make_ctx(
+            tmp_path,
+            analyze={"disposition": "benign", "matched_archetype": "monitoring-probe"},
+            investigation_md="## CONTEXTUALIZE\n\nsignature analysis.\n\n## ANALYZE (loop 1)\n\nrouting.\n",
+        )
+        captured: list[str] = []
+        response = textwrap.dedent("""
+        ```yaml
+        status: written
+        report_path: /tmp/report.md
+        disposition: benign
+        confidence: high
+        matched_archetype: monitoring-probe
+        status_frontmatter: resolved
+        ```
+        """).strip()
+        monkeypatch.setattr(conclude_handler, "_invoke_subagent", stub_invoke(captured, response))
+        conclude_handler.handle(ctx)
+        prompt = captured[0]
+        # All three tagged blocks present
+        assert "<alert>" in prompt and "</alert>" in prompt
+        assert "<investigation>" in prompt and "signature analysis" in prompt
+        assert "<archetypes>" in prompt
+        # Matched archetype shape inlined
+        assert 'name="monitoring-probe"' in prompt
+        # Precedents surfaced (5710/monitoring-probe ships SEC-2024-001)
+        assert "SEC-2024-001" in prompt
+
+    def test_prompt_omits_archetypes_on_forced_exhaustion(self, tmp_path, monkeypatch):
+        """Forced-exhaustion emits matched_archetype=null by contract, so
+        loading archetype shapes + precedents is wasted prompt tokens. Block
+        must be absent."""
+        ctx = make_ctx(tmp_path, forced_conclude=True)
+        captured: list[str] = []
+        response = textwrap.dedent("""
+        ```yaml
+        status: written
+        report_path: /tmp/report.md
+        disposition: inconclusive
+        confidence: low
+        matched_archetype: null
+        status_frontmatter: escalated
+        ```
+        """).strip()
+        monkeypatch.setattr(conclude_handler, "_invoke_subagent", stub_invoke(captured, response))
+        conclude_handler.handle(ctx)
+        prompt = captured[0]
+        assert "<alert>" in prompt
+        assert "<investigation>" in prompt
+        assert "<archetypes>" not in prompt
+        assert "<archetype " not in prompt
+
     def test_analyze_routing_passes_core_fields(self, tmp_path, monkeypatch):
         ctx = make_ctx(
             tmp_path,
@@ -319,7 +392,7 @@ class TestOrchestratorIntegration:
 
     def test_conclude_handler_runs_before_terminal_return(self, tmp_path, monkeypatch):
         run_dir = tmp_path / "run-1"
-        run_dir.mkdir()
+        _prepare_run_dir(run_dir)
         ctx = Context(
             run_dir=run_dir,
             signature_id="wazuh-rule-5710",
@@ -367,7 +440,7 @@ class TestOrchestratorIntegration:
         """When MAX_LOOPS forces CONCLUDE, the handler still runs and receives
         a ctx with no ANALYZE/SCREEN outputs (forced-exhaustion path)."""
         run_dir = tmp_path / "run-forced"
-        run_dir.mkdir()
+        _prepare_run_dir(run_dir)
         ctx = Context(
             run_dir=run_dir,
             signature_id="wazuh-rule-5710",
@@ -428,6 +501,13 @@ def _seed_ctx_for_mechanical(tmp_path: Path, *, matched_ticket_id: str | None) -
     mechanical CONCLUDE composer."""
     run_dir = tmp_path / "run-mech"
     run_dir.mkdir()
+    # Seed alert.json for the preload path (even though mechanical compose
+    # doesn't invoke the subagent, assembling a ctx that validates cleanly
+    # means fallback paths still work).
+    import json as _json
+    (run_dir / "alert.json").write_text(
+        _json.dumps({"id": "alert-1", "rule": {"id": "5710"}, "data": {}})
+    )
     # Seed investigation.md with a minimal prologue so the mechanical path's
     # investigation.md append produces valid cumulative text.
     (run_dir / "investigation.md").write_text(
@@ -672,7 +752,7 @@ class TestMechanicalScreenCompose:
         """Missing gather block → mechanical composer gated off, handler
         dispatches the conclude subagent as before."""
         run_dir = tmp_path / "run-fallback"
-        run_dir.mkdir()
+        _prepare_run_dir(run_dir)
         ctx = Context(
             run_dir=run_dir,
             signature_id="wazuh-rule-5710",

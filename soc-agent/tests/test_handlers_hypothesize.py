@@ -35,13 +35,19 @@ def make_ctx(
 ) -> Context:
     run_dir = tmp_path / "run-test"
     run_dir.mkdir()
+    # alert.json is required — the hypothesize handler now preloads it into
+    # the prompt along with investigation.md + signature knowledge + lead
+    # catalog + archetype shapes.
+    import json as _json
+    alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
+    (run_dir / "alert.json").write_text(_json.dumps(alert))
     if existing_investigation is not None:
         (run_dir / "investigation.md").write_text(existing_investigation)
     ctx = Context(
         run_dir=run_dir,
         signature_id="wazuh-rule-5710",
         ticket_id="SEC-2026-042",
-        alert={"id": "alert-1"},
+        alert=alert,
         history=history or [Phase.HYPOTHESIZE.value],
         current_phase=current_phase,
     )
@@ -111,12 +117,28 @@ loop_n: 1
 
 
 _NO_FORK_RESPONSE = textwrap.dedent("""
-## GATHER (loop 1)
+## HYPOTHESIZE (loop 1) — no fork yet
 
-**Selected lead:** source-classification
+**Selected lead:** source-classification — classifies srcip against
+ip-ranges.md and approved-monitoring-sources anchor; discriminates
+sanctioned-automation vs unregistered-internal vs external-origin.
+
 **Pitfalls:**
-- lead-level pitfall …
+- l-001: anchor registry lag — a newly-added approved source may
+  not be in the cached copy; re-fetch if the classification misses.
 
+```yaml
+mode: no-fork
+selected_lead: source-classification
+loop_n: 1
+```
+""").strip()
+
+
+# A legacy shape: the subagent incorrectly emits a `gather:` block. This
+# is the contract violation the handler catches and retries with the
+# gather_block_in_hypothesize remediation directive.
+_NO_FORK_WITH_GATHER_BLOCK_RESPONSE = textwrap.dedent("""
 ```yaml
 gather:
   - id: l-001
@@ -163,6 +185,32 @@ class TestPromptAssembly:
         assert "run_dir=" in captured[0]
         assert "signature_id=wazuh-rule-5710" in captured[0]
         assert "resume_from_checkpoint" not in captured[0]
+
+    def test_prompt_inlines_all_deterministic_context(self, tmp_path, monkeypatch):
+        """Handler preloads alert + investigation + signature knowledge +
+        archetypes + lead catalog so the subagent needs no Read tool."""
+        ctx = make_ctx(
+            tmp_path,
+            history=[Phase.HYPOTHESIZE.value],
+            existing_investigation="## CONTEXTUALIZE\n\nsignature summary.\n",
+        )
+        captured: list[str] = []
+        monkeypatch.setattr(hypothesize_handler, "_invoke_subagent",
+                            stub_invoke(captured, [_FORK_RESPONSE]))
+        monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
+                            stub_validator([[]]))
+        hypothesize_handler.handle(ctx)
+        prompt = captured[0]
+
+        # All five tagged blocks present
+        assert "<alert>" in prompt and "</alert>" in prompt
+        assert "<investigation>" in prompt and "signature summary" in prompt
+        assert "<signature-knowledge>" in prompt
+        assert "<playbook>" in prompt  # real 5710 playbook body inlined
+        assert "<archetypes>" in prompt
+        assert 'name="monitoring-probe"' in prompt
+        assert "<lead-catalog>" in prompt
+        assert 'name="authentication-history"' in prompt  # real lead inlined
 
     def test_second_loop_passes_loop_n_2(self, tmp_path, monkeypatch):
         # History of one completed loop + current HYPOTHESIZE entry for loop 2.
@@ -371,8 +419,17 @@ class TestDetectBlockType:
     def test_detects_hypothesize_block(self):
         assert hypothesize_handler._detect_block_type(_FORK_RESPONSE) == "hypothesize"
 
-    def test_detects_gather_block(self):
-        assert hypothesize_handler._detect_block_type(_NO_FORK_RESPONSE) == "gather"
+    def test_detects_gather_block_as_contract_violation(self):
+        """A `gather:` block in hypothesize output is now a contract
+        violation — detection still returns "gather", and the handler
+        catches it upstream to trigger the registry-loaded remediation."""
+        assert hypothesize_handler._detect_block_type(
+            _NO_FORK_WITH_GATHER_BLOCK_RESPONSE
+        ) == "gather"
+
+    def test_detects_no_block_when_only_trailer(self):
+        """The valid no-fork shape — narrative + trailer, no invlang block."""
+        assert hypothesize_handler._detect_block_type(_NO_FORK_RESPONSE) == "unknown"
 
     def test_detects_error_block(self):
         assert hypothesize_handler._detect_block_type(_ERROR_RESPONSE) == "error"
@@ -399,11 +456,23 @@ class TestValidateTrailer:
             trailer, block_type="hypothesize", expected_loop_n=1,
         )
 
-    def test_no_fork_mode_gather_block_ok(self):
+    def test_no_fork_mode_no_block_ok(self):
+        """Valid no-fork shape — trailer with no invlang block (block_type=unknown)."""
         trailer = {"mode": "no-fork", "selected_lead": "foo", "loop_n": 2}
         hypothesize_handler._validate_trailer(
-            trailer, block_type="gather", expected_loop_n=2,
+            trailer, block_type="unknown", expected_loop_n=2,
         )
+
+    def test_no_fork_mode_with_gather_block_raises(self):
+        """A `gather:` block under no-fork is a contract violation — the
+        validator rejects it here (the handler's earlier short-circuit
+        catches it before validation in the live path, but the trailer
+        check is the backstop)."""
+        with pytest.raises(OrchestrationError, match="requires block_type"):
+            hypothesize_handler._validate_trailer(
+                {"mode": "no-fork", "selected_lead": "x", "loop_n": 1},
+                block_type="gather", expected_loop_n=1,
+            )
 
     def test_invalid_mode_raises(self):
         with pytest.raises(OrchestrationError, match="invalid trailer mode"):
@@ -412,11 +481,13 @@ class TestValidateTrailer:
                 block_type="hypothesize", expected_loop_n=1,
             )
 
-    def test_mode_mismatches_block_type_raises(self):
-        with pytest.raises(OrchestrationError, match="does not match block type"):
+    def test_fork_mode_with_no_block_raises(self):
+        """fork mode requires a hypothesize: block — trailer-only is a contract
+        violation."""
+        with pytest.raises(OrchestrationError, match="requires block_type"):
             hypothesize_handler._validate_trailer(
-                {"mode": "no-fork", "selected_lead": "x", "loop_n": 1},
-                block_type="hypothesize", expected_loop_n=1,
+                {"mode": "fork", "selected_lead": "x", "loop_n": 1},
+                block_type="unknown", expected_loop_n=1,
             )
 
     def test_missing_selected_lead_raises(self):
@@ -512,15 +583,79 @@ class TestHandleHappyPaths:
         assert result.payload["block_type"] == "hypothesize"
 
     def test_no_fork_mode_routes_to_gather(self, tmp_path, monkeypatch):
-        ctx = make_ctx(tmp_path)
+        """No-fork emits no invlang block — narrative + trailer only.
+        Nothing is appended to investigation.md; routing still flows to GATHER."""
+        ctx = make_ctx(tmp_path, existing_investigation="## CONTEXTUALIZE\n\nexisting.\n")
         monkeypatch.setattr(hypothesize_handler, "_invoke_subagent",
                             stub_invoke([], [_NO_FORK_RESPONSE]))
+        # validator not expected to be called — no sections to append
         monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
                             stub_validator([[]]))
         result = hypothesize_handler.handle(ctx)
         assert result.next_phase == Phase.GATHER
         assert result.payload["mode"] == "no-fork"
-        assert result.payload["block_type"] == "gather"
+        assert result.payload["selected_lead"] == "source-classification"
+        assert result.payload["block_type"] == "unknown"
+
+        # investigation.md unchanged — no-fork writes nothing.
+        inv = (ctx.run_dir / "investigation.md").read_text()
+        assert inv == "## CONTEXTUALIZE\n\nexisting.\n"
+
+    def test_prose_only_stdout_triggers_summary_not_yaml_remediation(self, tmp_path, monkeypatch):
+        """Subagent emits narrative prose with no YAML fences at all (typical
+        when it wrote a detailed checkpoint and then 'summarized' for the
+        caller). Handler detects the missing structured output and retries
+        with the `stdout_summary_not_yaml` directive."""
+        prose_only = textwrap.dedent("""
+            HYPOTHESIZE loop 1 complete. Three mutually exclusive mechanism
+            hypotheses formed against v-001. Next lead: container-baseline.
+        """).strip()
+        captured: list[str] = []
+        monkeypatch.setattr(
+            hypothesize_handler, "_invoke_subagent",
+            stub_invoke(captured, [prose_only, _FORK_RESPONSE]),
+        )
+        monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
+                            stub_validator([[]]))
+        ctx = make_ctx(tmp_path)
+        result = hypothesize_handler.handle(ctx)
+
+        # Retry fired with the registry directive.
+        assert len(captured) == 2
+        directive = hypothesize_handler._FAILURE_REMEDIATIONS["stdout_summary_not_yaml"]
+        assert directive in captured[1]
+        assert directive not in captured[0]
+        # Final routing is the fork shape (the retry emitted _FORK_RESPONSE).
+        assert result.next_phase == Phase.GATHER
+        assert result.payload["mode"] == "fork"
+        assert result.payload["block_type"] == "hypothesize"
+
+    def test_gather_block_triggers_structured_remediation_retry(self, tmp_path, monkeypatch):
+        """When the subagent emits a `gather:` block, the handler retries with
+        the registry-loaded `gather_block_in_hypothesize` directive. On the
+        second attempt the subagent emits the correct no-fork shape."""
+        captured: list[str] = []
+        monkeypatch.setattr(
+            hypothesize_handler, "_invoke_subagent",
+            stub_invoke(captured, [_NO_FORK_WITH_GATHER_BLOCK_RESPONSE, _NO_FORK_RESPONSE]),
+        )
+        monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
+                            stub_validator([[]]))
+        ctx = make_ctx(tmp_path)
+        result = hypothesize_handler.handle(ctx)
+
+        # Two attempts — the second is the retry.
+        assert len(captured) == 2
+        # The retry prompt carries the registry-loaded directive verbatim.
+        directive = hypothesize_handler._FAILURE_REMEDIATIONS["gather_block_in_hypothesize"]
+        assert directive in captured[1]
+        assert "resume_from_checkpoint=true" in captured[1]
+        # First-attempt prompt has no remediation directive.
+        assert directive not in captured[0]
+        # Final routing is the no-fork shape.
+        assert result.next_phase == Phase.GATHER
+        assert result.payload["mode"] == "no-fork"
+        assert result.payload["block_type"] == "unknown"
 
     def test_appends_sections_without_trailer(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path, existing_investigation="## CONTEXTUALIZE\n\nexisting.\n")
@@ -562,7 +697,10 @@ class TestHandleErrorPaths:
             """).strip()
         monkeypatch.setattr(hypothesize_handler, "_invoke_subagent",
                             stub_invoke([], [only_trailer]))
-        with pytest.raises(OrchestrationError, match="no hypothesize:/gather:/error:"):
+        # mode=fork without an invlang block is a contract mismatch caught
+        # by _validate_trailer — "requires block_type 'hypothesize', got
+        # 'unknown'".
+        with pytest.raises(OrchestrationError, match="requires block_type"):
             hypothesize_handler.handle(ctx)
 
     def test_trailer_loop_mismatch_raises(self, tmp_path, monkeypatch):
@@ -606,7 +744,7 @@ class TestValidationRetry:
                                 ["error one"],
                                 ["error two"],
                             ]))
-        with pytest.raises(OrchestrationError, match="validation failed on retry"):
+        with pytest.raises(OrchestrationError, match="failed on retry"):
             hypothesize_handler.handle(ctx)
 
     def test_no_retry_if_first_passes(self, tmp_path, monkeypatch):
@@ -618,3 +756,180 @@ class TestValidationRetry:
                             stub_validator([[]]))
         hypothesize_handler.handle(ctx)
         assert len(captured) == 1
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint recovery (stdout-empty → read M_last instead of retrying)
+# ---------------------------------------------------------------------------
+
+
+def _write_checkpoint(run_dir: Path, loop_n: int, payload: dict) -> None:
+    import yaml
+    ckpt_dir = run_dir / "subagent_checkpoints"
+    ckpt_dir.mkdir(exist_ok=True)
+    (ckpt_dir / f"hypothesize-loop-{loop_n}.yaml").write_text(
+        yaml.safe_dump(payload, sort_keys=False)
+    )
+
+
+class TestCheckpointRecovery:
+    """Empty-stdout case: subagent ended on tool_use(Write M_last), `claude
+    --print` captured nothing. Handler reads the checkpoint and synthesizes the
+    response — no retry."""
+
+    def test_no_fork_checkpoint_synthesized_without_retry(self, tmp_path, monkeypatch):
+        ctx = make_ctx(tmp_path)
+        _write_checkpoint(ctx.run_dir, 1, {
+            "status": "complete",
+            "mode": "no-fork",
+            "selected_lead": "shell-context",
+        })
+        captured: list[str] = []
+        # Subagent returns empty stdout (the pathology).
+        monkeypatch.setattr(hypothesize_handler, "_invoke_subagent",
+                            stub_invoke(captured, [""]))
+        result = hypothesize_handler.handle(ctx)
+        # No retry — recovery short-circuited the rerun.
+        assert len(captured) == 1
+        assert result.payload["mode"] == "no-fork"
+        assert result.payload["selected_lead"] == "shell-context"
+        assert result.payload["block_type"] == "unknown"
+        # No-fork writes nothing to investigation.md.
+        assert not (ctx.run_dir / "investigation.md").exists() or \
+               "HYPOTHESIZE" not in (ctx.run_dir / "investigation.md").read_text()
+
+    def test_fork_checkpoint_synthesized_and_appended(self, tmp_path, monkeypatch):
+        ctx = make_ctx(tmp_path, existing_investigation="## CONTEXTUALIZE\n\nexisting.\n")
+        _write_checkpoint(ctx.run_dir, 1, {
+            "status": "complete",
+            "mode": "fork",
+            "hypotheses": [
+                {
+                    "id": "h-001",
+                    "name": "?scheduled-automation-health-check",
+                    "attached_to_vertex": "v-001",
+                    "proposed_edge": {
+                        "relation": "initiated_by",
+                        "parent_vertex": {
+                            "type": "identity",
+                            "classification": "scheduled-automation-health-check",
+                        },
+                    },
+                    "predictions": [
+                        {"id": "p1", "subject": "proposed_parent",
+                         "claim": "event cadence matches documented probe interval within ±5s"},
+                    ],
+                    "refutation_shape": [
+                        {"id": "r1", "refutes_predictions": ["p1"],
+                         "claim": "event cadence is off-documented-interval"},
+                    ],
+                    "weight": None,
+                },
+            ],
+            "selected_lead": "authentication-history",
+        })
+        captured: list[str] = []
+        monkeypatch.setattr(hypothesize_handler, "_invoke_subagent",
+                            stub_invoke(captured, [""]))
+        monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
+                            stub_validator([[]]))
+        result = hypothesize_handler.handle(ctx)
+        assert len(captured) == 1  # no retry
+        assert result.payload["mode"] == "fork"
+        assert result.payload["selected_lead"] == "authentication-history"
+        assert result.payload["block_type"] == "hypothesize"
+        written = (ctx.run_dir / "investigation.md").read_text()
+        assert "existing." in written
+        assert "## HYPOTHESIZE (loop 1)" in written
+        assert "?scheduled-automation-health-check" in written
+
+    def test_incomplete_checkpoint_falls_through_to_retry(self, tmp_path, monkeypatch):
+        """Checkpoint with status != 'complete' should NOT synthesize — the
+        subagent needs to finish the work. Handler falls through to the
+        existing stdout_summary_not_yaml retry path."""
+        ctx = make_ctx(tmp_path)
+        _write_checkpoint(ctx.run_dir, 1, {
+            "status": "drafting",  # ← not complete
+            "mode": "fork",
+        })
+        captured: list[str] = []
+        monkeypatch.setattr(
+            hypothesize_handler, "_invoke_subagent",
+            stub_invoke(captured, ["", _FORK_RESPONSE]),
+        )
+        monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
+                            stub_validator([[]]))
+        result = hypothesize_handler.handle(ctx)
+        # Retry fired — the second call carried the stdout_summary_not_yaml directive.
+        assert len(captured) == 2
+        directive = hypothesize_handler._FAILURE_REMEDIATIONS["stdout_summary_not_yaml"]
+        assert directive in captured[1]
+        assert result.payload["mode"] == "fork"
+
+    def test_no_checkpoint_file_falls_through_to_retry(self, tmp_path, monkeypatch):
+        """When the subagent emits empty stdout AND wrote no checkpoint at all,
+        the retry path is the only recovery."""
+        ctx = make_ctx(tmp_path)
+        # Deliberately do not write a checkpoint.
+        captured: list[str] = []
+        monkeypatch.setattr(
+            hypothesize_handler, "_invoke_subagent",
+            stub_invoke(captured, ["", _FORK_RESPONSE]),
+        )
+        monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
+                            stub_validator([[]]))
+        hypothesize_handler.handle(ctx)
+        assert len(captured) == 2
+
+
+# ---------------------------------------------------------------------------
+# Archetype-scan-aware prompt trimming
+# ---------------------------------------------------------------------------
+
+
+class TestArchetypeSelection:
+    """Vocabulary: archetype-scan emits `candidate | ruled-out` — no
+    strong/moderate/weak ranking. The hypothesize prompt ships every candidate
+    (plus the adversarial archetype, even if ruled-out)."""
+
+    def test_candidates_plus_adversarial(self):
+        investigation = textwrap.dedent("""\
+            **Plausible archetypes (candidates for HYPOTHESIZE):**
+            - alpha — notes
+            - beta — notes
+            - gamma — notes
+            **Ruled-out archetypes:**
+            - epsilon — disqualifier tripped
+            **Adversarial archetype:** epsilon — reason
+        """)
+        picked = hypothesize_handler._select_archetypes_for_prompt(investigation)
+        # Every candidate in doc order, then adversarial unioned in even though ruled-out.
+        assert picked == ["alpha", "beta", "gamma", "epsilon"]
+
+    def test_adversarial_already_in_candidates_no_duplicate(self):
+        investigation = textwrap.dedent("""\
+            **Plausible archetypes (candidates for HYPOTHESIZE):**
+            - alpha — notes
+            - beta — notes
+            **Adversarial archetype:** alpha — already candidate
+        """)
+        picked = hypothesize_handler._select_archetypes_for_prompt(investigation)
+        assert picked == ["alpha", "beta"]
+
+    def test_missing_scan_returns_none(self):
+        """No archetype-scan block → fall back to loading all archetypes."""
+        picked = hypothesize_handler._select_archetypes_for_prompt("nothing here")
+        assert picked is None
+
+    def test_legacy_ranked_format_backward_compat(self):
+        """In-flight runs started on the old renderer must still work."""
+        investigation = textwrap.dedent("""\
+            **Archetype matches:**
+            - alpha — strong — rationale
+            - beta — moderate — rationale
+            - epsilon — ruled_out — rationale
+            **Adversarial archetype:** epsilon — rationale
+        """)
+        picked = hypothesize_handler._select_archetypes_for_prompt(investigation)
+        # Candidates = non-ruled_out entries in doc order, then adversarial.
+        assert picked == ["alpha", "beta", "epsilon"]

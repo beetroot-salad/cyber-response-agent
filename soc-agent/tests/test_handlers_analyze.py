@@ -33,13 +33,17 @@ def make_ctx(
 ) -> Context:
     run_dir = tmp_path / "run-test"
     run_dir.mkdir()
+    # alert.json is required — the analyze handler preloads it into the prompt.
+    alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
+    import json as _json
+    (run_dir / "alert.json").write_text(_json.dumps(alert))
     if existing_investigation is not None:
         (run_dir / "investigation.md").write_text(existing_investigation)
     return Context(
         run_dir=run_dir,
         signature_id="wazuh-rule-5710",
         ticket_id="SEC-2026-042",
-        alert={"id": "alert-1"},
+        alert=alert,
         history=history or [],
     )
 
@@ -122,6 +126,32 @@ class TestPromptAssembly:
         analyze_handler.handle(ctx)
         assert f"run_dir={ctx.run_dir}" in captured[0]
         assert "signature_id=wazuh-rule-5710" in captured[0]
+
+    def test_prompt_inlines_alert_investigation_archetypes(self, tmp_path, monkeypatch):
+        """Handler preloads all deterministic context into the prompt so the
+        subagent doesn't need Read/Glob tools."""
+        ctx = make_ctx(
+            tmp_path,
+            history=[Phase.HYPOTHESIZE.value],
+            existing_investigation="## CONTEXTUALIZE\n\nalert observed.\n",
+        )
+        captured: list[str] = []
+        monkeypatch.setattr(
+            analyze_handler, "_invoke_subagent",
+            stub_invoke(captured, _HYPOTHESIZE_RESPONSE),
+        )
+        analyze_handler.handle(ctx)
+        prompt = captured[0]
+
+        # Tagged blocks present
+        assert "<alert>" in prompt and "</alert>" in prompt
+        assert "<investigation>" in prompt and "</investigation>" in prompt
+        assert "<archetypes>" in prompt
+        # Inlined content landed
+        assert "alert observed." in prompt  # from investigation.md
+        assert '"id": "alert-1"' in prompt  # from alert.json
+        # Real 5710 archetypes surface (live knowledge/ dir)
+        assert 'name="monitoring-probe"' in prompt
 
     def test_loop_n_counts_hypothesize_entries(self, tmp_path, monkeypatch):
         # Three HYPOTHESIZE entries → loop_n = 3

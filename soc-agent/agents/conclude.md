@@ -1,8 +1,9 @@
 ---
 name: conclude
 description: Compose and persist the CONCLUDE markdown section, `conclude:` YAML block, and `report.md` body for a security-alert investigation. Writes directly to `investigation.md` and `report.md`. Used by the investigate orchestrator's CONCLUDE phase handler.
-tools: Read, Glob, Edit, Write
-model: haiku
+tools: Edit, Write
+model: sonnet
+effort: low
 ---
 
 # Conclude: Compose and Persist the Final Artifacts
@@ -23,22 +24,36 @@ If any substitution is missing, stop and emit a single terminal YAML block with 
 
 ## Context
 
-Read on your first turn:
+All deterministic context is **pre-loaded in your prompt** as tagged XML-style
+blocks — you have no Read or Glob tool. The handler has already fetched every
+file you would otherwise read:
 
-- `{run_dir}/investigation.md` — full investigation log
+- `<alert>…</alert>` — the raw alert JSON.
+- `<investigation>…</investigation>` — the full investigation log.
+- `<archetypes>…</archetypes>` — every archetype for this signature. Each
+  `<archetype name="X">` carries its `<story>`, optional `<trust-anchors>`
+  frontmatter body, and `<precedents>` (a list of `<precedent id="TICKET-ID">`
+  entries whose body is the precedent's JSON). The `<archetypes>` block is
+  omitted entirely on the forced-exhaustion path (you emit `matched_archetype:
+  null` regardless).
 
-After reading it, **if the investigation matched an archetype** (either (a) the last ANALYZE's routing names a non-null `matched_archetype`, or (b) SCREEN returned `screen_result: match` with a `matched_archetype` field), also read these in one parallel batch:
+These pre-loaded blocks serve three narrow purposes:
+1. **Confirming `required_anchors` names** from the matched archetype's
+   `<trust-anchors>` body.
+2. **Selecting `matched_ticket_id`**: if any `<precedent>` on the matched
+   archetype has a `disposition`, `confidence`, and shape matching the current
+   investigation, cite it as `matched_ticket_id`. Prefer the most recent
+   precedent whose (disposition, matched_archetype) tuple matches. For
+   SCREEN-resolved cases, the screen subagent may have named a
+   `matched_ticket_id` — prefer that one and verify it appears in the
+   `<precedents>` of the matched archetype; if it doesn't, escalate and emit
+   `matched_ticket_id: null`.
+3. Verifying citation text is present in the investigation narrative
+   (citations ground in your investigation, not in archetype knowledge).
 
-- `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/story.md`
-- `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/trust-anchors.md`
-- Every `*.json` file directly under `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/` — use `Glob` with pattern `knowledge/signatures/{signature_id}/archetypes/{matched_archetype}/*.json`, then Read each returned file in the same parallel turn.
-
-These reference files serve three narrow purposes:
-1. Confirming `required_anchors` names from `trust-anchors.md` frontmatter.
-2. **Selecting `matched_ticket_id`**: if any precedent's `disposition`, `confidence`, and shape match the current investigation's shape, cite it as `matched_ticket_id`. Prefer the most recent precedent whose (disposition, matched_archetype) tuple matches. For SCREEN-resolved cases, the screen subagent may have named a `matched_ticket_id` — prefer that one and verify it exists; if it doesn't, escalate and emit `matched_ticket_id: null`.
-3. Verifying citation text is present in the *investigation narrative* (citations ground in your investigation, not in knowledge files).
-
-Do not read them for fresh reasoning about the alert.
+Do not attempt to Read files — you have no filesystem tool. If something you
+need appears missing from the pre-loaded blocks, emit a terminal
+`status: error` YAML naming the missing context and stop.
 
 ## Task
 

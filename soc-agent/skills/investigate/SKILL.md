@@ -197,7 +197,7 @@ The subagent returns its findings alongside the code or query it executed. Treat
 
    **Parsing ticket_context.py.** The script's stdout is a single fenced ```yaml block under top-level key `ticket_context:`. Parse it directly — no PostToolUse hook is involved. If the script emits `queries_failed` or `queries_partial`, note the failure reason in your transcription but proceed; the main agent still has enough context from archetype-scan and the alert itself.
 
-   **From archetype-scan:** transcribe its `archetype_scan` ranked list AND its `adversarial_archetype` entry into the markdown summary. Archetypes are starting hypotheses, not conclusions; the strong matches inform hypothesis seeds, the adversarial one is the citable surface CONCLUDE's self-check expects in writing. If the subagent returned no useful output (malformed YAML, empty ranking), continue without it — archetypes are a useful prior, not required.
+   **From archetype-scan:** transcribe its `archetype_scan` candidate list (entries with `shape_match: candidate`) under **Plausible archetypes**, and its ruled-out entries under **Ruled-out archetypes**, plus its `adversarial_archetype` entry. Archetypes are starting candidates, not conclusions; the scan does not pre-rank or express confidence — HYPOTHESIZE decides which candidate best explains the alert after looking at full context. The adversarial entry is the citable surface CONCLUDE's self-check expects in writing. If the subagent returned no useful output (malformed YAML, empty list), continue without it — archetypes are a useful prior, not required.
 
    **From ticket_context.py:** transcribe `entities`, `repeats`, `related`, and `high_volume_dimensions`.
 
@@ -222,7 +222,8 @@ The subagent returns its findings alongside the code or query it executed. Treat
 **Key observables:** {investigation-relevant values from alert}
 **Playbook hypotheses:** ?hypothesis-1, ?hypothesis-2, ...
 **Available leads:** lead-1, lead-2, ...
-**Archetype matches:** {ranked list from archetype-scan, one line each: name (strength) — key features}
+**Plausible archetypes (candidates for HYPOTHESIZE):** {one line per candidate from archetype-scan: name — shape_notes}
+**Ruled-out archetypes:** {optional — omit block if empty; otherwise one line per entry: name — disqualifier tripped}
 **Adversarial archetype:** {name from archetype-scan} — {one-line transcribed reason}
 **Data environment:** {reachable systems per preflight; any degraded systems and the leads they affect}
 ```
@@ -248,9 +249,10 @@ prologue:
 - Wazuh time: 2026-04-19T14:22:08Z
 **Playbook hypotheses:** ?opportunistic-probe, ?credential-stuffing-burst, ?misconfigured-client
 **Available leads:** auth-history (lead 1), peer-targets (lead 2), source-reputation (lead 3)
-**Archetype matches** (from archetype-scan):
-1. opportunistic-internet-scan (STRONG) — single failure, public source IP, common username
-2. credential-stuffing-burst (WEAK) — no burst evidence yet
+**Plausible archetypes (candidates for HYPOTHESIZE):**
+- opportunistic-internet-scan — single failure, public source IP, common username
+**Ruled-out archetypes:**
+- credential-stuffing-burst — no burst evidence in the single-alert view
 **Adversarial archetype:** persistent-internet-bruteforce — single failure indistinguishable from first probe of a slow campaign; widening the time window in GATHER would discriminate.
 **Data environment:** All systems reachable. No degraded systems.
 ```

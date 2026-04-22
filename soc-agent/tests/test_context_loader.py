@@ -1,0 +1,302 @@
+"""Unit tests for the deterministic context loader.
+
+Keeps the load + format surface narrow and well-covered so that handler
+refactors can trust the loader to do what it says without stepping through
+it again.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SOC_AGENT_ROOT))
+
+from scripts.handlers._context_loader import (  # noqa: E402
+    format_alert_block,
+    format_archetype_shapes_block,
+    format_investigation_block,
+    format_lead_definitions_block,
+    format_lead_definitions_summary_block,
+    format_signature_text_block,
+    load_alert,
+    load_archetype_shapes,
+    load_investigation_md,
+    load_lead_definitions,
+    load_signature_text,
+    parse_adversarial_archetype,
+    parse_archetype_candidates,
+    parse_ruled_out_archetypes,
+)
+
+
+# ---------------------------------------------------------------------------
+# Run-dir artifact loaders
+# ---------------------------------------------------------------------------
+
+
+class TestLoadAlert:
+    def test_reads_alert_json(self, tmp_path):
+        alert = {"id": "alert-1", "rule": {"id": "5710"}}
+        (tmp_path / "alert.json").write_text(json.dumps(alert))
+        assert load_alert(tmp_path) == alert
+
+    def test_missing_alert_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_alert(tmp_path)
+
+
+class TestLoadInvestigationMd:
+    def test_reads_existing(self, tmp_path):
+        (tmp_path / "investigation.md").write_text("## CONTEXTUALIZE\n\nbody.\n")
+        assert "## CONTEXTUALIZE" in load_investigation_md(tmp_path)
+
+    def test_missing_returns_empty(self, tmp_path):
+        assert load_investigation_md(tmp_path) == ""
+
+
+# ---------------------------------------------------------------------------
+# Archetype shape loader (runs against live knowledge/ dir)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadArchetypeShapes:
+    def test_loads_all_archetypes_when_names_none(self):
+        shapes = load_archetype_shapes("wazuh-rule-5710", SOC_AGENT_ROOT)
+        names = [s["name"] for s in shapes]
+        # 5710 has monitoring-probe + external-bruteforce + credential-stuffing
+        # + service-account-rotation; don't assert exact set (may evolve)
+        # but require the well-known ones.
+        assert "monitoring-probe" in names
+        assert "external-bruteforce" in names
+
+    def test_respects_archetype_names_filter(self):
+        shapes = load_archetype_shapes(
+            "wazuh-rule-5710", SOC_AGENT_ROOT,
+            archetype_names=["monitoring-probe"],
+        )
+        assert [s["name"] for s in shapes] == ["monitoring-probe"]
+
+    def test_skips_nonexistent_archetype_names(self):
+        shapes = load_archetype_shapes(
+            "wazuh-rule-5710", SOC_AGENT_ROOT,
+            archetype_names=["monitoring-probe", "does-not-exist"],
+        )
+        assert [s["name"] for s in shapes] == ["monitoring-probe"]
+
+    def test_includes_story_md_when_present(self):
+        shapes = load_archetype_shapes(
+            "wazuh-rule-5710", SOC_AGENT_ROOT,
+            archetype_names=["monitoring-probe"],
+        )
+        assert shapes[0]["story_md"]  # non-empty
+
+    def test_precedents_loaded_when_requested(self):
+        shapes = load_archetype_shapes(
+            "wazuh-rule-5710", SOC_AGENT_ROOT,
+            archetype_names=["monitoring-probe"],
+            include_precedents=True,
+        )
+        # monitoring-probe archetype ships SEC-2024-001 as a precedent snapshot
+        assert "precedents" in shapes[0]
+        assert "SEC-2024-001" in shapes[0]["precedents"]
+        # precedent is parsed JSON
+        assert isinstance(shapes[0]["precedents"]["SEC-2024-001"], dict)
+
+    def test_precedents_omitted_by_default(self):
+        shapes = load_archetype_shapes(
+            "wazuh-rule-5710", SOC_AGENT_ROOT,
+            archetype_names=["monitoring-probe"],
+        )
+        assert "precedents" not in shapes[0]
+
+    def test_missing_signature_returns_empty(self):
+        assert load_archetype_shapes(
+            "wazuh-rule-does-not-exist", SOC_AGENT_ROOT,
+        ) == []
+
+
+# ---------------------------------------------------------------------------
+# Prompt formatters
+# ---------------------------------------------------------------------------
+
+
+class TestFormatAlertBlock:
+    def test_wraps_json_in_tags(self):
+        block = format_alert_block({"id": "x"})
+        assert block.startswith("<alert>")
+        assert block.endswith("</alert>")
+        assert '"id": "x"' in block
+
+
+class TestFormatInvestigationBlock:
+    def test_wraps_content(self):
+        block = format_investigation_block("## A\n\nbody\n")
+        assert "<investigation>" in block
+        assert "## A" in block
+        assert "</investigation>" in block
+
+    def test_empty_gets_placeholder(self):
+        block = format_investigation_block("")
+        assert "(empty" in block
+
+
+class TestLoadSignatureText:
+    def test_loads_rule_5710_playbook_and_context(self):
+        texts = load_signature_text("wazuh-rule-5710", SOC_AGENT_ROOT)
+        assert texts["playbook_md"]  # non-empty
+        assert texts["context_md"]  # non-empty
+
+    def test_missing_signature_empty_strings(self):
+        texts = load_signature_text("wazuh-rule-does-not-exist", SOC_AGENT_ROOT)
+        assert texts == {"playbook_md": "", "context_md": ""}
+
+
+class TestLoadLeadDefinitions:
+    def test_loads_catalog(self):
+        defs = load_lead_definitions(SOC_AGENT_ROOT)
+        # Known common-investigation leads
+        assert "authentication-history" in defs
+        assert "process-lineage" in defs
+        # _template skipped (underscore prefix)
+        assert "_template" not in defs
+
+    def test_empty_definitions_skipped(self, tmp_path):
+        (tmp_path / "knowledge" / "common-investigation" / "leads").mkdir(parents=True)
+        assert load_lead_definitions(tmp_path) == {}
+
+
+class TestFormatSignatureTextBlock:
+    def test_renders_both_files(self):
+        out = format_signature_text_block({
+            "playbook_md": "# Playbook\nbody",
+            "context_md": "# Context\nbody2",
+        })
+        assert "<signature-knowledge>" in out
+        assert "<playbook>" in out and "# Playbook" in out and "</playbook>" in out
+        assert "<context>" in out and "# Context" in out
+
+    def test_missing_files_self_closing_tags(self):
+        out = format_signature_text_block({"playbook_md": "", "context_md": ""})
+        assert "<playbook/>" in out
+        assert "<context/>" in out
+
+
+class TestFormatLeadDefinitionsBlock:
+    def test_empty_is_self_closing(self):
+        assert format_lead_definitions_block({}) == "<lead-catalog/>"
+
+    def test_renders_each_lead(self):
+        out = format_lead_definitions_block({
+            "a": "body-a",
+            "b": "body-b",
+        })
+        assert "<lead-catalog>" in out
+        assert '<lead name="a">' in out
+        assert '<lead name="b">' in out
+        assert "body-a" in out and "body-b" in out
+
+
+class TestFormatArchetypeShapesBlock:
+    def test_empty_list_self_closing(self):
+        assert format_archetype_shapes_block([]) == "<archetypes/>"
+
+    def test_renders_story_and_anchors(self):
+        shapes = [{
+            "name": "x",
+            "story_md": "story body",
+            "trust_anchors_md": "anchor body",
+        }]
+        out = format_archetype_shapes_block(shapes)
+        assert '<archetype name="x">' in out
+        assert "<story>" in out and "story body" in out and "</story>" in out
+        assert "<trust-anchors>" in out and "anchor body" in out
+
+    def test_precedents_gated_by_flag(self):
+        shapes = [{
+            "name": "x",
+            "story_md": "s",
+            "precedents": {"T-1": {"disposition": "benign"}},
+        }]
+        without = format_archetype_shapes_block(shapes, with_precedents=False)
+        assert "<precedents>" not in without
+        with_p = format_archetype_shapes_block(shapes, with_precedents=True)
+        assert "<precedents>" in with_p
+        assert "T-1" in with_p
+        assert "benign" in with_p
+
+
+# ---------------------------------------------------------------------------
+# Lead-catalog diet + archetype-scan rank parser
+# ---------------------------------------------------------------------------
+
+
+class TestFormatLeadDefinitionsSummaryBlock:
+    def test_empty_is_self_closing(self):
+        assert format_lead_definitions_summary_block({}) == "<lead-catalog/>"
+
+    def test_summary_strips_everything_but_goal_and_tags(self):
+        defn = (
+            "---\n"
+            "name: x\n"
+            "data_tags: [auth-events, identity-state]\n"
+            "---\n\n"
+            "## Goal\n\n"
+            "One-line purpose of this lead.\n\n"
+            "## What to Characterize\n\n"
+            "- lots of detail\n"
+            "- more detail\n\n"
+            "## Common Pitfalls\n\n"
+            "- generic\n"
+        )
+        out = format_lead_definitions_summary_block({"x": defn})
+        assert '<lead name="x"' in out
+        assert 'data_tags="[auth-events, identity-state]"' in out
+        assert "One-line purpose of this lead." in out
+        # verbose sections stripped
+        assert "Common Pitfalls" not in out
+        assert "What to Characterize" not in out
+
+    def test_summary_tolerates_missing_goal_and_frontmatter(self):
+        out = format_lead_definitions_summary_block({"x": "no frontmatter or goal"})
+        # Still renders a tag, just without data_tags / goal body.
+        assert '<lead name="x">' in out
+        assert out.count('<lead name=') == 1
+
+
+class TestParseArchetypeCandidates:
+    def test_new_heading_candidates_doc_order(self):
+        md = (
+            "**Plausible archetypes (candidates for HYPOTHESIZE):**\n"
+            "- alpha — notes\n"
+            "- beta — notes\n"
+            "- gamma — notes\n"
+            "**Ruled-out archetypes:**\n"
+            "- delta — disqualifier tripped\n"
+            "**Adversarial archetype:** alpha — r\n"
+        )
+        assert parse_archetype_candidates(md) == ["alpha", "beta", "gamma"]
+        assert parse_ruled_out_archetypes(md) == ["delta"]
+
+    def test_legacy_heading_backward_compat(self):
+        md = (
+            "**Archetype matches:**\n"
+            "- alpha — moderate — r\n"
+            "- beta — strong — r\n"
+            "- delta — ruled_out — r\n"
+        )
+        # All non-ruled_out entries are candidates, in document order.
+        assert parse_archetype_candidates(md) == ["alpha", "beta"]
+
+    def test_missing_block_returns_empty(self):
+        assert parse_archetype_candidates("no archetype block here") == []
+        assert parse_ruled_out_archetypes("no archetype block here") == []
+
+    def test_parse_adversarial(self):
+        md = "**Adversarial archetype:** post-exploit-interactive — because\n"
+        assert parse_adversarial_archetype(md) == "post-exploit-interactive"
+
+    def test_missing_adversarial_returns_none(self):
+        assert parse_adversarial_archetype("no adversarial line") is None

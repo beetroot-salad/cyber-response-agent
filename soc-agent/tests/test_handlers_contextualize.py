@@ -36,18 +36,21 @@ archetype_scan:
     required_anchors: [approved-monitoring-sources]
     disqualifiers:
       - "attempt_count > 1"
-    story_match: "strong — single failure, sentinel username, internal source"
+    shape_match: candidate
+    shape_notes: "single failure, sentinel username, internal source"
     boundary_note: null
   - archetype: external-bruteforce
     required_anchors: []
     disqualifiers: []
-    story_match: "weak — no burst evidence"
+    shape_match: ruled-out
+    shape_notes: "no burst evidence"
     boundary_note: null
 
 adversarial_archetype:
   archetype: external-bruteforce
   required_anchors: []
-  story_match: "weak — single-alert view does not resemble a brute-force"
+  shape_match: ruled-out
+  shape_notes: "single-alert view does not resemble a brute-force"
   reason: "most plausible hideout for a real threat mimicking monitoring traffic"
 ```
 """).strip()

@@ -6,9 +6,10 @@ terminal routing YAML, and appends the invlang block to investigation.md.
 
 The `hypothesize` subagent (agents/hypothesize.md, model=sonnet) emits one of:
     - `hypothesize:` YAML block + `Selected lead:` + `Pitfalls:` (fork mode)
-    - `gather:` YAML block with lead-level predictions + `Selected lead:` +
-      `Pitfalls:` (no-fork mode — when no observable discriminates between
-      candidate classifications yet)
+    - **No invlang YAML block** — narrative only (`Selected lead:` +
+      `Pitfalls:`) when no observable discriminates between candidate
+      classifications yet (no-fork mode). The GATHER subagent authors the
+      `gather[].lead` entry after the lead executes.
     - `error:` block (malformed inputs)
 followed by a terminal routing YAML:
     ```yaml
@@ -16,6 +17,13 @@ followed by a terminal routing YAML:
     selected_lead: <lead name>
     loop_n: <integer>
     ```
+
+A `gather:` block emitted from this subagent is a contract violation —
+`gather[].lead` entries require execution fields (`outcome`,
+`query_details`, `resolutions`) that HYPOTHESIZE has no way to fill, so
+writing them to `investigation.md` would fail invlang validation. The
+handler detects this case explicitly and retries with a structured
+remediation directive.
 
 This handler:
     - computes `loop_n` from ctx.history (count of prior HYPOTHESIZE entries + 1)
@@ -67,6 +75,20 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._context_loader import (
+    format_alert_block,
+    format_archetype_shapes_block,
+    format_investigation_block,
+    format_lead_definitions_summary_block,
+    format_signature_text_block,
+    load_alert,
+    load_archetype_shapes,
+    load_investigation_md,
+    load_lead_definitions,
+    load_signature_text,
+    parse_adversarial_archetype,
+    parse_archetype_candidates,
+)
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
@@ -108,6 +130,27 @@ def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) ->
 # ---------------------------------------------------------------------------
 
 
+def _select_archetypes_for_prompt(investigation_md: str) -> list[str] | None:
+    """Pick the archetype names to inline into the subagent prompt.
+
+    Returns the candidate archetypes from CONTEXTUALIZE's archetype-scan
+    (unordered set of archetypes whose shape is consistent with the alert),
+    unioned with the adversarial archetype so the adversarial-discipline rule
+    always sees its shape even when the shape is ruled-out.
+
+    Returns None when the scan is absent or unparseable — callers fall back to
+    shipping every archetype (original behavior).
+    """
+    candidates = parse_archetype_candidates(investigation_md)
+    if not candidates:
+        return None  # fall back to all archetypes
+    out = list(candidates)
+    adversarial = parse_adversarial_archetype(investigation_md)
+    if adversarial and adversarial not in out:
+        out.append(adversarial)
+    return out
+
+
 def _compute_loop_n(ctx: Context) -> int:
     """Current loop number = count of prior HYPOTHESIZE entries + 1.
 
@@ -124,20 +167,48 @@ def _compute_loop_n(ctx: Context) -> int:
 
 
 def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None) -> str:
+    """Build the hypothesize subagent prompt with all deterministic context inline.
+
+    The subagent receives alert.json, investigation.md, signature playbook +
+    context, every archetype's story/trust-anchors, and the full lead catalog
+    preloaded — no Read tool calls required. Bash stays available for invlang
+    corpus queries (pre-baked priors are inlined, but CLI is retained for
+    shape-calibration lookups the priors don't answer).
+    """
     loop_n = _compute_loop_n(ctx)
     priors_section = _safe_priors_section(ctx)
-    lines = [
-        f"run_dir={ctx.run_dir}",
-        f"signature_id={ctx.signature_id}",
-        f"loop_n={loop_n}",
-        "",
+
+    alert = load_alert(ctx.run_dir)
+    investigation_md = load_investigation_md(ctx.run_dir)
+    signature_texts = load_signature_text(ctx.signature_id, SOC_AGENT_ROOT)
+    archetype_shapes = load_archetype_shapes(
+        ctx.signature_id, SOC_AGENT_ROOT,
+        archetype_names=_select_archetypes_for_prompt(investigation_md),
+        include_precedents=False,
+    )
+    lead_defs = load_lead_definitions(SOC_AGENT_ROOT)
+
+    blocks = [
+        (
+            f"run_dir={ctx.run_dir}\n"
+            f"signature_id={ctx.signature_id}\n"
+            f"loop_n={loop_n}"
+        ),
         priors_section,
+        format_alert_block(alert),
+        format_investigation_block(investigation_md),
+        format_signature_text_block(signature_texts),
+        format_archetype_shapes_block(archetype_shapes, with_precedents=False),
+        format_lead_definitions_summary_block(lead_defs),
     ]
+
     if remediation_notes:
-        lines.append("")
-        lines.append("resume_from_checkpoint=true")
-        lines.append("remediation_notes=" + " | ".join(remediation_notes))
-    return "\n".join(lines)
+        blocks.append(
+            "resume_from_checkpoint=true\n"
+            "remediation_notes=" + " | ".join(remediation_notes)
+        )
+
+    return "\n\n".join(blocks)
 
 
 # ---------------------------------------------------------------------------
@@ -374,18 +445,26 @@ def _extract_error_reason(raw: str) -> str:
 
 
 def _validate_trailer(trailer: dict, *, block_type: str, expected_loop_n: int) -> dict:
-    """Verify the terminal routing YAML conforms to the subagent contract."""
+    """Verify the terminal routing YAML conforms to the subagent contract.
+
+    Contract (option C, post-dedup-retirement):
+    - mode=fork   ⇒ block_type=hypothesize (invlang block required)
+    - mode=no-fork ⇒ block_type=unknown    (NO invlang block — narrative only)
+    - block_type=gather is always a contract violation from this subagent
+      (handled earlier via _gather_block_remediation; should not reach here)
+    """
     mode = trailer.get("mode")
     if mode not in _VALID_MODES:
         raise OrchestrationError(
             f"hypothesize subagent: invalid trailer mode {mode!r} "
             f"(expected one of {sorted(_VALID_MODES)})"
         )
-    expected_by_type = {"hypothesize": "fork", "gather": "no-fork"}
-    if block_type in expected_by_type and mode != expected_by_type[block_type]:
+    expected_block_by_mode = {"fork": "hypothesize", "no-fork": "unknown"}
+    expected_block = expected_block_by_mode[mode]
+    if block_type != expected_block:
         raise OrchestrationError(
-            f"hypothesize subagent: trailer mode {mode!r} does not match "
-            f"block type {block_type!r} (expected {expected_by_type[block_type]!r})"
+            f"hypothesize subagent: mode {mode!r} requires block_type "
+            f"{expected_block!r}, got {block_type!r}"
         )
     selected_lead = trailer.get("selected_lead")
     if not isinstance(selected_lead, str) or not selected_lead.strip():
@@ -466,6 +545,50 @@ def _append_to_investigation(ctx: Context, new_section: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Failure-mode registry (lazy-loaded into the retry prompt)
+# ---------------------------------------------------------------------------
+# Each entry: a handler-recognized failure mode maps to a remediation
+# directive that gets injected into the retry prompt's `remediation_notes`.
+# This keeps the baseline prompt lean — failure-specific guidance arrives
+# only when the failure actually happens.
+#
+# The registry is the single source of truth for handler-authored retry
+# directives. Invlang validator errors (rules 26-30 etc.) pass through as
+# free-form remediation_notes so the subagent can correct claim-level
+# semantics against its checkpoint.
+
+_FAILURE_REMEDIATIONS: dict[str, str] = {
+    "gather_block_in_hypothesize": (
+        "CONTRACT VIOLATION: your prior attempt emitted a `gather:` YAML "
+        "block. HYPOTHESIZE must never emit a `gather:` block — "
+        "`gather[].lead` entries require execution fields (outcome, "
+        "query_details, resolutions) that the GATHER subagent fills, not "
+        "HYPOTHESIZE. REMEDIATION: drop the `gather:` block entirely. For "
+        "no-fork mode, emit only narrative (`Selected lead:` + `Pitfalls:`) "
+        "followed by the terminal routing YAML with `mode: no-fork`. Any "
+        "lead-level predictions you want to communicate belong in the "
+        "narrative prose, not as invlang YAML."
+    ),
+    "stdout_summary_not_yaml": (
+        "CONTRACT VIOLATION: your prior attempt emitted only a prose "
+        "summary of your work — no YAML fences at all. The YAML IS the "
+        "deliverable; a prose summary of the YAML is not. If you already "
+        "wrote a checkpoint at "
+        "`{run_dir}/subagent_checkpoints/hypothesize-loop-{loop_n}.yaml` "
+        "with the completed work, use it as the source of truth and "
+        "transcribe it to stdout in the required shape. REMEDIATION: "
+        "re-emit the full Return contract from `agents/hypothesize.md`: "
+        "for fork mode, a ```yaml``` block containing `hypothesize:` with "
+        "all declared hypotheses + Selected lead + Pitfalls + the terminal "
+        "routing ```yaml``` block with {mode, selected_lead, loop_n}; for "
+        "no-fork mode, just Selected lead + Pitfalls narrative + the "
+        "terminal routing block. The checkpoint file and stdout must BOTH "
+        "reflect the final state — stdout is not optional."
+    ),
+}
+
+
 def _attempt(
     ctx: Context,
     *,
@@ -476,8 +599,9 @@ def _attempt(
 
     Returns `(sections_to_append, block_type, trailer, validator_errors)`.
     Raises OrchestrationError for unrecoverable shapes (error block, malformed
-    trailer, unknown block type). Validator errors are *returned* rather than
-    raised so the caller can decide whether to retry.
+    trailer). Recoverable contract violations (emitting a `gather:` block,
+    validator errors) are surfaced via the returned error list so the caller
+    can retry with structured remediation.
     """
     prompt = _assemble_prompt(ctx, remediation_notes=remediation_notes)
     raw = _invoke_subagent(prompt)
@@ -487,10 +611,34 @@ def _attempt(
         raise OrchestrationError(
             f"hypothesize subagent returned error block: {_extract_error_reason(raw)}"
         )
-    if block_type == "unknown":
-        raise OrchestrationError(
-            "hypothesize subagent produced no hypothesize:/gather:/error: "
-            f"block:\n{raw[:500]}"
+
+    # Contract violation: `gather:` block from HYPOTHESIZE is never valid.
+    # Short-circuit to a retry with a registry-loaded remediation directive —
+    # don't bother parsing the trailer or running the validator.
+    if block_type == "gather":
+        trailer_for_loop_check = extract_terminal_yaml(raw) if _has_trailer(raw) else {}
+        return (
+            "",  # no sections to append yet
+            block_type,
+            trailer_for_loop_check,
+            [_FAILURE_REMEDIATIONS["gather_block_in_hypothesize"]],
+        )
+
+    # Empty-stdout path: `claude --print` captures only the final text turn,
+    # so when the subagent ends on a tool_use (Write M_last after emitting
+    # the YAML response), stdout is empty. Before retrying, look for the
+    # M_last checkpoint — if present and complete, synthesize the response
+    # from it. This converts a 300s retry into a ~0s checkpoint read.
+    if not _has_trailer(raw):
+        recovered = _synthesize_from_checkpoint(ctx, expected_loop_n)
+        if recovered is not None:
+            return recovered
+        # Fall through to the retry path with the directive.
+        return (
+            "",
+            block_type,
+            {},
+            [_FAILURE_REMEDIATIONS["stdout_summary_not_yaml"]],
         )
 
     trailer = _validate_trailer(
@@ -499,9 +647,87 @@ def _attempt(
         expected_loop_n=expected_loop_n,
     )
 
+    # No-fork mode: no invlang block, nothing to append to investigation.md.
+    # The narrative (Selected lead: + Pitfalls:) is preserved in the subagent
+    # output file under subagent_outputs/; the terminal trailer drives routing.
+    if block_type == "unknown":
+        return "", block_type, trailer, []
+
     sections = _strip_terminal_routing(raw)
     errors = _validate_companion_proposed(ctx, sections)
     return sections, block_type, trailer, errors
+
+
+def _has_trailer(raw: str) -> bool:
+    """Lightweight check: does `raw` contain a trailing yaml fence that parses
+    as a routing trailer?"""
+    try:
+        t = extract_terminal_yaml(raw)
+    except Exception:  # noqa: BLE001
+        return False
+    return isinstance(t, dict) and "mode" in t
+
+
+def _synthesize_from_checkpoint(
+    ctx: Context, expected_loop_n: int,
+) -> tuple[str, str, dict, list[str]] | None:
+    """Recovery path for the stdout-empty case.
+
+    When the subagent wrote the M_last checkpoint (`status: complete`) but
+    stdout is empty (final turn was a tool_use, dropped by `claude --print`),
+    transcribe the checkpoint into the expected return shape so the handler
+    can proceed without a retry.
+
+    Returns the same tuple shape as `_attempt` on success, or None when the
+    checkpoint is absent / incomplete / shape-invalid. On None the caller
+    falls through to the retry path.
+
+    Contract with the subagent prompt (`agents/hypothesize.md`): the checkpoint
+    must carry `status: complete`, `mode: fork|no-fork`, and (fork mode)
+    `hypotheses: [...]` in the same shape the stdout YAML block would have.
+    """
+    ckpt = ctx.run_dir / "subagent_checkpoints" / f"hypothesize-loop-{expected_loop_n}.yaml"
+    if not ckpt.exists():
+        return None
+    try:
+        data = yaml.safe_load(ckpt.read_text())
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict) or data.get("status") != "complete":
+        return None
+    mode = data.get("mode")
+    if mode not in _VALID_MODES:
+        return None
+    selected_lead = data.get("selected_lead")
+    if not isinstance(selected_lead, str) or not selected_lead.strip():
+        return None
+
+    trailer = {"mode": mode, "selected_lead": selected_lead, "loop_n": expected_loop_n}
+
+    if mode == "no-fork":
+        # No invlang block to append; caller's write step is a no-op.
+        return "", "unknown", trailer, []
+
+    # fork mode — require hypotheses list, transcribe as a `hypothesize:` block
+    hypotheses = data.get("hypotheses")
+    if not isinstance(hypotheses, list) or not hypotheses:
+        return None
+
+    dumped = yaml.safe_dump(
+        {"hypothesize": {"hypotheses": hypotheses}},
+        sort_keys=False, default_flow_style=False,
+    )
+    section = (
+        f"## HYPOTHESIZE (loop {expected_loop_n})\n\n"
+        f"```yaml\n{dumped.rstrip()}\n```\n"
+    )
+    errors = _validate_companion_proposed(ctx, section)
+    if errors:
+        # Checkpoint is complete but validation fails — do NOT silently pass;
+        # route into the standard retry path so the subagent can correct with
+        # the validator errors as remediation_notes.
+        return "", "hypothesize", trailer, errors
+    return section, "hypothesize", trailer, []
 
 
 # ---------------------------------------------------------------------------
@@ -517,18 +743,23 @@ def handle(ctx: Context) -> PhaseResult:
     )
 
     if errors:
-        # One retry with the validator errors as remediation. The subagent
-        # should read its checkpoint and correct the flagged claims.
+        # One retry. For the `gather:`-block contract violation the remediation
+        # is a deterministic handler-authored directive; for invlang validator
+        # errors the raw errors pass through so the subagent can fix claim-level
+        # semantics against its checkpoint.
         sections, block_type, trailer, errors = _attempt(
             ctx, expected_loop_n=expected_loop_n, remediation_notes=errors,
         )
         if errors:
             raise OrchestrationError(
-                "HYPOTHESIZE invlang validation failed on retry:\n"
+                "HYPOTHESIZE failed on retry:\n"
                 + "\n".join(f"  - {e}" for e in errors)
             )
 
-    _append_to_investigation(ctx, sections)
+    # Only append when there's something to append. No-fork mode writes no
+    # invlang block; the narrative is preserved in the subagent output file.
+    if sections:
+        _append_to_investigation(ctx, sections)
 
     payload = {
         "mode": trailer["mode"],
