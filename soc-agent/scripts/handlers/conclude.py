@@ -1,7 +1,12 @@
 """CONCLUDE phase handler.
 
-Three-level compose gradient:
+Compose gradient with mechanical fast-paths for both SCREEN-matched and
+ANALYZE-routed investigations. LLM dispatch is reserved for (a) authoring the
+free-text narrative sections (Summary / For Analyst) on the ANALYZE mechanical
+path, and (b) the full-context fallback when mechanical composition cannot
+proceed.
 
+SCREEN path:
   **Level 1 — mechanical, fully grounded.** SCREEN match with all grounding
     satisfied (required_anchors confirmed, OR precedent file present).
     `status: resolved`, disposition + confidence from SCREEN. No LLM call.
@@ -11,16 +16,26 @@ Three-level compose gradient:
     to `escalated`, disposition preserved from SCREEN, confidence clamped to
     `medium`. No LLM call. Termination rationale names which leg failed.
 
-  **Level 3 — subagent fallback.** Used when mechanical composition cannot
-    proceed (archetype directory missing, Tier-1 validation fails on the
-    mechanical output, or the SCREEN payload is not match-shaped).
-    Dispatches the `conclude` subagent. Any partial mechanical writes are
-    rolled back before fallback so the subagent starts from a clean state.
+ANALYZE path:
+  **Mechanical + narrative subagent.** Handler composes every structured
+    field (frontmatter, conclude: YAML, Hypothesis Outcomes, Key Evidence,
+    Verdict, trace) from the ANALYZE payload + invlang `gather:` blocks in
+    investigation.md. A narrow `conclude_narrative` subagent (Haiku, no
+    tools) authors only `## Summary` and optionally `## For Analyst`. Its
+    preload is ~5-8 KB (trimmed investigation + optional single archetype)
+    vs. ~50 KB for the full-context fallback.
 
-  Also handles: analyze-routed + forced-exhaustion (both always Level 3).
+Fallback:
+  **Full-context subagent.** Used when mechanical composition cannot
+    proceed (archetype directory missing, Tier-1 validation fails on the
+    mechanical output, narrative subagent fails to emit the expected tagged
+    blocks, SCREEN payload not match-shaped, or forced-exhaustion). Any
+    partial mechanical writes are rolled back before fallback so the
+    subagent starts from a clean state. Uses agents/conclude.md.
 
 Payload carries `compose_mode` for telemetry:
-  `screen_mechanical_grounded` (L1) | `screen_mechanical_partial` (L2) | `subagent` (L3).
+  `screen_mechanical_grounded` | `screen_mechanical_partial` |
+  `analyze_mechanical` | `subagent`.
 
 Input:
     ctx.ticket_id                               — resolved at Context construction
@@ -180,7 +195,9 @@ class _MechanicalFallback(Exception):
 
 def handle(ctx: Context) -> PhaseResult:
     screen_payload = ctx.outputs.get(Phase.SCREEN) or {}
+    analyze_payload = ctx.outputs.get(Phase.ANALYZE) or {}
     fallback_reason: str | None = None
+
     if (
         not ctx.forced_conclude
         and screen_payload.get("screen_result") == "match"
@@ -189,6 +206,22 @@ def handle(ctx: Context) -> PhaseResult:
     ):
         try:
             payload = _compose_screen_match(ctx, screen_payload)
+            return PhaseResult(next_phase=Phase.CONCLUDE, payload=payload)
+        except _MechanicalFallback as exc:
+            fallback_reason = str(exc)
+
+    # ANALYZE-routed mechanical path: handler composes every structured field;
+    # dispatches the narrative subagent only for Summary / For Analyst prose.
+    # Gated on a non-empty ANALYZE payload; forced-exhaustion skips this path
+    # (ANALYZE never ran).
+    if (
+        fallback_reason is None
+        and not ctx.forced_conclude
+        and analyze_payload
+        and analyze_payload.get("disposition")
+    ):
+        try:
+            payload = _compose_analyze_routed(ctx, analyze_payload)
             return PhaseResult(next_phase=Phase.CONCLUDE, payload=payload)
         except _MechanicalFallback as exc:
             fallback_reason = str(exc)
@@ -341,7 +374,7 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
         "",
     ]
 
-    report_text = _compose_report_md(
+    report_text = _compose_report_md_screen(
         ctx=ctx,
         status=status,
         disposition=disposition,
@@ -467,7 +500,7 @@ def _run_tier1_validation(report_path: Path) -> None:
         )
 
 
-def _compose_report_md(
+def _compose_report_md_screen(
     *,
     ctx: Context,
     status: str,
@@ -548,3 +581,753 @@ def _compose_report_md(
            "status are not fully met. Review the Investigation Trace and confirm "
            "whether anchor confirmation or a precedent cite can be produced manually.\n")
     )
+
+
+# ---------------------------------------------------------------------------
+# Mechanical CONCLUDE composer (ANALYZE-routed path)
+# ---------------------------------------------------------------------------
+
+
+def _extract_gather_blocks(investigation_md: str) -> list[dict]:
+    """Extract gather lead entries from investigation.md.
+
+    Preference order:
+      1. Invlang `gather: [...]` YAML fences (structured form — carries
+         full outcome shape including trust_anchor_result, resolutions,
+         attribute_updates).
+      2. Prose-form `## GATHER (loop N)` sections with `**Lead:**` /
+         `**Status:**` bold-prefix lines (what ANALYZE currently produces).
+         Yields `{name, status, loop}` entries — enough for lead counts
+         and trace composition, but no structured outcome fields.
+
+    Returns an empty list if neither form is present.
+    """
+    from scripts.handlers._markdown import iter_yaml_fences  # local import
+
+    merged: list[dict] = []
+    for body in iter_yaml_fences(investigation_md):
+        try:
+            parsed = yaml.safe_load(body)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        gather = parsed.get("gather")
+        if not isinstance(gather, list):
+            continue
+        for entry in gather:
+            if isinstance(entry, dict):
+                merged.append(entry)
+    if merged:
+        return merged
+
+    # Fallback: parse prose-form GATHER sections.
+    return _extract_gather_blocks_prose(investigation_md)
+
+
+_GATHER_HEADER_RE = None
+_LEAD_FIELD_RE = None
+
+
+def _extract_gather_blocks_prose(investigation_md: str) -> list[dict]:
+    """Parse prose-form `## GATHER (loop N)` sections into lead entries.
+
+    Each GATHER section is assumed to have a `**Lead:** <name>` line and
+    optional `**Status:** <status>` line. Multiple Lead entries within a
+    single GATHER (composite dispatch) are each returned as separate
+    entries.
+    """
+    import re  # local
+    global _GATHER_HEADER_RE, _LEAD_FIELD_RE
+    if _GATHER_HEADER_RE is None:
+        _GATHER_HEADER_RE = re.compile(
+            r"^## GATHER(?:\s*\(loop\s*(\d+)\))?\s*$", re.MULTILINE,
+        )
+        _LEAD_FIELD_RE = re.compile(
+            r"^\*\*(?P<key>Lead|Status|Query):\*\*\s*(?P<value>.+?)\s*$",
+            re.MULTILINE,
+        )
+
+    entries: list[dict] = []
+    lines = investigation_md.splitlines()
+    in_fence = False
+    # Collect (start_line, loop_n, end_line) for each GATHER section.
+    section_ranges: list[tuple[int, int | None, int]] = []
+    cur_start: int | None = None
+    cur_loop: int | None = None
+    for i, line in enumerate(lines):
+        if line.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if line.startswith("## "):
+            if cur_start is not None:
+                section_ranges.append((cur_start, cur_loop, i))
+                cur_start = None
+                cur_loop = None
+            m = _GATHER_HEADER_RE.match(line)
+            if m:
+                cur_start = i
+                cur_loop = int(m.group(1)) if m.group(1) else None
+    if cur_start is not None:
+        section_ranges.append((cur_start, cur_loop, len(lines)))
+
+    for start, loop, end in section_ranges:
+        body = "\n".join(lines[start + 1:end])
+        current: dict | None = None
+        for fm in _LEAD_FIELD_RE.finditer(body):
+            key = fm.group("key")
+            value = fm.group("value").strip()
+            if key == "Lead":
+                if current is not None:
+                    entries.append(current)
+                current = {"name": value, "loop": loop}
+            elif current is not None:
+                current[key.lower()] = value
+        if current is not None:
+            entries.append(current)
+    return entries
+
+
+def _extract_final_analyze_section(investigation_md: str) -> str:
+    """Return the raw markdown text of the final `## ANALYZE (loop N)`
+    section, header line included. Returns empty string if no ANALYZE
+    section is present. Fence-aware (a `## ` line inside a code block is
+    not a section boundary).
+    """
+    lines = investigation_md.splitlines()
+    in_fence = False
+    section_starts: list[int] = []
+    next_section_after: dict[int, int] = {}
+    for i, line in enumerate(lines):
+        if line.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if line.startswith("## "):
+            for s in section_starts:
+                if s not in next_section_after:
+                    next_section_after[s] = i
+            header = line[3:].strip().lower()
+            if header.startswith("analyze"):
+                section_starts.append(i)
+    if not section_starts:
+        return ""
+    last = section_starts[-1]
+    end = next_section_after.get(last, len(lines))
+    return "\n".join(lines[last:end]).rstrip()
+
+
+def _compose_trace_analyze(
+    gather: list[dict],
+    disposition: str,
+    surviving_hypotheses: list[str] | None,
+    matched_archetype: str | None,
+) -> str:
+    """Build the trace line for an ANALYZE-routed investigation:
+
+        lead1(outcome) -> lead2(outcome) -> ... -> disposition:{tail}
+
+    `tail` is `matched_archetype` if set, else the first surviving
+    hypothesis, else the disposition itself (so "escalated" still lands).
+    """
+    parts: list[str] = []
+    for entry in gather:
+        name = entry.get("name") or entry.get("id") or "?"
+        outcome_obj = entry.get("outcome") or {}
+        tar = outcome_obj.get("trust_anchor_result")
+        if isinstance(tar, dict) and tar.get("verdict"):
+            summary = str(tar.get("verdict"))
+        elif isinstance(tar, dict) and tar.get("result"):
+            summary = str(tar.get("result"))
+        elif outcome_obj.get("resolutions"):
+            res = outcome_obj["resolutions"]
+            if isinstance(res, list) and res:
+                first = res[0] if isinstance(res[0], dict) else {}
+                summary = str(first.get("weight") or "resolved")
+            else:
+                summary = "resolved"
+        elif outcome_obj.get("attribute_updates"):
+            summary = "classified"
+        else:
+            summary = "observed"
+        parts.append(f"{name}({summary})")
+    if matched_archetype:
+        tail = f"{disposition}:{matched_archetype}"
+    elif surviving_hypotheses:
+        tail = f"{disposition}:{surviving_hypotheses[0]}"
+    else:
+        tail = disposition
+    if parts:
+        return " → ".join(parts) + f" → {tail}"
+    return tail
+
+
+def _derive_termination_category(
+    analyze_payload: dict,
+    gather: list[dict],
+    final_analyze_text: str,
+) -> str:
+    """Decide `conclude.termination.category` from the available signals.
+
+    Order of precedence:
+      1. `trust-root` — a gather lead carries `legitimacy_resolutions[]` with
+         at least one entry where `verdict: authorized`, OR a
+         `trust_anchor_result` with `verdict: authorized`. An authority
+         closed the question.
+      2. `adversarial-refuted` — the final ANALYZE text grades an
+         adversarial-named hypothesis (`?adversary-*`, `?post-exploit-*`,
+         or the word "adversarial") at `--`.
+      3. `severity-ceiling` — the final ANALYZE text or an investigation
+         narrative mentions a composition rule (`composition rule`,
+         `severity ceiling`, `co-fir`), indicating the structural severity
+         forces escalation regardless of mechanism.
+      4. `exhaustion-escalation` — default.
+
+    This mirrors the discipline in agents/conclude.md §3 without requiring
+    the subagent to author it. Over-triggering `exhaustion-escalation` is
+    the safe fallback — escalated dispositions land there.
+    """
+    for entry in gather:
+        outcome = entry.get("outcome") or {}
+        tar = outcome.get("trust_anchor_result")
+        if isinstance(tar, dict) and tar.get("verdict") == "authorized":
+            return "trust-root"
+        resolutions = outcome.get("legitimacy_resolutions")
+        if isinstance(resolutions, list):
+            for r in resolutions:
+                if isinstance(r, dict) and r.get("verdict") == "authorized":
+                    return "trust-root"
+
+    lower = final_analyze_text.lower()
+    # Adversarial-refuted: look for ?adversary-* / ?post-exploit-* /
+    # adversarial keyword paired with a `--` grade.
+    adversarial_markers = ("?adversary-", "?post-exploit-", "adversarial")
+    if any(m in lower for m in adversarial_markers) and "`--`" in final_analyze_text:
+        return "adversarial-refuted"
+
+    if (
+        "composition rule" in lower
+        or "severity ceiling" in lower
+        or "co-fir" in lower  # matches "co-fire", "co-firing", "co-fires"
+    ):
+        return "severity-ceiling"
+
+    return "exhaustion-escalation"
+
+
+def _compose_hypothesis_outcomes_md(
+    gather: list[dict],
+    surviving_hypotheses: list[str] | None,
+) -> str:
+    """Render `## Hypothesis Outcomes` from invlang gather resolutions.
+
+    Walks gather blocks for `outcome.resolutions[]` entries, collecting
+    the final weight per hypothesis ID. Output is a bulleted list:
+
+        - **?hypothesis-id (h-NNN):** final-weight — source lead(s).
+
+    If no resolutions are found, falls back to listing surviving
+    hypotheses (if any) with status `(live weight)`; if that too is empty,
+    emits a neutral `(no hypothesis records found)` placeholder. The
+    handler will still pass Tier-1 since the section exists.
+    """
+    # hypothesis_id -> (latest_weight, lead_names_that_resolved_it)
+    resolved: dict[str, tuple[str, list[str]]] = {}
+    for entry in gather:
+        outcome = entry.get("outcome") or {}
+        resolutions = outcome.get("resolutions")
+        if not isinstance(resolutions, list):
+            continue
+        lead_name = entry.get("name") or entry.get("id") or "?"
+        for r in resolutions:
+            if not isinstance(r, dict):
+                continue
+            hyp = r.get("hypothesis") or r.get("hypothesis_id")
+            weight = r.get("weight") or r.get("to_weight")
+            if not hyp or not weight:
+                continue
+            prev = resolved.get(str(hyp))
+            if prev is None:
+                resolved[str(hyp)] = (str(weight), [lead_name])
+            else:
+                # Keep the latest weight; append the lead.
+                resolved[str(hyp)] = (str(weight), prev[1] + [lead_name])
+
+    if resolved:
+        lines = []
+        for hyp_id, (weight, leads) in resolved.items():
+            leads_str = ", ".join(dict.fromkeys(leads))  # dedupe preserving order
+            lines.append(f"- **{hyp_id}:** `{weight}` — via {leads_str}")
+        return "\n".join(lines)
+
+    if surviving_hypotheses:
+        return "\n".join(
+            f"- **{h}:** live weight (not resolved to `++`/`--`)"
+            for h in surviving_hypotheses
+        )
+
+    return "- (no hypothesis records found in gather blocks)"
+
+
+def _compose_key_evidence_md(gather: list[dict]) -> str:
+    """Render `## Key Evidence` from invlang gather outcomes.
+
+    One bullet per lead. Preference order for what to cite:
+      1. trust_anchor_result — anchor verdict + as_of.
+      2. attribute_updates — first updates entry compactly.
+      3. resolutions — count + leads they touch.
+      4. fallback — lead name + status string.
+    """
+    lines: list[str] = []
+    for entry in gather:
+        name = entry.get("name") or entry.get("id") or "?"
+        outcome = entry.get("outcome") or {}
+        citation: str
+        tar = outcome.get("trust_anchor_result")
+        if isinstance(tar, dict) and (tar.get("verdict") or tar.get("result")):
+            verdict = tar.get("verdict") or tar.get("result")
+            anchor = tar.get("anchor_id") or name
+            as_of = tar.get("as_of")
+            suffix = f" (as of {as_of})" if as_of else ""
+            citation = f"anchor `{anchor}` → `{verdict}`{suffix}"
+        elif outcome.get("attribute_updates"):
+            updates = outcome["attribute_updates"]
+            if isinstance(updates, list) and updates:
+                first = updates[0] if isinstance(updates[0], dict) else {}
+                target = first.get("target", "?")
+                up = first.get("updates") or {}
+                if isinstance(up, dict) and up:
+                    key, val = next(iter(up.items()))
+                    citation = f"`{target}.{key}` = `{val}`"
+                else:
+                    citation = f"attribute update on `{target}`"
+            else:
+                citation = "attribute update recorded"
+        elif outcome.get("resolutions"):
+            res = outcome["resolutions"]
+            count = len(res) if isinstance(res, list) else 0
+            citation = f"{count} hypothesis resolution(s) recorded"
+        else:
+            status = entry.get("status") or "observed"
+            citation = f"lead completed (status: `{status}`)"
+        lines.append(f"- **{name}:** {citation}")
+    if not lines:
+        return "- (no gather leads recorded)"
+    return "\n".join(lines)
+
+
+_SUMMARY_TAG_RE = None
+_ANALYST_TAG_RE = None
+
+
+def _parse_narrative_tags(raw: str) -> tuple[str, str | None]:
+    """Extract `<summary>` (required) and `<for-analyst>` (optional) body
+    text from the narrative subagent's stdout. Returns `(summary_md,
+    analyst_md_or_None)`. Raises `_MechanicalFallback` if `<summary>` is
+    missing — the mechanical path cannot proceed without it.
+    """
+    import re  # local; narrow scope
+    global _SUMMARY_TAG_RE, _ANALYST_TAG_RE
+    if _SUMMARY_TAG_RE is None:
+        _SUMMARY_TAG_RE = re.compile(r"<summary>\s*(.*?)\s*</summary>", re.DOTALL)
+        _ANALYST_TAG_RE = re.compile(
+            r"<for-analyst>\s*(.*?)\s*</for-analyst>", re.DOTALL,
+        )
+    m = _SUMMARY_TAG_RE.search(raw)
+    if not m:
+        raise _MechanicalFallback(
+            "narrative subagent produced no <summary> block"
+        )
+    summary = m.group(1).strip()
+    if not summary or summary.startswith("(insufficient-context"):
+        raise _MechanicalFallback(
+            f"narrative subagent flagged insufficient context: {summary!r}"
+        )
+    analyst_m = _ANALYST_TAG_RE.search(raw)
+    analyst = analyst_m.group(1).strip() if analyst_m else None
+    return summary, (analyst or None)
+
+
+def _dispatch_narrative_subagent(
+    ctx: Context,
+    *,
+    status: str,
+    disposition: str,
+    confidence: str,
+    matched_archetype: str | None,
+) -> tuple[str, str | None]:
+    """Invoke `conclude_narrative` subagent with a trimmed preload.
+
+    Preload shape (target ≤ 8 KB):
+      - One-line alert summary
+      - <investigation-summary> via `format_investigation_block(mode="conclude-narrative")`
+      - <archetype> block only when `matched_archetype` is non-null
+      - Header metadata: status, disposition, confidence, matched_archetype
+
+    Returns (summary_md, analyst_md_or_None). Raises `_MechanicalFallback`
+    on any failure (subagent error, missing <summary> tag, insufficient-
+    context sentinel).
+    """
+    alert = load_alert(ctx.run_dir)
+    salt = load_run_salt(ctx.run_dir)
+    investigation_md = load_investigation_md(ctx.run_dir)
+
+    header_lines = [
+        f"status={status}",
+        f"disposition={disposition}",
+        f"confidence={confidence}",
+        f"matched_archetype={matched_archetype or 'null'}",
+    ]
+    blocks = [
+        "\n".join(header_lines),
+        format_alert_block(alert, salt),
+        format_investigation_block(investigation_md, mode="conclude-narrative"),
+    ]
+    if matched_archetype:
+        shapes = load_archetype_shapes(
+            ctx.signature_id, SOC_AGENT_ROOT,
+            archetype_names=[matched_archetype],
+            include_precedents=False,
+        )
+        if shapes:
+            blocks.append(format_archetype_shapes_block(
+                shapes, with_precedents=False,
+            ))
+
+    prompt = "\n\n".join(blocks)
+    try:
+        raw = _shared_invoke("conclude_narrative", prompt, timeout=120)
+    except OrchestrationError as exc:
+        raise _MechanicalFallback(
+            f"narrative subagent invocation failed: {exc}"
+        ) from None
+    return _parse_narrative_tags(raw)
+
+
+def _compose_report_md_analyze(
+    *,
+    ctx: Context,
+    status: str,
+    disposition: str,
+    confidence: str,
+    matched_archetype: str | None,
+    matched_ticket_id: str | None,
+    trust_anchors: list[dict],
+    leads_pursued: int,
+    trace: str,
+    hypothesis_outcomes_md: str,
+    key_evidence_md: str,
+    summary_md: str,
+    analyst_md: str | None,
+) -> str:
+    """Assemble report.md for the ANALYZE-routed mechanical path.
+
+    Structural fields come from the ANALYZE payload + parsed gather blocks.
+    `summary_md` and `analyst_md` come from the narrative subagent. Section
+    order is fixed to match agents/conclude.md §6 exactly so Tier-1 passes.
+    """
+    fm = {
+        "ticket_id": ctx.ticket_id,
+        "signature_id": ctx.signature_id,
+        "status": status,
+        "disposition": disposition,
+        "confidence": confidence,
+        "matched_archetype": matched_archetype,
+        "matched_ticket_id": matched_ticket_id,
+        "trust_anchors_consulted": trust_anchors,
+        "leads_pursued": leads_pursued,
+        "trace": trace,
+    }
+    frontmatter_yaml = yaml.safe_dump(fm, sort_keys=False).rstrip()
+
+    sections: list[str] = [
+        "---",
+        frontmatter_yaml,
+        "---",
+        "",
+        "## Summary",
+        "",
+        summary_md.strip(),
+        "",
+        "## Investigation Trace",
+        "",
+        trace,
+        "",
+        "## Hypothesis Outcomes",
+        "",
+        hypothesis_outcomes_md.strip(),
+        "",
+        "## Key Evidence",
+        "",
+        key_evidence_md.strip(),
+        "",
+        "## Verdict",
+        "",
+        f"**Status:** {status.capitalize()}  ",
+        f"**Disposition:** {disposition.capitalize()}  ",
+        f"**Confidence:** {confidence.capitalize()}  ",
+        f"**Matched Archetype:** {matched_archetype or 'null'}  ",
+    ]
+
+    if status == "escalated":
+        sections.append("")
+        sections.append("## For Analyst")
+        sections.append("")
+        if analyst_md:
+            sections.append(analyst_md.strip())
+        else:
+            sections.append(
+                "Investigation escalated without grounding. Review the "
+                "Hypothesis Outcomes and Key Evidence sections above, and "
+                "confirm whether additional telemetry or authority "
+                "consultation can resolve the open uncertainty."
+            )
+
+    return "\n".join(sections) + "\n"
+
+
+def _compose_analyze_routed(ctx: Context, analyze_payload: dict) -> dict:
+    """Mechanical CONCLUDE composer for the ANALYZE-routed path.
+
+    Extracts structured fields from the ANALYZE payload + invlang gather
+    blocks in investigation.md, dispatches the narrative subagent for the
+    free-text sections, assembles report.md, appends the CONCLUDE section
+    to investigation.md, and runs Tier-1 validation.
+
+    On any failure (narrative subagent miss, Tier-1 reject, mandatory-
+    grounding violation on resolved status), rolls back partial writes and
+    raises `_MechanicalFallback` so handle() falls through to the
+    full-context subagent.
+    """
+    raw_disposition = analyze_payload.get("disposition")
+    confidence = analyze_payload.get("confidence")
+    matched_archetype = analyze_payload.get("matched_archetype")
+    surviving_hypotheses = analyze_payload.get("surviving_hypotheses") or []
+
+    if not raw_disposition or not confidence:
+        raise _MechanicalFallback(
+            f"ANALYZE payload missing disposition/confidence: "
+            f"{list(analyze_payload.keys())}"
+        )
+
+    # ANALYZE's routing schema (agents/analyze.md) uses
+    # disposition ∈ {benign, false_positive, true_positive, escalated}
+    # but the report frontmatter schema (schemas/enums.py VALID_DISPOSITIONS)
+    # uses {benign, false_positive, true_positive, inconclusive}. When ANALYZE
+    # routes `escalated`, that maps to report-frontmatter
+    # `disposition: inconclusive` + `status: escalated`. The conclude
+    # subagent does this remapping implicitly per agents/conclude.md; the
+    # mechanical path does it explicitly.
+    force_escalated_from_disposition = False
+    if raw_disposition == "escalated":
+        disposition = "inconclusive"
+        force_escalated_from_disposition = True
+    else:
+        disposition = raw_disposition
+
+    investigation_md = load_investigation_md(ctx.run_dir)
+    gather = _extract_gather_blocks(investigation_md)
+    final_analyze_text = _extract_final_analyze_section(investigation_md)
+
+    trust_anchors = _derive_trust_anchors(gather)
+    leads_pursued = len(gather)
+    trace = _compose_trace_analyze(
+        gather, disposition, surviving_hypotheses, matched_archetype,
+    )
+    termination_category = _derive_termination_category(
+        analyze_payload, gather, final_analyze_text,
+    )
+    hypothesis_outcomes_md = _compose_hypothesis_outcomes_md(
+        gather, surviving_hypotheses,
+    )
+    key_evidence_md = _compose_key_evidence_md(gather)
+
+    # Resolve grounding status. The ANALYZE disposition steers, but
+    # `resolved` requires either (a) required_anchors all confirmed or
+    # (b) a matched_ticket_id pointing at an on-disk precedent.
+    matched_ticket_id = analyze_payload.get("matched_ticket_id")
+    status = "escalated"
+    if disposition in ("benign", "false_positive") and matched_archetype:
+        archetype_dir = (
+            SOC_AGENT_ROOT
+            / "knowledge" / "signatures" / ctx.signature_id
+            / "archetypes" / matched_archetype
+        )
+        if archetype_dir.exists():
+            required = _load_required_anchors(archetype_dir)
+            confirmed = {
+                (a.get("anchor") or "") for a in trust_anchors
+                if a.get("result") == "confirmed"
+            }
+            anchor_grounded = bool(required) and all(
+                r in confirmed for r in required
+            )
+            precedent_grounded = False
+            if matched_ticket_id:
+                precedent_path = archetype_dir / f"{matched_ticket_id}.json"
+                precedent_grounded = precedent_path.exists()
+            if anchor_grounded or precedent_grounded:
+                status = "resolved"
+            elif matched_ticket_id and not precedent_grounded:
+                # SCREEN-style recovery: drop the invalid cite, keep trying.
+                matched_ticket_id = None
+        # If archetype dir missing, fall through to escalated with
+        # matched_archetype preserved for the report body. Tier-1 will
+        # catch this if it's incompatible with status=resolved.
+
+    # If the ANALYZE disposition is adversarial (true_positive / inconclusive
+    # with adversarial termination) we always escalate — matches the
+    # legitimacy-gated-disposition rule in invlang v2.9. Also applies when
+    # ANALYZE explicitly routed `disposition: escalated`.
+    if disposition in ("true_positive", "inconclusive") or force_escalated_from_disposition:
+        status = "escalated"
+
+    # Dispatch narrative subagent (BEFORE writing anything — on failure we
+    # haven't touched disk yet, no rollback needed).
+    summary_md, analyst_md = _dispatch_narrative_subagent(
+        ctx,
+        status=status,
+        disposition=disposition,
+        confidence=confidence,
+        matched_archetype=matched_archetype,
+    )
+
+    conclude_yaml_block = {
+        "conclude": {
+            "termination": {
+                "category": termination_category,
+                "rationale": _compose_termination_rationale(
+                    termination_category, matched_archetype,
+                    matched_ticket_id, surviving_hypotheses,
+                ),
+            },
+            "disposition": disposition,
+            "confidence": confidence,
+            "matched_archetype": matched_archetype,
+            "summary": _truncate_summary(summary_md),
+        }
+    }
+    conclude_yaml_text = yaml.safe_dump(
+        conclude_yaml_block, sort_keys=False,
+    ).rstrip()
+
+    verdict_line = (
+        f"**Verdict:** {status} / {disposition} / {confidence}"
+    )
+    confirmed_hyp = (
+        f"?{matched_archetype} (via ANALYZE routing)"
+        if matched_archetype
+        else (surviving_hypotheses[0] if surviving_hypotheses else "null")
+    )
+    md_lines = [
+        "## CONCLUDE",
+        "",
+        verdict_line,
+        f"**Confirmed hypothesis:** {confirmed_hyp}",
+        f"**Trace:** {trace}",
+        "",
+        "```yaml",
+        conclude_yaml_text,
+        "```",
+        "",
+    ]
+
+    report_text = _compose_report_md_analyze(
+        ctx=ctx,
+        status=status,
+        disposition=disposition,
+        confidence=confidence,
+        matched_archetype=matched_archetype,
+        matched_ticket_id=matched_ticket_id,
+        trust_anchors=trust_anchors,
+        leads_pursued=leads_pursued,
+        trace=trace,
+        hypothesis_outcomes_md=hypothesis_outcomes_md,
+        key_evidence_md=key_evidence_md,
+        summary_md=summary_md,
+        analyst_md=analyst_md,
+    )
+
+    # Snapshot before touching disk so Tier-1 failure rolls back cleanly.
+    inv_path = ctx.run_dir / "investigation.md"
+    report_path = ctx.run_dir / "report.md"
+    inv_before = inv_path.read_text() if inv_path.exists() else None
+
+    _append_to_investigation(ctx.run_dir, "\n".join(md_lines))
+    report_path.write_text(report_text)
+
+    try:
+        _run_tier1_validation(report_path)
+    except OrchestrationError as exc:
+        if inv_before is None:
+            inv_path.unlink(missing_ok=True)
+        else:
+            inv_path.write_text(inv_before)
+        report_path.unlink(missing_ok=True)
+        raise _MechanicalFallback(
+            f"Tier-1 validation rejected mechanical analyze report: {exc}"
+        ) from None
+
+    return {
+        "status": "written",
+        "report_path": str(report_path),
+        "disposition": disposition,
+        "confidence": confidence,
+        "matched_archetype": matched_archetype,
+        "matched_ticket_id": matched_ticket_id,
+        "status_frontmatter": status,
+        "compose_mode": "analyze_mechanical",
+    }
+
+
+def _compose_termination_rationale(
+    category: str,
+    matched_archetype: str | None,
+    matched_ticket_id: str | None,
+    surviving_hypotheses: list[str],
+) -> str:
+    """One-sentence rationale for the `termination.category`. Mechanical —
+    no narrative judgment."""
+    if category == "trust-root":
+        return (
+            f"Authority verdict closed the question"
+            + (f" for archetype {matched_archetype}" if matched_archetype else "")
+            + "."
+        )
+    if category == "adversarial-refuted":
+        return (
+            "Adversarial mechanism hypothesis refuted with a named matched "
+            "refutation shape."
+        )
+    if category == "severity-ceiling":
+        return (
+            "Signature's structural severity forces escalation regardless of "
+            "mechanism (composition rule triggered)."
+        )
+    # exhaustion-escalation
+    if matched_archetype and matched_ticket_id is None:
+        return (
+            f"Archetype {matched_archetype} could not be grounded — required "
+            f"anchor(s) unconfirmed and no matching precedent."
+        )
+    if surviving_hypotheses:
+        return (
+            f"Further leads not runnable; "
+            f"{surviving_hypotheses[0]} held at live weight."
+        )
+    return "Further leads not runnable; investigation escalated for analyst review."
+
+
+def _truncate_summary(summary_md: str, *, max_chars: int = 300) -> str:
+    """Collapse a multi-paragraph narrative summary into a 1-2 sentence
+    summary field for the CONCLUDE YAML block. Takes the first paragraph,
+    strips newlines, clamps to max_chars.
+    """
+    first_para = summary_md.strip().split("\n\n", 1)[0]
+    collapsed = " ".join(first_para.split())
+    if len(collapsed) <= max_chars:
+        return collapsed
+    return collapsed[: max_chars - 1].rstrip() + "…"
