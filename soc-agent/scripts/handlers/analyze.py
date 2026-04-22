@@ -52,6 +52,7 @@ from scripts.handlers._context_loader import (
     load_alert,
     load_archetype_shapes,
     load_investigation_md,
+    load_run_salt,
 )
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
@@ -111,14 +112,15 @@ def _assemble_prompt(ctx: Context) -> str:
     """
     loop_n = _compute_loop_n(ctx)
     alert = load_alert(ctx.run_dir)
+    salt = load_run_salt(ctx.run_dir)
     investigation_md = load_investigation_md(ctx.run_dir)
     archetype_shapes = load_archetype_shapes(
         ctx.signature_id, SOC_AGENT_ROOT, include_precedents=False,
     )
     return "\n\n".join([
         f"run_dir={ctx.run_dir}\nloop_n={loop_n}\nsignature_id={ctx.signature_id}",
-        format_alert_block(alert),
-        format_investigation_block(investigation_md),
+        format_alert_block(alert, salt),
+        format_investigation_block(investigation_md, mode="analyze"),
         format_archetype_shapes_block(archetype_shapes, with_precedents=False),
     ])
 

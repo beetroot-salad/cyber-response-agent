@@ -325,14 +325,7 @@ def _compose_markdown(
     for entry in scan.get("archetype_scan", []) or []:
         name = entry.get("archetype", "?")
         shape_match = (entry.get("shape_match") or "").strip()
-        # Prefer shape_notes (new) but fall back to story_match body (legacy) —
-        # older fixtures + any in-flight runs under the previous contract.
-        notes = entry.get("shape_notes")
-        if not notes:
-            legacy = entry.get("story_match", "")
-            # legacy format: "strong|moderate|weak — <notes>" — strip the prefix
-            parts = legacy.split("—", 1)
-            notes = parts[1].strip() if len(parts) == 2 else legacy
+        notes = entry.get("shape_notes") or ""
         line = f"{name} — {notes}" if notes else name
         if shape_match == "ruled-out":
             ruled_out_lines.append(line)

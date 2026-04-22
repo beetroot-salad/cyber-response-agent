@@ -36,12 +36,13 @@ def make_ctx(
 ) -> Context:
     run_dir = tmp_path / "run-test"
     run_dir.mkdir()
-    # alert.json + investigation.md are now pre-loaded by the handler into the
-    # prompt, so both must exist on disk.
+    # alert.json + investigation.md + meta.json are now pre-loaded by the
+    # handler into the prompt (alert + per-run salt), so all must exist on disk.
     alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
     import json as _json
     (run_dir / "alert.json").write_text(_json.dumps(alert))
     (run_dir / "investigation.md").write_text(investigation_md)
+    (run_dir / "meta.json").write_text(_json.dumps({"salt": "test-salt"}))
     outputs: dict[Phase, dict] = {}
     if contextualize is not None:
         outputs[Phase.CONTEXTUALIZE] = contextualize
@@ -60,14 +61,15 @@ def make_ctx(
 
 
 def _prepare_run_dir(run_dir: Path, *, investigation_md: str = "## CONTEXTUALIZE\n\nalert observed.\n") -> None:
-    """Create alert.json + investigation.md on disk so the handler's preloaded
-    prompt assembly doesn't FileNotFoundError. Kept small — tests that need
-    specific alert content or investigation shape override per-call."""
+    """Create alert.json + investigation.md + meta.json on disk so the
+    handler's preloaded prompt assembly doesn't error. Kept small — tests
+    that need specific alert content or investigation shape override per-call."""
     import json as _json
     alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
     run_dir.mkdir(exist_ok=True)
     (run_dir / "alert.json").write_text(_json.dumps(alert))
     (run_dir / "investigation.md").write_text(investigation_md)
+    (run_dir / "meta.json").write_text(_json.dumps({"salt": "test-salt"}))
 
 
 def stub_invoke(captured: list[str], response: str):
@@ -107,8 +109,8 @@ class TestPromptAssembly:
         monkeypatch.setattr(conclude_handler, "_invoke_subagent", stub_invoke(captured, response))
         conclude_handler.handle(ctx)
         prompt = captured[0]
-        # All three tagged blocks present
-        assert "<alert>" in prompt and "</alert>" in prompt
+        # All three tagged blocks present (alert tag is salted)
+        assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
         assert "<investigation>" in prompt and "signature analysis" in prompt
         assert "<archetypes>" in prompt
         # Matched archetype shape inlined
@@ -135,7 +137,7 @@ class TestPromptAssembly:
         monkeypatch.setattr(conclude_handler, "_invoke_subagent", stub_invoke(captured, response))
         conclude_handler.handle(ctx)
         prompt = captured[0]
-        assert "<alert>" in prompt
+        assert "<alert-test-salt>" in prompt
         assert "<investigation>" in prompt
         assert "<archetypes>" not in prompt
         assert "<archetype " not in prompt
@@ -501,13 +503,14 @@ def _seed_ctx_for_mechanical(tmp_path: Path, *, matched_ticket_id: str | None) -
     mechanical CONCLUDE composer."""
     run_dir = tmp_path / "run-mech"
     run_dir.mkdir()
-    # Seed alert.json for the preload path (even though mechanical compose
-    # doesn't invoke the subagent, assembling a ctx that validates cleanly
-    # means fallback paths still work).
+    # Seed alert.json + meta.json for the preload path (even though
+    # mechanical compose doesn't invoke the subagent, assembling a ctx that
+    # validates cleanly means fallback paths still work).
     import json as _json
     (run_dir / "alert.json").write_text(
         _json.dumps({"id": "alert-1", "rule": {"id": "5710"}, "data": {}})
     )
+    (run_dir / "meta.json").write_text(_json.dumps({"salt": "test-salt"}))
     # Seed investigation.md with a minimal prologue so the mechanical path's
     # investigation.md append produces valid cumulative text.
     (run_dir / "investigation.md").write_text(

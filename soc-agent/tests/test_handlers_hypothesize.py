@@ -35,12 +35,13 @@ def make_ctx(
 ) -> Context:
     run_dir = tmp_path / "run-test"
     run_dir.mkdir()
-    # alert.json is required — the hypothesize handler now preloads it into
-    # the prompt along with investigation.md + signature knowledge + lead
-    # catalog + archetype shapes.
+    # alert.json + meta.json are required — the hypothesize handler preloads
+    # the alert and per-run salt into the prompt along with investigation.md
+    # + signature knowledge + lead catalog + archetype shapes.
     import json as _json
     alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
     (run_dir / "alert.json").write_text(_json.dumps(alert))
+    (run_dir / "meta.json").write_text(_json.dumps({"salt": "test-salt"}))
     if existing_investigation is not None:
         (run_dir / "investigation.md").write_text(existing_investigation)
     ctx = Context(
@@ -202,8 +203,8 @@ class TestPromptAssembly:
         hypothesize_handler.handle(ctx)
         prompt = captured[0]
 
-        # All five tagged blocks present
-        assert "<alert>" in prompt and "</alert>" in prompt
+        # All five tagged blocks present (alert tag is salted)
+        assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
         assert "<investigation>" in prompt and "signature summary" in prompt
         assert "<signature-knowledge>" in prompt
         assert "<playbook>" in prompt  # real 5710 playbook body inlined
@@ -881,6 +882,37 @@ class TestCheckpointRecovery:
         hypothesize_handler.handle(ctx)
         assert len(captured) == 2
 
+    def test_retry_does_not_re_synthesize_from_checkpoint(self, tmp_path, monkeypatch):
+        """Both attempts return empty stdout with a stale `status: complete`
+        checkpoint on disk. Attempt 1 triggers synthesis; synthesis passes
+        validator but routes the handler into its normal retry path (e.g.
+        because the first validation errored). Attempt 2 must NOT re-synthesize
+        the same checkpoint — it would loop the same failure silently. Instead
+        the retry path raises with the stdout_summary_not_yaml directive as
+        the unresolved error."""
+        ctx = make_ctx(tmp_path)
+        _write_checkpoint(ctx.run_dir, 1, {
+            "status": "complete",
+            "mode": "fork",
+            "hypotheses": [{"id": "h-001", "name": "?x"}],
+            "selected_lead": "authentication-history",
+        })
+        captured: list[str] = []
+        # Both attempts return empty stdout.
+        monkeypatch.setattr(
+            hypothesize_handler, "_invoke_subagent",
+            stub_invoke(captured, ["", ""]),
+        )
+        # Validator flags synthesis output on attempt 1, forcing the retry
+        # path; attempt 2 then hits empty-stdout again and (with recovery
+        # disabled) surfaces the stdout_summary_not_yaml error.
+        monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
+                            stub_validator([["invlang rule 27 violation"]]))
+        with pytest.raises(OrchestrationError, match="failed on retry"):
+            hypothesize_handler.handle(ctx)
+        # Two attempts, both invoked the subagent — no infinite synthesis loop.
+        assert len(captured) == 2
+
 
 # ---------------------------------------------------------------------------
 # Archetype-scan-aware prompt trimming
@@ -920,16 +952,3 @@ class TestArchetypeSelection:
         """No archetype-scan block → fall back to loading all archetypes."""
         picked = hypothesize_handler._select_archetypes_for_prompt("nothing here")
         assert picked is None
-
-    def test_legacy_ranked_format_backward_compat(self):
-        """In-flight runs started on the old renderer must still work."""
-        investigation = textwrap.dedent("""\
-            **Archetype matches:**
-            - alpha — strong — rationale
-            - beta — moderate — rationale
-            - epsilon — ruled_out — rationale
-            **Adversarial archetype:** epsilon — rationale
-        """)
-        picked = hypothesize_handler._select_archetypes_for_prompt(investigation)
-        # Candidates = non-ruled_out entries in doc order, then adversarial.
-        assert picked == ["alpha", "beta", "epsilon"]

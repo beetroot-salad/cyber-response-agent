@@ -33,10 +33,12 @@ def make_ctx(
 ) -> Context:
     run_dir = tmp_path / "run-test"
     run_dir.mkdir()
-    # alert.json is required — the analyze handler preloads it into the prompt.
+    # alert.json + meta.json are required — the analyze handler preloads the
+    # alert and the per-run salt into the prompt.
     alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
     import json as _json
     (run_dir / "alert.json").write_text(_json.dumps(alert))
+    (run_dir / "meta.json").write_text(_json.dumps({"salt": "test-salt"}))
     if existing_investigation is not None:
         (run_dir / "investigation.md").write_text(existing_investigation)
     return Context(
@@ -143,8 +145,8 @@ class TestPromptAssembly:
         analyze_handler.handle(ctx)
         prompt = captured[0]
 
-        # Tagged blocks present
-        assert "<alert>" in prompt and "</alert>" in prompt
+        # Tagged blocks present (alert tag is salted for injection safety)
+        assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
         assert "<investigation>" in prompt and "</investigation>" in prompt
         assert "<archetypes>" in prompt
         # Inlined content landed

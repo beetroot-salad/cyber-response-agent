@@ -85,6 +85,7 @@ from scripts.handlers._context_loader import (
     load_archetype_shapes,
     load_investigation_md,
     load_lead_definitions,
+    load_run_salt,
     load_signature_text,
     parse_adversarial_archetype,
     parse_archetype_candidates,
@@ -179,6 +180,7 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
     priors_section = _safe_priors_section(ctx)
 
     alert = load_alert(ctx.run_dir)
+    salt = load_run_salt(ctx.run_dir)
     investigation_md = load_investigation_md(ctx.run_dir)
     signature_texts = load_signature_text(ctx.signature_id, SOC_AGENT_ROOT)
     archetype_shapes = load_archetype_shapes(
@@ -195,8 +197,8 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
             f"loop_n={loop_n}"
         ),
         priors_section,
-        format_alert_block(alert),
-        format_investigation_block(investigation_md),
+        format_alert_block(alert, salt),
+        format_investigation_block(investigation_md, mode="hypothesize"),
         format_signature_text_block(signature_texts),
         format_archetype_shapes_block(archetype_shapes, with_precedents=False),
         format_lead_definitions_summary_block(lead_defs),
@@ -594,6 +596,7 @@ def _attempt(
     *,
     expected_loop_n: int,
     remediation_notes: list[str] | None,
+    allow_checkpoint_recovery: bool = True,
 ) -> tuple[str, str, dict, list[str]]:
     """Run one subagent invocation end-to-end.
 
@@ -602,6 +605,12 @@ def _attempt(
     trailer). Recoverable contract violations (emitting a `gather:` block,
     validator errors) are surfaced via the returned error list so the caller
     can retry with structured remediation.
+
+    `allow_checkpoint_recovery` gates the empty-stdout → checkpoint synthesis
+    path. `handle()` passes False on the retry attempt so a stale or broken
+    checkpoint cannot loop the recovery synthesis indefinitely: on retry,
+    empty stdout is always a subagent failure, not a harness quirk to
+    recover from.
     """
     prompt = _assemble_prompt(ctx, remediation_notes=remediation_notes)
     raw = _invoke_subagent(prompt)
@@ -629,10 +638,12 @@ def _attempt(
     # the YAML response), stdout is empty. Before retrying, look for the
     # M_last checkpoint — if present and complete, synthesize the response
     # from it. This converts a 300s retry into a ~0s checkpoint read.
+    # Skipped on retry attempts (see docstring).
     if not _has_trailer(raw):
-        recovered = _synthesize_from_checkpoint(ctx, expected_loop_n)
-        if recovered is not None:
-            return recovered
+        if allow_checkpoint_recovery:
+            recovered = _synthesize_from_checkpoint(ctx, expected_loop_n)
+            if recovered is not None:
+                return recovered
         # Fall through to the retry path with the directive.
         return (
             "",
@@ -746,9 +757,13 @@ def handle(ctx: Context) -> PhaseResult:
         # One retry. For the `gather:`-block contract violation the remediation
         # is a deterministic handler-authored directive; for invlang validator
         # errors the raw errors pass through so the subagent can fix claim-level
-        # semantics against its checkpoint.
+        # semantics against its checkpoint. Disable checkpoint recovery on the
+        # retry so a stale checkpoint cannot re-synthesize the same failure.
         sections, block_type, trailer, errors = _attempt(
-            ctx, expected_loop_n=expected_loop_n, remediation_notes=errors,
+            ctx,
+            expected_loop_n=expected_loop_n,
+            remediation_notes=errors,
+            allow_checkpoint_recovery=False,
         )
         if errors:
             raise OrchestrationError(

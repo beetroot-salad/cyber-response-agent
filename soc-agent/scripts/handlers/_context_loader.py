@@ -47,6 +47,23 @@ def load_investigation_md(run_dir: Path) -> str:
     return path.read_text() if path.exists() else ""
 
 
+def load_run_salt(run_dir: Path) -> str:
+    """Return the per-run salt from `{run_dir}/meta.json`.
+
+    Fails fast if meta.json or its `salt` field is missing — the salt is
+    required to wrap untrusted alert content in unguessable delimiters. A
+    missing salt is an orchestration-level bug (setup_run.py always writes
+    one), not a recoverable runtime state.
+    """
+    meta = json.loads((run_dir / "meta.json").read_text())
+    salt = meta.get("salt")
+    if not salt or not isinstance(salt, str):
+        raise RuntimeError(
+            f"meta.json at {run_dir} is missing a non-empty 'salt' field"
+        )
+    return salt
+
+
 # ---------------------------------------------------------------------------
 # Archetype shapes
 # ---------------------------------------------------------------------------
@@ -158,15 +175,239 @@ def load_lead_definitions(soc_agent_root: Path) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def format_alert_block(alert: dict) -> str:
-    """Render the alert JSON as a tagged block for inline prompt inclusion."""
-    return f"<alert>\n{json.dumps(alert, indent=2)}\n</alert>"
+def format_alert_block(alert: dict, salt: str) -> str:
+    """Render the alert JSON as a salted-tag block for inline prompt inclusion.
+
+    The outer tag carries a per-run salt (`<alert-{salt}>…</alert-{salt}>`)
+    so an attacker-controlled alert field cannot forge a tag close. Matches
+    the `<run-{salt}-{tag}>` pattern in hooks/scripts/tag_tool_results.py,
+    which wraps untrusted SIEM/MCP output at PostToolUse time. Handlers
+    resolve the salt via `load_run_salt(run_dir)`.
+    """
+    if not salt:
+        raise ValueError("format_alert_block requires a non-empty salt")
+    return f"<alert-{salt}>\n{json.dumps(alert, indent=2)}\n</alert-{salt}>"
 
 
-def format_investigation_block(investigation_md: str) -> str:
-    """Render investigation.md content as a tagged block."""
-    body = investigation_md.rstrip() or "(empty — no prior phases recorded)"
-    return f"<investigation>\n{body}\n</investigation>"
+_PHASE_HEADER_RE = re.compile(
+    r"^##\s+(?P<phase>[A-Za-z][A-Za-z\- ]*?)(?:\s*\(loop\s*(?P<loop>\d+)\))?\s*$"
+)
+
+
+def _parse_investigation_sections(text: str) -> list[dict]:
+    """Split investigation.md into ordered `## `-delimited sections.
+
+    Each section is `{header, phase, loop_n, body}`. `phase` is lowercased
+    and dash-separated (e.g. `contextualize`, `hypothesize`, `gather`,
+    `analyze`, `self-report`). `loop_n` is int or None. `body` is the full
+    section body including blank lines and fenced blocks, header line
+    excluded. Leading content before the first header is dropped (current
+    investigation.md format always opens with `## CONTEXTUALIZE`).
+
+    Header matching is fence-aware — a `## ...` line inside a ``` fenced
+    block is body content, not a new section.
+    """
+    lines = text.splitlines()
+    sections: list[dict] = []
+    current: dict | None = None
+    in_fence = False
+    for line in lines:
+        if line.startswith("```"):
+            in_fence = not in_fence
+            if current is not None:
+                current["body_lines"].append(line)
+            continue
+        if not in_fence and line.startswith("## "):
+            m = _PHASE_HEADER_RE.match(line)
+            if m:
+                if current is not None:
+                    sections.append(current)
+                phase = m.group("phase").strip().lower().replace(" ", "-")
+                current = {
+                    "header": line,
+                    "phase": phase,
+                    "loop_n": int(m.group("loop")) if m.group("loop") else None,
+                    "body_lines": [],
+                }
+                continue
+        if current is not None:
+            current["body_lines"].append(line)
+    if current is not None:
+        sections.append(current)
+    return sections
+
+
+def _section_text(section: dict) -> str:
+    """Render a parsed section back to its markdown form."""
+    return section["header"] + "\n" + "\n".join(section["body_lines"])
+
+
+def _trim_gather_section(section: dict) -> str:
+    """Render a GATHER section keeping only its structured top-matter
+    (bolded `**Lead:**` / `**Status:**` / `**Query:**` lines) and any YAML
+    fences. Raw-observation prose (multi-KB per lead in practice) is
+    elided with a single placeholder line.
+
+    This is the dominant bulk-contributor in `investigation.md` growth
+    across loops: each GATHER can be 2-5KB of observation prose that
+    HYPOTHESIZE does not need for picking the next fork — the structured
+    outcome lives either in a `gather:` YAML fence (when authored) or is
+    summarized into the downstream ANALYZE block.
+    """
+    header = section["header"]
+    kept: list[str] = []
+    in_fence = False
+    dropping_raw = False
+    raw_dropped = False
+    for line in section["body_lines"]:
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            kept.append(line)
+            continue
+        if in_fence:
+            kept.append(line)
+            continue
+        # Out of fence. Detect raw-observation boundary.
+        if stripped.startswith("**Raw observation") or stripped.startswith("**Observations"):
+            dropping_raw = True
+            raw_dropped = True
+            continue
+        if dropping_raw:
+            # End drop mode when we hit a new bolded field or a blank-then-
+            # bolded pattern. Conservative: any `**...` line out of fence
+            # ends the drop.
+            if stripped.startswith("**") and stripped.endswith("**"):
+                dropping_raw = False
+                kept.append(line)
+            elif stripped.startswith("**") and ":**" in stripped:
+                dropping_raw = False
+                kept.append(line)
+            # else: skip the observation bullet
+            continue
+        kept.append(line)
+    body = "\n".join(kept).rstrip()
+    if raw_dropped:
+        body = body + "\n\n[raw-observation prose trimmed — see `gather:` YAML and downstream ANALYZE for structured outcome]"
+    return header + "\n" + body
+
+
+def _analyze_grade_summary(section: dict) -> str:
+    """Render an ANALYZE section keeping only the per-hypothesis grade lines
+    and the routing tail (`**Surviving hypotheses:**`, `**Next action:**`).
+    Drops the per-hypothesis narrative bodies, which can be multi-KB.
+
+    Used for prior-loop ANALYZEs in `analyze` mode — the current loop's
+    ANALYZE doesn't exist yet (that's what the handler is about to produce).
+    """
+    header = section["header"]
+    kept: list[str] = []
+    for line in section["body_lines"]:
+        stripped = line.lstrip()
+        if stripped.startswith("- ") and ":" in stripped and ("`+`" in stripped or "`-`" in stripped or "`++`" in stripped or "`--`" in stripped):
+            # Per-hypothesis grade line. Keep the first sentence only.
+            kept.append(line.split(". ", 1)[0] + ("." if "." in line else ""))
+        elif stripped.startswith("**Surviving hypotheses:**") or stripped.startswith("**Next action:**"):
+            kept.append(line)
+    if not kept:
+        return header + "\n[analyze block — no grade lines parsed]"
+    return header + "\n" + "\n".join(kept)
+
+
+def format_investigation_block(
+    investigation_md: str,
+    *,
+    mode: str = "full",
+) -> str:
+    """Render investigation.md content as a tagged `<investigation>` block.
+
+    `mode` controls how much of the file is emitted — each phase handler
+    uses a subset tuned to what its subagent needs. This is the single
+    entrypoint for reading `investigation.md` from a handler; trimming
+    decisions live here, not in the handlers or subagent prompts.
+
+    Modes:
+
+    - `full` — entire file verbatim. Default. Used by CONCLUDE, which
+      needs access to every phase for citation resolution.
+
+    - `hypothesize` — CONTEXTUALIZE + every HYPOTHESIZE block verbatim +
+      every GATHER block with its raw-observation prose elided (top-matter
+      and YAML fences kept) + the latest ANALYZE block + the latest
+      Self-report. Prior loops' GATHER raw observations are the dominant
+      bulk-contributor; dropping them makes the loop-N prompt independent
+      of N for the next-fork decision. Typical reduction: 50-70% on
+      2-loop-deep investigations.
+
+    - `analyze` — CONTEXTUALIZE + current loop's HYPOTHESIZE and GATHER
+      verbatim (needed to grade against pre-declared predictions /
+      refutation shapes) + prior ANALYZE blocks summarized to grade lines
+      only (for weight-carryover / rollup-discipline). Current loop is
+      the highest loop_n found across HYPOTHESIZE/GATHER.
+
+    Unknown modes fall back to `full` to be safe.
+    """
+    body_raw = investigation_md.rstrip()
+    if not body_raw:
+        return "<investigation>\n(empty — no prior phases recorded)\n</investigation>"
+
+    if mode not in {"hypothesize", "analyze"}:
+        return f"<investigation>\n{body_raw}\n</investigation>"
+
+    sections = _parse_investigation_sections(body_raw)
+    if not sections:
+        return f"<investigation>\n{body_raw}\n</investigation>"
+
+    if mode == "hypothesize":
+        # Latest ANALYZE + Self-report carry the routing rationale for why
+        # we're back in HYPOTHESIZE — always include those in full.
+        analyze_sections = [s for s in sections if s["phase"] == "analyze"]
+        selfreport_sections = [s for s in sections if s["phase"] == "self-report"]
+        latest_analyze_idx = (
+            sections.index(analyze_sections[-1]) if analyze_sections else -1
+        )
+        latest_selfreport_idx = (
+            sections.index(selfreport_sections[-1]) if selfreport_sections else -1
+        )
+        parts: list[str] = []
+        for i, s in enumerate(sections):
+            if s["phase"] == "contextualize":
+                parts.append(_section_text(s))
+            elif s["phase"] == "hypothesize":
+                parts.append(_section_text(s))
+            elif s["phase"] == "gather":
+                parts.append(_trim_gather_section(s))
+            elif s["phase"] == "analyze":
+                if i == latest_analyze_idx:
+                    parts.append(_section_text(s))
+                # else: drop older ANALYZE narrative (its grades are already
+                # rolled into the downstream hypothesize/gather YAML state)
+            elif s["phase"] == "self-report":
+                if i == latest_selfreport_idx:
+                    parts.append(_section_text(s))
+            # Unknown phase sections are dropped.
+        body = "\n\n".join(p.rstrip() for p in parts if p.strip())
+        return f"<investigation mode=\"hypothesize\">\n{body}\n</investigation>"
+
+    # mode == "analyze"
+    loops = [s["loop_n"] for s in sections if s["loop_n"] is not None]
+    current_loop = max(loops) if loops else None
+    parts: list[str] = []
+    for s in sections:
+        if s["phase"] == "contextualize":
+            parts.append(_section_text(s))
+        elif s["phase"] in {"hypothesize", "gather"}:
+            if s["loop_n"] == current_loop:
+                parts.append(_section_text(s))
+            # prior-loop hypothesize/gather: their structured outcome is
+            # rolled into the ANALYZE grade lines we render below.
+        elif s["phase"] == "analyze":
+            # Always summarize — the current loop's ANALYZE doesn't exist
+            # yet (this handler is about to produce it).
+            parts.append(_analyze_grade_summary(s))
+        # self-report dropped for analyze mode (not load-bearing for grading)
+    body = "\n\n".join(p.rstrip() for p in parts if p.strip())
+    return f"<investigation mode=\"analyze\">\n{body}\n</investigation>"
 
 
 def format_signature_text_block(texts: dict[str, str]) -> str:
@@ -308,41 +549,16 @@ def parse_archetype_candidates(investigation_md: str) -> list[str]:
     """Return the candidate archetype names (unordered set, document-order).
 
     Reads the `**Plausible archetypes (candidates for HYPOTHESIZE):**` block
-    emitted by contextualize.py. For backward compatibility also accepts the
-    legacy `**Archetype matches:**` heading and treats every entry not marked
-    `ruled_out` as a candidate.
+    emitted by contextualize.py.
     """
-    # New heading first.
-    names = _parse_archetype_block(
+    return _parse_archetype_block(
         investigation_md, "**Plausible archetypes (candidates for HYPOTHESIZE):**"
     )
-    if names:
-        return names
-    # Legacy path — extract names whose strength is not `ruled_out`.
-    lines = investigation_md.splitlines()
-    try:
-        start = next(i for i, ln in enumerate(lines) if ln.startswith("**Archetype matches:**"))
-    except StopIteration:
-        return []
-    out: list[str] = []
-    for ln in lines[start + 1:]:
-        if ln.startswith("**") or ln.startswith("```"):
-            break
-        if not ln.lstrip().startswith("- "):
-            continue
-        stripped = ln.lstrip()[2:]
-        parts = [p.strip() for p in stripped.split("—")]
-        if len(parts) < 2:
-            continue
-        if parts[1].lower() == "ruled_out":
-            continue
-        out.append(parts[0])
-    return out
 
 
 def parse_ruled_out_archetypes(investigation_md: str) -> list[str]:
-    """Return ruled-out archetype names (new heading only; legacy format
-    embeds them in the same list and is handled by the candidate parser)."""
+    """Return ruled-out archetype names from the `**Ruled-out archetypes:**`
+    block emitted by contextualize.py."""
     return _parse_archetype_block(investigation_md, "**Ruled-out archetypes:**")
 
 
