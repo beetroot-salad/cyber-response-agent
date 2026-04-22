@@ -80,18 +80,14 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._context_loader import (
     format_alert_block,
-    format_archetype_shapes_block,
     format_investigation_block,
     format_lead_definitions_summary_block,
     format_signature_text_block,
     load_alert,
-    load_archetype_shapes,
     load_investigation_md,
     load_lead_definitions,
     load_run_salt,
     load_signature_text,
-    parse_adversarial_archetype,
-    parse_archetype_candidates,
 )
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
@@ -134,27 +130,6 @@ def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) ->
 # ---------------------------------------------------------------------------
 
 
-def _select_archetypes_for_prompt(investigation_md: str) -> list[str] | None:
-    """Pick the archetype names to inline into the subagent prompt.
-
-    Returns the candidate archetypes from CONTEXTUALIZE's archetype-scan
-    (unordered set of archetypes whose shape is consistent with the alert),
-    unioned with the adversarial archetype so the adversarial-discipline rule
-    always sees its shape even when the shape is ruled-out.
-
-    Returns None when the scan is absent or unparseable — callers fall back to
-    shipping every archetype (original behavior).
-    """
-    candidates = parse_archetype_candidates(investigation_md)
-    if not candidates:
-        return None  # fall back to all archetypes
-    out = list(candidates)
-    adversarial = parse_adversarial_archetype(investigation_md)
-    if adversarial and adversarial not in out:
-        out.append(adversarial)
-    return out
-
-
 def _compute_loop_n(ctx: Context) -> int:
     """Current loop number = count of prior PREDICT entries + 1.
 
@@ -174,10 +149,13 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
     """Build the predict subagent prompt with all deterministic context inline.
 
     The subagent receives alert.json, investigation.md, signature playbook +
-    context, every archetype's story/trust-anchors, and the full lead catalog
-    preloaded — no Read tool calls required. Bash stays available for invlang
-    corpus queries (pre-baked priors are inlined, but CLI is retained for
-    shape-calibration lookups the priors don't answer).
+    context, and the full lead catalog preloaded — no Read tool calls
+    required. Bash stays available for invlang corpus queries (pre-baked
+    priors are inlined, but CLI is retained for shape-calibration lookups the
+    priors don't answer).
+
+    Archetype context is intentionally absent: PREDICT works at the mechanism
+    layer, archetypes are a disposition-routing concern that REPORT consumes.
     """
     loop_n = _compute_loop_n(ctx)
     priors_section = _safe_priors_section(ctx)
@@ -186,11 +164,6 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
     salt = load_run_salt(ctx.run_dir)
     investigation_md = load_investigation_md(ctx.run_dir)
     signature_texts = load_signature_text(ctx.signature_id, SOC_AGENT_ROOT)
-    archetype_shapes = load_archetype_shapes(
-        ctx.signature_id, SOC_AGENT_ROOT,
-        archetype_names=_select_archetypes_for_prompt(investigation_md),
-        include_precedents=False,
-    )
     lead_defs = load_lead_definitions(SOC_AGENT_ROOT)
 
     blocks = [
@@ -203,7 +176,6 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
         format_alert_block(alert, salt),
         format_investigation_block(investigation_md, mode="predict"),
         format_signature_text_block(signature_texts),
-        format_archetype_shapes_block(archetype_shapes, with_precedents=False),
         format_lead_definitions_summary_block(lead_defs),
     ]
 
@@ -315,47 +287,58 @@ def _prologue_signature_summary(prologue: dict) -> dict:
 
 
 def _format_prologue_priors(payload: dict) -> str:
-    """Render the loop-1 prologue-keyed priors block."""
+    """Render the loop-1 prologue-keyed priors block.
+
+    Baseline-recommendation format: when the corpus carries strong support
+    for a top-lead at this prologue topology, emit a single recommendation
+    line — "use this scaffold unless the alert contradicts it." When
+    support is weak, emit a sparse-prior fallback that tells PREDICT to
+    scaffold from first principles.
+
+    Peer-classification rendering is intentionally absent. A list of
+    historically-proposed classifications drives enumerate-every-mechanism
+    behavior (the FM4/FM5 failure modes); the priors block should nudge
+    scaffold choice, not seed a fork space.
+    """
     sig = payload["prologue_signature"]
     scope = payload["scope"]
     leads = payload["leads"]
-    peers = payload["peers"]
+
+    lead_rows = leads.get("hits") or []
+    top = lead_rows[0] if lead_rows else None
+
+    is_strong = (
+        top is not None
+        and (top.get("branching_support") or 0) >= _STRONG_PRIOR_MIN_SUPPORT
+        and (top.get("fidelity_rate") or 0.0) >= _STRONG_PRIOR_MIN_FIDELITY
+    )
 
     lines = [
         "## Past-investigation priors",
         "",
-        f"### Loop 1 — keyed on prologue topology ({scope} scope, "
+        f"Prologue topology — {scope} scope, "
         f"tier {leads['tier_used']}: {leads['tier_label']}, "
-        f"{leads.get('cases_matched', 0)} cases matched)",
-        "Prologue vertex types: " + (", ".join(sig["vertex_types"]) or "—"),
-        "Prologue edge relations: " + (", ".join(sig["edge_relations"]) or "—"),
+        f"{leads.get('cases_matched', 0)} cases matched. "
+        f"Vertex types: {', '.join(sig['vertex_types']) or '—'}. "
+        f"Edge relations: {', '.join(sig['edge_relations']) or '—'}.",
+        "",
     ]
 
-    lead_rows = (leads.get("hits") or [])[:_PRIORS_LEADS_TOP_N]
-    if lead_rows:
-        lines.append("")
-        lines.append("Leads ranked at this prologue topology (per-occurrence effectiveness; n = support):")
-        for row in lead_rows:
-            lines.append(
-                f"  - {row['lead_name']}: "
-                f"score={_fmt_num(row.get('mean_branching_delta'))}, "
-                f"fidelity={_fmt_num(row.get('fidelity_rate'))}, "
-                f"n={row.get('branching_support') or 0}"
-            )
+    if is_strong:
+        n = top.get("branching_support") or 0
+        total = leads.get("cases_matched") or n
+        fidelity = top.get("fidelity_rate") or 0.0
+        lines.append(
+            f"**Strongest prior at this topology:** `{top['lead_name']}` "
+            f"({n}/{total} cases, {int(fidelity * 100)}% fidelity rate). "
+            "Use this scaffold unless the alert specifically contradicts it."
+        )
     else:
-        lines.append("Leads: (no corpus matches)")
+        lines.append(
+            "Priors at this topology are sparse — scaffold from first principles "
+            "per PREDICT's ASSESS gate."
+        )
 
-    peer_rows = (peers.get("hits") or [])[:_PRIORS_PEERS_TOP_N]
-    if peer_rows:
-        lines.append("")
-        lines.append("Hypothesis classifications proposed historically at this prologue topology:")
-        for p in peer_rows:
-            hist = p.get("final_weight_histogram") or {}
-            hist_str = ", ".join(f"{k}={v}" for k, v in hist.items() if v) or "—"
-            lines.append(
-                f"  - {p['classification']} "
-                f"({p['peer_count']} cases, weights: {hist_str})"
-            )
     return "\n".join(lines)
 
 
@@ -464,6 +447,17 @@ def _compute_priors(frontier: list[dict]) -> list[dict]:
 
 _PRIORS_LEADS_TOP_N = 5
 _PRIORS_PEERS_TOP_N = 5
+
+# Baseline-recommendation thresholds for _format_prologue_priors. Calibrated
+# against the current corpus depth (~40 companions); revisit as the corpus
+# grows or if eval shows the recommendation missing real patterns.
+#   - support (branching_support): the per-lead case count at this topology.
+#     Below 5 we can't reliably distinguish signal from coincidence.
+#   - fidelity (fidelity_rate): fraction of cases where the lead's
+#     prediction materialized — i.e. the lead actually discriminated when
+#     it was fired. Below 0.5 the prior is a coin flip.
+_STRONG_PRIOR_MIN_SUPPORT = 5
+_STRONG_PRIOR_MIN_FIDELITY = 0.5
 
 
 def _format_priors(priors: list[dict]) -> str:

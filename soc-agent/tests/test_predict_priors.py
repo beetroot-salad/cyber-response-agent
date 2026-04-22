@@ -23,7 +23,10 @@ from invlang.queries import (  # noqa: E402
     lead_effectiveness_for_topology,
     peer_hypothesis_distribution_for_topology,
 )
-from scripts.handlers.predict import _format_priors  # noqa: E402
+from scripts.handlers.predict import (  # noqa: E402
+    _format_priors,
+    _format_prologue_priors,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -487,3 +490,103 @@ def test_format_priors_empty_leads_prints_no_corpus_match():
     ]
     out = _format_priors(priors)
     assert "(no corpus matches at any tier)" in out
+
+
+# ---------------------------------------------------------------------------
+# Loop-1 baseline-recommendation formatter
+# ---------------------------------------------------------------------------
+
+
+def _prologue_priors_payload(
+    *,
+    lead_name: str = "process-lineage",
+    support: int = 7,
+    fidelity: float = 0.71,
+    cases_matched: int = 9,
+    tier_used: int = 0,
+    tier_label: str = "exact",
+    scope: str = "same-signature",
+) -> dict[str, Any]:
+    return {
+        "prologue_signature": {
+            "vertex_types": ["endpoint", "process"],
+            "vertex_classifications": ["host"],
+            "edge_relations": ["spawned"],
+        },
+        "scope": scope,
+        "leads": {
+            "tier_used": tier_used,
+            "tier_label": tier_label,
+            "cases_matched": cases_matched,
+            "hits": [
+                {
+                    "lead_name": lead_name,
+                    "branching_support": support,
+                    "fidelity_rate": fidelity,
+                    "mean_branching_delta": 0.8,
+                }
+            ],
+        },
+        "peers": {
+            # Peer rendering was intentionally dropped — the payload still
+            # carries peers (retrieval layer unchanged) but the renderer
+            # ignores them.
+            "hits": [
+                {
+                    "classification": "ci-pipeline-exec",
+                    "peer_count": 4,
+                    "final_weight_histogram": {"+": 3, "-": 1},
+                }
+            ],
+        },
+    }
+
+
+def test_format_prologue_priors_strong_emits_baseline_recommendation():
+    payload = _prologue_priors_payload(support=7, fidelity=0.71, cases_matched=9)
+    out = _format_prologue_priors(payload)
+
+    # Header + topology summary always emitted
+    assert "## Past-investigation priors" in out
+    assert "tier 0: exact" in out
+    assert "endpoint, process" in out  # vertex types
+    assert "spawned" in out            # edge relations
+
+    # Strong-prior branch: baseline recommendation line with case counts
+    # and fidelity percentage; no per-classification peer listing.
+    assert "Strongest prior at this topology" in out
+    assert "`process-lineage`" in out
+    assert "7/9 cases" in out
+    assert "71% fidelity" in out
+    assert "Use this scaffold unless the alert specifically contradicts it." in out
+
+    # Peer-distribution rendering is gone.
+    assert "ci-pipeline-exec" not in out
+    assert "peer_count" not in out
+
+
+def test_format_prologue_priors_sparse_support_emits_first_principles_fallback():
+    # support=3 is below the _STRONG_PRIOR_MIN_SUPPORT=5 threshold
+    payload = _prologue_priors_payload(support=3, fidelity=0.71)
+    out = _format_prologue_priors(payload)
+    assert "## Past-investigation priors" in out
+    assert "sparse" in out
+    assert "first principles" in out
+    assert "Strongest prior" not in out
+
+
+def test_format_prologue_priors_sparse_fidelity_emits_first_principles_fallback():
+    # support OK but fidelity=0.4 is below the 0.5 threshold
+    payload = _prologue_priors_payload(support=9, fidelity=0.4)
+    out = _format_prologue_priors(payload)
+    assert "sparse" in out
+    assert "first principles" in out
+    assert "Strongest prior" not in out
+
+
+def test_format_prologue_priors_no_hits_emits_sparse_fallback():
+    payload = _prologue_priors_payload(cases_matched=0)
+    payload["leads"]["hits"] = []
+    out = _format_prologue_priors(payload)
+    assert "sparse" in out
+    assert "first principles" in out

@@ -35,9 +35,9 @@ def make_ctx(
 ) -> Context:
     run_dir = tmp_path / "run-test"
     run_dir.mkdir()
-    # alert.json + meta.json are required — the hypothesize handler preloads
+    # alert.json + meta.json are required — the predict handler preloads
     # the alert and per-run salt into the prompt along with investigation.md
-    # + signature knowledge + lead catalog + archetype shapes.
+    # + signature knowledge + lead catalog.
     import json as _json
     alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
     (run_dir / "alert.json").write_text(_json.dumps(alert))
@@ -189,7 +189,8 @@ class TestPromptAssembly:
 
     def test_prompt_inlines_all_deterministic_context(self, tmp_path, monkeypatch):
         """Handler preloads alert + investigation + signature knowledge +
-        archetypes + lead catalog so the subagent needs no Read tool."""
+        lead catalog so the subagent needs no Read tool. Archetype context
+        is intentionally absent — PREDICT works at the mechanism layer."""
         ctx = make_ctx(
             tmp_path,
             history=[Phase.PREDICT.value],
@@ -203,14 +204,15 @@ class TestPromptAssembly:
         predict_handler.handle(ctx)
         prompt = captured[0]
 
-        # All five tagged blocks present (alert tag is salted)
+        # Tagged blocks present (alert tag is salted)
         assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
-        # hypothesize handler uses mode="predict" — tag carries a mode attribute
+        # predict handler uses mode="predict" — tag carries a mode attribute
         assert "<investigation mode=\"predict\">" in prompt and "signature summary" in prompt
         assert "<signature-knowledge>" in prompt
         assert "<playbook>" in prompt  # real 5710 playbook body inlined
-        assert "<archetypes>" in prompt
-        assert 'name="monitoring-probe"' in prompt
+        # Archetype context is NOT in the PREDICT prompt (dropped per the
+        # reframe — archetypes are a REPORT-phase concern).
+        assert "<archetypes>" not in prompt
         assert "<lead-catalog>" in prompt
         assert 'name="authentication-history"' in prompt  # real lead inlined
 
@@ -378,15 +380,15 @@ class TestPriorsIntegration:
         monkeypatch.setattr(invlang, "load_corpus", lambda *a, **k: [])
 
         prompt = predict_handler._assemble_prompt(ctx)
-        # Loop-1 now takes the prologue-keyed retrieval path, which renders
-        # a single block keyed on the prologue shape (not per-seed). With an
-        # empty corpus we expect the "no match" sentinel at tier 3.
+        # Loop-1 takes the prologue-keyed retrieval path. With an empty
+        # corpus, priors fall through to the sparse-prior fallback —
+        # "scaffold from first principles per PREDICT's ASSESS gate."
         assert "## Past-investigation priors" in prompt
-        assert "Loop 1 — keyed on prologue topology" in prompt
+        assert "Prologue topology" in prompt
         assert "tier 3: no match" in prompt
-        assert "Leads: (no corpus matches)" in prompt
-        # Sentinel that would fire if the loop-1 detection silently broke
-        # and fell through to the loop-2+ per-seed path.
+        assert "sparse" in prompt
+        assert "first principles" in prompt
+        # Sentinel: the loop-2+ per-seed frontier path would emit this.
         assert "(no frontier extracted)" not in prompt
 
     def test_priors_failure_is_non_fatal(self, tmp_path, monkeypatch):
@@ -920,41 +922,10 @@ class TestCheckpointRecovery:
         assert len(captured) == 3
 
 
-# ---------------------------------------------------------------------------
-# Archetype-scan-aware prompt trimming
-# ---------------------------------------------------------------------------
-
-
-class TestArchetypeSelection:
-    """Vocabulary: archetype-scan emits `candidate | ruled-out` — no
-    strong/moderate/weak ranking. The hypothesize prompt ships every candidate
-    (plus the adversarial archetype, even if ruled-out)."""
-
-    def test_candidates_plus_adversarial(self):
-        investigation = textwrap.dedent("""\
-            **Plausible archetypes (candidates for HYPOTHESIZE):**
-            - alpha — notes
-            - beta — notes
-            - gamma — notes
-            **Ruled-out archetypes:**
-            - epsilon — disqualifier tripped
-            **Adversarial archetype:** epsilon — reason
-        """)
-        picked = predict_handler._select_archetypes_for_prompt(investigation)
-        # Every candidate in doc order, then adversarial unioned in even though ruled-out.
-        assert picked == ["alpha", "beta", "gamma", "epsilon"]
-
-    def test_adversarial_already_in_candidates_no_duplicate(self):
-        investigation = textwrap.dedent("""\
-            **Plausible archetypes (candidates for HYPOTHESIZE):**
-            - alpha — notes
-            - beta — notes
-            **Adversarial archetype:** alpha — already candidate
-        """)
-        picked = predict_handler._select_archetypes_for_prompt(investigation)
-        assert picked == ["alpha", "beta"]
-
-    def test_missing_scan_returns_none(self):
-        """No archetype-scan block → fall back to loading all archetypes."""
-        picked = predict_handler._select_archetypes_for_prompt("nothing here")
-        assert picked is None
+# Archetype selection was removed — PREDICT no longer consumes archetype
+# context. Archetype-scan's candidate output remains in CONTEXTUALIZE's
+# investigation.md for REPORT to read; the `_select_archetypes_for_prompt`
+# helper and the corresponding TestArchetypeSelection suite were deleted
+# in the PREDICT reframe. Coverage of the underlying
+# `parse_archetype_candidates` / `parse_adversarial_archetype` parsers
+# lives in tests/test_context_loader.py.

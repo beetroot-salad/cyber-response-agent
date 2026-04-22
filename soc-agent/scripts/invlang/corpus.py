@@ -20,6 +20,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -301,6 +302,31 @@ def discover_run_investigations(root: Path) -> list[Companion]:
     return companions
 
 
+@lru_cache(maxsize=16)
+def _load_corpus_cached(
+    effective_root: Path,
+    paths: tuple[str, ...] | None,
+) -> tuple[Companion, ...]:
+    """Memoized core: same `(effective_root, paths)` returns the same tuple.
+
+    Cached because corpus scans are filesystem-heavy (~17s for ~40
+    companions) and both live orchestrator runs and tests call this many
+    times per session against an unchanging corpus. Returns a tuple so the
+    cache entry is immutable — callers materialize to a list.
+    """
+    if paths is None:
+        return tuple(discover_run_investigations(effective_root))
+
+    companions: list[Companion] = []
+    for rel in paths:
+        abs_path = effective_root / rel
+        if not abs_path.exists():
+            print(f"warning: {rel} not found under {effective_root}, skipping", file=sys.stderr)
+            continue
+        companions.extend(_load_from_path(abs_path))
+    return tuple(companions)
+
+
 def load_corpus(
     root: Path | None = None,
     paths: tuple[str, ...] | None = None,
@@ -314,16 +340,19 @@ def load_corpus(
     Allowlist mode (paths is a tuple): load exactly those relative paths
     from `root`. Used for the hand-curated pilot corpus; pass
     `paths=PILOT_CORPUS_FILES` and `root=<pilot dir>` explicitly.
+
+    Results are memoized per (effective_root, paths) via `_load_corpus_cached`
+    — clear with `load_corpus.cache_clear()` (a thin wrapper is exposed
+    below) when callers need to see fresh corpus state (e.g. after a run
+    writes a new investigation.md in the same process).
     """
     effective_root = root if root is not None else _corpus_root()
-    if paths is None:
-        return discover_run_investigations(effective_root)
+    return list(_load_corpus_cached(effective_root, paths))
 
-    companions: list[Companion] = []
-    for rel in paths:
-        abs_path = effective_root / rel
-        if not abs_path.exists():
-            print(f"warning: {rel} not found under {effective_root}, skipping", file=sys.stderr)
-            continue
-        companions.extend(_load_from_path(abs_path))
-    return companions
+
+def clear_corpus_cache() -> None:
+    """Drop the memoized corpus. Call between runs that intentionally share
+    a process (rare — the orchestrator usually runs one investigation
+    per process) if you need the second run to pick up companions the
+    first run wrote."""
+    _load_corpus_cached.cache_clear()
