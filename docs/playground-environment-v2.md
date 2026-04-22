@@ -85,7 +85,7 @@ CPU: 8 vCPU is adequate; 4 vCPU would be marginal under attack-simulation bursts
 
 **Hybrid: VPS primary + small AWS shell.**
 
-- VPS (Hetzner CCX23-class) hosts the full v2 stack. Continuous operation, affordable, level-down by stopping non-essential containers during idle (canary + one web-tier + office workstations = −4 GB).
+- VPS (Hetzner CCX33 — 8 vCPU / 32 GB / 240 GB, dedicated) hosts the full v2 stack. Continuous operation, affordable, level-down by stopping non-essential containers during idle (canary + one web-tier + office workstations = −4 GB).
 - A tiny AWS account (one S3 bucket, one IAM user, a few KMS keys, CloudTrail on) runs alongside. No workloads — just enough to generate realistic cloud API events that Elastic ingests via a CloudTrail→ES pipeline. Budget <$15/mo.
 - Local devcontainer remains for feature work against a subset of the stack (v1-style), not for continuous ops.
 
@@ -96,6 +96,77 @@ This gets us: continuous run, peer-baseline population, cloud-API alert coverage
 - VPS provider choice (Hetzner, Vultr, DigitalOcean) — cost/reliability trade, not urgent.
 - Whether the AWS shell should use LocalStack instead for the first iteration and promote to real AWS only when we want cross-account patterns. Cheaper and lower-risk to start with LocalStack.
 - Secret management — for a single-dev VPS, a sealed `.env` is fine; if this ever goes multi-dev, revisit.
+
+## Tech stack
+
+Constraints: OSS or free-tier, lightweight enough to fit the CCX33 footprint alongside a realistic host population, and produce telemetry shaped like real enterprise gear — not toys. This section is the authoritative list of chosen components; §Telemetry stack below keeps the tier-ordering view.
+
+### Network
+
+| Concern | Choice | Notes / alternatives |
+|---|---|---|
+| Edge firewall | Hetzner Cloud Firewall | Free, IaC-managed, blocks before host even boots |
+| Host firewall | nftables | Per-container rules the edge can't express |
+| Passive monitoring | Zeek | conn / dns / http / ssl / files logs — richest OSS network telemetry. Alt: Suricata (signature-first) |
+| Forward proxy | Squid | User-attributed egress, SOC-standard shape |
+| DNS | Unbound + local playground zone | Query logs; controlled zones for exfil / beaconing patterns. Alts: BIND (heavier, more "enterprise-shaped"), CoreDNS (container-native) |
+| Admin access | Plain SSH over Hetzner FW allowlist | No VPN for single-dev. Alts: WireGuard if multiple services need direct local access; Tailscale trades purity for convenience |
+
+### Identity
+
+| Concern | Choice | Notes / alternatives |
+|---|---|---|
+| IdP / SSO | Keycloak | Enterprise-shaped OIDC/SAML + rich event listener. Alts: Authentik (newer, lighter config), Dex (too thin — delegates user mgmt), FreeIPA (heavy AD-like stack) |
+| Host auth | sshd + PAM (native) | auth.log + journald — bedrock Linux triage signal |
+| User/group mgmt | Flat YAML → `/etc/passwd` + SSH key distribution from repo | Cross-host identity consistency without AD/LDAP complexity |
+| Internal PKI | step-ca (deferred, Phase 3+) | Only when mTLS / client-cert patterns are wanted |
+
+### Data
+
+| Concern | Choice | Notes |
+|---|---|---|
+| SIEM + query + dashboards | Elasticsearch + Kibana | v1 baseline; detection rules + Fleet + Cases native |
+| Log shipping | Elastic Agent + Filebeat | Fleet-managed policies |
+| Endpoint | Elastic Defend + Falco | Process tree + FIM (Defend); Falco keeps v1 syscall coverage |
+| Blob storage | MinIO | S3-compat, real IAM, audit webhook (§Blob storage) |
+| Database tier | PostgreSQL + pgaudit | Ubiquitous, realistic query patterns, granular audit extension |
+| Ticketing stub | Existing FastAPI `ticket-server` | Keep stub over Elastic Cases per §Open questions |
+| CMDB stub | YAML + thin FastAPI | Asset queries + mutation overlay for stale-CMDB chaos |
+| Threat intel stub | FastAPI stub | Local VT/OTX shape |
+| Change mgmt stub | YAML + thin FastAPI | Authorized-change context |
+
+### Telemetry sources — who produces what
+
+Overlap is a feature: an SSH login shows up across `auth.log` (PAM), auditd (session syscalls), wtmp, and Zeek (network flow) — real triage leans on correlating across these.
+
+| Signal category | Producer | What it logs |
+|---|---|---|
+| Endpoint (process/file) | Elastic Defend | Process exec, FIM, outbound conns per host |
+| | Falco | eBPF syscall-pattern rule hits |
+| | auditd | Raw kernel audit firehose — execve, open, setuid, PAM hooks |
+| Network (L3–L7) | Zeek | Passive protocol decode — conn / dns / http / ssl / files |
+| | Packetbeat | Flow + protocol events from host POV |
+| | Squid access log | Proxied HTTP/S egress with user attribution |
+| Host auth | sshd / PAM → journald | SSH attempts, key matches, failures |
+| | sudo | Privileged command invocations |
+| | auditd PAM rules | Session open/close at syscall level |
+| Identity / IdP | Keycloak event listener | OIDC/SAML login, MFA, admin actions — JSON events |
+| Data access — blob | MinIO audit webhook | Per-request S3: principal + IP + UA + key + response |
+| Data access — DB | pgaudit | PostgreSQL session + object-level audit |
+| | Postgres `log_statement` | Query logging |
+| Application | nginx / app access logs | HTTP request-level events from the web tier |
+| Shipping | Elastic Agent (+ Filebeat edge cases) | Carries all of the above into Elasticsearch |
+
+### Provisioning (meta)
+
+Not part of the playground's runtime surface, but recorded here for completeness. Managed from the devcontainer; see `infra/` for the actual configuration.
+
+| Concern | Choice |
+|---|---|
+| VPS IaC | Terraform + `hetznercloud/hcloud` provider |
+| VPS bootstrap | `cloud-init` (native Hetzner) |
+| Container runtime on VPS | Docker + Docker Compose |
+| State | Local `terraform.tfstate` (gitignored) — single-dev; move to S3/remote backend only if it becomes multi-dev |
 
 ## Environment population
 

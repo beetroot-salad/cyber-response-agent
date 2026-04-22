@@ -1,3 +1,6 @@
+# SSH keys (devcontainer)
+.ssh/
+
 # Python
 __pycache__/
 *.py[cod]

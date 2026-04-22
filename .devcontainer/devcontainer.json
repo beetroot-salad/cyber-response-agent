@@ -65,7 +65,7 @@
     "source=${localEnv:USERPROFILE}/.claude,target=/root/.claude,type=bind"
   ],
 
-  "postCreateCommand": "cd /workspace/soc-agent && uv sync --extra dev",
+  "postCreateCommand": "cd /workspace/soc-agent && uv sync --extra dev && docker context create soc-playground --docker host=ssh://soc-playground --description 'v2 playground VPS on Hetzner' 2>/dev/null || true",
   "postStartCommand": "echo 'Development environment ready!'",
 
   "remoteUser": "root",

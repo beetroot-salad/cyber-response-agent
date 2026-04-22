@@ -14,15 +14,31 @@ RUN apt-get update && apt-get install -y \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /etc/apt/keyrings/hashicorp.gpg \
+    && chmod a+r /etc/apt/keyrings/hashicorp.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list > /dev/null \
     && apt-get update \
-    && apt-get install -y docker-ce-cli docker-compose-plugin \
+    && apt-get install -y docker-ce-cli docker-compose-plugin terraform \
     && rm -rf /var/lib/apt/lists/*
+
+# hcloud CLI (Hetzner Cloud)
+ARG HCLOUD_VERSION=1.62.2
+RUN curl -fsSL "https://github.com/hetznercloud/cli/releases/download/v${HCLOUD_VERSION}/hcloud-linux-amd64.tar.gz" \
+    | tar -xz -C /usr/local/bin hcloud \
+    && chmod 0755 /usr/local/bin/hcloud
 
 # Set working directory
 WORKDIR /workspace
 
 # Install uv (all Python deps managed via pyproject.toml)
 RUN pip install --no-cache-dir uv
+
+# Auto-load /workspace/.env for interactive shells (HCLOUD_TOKEN, WAZUH_*, etc.)
+RUN printf '\n# Auto-load /workspace/.env for CLI usage (docker-compose loads it separately).\nif [ -f /workspace/.env ]; then\n    set -a\n    . /workspace/.env\n    set +a\nfi\n' >> /root/.bashrc
+
+# Link SSH config from workspace (resolves at runtime once /workspace is mounted).
+# Keys + config live in /workspace/.ssh/ (gitignored) so they persist across rebuilds.
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh && ln -sf /workspace/.ssh/config /root/.ssh/config
 
 # Development command - start shell by default (uvicorn can be run manually)
 CMD ["bash"]
