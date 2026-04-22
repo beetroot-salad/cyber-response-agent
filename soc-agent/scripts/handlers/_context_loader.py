@@ -345,13 +345,21 @@ def format_investigation_block(
       only (for weight-carryover / rollup-discipline). Current loop is
       the highest loop_n found across HYPOTHESIZE/GATHER.
 
+    - `conclude-narrative` — CONTEXTUALIZE + the latest HYPOTHESIZE and
+      latest ANALYZE blocks verbatim. GATHER sections, Self-report
+      sections, and prior-loop HYPOTHESIZE/ANALYZE blocks are dropped
+      entirely. Used by the narrow narrative subagent that authors
+      `## Summary` / `## For Analyst` prose; it doesn't need raw GATHER
+      observations because the final ANALYZE already summarizes what
+      was found.
+
     Unknown modes fall back to `full` to be safe.
     """
     body_raw = investigation_md.rstrip()
     if not body_raw:
         return "<investigation>\n(empty — no prior phases recorded)\n</investigation>"
 
-    if mode not in {"hypothesize", "analyze"}:
+    if mode not in {"hypothesize", "analyze", "conclude-narrative"}:
         return f"<investigation>\n{body_raw}\n</investigation>"
 
     sections = _parse_investigation_sections(body_raw)
@@ -389,25 +397,40 @@ def format_investigation_block(
         body = "\n\n".join(p.rstrip() for p in parts if p.strip())
         return f"<investigation mode=\"hypothesize\">\n{body}\n</investigation>"
 
-    # mode == "analyze"
-    loops = [s["loop_n"] for s in sections if s["loop_n"] is not None]
-    current_loop = max(loops) if loops else None
+    if mode == "analyze":
+        loops = [s["loop_n"] for s in sections if s["loop_n"] is not None]
+        current_loop = max(loops) if loops else None
+        parts: list[str] = []
+        for s in sections:
+            if s["phase"] == "contextualize":
+                parts.append(_section_text(s))
+            elif s["phase"] in {"hypothesize", "gather"}:
+                if s["loop_n"] == current_loop:
+                    parts.append(_section_text(s))
+                # prior-loop hypothesize/gather: their structured outcome is
+                # rolled into the ANALYZE grade lines we render below.
+            elif s["phase"] == "analyze":
+                # Always summarize — the current loop's ANALYZE doesn't exist
+                # yet (this handler is about to produce it).
+                parts.append(_analyze_grade_summary(s))
+            # self-report dropped for analyze mode (not load-bearing for grading)
+        body = "\n\n".join(p.rstrip() for p in parts if p.strip())
+        return f"<investigation mode=\"analyze\">\n{body}\n</investigation>"
+
+    # mode == "conclude-narrative"
+    hypothesize_sections = [s for s in sections if s["phase"] == "hypothesize"]
+    analyze_sections = [s for s in sections if s["phase"] == "analyze"]
+    latest_hyp = hypothesize_sections[-1] if hypothesize_sections else None
+    latest_ana = analyze_sections[-1] if analyze_sections else None
     parts: list[str] = []
     for s in sections:
         if s["phase"] == "contextualize":
             parts.append(_section_text(s))
-        elif s["phase"] in {"hypothesize", "gather"}:
-            if s["loop_n"] == current_loop:
-                parts.append(_section_text(s))
-            # prior-loop hypothesize/gather: their structured outcome is
-            # rolled into the ANALYZE grade lines we render below.
-        elif s["phase"] == "analyze":
-            # Always summarize — the current loop's ANALYZE doesn't exist
-            # yet (this handler is about to produce it).
-            parts.append(_analyze_grade_summary(s))
-        # self-report dropped for analyze mode (not load-bearing for grading)
+        elif s is latest_hyp or s is latest_ana:
+            parts.append(_section_text(s))
+        # Everything else (GATHER, self-report, prior HYPOTHESIZE/ANALYZE) dropped.
     body = "\n\n".join(p.rstrip() for p in parts if p.strip())
-    return f"<investigation mode=\"analyze\">\n{body}\n</investigation>"
+    return f"<investigation mode=\"conclude-narrative\">\n{body}\n</investigation>"
 
 
 def format_signature_text_block(texts: dict[str, str]) -> str:
