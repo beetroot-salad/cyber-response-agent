@@ -1,0 +1,198 @@
+name: soc-playground
+
+# Services:
+#  setup         — one-shot: generates self-signed CA + ES cert, waits for ES, sets kibana_system password, exits
+#  elasticsearch — single-node, TLS on (HTTP + transport), xpack.security.enabled
+#  kibana        — auth via kibana_system over TLS
+# Exposed on loopback only. External access via SSH tunnel (ssh -L 9200:localhost:9200 -L 5601:localhost:5601 soc-playground).
+
+x-es-image: &es-image docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+
+services:
+  setup:
+    image: *es-image
+    container_name: soc-playground-setup
+    user: "0"
+    environment:
+      - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
+      - KIBANA_PASSWORD=${V2_KIBANA_PASSWORD}
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+    command: >
+      bash -c '
+        if [ ! -f config/certs/ca.zip ] || [ ! -f config/certs/fleet-server/fleet-server.crt ]; then
+          echo "-> (re)generating CA + node certs";
+          rm -rf config/certs/ca config/certs/elasticsearch config/certs/fleet-server config/certs/ca.zip config/certs/certs.zip;
+          bin/elasticsearch-certutil ca --silent --pem -out config/certs/ca.zip;
+          unzip -q config/certs/ca.zip -d config/certs;
+          printf "instances:\n  - name: elasticsearch\n    dns:\n      - elasticsearch\n      - localhost\n    ip:\n      - 127.0.0.1\n  - name: fleet-server\n    dns:\n      - fleet-server\n      - localhost\n    ip:\n      - 127.0.0.1\n" > config/certs/instances.yml;
+          bin/elasticsearch-certutil cert --silent --pem -out config/certs/certs.zip --in config/certs/instances.yml --ca-cert config/certs/ca/ca.crt --ca-key config/certs/ca/ca.key;
+          unzip -q config/certs/certs.zip -d config/certs;
+        fi;
+        echo "-> fixing permissions";
+        chown -R 1000:0 config/certs;
+        find config/certs -type d -exec chmod 750 {} \;;
+        find config/certs -type f -exec chmod 640 {} \;;
+        echo "-> waiting for elasticsearch";
+        until curl -s --cacert config/certs/ca/ca.crt https://elasticsearch:9200 | grep -q "missing authentication credentials"; do sleep 5; done;
+        echo "-> setting kibana_system password";
+        until curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:$${ELASTIC_PASSWORD}" -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"$${KIBANA_PASSWORD}\"}" | grep -q "^{}"; do sleep 5; done;
+        echo "-> setup complete";
+      '
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /usr/share/elasticsearch/config/certs/fleet-server/fleet-server.crt ]"]
+      interval: 2s
+      timeout: 5s
+      retries: 120
+
+  elasticsearch:
+    depends_on:
+      setup:
+        condition: service_healthy
+    image: *es-image
+    container_name: elasticsearch
+    environment:
+      - node.name=es01
+      - cluster.name=${CLUSTER_NAME}
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=certs/elasticsearch/elasticsearch.key
+      - xpack.security.http.ssl.certificate=certs/elasticsearch/elasticsearch.crt
+      - xpack.security.http.ssl.certificate_authorities=certs/ca/ca.crt
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.key=certs/elasticsearch/elasticsearch.key
+      - xpack.security.transport.ssl.certificate=certs/elasticsearch/elasticsearch.crt
+      - xpack.security.transport.ssl.certificate_authorities=certs/ca/ca.crt
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - "ES_JAVA_OPTS=-Xms${ES_HEAP} -Xmx${ES_HEAP}"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs:ro
+      - es_data:/usr/share/elasticsearch/data
+    ports:
+      - "127.0.0.1:9200:9200"
+    mem_limit: 3g
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl -fsS --cacert /usr/share/elasticsearch/config/certs/ca/ca.crt -u elastic:$$ELASTIC_PASSWORD https://localhost:9200/_cluster/health | grep -qE '\"status\":\"(yellow|green)\"'"
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+  kibana:
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+    image: docker.elastic.co/kibana/kibana:${STACK_VERSION}
+    container_name: kibana
+    environment:
+      - SERVERNAME=kibana
+      - ELASTICSEARCH_HOSTS=https://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${V2_KIBANA_PASSWORD}
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/kibana/config/certs/ca/ca.crt
+      - XPACK_SECURITY_ENCRYPTIONKEY=${V2_KIBANA_ENCRYPTION_KEY}
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${V2_KIBANA_ENCRYPTION_KEY}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${V2_KIBANA_ENCRYPTION_KEY}
+    volumes:
+      - certs:/usr/share/kibana/config/certs:ro
+      - kibana_data:/usr/share/kibana/data
+    ports:
+      - "127.0.0.1:5601:5601"
+    mem_limit: 2g
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl -fsS http://localhost:5601/api/status | grep -q '\"level\":\"available\"'"
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  fleet-init:
+    # One-shot: initializes Fleet plugin + creates fleet-server-policy.
+    # KIBANA_FLEET_SETUP=1 on the fleet-server container does NOT create this policy in 9.x —
+    # see memory reference_fleet_server_docker_9x.md.
+    depends_on:
+      kibana:
+        condition: service_healthy
+    image: curlimages/curl:latest
+    container_name: soc-playground-fleet-init
+    environment:
+      - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
+    command: >
+      sh -c '
+        set -e;
+        echo "-> fleet setup";
+        curl -fsS -u "elastic:$$ELASTIC_PASSWORD" -H "kbn-xsrf: x" -X POST http://kibana:5601/api/fleet/setup > /dev/null;
+        echo "-> fleet-server-policy (idempotent: 409 on re-run is fine)";
+        HTTP=$$(curl -sS -o /tmp/resp.json -w "%{http_code}" -u "elastic:$$ELASTIC_PASSWORD" -H "kbn-xsrf: x" -H "Content-Type: application/json" -X POST "http://kibana:5601/api/fleet/agent_policies?sys_monitoring=true" -d "{\"id\":\"fleet-server-policy\",\"name\":\"Fleet Server policy\",\"namespace\":\"default\",\"has_fleet_server\":true,\"monitoring_enabled\":[\"logs\",\"metrics\"]}");
+        case "$$HTTP" in
+          200|201) echo "created" ;;
+          409) echo "already exists" ;;
+          *) echo "FAIL http=$$HTTP"; cat /tmp/resp.json; exit 1 ;;
+        esac;
+      '
+    restart: "no"
+
+  fleet-server:
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kibana:
+        condition: service_healthy
+      fleet-init:
+        condition: service_completed_successfully
+    image: docker.elastic.co/elastic-agent/elastic-agent:${STACK_VERSION}
+    container_name: fleet-server
+    user: "0"
+    environment:
+      # Fleet Server mode — self-bootstraps via Kibana Fleet API on first start.
+      - FLEET_SERVER_ENABLE=true
+      - FLEET_SERVER_ELASTICSEARCH_HOST=https://elasticsearch:9200
+      - FLEET_SERVER_ELASTICSEARCH_CA=/usr/share/elastic-agent/certs/ca/ca.crt
+      - FLEET_SERVER_CERT=/usr/share/elastic-agent/certs/fleet-server/fleet-server.crt
+      - FLEET_SERVER_CERT_KEY=/usr/share/elastic-agent/certs/fleet-server/fleet-server.key
+      - FLEET_URL=https://fleet-server:8220
+      # Agent side: trust our self-signed CA when enrolling back into this same Fleet Server.
+      - FLEET_CA=/usr/share/elastic-agent/certs/ca/ca.crt
+      # Run Kibana Fleet setup + auto-generate service token on first boot.
+      - KIBANA_FLEET_SETUP=1
+      - KIBANA_HOST=http://kibana:5601
+      - KIBANA_FLEET_USERNAME=elastic
+      - KIBANA_FLEET_PASSWORD=${V2_ELASTIC_PASSWORD}
+    volumes:
+      - certs:/usr/share/elastic-agent/certs:ro
+      - fleet_data:/usr/share/elastic-agent/state
+    ports:
+      - "127.0.0.1:8220:8220"
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSk https://localhost:8220/api/status | grep -q '\"status\":\"HEALTHY\"'"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+volumes:
+  certs:
+    driver: local
+  es_data:
+    driver: local
+  kibana_data:
+    driver: local
+  fleet_data:
+    driver: local
