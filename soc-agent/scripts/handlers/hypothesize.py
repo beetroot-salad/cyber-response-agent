@@ -483,6 +483,22 @@ def _validate_trailer(trailer: dict, *, block_type: str, expected_loop_n: int) -
             f"hypothesize subagent: trailer loop_n={loop_n} does not match "
             f"orchestrator-computed loop_n={expected_loop_n}"
         )
+    # Optional fields: `override_data_source` and `lead_hint` give HYPOTHESIZE
+    # a machine-readable channel to the downstream gather subagent. Both are
+    # free-form strings when present, absent otherwise. Non-string values for
+    # either field are a contract violation.
+    override = trailer.get("override_data_source")
+    if override is not None and (not isinstance(override, str) or not override.strip()):
+        raise OrchestrationError(
+            f"hypothesize subagent: trailer override_data_source must be a "
+            f"non-empty string if provided, got {override!r}"
+        )
+    lead_hint = trailer.get("lead_hint")
+    if lead_hint is not None and (not isinstance(lead_hint, str) or not lead_hint.strip()):
+        raise OrchestrationError(
+            f"hypothesize subagent: trailer lead_hint must be a non-empty "
+            f"string if provided, got {lead_hint!r}"
+        )
     return trailer
 
 
@@ -753,23 +769,31 @@ def handle(ctx: Context) -> PhaseResult:
         ctx, expected_loop_n=expected_loop_n, remediation_notes=None,
     )
 
-    if errors:
-        # One retry. For the `gather:`-block contract violation the remediation
-        # is a deterministic handler-authored directive; for invlang validator
-        # errors the raw errors pass through so the subagent can fix claim-level
-        # semantics against its checkpoint. Disable checkpoint recovery on the
-        # retry so a stale checkpoint cannot re-synthesize the same failure.
+    # Retry budget is 2. For the `gather:`-block contract violation the
+    # remediation is a deterministic handler-authored directive; for invlang
+    # validator errors the raw errors pass through so the subagent can fix
+    # claim-level semantics against its checkpoint. Disable checkpoint recovery
+    # on retries so a stale checkpoint cannot re-synthesize the same failure.
+    #
+    # Two retries (vs one) handles the common layered-schema cascade: the
+    # validator reports only errors deep enough to be visible given the current
+    # structural shape. When the agent fixes the outer shape on attempt 2, a
+    # new set of inner errors surfaces — attempt 3 then closes them.
+    MAX_RETRIES = 2
+    attempts_used = 1
+    while errors and attempts_used <= MAX_RETRIES:
+        attempts_used += 1
         sections, block_type, trailer, errors = _attempt(
             ctx,
             expected_loop_n=expected_loop_n,
             remediation_notes=errors,
             allow_checkpoint_recovery=False,
         )
-        if errors:
-            raise OrchestrationError(
-                "HYPOTHESIZE failed on retry:\n"
-                + "\n".join(f"  - {e}" for e in errors)
-            )
+    if errors:
+        raise OrchestrationError(
+            f"HYPOTHESIZE failed after {attempts_used} attempts:\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
 
     # Only append when there's something to append. No-fork mode writes no
     # invlang block; the narrative is preserved in the subagent output file.
@@ -782,4 +806,11 @@ def handle(ctx: Context) -> PhaseResult:
         "loop_n": trailer["loop_n"],
         "block_type": block_type,
     }
+    # Forward optional overrides when HYPOTHESIZE authored them. Omitted keys
+    # keep the downstream GATHER payload clean when the subagent didn't use
+    # this channel.
+    if trailer.get("override_data_source") is not None:
+        payload["override_data_source"] = trailer["override_data_source"]
+    if trailer.get("lead_hint") is not None:
+        payload["lead_hint"] = trailer["lead_hint"]
     return PhaseResult(next_phase=Phase.GATHER, payload=payload)

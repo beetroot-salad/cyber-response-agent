@@ -147,7 +147,8 @@ class TestPromptAssembly:
 
         # Tagged blocks present (alert tag is salted for injection safety)
         assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
-        assert "<investigation>" in prompt and "</investigation>" in prompt
+        # analyze handler uses mode="analyze" — tag carries a mode attribute
+        assert "<investigation mode=\"analyze\">" in prompt and "</investigation>" in prompt
         assert "<archetypes>" in prompt
         # Inlined content landed
         assert "alert observed." in prompt  # from investigation.md

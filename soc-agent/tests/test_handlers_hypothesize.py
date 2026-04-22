@@ -205,7 +205,8 @@ class TestPromptAssembly:
 
         # All five tagged blocks present (alert tag is salted)
         assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
-        assert "<investigation>" in prompt and "signature summary" in prompt
+        # hypothesize handler uses mode="hypothesize" — tag carries a mode attribute
+        assert "<investigation mode=\"hypothesize\">" in prompt and "signature summary" in prompt
         assert "<signature-knowledge>" in prompt
         assert "<playbook>" in prompt  # real 5710 playbook body inlined
         assert "<archetypes>" in prompt
@@ -736,16 +737,18 @@ class TestValidationRetry:
         assert result.next_phase == Phase.GATHER
         assert len(captured) == 2
 
-    def test_both_attempts_fail_raises(self, tmp_path, monkeypatch):
+    def test_all_attempts_fail_raises(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path)
+        # Retry budget is 2 → 3 total attempts. All three fail → raise.
         monkeypatch.setattr(hypothesize_handler, "_invoke_subagent",
-                            stub_invoke([], [_FORK_RESPONSE, _FORK_RESPONSE]))
+                            stub_invoke([], [_FORK_RESPONSE, _FORK_RESPONSE, _FORK_RESPONSE]))
         monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
                             stub_validator([
                                 ["error one"],
                                 ["error two"],
+                                ["error three"],
                             ]))
-        with pytest.raises(OrchestrationError, match="failed on retry"):
+        with pytest.raises(OrchestrationError, match="failed after"):
             hypothesize_handler.handle(ctx)
 
     def test_no_retry_if_first_passes(self, tmp_path, monkeypatch):
@@ -898,20 +901,20 @@ class TestCheckpointRecovery:
             "selected_lead": "authentication-history",
         })
         captured: list[str] = []
-        # Both attempts return empty stdout.
+        # All 3 attempts return empty stdout (retry budget = 2 → 3 total).
         monkeypatch.setattr(
             hypothesize_handler, "_invoke_subagent",
-            stub_invoke(captured, ["", ""]),
+            stub_invoke(captured, ["", "", ""]),
         )
         # Validator flags synthesis output on attempt 1, forcing the retry
-        # path; attempt 2 then hits empty-stdout again and (with recovery
-        # disabled) surfaces the stdout_summary_not_yaml error.
+        # path; attempts 2 + 3 then hit empty-stdout and (with recovery
+        # disabled) surface the stdout_summary_not_yaml error.
         monkeypatch.setattr(hypothesize_handler, "_validate_companion_proposed",
                             stub_validator([["invlang rule 27 violation"]]))
-        with pytest.raises(OrchestrationError, match="failed on retry"):
+        with pytest.raises(OrchestrationError, match="failed after"):
             hypothesize_handler.handle(ctx)
-        # Two attempts, both invoked the subagent — no infinite synthesis loop.
-        assert len(captured) == 2
+        # Three attempts, no infinite synthesis loop.
+        assert len(captured) == 3
 
 
 # ---------------------------------------------------------------------------

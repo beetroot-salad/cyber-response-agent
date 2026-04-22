@@ -217,6 +217,8 @@ Runs the `soc-agent:investigate` skill end-to-end against one real Wazuh alert f
 
 21. **Dedup fast-path retired (run #43 blocker).** When CONTEXTUALIZE saw a `dedup_candidate` in ticket-context output, the old orchestrator routing short-circuited straight to CONCLUDE with a `routing_source=screen` stand-in. CONCLUDE subagent timed out at 300s because its prompt was confused about whether a SCREEN had actually run. Routing now always goes CONTEXTUALIZE → SCREEN-or-HYPOTHESIZE; `dedup` is returned as telemetry in the handler payload but doesn't change routing. Re-introduction requires the experimental infra tracked in `tasks/dedup-fast-path.md`.
 
+22. **Loop-N HYPOTHESIZE timeout is the new dominant orchestrator failure mode on 100001 full-loop runs.** First observed in run `20260422-044342-rule100001`: loop-1 hypothesize clean at 147s, loop-2 timed out at 450s with zero stdout and no checkpoint. Single variable: investigation.md grew from 3.6KB at loop-1 dispatch to 13KB at loop-2 dispatch (GATHER raw-observation prose + ANALYZE assessment + self-report accumulated). The subagent's preload now includes that full investigation.md plus unchanged alert/playbook/archetypes/lead-catalog, so the thinking-restatement driver from meta-finding #17(b) gets amplified each loop. The handler's design comment at `hypothesize.py:109` — *"Timeout fails fast — the handler does not respawn on timeout"* — is deliberate (stale-checkpoint synthesis can't rescue a timeout with zero subagent progress), but it means the whole run is unrecoverable. Fix directions, by leverage: (a) **raise the hypothesize subagent timeout** on loop-N dispatches (the 450s is sized for attempt-1 preload-size; loop-2+ routinely sees 2-4× that prompt size — a dynamic ceiling based on `expected_loop_n` or prompt_chars is cheap); (b) **trim loop-N investigation.md in the preload** — past loops' raw GATHER observations are rarely load-bearing for HYPOTHESIZE's next fork choice; an `investigation_summary_block` that keeps CONTEXTUALIZE + latest ANALYZE + last HYPOTHESIZE + only the lead-level outcomes from prior GATHERs would cut context 50-70% without losing routing-relevant signal; (c) **partial-progress checkpoint on timeout** — if the subagent is mid-thinking at the deadline, there's no rescue short of a harness-level thinking-abort + forced-summary turn, which is a Claude Code harness feature, not a handler feature. (a) + (b) are the practical fixes; (c) is aspirational. Same driver also puts ANALYZE and CONCLUDE subagents at risk on deeper-loop runs — the fix generalizes to all narrative-synthesis subagents whose preload includes investigation.md.
+
 ### What made SCREEN finally dispatch as a subagent
 
 Observed across runs #1-#4: the agent read the one-row screen table inline and reasoned "no match → fall through" without ever spawning the SCREEN subagent. Verbose instructions didn't help — it was rational optimization.
@@ -240,8 +242,38 @@ Orchestrator runs from `eval_run_orchestrate.sh` live under `/tmp/soc-agent-orch
 | `20260421-181641-rule100001` | 100001 | 165s (stdout=1) → retry 31s | stdout-empty pathology: session ended on Write(M_last) |
 | `20260421-183244-rule100001` | 100001 | 324s (stdout=1362) | slow upfront thinking, no retry |
 | `20260421-213431-rule100001` | 100001 | 308s (stdout=1) → retry 25s | run #50; same pathology as 181641; drove the legitimacy_contract list-shape finding |
+| `20260422-044342-rule100001` | 100001 | 147s loop-1 clean → **loop-2 timeout at 450s** | First observed loop-N HYPOTHESIZE timeout under the `_context_loader` preload refactor; see meta-finding #22 |
 
 Variance is 144s→324s on attempt-1 for the same signature + same preloaded context — see meta-findings #17-#18 below for the two orthogonal root causes. Full forensic at `/workspace/tasks-scratch/hypothesize-variance-analysis.md` and raw transcripts at `/workspace/tasks-scratch/hypothesize-transcript-run50.md`.
+
+### `20260422-044342-rule100001` — loop-2 HYPOTHESIZE timeout (full-run detail)
+
+**Branch state**: uncommitted `_context_loader.py` preload refactor + hypothesize/analyze/conclude handlers wired to XML-tagged preloaded blocks + `agents/hypothesize.md` rewrite carrying topology-conditioned corpus priors. Trigger: `docker exec -t target-endpoint bash -c whoami` scenario A on 100001. Harness: `eval_run_orchestrate.sh 100001 --window 1h`.
+
+**Timeline (t0 = 04:43:42Z):**
+- C → H(loop 1) → G(loop 1) → A(loop 1) → H(loop 2) **timeout @ 450s → orchestrator failed, no report.md**
+- Total wall **1266s** (21min); subagent accounted wall 904s (Haiku 234s + Sonnet 670s); orchestrator exit=1.
+
+**Subagent roster (all rc=0 except loop-2 hypothesize which never returned):**
+- `ticket-context` Haiku 46s / stdout 1303
+- `archetype-scan` Haiku 85s / stdout 4933
+- `contextualize-prologue` Haiku 103s / stdout 786
+- `hypothesize` (loop 1) Sonnet 147s / stdout 1730 → `mode: no-fork, selected_lead: process-lineage`
+- `gather-composite` (loop 1) Sonnet 282s / stdout 6396 → process-lineage + sshd 100002 + 100007 scope check
+- `analyze` (loop 1) Sonnet 240s / stdout 5982 → `?underlying-host: +`, `?runtime-process: -`, `?image-entrypoint: -`; routes HYPOTHESIZE
+- `hypothesize` (loop 2) Sonnet **timed out at 450s**; no checkpoint, no stdout
+
+**Quality findings (what did land, loops 1):**
+- CONTEXTUALIZE: textbook — 1 candidate (`ci-pipeline-exec`), 5 authoritatively-ruled-out archetypes with crisp disqualifier text, adversarial archetype named, data-env reachable/degraded surfaced, prologue YAML has 4 vertices + 1 edge with siem-event authority.
+- Loop-1 HYPOTHESIZE correctly applied `agents/hypothesize.md` §Discipline "Unknown-shape hypothesis when a discriminating field is missing" — `proc.pname=null` → emits `mode: no-fork` instead of noodling on every mechanism. This is the exact discipline the `feedback_unknown_hypothesis_discipline` memory encodes, and it landed on first try.
+- Loop-1 GATHER self-labelled `## GATHER (loop 1)` as `Status: partial` and dispatched a composite across 3 rule classes (falco container + 100002 sshd + 100007 binary-drop) under a single-lead label. ANALYZE's Self-report flagged this explicitly as "composite gather dispatched under a single-lead label" — good grading-hygiene flag; the gather-composite subagent contract (per run #42) wasn't triggered because hypothesize selected a single lead.
+- Loop-1 ANALYZE discipline is correct: grades capped at `+`/`-` because no HYPOTHESIZE invlang block existed to cite `p{N}`/`r{N}` against. The Self-report flagged "Missing HYPOTHESIZE block before loop 1 GATHER" and explicitly called for loop-2 HYPOTHESIZE to "repair this gap before the next lead runs". This is the ANALYZE subagent self-flagging a *structural* gap caused by loop-1's no-fork mode — the routing decision is the correct one.
+
+**Headline failure mode (new):** **loop-N HYPOTHESIZE timeout under expanded investigation.md context**. Loop-1 hypothesize was 147s (fast end of the 144-324s range documented in meta-finding #17). Loop-2's preload grew to include the loop-1 GATHER (~4.5KB raw-observation prose) + loop-1 ANALYZE (~3KB assessment + self-report) — investigation.md went from 3.6KB at loop-1 dispatch to 13KB at loop-2 dispatch. Nothing else in the prompt changed. At some point past 324s the subagent was still in thinking/reasoning and hit the 450s ceiling with zero output — no checkpoint written, no stdout.
+
+**Orchestrator behavior:** `hypothesize.py` line 109 comment: *"Timeout fails fast — the handler does not respawn on timeout."* The M_last checkpoint-recovery path (`_synthesize_from_checkpoint`) only rescues the **stdout=1 / session-ended-on-Write** pathology — a timeout with zero subagent progress has nothing to fall back to. Orchestrator exits 1, no report.md.
+
+**Budget accounting:** `budget.json` shows `subagent_spawns: 0` even though 7 subagents were dispatched. Counter appears not to be incremented by the orchestrator (budget_enforcer is main-agent-only).
 
 ## Historic runs
 

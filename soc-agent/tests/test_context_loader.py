@@ -181,6 +181,106 @@ class TestFormatInvestigationBlock:
         block = format_investigation_block("")
         assert "(empty" in block
 
+    def test_unknown_mode_falls_back_to_full(self):
+        block = format_investigation_block("## A\nbody\n", mode="bogus")
+        # No mode attr on the opening tag → full behavior
+        assert block.startswith("<investigation>")
+        assert "body" in block
+
+    @staticmethod
+    def _multiloop_fixture() -> str:
+        return (
+            "## CONTEXTUALIZE\n"
+            "**Alert:** test\n"
+            "candidate archetype: X\n"
+            "```yaml\nprologue:\n  vertices: []\n```\n"
+            "## HYPOTHESIZE (loop 1)\n"
+            "**Selected lead:** l1\n"
+            "```yaml\nhypothesize:\n  hypotheses: []\n```\n"
+            "## GATHER (loop 1)\n"
+            "**Lead:** l1\n"
+            "**Status:** complete\n"
+            "**Query:** `q1`\n"
+            "\n"
+            "**Raw observation:**\n"
+            "- bulky line one with lots of detail " + ("x" * 300) + "\n"
+            "- bulky line two with lots of detail " + ("y" * 300) + "\n"
+            "- bulky line three with lots of detail " + ("z" * 300) + "\n"
+            "## ANALYZE (loop 1)\n"
+            "**Evidence:** e1\n"
+            "**Assessment:**\n"
+            "- **?h1**: `+` (new) — grade narrative first sentence. followup sentence.\n"
+            "- **?h2**: `-` (new) — another grade narrative.\n"
+            "**Surviving hypotheses:** ?h1, ?h2\n"
+            "**Next action:** HYPOTHESIZE\n"
+            "---\n"
+            "## Self-report\n"
+            "- anomaly note\n"
+            "## HYPOTHESIZE (loop 2)\n"
+            "**Selected lead:** l2\n"
+            "```yaml\nhypothesize:\n  hypotheses: [h-001]\n```\n"
+            "## GATHER (loop 2)\n"
+            "**Lead:** l2\n"
+            "**Status:** complete\n"
+            "**Query:** `q2`\n"
+            "\n"
+            "**Raw observation:**\n"
+            "- fresh bulky line with current-loop detail\n"
+        )
+
+    def test_hypothesize_mode_trims_prior_gather_raw_obs(self):
+        block = format_investigation_block(
+            self._multiloop_fixture(), mode="hypothesize"
+        )
+        # Mode attribute is emitted
+        assert 'mode="hypothesize"' in block
+        # CONTEXTUALIZE + all HYPOTHESIZE blocks preserved verbatim
+        assert "## CONTEXTUALIZE" in block
+        assert "## HYPOTHESIZE (loop 1)" in block
+        assert "## HYPOTHESIZE (loop 2)" in block
+        # GATHER top-matter kept
+        assert "**Lead:** l1" in block
+        assert "**Lead:** l2" in block
+        # Raw-observation bullets dropped
+        assert "bulky line one with lots of detail" not in block
+        assert "fresh bulky line with current-loop detail" not in block
+        # Trimming marker present
+        assert "raw-observation prose trimmed" in block
+        # Latest ANALYZE kept verbatim
+        assert "grade narrative first sentence" in block
+        # YAML fences preserved
+        assert "prologue:" in block
+        assert "hypothesize:" in block
+
+    def test_hypothesize_mode_is_smaller_than_full(self):
+        fx = self._multiloop_fixture()
+        full = format_investigation_block(fx, mode="full")
+        hyp = format_investigation_block(fx, mode="hypothesize")
+        assert len(hyp) < len(full)
+
+    def test_analyze_mode_keeps_current_loop_verbatim(self):
+        block = format_investigation_block(
+            self._multiloop_fixture(), mode="analyze"
+        )
+        assert 'mode="analyze"' in block
+        # Current loop (loop 2) H + G present verbatim
+        assert "## HYPOTHESIZE (loop 2)" in block
+        assert "fresh bulky line with current-loop detail" in block
+        # Prior loop H + G dropped (rolled up via ANALYZE summary)
+        assert "## HYPOTHESIZE (loop 1)" not in block
+        assert "bulky line one with lots of detail" not in block
+        # Prior ANALYZE rendered as grade-summary (kept minimal grade line)
+        assert "## ANALYZE (loop 1)" in block
+        assert "**Surviving hypotheses:**" in block
+        # Per-hypothesis grade lines kept but narrative trimmed
+        assert "followup sentence" not in block
+
+    def test_full_mode_default_matches_legacy_behavior(self):
+        fx = "## A\nraw\n"
+        legacy = format_investigation_block(fx)
+        explicit_full = format_investigation_block(fx, mode="full")
+        assert legacy == explicit_full
+
 
 class TestLoadSignatureText:
     def test_loads_rule_5710_playbook_and_context(self):
