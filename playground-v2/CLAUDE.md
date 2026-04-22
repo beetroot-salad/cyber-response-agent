@@ -63,6 +63,84 @@ Runs before Elasticsearch. Generates a self-signed CA and node cert into the sha
 - Encryption keys (`V2_KIBANA_ENCRYPTION_KEY`) are reused across saved-objects, security, and reporting — fine for a playground, regenerate per environment in real deployments.
 - Named volume `soc-playground_kibana_data`.
 
+### keycloak (26.x) + keycloak-init
+
+Identity tier — OIDC/SAML IdP with scripted user/role seeding (see v2 §Identities).
+
+- **Realm config lives in `keycloak/realm.yaml`** (committed). Contains realm settings, roles (`sre-ops`, `developer`, `dba`, `service-account`, `contractor`), placeholder OIDC client, and ~13 seed users. Edit YAML, `compose up -d` — see "Re-seed users/roles" below for the import caveat.
+- **YAML → JSON via `keycloak-init` one-shot**: `python:3.12-alpine` runs `seed.py` which is a straight `yaml.safe_load → json.dumps`. Output lands on the shared `keycloak_import` volume at `/import/realm.json`.
+- **Keycloak imports on first boot**: `start-dev --import-realm` reads anything under `/opt/keycloak/data/import/`. `--import-realm` **skips the realm if it already exists** — it does not diff/update.
+- **`start-dev` + H2**: dev-mode Keycloak uses embedded H2 in `/opt/keycloak/data/h2/`, persisted via the `keycloak_data` named volume. Fine for a playground; production Keycloak would need `start` mode + PostgreSQL.
+- **`127.0.0.1:8080` on the VPS** — loopback only. Access via SSH tunnel:
+  ```bash
+  ssh -L 9200:localhost:9200 -L 5601:localhost:5601 -L 8220:localhost:8220 -L 8080:localhost:8080 soc-playground
+  # Keycloak admin: http://localhost:8080/admin  → login: $V2_KEYCLOAK_ADMIN / $V2_KEYCLOAK_ADMIN_PASSWORD
+  # Account console (as a seed user): http://localhost:8080/realms/soc-playground/account → e.g., sre.alice / changeme
+  ```
+- **Config files shipped via a build-context image** (`keycloak/Dockerfile`). The init container is `FROM python:3.12-alpine` + `COPY realm.yaml seed.py`, so the build context tar-streams those files to the remote daemon at `compose build` time — no pre-stage on the VPS needed. Note: the obvious alternative — Docker Compose `configs:` with `file: ./keycloak/realm.yaml` — does **not** work against a remote context. `file:` resolves the path on the daemon side, and `/workspace/` doesn't exist on the VPS. (`configs.*.content:` with inline YAML would also work but buries a 5KB seed inside compose.yml.)
+- **Events enabled**: realm config sets `eventsEnabled: true` with the `jboss-logging` listener. The listener writes at DEBUG level, so stdout is silent unless the log level is raised — we set `KC_LOG_LEVEL=INFO,org.keycloak.events:debug` so only the events stream is verbose (root stays INFO). Sample line: `type="LOGIN", realmName="soc-playground", clientId="soc-playground-app", username="sre.alice", ipAddress="127.0.0.1", grant_type="password", ...`. Events are also stored in the realm DB and viewable in Kibana → (later) or Keycloak UI → Events.
+- **Named volumes**: `soc-playground_keycloak_data` (H2 DB + server state), `soc-playground_keycloak_import` (generated realm.json — rewritten on every `compose up`).
+
+#### Re-seed users/roles
+
+Because `--import-realm` skips existing realms, changing `realm.yaml` has no effect on an already-imported realm. Three ways to apply edits:
+
+1. **Nuke and re-import** (playground-level, loses Keycloak-side edits like UI-added users):
+   ```bash
+   docker --context soc-playground compose down
+   docker --context soc-playground volume rm soc-playground_keycloak_data
+   docker --context soc-playground compose up -d
+   ```
+2. **Admin CLI** (`kcadm.sh`) inside the container — surgical, preserves runtime state. Example pattern for adding a user:
+   ```bash
+   docker --context soc-playground exec keycloak /opt/keycloak/bin/kcadm.sh config credentials \
+     --server http://localhost:8080 --realm master \
+     --user "$V2_KEYCLOAK_ADMIN" --password "$V2_KEYCLOAK_ADMIN_PASSWORD"
+   docker --context soc-playground exec keycloak /opt/keycloak/bin/kcadm.sh create users \
+     -r soc-playground -s username=... -s enabled=true -s email=...
+   ```
+3. **Partial import via admin UI** — Keycloak → realm → Manage → Import, with "If a resource exists" = Overwrite.
+
+The committed YAML is source-of-truth; if #2 is used for substantive changes, fold them back into `realm.yaml` so a fresh lever-up matches.
+
+### unbound (alpine + unbound 1.20.x)
+
+Recursive DNS resolver + playground-internal zone. Built from `playground-v2/unbound/Dockerfile` (`FROM alpine:3.20` + `apk add unbound`).
+
+- Config: `playground-v2/unbound/unbound.conf` — `log-queries`/`log-replies` on, writes to stdout (no file, no syslog).
+- Forwards `.` to `1.1.1.1` + `9.9.9.9` over plain Do53 (TLS upstream is a hardening follow-up).
+- Local zone: `soc-playground.local.` (empty — batch 7 populates A records per role host).
+- In-network access only (`http://unbound:53` from other containers). No host port.
+- Log shape: `172.18.0.8 github.com. A IN` (query); `172.18.0.8 github.com. A IN NOERROR 0.006902 0 55` (reply — adds rcode, RTT, flags, size).
+
+### squid (ubuntu/squid:latest, 6.13)
+
+Forward HTTP(S) proxy with basic-auth user attribution.
+
+- Config + bcrypt passwd: built in-image. `playground-v2/squid/Dockerfile` is two-stage: an `alpine + apache2-utils` builder generates bcrypt entries for the 13 Keycloak seed users (same plaintext `changeme`), copied into the runtime image's `/etc/squid/passwd`.
+- Access log format `soc`: `%ts.%03tu %6tr %>a %[un %Ss/%03>Hs %<st %rm %ru %Sh/%<a %mt` — fields: timestamp, elapsed, client IP, **username**, result, bytes, method, URL, peer, mime.
+- Sample line: `1776879941.428 102 172.18.0.8 sre.alice TCP_TUNNEL/200 5336 CONNECT example.com:443 HIER_DIRECT/172.66.147.243 -`.
+- Listens on `3128/tcp` (docker network, no host port). `forwarded_for delete` + `via off` keep internal identity out of upstream requests.
+- The user list in the Dockerfile must stay in sync with `keycloak/realm.yaml`. Cross-file invariant maintained by humans; no validator.
+
+### zeek (zeek/zeek:lts, 8.0.x)
+
+Passive monitor producing JSON conn/dns/http/ssl/files logs to the `zeek_logs` named volume.
+
+- Runs with `network_mode: host` + `cap_add: [NET_ADMIN, NET_RAW]` so libpcap sees real VPS interfaces.
+- `entrypoint.sh` picks the interface at startup: prefers the soc-playground compose bridge (`br-*`, UP) so it sees inter-container traffic; falls back to `eth0` (captures VPS↔public only). Bridge names are dynamic (`br-<12-hex>`), can't hardcode.
+- Uses the `Zeek_AF_Packet` plugin (built-in): `zeek -C -i af_packet::<iface>`. `-C` ignores TCP checksums (Hetzner NICs do checksum offloading → libpcap would see bogus checksums → Zeek would drop most packets).
+- JSON logs via `@load policy/tuning/json-logs.zeek` in `local.zeek`. Fields line up with Elastic's Zeek integration ECS mappings.
+- Cross-source correlation already works: Zeek's `http.log` captures `"username":"sre.alice"` from Squid's CONNECT basic-auth headers, and `dns.log` shows the two-hop resolver flow (container → unbound, unbound → 1.1.1.1).
+- Log ingestion into Elastic is deferred to a later batch (existing host-based elastic-agent integration or a container Filebeat).
+
+### Adding a new proxy-attributable user
+
+1. Add to `keycloak/realm.yaml` (realm import).
+2. Add to the username list in `squid/Dockerfile`'s htpasswd loop.
+3. `docker --context soc-playground compose up -d --build keycloak-init squid`.
+4. For Keycloak to actually honor the new user, nuke `keycloak_data` (see "Re-seed users/roles" above).
+
 ### certs volume
 
 Shared between `setup` (writer), `elasticsearch` (ro), `kibana` (ro), and `fleet-server` (ro). The `setup` script invalidates-and-regenerates when `fleet-server/fleet-server.crt` is missing (batch 4d added fleet-server to the cert list). To force full cert regeneration: `docker --context soc-playground compose down -v` (destroys data too).
@@ -154,3 +232,9 @@ docker --context soc-playground compose up -d
 - **Fleet Server re-enrolls as a new agent on each container restart.** `KIBANA_FLEET_SETUP=1` on the fleet-server container requests a new service token + new enrollment on every start. Across a lever-down/up cycle the old record becomes an `offline` ghost in Kibana → Fleet → Agents. Cleanup: `POST /api/fleet/agents/<old-id>/unenroll -d '{"revoke":true}'` or via UI. The Fleet Server itself keeps working fine — this is a cosmetic bookkeeping issue.
 - **After lever-up, the host elastic-agent may need `systemctl restart elastic-agent`** to shake off cached DNS state and re-resolve `fleet-server` / `elasticsearch` through `/etc/hosts`. Symptom in `elastic-agent status`: fleet checkin `FAILED: lookup fleet-server on 127.0.0.53:53: server misbehaving`. Cure: restart the service. Could script this into the lever-up flow later if it proves recurring.
 - **Beats sub-components in `elastic-agent status` show `x509: certificate signed by unknown authority`** even though `ca_trusted_fingerprint` is in the output config. This is a cosmetic issue in Elastic 9.x's component-status view — data still flows to ES (verified by growing doc counts). Usually settles after a few check-in cycles.
+- **Keycloak `--import-realm` is create-only, not upsert.** Editing `realm.yaml` after the realm exists is a no-op at next `compose up`. See "Re-seed users/roles" above. A consequence: seed passwords are only honored on first import; rotations need kcadm.sh or the UI.
+- **Keycloak image has no `curl`** (UBI-minimal base). Healthcheck uses bash's `/dev/tcp` against the management port 9000. Use the CMD exec form (`["bash", "-c", ...]`) not CMD-SHELL — the default `/bin/sh` in the image doesn't expand `echo -e` escapes, so CRLFs go out as literal `\r\n` and Vert.x rejects the request with "Host header required". `printf` + explicit `bash` sidesteps this.
+- **Keycloak 26 splits HTTP (8080) from management/health (9000).** `/health/ready` is only on 9000 and is enabled by `KC_HEALTH_ENABLED=true`. Only 8080 is published to the host (loopback); 9000 is internal-only and reached from the container's own healthcheck.
+- **Anonymous image-VOLUME dirs persist across `compose up --build`.** `ubuntu/squid:latest` declares `/var/log/squid` and `/var/spool/squid` as VOLUMEs. Docker Compose creates anonymous volumes for them, then **re-binds the same anonymous volume on every container recreate**, even after the image changes. A build-time `chown` or `ln -sf` inside those dirs won't propagate until you `docker volume rm` the stale volume. Fix used here: declare them as `tmpfs:` in compose — ephemeral, reset from image on every start.
+- **libpcap can't do promiscuous mode on the `any` pseudo-interface on modern Linux.** `zeek -i any` errors with `Promiscuous mode not supported on the "any" device`. The `Zeek_AF_Packet` plugin (`-i af_packet::<iface>`) uses kernel AF_PACKET sockets directly and sidesteps the issue — but needs a concrete interface name, not `any`. Cloud NICs with checksum offloading also require `-C` (ignore checksums) or Zeek drops most packets as invalid.
+- **Ubuntu `squid` image won't let squid open `/dev/stdout` directly.** It tries a parent-dir writability check that fails (`/dev` isn't writable by user `proxy`). The image's own entrypoint already runs `tail -F /var/log/squid/*.log` to forward logs to container stdout — just write to regular files in that dir and let the entrypoint handle forwarding. Attempting `ln -sf /dev/stdout /var/log/squid/access.log` doesn't work either (the writability check can't traverse the symlink).

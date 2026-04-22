@@ -1,0 +1,168 @@
+# Realm config imported on first Keycloak boot (start-dev --import-realm).
+# Source of truth for the soc-playground identity tier:
+#   - roles mirror v2 design §Identities (SRE/ops, Developer, DBA, service, contractor)
+#   - users are the scripted seed population (counts within v2 ranges)
+#   - one placeholder OIDC client to validate login flows before real integrations exist
+# Schema: 1:1 with Keycloak's realm-export JSON — seed.py converts YAML→JSON, Keycloak imports.
+#
+# Not prod-safe: passwords are literal "changeme"; this is a dev playground behind SSH tunnel only.
+
+realm: soc-playground
+displayName: SOC Playground
+enabled: true
+loginTheme: keycloak
+accessTokenLifespan: 3600
+ssoSessionIdleTimeout: 1800
+ssoSessionMaxLifespan: 36000
+
+# Event capture — this is the load-bearing telemetry for the identity tier (§Telemetry sources).
+# jboss-logging emits events to Keycloak's stdout (picked up by container-log collection later).
+eventsEnabled: true
+eventsListeners:
+  - jboss-logging
+eventsExpiration: 604800
+adminEventsEnabled: true
+adminEventsDetailsEnabled: true
+
+roles:
+  realm:
+    - name: sre-ops
+      description: SRE / ops — sudo, multi-host SSH, cron management
+    - name: developer
+      description: Developer — git, package installs on dev workstations, occasional jump-box
+    - name: dba
+      description: DBA — database-tier access only
+    - name: service-account
+      description: Automated cron / scheduled reports
+    - name: contractor
+      description: Time-limited access; elevated suspicion surface
+
+clients:
+  # Placeholder OIDC client — proves the realm works; real clients (Kibana SAML, etc.) land in later batches.
+  - clientId: soc-playground-app
+    name: SOC Playground sample OIDC client
+    protocol: openid-connect
+    publicClient: true
+    standardFlowEnabled: true
+    directAccessGrantsEnabled: true
+    redirectUris:
+      - http://localhost:*
+      - http://127.0.0.1:*
+    webOrigins:
+      - +
+    enabled: true
+
+users:
+  # SRE / ops (3 — within v2 design range of 3–4)
+  - username: sre.alice
+    enabled: true
+    emailVerified: true
+    email: alice@soc-playground.local
+    firstName: Alice
+    lastName: Park
+    realmRoles: [sre-ops]
+    credentials: [{type: password, value: changeme, temporary: false}]
+  - username: sre.ben
+    enabled: true
+    emailVerified: true
+    email: ben@soc-playground.local
+    firstName: Ben
+    lastName: Okafor
+    realmRoles: [sre-ops]
+    credentials: [{type: password, value: changeme, temporary: false}]
+  - username: sre.chen
+    enabled: true
+    emailVerified: true
+    email: chen@soc-playground.local
+    firstName: Chen
+    lastName: Liu
+    realmRoles: [sre-ops]
+    credentials: [{type: password, value: changeme, temporary: false}]
+
+  # Developer (5 — within v2 design range of 5–8)
+  - username: dev.dana
+    enabled: true
+    emailVerified: true
+    email: dana@soc-playground.local
+    firstName: Dana
+    lastName: Ruiz
+    realmRoles: [developer]
+    credentials: [{type: password, value: changeme, temporary: false}]
+  - username: dev.ethan
+    enabled: true
+    emailVerified: true
+    email: ethan@soc-playground.local
+    firstName: Ethan
+    lastName: Novak
+    realmRoles: [developer]
+    credentials: [{type: password, value: changeme, temporary: false}]
+  - username: dev.fatima
+    enabled: true
+    emailVerified: true
+    email: fatima@soc-playground.local
+    firstName: Fatima
+    lastName: Ahmed
+    realmRoles: [developer]
+    credentials: [{type: password, value: changeme, temporary: false}]
+  - username: dev.gabe
+    enabled: true
+    emailVerified: true
+    email: gabe@soc-playground.local
+    firstName: Gabe
+    lastName: Iverson
+    realmRoles: [developer]
+    credentials: [{type: password, value: changeme, temporary: false}]
+  - username: dev.hira
+    enabled: true
+    emailVerified: true
+    email: hira@soc-playground.local
+    firstName: Hira
+    lastName: Shah
+    realmRoles: [developer]
+    credentials: [{type: password, value: changeme, temporary: false}]
+
+  # DBA (1 — within v2 design range of 1–2)
+  - username: dba.ivy
+    enabled: true
+    emailVerified: true
+    email: ivy@soc-playground.local
+    firstName: Ivy
+    lastName: Carter
+    realmRoles: [dba]
+    credentials: [{type: password, value: changeme, temporary: false}]
+
+  # Service accounts (3 — within v2 design range of 3–5)
+  - username: svc.backups
+    enabled: true
+    emailVerified: true
+    email: svc-backups@soc-playground.local
+    firstName: Backups
+    lastName: Service
+    realmRoles: [service-account]
+    credentials: [{type: password, value: changeme, temporary: false}]
+  - username: svc.reports
+    enabled: true
+    emailVerified: true
+    email: svc-reports@soc-playground.local
+    firstName: Reports
+    lastName: Service
+    realmRoles: [service-account]
+    credentials: [{type: password, value: changeme, temporary: false}]
+  - username: svc.monitoring
+    enabled: true
+    emailVerified: true
+    email: svc-monitoring@soc-playground.local
+    firstName: Monitoring
+    lastName: Service
+    realmRoles: [service-account]
+    credentials: [{type: password, value: changeme, temporary: false}]
+
+  # Contractor (1 — within v2 design range of 1–2)
+  - username: ctr.kai
+    enabled: true
+    emailVerified: true
+    email: kai@contractor.example
+    firstName: Kai
+    lastName: Singh
+    realmRoles: [contractor]
+    credentials: [{type: password, value: changeme, temporary: false}]

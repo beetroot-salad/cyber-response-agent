@@ -4,7 +4,15 @@ name: soc-playground
 #  setup         — one-shot: generates self-signed CA + ES cert, waits for ES, sets kibana_system password, exits
 #  elasticsearch — single-node, TLS on (HTTP + transport), xpack.security.enabled
 #  kibana        — auth via kibana_system over TLS
-# Exposed on loopback only. External access via SSH tunnel (ssh -L 9200:localhost:9200 -L 5601:localhost:5601 soc-playground).
+#  fleet-init    — one-shot: fleet setup + fleet-server-policy
+#  fleet-server  — Fleet Server + self-enrollment
+#  keycloak-init — one-shot: converts keycloak/realm.yaml → realm.json on shared import volume
+#  keycloak      — IdP (start-dev + --import-realm); H2 state persisted in keycloak_data volume
+#  unbound       — recursive DNS resolver with query logs to stdout (playground-internal resolver)
+#  squid         — forward HTTP(S) proxy with basic-auth attribution; access log to stdout
+#  zeek          — passive network monitor (host netns); JSON conn/dns/http/ssl/files logs to volume
+# Exposed on loopback only. External access via SSH tunnel:
+#   ssh -L 9200:localhost:9200 -L 5601:localhost:5601 -L 8220:localhost:8220 -L 8080:localhost:8080 soc-playground
 
 x-es-image: &es-image docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
 
@@ -187,6 +195,123 @@ services:
       start_period: 120s
     restart: unless-stopped
 
+  keycloak-init:
+    # One-shot: converts realm.yaml → realm.json on the shared import volume.
+    # Idempotent — runs every `compose up` and rewrites the JSON; Keycloak's
+    # --import-realm skips if the realm already exists, so re-imports are safe no-ops.
+    # Built from ./keycloak/Dockerfile so realm.yaml + seed.py ship via the build
+    # context (compose `configs:` resolves paths on the remote daemon, which
+    # doesn't have /workspace/; a build-and-upload sidesteps that).
+    build: ./keycloak
+    image: soc-playground/keycloak-init:local
+    container_name: soc-playground-keycloak-init
+    volumes:
+      - keycloak_import:/import
+    command: ["python", "/config/seed.py", "/config/realm.yaml", "/import/realm.json"]
+    restart: "no"
+
+  keycloak:
+    depends_on:
+      keycloak-init:
+        condition: service_completed_successfully
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}
+    container_name: keycloak
+    environment:
+      - KEYCLOAK_ADMIN=${V2_KEYCLOAK_ADMIN}
+      - KEYCLOAK_ADMIN_PASSWORD=${V2_KEYCLOAK_ADMIN_PASSWORD}
+      - KC_HEALTH_ENABLED=true
+      - KC_HTTP_ENABLED=true
+      - KC_HOSTNAME_STRICT=false
+      - KC_PROXY_HEADERS=xforwarded
+      # Raise org.keycloak.events to DEBUG so the jboss-logging listener actually
+      # writes LOGIN/LOGOUT/etc. lines to stdout. Root stays INFO — we only want
+      # the events stream, not all of Keycloak's internals.
+      - KC_LOG_LEVEL=INFO,org.keycloak.events:debug
+    command: ["start-dev", "--import-realm"]
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - keycloak_import:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    mem_limit: 1g
+    healthcheck:
+      # Keycloak 26 management/health port is 9000; no curl in the image, so use
+      # bash + /dev/tcp. CMD-SHELL's /bin/sh doesn't honor `echo -e`'s escapes
+      # portably — force bash + printf, which reliably emits real CRLF (without
+      # that, Vert.x rejects the request with "Host header required").
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/9000 && printf "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && timeout --preserve-status 2 cat <&3 | grep -q ''"status": "UP"'''
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  unbound:
+    build: ./unbound
+    image: soc-playground/unbound:local
+    container_name: unbound
+    restart: unless-stopped
+    mem_limit: 128m
+    healthcheck:
+      # pgrep is in the alpine base; confirms the daemon is up. (No netcat in minimal
+      # alpine for a proper `dig`-style probe; pgrep is enough for a playground.)
+      test: ["CMD", "pgrep", "unbound"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  squid:
+    build: ./squid
+    image: soc-playground/squid:local
+    container_name: squid
+    restart: unless-stopped
+    mem_limit: 256m
+    # /var/log/squid is a VOLUME in the ubuntu/squid image, which creates anonymous
+    # volumes that persist across `compose up --build` — i.e., image changes to this
+    # dir won't propagate. Force tmpfs so it resets to the image's state (proxy:proxy)
+    # every restart. Logs ship via the entrypoint's `tail -F → stdout` anyway, so
+    # persistence isn't needed.
+    tmpfs:
+      - /var/log/squid:uid=13,gid=13,mode=0755
+      - /var/spool/squid:uid=13,gid=13,mode=0755
+    healthcheck:
+      # Squid's PID file is at /run/squid.pid in the ubuntu/squid image; presence
+      # alone is enough to confirm the master process is up.
+      test: ["CMD-SHELL", "test -f /run/squid.pid"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  zeek:
+    build: ./zeek
+    image: soc-playground/zeek:local
+    container_name: zeek
+    # Host netns so Zeek's libpcap sees real interfaces (eth0, docker0, all br-* bridges).
+    # Bridge-mode would only let it sniff its own veth, which is useless for passive monitoring.
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+    mem_limit: 1g
+    volumes:
+      - zeek_logs:/usr/local/zeek/logs
+    # entrypoint.sh picks the soc-playground compose bridge (br-*) if one is UP,
+    # else eth0. It uses the AF_PACKET plugin — libpcap rejects promisc mode on
+    # the `any` pseudo-interface on recent Linux kernels, AF_PACKET sidesteps it.
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'zeek -C -i af_packet' >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
   certs:
     driver: local
@@ -195,4 +320,10 @@ volumes:
   kibana_data:
     driver: local
   fleet_data:
+    driver: local
+  keycloak_data:
+    driver: local
+  keycloak_import:
+    driver: local
+  zeek_logs:
     driver: local
