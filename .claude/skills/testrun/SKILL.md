@@ -33,11 +33,22 @@ Runs the `soc-agent:investigate` skill end-to-end against one real Wazuh alert f
      /workspace/soc-agent/scripts/fetch_alert.py <rule_id> --window 5m
    ```
 
-2. **Run the eval harness** in the background:
+2. **Run the eval harness** in the background. Two harnesses exist; pick the one matching what you're testing:
+
    ```bash
+   # Main-agent SKILL.md path (claude -p against soc-agent:investigate).
+   # Exercises the SKILL.md prose + state-machine-via-hooks path.
    playground/scripts/eval_run.sh <rule_id> --window 1h
+
+   # Orchestrator path (Python state machine dispatches per-phase subagents).
+   # Exercises agents/*.md + scripts/handlers/*.py. Output goes to
+   # /tmp/soc-agent-orchestrate-eval/<timestamp>-rule<N>/ (NOT /workspace/runs/).
+   playground/scripts/eval_run_orchestrate.sh <rule_id> --window 1h
    ```
-   Each run takes 7-15 min wall clock and costs ~$2.40-$3.00. Output goes to a timestamped dir under `/workspace/runs/`. That dir is gitignored but persists across sessions, so past eval runs remain browsable — see **Historic runs** below.
+
+   Each run takes 7-15 min wall clock and costs ~$2.40-$3.00 (main-agent harness) or ~$0.50-$1.50 (orchestrator — cheaper because no main-agent loop). Main-agent output goes to `/workspace/runs/`; orchestrator output goes to `/tmp/soc-agent-orchestrate-eval/`. Both are gitignored but persist across sessions, so past eval runs remain browsable — see **Historic runs** below.
+
+   **Critical**: `eval_run.sh` and `eval_run_orchestrate.sh` test different code. Fixes to `scripts/handlers/*.py` + `agents/*.md` are only visible in orchestrator runs. Fixes to `skills/investigate/SKILL.md` are only visible in main-agent runs.
 
 3. **Verify the run actually started** by reading the output file once after kicking off — don't assume from the task id alone. The harness should print `[+] Launching claude (isolated, transcript → ...)` and start producing transcript events. If the output file is silent after a few seconds, the launch failed (check for MCP config errors, missing alerts, missing `.env`, etc.).
 
@@ -192,6 +203,22 @@ Runs the `soc-agent:investigate` skill end-to-end against one real Wazuh alert f
 
 10. **Signature knowledge reads should be attributed by model.** When counting "who read the archetype READMEs", filter by `message.model` — Sonnet main-agent reads and Haiku subagent reads show up in the same transcript and mix together if you count blindly. Run #19's earlier analysis mistakenly attributed 5 archetype-README reads to Sonnet when they were actually the archetype-scan Haiku subagent doing its job. Eval-analysis scripts should bucket tool_use events by model, not count them globally.
 
+**Key meta-findings from the orchestrator handler-preload refactor (runs #43–#50, `/tmp/soc-agent-orchestrate-eval/`):**
+
+16. **Orchestrator subagents have no main-agent loop** — they are one-shot Python-dispatched `claude -p` calls against `agents/*.md` frontmatter. This makes per-phase cost lower (~$0.05-$0.30 per phase vs $0.50-$2.00 for the main-agent equivalent), but also means stdout IS the deliverable. `claude --print` emits only the **final assistant text turn**; any tool_use that follows the last text is silently dropped from stdout. This is the load-bearing contract for every handler — violate it and the handler rejects with empty-stdout fallback to a retry.
+
+17. **HYPOTHESIZE wall-clock variance of 144s-324s on rule-100001, attempt-1** (runs #43-#50). Two orthogonal drivers: (a) **checkpoint-after-YAML ordering** in `agents/hypothesize.md` §Progress checkpoint puts the M(last) Write *after* the text response → when the model follows the contract literally, its last turn is tool_use(Write) → `claude --print` emits nothing → handler retries with `stdout_summary_not_yaml` remediation (~25s clean recovery). Roughly 1-in-3 first attempts hit this on rule-100001. (b) **28K-char upfront thinking-block restatement** — the model restates the preloaded prompt (alert fields, archetype scan output, playbook content) back to itself before reasoning. Stochastic; when it happens it's ~180-220s of pure thinking before any action. Forensic detail in `/workspace/tasks-scratch/hypothesize-variance-analysis.md`. Both are prompt-authoring issues, not plumbing.
+
+18. **Invlang shape-drift is an example-gap, not a concept-duplication.** When `agents/hypothesize.md` describes a field in prose (§Discipline legitimacy-contract paragraph, §Output schema) but does not show its YAML shape in any example, Sonnet invents the shape and commonly gets it wrong (legitimacy_contract as dict instead of list on run #50). The canonical shapes live in `knowledge/invlang/schema.md`, but that file is loaded into the main-agent context, not the subagent prompt. Fixes in order of leverage: (a) inline a YAML example for every field the prompt references; (b) add `knowledge/invlang/schema.md` to the subagent preload in `_context_loader.py`. The `_FAILURE_REMEDIATIONS` registry is a last-resort per-rule patch — don't add entries there as the first fix for schema gaps.
+
+19. **Deterministic context preload is cheap wall-clock reclaim.** Runs #47-#48 hit 450s timeouts on CONCLUDE/ANALYZE subagents because the subagent's entire wall clock was Read-tool-loop for path-deterministic files (alert.json, investigation.md, archetype story.md/trust-anchors.md). Pulling those Reads into handler-side Python preloads (`scripts/handlers/_context_loader.py`) and shipping all context as XML-tagged prompt blocks cut ANALYZE from 450s-timeout → 276s clean return on run #49 and CONCLUDE similarly. When a subagent's job reduces to "narrative synthesis + structured output," empty its `tools:` list to `[]` or the minimum needed — if the tools aren't removed, Sonnet will still Read files it already has inlined, because it can't tell the inline `<alert>` block is the same thing as `alert.json` on disk.
+
+20. **Two eval harnesses, two output trees.** `eval_run.sh` → `/workspace/runs/`. `eval_run_orchestrate.sh` → `/tmp/soc-agent-orchestrate-eval/`. Don't conflate the two when summarizing recent runs — they test completely different code paths (main-agent SKILL.md vs Python orchestrator + agents/*.md). The per-subagent audit is at `{run_tmpdir}/runs/<uuid>/subagent_audit.jsonl` (jsonl) with keys `agent, model, duration_ms, returncode, prompt_chars, stdout_chars` — the fastest way to read a run's timeline. Per-subagent transcripts are at `{run_tmpdir}/runs/<uuid>/subagent_outputs/<timestamp>-<agent>.txt` with PROMPT and STDOUT sections. Full thinking + tool_use traces live in `/root/.claude/projects/-workspace-soc-agent/<session_id>.jsonl` (looked up by `session_id` from the audit row).
+
+21. **Dedup fast-path retired (run #43 blocker).** When CONTEXTUALIZE saw a `dedup_candidate` in ticket-context output, the old orchestrator routing short-circuited straight to CONCLUDE with a `routing_source=screen` stand-in. CONCLUDE subagent timed out at 300s because its prompt was confused about whether a SCREEN had actually run. Routing now always goes CONTEXTUALIZE → SCREEN-or-HYPOTHESIZE; `dedup` is returned as telemetry in the handler payload but doesn't change routing. Re-introduction requires the experimental infra tracked in `tasks/dedup-fast-path.md`.
+
+22. **Loop-N HYPOTHESIZE timeout is the new dominant orchestrator failure mode on 100001 full-loop runs.** First observed in run `20260422-044342-rule100001`: loop-1 hypothesize clean at 147s, loop-2 timed out at 450s with zero stdout and no checkpoint. Single variable: investigation.md grew from 3.6KB at loop-1 dispatch to 13KB at loop-2 dispatch (GATHER raw-observation prose + ANALYZE assessment + self-report accumulated). The subagent's preload now includes that full investigation.md plus unchanged alert/playbook/archetypes/lead-catalog, so the thinking-restatement driver from meta-finding #17(b) gets amplified each loop. The handler's design comment at `hypothesize.py:109` — *"Timeout fails fast — the handler does not respawn on timeout"* — is deliberate (stale-checkpoint synthesis can't rescue a timeout with zero subagent progress), but it means the whole run is unrecoverable. Fix directions, by leverage: (a) **raise the hypothesize subagent timeout** on loop-N dispatches (the 450s is sized for attempt-1 preload-size; loop-2+ routinely sees 2-4× that prompt size — a dynamic ceiling based on `expected_loop_n` or prompt_chars is cheap); (b) **trim loop-N investigation.md in the preload** — past loops' raw GATHER observations are rarely load-bearing for HYPOTHESIZE's next fork choice; an `investigation_summary_block` that keeps CONTEXTUALIZE + latest ANALYZE + last HYPOTHESIZE + only the lead-level outcomes from prior GATHERs would cut context 50-70% without losing routing-relevant signal; (c) **partial-progress checkpoint on timeout** — if the subagent is mid-thinking at the deadline, there's no rescue short of a harness-level thinking-abort + forced-summary turn, which is a Claude Code harness feature, not a handler feature. (a) + (b) are the practical fixes; (c) is aspirational. Same driver also puts ANALYZE and CONCLUDE subagents at risk on deeper-loop runs — the fix generalizes to all narrative-synthesis subagents whose preload includes investigation.md.
+
 ### What made SCREEN finally dispatch as a subagent
 
 Observed across runs #1-#4: the agent read the one-row screen table inline and reasoned "no match → fall through" without ever spawning the SCREEN subagent. Verbose instructions didn't help — it was rational optimization.
@@ -203,9 +230,54 @@ Two changes together unblocked it in run #5, neither alone would have:
 
 If either is removed, the agent will likely go back to inline screening. Treat both as load-bearing.
 
+## Orchestrator runs (supplementary, separate harness)
+
+Orchestrator runs from `eval_run_orchestrate.sh` live under `/tmp/soc-agent-orchestrate-eval/<ts>-rule<N>/` and aren't numbered in the main cost table above (different harness, different cost basis). The ones relevant to the current HYPOTHESIZE/ANALYZE/CONCLUDE preload refactor and per-phase findings:
+
+| Orchestrator run dir | Signature | HYPOTHESIZE attempt-1 | Notes |
+|---|---|---|---|
+| `20260421-171849-rule100001` | 100001 | 277s (stdout=2982) | pre-preload, two-attempt retry on unrelated cause |
+| `20260421-174559-rule100001` | 100001 | 301s (stdout=905) | short output, no retry |
+| `20260421-175726-rule100001` | 100001 | **144s** (stdout=2017) | fast clean success — last turn was TEXT not Write(M_last) |
+| `20260421-181641-rule100001` | 100001 | 165s (stdout=1) → retry 31s | stdout-empty pathology: session ended on Write(M_last) |
+| `20260421-183244-rule100001` | 100001 | 324s (stdout=1362) | slow upfront thinking, no retry |
+| `20260421-213431-rule100001` | 100001 | 308s (stdout=1) → retry 25s | run #50; same pathology as 181641; drove the legitimacy_contract list-shape finding |
+| `20260422-044342-rule100001` | 100001 | 147s loop-1 clean → **loop-2 timeout at 450s** | First observed loop-N HYPOTHESIZE timeout under the `_context_loader` preload refactor; see meta-finding #22 |
+
+Variance is 144s→324s on attempt-1 for the same signature + same preloaded context — see meta-findings #17-#18 below for the two orthogonal root causes. Full forensic at `/workspace/tasks-scratch/hypothesize-variance-analysis.md` and raw transcripts at `/workspace/tasks-scratch/hypothesize-transcript-run50.md`.
+
+### `20260422-044342-rule100001` — loop-2 HYPOTHESIZE timeout (full-run detail)
+
+**Branch state**: uncommitted `_context_loader.py` preload refactor + hypothesize/analyze/conclude handlers wired to XML-tagged preloaded blocks + `agents/hypothesize.md` rewrite carrying topology-conditioned corpus priors. Trigger: `docker exec -t target-endpoint bash -c whoami` scenario A on 100001. Harness: `eval_run_orchestrate.sh 100001 --window 1h`.
+
+**Timeline (t0 = 04:43:42Z):**
+- C → H(loop 1) → G(loop 1) → A(loop 1) → H(loop 2) **timeout @ 450s → orchestrator failed, no report.md**
+- Total wall **1266s** (21min); subagent accounted wall 904s (Haiku 234s + Sonnet 670s); orchestrator exit=1.
+
+**Subagent roster (all rc=0 except loop-2 hypothesize which never returned):**
+- `ticket-context` Haiku 46s / stdout 1303
+- `archetype-scan` Haiku 85s / stdout 4933
+- `contextualize-prologue` Haiku 103s / stdout 786
+- `hypothesize` (loop 1) Sonnet 147s / stdout 1730 → `mode: no-fork, selected_lead: process-lineage`
+- `gather-composite` (loop 1) Sonnet 282s / stdout 6396 → process-lineage + sshd 100002 + 100007 scope check
+- `analyze` (loop 1) Sonnet 240s / stdout 5982 → `?underlying-host: +`, `?runtime-process: -`, `?image-entrypoint: -`; routes HYPOTHESIZE
+- `hypothesize` (loop 2) Sonnet **timed out at 450s**; no checkpoint, no stdout
+
+**Quality findings (what did land, loops 1):**
+- CONTEXTUALIZE: textbook — 1 candidate (`ci-pipeline-exec`), 5 authoritatively-ruled-out archetypes with crisp disqualifier text, adversarial archetype named, data-env reachable/degraded surfaced, prologue YAML has 4 vertices + 1 edge with siem-event authority.
+- Loop-1 HYPOTHESIZE correctly applied `agents/hypothesize.md` §Discipline "Unknown-shape hypothesis when a discriminating field is missing" — `proc.pname=null` → emits `mode: no-fork` instead of noodling on every mechanism. This is the exact discipline the `feedback_unknown_hypothesis_discipline` memory encodes, and it landed on first try.
+- Loop-1 GATHER self-labelled `## GATHER (loop 1)` as `Status: partial` and dispatched a composite across 3 rule classes (falco container + 100002 sshd + 100007 binary-drop) under a single-lead label. ANALYZE's Self-report flagged this explicitly as "composite gather dispatched under a single-lead label" — good grading-hygiene flag; the gather-composite subagent contract (per run #42) wasn't triggered because hypothesize selected a single lead.
+- Loop-1 ANALYZE discipline is correct: grades capped at `+`/`-` because no HYPOTHESIZE invlang block existed to cite `p{N}`/`r{N}` against. The Self-report flagged "Missing HYPOTHESIZE block before loop 1 GATHER" and explicitly called for loop-2 HYPOTHESIZE to "repair this gap before the next lead runs". This is the ANALYZE subagent self-flagging a *structural* gap caused by loop-1's no-fork mode — the routing decision is the correct one.
+
+**Headline failure mode (new):** **loop-N HYPOTHESIZE timeout under expanded investigation.md context**. Loop-1 hypothesize was 147s (fast end of the 144-324s range documented in meta-finding #17). Loop-2's preload grew to include the loop-1 GATHER (~4.5KB raw-observation prose) + loop-1 ANALYZE (~3KB assessment + self-report) — investigation.md went from 3.6KB at loop-1 dispatch to 13KB at loop-2 dispatch. Nothing else in the prompt changed. At some point past 324s the subagent was still in thinking/reasoning and hit the 450s ceiling with zero output — no checkpoint written, no stdout.
+
+**Orchestrator behavior:** `hypothesize.py` line 109 comment: *"Timeout fails fast — the handler does not respawn on timeout."* The M_last checkpoint-recovery path (`_synthesize_from_checkpoint`) only rescues the **stdout=1 / session-ended-on-Write** pathology — a timeout with zero subagent progress has nothing to fall back to. Orchestrator exits 1, no report.md.
+
+**Budget accounting:** `budget.json` shows `subagent_spawns: 0` even though 7 subagents were dispatched. Counter appears not to be incremented by the orchestrator (budget_enforcer is main-agent-only).
+
 ## Historic runs
 
-All past eval runs persist under `/workspace/runs/<run_id>/` (gitignored but not wiped). The cost baseline table above references runs by number (`#1`…`#25`); the on-disk `<run_id>` is a `YYYYMMDD-HHMMSS-rule<N>` timestamp, so mapping a table row back to its artifacts is an `ls /workspace/runs/ | grep rule<N>` + date match. Useful when a new finding contradicts an older run and you want to re-read that run's `investigation.md`, `transcript.jsonl`, or `analyze_run.py` output instead of trusting the table summary.
+All past eval runs persist under `/workspace/runs/<run_id>/` (main-agent harness) or `/tmp/soc-agent-orchestrate-eval/<run_id>/` (orchestrator) — both gitignored but not wiped. The cost baseline table above references runs by number (`#1`…`#42`); the on-disk `<run_id>` is a `YYYYMMDD-HHMMSS-rule<N>` timestamp, so mapping a table row back to its artifacts is an `ls /workspace/runs/ | grep rule<N>` + date match. Useful when a new finding contradicts an older run and you want to re-read that run's `investigation.md`, `transcript.jsonl`, or `analyze_run.py` output instead of trusting the table summary.
 
 ## Known harness quirks (don't confuse for agent bugs)
 

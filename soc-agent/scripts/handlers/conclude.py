@@ -56,6 +56,15 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._context_loader import (
+    format_alert_block,
+    format_archetype_shapes_block,
+    format_investigation_block,
+    load_alert,
+    load_archetype_shapes,
+    load_investigation_md,
+    load_run_salt,
+)
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
@@ -105,21 +114,51 @@ def _select_routing_source(ctx: Context) -> tuple[str, bool]:
 
 
 def _assemble_prompt(ctx: Context) -> str:
+    """Build the conclude subagent prompt with all deterministic context inline.
+
+    The subagent receives alert.json, investigation.md, and every archetype's
+    story.md + trust-anchors.md + precedent snapshots preloaded — no Read/Glob
+    tool calls required. On the forced-exhaustion path archetype shapes are
+    omitted (the subagent is instructed to emit `matched_archetype: null`
+    regardless of investigation state, so carrying archetypes wastes tokens).
+
+    The subagent's remaining job: pick `matched_ticket_id` from the inlined
+    precedents, synthesize report.md's narrative prose, and emit the terminal
+    YAML status block.
+    """
     if not ctx.ticket_id:
         raise OrchestrationError(
             "CONCLUDE handler: ctx.ticket_id is empty — must be set at Context "
             "construction by the /investigate entrypoint"
         )
     routing_source, forced = _select_routing_source(ctx)
-    lines = [
+    header_lines = [
         f"run_dir={ctx.run_dir}",
         f"signature_id={ctx.signature_id}",
         f"identifier={ctx.ticket_id}",
         f"routing_source={routing_source}",
     ]
     if forced:
-        lines.append("forced_exhaustion=true")
-    return "\n".join(lines)
+        header_lines.append("forced_exhaustion=true")
+
+    alert = load_alert(ctx.run_dir)
+    salt = load_run_salt(ctx.run_dir)
+    investigation_md = load_investigation_md(ctx.run_dir)
+
+    blocks = [
+        "\n".join(header_lines),
+        format_alert_block(alert, salt),
+        format_investigation_block(investigation_md),
+    ]
+
+    # Forced-exhaustion is archetype-null by contract — skip archetype load.
+    if not forced:
+        shapes = load_archetype_shapes(
+            ctx.signature_id, SOC_AGENT_ROOT, include_precedents=True,
+        )
+        blocks.append(format_archetype_shapes_block(shapes, with_precedents=True))
+
+    return "\n\n".join(blocks)
 
 
 def _validate_status(parsed: dict) -> dict:

@@ -287,12 +287,21 @@ def _assemble_prompt_composite(
     *,
     mode: str,
     resume: bool = False,
+    override_data_source: Optional[str] = None,
+    lead_hint: Optional[str] = None,
 ) -> str:
     lead_spec = {
         "lead_name": scope.lead_name,
         "entity_bindings": scope.entity_bindings,
         "reporting_agent": scope.reporting_agent,
     }
+    # Per-lead HYPOTHESIZE→GATHER hints. Emit inside the lead spec so the
+    # subagent sees them attached to the lead, not as ambient dispatch
+    # metadata — matters when future dispatches carry multiple leads.
+    if override_data_source:
+        lead_spec["override_data_source"] = override_data_source
+    if lead_hint:
+        lead_spec["lead_hint"] = lead_hint
     lines = [
         f"run_dir={ctx.run_dir}",
         f"signature_id={ctx.signature_id}",
@@ -478,16 +487,29 @@ def _recover_single(ctx: Context, scope: Scope, loop_n: int) -> dict:
 
 def _dispatch_composite(
     ctx: Context, scope: Scope, loop_n: int, *, mode: str,
+    override_data_source: Optional[str] = None,
+    lead_hint: Optional[str] = None,
 ) -> dict:
-    prompt = _assemble_prompt_composite(ctx, scope, loop_n, mode=mode)
+    prompt = _assemble_prompt_composite(
+        ctx, scope, loop_n, mode=mode,
+        override_data_source=override_data_source,
+        lead_hint=lead_hint,
+    )
     parsed = _parse_composite_output(_invoke_gather_composite(prompt))
     if parsed is None:
-        return _recover_composite(ctx, scope, loop_n, mode)
+        return _recover_composite(
+            ctx, scope, loop_n, mode,
+            override_data_source=override_data_source,
+            lead_hint=lead_hint,
+        )
     return parsed
 
 
 def _recover_composite(
     ctx: Context, scope: Scope, loop_n: int, mode: str,
+    *,
+    override_data_source: Optional[str] = None,
+    lead_hint: Optional[str] = None,
 ) -> dict:
     ckpt_path = _checkpoint_path_composite(ctx, loop_n)
     ckpt = _load_checkpoint(ckpt_path)
@@ -500,6 +522,8 @@ def _recover_composite(
         return _reconstruct_composite_from_checkpoint(ckpt)
     resume_prompt = _assemble_prompt_composite(
         ctx, scope, loop_n, mode=mode, resume=True,
+        override_data_source=override_data_source,
+        lead_hint=lead_hint,
     )
     parsed = _parse_composite_output(_invoke_gather_composite(resume_prompt))
     if parsed is None:
@@ -639,7 +663,7 @@ def _append_to_investigation(ctx: Context, section: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _read_hypothesize_payload(ctx: Context) -> tuple[str, int]:
+def _read_hypothesize_payload(ctx: Context) -> tuple[str, int, Optional[str], Optional[str]]:
     hypothesize_out = ctx.outputs.get(Phase.HYPOTHESIZE)
     if not isinstance(hypothesize_out, dict):
         raise OrchestrationError(
@@ -657,18 +681,32 @@ def _read_hypothesize_payload(ctx: Context) -> tuple[str, int]:
         raise OrchestrationError(
             f"GATHER: HYPOTHESIZE payload missing int loop_n (got {loop_n!r})"
         )
-    return selected_lead, loop_n
+    # Optional HYPOTHESIZE→GATHER hints — forwarded into the gather-composite
+    # dispatch when present, omitted otherwise. HYPOTHESIZE trailer parser
+    # already validated string-ness; we pass through as-is.
+    override_data_source = hypothesize_out.get("override_data_source")
+    lead_hint = hypothesize_out.get("lead_hint")
+    return selected_lead, loop_n, override_data_source, lead_hint
 
 
 def handle(ctx: Context) -> PhaseResult:
-    selected_lead, loop_n = _read_hypothesize_payload(ctx)
+    selected_lead, loop_n, override_data_source, lead_hint = _read_hypothesize_payload(ctx)
     scope = _resolve_scope(ctx, selected_lead)
 
-    if scope.template_exists:
+    # Overrides only apply to the composite subagent — single-lead gather
+    # executes a fixed vendor template and has no room for a data-source
+    # override. When HYPOTHESIZE authored an override, force composite
+    # dispatch even if a single-lead template exists.
+    force_composite = override_data_source is not None
+
+    if scope.template_exists and not force_composite:
         payload = _dispatch_single(ctx, scope, loop_n)
     else:
         composite_parsed = _dispatch_composite(
-            ctx, scope, loop_n, mode="ad-hoc",
+            ctx, scope, loop_n,
+            mode="ad-hoc" if not scope.template_exists else "composite",
+            override_data_source=override_data_source,
+            lead_hint=lead_hint,
         )
         payload = _normalize_composite(composite_parsed, scope)
 

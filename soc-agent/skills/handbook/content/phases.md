@@ -44,7 +44,7 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 **Key observables:** {investigation-relevant values from alert}
 **Playbook hypotheses:** ?hypothesis-1, ?hypothesis-2, ...
 **Available leads:** lead-1, lead-2, ...
-**Archetype matches:** {summary from archetype-scan}
+**Plausible archetypes (candidates for HYPOTHESIZE):** {candidate list from archetype-scan}
 **Data environment:** {summary of resolution map — available operations, healthy sources, gaps}
 ```
 

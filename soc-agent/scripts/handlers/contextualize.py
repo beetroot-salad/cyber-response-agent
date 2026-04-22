@@ -320,15 +320,27 @@ def _compose_markdown(
     tc = ticket.get("ticket_context", {})
     entities = tc.get("entities", {}) or {}
 
-    archetype_lines = []
+    candidate_lines: list[str] = []
+    ruled_out_lines: list[str] = []
     for entry in scan.get("archetype_scan", []) or []:
         name = entry.get("archetype", "?")
-        strength = entry.get("story_match", "")
-        archetype_lines.append(f"{name} — {strength}")
-    archetype_block = (
-        "\n".join(f"- {line}" for line in archetype_lines)
-        if archetype_lines
-        else "- (archetype-scan returned no entries)"
+        shape_match = (entry.get("shape_match") or "").strip()
+        notes = entry.get("shape_notes") or ""
+        line = f"{name} — {notes}" if notes else name
+        if shape_match == "ruled-out":
+            ruled_out_lines.append(line)
+        else:
+            candidate_lines.append(line)
+
+    candidate_block = (
+        "\n".join(f"- {line}" for line in candidate_lines)
+        if candidate_lines
+        else "- (archetype-scan returned no candidates)"
+    )
+    ruled_out_block = (
+        "\n".join(f"- {line}" for line in ruled_out_lines)
+        if ruled_out_lines
+        else ""
     )
 
     adversarial = scan.get("adversarial_archetype") or {}
@@ -352,13 +364,17 @@ def _compose_markdown(
     elif tc.get("queries_partial"):
         data_env = f"{data_env} | partial correlation: {tc['queries_partial']}"
 
+    archetype_section = f"**Plausible archetypes (candidates for HYPOTHESIZE):**\n{candidate_block}\n"
+    if ruled_out_block:
+        archetype_section += f"**Ruled-out archetypes:**\n{ruled_out_block}\n"
+
     return (
         f"## CONTEXTUALIZE\n\n"
         f"**Alert:** {ctx.ticket_id} — {ctx.signature_id}\n"
         f"**Key observables:**\n{entities_lines}\n"
         f"**Playbook hypotheses:** {hypotheses_line}\n"
         f"**Available leads:** {leads_line}\n"
-        f"**Archetype matches:**\n{archetype_block}\n"
+        f"{archetype_section}"
         f"**Adversarial archetype:** {adversarial_name} — {adversarial_reason}\n"
         f"**Data environment:** {data_env}\n"
     )
