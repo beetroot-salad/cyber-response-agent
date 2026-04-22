@@ -221,10 +221,21 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
 def _safe_priors_section(ctx: Context) -> str:
     """Produce the `## Past-investigation priors` markdown block.
 
+    Loop-aware: at loop 1 (no prior hypothesize block) we key retrieval off the
+    *prologue* shape rather than synthesizing per-seed fingerprints that
+    structurally can't match topology tiers 0–3. At loop 2+ the hypothesis
+    frontier carries real proposed upstream edges, so per-hypothesis topology
+    retrieval works as designed.
+
     All exceptions degrade to a banner — priors must never block the loop.
     """
     try:
         frontier = _extract_current_frontier(ctx)
+        is_loop_1 = not frontier or all(
+            _fp_get_relation(e["fingerprint"]) is None for e in frontier
+        )
+        if is_loop_1:
+            return _format_prologue_priors(_compute_prologue_priors(ctx))
         priors = _compute_priors(frontier)
         return _format_priors(priors)
     except Exception as exc:  # noqa: BLE001 — intentional broad catch
@@ -232,6 +243,117 @@ def _safe_priors_section(ctx: Context) -> str:
             "## Past-investigation priors\n"
             f"(priors unavailable: {type(exc).__name__}: {exc})"
         )
+
+
+def _fp_get_relation(fp: dict) -> str | None:
+    r = fp.get("relation") if isinstance(fp, dict) else None
+    return r if isinstance(r, str) else None
+
+
+def _compute_prologue_priors(ctx: Context) -> dict:
+    """Loop-1 prologue-keyed retrieval.
+
+    Reads the prologue from the run's `investigation.md`, runs
+    same-signature-scoped prologue retrieval, and falls back to
+    cross-signature when the same-signature pass returns no cases.
+    """
+    from invlang import (  # type: ignore
+        lead_effectiveness_for_prologue,
+        load_corpus,
+        peer_hypothesis_distribution_for_prologue,
+    )
+
+    inv_path = ctx.run_dir / "investigation.md"
+    text = inv_path.read_text() if inv_path.exists() else ""
+    prologue, _ = _parse_prologue_and_last_hypothesize(text)
+    prologue = prologue or {}
+
+    corpus = load_corpus()
+
+    leads_same = lead_effectiveness_for_prologue(
+        corpus, prologue, signature_id=ctx.signature_id
+    )
+    peers_same = peer_hypothesis_distribution_for_prologue(
+        corpus, prologue, signature_id=ctx.signature_id
+    )
+    scope = "same-signature"
+    leads = leads_same
+    peers = peers_same
+    if not leads_same.get("cases_matched"):
+        leads_any = lead_effectiveness_for_prologue(
+            corpus, prologue, signature_id=None
+        )
+        peers_any = peer_hypothesis_distribution_for_prologue(
+            corpus, prologue, signature_id=None
+        )
+        if leads_any.get("cases_matched"):
+            scope = "cross-signature"
+            leads = leads_any
+            peers = peers_any
+
+    return {
+        "prologue_signature": _prologue_signature_summary(prologue),
+        "scope": scope,
+        "leads": leads,
+        "peers": peers,
+    }
+
+
+def _prologue_signature_summary(prologue: dict) -> dict:
+    """Compact self-describing signature — shown in the rendered block so the
+    subagent sees exactly what was matched on."""
+    vertices = prologue.get("vertices") or []
+    edges = prologue.get("edges") or []
+    return {
+        "vertex_types": sorted({v.get("type") for v in vertices if isinstance(v, dict) and v.get("type")}),
+        "vertex_classifications": sorted({v.get("classification") for v in vertices if isinstance(v, dict) and v.get("classification")}),
+        "edge_relations": sorted({e.get("relation") for e in edges if isinstance(e, dict) and e.get("relation")}),
+    }
+
+
+def _format_prologue_priors(payload: dict) -> str:
+    """Render the loop-1 prologue-keyed priors block."""
+    sig = payload["prologue_signature"]
+    scope = payload["scope"]
+    leads = payload["leads"]
+    peers = payload["peers"]
+
+    lines = [
+        "## Past-investigation priors",
+        "",
+        f"### Loop 1 — keyed on prologue topology ({scope} scope, "
+        f"tier {leads['tier_used']}: {leads['tier_label']}, "
+        f"{leads.get('cases_matched', 0)} cases matched)",
+        "Prologue vertex types: " + (", ".join(sig["vertex_types"]) or "—"),
+        "Prologue edge relations: " + (", ".join(sig["edge_relations"]) or "—"),
+    ]
+
+    lead_rows = (leads.get("hits") or [])[:_PRIORS_LEADS_TOP_N]
+    if lead_rows:
+        lines.append("")
+        lines.append("Leads ranked at this prologue topology (per-occurrence effectiveness; n = support):")
+        for row in lead_rows:
+            lines.append(
+                f"  - {row['lead_name']}: "
+                f"score={_fmt_num(row.get('mean_branching_delta'))}, "
+                f"fidelity={_fmt_num(row.get('fidelity_rate'))}, "
+                f"n={row.get('branching_support') or 0}"
+            )
+    else:
+        lines.append("Leads: (no corpus matches)")
+
+    peer_rows = (peers.get("hits") or [])[:_PRIORS_PEERS_TOP_N]
+    if peer_rows:
+        lines.append("")
+        lines.append("Hypothesis classifications proposed historically at this prologue topology:")
+        for p in peer_rows:
+            hist = p.get("final_weight_histogram") or {}
+            hist_str = ", ".join(f"{k}={v}" for k, v in hist.items() if v) or "—"
+            lines.append(
+                f"  - {p['classification']} "
+                f"({p['peer_count']} cases, weights: {hist_str})"
+            )
+    return "\n".join(lines)
 
 
 def _extract_current_frontier(ctx: Context) -> list[dict]:

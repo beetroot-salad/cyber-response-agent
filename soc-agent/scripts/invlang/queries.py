@@ -911,6 +911,229 @@ def peer_hypothesis_distribution_for_topology(
 
 
 # ---------------------------------------------------------------------------
+# Class 8b — prologue-keyed retrieval (loop-1 priors — no hypothesis yet)
+# ---------------------------------------------------------------------------
+# At loop 1 the frontier has no proposed upstream edges (relation=None), so
+# `hypothesis_topology` fingerprints cannot match tiers 0–3 of the hypothesis
+# matcher. The name-glob fallback (tier 4) is keyed on playbook seed names,
+# which frequently don't match the corpus's working-hypothesis vocabulary and
+# produces "no match" for every seed — a systematic loss at the phase where
+# priors would help most.
+#
+# This class keys retrieval off the *prologue* instead. The prologue is dense
+# at loop 1 (CONTEXTUALIZE has just written vertices + edges), carries the
+# alert's topology directly, and matches across hypothesis-name drift. Callers
+# filter by `signature_id` when they want same-signature-only priors.
+
+
+_PROLOGUE_TIER_LABELS = {
+    0: "exact vertex+edge shape",
+    1: "vertex-type set exact",
+    2: "vertex-type set overlap",
+    3: "no match",
+}
+
+
+def _prologue_signature(prologue: dict[str, Any]) -> dict[str, Any]:
+    """Frozen signature for prologue-shape retrieval.
+
+    Returns `{vertex_types, vertex_classifications, edge_relations}` — three
+    frozensets. `vertex_types` is the coarsest (container/process/identity/…);
+    `vertex_classifications` carries the classification tokens (runtime-exec-
+    primitive, monitoring-pattern, …); `edge_relations` is the edge.relation
+    set (spawned, runs_in, attempted_auth, …). Missing values are dropped.
+    """
+    if not isinstance(prologue, dict):
+        return {"vertex_types": frozenset(), "vertex_classifications": frozenset(), "edge_relations": frozenset()}
+
+    vertices = prologue.get("vertices") or []
+    edges = prologue.get("edges") or []
+    v_types: set[str] = set()
+    v_classes: set[str] = set()
+    for v in vertices:
+        if not isinstance(v, dict):
+            continue
+        t = v.get("type")
+        c = v.get("classification")
+        if isinstance(t, str):
+            v_types.add(t)
+        if isinstance(c, str):
+            v_classes.add(c)
+    e_rels: set[str] = set()
+    for e in edges:
+        if not isinstance(e, dict):
+            continue
+        r = e.get("relation")
+        if isinstance(r, str):
+            e_rels.add(r)
+    return {
+        "vertex_types": frozenset(v_types),
+        "vertex_classifications": frozenset(v_classes),
+        "edge_relations": frozenset(e_rels),
+    }
+
+
+def _prologue_tier_match(case_sig: dict[str, Any], query_sig: dict[str, Any], tier: int) -> bool:
+    """Three-tier prologue matcher.
+
+      0 — exact: vertex_types == AND edge_relations ==
+      1 — vertex_types == (ignore edges — some vendors emit sparse edge sets)
+      2 — vertex_types & query != ∅  (any overlap; last useful tier)
+      3 — no match
+    """
+    if tier >= 3:
+        return False
+    qv, cv = query_sig["vertex_types"], case_sig["vertex_types"]
+    qe, ce = query_sig["edge_relations"], case_sig["edge_relations"]
+    if tier == 0:
+        return qv == cv and qe == ce
+    if tier == 1:
+        return qv == cv
+    if tier == 2:
+        return bool(qv & cv)
+    return False
+
+
+def _companion_signature_id(c: Companion) -> str | None:
+    from .corpus import signature_id_from_path
+    return signature_id_from_path(c.source_path)
+
+
+def _walk_prologue_tiers(
+    corpus: list[Companion],
+    query_sig: dict[str, Any],
+    *,
+    signature_id: str | None,
+) -> tuple[list[int], int]:
+    """Return `(case_indices, tier_used)`. Empty → tier 3."""
+    scoped = [
+        i for i, c in enumerate(corpus)
+        if signature_id is None or _companion_signature_id(c) == signature_id
+    ]
+    for tier in range(0, 3):
+        hits: list[int] = []
+        for i in scoped:
+            case_sig = _prologue_signature(corpus[i].prologue)
+            if _prologue_tier_match(case_sig, query_sig, tier):
+                hits.append(i)
+        if hits:
+            return hits, tier
+    return [], 3
+
+
+def lead_effectiveness_for_prologue(
+    corpus: list[Companion],
+    prologue: dict[str, Any],
+    *,
+    signature_id: str | None = None,
+) -> dict[str, Any]:
+    """Lead effectiveness across past cases whose prologue shape matches.
+
+    `signature_id` — when provided, restricts the scope to same-signature past
+    cases. Pass `None` for cross-signature retrieval (useful when signature
+    corpus is thin).
+
+    Returns `{hits, count, tier_used, tier_label, cases_matched}`. Rows are
+    `_lead_effectiveness_rows` ranked identically to the per-hypothesis variant.
+    """
+    query_sig = _prologue_signature(prologue)
+    case_indices, tier_used = _walk_prologue_tiers(
+        corpus, query_sig, signature_id=signature_id
+    )
+    if not case_indices:
+        return {
+            "hits": [], "count": 0,
+            "tier_used": 3, "tier_label": _PROLOGUE_TIER_LABELS[3],
+            "cases_matched": 0,
+        }
+    # Scope lead effectiveness to every hypothesis in matched cases.
+    hypothesis_ids: set[tuple[int, str]] = set()
+    for case_idx in case_indices:
+        for h in corpus[case_idx].iter_new_hypotheses():
+            hid = h.get("id")
+            if hid:
+                hypothesis_ids.add((case_idx, hid))
+    rows = _lead_effectiveness_rows(corpus, hypothesis_id_filter=hypothesis_ids)
+    rows.sort(
+        key=lambda r: (
+            r["mean_branching_delta"] if r["mean_branching_delta"] is not None else float("-inf"),
+            r["fidelity_rate"] if r["fidelity_rate"] is not None else float("-inf"),
+            r["branching_support"],
+        ),
+        reverse=True,
+    )
+    return {
+        "hits": rows,
+        "count": len(rows),
+        "tier_used": tier_used,
+        "tier_label": _PROLOGUE_TIER_LABELS[tier_used],
+        "cases_matched": len(case_indices),
+    }
+
+
+def peer_hypothesis_distribution_for_prologue(
+    corpus: list[Companion],
+    prologue: dict[str, Any],
+    *,
+    signature_id: str | None = None,
+) -> dict[str, Any]:
+    """Classification distribution of hypotheses proposed across prologue-matching cases.
+
+    One entry per distinct `?<name>`; counts cases (dedup within case), and
+    carries the final-weight histogram so callers see which hypothesis shapes
+    at this topology actually survived.
+    """
+    query_sig = _prologue_signature(prologue)
+    case_indices, tier_used = _walk_prologue_tiers(
+        corpus, query_sig, signature_id=signature_id
+    )
+    if not case_indices:
+        return {
+            "hits": [], "count": 0,
+            "tier_used": 3, "tier_label": _PROLOGUE_TIER_LABELS[3],
+            "cases_matched": 0,
+        }
+    peer_counts: dict[str, int] = {}
+    peer_weights: dict[str, dict[str, int]] = {}
+    weight_buckets = ("++", "+", "null", "-", "--")
+    for case_idx in case_indices:
+        c = corpus[case_idx]
+        last_weight: dict[str, Any] = {}
+        for lead in c.leads:
+            for r in lead.get("resolutions", []) or []:
+                h_id = r.get("hypothesis")
+                if h_id:
+                    last_weight[h_id] = r.get("after")
+        seen: set[str] = set()
+        for sib in c.iter_new_hypotheses():
+            classification = _hypothesis_name(sib)
+            sib_id = sib.get("id")
+            if not classification or not sib_id or classification in seen:
+                continue
+            seen.add(classification)
+            peer_counts[classification] = peer_counts.get(classification, 0) + 1
+            bucket_key = "null" if last_weight.get(sib_id) is None else str(last_weight[sib_id])
+            hist = peer_weights.setdefault(classification, {b: 0 for b in weight_buckets})
+            if bucket_key in hist:
+                hist[bucket_key] += 1
+    hits = [
+        {
+            "classification": name,
+            "peer_count": peer_counts[name],
+            "final_weight_histogram": peer_weights[name],
+        }
+        for name in sorted(peer_counts.keys(), key=lambda n: (-peer_counts[n], n))
+    ]
+    return {
+        "hits": hits,
+        "count": len(hits),
+        "tier_used": tier_used,
+        "tier_label": _PROLOGUE_TIER_LABELS[tier_used],
+        "cases_matched": len(case_indices),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Class 9 — weight-reversal mining (ANALYZE — pitfall extraction before grading)
 # ---------------------------------------------------------------------------
 
