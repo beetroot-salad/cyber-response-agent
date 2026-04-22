@@ -286,7 +286,11 @@ Structural shape (fields, types, required keys) lives in the invlang schema. The
 - **Legitimacy-attribute on confirmed vertices.** When the hypothesis classifies an *already-confirmed* vertex (the legitimacy-attribute case — e.g. classifying a known srcip as `sanctioned-automation-source`), set `proposed_edge.relation: classified_as` and let `parent_vertex.type` match the attached vertex's own type. Don't invent types like `host` for an `endpoint` vertex.
 - **Lead names must be real.** `Selected lead:` and `advance_to` values reference leads that exist in the signature's playbook, the common catalog, or are clearly marked `(new)` per §Selecting leads step 3.
 
-**No-fork mode** (no observable discriminates yet): emit no invlang YAML block — only narrative (`Selected lead:` + lead-level `Pitfalls:`) + the terminal routing YAML with `mode: no-fork`. Lead-level predictions (`if → read_as → advance_to`) can appear in the narrative prose for the GATHER handler to pick up.
+**No-fork mode** — emit no invlang YAML block, only narrative (`Selected lead:` + lead-level `Pitfalls:`) + the terminal routing YAML with `mode: no-fork`. Two shapes qualify:
+- **Data gap.** No observable discriminates among candidate classifications yet; a lead is needed to reveal the discriminating data.
+- **Context-determined topology.** Alert fields, prior-loop observations, or anchor-registry matches already identify the mechanism. Do not register the pre-refuted playbook seeds as hypotheses to `--`-grade them — emit no-fork with a lead that closes the next attribute gap (authorization, scope) or grandparent-topology gap. See Example 2.
+
+Lead-level predictions (`if → read_as → advance_to`) can appear in the narrative prose for the GATHER handler to pick up.
 
 ## Examples
 
@@ -361,6 +365,28 @@ Selected lead: `shell-context` (extended) — container runtime API for full anc
 Pitfalls:
 - h-001: same topology is produced by post-exploit RCE through node — mechanism does not discriminate benign/adversarial; image-baseline anchor question.
 - h-002: a long-lived operator `docker exec` produces the same chain as attacker injection; who invoked the exec resolves at anchor time.
+
+### Example 2 — loop-2 recovery, attribute-only gap, no-fork
+
+**Alert:** same `pname=runc`, `cmdline="bash -c whoami"`, k8s null shape as Example 1.
+
+**State at loop 2:** loop 1 emitted a grandparent-layer fork (`?ci-pipeline-exec` vs `?adversary-controlled-host-exec`) and dispatched the mandatory composition-rule lead (`correlated-falco-events`) as a composite alongside a lineage lead (`process-lineage`). Composition check came back clean; lineage resolved the host-side parent to a recognized CI agent binary. Loop-1 ANALYZE graded `?ci-pipeline-exec` to `+` and `?adversary-controlled-host-exec` to `--`. The only remaining question is whether the CI run was *authorized* — an attribute question on the confirmed grandparent vertex, resolved by the `deploy-runs` anchor named in `h-001.lc1`.
+
+No topology fork is live at any layer: seed-layer was collapsed by the alert, grandparent-layer was resolved by loop-1 evidence. Do **not** re-register seeds as hypotheses for ANALYZE to `--`-grade — that is bookkeeping. The open question is attribute-only; no-fork is the right shape.
+
+Selected lead: `deploy-runs` anchor consultation — satisfies `h-001.lc1` (`asks: authorization`). If the registry carries a CI run at the alert timestamp matching this container target → verdict `authorized`, advance to CONCLUDE. If no matching run → verdict `unauthorized` / `indeterminate`, escalate.
+
+Pitfalls:
+- `deploy-runs`: confirmation tells you scope, not who typed the command. Stolen CI credentials produce the same anchor answer. Pair with any co-firing Falco signal.
+- `deploy-runs`: registry unavailability must not be read as "no run" — flag the data-source gap, escalate conservatively.
+
+```yaml
+mode: no-fork
+selected_lead: deploy-runs
+loop_n: 2
+```
+
+**Contrast — loop 1 with the same alert.** At loop 1, lineage data is not yet in context. The grandparent-layer fork (`?ci-pipeline-exec` vs `?adversary-controlled-host-exec`) is live — the two classifications diverge on host-side ancestry and on CI-run correlation. **Fork mode** applies, one layer above the pre-refuted seeds. Selected lead at loop 1 is typically a composite of `correlated-falco-events` (mandatory composition rule) with `process-lineage` or `container-baseline` (grandparent discriminator). Emit two hypotheses at the grandparent layer; do not skip the fork just because the seed-layer collapsed.
 
 ## Progress checkpoint (recovery artifact)
 
