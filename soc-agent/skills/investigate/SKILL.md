@@ -97,13 +97,13 @@ This means:
 
 ## Investigation Loop
 
-After CONTEXTUALIZE and after every ANALYZE, dispatch the HYPOTHESIZE subagent. The subagent owns the branching question ("does the hypothesis space fork at this anchor?") and picks the output shape accordingly — a `hypothesize:` block when there's a real fork, a `gather:` block (with lead-level pre-registered predictions on any interpretation-vulnerable outcome fields) when the next lead is mechanical or pure enrichment. Your job is to transcribe and proceed.
+After CONTEXTUALIZE and after every ANALYZE, dispatch the PREDICT subagent. The subagent owns the branching question ("does the hypothesis space fork at this anchor?") and picks the output shape accordingly — a `hypothesize:` block when there's a real fork, a `gather:` block (with lead-level pre-registered predictions on any interpretation-vulnerable outcome fields) when the next lead is mechanical or pure enrichment. Your job is to transcribe and proceed.
 
 ```
 CONTEXTUALIZE
       │
       ▼
- HYPOTHESIZE ◀──────────────┐      (subagent emits:
+ PREDICT ◀──────────────┐      (subagent emits:
    │                         │       fork    → hypothesize:
    ▼                         │       no fork → gather: with
  GATHER                      │                 pre-registered
@@ -115,18 +115,18 @@ CONTEXTUALIZE
  CONCLUDE
 ```
 
-The phase headers you write to `investigation.md` are `## CONTEXTUALIZE`, `## SCREEN`, `## HYPOTHESIZE`, `## GATHER`, `## ANALYZE`, `## CONCLUDE`.
+The phase headers you write to `investigation.md` are `## CONTEXTUALIZE`, `## SCREEN`, `## PREDICT`, `## GATHER`, `## ANALYZE`, `## CONCLUDE`.
 
 Transitions (enforced by the state machine hook):
 - CONTEXTUALIZE → CONCLUDE (dedup when ticket-context surfaces a live repeat)
 - CONTEXTUALIZE → SCREEN (playbook has a ## Screen section)
-- CONTEXTUALIZE → HYPOTHESIZE (default)
-- SCREEN → CONCLUDE | HYPOTHESIZE (matched | no-match)
-- HYPOTHESIZE → GATHER
+- CONTEXTUALIZE → PREDICT (default)
+- SCREEN → CONCLUDE | PREDICT (matched | no-match)
+- PREDICT → GATHER
 - GATHER → ANALYZE
-- ANALYZE → HYPOTHESIZE | CONCLUDE
+- ANALYZE → PREDICT | CONCLUDE
 
-The state machine is enforced automatically — when you write a phase section header to `investigation.md`, a hook validates the transition and updates `state.json`. Phase headers must be exactly `## PHASENAME` with no prefix or suffix. If you attempt an illegal transition, the write is blocked. The hook reports loop count (every HYPOTHESIZE and every ANALYZE entry counts as one cycle); a hard cap is enforced — if you're approaching it without convergence, escalate.
+The state machine is enforced automatically — when you write a phase section header to `investigation.md`, a hook validates the transition and updates `state.json`. Phase headers must be exactly `## PHASENAME` with no prefix or suffix. If you attempt an illegal transition, the write is blocked. The hook reports loop count (every PREDICT and every ANALYZE entry counts as one cycle); a hard cap is enforced — if you're approaching it without convergence, escalate.
 
 ---
 
@@ -197,7 +197,7 @@ The subagent returns its findings alongside the code or query it executed. Treat
 
    **Parsing ticket_context.py.** The script's stdout is a single fenced ```yaml block under top-level key `ticket_context:`. Parse it directly — no PostToolUse hook is involved. If the script emits `queries_failed` or `queries_partial`, note the failure reason in your transcription but proceed; the main agent still has enough context from archetype-scan and the alert itself.
 
-   **From archetype-scan:** transcribe its `archetype_scan` candidate list (entries with `shape_match: candidate`) under **Plausible archetypes**, and its ruled-out entries under **Ruled-out archetypes**, plus its `adversarial_archetype` entry. Archetypes are starting candidates, not conclusions; the scan does not pre-rank or express confidence — HYPOTHESIZE decides which candidate best explains the alert after looking at full context. The adversarial entry is the citable surface CONCLUDE's self-check expects in writing. If the subagent returned no useful output (malformed YAML, empty list), continue without it — archetypes are a useful prior, not required.
+   **From archetype-scan:** transcribe its `archetype_scan` candidate list (entries with `shape_match: candidate`) under **Plausible archetypes**, and its ruled-out entries under **Ruled-out archetypes**, plus its `adversarial_archetype` entry. Archetypes are starting candidates, not conclusions; the scan does not pre-rank or express confidence — PREDICT decides which candidate best explains the alert after looking at full context. The adversarial entry is the citable surface CONCLUDE's self-check expects in writing. If the subagent returned no useful output (malformed YAML, empty list), continue without it — archetypes are a useful prior, not required.
 
    **From ticket_context.py:** transcribe `entities`, `repeats`, `related`, and `high_volume_dimensions`.
 
@@ -206,11 +206,11 @@ The subagent returns its findings alongside the code or query it executed. Treat
 
    **Entity classification stays with you.** The subagent returns raw values (IPs, usernames). You decide whether `172.22.0.10` is a NAT gateway or `healthcheck` is a known monitoring alias using `knowledge/environment/context/`. This is *labelling*, not weighting evidence.
 
-   **Related alerts are seeds for thinking, not evidence for grading.** Use them later in HYPOTHESIZE to notice patterns. Do not cite them as grading evidence (`+`/`++`/`-`/`--`) in ANALYZE unless you can (a) name a specific causal mechanism linking them to the current alert and (b) point to a concrete observation that establishes the link. "Temporally concurrent," "same host," and "high combined alert volume" are not mechanisms — they are coincidence shapes that any multi-cron or high-baseline environment produces naturally.
+   **Related alerts are seeds for thinking, not evidence for grading.** Use them later in PREDICT to notice patterns. Do not cite them as grading evidence (`+`/`++`/`-`/`--`) in ANALYZE unless you can (a) name a specific causal mechanism linking them to the current alert and (b) point to a concrete observation that establishes the link. "Temporally concurrent," "same host," and "high combined alert volume" are not mechanisms — they are coincidence shapes that any multi-cron or high-baseline environment produces naturally.
 
 5. **Environment readiness.** The `## Environment Readiness` section at the top of this skill is the preflight output. For any system marked unreachable or degraded, scan `knowledge/common-investigation/leads/*/definition.md` for leads whose `data_tags` depend on that system and record them as affected. Preflight is connectivity-only; if a GATHER query later returns suspect results, follow `knowledge/common-investigation/leads/data-source-debug/definition.md`.
 
-6. **Write the section.** Produce the markdown summary + `prologue:` YAML below, then proceed to HYPOTHESIZE.
+6. **Write the section.** Produce the markdown summary + `prologue:` YAML below, then proceed to PREDICT.
 
 **Markdown template:**
 ```markdown
@@ -297,7 +297,7 @@ prologue:
 
 **Goal:** Attempt fast resolution via mechanical pattern matching before the full investigation loop.
 
-**When to enter:** The playbook loaded in Signature Knowledge contains a `## Screen` section. If there is no Screen section, skip directly to HYPOTHESIZE.
+**When to enter:** The playbook loaded in Signature Knowledge contains a `## Screen` section. If there is no Screen section, skip directly to PREDICT.
 
 1. **Spawn the SCREEN subagent.** It runs the playbook's screen pattern table — checks each pattern's indicators against the alert, executes the specified leads, and returns a structured `screen_result: match | no_match` with the supporting observations.
    ```
@@ -311,15 +311,15 @@ prologue:
 
    **Why this matters — do NOT inline the screen work.** Reading the playbook table and reasoning "looks like monitoring, no match" in the main agent's context is strictly cheaper *per invocation* but violates two goals: (a) the cost lever is Haiku screening on repeat alerts, which requires actually dispatching the subagent; (b) the indicator resolution requires a real `authentication-history` query whose raw results would pollute your main context if run inline. Always spawn.
 
-**If `screen_result: match`** — validate the screen output is well-formed (all required YAML fields present, observations are non-empty, matched_pattern corresponds to an entry in the Screen table). If valid, proceed to CONCLUDE using the screen result. If malformed, fall through to HYPOTHESIZE with the evidence gathered.
+**If `screen_result: match`** — validate the screen output is well-formed (all required YAML fields present, observations are non-empty, matched_pattern corresponds to an entry in the Screen table). If valid, proceed to CONCLUDE using the screen result. If malformed, fall through to PREDICT with the evidence gathered.
 
 > Note: The report validation hooks (Tier 1 + Tier 2 judge) handle deeper validation — precedent existence, evidence sufficiency, report consistency. The main agent's job here is only to check that the screen subagent returned a coherent, complete response.
 
-**If `screen_result: no_match`** — proceed to HYPOTHESIZE. The evidence gathered during screening (the `leads_run` observations) becomes part of the investigation record. Do not re-run those leads in the full loop unless you have reason to believe the results were incomplete.
+**If `screen_result: no_match`** — proceed to PREDICT. The evidence gathered during screening (the `leads_run` observations) becomes part of the investigation record. Do not re-run those leads in the full loop unless you have reason to believe the results were incomplete.
 
-**If `screen_result: error`** — the subagent could not complete a clean match/no_match decision (missing file, failed query, missing substitution). Log the `reason` in the SCREEN section of `investigation.md` and fall through to HYPOTHESIZE. Do not treat `error` as `no_match` — the distinction matters for debugging and for audit.
+**If `screen_result: error`** — the subagent could not complete a clean match/no_match decision (missing file, failed query, missing substitution). Log the `reason` in the SCREEN section of `investigation.md` and fall through to PREDICT. Do not treat `error` as `no_match` — the distinction matters for debugging and for audit.
 
-**If the subagent returns malformed or unparseable output** — treat as no_match and fall through to HYPOTHESIZE.
+**If the subagent returns malformed or unparseable output** — treat as no_match and fall through to PREDICT.
 
 Append to `{run_dir}/investigation.md`:
 ```markdown
@@ -327,7 +327,7 @@ Append to `{run_dir}/investigation.md`:
 
 **Result:** {match|no_match}
 **Leads run:** {lead names and observations from screen subagent}
-**Outcome:** {proceeding to CONCLUDE | falling through to HYPOTHESIZE — reason}
+**Outcome:** {proceeding to CONCLUDE | falling through to PREDICT — reason}
 ```
 
 **Then compose one `gather:` YAML entry per lead the screen subagent ran.** Screen leads share the same top-level `gather:` block as normal leads, but with a reduced shape: each is `mode: screen` with `resolutions: []` (SCREEN has no hypotheses yet, so there is nothing to grade). The final lead in the screen sequence carries `screen_result: match | no_match` inside its `outcome`.
@@ -351,11 +351,11 @@ gather:
 Emit all screen leads in one write. Four constraints that trip up the validator or bloat output if violated:
 
 - `resolutions: []` is required (validator rejects missing `resolutions` even when empty) — it encodes "this lead didn't grade any hypothesis," which is the correct state for SCREEN.
-- **Do not set `tests` on screen leads.** `tests: [h-...]` means "this lead discriminates these hypotheses," but no hypothesis IDs exist yet at SCREEN time (HYPOTHESIZE comes after). A screen lead with `tests: [h-001]` is rejected as an unknown-ID reference. Omit `tests` entirely on `mode: screen` leads.
+- **Do not set `tests` on screen leads.** `tests: [h-...]` means "this lead discriminates these hypotheses," but no hypothesis IDs exist yet at SCREEN time (PREDICT comes after). A screen lead with `tests: [h-001]` is rejected as an unknown-ID reference. Omit `tests` entirely on `mode: screen` leads.
 - **Omit empty subblocks** — do not write `observations: { vertices: [], edges: [] }`, `attribute_updates: []`, or `resolutions: []` placeholders inside `outcome`. The validator reads these defensively with safe defaults; the only *required* top-level keys inside `outcome` are the ones your lead actually produced. `resolutions: []` at the lead level stays required; `outcome.*` sub-keys do not.
 - **Classification and anchor leads have no observations.** A source-classification, username-classification, or approved-monitoring-sources lookup refines an attribute or records a trust-anchor verdict — it does not materialize new graph vertices/edges. Leave `observations` out entirely.
 
-### HYPOTHESIZE
+### PREDICT
 
 **Goal:** Form or update hypotheses and select the most diagnostic lead — OR, when no fork is observable at this anchor, route directly to GATHER with pre-registered predictions on interpretation-vulnerable outcome fields.
 
@@ -369,7 +369,7 @@ A **lead** is an edge measurement that collapses the proposed frontier. Playbook
 
 For the full structural spec (attached_to_vertex, proposed_edge, predictions, refutation_shape, legitimacy_contract) see `docs/investigation-language.md` §Hypothesis.
 
-#### Dispatch the HYPOTHESIZE subagent
+#### Dispatch the PREDICT subagent
 
 Hypothesis formation is owned by `soc-agent:hypothesize` (Sonnet, `agents/hypothesize.md`). The subagent reads the alert, `investigation.md`, the signature's playbook + context, and returns the `hypothesize:` YAML block plus `Selected lead:` and `Pitfalls:` lines. The methodology — anchor location, one-hop parent enumeration, **causal-story discipline** (each hypothesis carries a concrete causal chain from which predictions and refutation shapes derive — labels without stories max out at `+` regardless of evidence), refinement via hierarchical IDs, three shapes of adversariness, legitimacy-contract declaration, lead selection — lives in the subagent's prompt, not here.
 
@@ -382,7 +382,7 @@ Agent(
 ```
 
 **When the subagent returns:**
-- Transcribe the YAML verbatim under `## HYPOTHESIZE (loop {N})` along with `Selected lead:` and `Pitfalls:`. Run `bash scripts/invlang/run.sh --ids {run_dir}/investigation.md` first to confirm the ID namespace.
+- Transcribe the YAML verbatim under `## PREDICT (loop {N})` along with `Selected lead:` and `Pitfalls:`. Run `bash scripts/invlang/run.sh --ids {run_dir}/investigation.md` first to confirm the ID namespace.
 - If it returned a `gather:` block instead (no fork observable — discriminating data not yet in hand, or already resolved by prior leads), transcribe under `## GATHER (loop {N})` with the lead-level `predictions` triples and proceed to GATHER.
 - If it returned `error:`, surface the reason and stop. Do not form hypotheses inline.
 
@@ -463,10 +463,10 @@ predictions:
   - id: lp1
     if: "<outcome pattern on the interpretive field(s)>"
     read_as: "<what this reading means>"
-    advance_to: "<next lead name | CONCLUDE | HYPOTHESIZE>"
+    advance_to: "<next lead name | CONCLUDE | PREDICT>"
 ```
 
-Each prediction is simultaneously an interpretation commitment and a pre-committed routing decision. If the observed outcome doesn't fit any `if` branch, that is itself a signal — HYPOTHESIZE to extend the fork space, don't silently rationalize.
+Each prediction is simultaneously an interpretation commitment and a pre-committed routing decision. If the observed outcome doesn't fit any `if` branch, that is itself a signal — PREDICT to extend the fork space, don't silently rationalize.
 
 ### ANALYZE
 
@@ -482,11 +482,11 @@ ANALYZE runs as a dedicated subagent. You do not grade hypotheses inline — you
      prompt="run_dir={run_dir}\nloop_n={N}\nsignature_id={signature_id}"
    )
    ```
-   `{N}` is the loop number you just stamped on this cycle's `## HYPOTHESIZE (loop N)` and `## GATHER (loop N)` headers — the ANALYZE belongs to the same cycle. Do not increment it.
+   `{N}` is the loop number you just stamped on this cycle's `## PREDICT (loop N)` and `## GATHER (loop N)` headers — the ANALYZE belongs to the same cycle. Do not increment it.
 
    **Why dispatch, not inline.** Weighted grading, rollup reasoning, and refutation discipline are the token-heaviest per-cycle work, and most of it is not load-bearing for later phases — only the grades, surviving hypotheses, routing decision, and (on CONCLUDE) disposition+archetype matter downstream. Keeping that reasoning in a subagent isolates rollup discipline from the main loop's other responsibilities and keeps main context lean.
 
-2. **Trust the subagent's grades and routing. Do not re-grade.** The subagent owns the weighted assessment and the routing decision; your job is to act on it, not re-derive it. Skim the output for two things only: (a) well-formedness — both `## ANALYZE (loop N)` and `## Self-report` sections present, `Next action:` is `CONCLUDE` or `HYPOTHESIZE`, CONCLUDE includes `disposition`/`confidence`/`matched_archetype`; (b) anomaly flags — if `Anomalies:` names a specific missing lead or evidence gap, route HYPOTHESIZE for the next cycle even if the subagent said CONCLUDE. Otherwise proceed with the subagent's stated routing. Writing your own parallel analysis in a thinking block defeats the extraction — don't.
+2. **Trust the subagent's grades and routing. Do not re-grade.** The subagent owns the weighted assessment and the routing decision; your job is to act on it, not re-derive it. Skim the output for two things only: (a) well-formedness — both `## ANALYZE (loop N)` and `## Self-report` sections present, `Next action:` is `CONCLUDE` or `PREDICT`, CONCLUDE includes `disposition`/`confidence`/`matched_archetype`; (b) anomaly flags — if `Anomalies:` names a specific missing lead or evidence gap, route PREDICT for the next cycle even if the subagent said CONCLUDE. Otherwise proceed with the subagent's stated routing. Writing your own parallel analysis in a thinking block defeats the extraction — don't.
 
 3. **Paste the ANALYZE block into `{run_dir}/investigation.md`** verbatim, appending at end-of-file. The subagent's output already includes the `## ANALYZE (loop N)` header. Anchor the Edit/Write at the last line of the current file (read the tail if unsure) — never insert ahead of an existing phase header, or `infer_state_pre.py` will reject on phase-order mismatch. Do not paste the `## Self-report` section; it is for your consumption only.
 
@@ -505,7 +505,7 @@ ANALYZE runs as a dedicated subagent. You do not grade hypotheses inline — you
    ```
 
 5. **Act on the routing.**
-   - `Next action: HYPOTHESIZE` → re-enter HYPOTHESIZE for loop N+1, using the subagent's discriminator guidance.
+   - `Next action: PREDICT` → re-enter PREDICT for loop N+1, using the subagent's discriminator guidance.
    - `Next action: CONCLUDE` → proceed to CONCLUDE. The subagent's `disposition`, `confidence`, and `matched_archetype` feed the report frontmatter; anchor grounding is enforced at report validation, not here.
 
 ### CONCLUDE

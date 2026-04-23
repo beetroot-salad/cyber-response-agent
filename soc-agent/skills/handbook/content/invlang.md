@@ -22,7 +22,7 @@ The narrative log remains agent-owned; the companion blocks give the plugin a ma
 |---|---|---|---|
 | CONTEXTUALIZE | `prologue:` | end of phase | vertices + edges derived from alert entities |
 | SCREEN | first `gather:` lead with `mode: screen` | after screen subagent returns | `screen_result: match | no_match` on the final screen lead; SCREEN-matched companions omit `hypothesize` |
-| HYPOTHESIZE | `hypothesize:` | end of phase | initial proposed frontier of hypotheses |
+| PREDICT | `hypothesize:` | end of phase | initial proposed frontier of hypotheses |
 | GATHER | *(no YAML block)* | narrative only | the lead block is written at ANALYZE |
 | ANALYZE | complete `gather:` lead (outcome + resolutions) | end of phase | one entry per lead; entries in the same cycle share `loop:` |
 | CONCLUDE | `conclude:` | after the `## CONCLUDE` header + verdict line, before `report.md` | `termination`, `disposition`, `confidence`, `matched_archetype` |
@@ -53,7 +53,7 @@ From `hooks/scripts/invlang_validate.py::validate_companion`:
 7. **Refutation IDs.** Every `--` resolution has non-empty `matched_refutation_ids` referencing IDs that exist in the target hypothesis's `refutation_shape`.
 8. **Trust-anchor completeness.** When a lead includes `trust_anchor_result`, all five fields are required: `anchor_id`, `kind`, `result`, `as_of`, `authority_for_question`.
 9. **`screen_result` scope.** Only valid on leads with `mode: screen`, and only on the final lead in a SCREEN sequence.
-10. **Lead-level predictions.** When present, each entry has `id` (matches `^lp\d+$`, unique within the lead), `if`, `read_as`, and `advance_to` (another lead name in the same or subsequent loop, or one of `CONCLUDE` / `HYPOTHESIZE`).
+10. **Lead-level predictions.** When present, each entry has `id` (matches `^lp\d+$`, unique within the lead), `if`, `read_as`, and `advance_to` (another lead name in the same or subsequent loop, or one of `CONCLUDE` / `PREDICT`).
 
 ### Warning checks (do not block)
 

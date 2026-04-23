@@ -52,7 +52,7 @@ directories, do not read anything else.
      - `tini`, `dumb-init` → `classification: container-entrypoint`
      - otherwise → `classification: unclassified-process`
      Do NOT fold a named parent into the child process's `attributes` — the
-     parent is a distinct vertex because downstream HYPOTHESIZE attaches the
+     parent is a distinct vertex because downstream PREDICT attaches the
      proposed upstream edge to it (not to the child shell). Missing / null
      parent → omit the vertex (no invention).
    - **Other fields named in field-quirks** → pick the closest matching type; if

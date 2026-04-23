@@ -29,7 +29,7 @@ The main agent substitutes these into your invocation prompt:
 Read these files in parallel:
 
 - `{run_dir}/alert.json` — the raw alert
-- `{run_dir}/investigation.md` — the CONTEXTUALIZE output (you do not need HYPOTHESIZE/ANALYZE state)
+- `{run_dir}/investigation.md` — the CONTEXTUALIZE output (you do not need PREDICT/ANALYZE state)
 - `knowledge/common-investigation/leads/{lead_name}/definition.md` — what to characterize, pitfalls
 - `knowledge/common-investigation/leads/{lead_name}/templates/{vendor}.md` — base query, entity field mapping, vendor invocation
 - `knowledge/environment/systems/{vendor}/SKILL.md` — CLI invocation conventions for the SIEM and the data-source health probe

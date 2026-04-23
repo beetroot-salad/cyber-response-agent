@@ -80,10 +80,10 @@ This file is the **agent-owned log**. The structural record lives in `state.json
   "history": [
     "CONTEXTUALIZE",
     "SCREEN",
-    "HYPOTHESIZE",
+    "PREDICT",
     "GATHER",
     "ANALYZE",
-    "HYPOTHESIZE",
+    "PREDICT",
     "GATHER",
     "ANALYZE"
   ],
@@ -91,7 +91,7 @@ This file is the **agent-owned log**. The structural record lives in `state.json
 }
 ```
 
-The `history` array is append-only and records every phase the investigation has entered, in order. `infer_state.py` uses it to count cycles (number of `HYPOTHESIZE` plus `ANALYZE` entries) against `MAX_LOOPS = 12`, and `validate_conclude.py` + `validate_report.py` use `SCREEN in history and HYPOTHESIZE not in history` to detect screen-resolved investigations that are exempt from the CONCLUDE self-check and that must be backed by a playbook declaring a `## Screen` section.
+The `history` array is append-only and records every phase the investigation has entered, in order. `infer_state.py` uses it to count cycles (number of `PREDICT` plus `ANALYZE` entries) against `MAX_LOOPS = 12`, and `validate_conclude.py` + `validate_report.py` use `SCREEN in history and PREDICT not in history` to detect screen-resolved investigations that are exempt from the CONCLUDE self-check and that must be backed by a playbook declaring a `## Screen` section.
 
 This file is **machine-owned**. The agent should never edit it directly — all updates go through the `infer_state.py` hook (triggered by `investigation.md` writes) so the state machine can validate the transition. Attempting to edit `state.json` directly is a way to bypass safety, and it will lose against the PostToolUse audit hook even if it succeeds momentarily.
 
