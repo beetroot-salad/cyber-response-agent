@@ -1,26 +1,30 @@
 # Investigation Language — Agent Reference
 
-Schema v2.8. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes). Full spec: `docs/investigation-language.md`.
+Schema v2.11. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes). Full spec: `docs/investigation-language.md`.
 
-**v2.8 delta:** legitimacy is a first-class refinement attribute. Hypotheses whose disposition depends on authorization declare a `legitimacy_contract`; the resolving lead writes `legitimacy_resolutions[]` in its own `outcome` (a sibling of `attribute_updates`). Edge records remain write-once; an edge's current authorization state is a computed rollup over every lead that names the edge as its resolution `target`, in declaration order, with explicit `supersedes` chain support. Supersedes the former "maintain adversarial hypothesis until `--`" bookkeeping rule — teeth are structural via validator rules #10–#11 and #13–#16.
+Three orthogonal resolution axes:
 
-**v2.9 delta:** authority-consultation primitive unified. `trust_anchor_result` carries `asks: expectation | authorization` with conditional `verdict` — the single lead-outcome record that feeds both the edge's rollup-computed legitimacy state and the report's `trust_anchors_consulted[]`. Baselines (`kind: telemetry-baseline`) ground expectation only; authorization verdicts are reserved for `kind: org-authority`. Unifies what was previously a duplicated mechanism (archetype grounding at the report layer, authorization at the edge layer) into one primitive at the lead-outcome layer.
+- **Authorization** — *is this edge permitted by policy?* Categorical verdict, single-source-of-truth anchors. Declared as `authorization_contract` on a hypothesis, resolved via `authorization_resolutions[]` on the edge.
+- **Integrity** — *is the acting entity what it claims to be?* Evidential, composed from observables. No contract; represented as peer mechanism hypotheses (`?adversary-controlled-*`) with predictions on discriminators.
+- **Impact** — *does this edge's effect matter enough to escalate?* Quantitative, threshold-gated. Declared as lead-level `impact_predictions[]`, graded at ANALYZE into `impact_resolutions[]` on the lead outcome.
+
+CONCLUDE carries both the authz/mechanism axis (`disposition`) and the impact axis (`impact_verdict` + `impact_severity`). Integrity resolves through normal hypothesis weight machinery.
 
 ---
 
 ## Principles
 
-**Graph discovery.** An investigation constructs a directed graph by working backward from the alert. Confirmed vertices and edges grow monotonically. The investigation halts when it reaches a trust root (no accessible upstream) or every `legitimacy_contract` on a live-weight hypothesis has a fulfilling resolution.
+**Graph discovery.** An investigation constructs a directed graph by working backward from the alert. Confirmed vertices and edges grow monotonically. The investigation halts when the frontier is empty (all active hypotheses resolved) or a trust root is reached — i.e. the lead reports `outcome.trust_root_reached` and no live hypothesis can extend upstream.
 
 **Entities as vertices.** Every observed entity (endpoint, process, identity, session, file…) becomes a typed vertex with a classification and identifier. Model at the resolution the investigation reasons at — don't decompose finer unless a lead forces it. When it does, append sub-vertices via `component_of` with hierarchical IDs (`v-{parent}-{nonce}`); the parent vertex remains valid.
 
-**Relations as edges.** Observed connections and events between entities become edges. Each edge carries authority (how reliably the source recorded it) and optional temporal data.
+**Relations as edges.** Observed connections and events between entities become edges. Each edge carries observational authority (how reliably the source recorded it) and — when a contract fulfills against it — one or more `authorization_resolutions[]` entries.
 
-**Hypotheses as proposed edges.** A hypothesis proposes that one specific upstream vertex exists, connected to a confirmed vertex by exactly one edge (`proposed_edge`). Predictions describe what observable evidence would confirm or contradict it; keep to 1–2 predictions — the minimum that distinguishes this hypothesis from competing ones. **Prediction scope is unbounded** — predictions may reference observables from any system or time range (parent's ancestry on a different host, correlating audit-log entries on another system, aggregated telemetry baselines). The one-hop discipline governs what extends the confirmed graph on `++`, not where evidence may be queried.
+**Hypotheses as proposed edges.** A hypothesis proposes that one specific upstream vertex exists, connected to a confirmed vertex by exactly one edge (`proposed_edge`). Predictions describe what observable evidence would confirm or contradict it; keep to 1–2 predictions — the minimum that distinguishes this hypothesis from competing ones. **Prediction scope is unbounded** — predictions may reference observables from any system or time range. The one-hop discipline governs what extends the confirmed graph on `++`, not where evidence may be queried. Cardinality per PREDICT pass is 0–N (realistically ≤ 3); 0 is legal when the loop is enriching before a fork is possible.
 
-**Attributes.** Facts about a vertex that don't add topology (identity role, file creation time, IP classification, listening port) stay as `attributes` on the vertex or as `attribute_updates` in a lead outcome. Don't materialize a vertex just to carry an attribute.
+**Attributes.** Facts about a vertex that don't add topology stay as `attributes` on the vertex or as `attribute_updates` in a lead outcome. Don't materialize a vertex just to carry an attribute.
 
-**Leads.** A lead is a graph operation: topology-extending (new vertices/edges enter the confirmed graph via `outcome.observations`) or attribute-refining (existing vertices enriched via `attribute_updates`), or both. `tests` declares which hypotheses it discriminates; `resolutions` records weight effects with reasoning. A lead that does not collapse a fork (no `tests`) may still pre-commit to a reading via lead-level `predictions` — conditional branch plans that bind how an interpretation-vulnerable outcome should be read and what to run next.
+**Leads.** A lead is a graph operation: topology-extending (new vertices/edges enter the confirmed graph via `outcome.observations`) or attribute-refining (existing vertices enriched via `attribute_updates`), or both. `tests` declares which hypotheses it discriminates; `resolutions` records weight effects. A non-branching lead may pre-commit to a reading via lead-level `predictions` (conditional branch plans `if X → read_as Y → advance_to Z`). Leads that measure impact observables carry `impact_predictions[]` (pre-committed thresholds); ANALYZE grades them into `impact_resolutions[]`.
 
 **Corpus.** Past investigations are queryable. Query before PREDICT to calibrate hypothesis names and weights; set `matched_archetype` at REPORT to connect this run.
 
@@ -32,9 +36,9 @@ Schema v2.8. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on 
 |---|---|---|
 | CONTEXTUALIZE | `prologue:` | end of CONTEXTUALIZE |
 | SCREEN | first `gather:` lead with `mode: screen` | after screen subagent returns |
-| PREDICT | `hypothesize:` | end of PREDICT |
+| PREDICT | `hypothesize:` (only when ≥ 1 new hypotheses); lead skeleton with `impact_predictions[]` when applicable | end of PREDICT |
 | GATHER | narrative only — no YAML block | during GATHER |
-| ANALYZE | complete `gather:` lead block (outcome + resolutions together) | end of ANALYZE |
+| ANALYZE | complete `gather:` lead block (outcome + resolutions + `impact_resolutions[]`) | end of ANALYZE |
 | REPORT | `conclude:` | after the `## REPORT` header + verdict line, before report.md |
 
 Call `invlang --enum` before writing any block that introduces new IDs or references existing ones.
@@ -48,14 +52,14 @@ Every list item below is a flat object — no wrapping key (no `- vertex:`, `- e
 ```yaml
 prologue:       # vertices + edges from alert entities
   vertices:
-    - id: v-001          # vertex object fields directly (see Vertex below)
+    - id: v-001          # vertex object fields directly
       type: endpoint
       ...
   edges:
     - id: e-001          # edge object fields directly
       ...
 
-hypothesize:    # initial proposed frontier; omit for screen-matched cases
+hypothesize:    # proposed frontier; omit when PREDICT authors 0 new hypotheses
   hypotheses:
     - id: h-001          # hypothesis object fields directly
       ...
@@ -83,11 +87,12 @@ type: <string>             # from type vocabulary
 classification: <string>   # from seed list or {type}:{slug} provisional
 identifier: <string>       # human-readable primary key
 attributes: {}             # type-specific key-value pairs; omit if empty
-trust_root: true           # omit when false
 placeholder: true          # omit when false
 concerns: []               # omit if empty
 citations: []              # omit if single or implicit
 ```
+
+Trust-root signaling lives on lead outcomes (`outcome.trust_root_reached: v-{id}`) and CONCLUDE (`termination.category: trust-root`), not on vertices. A vertex does not carry an intrinsic trust-root attribute.
 
 ---
 
@@ -106,31 +111,64 @@ status: observed           # omit; emit hypothesized | refuted when non-default
 authority:
   kind: siem-event | runtime-audit | authoritative-source
       | client-asserted | inferred-structural
-                           # Edge-authority taxonomy — distinct from the anchor
-                           # taxonomy used at `trust_anchor_result.kind` (which is
-                           # `org-authority | telemetry-baseline`). Do not copy
-                           # these edge values into `trust_anchor_result.kind`.
+                           # Observational authority — how reliably the source recorded the
+                           # observation. Distinct from authz grounding (`authorization_resolutions[].grounding_kind`)
+                           # and from anchor consultation kinds (`anchor_consultations[].grounding_kind`).
   source: <string>
   trust_chain: []          # omit if empty
+authorization_resolutions: []
+                           # one entry per fulfilled authorization_contract; see §Edge authorization below.
+                           # Omit when no contract resolves against this edge.
 concerns: []               # omit if empty
 ```
 
-**Where do legitimacy verdicts live?** On lead outcomes, not on edges. Edge
-records are write-once; the authorization state of an edge is a computed
-rollup over every lead whose `outcome.legitimacy_resolutions[]` names this
-edge as its `target`. See the *Lead outcome* section below for the
-resolution shape, and the validator rules for the legitimacy gate.
+### Edge authorization
+
+When a hypothesis declares an `authorization_contract` and the resolving lead materializes the `proposed_edge`, the new edge carries the verdict inline via `authorization_resolutions[]`. When a contract resolves against an *already-confirmed* edge (not the hypothesis's own proposed edge), the resolving lead writes the verdict via `attribute_updates` targeting that edge — never by mutating the original edge record (append-only).
+
+Each entry:
+
+```yaml
+- verdict: authorized | unauthorized | indeterminate
+  anchor_kind: <string>           # iam-policy | data-classification-policy | oncall-schedule
+                                  # | deploy-runs | approved-monitoring-sources | ...
+                                  # The authority surface consulted. Distinct from
+                                  # `edge.authority.kind` and `anchor_consultations[].grounding_kind`.
+  anchor_id: <string>             # concrete authority identifier
+  grounding_kind: org-authority | past-case
+                                  # telemetry-baseline NOT admissible — baselines answer
+                                  # expectation, not authorization. Baseline queries that
+                                  # inform hypothesis weight without fulfilling a contract
+                                  # live in `anchor_consultations[]` on the lead outcome.
+  authority_for_question: full | partial
+                                  # `partial` caps weight effect at `+`/`-` (rule #14).
+  anchor_query: <string>          # short human-readable record of what was asked
+  as_of: <iso>                    # timestamp the answer is authoritative ABOUT
+  effective_window:               # optional; authz grants with explicit time bounds
+    start: <iso>                  # (change windows, oncall shifts, travel approvals)
+    end: <iso>
+  conditioning_context: []        # optional prose list of then-true conditions the
+                                  # verdict rests on ("CHG-2041 active", "oncall X")
+  cites_past_case:                # required when grounding_kind: past-case
+    run_id: <run-id>
+    contract_ref: h-{id}.ac{n}
+  resolved_by_lead: l-{id}
+  fulfills_contract: h-{id}.ac{n} # back-reference to the declaring hypothesis's contract
+  concerns: []                    # optional
+```
+
+Plural because real edges often face parallel policy layers — IAM × data-classification × time-of-day — each resolved independently by a different anchor, any one of which can deny.
 
 ---
 
 ## Hypothesis
 
-Fields of a hypothesis object (list item under `hypothesize.hypotheses` or `lead.new_hypotheses`). `proposed_edge.parent_vertex` is the *causal upstream* — the vertex that would explain the confirmed anchor if it existed. "Parent" means upstream in the causal chain, not schema hierarchy; relation direction is irrelevant.
+Fields of a hypothesis object (list item under `hypothesize.hypotheses` or `lead.new_hypotheses`). `proposed_edge.parent_vertex` is the *causal upstream* — the vertex that would explain the confirmed anchor if it existed.
 
 ```yaml
 id: h-{nonce}              # child refinements: h-{parent}-{nonce}
 name: "?descriptive-slug"
-attached_to_vertex: v-{id}
+attached_to_vertex: v-{id}         # confirmed vertex this one-hop extension grafts onto
 proposed_edge:
   relation: <string>
   parent_vertex:
@@ -145,28 +183,36 @@ refutation_shape:          # omit if no clean refutation shape exists
   - id: r1
     refutes_predictions: [p1]  # non-empty list of prediction ids on THIS hypothesis
     claim: "<observation that would contradict a core prediction>"
-legitimacy_contract: []    # optional; present when disposition depends on
-                           # policy authorization. Same mechanism, same
-                           # observables, but an authority would answer
-                           # "allowed" differently depending on source
-                           # identity (CFO vs external identity reading
-                           # payroll; operator shell vs RCE on prod). Do NOT
-                           # declare when the adversarial reading IS the
-                           # mechanism — classification carries the claim.
-                           # Per entry (local ids match ^lc\d+$):
-                           #   id: lc1
+authorization_contract: [] # optional; present when disposition depends on policy
+                           # authorization. Declare when the mechanism is consistent
+                           # with both benign and adversarial readings depending on
+                           # authorization; skip when the adversarial reading IS
+                           # the mechanism (classification already carries the claim).
+                           # Per entry (local ids match ^ac\d+$):
+                           #   id: ac1
                            #   edge_ref: proposed | e-{id}
                            #   anchor_kind: <iam-policy | approved-monitoring-sources | ...>
-                           #   predicate: "<natural-language; any AND/OR allowed>"
+                           #   predicate: "<natural-language claim — authorized iff ...>"
                            #   on_unauthorized: escalate
                            #   on_indeterminate: escalate
                            #   concerns: []   # optional
+integrity_waived: <string> # optional; required when `authorization_contract` is declared
+                           # on a hypothesis whose proposed_edge source is an
+                           # acting-entity type (session | identity | process) AND
+                           # no peer `?adversary-controlled-*` hypothesis is present.
+                           # The string is the rationale (why integrity testing is not
+                           # in scope for this case). See §Integrity discipline below.
 concerns: []               # omit if empty
 weight: null               # null | "++" | "+" | "-" | "--"
-weight_history: []         # omit until transitions exist; each lead resolution that
-                           # changes weight appends { from: <before>, to: <after>, lead: l-{id} }
+weight_history: []         # omit until transitions exist
 status: active             # omit; emit confirmed | refuted | shelved when non-default
 ```
+
+### Integrity discipline
+
+When `authorization_contract` is declared and the `proposed_edge.parent_vertex.type` is an acting-entity type (`session`, `identity`, `process`), a peer integrity hypothesis (`?adversary-controlled-<entity>`) is expected — its predictions test whether the claimed entity is actually the one acting (application-layer correlation, query-shape template match, timing against baseline, device/geo consistency). The peer shares the authz contract's verdict (both `authorized` against IAM) and differs on observables that discriminate routine activity from impostor activity.
+
+Omit the peer only when the integrity premise is out of scope for the case; in that case, declare `integrity_waived: <rationale>` on the contract-carrying hypothesis.
 
 ---
 
@@ -181,19 +227,27 @@ name: <string>
 target: v-{id}
 selection_rationale: <string>   # optional; 1–3 sentences on why this lead now
 mode: screen                    # omit unless SCREEN-dispatched
-tests: [h-{id}, ...]            # optional; hypotheses this lead discriminates.
-                                # Presence signals the lead collapses a fork; absence
-                                # signals a non-branching (gathering or interpretive) lead.
+tests: [h-{id}, ...]            # optional; hypotheses this lead discriminates
 observes:                       # optional; explicit prediction/refutation mapping
   - { hypothesis: h-{id}, predictions: [p1], refutations: [r1] }
 predictions:                    # optional; pre-committed conditional branch plans for
                                 # non-branching but interpretation-vulnerable leads.
-                                # IDs are local to the lead (lp1, lp2, …) and do not
-                                # collide with hypothesis predictions (p1, p2, …).
+                                # IDs local to the lead (lp1, lp2, …).
   - id: lp1
-    if: "<outcome pattern>"           # how to recognise this branch in the result
-    read_as: "<interpretation>"       # what this outcome means
-    advance_to: "<lead-name | REPORT | PREDICT>"   # pre-committed next step
+    if: "<outcome pattern>"
+    read_as: "<interpretation>"
+    advance_to: "<lead-name | REPORT | PREDICT>"
+impact_predictions:             # optional; pre-registered threshold predicates
+                                # authored by PREDICT for leads that measure
+                                # impact-relevant observables. See §Impact below.
+                                # IDs local to the lead (ip1, ip2, …).
+  - id: ip1
+    dimension: confidentiality | integrity | availability | scope
+    claim: "<threshold predicate — one observable per claim>"
+    on_match: within
+    on_mismatch: exceeds
+    on_indeterminate: indeterminate
+    escalation_on: exceeds | indeterminate | none
 query_details:
   system: <string>
   template: <string>
@@ -203,74 +257,53 @@ query_details:
 concerns: []                    # omit if empty
 outcome:
   attribute_updates:            # enriches existing confirmed vertices OR edges
-    - target: v-{id} | e-{id}   # exactly one; edge or vertex id must be declared
-      updates: {}
-  legitimacy_resolutions:       # append-only refinement — a lead whose trust_anchor_result
-                                # asks:authorization writes one entry per contract it resolves.
-                                # Edges themselves carry no resolution list; the current
-                                # authorization state of an edge is a rollup computed across
-                                # every lead that names it in `target`, in declaration order,
-                                # with `supersedes` pruning the chain. See validator rules
-                                # #20 (back-ref), #21 (legitimacy-gated disposition).
-    - id: lr{n}                 # unique run-wide; pattern ^lr\d+$ (e.g. lr1, lr2).
-                                # Follows the `lp{n}` / `lc{n}` sub-id convention — no
-                                # hyphen, distinct from top-level `v-{id}` / `e-{id}`.
-      target: v-{id} | e-{id}   # graph element whose authorization this verdict refines.
-                                # May differ from the lead's own `target` — the lead's
-                                # target is "what I'm asking about," the resolution's
-                                # target is "which graph element this verdict applies to."
-      fulfills_contract: h-{id}.lc{n}   # back-reference to a declared legitimacy_contract
-      verdict: authorized | unauthorized | indeterminate
-      supersedes: lr{m}         # optional; when a later lead revises an earlier verdict
-                                # on the same (fulfills_contract, target). Cross-contract
-                                # or cross-target supersession is a category error.
-      concerns: []              # optional
+    - target: v-{id} | e-{id}   # exactly one
+      updates: {}               # when target is an edge and updates.authorization_resolutions
+                                # is present, each entry is a full authorization_resolutions
+                                # shape (see §Edge authorization).
+  anchor_consultations:         # optional; structured record of baseline / registry / reference
+                                # queries that inform hypothesis weight but do NOT fulfill
+                                # an authorization_contract (baselines, registry lookups).
+    - anchor_id: <string>
+      anchor_kind: <string>     # vendor-level surface: image-baseline, user-cadence,
+                                # asset-inventory, sensitive-data-registry, ...
+      grounding_kind: org-authority | telemetry-baseline
+                                # past-case NOT admissible here — past-case citations
+                                # are authz evidence only and live in
+                                # authorization_resolutions[].
+      result: confirmed | refuted | partial | no-data
+      as_of: <iso>              # timestamp the answer is authoritative ABOUT
+      authority_for_question: full | partial
+      anchor_query: <string>    # optional; human-readable record of what was asked
+      effective_window:         # optional; when the consulted record carries time bounds
+        start: <iso>
+        end: <iso>
+      conditioning_context: []  # optional; then-true conditions the verdict rests on
+      concerns: []              # optional; snapshot freshness, coverage caveats
+  impact_resolutions:           # optional; emitted by ANALYZE against the lead's
+                                # pre-registered impact_predictions[]. See §Impact.
+    - prediction_ref: ip1
+      dimension: confidentiality
+      observed_value: <string>  # quantitative or qualitative — e.g.
+                                # "180GB (3σ above 30d baseline mean 60GB, σ 40GB)"
+      verdict: within | exceeds | indeterminate
+      matched_predicate: "<verbatim predicate from ip*>"
+      grounded_by_lead: l-{id}
+      grounding_kind: telemetry-baseline | business-owner-attestation | dlp-policy
+                                # past-case NOT admissible — category reasoning, not
+                                # instance reasoning.
+      anchor_id: <string>
+      anchor_kind: <string>
+      authority_for_question: full | partial
+      as_of: <iso>
+      effective_window:         # optional
+        start: <iso>
+        end: <iso>
+      conditioning_context: []  # optional
+      reasoning: <string>
   observations:
     vertices: []
     edges: []
-  trust_anchor_result:          # include when the lead queried a named trust anchor
-                                # (a standing source of truth that can give a definitive
-                                # verdict on the question at hand); omit for SIEM queries
-                                # that are not anchors.
-    anchor_id: <string>         # stable id of the anchor registry (e.g. "approved-monitoring-sources")
-    anchor_name: <string>       # optional; specific authority within the registry
-                                # (e.g. "iam-policy", "oncall-schedule"). Free-form for
-                                # audit granularity; distinct from `kind` (classification).
-    kind: org-authority | telemetry-baseline
-                                # Anchor taxonomy — distinct from `edge.authority.kind`
-                                # (which is about observation provenance). Agents commonly
-                                # conflate the two vocabularies; do not write `siem-event`,
-                                # `runtime-audit`, or `authoritative-source` here.
-                                #   org-authority      — curated registry, policy doc, IAM
-                                #                        record, approved-* list
-                                #   telemetry-baseline — statistical baseline derived from
-                                #                        historical telemetry (e.g.
-                                #                        image-baseline, username-frequency)
-                                # This is the same enum the report frontmatter uses for
-                                # `trust_anchors_consulted[].kind`.
-    asks: expectation | authorization
-                                # Discriminator for what this consultation is asking:
-                                #   expectation   — "does this match the baseline / registry?"
-                                #                   (no verdict; telemetry-baseline anchors)
-                                #   authorization — "is this action sanctioned right now?"
-                                #                   (verdict required; org-authority anchors)
-                                # Telemetry baselines cannot answer authorization — validator
-                                # enforces `kind: telemetry-baseline` ⇒ `asks: expectation`.
-    verdict: authorized | unauthorized | indeterminate
-                                # Required when asks: authorization; forbidden when
-                                # asks: expectation. Baselines don't authorize.
-    input_triple:               # optional; echoes the query shape for audit
-      source_vertex: v-{id}
-      target_vertex: v-{id}
-      relation: <string>
-    result: confirmed | refuted | unavailable
-                                # `unavailable` covers both "anchor returned partial coverage"
-                                # and "anchor had no data" — the grading cap for reduced
-                                # authority is expressed via `authority_for_question` below,
-                                # not by splitting the result enum. asks:authorization with
-                                # result:unavailable pairs with verdict:indeterminate.
-    as_of: <iso>                # timestamp the answer is authoritative ABOUT
-    authority_for_question: full | partial
   trust_root_reached: v-{id}    # omit when null
   failure_reason: <string>      # adapter-error | attribution-opaque | partial-coverage
                                 # | permission-denied | timeout | other
@@ -284,9 +317,20 @@ resolutions:
     severity_of_test: severe | moderate | weak
     matched_prediction_ids: []
     matched_refutation_ids: []
-    reasoning: "<string>"       # explain why this evidence moves weight — not a field restatement
+    reasoning: "<string>"       # why this evidence moves weight — not a field restatement
     supporting_edges: []
 ```
+
+### Impact
+
+Impact is graded at ANALYZE against predicates authored by PREDICT. The commit-before-evidence property transfers: the threshold is written into `impact_predictions[]` before the lead runs, so ANALYZE cannot retroactively shift the bar.
+
+- **`impact_predictions[]`** declares threshold predicates on the lead. One observable per `claim` — split compound AND/OR into multiple `ip*` entries.
+- **`impact_resolutions[]`** matches observation against the predicate and emits a verdict. `grounding_kind: telemetry-baseline` is the common case; business-owner attestation and DLP policy lookups are also admissible. Past-case is not — impact reasoning is per-instance, not category-of-event.
+- Rule #14 (partial-authority cap) applies — a baseline that covers magnitude but not intent is `partial` and cannot alone force high severity.
+- CONCLUDE closes the loop: every declared `impact_predictions[]` entry must either have a fulfilling `impact_resolutions[]` entry, OR appear in `conclude.deferred_impact_predictions[]` with rationale.
+
+Per-signature impact knowledge lives in playbook prose (no new schema artifact in v2.11). Signature-tier `impact_profile.md` is a future promotion if corpus measurements show PREDICT threshold drift; promotion is additive (`impact_predictions[].inherited_from: sig-iq{n}` back-reference).
 
 ---
 
@@ -297,19 +341,43 @@ conclude:
   termination:
     category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
     rationale: <string>
-  disposition: benign | false_positive | true_positive | inconclusive
+  disposition: benign | true_positive | unclear              # authz/mechanism axis
+  impact_verdict: none | within | exceeds | indeterminate    # impact axis
+  impact_severity: null | low | moderate | high              # present when impact_verdict ∈ {exceeds, indeterminate}
   confidence: high | medium | low
-  matched_archetype: <name> | null   # use the archetype directory name from
+  matched_archetype: <name> | null   # archetype directory name from
                                      # knowledge/signatures/{sig}/archetypes/{name}/
-  surviving_hypotheses: [h-001, ...] # IDs of declared hypotheses whose final
-                                     # weight is not `--` — validator rule 24
-                                     # rejects silent drops at REPORT write time
-  ceiling_test:                   # required when category = severity-ceiling
+  surviving_hypotheses: [h-001, ...] # IDs of declared hypotheses whose final weight
+                                     # is not `--` — validator rule #24 rejects
+                                     # silent drops at REPORT write time
+  deferred_authorizations:           # required when any declared authorization_contract
+                                     # has no fulfilling resolution (rule #26)
+    - contract_ref: h-{id}.ac{n}
+      rationale: "<why this contract was not resolved>"
+  deferred_impact_predictions:       # required when any declared impact_predictions[]
+                                     # entry has no fulfilling resolution
+    - prediction_ref: l-{id}.ip{n}
+      rationale: "<why this impact prediction was not resolved>"
+  ceiling_test:                      # required when category = severity-ceiling
     kind: out-of-band-human-contact | tool-unavailable | legal-authorization | other
     subject: <string>
-  ceiling_rationale: <string>     # required when category = severity-ceiling
+  ceiling_rationale: <string>        # required when category = severity-ceiling
   summary: <string>
 ```
+
+**Two-axis disposition.** `disposition` and `impact_verdict` combine orthogonally:
+
+| disposition | impact_verdict | Meaning |
+|---|---|---|
+| benign | within | Routine activity, no escalation |
+| benign | exceeds | **Authorized-but-malifying** — mechanism confirmed benign; consequence exceeds threshold. Analyst review on impact |
+| true_positive | within | Confirmed threat whose consequence stayed bounded (failed probe, denied access) |
+| true_positive | exceeds | Confirmed threat with realized consequence. Highest-severity class |
+| unclear | \* | Mechanism indeterminate; impact verdict still recorded for handoff |
+
+`impact_severity` rolls up across fulfilling `impact_resolutions[]`, capped by any `authority_for_question: partial` per rule #14.
+
+**Authorization-gated disposition.** `disposition: benign` requires every `authorization_contract` on a confirmed-weight hypothesis (`++` or `+`, status `confirmed` or `active`) to have at least one fulfilling `authorization_resolutions` entry with `verdict: authorized`. Any unfulfilled contract (absent from `deferred_authorizations`) or `verdict: indeterminate` caps at `unclear`. Any `verdict: unauthorized` forces disposition ∈ {`unclear`, `true_positive`}.
 
 ---
 
@@ -339,6 +407,8 @@ conclude:
 | `file` | Specific file artifact |
 | `command` | Audited invocation (action-shaped observation) |
 | `socket` | Network socket (transport-layer) |
+
+Acting-entity types (trigger the §Integrity discipline when an `authorization_contract` is declared on an edge sourced from one of them): `session`, `identity`, `process`.
 
 Use `unclassified-{type}` when unknown; `ambiguous-{a}-or-{b}` when genuinely indistinguishable.
 
@@ -374,132 +444,219 @@ Use `unclassified-{type}` when unknown; `ambiguous-{a}-or-{b}` when genuinely in
 
 ## Examples
 
-### Hypothesis — lean one-hop predictions
-
-A hypothesis list item under `hypothesize.hypotheses` — no `hypothesis:` wrapping key. `proposed_edge` names exactly one new vertex and one new edge; predictions test the *proposed vertex's* existence, not alert data already in hand (that would be an observation, not a prediction).
+### Hypothesis — lean one-hop predictions with authorization contract
 
 ```yaml
 - id: h-001
-  name: "?opportunistic-scanner"
-  attached_to_vertex: v-001          # confirmed source endpoint (203.0.113.47)
+  name: "?scheduled-monitoring-probe"
+  attached_to_vertex: v-001          # confirmed source endpoint (172.22.0.10)
   proposed_edge:
-    relation: initiated_by           # source behavior was initiated by automated tooling
+    relation: initiated_by
     parent_vertex:
       type: identity
-      classification: automated-scanner
+      classification: approved-monitoring-service-account
       attributes: { kind: service-account }
   predictions:
     - id: p1
-      claim: "source IP appears in at least one passive-DNS or threat-intel scanner list"
+      subject: proposed_parent
+      claim: "source triple (172.22.0.10, monitorprobe, 10.0.7.44) is a registered active probe in approved-monitoring-sources"
   refutation_shape:
     - id: r1
-      claim: "source IP has prior authenticated sessions against this host — not a blind scanner"
+      refutes_predictions: [p1]
+      claim: "triple absent or marked inactive/revoked in approved-monitoring-sources"
+  authorization_contract:
+    - id: ac1
+      edge_ref: proposed
+      anchor_kind: approved-monitoring-sources
+      predicate: "triple (src, user, dst) listed as active approved monitoring probe"
+      on_unauthorized: escalate
+      on_indeterminate: escalate
+  weight: null
+  status: active
+
+- id: h-002
+  name: "?adversary-controlled-source-session"
+  attached_to_vertex: v-001
+  proposed_edge:
+    relation: initiated_by
+    parent_vertex:
+      type: process
+      classification: non-monitoring-process-on-source
+  predictions:
+    - id: p1
+      subject: proposed_parent
+      claim: "no monitoring-system scheduler/audit entry correlates to this tick within ±30s"
+  refutation_shape:
+    - id: r1
+      refutes_predictions: [p1]
+      claim: "monitoring-system scheduler/audit entry correlates within ±30s"
   weight: null
   status: active
 ```
 
-### Lead — attribute update + resolution with reasoning
+h-002 is the peer integrity hypothesis required by the §Integrity discipline — h-001 carries an `authorization_contract` and the proposed edge sources from an acting-entity type (`identity`).
 
-A lead list item under `gather` — no `lead:` wrapping key. `reasoning` explains *why* the evidence moves weight (what was ruled in/out, what uncertainty remains), not a restatement of field values.
+### Lead — contract resolution on proposed edge
 
 ```yaml
 - id: l-001
   loop: 1
-  name: source-classification
-  target: v-001                      # source endpoint
-  selection_rationale: "IP attribution determines which hypotheses are live before
-    committing to discriminating queries — cheaper to classify the source first."
+  name: monitoring-source-registry-lookup
+  target: v-001
   tests: [h-001, h-002]
   query_details:
-    system: wazuh-indexer
-    template: source-ip-lookup
-    query: "agent.ip:10.0.0.50 AND src_ip:203.0.113.47"
-    time_window: "30d"
-    substitutions: { src_ip: "203.0.113.47" }
+    system: approved-monitoring-sources
+    template: triple-lookup
+    query: "src=172.22.0.10 user=monitorprobe dst=10.0.7.44"
   outcome:
-    attribute_updates:
-      - target: v-001
-        updates:
-          classification: external-unknown
-          asn: "AS64496 TEST-NET"
     observations:
       vertices: []
-      edges: []
+      edges:
+        - id: e-010
+          relation: initiated_by
+          source_vertex: v-002          # the materialized approved-monitoring-service-account identity
+          target_vertex: v-001
+          authority:
+            kind: authoritative-source
+            source: approved-monitoring-sources
+          authorization_resolutions:
+            - verdict: authorized
+              anchor_kind: approved-monitoring-sources
+              anchor_id: ams-registry-2026-01
+              grounding_kind: org-authority
+              authority_for_question: full
+              anchor_query: "triple (172.22.0.10, monitorprobe, 10.0.7.44)"
+              as_of: 2026-04-23T14:00Z
+              effective_window:
+                start: 2026-01-01T00:00Z
+                end: 2026-06-30T00:00Z
+              resolved_by_lead: l-001
+              fulfills_contract: h-001.ac1
   resolutions:
     - hypothesis: h-001
       before: null
       after: "+"
-      severity_of_test: weak
-      matched_prediction_ids: [p2]
-      reasoning: "No prior authenticated sessions from this IP in 30-day window.
-        Consistent with opportunistic scanner but not discriminating alone — many
-        legitimate first-time sources would also show no session history."
-      supporting_edges: [e-002]
+      severity_of_test: moderate
+      matched_prediction_ids: [p1]
+      reasoning: "registry confirms the triple as active registered probe; contract ac1 resolved authorized. Identity-of-use question (is the monitoring daemon actually the actor on this tick?) still open — see h-002."
+      supporting_edges: [e-010]
+```
+
+### Lead — impact predictions + resolution
+
+```yaml
+- id: l-002
+  loop: 2
+  name: volume-profile
+  target: v-003                      # session whose access triggered the DLP alert
+  impact_predictions:
+    - id: ip1
+      dimension: confidentiality
+      claim: "session_total_bytes within 30d service-account baseline mean ± 2σ"
+      on_match: within
+      on_mismatch: exceeds
+      on_indeterminate: indeterminate
+      escalation_on: exceeds
+  query_details:
+    system: wazuh-indexer
+    template: session-upload-profile
+    time_window: "30d"
+  outcome:
+    observations:
+      vertices: []
+      edges: []
+    anchor_consultations:
+      - anchor_id: backup-daemon-30d-baseline
+        anchor_kind: session-volume-baseline
+        grounding_kind: telemetry-baseline
+        result: confirmed
+        as_of: 2026-04-23T14:32Z
+        authority_for_question: partial
+        anchor_query: "30d session_total_bytes mean + σ for service account backup-svc"
+        conditioning_context: ["30d window excludes quarter-end surge"]
+    impact_resolutions:
+      - prediction_ref: ip1
+        dimension: confidentiality
+        observed_value: "180GB (3σ above 30d baseline mean 60GB, σ 40GB)"
+        verdict: exceeds
+        matched_predicate: "session_total_bytes within 30d service-account baseline mean ± 2σ"
+        grounded_by_lead: l-002
+        grounding_kind: telemetry-baseline
+        anchor_id: backup-daemon-30d-baseline
+        anchor_kind: session-volume-baseline
+        authority_for_question: partial
+        as_of: 2026-04-23T14:32Z
+        conditioning_context: ["30d window excludes quarter-end surge"]
+        reasoning: "observed 3σ exceedance; predicate threshold was 2σ. Partial authority (baseline covers magnitude not intent) caps severity at moderate."
 ```
 
 ### Lead — non-branching with pre-committed readings
 
-A gathering lead whose outcome is interpretation-vulnerable but does not collapse a hypothesis fork. No `tests` (single expected step-1 regardless of which story is true). `predictions` names the outcome patterns that would route step-2 differently — the triple is auditable after the fact: the actually-run next lead should match an `advance_to`.
-
 ```yaml
-- id: l-002
+- id: l-003
   loop: 1
-  name: access-volume-profile
-  target: v-003                      # identity whose access triggered the DLP alert
-  selection_rationale: "Volume alone can't distinguish authorized bulk export from
-    exfiltration; the profile shape (cadence, targets, prior history) determines the
-    next lead rather than collapsing a hypothesis."
+  name: access-cadence-profile
+  target: v-003
+  selection_rationale: "Cadence alone can't collapse a fork at loop 1; the profile shape
+    determines the next lead rather than discriminating a hypothesis."
   query_details:
     system: wazuh-indexer
-    template: identity-object-access
-    query: "user.name:alice AND action:GetObject"
-    time_window: "30d"
-    substitutions: { user: "alice" }
+    template: identity-cadence
+    time_window: "72h"
   predictions:
     - id: lp1
-      if: "access matches identity's prior 30d cadence within 1σ; targets overlap known project buckets"
-      read_as: "authorized bulk read, consistent with baseline"
-      advance_to: change-management-lookup
+      if: "access matches identity's prior 72h cadence within 1σ"
+      read_as: "periodic tooling pattern"
+      advance_to: identity-of-use-lookup
     - id: lp2
-      if: "volume >3σ above baseline and targets include buckets identity has not read before"
-      read_as: "anomalous access pattern; DLP alert corroborated"
+      if: "bursty cluster concentrated in last 10 min"
+      read_as: "anomalous spike; corroborates the DLP alert"
       advance_to: PREDICT
-    - id: lp3
-      if: "partial overlap: cadence normal but target set includes one unfamiliar bucket"
-      read_as: "mixed signal; scope question before concluding"
-      advance_to: bucket-sensitivity-lookup
   outcome:
     attribute_updates:
       - target: v-003
         updates:
-          baseline_30d_reads: 847
-          observed_30d_reads: 862
-          target_overlap: full
+          cadence_72h_mean_interval_s: 576
+          cadence_72h_stddev_s: 102
     observations:
       vertices: []
       edges: []
-  resolutions: []                    # no hypotheses to resolve on this lead
+  resolutions: []
 ```
 
 ---
 
 ## Key rules
 
-1. **Edge authority.** `++`/`--` resolutions must cite at least one `siem-event`, `runtime-audit`, or `authoritative-source` edge in `supporting_edges`.
-2. **Refutation IDs.** Every `--` resolution requires non-empty `matched_refutation_ids` referencing IDs that exist in the target hypothesis.
-3. **Prediction completeness.** `++` requires `matched_prediction_ids` to cover the full prediction set; partial coverage caps at `+`.
-4. **Append-only.** Never mutate an existing record. Decompose by appending sub-vertices; attribute by appending `attribute_updates`.
-5. **`trust_anchor_result` completeness.** When present, all five fields (`anchor_id`, `kind`, `result`, `as_of`, `authority_for_question`) are required.
-6. **Partial authority cap.** A resolution grounded solely by `authority_for_question: partial` cannot push a hypothesis past `+` or `-`.
-7. **`screen_result` scope.** Only valid on `mode: screen` leads; only on the final lead in a SCREEN sequence. SCREEN-matched companions omit the top-level `hypothesize` block.
-8. **Lead-level predictions.** When present, each entry has `id` (matching `^lp\d+$`), `if`, `read_as`, `advance_to`. IDs are unique within the lead. `advance_to` is either the name of another lead in the same or subsequent loop, or one of `REPORT` / `PREDICT`. The actual next step should match at least one pre-committed branch — mismatches are flagged by the validator.
-9. **Legitimacy contract edge_ref.** Every `hypothesis.legitimacy_contract[].edge_ref` is either the literal `proposed` (referring to the hypothesis's own `proposed_edge`) or an `e-*` id declared elsewhere in the companion.
-10. **Legitimacy back-reference.** Every `gather[].outcome.legitimacy_resolutions[].fulfills_contract` of shape `h-{id}.lc{n}` points to an existing hypothesis whose `legitimacy_contract` contains that entry.
-11. **Legitimacy-gated disposition.** `conclude.disposition: benign` requires every `legitimacy_contract` on a live-weight hypothesis (weight `++`/`+`, status `confirmed`/`active`) to have at least one fulfilling `legitimacy_resolutions` entry in the *effective* set (after supersede chain) with `verdict: authorized`. Unfulfilled contracts, or any non-`authorized` effective verdict, force escalation.
-12. **Target shape (attribute_updates + legitimacy_resolutions).** Every `attribute_updates[]` and `legitimacy_resolutions[]` entry has exactly one of `target: v-{id}` or `target: e-{id}`, and the id exists. The legacy `vertex:` key is rejected.
-13. **`asks` / `verdict` coherence.** When `trust_anchor_result.asks: authorization`, `verdict` is required and must be in `{authorized, unauthorized, indeterminate}`. When `asks: expectation`, `verdict` must be absent — baselines don't authorize.
-14. **`kind` / `asks` coherence.** When `trust_anchor_result.kind: telemetry-baseline`, `asks: expectation`. Baselines answer expectation only; using them for authorization is a category error.
-15. **Resolution requires authorization consultation.** A lead carrying `legitimacy_resolutions[]` must have a `trust_anchor_result` with `asks: authorization` — resolutions must be backed by an explicit authority consultation record.
-16. **Supersede chain.** `legitimacy_resolutions[].id` matches `^lr\d+$`, unique run-wide. `supersedes: lr{N}` (e.g. `lr1`, `lr2` — no hyphen) requires the referenced id exists and has the same `(fulfills_contract, target)` pair. Cycles are rejected. Rule #21 filters superseded entries from the effective set; rule #10 still walks the full list so orphans aren't hidden by supersession.
-
-17. **Hypothesis fork distinctness.** Within a sibling group — hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` — no two may share `proposed_edge.parent_vertex.classification`. Duplicates propose the same causal upstream under two ids and cannot be discriminated by any lead; collapse to one, or refine one side to a distinct classification.
+1. **Schema validity.** Required fields present, enums valid, IDs well-formed (including hierarchical patterns for hypotheses and sub-vertices).
+2. **Classification vocabulary.** Every `classification` is from the seed vocabulary or a `{type}:{slug}` provisional.
+3. **Relation catalog.** Every `edge.relation` appears in the relation catalog.
+4. **Edge authority.** `++`/`--` resolutions must cite at least one `siem-event`, `runtime-audit`, or `authoritative-source` edge in `supporting_edges`.
+5. **Refutation IDs.** Every `--` resolution has non-empty `matched_refutation_ids` referencing IDs that exist in the target hypothesis.
+6. **Prediction completeness for `++`.** `matched_prediction_ids` across all resolutions on a hypothesis must equal the full prediction set; partial coverage caps at `+`.
+7. **ID references resolve.** Every `v-*`, `e-*`, `h-*`, `l-*` reference points to a record that exists in the companion.
+8. **Append-only.** No existing record is mutated.
+9. **Lead block self-containment.** Every vertex, edge, or hypothesis produced by a lead lives inside that lead's `outcome.observations`, `new_hypotheses`, or `shelved`.
+10. **Mechanical leads stay within their data source.** A lead's `outcome.observations` contains only entities the queried system directly observes by native identity.
+11. **Anchor-query provenance completeness.** Every `authorization_resolutions[]` entry requires `verdict`, `anchor_kind`, `anchor_id`, `grounding_kind`, `authority_for_question`, `as_of`, `resolved_by_lead`, and `fulfills_contract`. When `grounding_kind: past-case`, `cites_past_case.run_id` and `cites_past_case.contract_ref` are required. Every `anchor_consultations[]` entry requires `anchor_id`, `anchor_kind`, `grounding_kind`, `result`, `as_of`, and `authority_for_question`. Enum constraints: authz resolutions exclude `telemetry-baseline` from `grounding_kind`; consultations exclude `past-case`.
+12. **Hierarchical hypothesis IDs.** A hypothesis with ID `h-001-002` requires that `h-001` exists in the same companion.
+13. **`ceiling_test` requires severity-ceiling.** Required when `termination.category: severity-ceiling`; forbidden otherwise.
+14. **Partial authority caps weight.** A resolution grounded solely by an `authorization_resolutions[]`, `anchor_consultations[]`, or `impact_resolutions[]` entry with `authority_for_question: partial` cannot push weight past `+` or `-` regardless of verdict or result.
+15. **`component_of` sub-vertex IDs.** Sub-vertices follow `v-{parent}-{nonce}`. Enforced by review.
+16. **`screen_result` scope.** Only valid on `mode: screen` leads; only on the final lead in a SCREEN sequence. SCREEN-matched companions omit the top-level `hypothesize` block.
+17. **SCREEN-matched companions omit `hypothesize`.** When `outcome.screen_result: match` is present on any lead, the top-level `hypothesize` block must be absent.
+18. **Lead-level predictions structure.** Each `predictions[]` entry has `id` (matching `^lp\d+$`, unique within the lead), `if`, `read_as`, `advance_to`. `advance_to` is a lead name in the companion, or one of `REPORT` / `PREDICT`.
+19. **Authorization contract `edge_ref` resolves.** Every `authorization_contract[].edge_ref` is either the literal `proposed` or an `e-*` id that exists in the companion.
+20. **Authorization back-reference resolves.** Every `authorization_resolutions[].fulfills_contract` of the form `h-{id}.ac{n}` points to an existing hypothesis whose `authorization_contract` contains that id.
+21. **Authorization-gated disposition.** `conclude.disposition: benign` requires every `authorization_contract` across confirmed-weight hypotheses (`++` or `+`, status `confirmed` or `active`) to have at least one fulfilling `authorization_resolutions` entry with `verdict: authorized`. Unfulfilled contracts (and not listed in `deferred_authorizations`, per rule #26), or `verdict: indeterminate`, cap disposition at `unclear`. Any `verdict: unauthorized` forces disposition ∈ {`unclear`, `true_positive`}.
+22. **Attribute-update target shape.** Every `attribute_updates[]` entry has exactly one of `target: v-{id}` or `target: e-{id}`, and the id exists.
+23. **Hypothesis fork distinctness.** Within a sibling group — hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` — no two may share `proposed_edge.parent_vertex.classification`.
+24. **Hypothesis persistence at CONCLUDE.** Every declared hypothesis whose final effective weight is not `--` appears in `conclude.surviving_hypotheses[]`. Silent drops are rejected.
+25. **Same-level sibling rollup.** Every id in `matched_prediction_ids[]` on a resolution for hypothesis `H` must appear in `H`'s own `predictions[]`. Cross-sibling citation is rejected.
+26. **Authorization contract closure at CONCLUDE.** Every declared `authorization_contract[]` entry must either have a fulfilling `authorization_resolutions[]` entry OR appear in `conclude.deferred_authorizations[]` with a non-empty rationale.
+27. **Past-case authority cap and no-sole-grounding.** When `authorization_resolutions[].grounding_kind: past-case`, `authority_for_question` is `partial` (rule #14 caps weight effect at `+`/`-`). On any contract load-bearing for `disposition: benign`, at least one fulfilling resolution must have `grounding_kind: org-authority`.
+28. **Past-case chain depth cap.** An `authorization_resolutions[]` entry with `grounding_kind: past-case` cites a prior contract via `cites_past_case`. The cited resolution must have `grounding_kind: org-authority` — past-case cannot recursively authorize past-case.
+29. **Impact prediction structure.** Each `impact_predictions[]` entry has `id` (matching `^ip\d+$`, unique within the lead), `dimension`, `claim`, `on_match`, `on_mismatch`, `on_indeterminate`, `escalation_on`. One observable per `claim` — compound AND/OR predicates split into separate entries.
+30. **Impact resolution back-reference and grounding.** Every `impact_resolutions[]` entry has `prediction_ref` pointing to an `impact_predictions[]` id on a lead in the companion, `dimension` matching the prediction's `dimension`, `verdict` ∈ {`within`, `exceeds`, `indeterminate`}, `grounding_kind` ∈ {`telemetry-baseline`, `business-owner-attestation`, `dlp-policy`} (past-case not admissible), `authority_for_question`, `as_of`, and `reasoning`.
+31. **Impact closure at CONCLUDE.** Every declared `impact_predictions[]` entry must either have a fulfilling `impact_resolutions[]` entry OR appear in `conclude.deferred_impact_predictions[]` with a non-empty rationale.
+32. **Integrity peer discipline.** When an `authorization_contract` is declared on a hypothesis whose `proposed_edge.parent_vertex.type` is an acting-entity type (`session`, `identity`, `process`), either a peer integrity hypothesis (`?adversary-controlled-*` sharing `attached_to_vertex`) must exist in the same sibling group, or the contract-carrying hypothesis must carry `integrity_waived: <rationale>` with a non-empty string.
