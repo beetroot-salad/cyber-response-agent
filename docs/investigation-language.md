@@ -1,11 +1,19 @@
 # Investigation Language
 
-**Status:** Implemented. Spec v2.9.
+**Status:** Spec v2.10. v2.9 implemented; v2.10 changes pending implementation (rename + temporality + past-case + orphan gate).
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
+
+**v2.10 delta:** motivated by `docs/experiments/invlang-post-predict-assessment.md`.
+- Rename `legitimacy_contract` → `authorization_contract` and `legitimacy_resolutions` → `authorization_resolutions`. The v2.8 name was a misnomer — 100% of corpus predicates are zero-trust ABAC authorization checks, not business-impact legitimacy reasoning. Business-impact legitimacy is parked at the signature knowledge-base layer (`impact_profile`), not the graph.
+- `authorization_resolutions[]` becomes self-describing: each resolution carries `anchor_id`, `grounding_kind`, `authority_for_question`, `effective_window`, and `conditioning_context: []`. Authz provenance and temporality live on the resolution they justify.
+- Anchor consultations that inform hypothesis weight but do not fulfill a contract (baselines, registry lookups, reference queries) keep a structured home at the lead outcome level: `anchor_consultations[]` — the v2.10 successor to v2.9's `trust_anchor_result`, narrowed to non-authz consultations and renamed because it records a consultation event, not a singular result. Keeps baseline/expectation evidence first-class instead of demoting it to prose.
+- `authorization_resolutions[].grounding_kind ∈ {org-authority, past-case}` — baselines cannot ground an authz verdict. `anchor_consultations[].grounding_kind ∈ {org-authority, telemetry-baseline}` — past-case citations are authz-only. `past-case` uses a structured citation (`cites_past_case.run_id`, `cites_past_case.contract_ref`). Constraints: force-caps `authority_for_question` to `partial`; cannot be sole grounding for benign disposition; a past-case cannot cite another past-case as its grounding (depth cap).
+- `conclude` gains `deferred_authorizations[]` — every declared `authorization_contract` must resolve OR appear here with rationale (validator rule #26). Closes the orphan-contract loophole where escalation paths silently accept unresolved contracts.
+- Validator rules #19–#21 renamed `legitimacy_*` → `authorization_*`; rules #26–#28 added (orphan gate, past-case authority cap, past-case depth cap).
 
 **v2.9 delta:** validator rules #24 (hypothesis persistence at CONCLUDE) and #25 (same-level sibling rollup for `matched_prediction_ids`). Closes two bias gaps identified during the ANALYZE-phase state-machine cutover: silent hypothesis drop across loops, and cross-sibling prediction-ID citation. See `.claude/skills/migrate-state-machine/SKILL.md` for the design context.
 
-**v2.8 delta:** legitimacy as first-class edge attribute (`edge.legitimacy_resolutions`) driven by hypothesis-declared contracts (`hypothesis.legitimacy_contract`); `attribute_updates` extended to edge targets; validator rules #19–#22; supersedes the former "maintain adversarial hypothesis until `--`" bookkeeping rule.
+**v2.8 delta:** authorization as first-class edge attribute (`edge.authorization_resolutions`) driven by hypothesis-declared contracts (`hypothesis.authorization_contract`); `attribute_updates` extended to edge targets; validator rules #19–#22; supersedes the former "maintain adversarial hypothesis until `--`" bookkeeping rule. (Originally shipped with `legitimacy_*` names — renamed in v2.10; see above.)
 
 A structured schema for recording security investigations as graph
 traversals. Designed for SOC-level alert triage: the agent works
@@ -106,34 +114,48 @@ prediction IDs for facts not yet in evidence, and makes weight
 accumulation harder. Refine into more specific children only when
 evidence forces the distinction.
 
-### Legitimacy as edge attribute
+### Authorization as edge attribute
 
-Legitimacy — is this edge *authorized*? — is a property of the
-(`source_vertex`, `edge`, `target_vertex`, `authority`) quadruple at
-time T. The same `read` edge from a session to a storage object is
-authorized when the session's identity carries the required role and
-unauthorized when it does not. The mechanism is identical; only the
-verdict differs. Legitimacy therefore lives **on the edge**, not as a
-parallel hypothesis.
+Authorization — is this edge *permitted by policy*? — is a property
+of the (`source_vertex`, `edge`, `target_vertex`, `authority`)
+quadruple at time T. The same `read` edge from a session to a storage
+object is authorized when the session's identity carries the required
+role and unauthorized when it does not. The mechanism is identical;
+only the verdict differs. Authorization therefore lives **on the
+edge**, not as a parallel hypothesis.
 
-A hypothesis whose disposition depends on authorization declares a
-`legitimacy_contract` naming the edge(s) whose verdict is load-bearing
-and the authority that resolves them. When the resolving lead fires,
-the edge gains a `legitimacy_resolutions` entry with the verdict and a
-back-reference to the contract. Append-only is preserved by backward
-traversal: the hypothesis is written once and never mutated; the
-materialized edge points backward via `fulfills_contract`.
+A hypothesis whose disposition depends on authorization declares an
+`authorization_contract` naming the edge(s) whose verdict is
+load-bearing and the authority that resolves them. When the resolving
+lead fires, the edge gains an `authorization_resolutions` entry with
+the verdict and a back-reference to the contract. Append-only is
+preserved by backward traversal: the hypothesis is written once and
+never mutated; the materialized edge points backward via
+`fulfills_contract`.
 
-**Three shapes of adversariness.** Not every adversarial question is a
-legitimacy question:
+**Authorization ≠ business-impact legitimacy.** The field was called
+`legitimacy_contract` through v2.9 and renamed in v2.10 because the
+name was a misnomer — agents consistently populated it with zero-trust
+ABAC predicates ("is this triple listed in the approved-sources
+registry?"), never with business-impact reasoning ("does this event
+help or damage business needs, and by how much?"). Business-impact
+legitimacy is a real but separate axis — direct damage (CIA effects),
+intent signal (does this event indicate adversarial intent), and
+business contribution (does this serve a sanctioned goal). Those axes
+are knowledge-base concerns tied to mechanism class, not per-instance
+graph elements — they live in `knowledge/signatures/{id}/impact_profile.md`,
+consumed by PREDICT/CONCLUDE prompts to contextualize disposition.
+
+**Three shapes of adversariness.** Not every adversarial question is
+an authorization question:
 
 - **Mechanism-level** — enumerate `adversary-controlled` alongside
   benign classifications when they predict observationally distinct
   world-states. Normal mechanism enumeration; no contract needed.
 - **Attribute-level (policy authorization)** — same mechanism, same
   observables, but an authority would answer "allowed" differently
-  depending on the source identity. This is the legitimacy contract
-  case. Common.
+  depending on the source identity. This is the authorization
+  contract case. Common.
 - **Future-edge** — the adversarial signal is a separate downstream
   edge (a failed-auth alert followed by an unexpected success). That
   is a topology question; write it as its own hypothesis attached to
@@ -150,6 +172,62 @@ resolved by behavioral observation (impossible travel, device
 fingerprint, anomalous timing), not by anchor lookup. Contracts
 therefore bottom out at the authentication edge; below that is
 mechanism enumeration.
+
+### Temporality of authorization
+
+Authorization is time-bound. An authz verdict holds *as of* a specific
+moment, conditional on state that was true at that moment — an oncall
+rotation, an open change window, an approved travel ticket, a registry
+entry. The schema records three temporal fields on every
+`authorization_resolutions[]` entry:
+
+- **`as_of`** — the timestamp the answer is authoritative *about*.
+  Required.
+- **`effective_window`** — optional `{start, end}` for authz grants
+  with explicit time bounds (change windows, oncall shifts, travel
+  approvals). When present, validates that the observed event falls
+  inside.
+- **`conditioning_context: []`** — optional prose list of then-true
+  conditions that the verdict rests on. Examples: "operator on-shift
+  per oncall rotation active 2026-04-14T00:00–2026-04-15T00:00",
+  "CHG-2041 open and applicable", "user-travel-approved
+  2026-04-14→2026-04-21".
+
+Conditioning context matters forensically even after conditions
+change. An authz verdict that was correct *as of* its time does not
+retroactively become wrong when the underlying conditions lapse. But
+analysts reading the companion months later need to see *why* the
+verdict held — the conditioning list makes this auditable. The same
+fields carry retrospective impact reads: if an exfil attempt was
+blocked by DLP rule R33 and that rule was later removed, the
+`conditioning_context` records R33 as the reason observed impact was
+"failed" — without claiming the impact would still be zero today.
+
+### Past cases as authorization source
+
+A past investigation's conclusion that a specific triple was
+authorized may serve as a **weak temporal authz source**
+(`authorization_resolutions[].grounding_kind: past-case`). Constraints
+are structural:
+
+- `authority_for_question` is force-capped to `partial` regardless of
+  how confidently the past case resolved — rule #14 then caps weight
+  effect at `+`/`-`.
+- A past-case consultation cannot be the sole grounding for
+  `disposition: benign` on any contract. If every fulfilling
+  resolution on a benign-eligible contract has
+  `grounding_kind: past-case`, escalation is forced (rule #27).
+- A past-case consultation cannot cite another past-case consultation
+  as its own grounding — `cites_past_case` points to the exact prior
+  contract, and that cited resolution must have
+  `grounding_kind: org-authority`. Prevents bootstrap drift where past
+  cases recursively authorize themselves (rule #28).
+
+Past-case-as-authz is distinct from archetype matching at CONCLUDE.
+Archetype matching is disposition-shaped ("this looks like outcome
+cluster Y"); past-case-as-authz is authz-shaped ("this triple was
+deemed authorized in SEC-2024-001"). The same past companion can
+inform both, via different schema paths. Do not conflate.
 
 ### Leads as graph operations
 
@@ -232,7 +310,7 @@ enabling prefix queries without edge traversal.
 
 **`trust_root: true`** marks where backward traversal halts because
 further upstream requires evidence inaccessible to this agent. It is
-not a legitimacy claim.
+not an authorization claim.
 
 **Placeholder vertices.** When a lifecycle edge requires two
 endpoints but one is unobservable, write a placeholder vertex with
@@ -256,11 +334,11 @@ edge:
         | client-asserted | inferred-structural
     source: <string>
     trust_chain: []                # omit if empty
-  legitimacy_resolutions: []       # omit when no contract resolves against this edge (§Legitimacy)
+  authorization_resolutions: []    # omit when no contract resolves against this edge (§Authorization)
   concerns: []                     # omit if empty
 ```
 
-**Authority is observational, not legitimacy.** It describes how
+**Authority is observational, not authorization.** It describes how
 reliably the source recorded the observation. `siem-event`,
 `runtime-audit`, and `authoritative-source` support `++`/`--`
 weight. `client-asserted` and `inferred-structural` cap at `+`/`-`.
@@ -268,17 +346,30 @@ weight. `client-asserted` and `inferred-structural` cap at `+`/`-`.
 A `client-asserted` edge on a verified trust chain gets effective
 `authoritative-source` authority; record the chain in `trust_chain`.
 
-**`legitimacy_resolutions` is a plural list.** Each entry records one
-contract's verdict:
+**`authorization_resolutions` is a plural list.** Each entry records
+one contract's verdict:
 
 ```yaml
-legitimacy_resolutions:
+authorization_resolutions:
   - verdict: authorized | unauthorized | indeterminate
-    anchor_kind: <string>           # iam-policy | data-classification-policy | oncall-schedule | deploy-runs | image-baseline | ...
+    anchor_kind: <string>           # iam-policy | data-classification-policy | oncall-schedule | deploy-runs | ...
+    anchor_id: <string>             # concrete authority identifier consulted
+    grounding_kind: org-authority | past-case
+                                    # telemetry-baseline is NOT admissible here — baselines
+                                    # answer expectation, not authorization. Use anchor_consultations
+                                    # on the lead outcome for baseline queries.
+    authority_for_question: full | partial
     anchor_query: <string>          # short human-readable record of what was asked
     as_of: <iso>                    # timestamp the answer is authoritative ABOUT
+    effective_window:               # optional; authz grants with explicit time bounds
+      start: <iso>
+      end: <iso>
+    conditioning_context: []        # optional prose list of then-true conditions the verdict rests on
+    cites_past_case:                # required when grounding_kind: past-case
+      run_id: <run-id>
+      contract_ref: h-{id}.ac{n}
     resolved_by_lead: l-{id}
-    fulfills_contract: h-{id}.lc{n} # back-reference to the declaring hypothesis's contract entry
+    fulfills_contract: h-{id}.ac{n} # back-reference to the declaring hypothesis's contract entry
     concerns: []                    # omit if empty; snapshot freshness, partial anchor coverage, etc.
 ```
 
@@ -287,9 +378,9 @@ data-classification × time-of-day — each resolved independently by a
 different anchor, any one of which can deny. Do not collapse layered
 policies into a single entry; each contract gets its own resolution.
 
-**When `legitimacy_resolutions` appears.** Only on edges that fulfill
-a declared contract. Edges not referenced by any contract omit the
-field entirely. Do not write speculative verdicts — that is
+**When `authorization_resolutions` appears.** Only on edges that
+fulfill a declared contract. Edges not referenced by any contract
+omit the field entirely. Do not write speculative verdicts — that is
 verdict-on-everything clutter.
 
 **Append-only on existing edges.** If a contract resolves against an
@@ -298,8 +389,9 @@ resolving lead writes the verdict via `attribute_updates` targeting
 the edge — not by mutating the original edge record.
 
 **Per-question authority** (whether a source covers all aspects of
-the question being asked) is a property of the lead, not the edge.
-It lives in `trust_anchor_result.authority_for_question`.
+the question being asked) is a property of the specific resolution,
+not the edge itself. It lives in
+`authorization_resolutions[].authority_for_question`.
 
 ### Hypothesis
 
@@ -325,7 +417,7 @@ hypothesis:
     - id: r1
       claim: "<observation that would contradict a core prediction>"
 
-  legitimacy_contract: []               # optional; present when disposition depends on policy authorization (§Legitimacy)
+  authorization_contract: []            # optional; present when disposition depends on policy authorization (§Authorization)
 
   concerns: []                          # residuals, unfalsifiability caveats; omit if empty
   weight: null | "++" | "+" | "-" | "--"
@@ -350,13 +442,13 @@ facts each partially confirm the hypothesis and neither alone
 suffices. Three or more predictions usually signals either a
 non-lean hypothesis or a refinement that should be deferred.
 
-**Legitimacy contracts** are declared on the hypothesis when
-disposition hinges on an authorization lookup (§Legitimacy). Each
+**Authorization contracts** are declared on the hypothesis when
+disposition hinges on an authorization lookup (§Authorization). Each
 contract entry:
 
 ```yaml
-legitimacy_contract:
-  - id: lc1                             # local to hypothesis; ^lc\d+$
+authorization_contract:
+  - id: ac1                             # local to hypothesis; ^ac\d+$
     edge_ref: proposed | e-{id}         # the hypothesis's proposed_edge, or an existing confirmed edge
     anchor_kind: <string>               # which authority resolves it
     predicate: "<natural-language claim — authorized iff ...>"
@@ -428,12 +520,23 @@ gather:
           vertices: []
           edges: []
 
-        trust_anchor_result:            # include when an authority anchor was queried
-          anchor_id: <string>
-          kind: <string>
-          result: confirmed | refuted | partial | no-data
-          as_of: <iso>                  # timestamp the answer is authoritative ABOUT
-          authority_for_question: full | partial
+        anchor_consultations:           # optional — structured record of baseline/registry lookups
+                                        # that inform hypothesis weight but do not fulfill an
+                                        # authorization_contract. See §Anchor consultation.
+          - anchor_id: <string>
+            anchor_kind: <string>       # vendor-level surface: image-baseline, user-cadence, asset-inventory, …
+            grounding_kind: org-authority | telemetry-baseline
+                                        # past-case is NOT admissible — past-case citations are authz
+                                        # evidence only (live in authorization_resolutions[]).
+            result: confirmed | refuted | partial | no-data
+            as_of: <iso>
+            authority_for_question: full | partial
+            anchor_query: <string>      # optional; human-readable record of what was asked
+            effective_window:           # optional; when the consulted record itself carries time bounds
+              start: <iso>
+              end: <iso>
+            conditioning_context: []    # optional prose list of then-true conditions the verdict rests on
+            concerns: []                # optional; snapshot freshness, coverage caveats
 
         trust_root_reached: v-{id}      # omit when null
         failure_reason: <string>        # omit unless errored or degraded
@@ -504,27 +607,79 @@ the specific fields that carry the judgment.
 **`attribute_updates` vs `observations`.** Use `attribute_updates`
 when the lead enriches an already-confirmed vertex or edge without
 new topology (e.g., a classification lookup adds `classification:
-monitoring-host` to an existing endpoint vertex; a legitimacy
-resolution adds a `legitimacy_resolutions` entry to an existing edge).
+monitoring-host` to an existing endpoint vertex; an authorization
+resolution adds an `authorization_resolutions` entry to an existing edge).
 Use `observations` when new vertices or edges enter the confirmed
 graph. Both may appear in the same outcome. Each `attribute_updates`
 entry targets exactly one of `target: v-{id}` or `target: e-{id}`.
 
-**`trust_anchor_result`.** Include whenever an authority anchor was
-queried. Five fields: anchor identity (`anchor_id`, `kind`), verdict
-(`result`), temporal validity (`as_of`), and scope (`authority_for_question`).
+**Anchor consultation vs authorization resolution.** Two records
+carry anchor-query provenance; which one applies is determined by
+whether the query fulfills a declared `authorization_contract`:
+
+| Record | Where | When |
+|---|---|---|
+| `authorization_resolutions[]` | on the resolved edge | query produces a verdict (`authorized | unauthorized | indeterminate`) that fulfills a contract declared on some hypothesis |
+| `anchor_consultations[]` | on the lead outcome | query returns evidence that informs hypothesis weight but does not fulfill a contract (baseline lookups, registry membership checks, reference queries) |
+
+The split maps to a real semantic difference. Authorization resolutions
+gate disposition (rule #21). Anchor consultations ground evidence
+weight via the lead's `resolutions[]`, the same way any other observation
+does. Temporal validity, authority-for-question scope, and
+conditioning context are structurally shared — the same fields mean
+the same thing in both records — but the verdict/contract-fulfillment
+machinery is authz-only.
 
 `as_of` is the timestamp the answer is **authoritative about** — not
-the query time unless they coincide:
+the query time unless they coincide. Applies identically to both
+records:
 - Event anchors (did X happen at time T?) → the event timestamp
 - Current-state anchors (is property X true now?) → the query time
   or snapshot timestamp
 - Slowly-changing references (was status X as of last sync?) → the
   last-modified time, not the query time
 
-`authority_for_question: partial` means the anchor covers only some
-aspects of the question. A `partial` anchor cannot push a hypothesis
-past `+` or `-` regardless of its verdict (validator rule 14).
+`effective_window` is set when the anchor's answer has explicit time
+bounds (change windows, oncall shifts, approved-travel dates for
+authz; baseline-snapshot windows for expectation). When present on an
+authz resolution, the validator checks that the observed event's
+timestamp falls inside `[start, end]`; a mismatch demotes the verdict
+to `indeterminate` regardless of the anchor's stated result.
+
+`conditioning_context` is a prose list of then-true conditions the
+verdict rests on. Authorization: `["operator on-shift per oncall
+rotation active 2026-04-14T00:00–2026-04-15T00:00", "CHG-2041 open
+and applicable"]`. Retrospective impact reads (recorded in the same
+field on consultations or resolutions, depending on which is in
+scope): `["DLP rule R33 in force, scope includes
+s3://prod-data/*"]`. The list is an audit trail for later analysts
+who need to understand *why* the verdict held before conditions
+lapsed.
+
+`authority_for_question: partial` means the consulted source covers
+only some aspects of the question. A resolution *or* a consultation
+with `authority_for_question: partial` cannot push a hypothesis past
+`+` or `-` regardless of its verdict or result (validator rule 14).
+
+`grounding_kind` distinguishes provenance from policy surface:
+`anchor_kind` says *what* authority surface was queried (`iam-policy`,
+`oncall-schedule`, `image-baseline`); `grounding_kind` says *what
+sort of source* produced the answer.
+- `authorization_resolutions[].grounding_kind ∈ {org-authority, past-case}`
+- `anchor_consultations[].grounding_kind ∈ {org-authority, telemetry-baseline}`
+
+Baselines cannot ground an authz verdict (they answer expectation,
+not authorization); past-cases cannot appear as expectation evidence
+(their semantic is authz-shaped). The enum constraints enforce this
+structurally so rules #13/#14 from v2.9 (baselines-don't-authorize
+discipline) don't have to be restated.
+
+`grounding_kind: past-case` is a weak-temporal authz source citing a
+prior companion's conclusion. Force-caps `authority_for_question` to
+`partial` (rule #27), cannot be sole grounding for benign disposition
+(rule #27), cannot chain on another past-case consultation (rule #28).
+`cites_past_case.run_id` names the source companion; `contract_ref`
+names the exact contract in that companion being relied upon.
 
 **`failure_reason` enum.** `adapter-error` | `attribution-opaque` |
 `partial-coverage` | `permission-denied` | `timeout` | `other`
@@ -548,12 +703,25 @@ conclude:
   confidence: high | medium | low
   matched_archetype: <name> | null
   surviving_hypotheses: [h-001, h-002]   # IDs of declared hypotheses whose final weight is not `--`; required by rule 24
+  deferred_authorizations:               # required when any declared authorization_contract has no fulfilling resolution; see rule 26
+    - contract_ref: h-{id}.ac{n}
+      rationale: "<why this contract was not resolved>"
   ceiling_test:                          # required when category = severity-ceiling
     kind: out-of-band-human-contact | tool-unavailable | legal-authorization | other
     subject: <string>
   ceiling_rationale: <string>            # required when category = severity-ceiling
   summary: <string>
 ```
+
+**`deferred_authorizations`.** Lists authorization contracts that were
+declared but not resolved by any lead. Each entry names the contract
+(`h-{id}.ac{n}`) and a rationale — typical rationales are
+"escalation-forced by unauthorized sibling contract, no benefit in
+resolving this one", "authority anchor unavailable (see concerns on
+h-003)", "superseded by mechanism refutation at lead l-007". Rule #26
+rejects a `conclude:` block that leaves any declared contract
+unresolved and absent from this list. Empty list is valid when every
+declared contract has a fulfilling resolution.
 
 **`surviving_hypotheses`.** When a `conclude:` block is written, every
 declared hypothesis whose final effective weight is not `--` must appear in
@@ -572,17 +740,21 @@ investigation from closing and should be included in the analyst handoff.
   records the out-of-band step that would resolve it.
 - `exhaustion-escalation` — loop budget exhausted.
 
-**Legitimacy-gated disposition.** `disposition: benign` requires that
-every `legitimacy_contract` on every confirmed-weight hypothesis
-(weight `++` or `+`, status `confirmed` or `active`) has at least one
-fulfilling `legitimacy_resolutions` entry with `verdict: authorized`
-on a contracted edge. Any contract that is unfulfilled, or whose
+**Authorization-gated disposition.** `disposition: benign` requires
+that every `authorization_contract` on every confirmed-weight
+hypothesis (weight `++` or `+`, status `confirmed` or `active`) has at
+least one fulfilling `authorization_resolutions` entry with `verdict:
+authorized` on a contracted edge. Any contract that is unfulfilled
+(and not in `deferred_authorizations`, per rule #26), or whose
 fulfillment carries `verdict: indeterminate`, caps disposition at
 `unclear` with `status: escalated`. Any `verdict: unauthorized` forces
 `status: escalated` with disposition ∈ {`unclear`, `true_positive`}
-depending on remaining evidence. This replaces the former "maintain
-adversarial hypothesis until `--`" bookkeeping rule; teeth are
-structural via validator rule #21.
+depending on remaining evidence. Past-case-sourced resolutions
+(`grounding_kind: past-case`) cannot be the sole grounding for
+`authorized` on a benign-eligible contract (rule #27). This replaces
+the former
+"maintain adversarial hypothesis until `--`" bookkeeping rule; teeth
+are structural via validator rules #21 and #26–#28.
 
 ---
 
@@ -725,9 +897,17 @@ coverage.
     `outcome.observations` contains only entities the queried system
     directly observes by native identity.
 
-11. **`trust_anchor_result` completeness.** When present, all five
-    fields (`anchor_id`, `kind`, `result`, `as_of`,
-    `authority_for_question`) are required.
+11. **Anchor-query provenance completeness.** Every
+    `authorization_resolutions[]` entry requires `verdict`,
+    `anchor_kind`, `anchor_id`, `grounding_kind`,
+    `authority_for_question`, `as_of`, `resolved_by_lead`, and
+    `fulfills_contract`. When `grounding_kind: past-case`,
+    `cites_past_case.run_id` and `cites_past_case.contract_ref` are
+    required. Every `anchor_consultations[]` entry requires
+    `anchor_id`, `anchor_kind`, `grounding_kind`, `result`, `as_of`,
+    and `authority_for_question`. Enum constraints per §Anchor
+    consultation: authz resolutions exclude `telemetry-baseline` from
+    `grounding_kind`; consultations exclude `past-case`.
 
 12. **Hierarchical hypothesis ID consistency.** A hypothesis with ID
     `h-001-002` requires that `h-001` exists in the same companion.
@@ -735,9 +915,11 @@ coverage.
 13. **`ceiling_test` requires severity-ceiling.** Required when
     `termination.category: severity-ceiling`; forbidden otherwise.
 
-14. **`partial` authority caps weight.** A resolution grounded solely
-    by a `trust_anchor_result` with `authority_for_question: partial`
-    cannot push a hypothesis past `+` or `-`.
+14. **`partial` authority caps weight.** A hypothesis resolution
+    grounded solely by an `authorization_resolutions[]` or
+    `anchor_consultations[]` entry with `authority_for_question:
+    partial` cannot push weight past `+` or `-` regardless of the
+    verdict or result.
 
 15. **`component_of` sub-vertex ID convention.** Sub-vertices should
     follow `v-{parent}-{nonce}`. Not mechanically enforced; enforced
@@ -761,26 +943,27 @@ coverage.
     at least one `advance_to` value — otherwise a route-compliance
     warning is emitted.
 
-19. **Legitimacy contract `edge_ref` resolves.** Every
-    `legitimacy_contract[].edge_ref` is either the literal `proposed`
-    (referring to the hypothesis's own `proposed_edge`) or an `e-*`
-    id that exists in the companion.
+19. **Authorization contract `edge_ref` resolves.** Every
+    `authorization_contract[].edge_ref` is either the literal
+    `proposed` (referring to the hypothesis's own `proposed_edge`) or
+    an `e-*` id that exists in the companion.
 
-20. **Legitimacy back-reference resolves.** Every
-    `legitimacy_resolutions[].fulfills_contract` of the form
-    `h-{id}.lc{n}` points to an existing hypothesis whose
-    `legitimacy_contract` contains an entry with that id.
+20. **Authorization back-reference resolves.** Every
+    `authorization_resolutions[].fulfills_contract` of the form
+    `h-{id}.ac{n}` points to an existing hypothesis whose
+    `authorization_contract` contains an entry with that id.
 
-21. **Legitimacy-gated disposition.** A `conclude.disposition: benign`
-    requires every `legitimacy_contract` across all confirmed-weight
-    hypotheses (weight `++` or `+`, status `confirmed` or `active`)
-    to have at least one fulfilling `legitimacy_resolutions` entry
-    with `verdict: authorized`. Unfulfilled contracts, or fulfillments
-    with `verdict: indeterminate`, force `status: escalated` and
-    disposition ∈ {`unclear`}. Any `verdict: unauthorized` forces
-    `status: escalated` with disposition ∈ {`unclear`, `true_positive`}.
-    Replaces the former "maintain adversarial hypothesis until `--`"
-    bookkeeping rule.
+21. **Authorization-gated disposition.** A `conclude.disposition:
+    benign` requires every `authorization_contract` across all
+    confirmed-weight hypotheses (weight `++` or `+`, status
+    `confirmed` or `active`) to have at least one fulfilling
+    `authorization_resolutions` entry with `verdict: authorized`.
+    Unfulfilled contracts (and not listed in `deferred_authorizations`
+    per rule #26), or fulfillments with `verdict: indeterminate`,
+    force `status: escalated` and disposition ∈ {`unclear`}. Any
+    `verdict: unauthorized` forces `status: escalated` with
+    disposition ∈ {`unclear`, `true_positive`}. Replaces the former
+    "maintain adversarial hypothesis until `--`" bookkeeping rule.
 
 22. **Attribute-update target shape.** Every `attribute_updates` entry
     has exactly one of `target: v-{id}` or `target: e-{id}`, and the
@@ -822,3 +1005,38 @@ coverage.
     per-hypothesis coverage aggregation would silently ignore a
     mis-cited ID; rule 25 rejects it loudly so the grade is forced
     to rest on this hypothesis's own evidence.
+
+26. **Authorization contract closure at CONCLUDE.** When a `conclude:`
+    block is written, every declared `authorization_contract[]` entry
+    across `hypothesize.hypotheses[]` and any
+    `lead.outcome.new_hypotheses[]` must either (a) have at least one
+    fulfilling entry in the
+    effective set of `authorization_resolutions[]`, OR (b) appear in
+    `conclude.deferred_authorizations[]` with a non-empty rationale.
+    A contract that is declared and silently abandoned — never
+    resolved, never deferred — fails this rule. Closes the orphan-
+    contract loophole observed in the pre-v2.10 corpus where 59% of
+    declared contracts had no resolution; rule #21 gated benign but
+    escalation paths silently accepted orphans.
+
+27. **Past-case authority cap and no-sole-grounding.** When an
+    `authorization_resolutions[]` entry has
+    `grounding_kind: past-case`, `authority_for_question` must be
+    `partial` (rule 14 then caps weight effect at `+`/`-`). On any
+    `authorization_contract` that is load-bearing for
+    `disposition: benign` (i.e., the hypothesis is confirmed-weight at
+    CONCLUDE), at least one fulfilling `authorization_resolutions`
+    entry must have `grounding_kind: org-authority` — if every
+    fulfilling resolution has `grounding_kind: past-case`, the
+    contract is treated as unresolved for rule #21 and escalation is
+    forced.
+
+28. **Past-case chain depth cap.** An `authorization_resolutions[]`
+    entry with `grounding_kind: past-case` references a source
+    companion via `cites_past_case.run_id` and an exact prior contract
+    via `cites_past_case.contract_ref`. The referenced companion's own
+    fulfilling resolution for that contract must have
+    `grounding_kind: org-authority` — a past-case companion cannot
+    itself cite another past-case as its grounding. Prevents bootstrap
+    drift where similar alerts recursively authorize themselves
+    without any real policy consultation in the chain.

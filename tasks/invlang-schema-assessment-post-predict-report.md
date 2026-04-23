@@ -1,7 +1,32 @@
 ---
 title: Invlang schema assessment after PREDICT/REPORT rename settles
-status: backlog
+status: done
 groups: invlang, schema, predict, report
+---
+
+**Result:** Audit doc at `docs/experiments/invlang-post-predict-assessment.md`. Key findings:
+
+- Coverage multiplicity (Q1): not load-bearing. 7/7 resolved contracts cover exactly 1 edge; 0 multi-edge triples across 14 corpus files. Rejects authz-as-vertex proposal empirically.
+- Authz/legitimacy naming (Q2): 100% of contract predicates are zero-trust ABAC. Zero mention of damage, intent, or business contribution. Field name is a misnomer.
+- Populatability (Q3): impact axes have no evidence stream in the current corpus; impact-as-vertex would be speculative.
+- Orphan contract problem: 10/17 declared contracts never resolve — rule #21 gates benign but escalation paths accept orphans silently.
+
+**Recommended (in priority order):**
+1. Rename `legitimacy_contract` → `authorization_contract` (+ resolutions). The schema field was a misnomer — 100% of corpus predicates are zero-trust ABAC.
+2. Add temporality fields to `trust_anchor_result`: `effective_window` (optional; authz time bounds — change windows, oncall shifts, travel approvals) and `conditioning_context: []` (prose list of then-conditions — "operator on-shift", "CHG-1234 active", "DLP rule R33 in force"). Applies to both authz decisions (why this was authorized *at that time*) and retrospective impact reads (what controls produced the observed outcome *at that time*).
+3. Add `kind: past-case` to `trust_anchor_result.kind` enum, as a weak-temporal authz source. Constraints: force-cap `authority_for_question` to `partial`; cannot be sole grounding for benign disposition; a past-case consultation cannot cite another past-case as its grounding (depth cap to prevent bootstrap drift). Archetype matching (disposition-shaped precedent) stays separate from past-case-as-authz (authz-shaped precedent).
+4. Add CONCLUDE-time orphan-contract gate: every declared contract resolved or in `deferred_authorizations[]`. Corpus shows 10/17 contracts orphaned today (59%); rule #21 gates benign but escalation paths accept orphans silently.
+5. Add `impact_profile` to signature knowledge-base (static, not per-investigation graph). Impact belongs with mechanism class (signature context), not with per-run graph work.
+6. Keep block names (`hypothesize:`, `conclude:`) — revisit after one eval cycle under the phase rename.
+
+**Consolidation note.** First-pass v2.10 edit folded `trust_anchor_result` entirely into `authorization_resolutions[]`, which overshot: expectation-kind queries (baselines, registry lookups that inform hypothesis weight but don't fulfill a contract) lost their structured home, and `grounding_kind: telemetry-baseline` on an authz resolution became a category error. Corrected to a hybrid: authz verdicts live on `authorization_resolutions[]` (edge), non-authz anchor queries live on `anchor_consultations[]` (lead outcome, renamed from `trust_anchor_result` — the record is a consultation event, not a singular result). Enums enforce the split: authz-resolutions exclude `telemetry-baseline`, consultations exclude `past-case`. Rule #14 (partial-authority weight cap) covers both records.
+
+**Rejected:** authz-as-vertex, impact-as-vertex, hybrid dual-write. See audit doc for reasoning.
+
+**Sample caveat:** 14 companions, mostly r5710 over one week. Re-run Q1/Q2 when signature breadth doubles or a data-exfiltration-style signature lands where authz and impact clearly separate.
+
+**Spec delta codified.** v2.10 in `docs/investigation-language.md` reflects recommendations 1–4; knowledge/invlang/schema.md + validator + prompts are the separate implementation pass.
+
 ---
 
 ## Context — why this exists
