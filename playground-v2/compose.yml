@@ -11,10 +11,39 @@ name: soc-playground
 #  unbound       — recursive DNS resolver with query logs to stdout (playground-internal resolver)
 #  squid         — forward HTTP(S) proxy with basic-auth attribution; access log to stdout
 #  zeek          — passive network monitor (host netns); JSON conn/dns/http/ssl/files logs to volume
+#  Role-clustered host population (8 containers — docs/playground-environment-v2.md §Environment population):
+#    web-1, web-2     — nginx, ubuntu 22.04, prod
+#    db-1             — postgres, ubuntu 22.04, prod
+#    jump-box-1       — plain, ubuntu 24.04, prod (SSH hub)
+#    dev-ws-1         — plain, ubuntu 24.04, dev (developer workstation)
+#    office-ws-1, -2  — plain, ubuntu 22.04 / 24.04, preprod (office-user workstations)
+#    canary-1         — plain, ubuntu 22.04, sandbox (designated attack target)
 # Exposed on loopback only. External access via SSH tunnel:
 #   ssh -L 9200:localhost:9200 -L 5601:localhost:5601 -L 8220:localhost:8220 -L 8080:localhost:8080 soc-playground
 
 x-es-image: &es-image docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+
+# Role-host defaults. Anchored here so the 8 host services below stay thin —
+# they differ only in image target, BASE_OS, hostname, HOST_NAME/HOST_ROLE env,
+# and a per-host agent-state volume. Shared bits (restart policy, healthcheck,
+# dependencies on Fleet readiness) live here; per-service volume lists are
+# NOT anchored because YAML <<: replaces lists rather than merging them, and
+# each host needs both the shared mounts (certs, fleet_tokens) and its own
+# agent state volume.
+x-host-defaults: &host-defaults
+  restart: unless-stopped
+  mem_limit: 256m
+  depends_on:
+    fleet-server:
+      condition: service_healthy
+    fleet-host-policies:
+      condition: service_completed_successfully
+  healthcheck:
+    test: ["CMD", "nc", "-z", "127.0.0.1", "22"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 15s
 
 services:
   setup:
@@ -155,6 +184,61 @@ services:
       '
     restart: "no"
 
+  fleet-host-policies:
+    # One-shot: creates one agent policy per host role and mints an enrollment
+    # token for each. Tokens land on the `fleet_tokens` shared volume so each
+    # host container can read its role's token at entrypoint time without
+    # holding a Kibana credential itself.
+    #
+    # sys_monitoring=true auto-attaches the system integration (logs+metrics)
+    # to each new policy. Role-specific integrations (nginx, postgres, endpoint)
+    # are layered in batches 7c+. Policies are upserted: POST returns 409 if
+    # already present, enrollment-key fetch is always refreshed (token write
+    # is idempotent, last writer wins).
+    depends_on:
+      kibana:
+        condition: service_healthy
+      fleet-init:
+        condition: service_completed_successfully
+    image: curlimages/curl:latest
+    container_name: soc-playground-fleet-host-policies
+    environment:
+      - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
+    volumes:
+      - fleet_tokens:/tokens
+    command: >
+      sh -c '
+        set -eu;
+        ROLES="web db jump-box dev-ws office-ws canary";
+        for role in $$ROLES; do
+          policy_id="host-$${role}-policy";
+          echo "-> creating policy $${policy_id}";
+          HTTP=$$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
+            -u "elastic:$$ELASTIC_PASSWORD" -H "kbn-xsrf: x" \
+            -H "Content-Type: application/json" \
+            -X POST "http://kibana:5601/api/fleet/agent_policies?sys_monitoring=true" \
+            -d "{\"id\":\"$${policy_id}\",\"name\":\"Host role: $${role}\",\"namespace\":\"default\",\"monitoring_enabled\":[\"logs\",\"metrics\"]}");
+          case "$$HTTP" in
+            200|201) echo "   created" ;;
+            409)     echo "   already exists" ;;
+            *)       echo "   FAIL http=$$HTTP"; cat /tmp/resp.json; exit 1 ;;
+          esac;
+          echo "-> fetching enrollment token for $${policy_id}";
+          TOKEN=$$(curl -fsS -u "elastic:$$ELASTIC_PASSWORD" -H "kbn-xsrf: x" \
+            "http://kibana:5601/api/fleet/enrollment_api_keys?kuery=policy_id:$${policy_id}" \
+            | sed -n "s/.*\"api_key\":\"\\([^\"]*\\)\".*/\\1/p" | head -n1);
+          if [ -z "$$TOKEN" ]; then
+            echo "   FAIL: no enrollment_api_key returned for $${policy_id}"; exit 1;
+          fi;
+          # Atomic-replace write — host agents poll for non-empty token file
+          # and would race against a partial write otherwise.
+          printf "%s" "$$TOKEN" > /tokens/$${role}.token.tmp;
+          mv /tokens/$${role}.token.tmp /tokens/$${role}.token;
+          echo "   wrote /tokens/$${role}.token";
+        done;
+      '
+    restart: "no"
+
   fleet-server:
     depends_on:
       elasticsearch:
@@ -288,6 +372,49 @@ services:
       retries: 5
       start_period: 20s
 
+  falco:
+    # Shared syscall monitor (modern eBPF / CO-RE). Sees every container on
+    # the daemon; per-host attribution is via the container plugin's
+    # `container.name` field on each event. Output JSON lands on the VPS
+    # host filesystem so the existing host-side elastic-agent (enrolled into
+    # `vps-host-policy` in batch 4e) can tail it via a custom-logs integration
+    # — see playground-v2/CLAUDE.md §Syscall monitoring (Falco).
+    build:
+      context: ./falco
+      args:
+        FALCO_VERSION: ${FALCO_VERSION}
+    image: soc-playground/falco:local
+    container_name: falco
+    restart: unless-stopped
+    mem_limit: 512m
+    # Avoid `privileged: true` — we only need the BPF-adjacent caps. Matches
+    # v1's footprint.
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - SYS_PTRACE
+    volumes:
+      # Kernel surface for CO-RE BPF.
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+      - /proc:/host/proc:ro
+      - /dev:/host/dev:ro
+      - /boot:/host/boot:ro
+      - /lib/modules:/host/lib/modules:ro
+      - /usr:/host/usr:ro
+      - /etc:/host/etc:ro
+      # Container metadata for the container plugin.
+      - /var/run/docker.sock:/host/var/run/docker.sock:ro
+      # Output — bind-mounted to the VPS host so the host agent can tail it
+      # without going through a docker volume.
+      - /var/log/falco:/var/log/falco
+    command: ["/usr/bin/falco", "--modern-bpf"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -x falco >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
   zeek:
     build: ./zeek
     image: soc-playground/zeek:local
@@ -312,6 +439,197 @@ services:
       retries: 5
       start_period: 30s
 
+  # ──────────────────────────────────────────────────────────────────────────
+  # Role-clustered host population (batch 7a + 7b).
+  # All 8 services share playground-v2/hosts/Dockerfile via target+BASE_OS args;
+  # BuildKit caches identical (target, BASE_OS) combinations across services.
+  # Identities + user shells are seeded at container start from inventory.yaml.
+  # Each host ships elastic-agent (installed in the base stage), enrolled at
+  # first boot into its HOST_ROLE policy using the token fleet-host-policies
+  # wrote to /fleet-tokens/<role>.token. State (agent.id, fleet.enc) persists
+  # in a per-host named volume so lever-down/up doesn't mint duplicate agents.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  web-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: web
+      args:
+        BASE_OS: "22.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-web:22.04
+    container_name: web-1
+    hostname: web-1
+    environment:
+      HOST_NAME: web-1
+      HOST_ROLE: web
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_web_1:/var/lib/elastic-agent
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 22 && nc -z 127.0.0.1 80"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  web-2:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: web
+      args:
+        BASE_OS: "22.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-web:22.04
+    container_name: web-2
+    hostname: web-2
+    environment:
+      HOST_NAME: web-2
+      HOST_ROLE: web
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_web_2:/var/lib/elastic-agent
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 22 && nc -z 127.0.0.1 80"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  db-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: db
+      args:
+        BASE_OS: "22.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-db:22.04
+    container_name: db-1
+    hostname: db-1
+    environment:
+      HOST_NAME: db-1
+      HOST_ROLE: db
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_db_1:/var/lib/elastic-agent
+    # Postgres's default cluster + elastic-agent add a bit over the bare base.
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 22 && nc -z 127.0.0.1 5432"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  jump-box-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "24.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:24.04
+    container_name: jump-box-1
+    hostname: jump-box-1
+    environment:
+      HOST_NAME: jump-box-1
+      HOST_ROLE: jump-box
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_jump_box_1:/var/lib/elastic-agent
+
+  dev-ws-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "24.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:24.04
+    container_name: dev-ws-1
+    hostname: dev-ws-1
+    environment:
+      HOST_NAME: dev-ws-1
+      HOST_ROLE: dev-ws
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_dev_ws_1:/var/lib/elastic-agent
+
+  office-ws-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "22.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:22.04
+    container_name: office-ws-1
+    hostname: office-ws-1
+    environment:
+      HOST_NAME: office-ws-1
+      HOST_ROLE: office-ws
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_office_ws_1:/var/lib/elastic-agent
+
+  office-ws-2:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "24.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:24.04
+    container_name: office-ws-2
+    hostname: office-ws-2
+    environment:
+      HOST_NAME: office-ws-2
+      HOST_ROLE: office-ws
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_office_ws_2:/var/lib/elastic-agent
+
+  canary-1:
+    <<: *host-defaults
+    build:
+      context: .
+      dockerfile: hosts/Dockerfile
+      target: plain
+      args:
+        BASE_OS: "22.04"
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/host-plain:22.04
+    container_name: canary-1
+    hostname: canary-1
+    environment:
+      HOST_NAME: canary-1
+      HOST_ROLE: canary
+    volumes:
+      - certs:/fleet-certs:ro
+      - fleet_tokens:/fleet-tokens:ro
+      - agent_state_canary_1:/var/lib/elastic-agent
+
 volumes:
   certs:
     driver: local
@@ -326,4 +644,28 @@ volumes:
   keycloak_import:
     driver: local
   zeek_logs:
+    driver: local
+  # Per-role Fleet enrollment tokens — written by fleet-host-policies init,
+  # mounted read-only into each host at /fleet-tokens/<role>.token.
+  fleet_tokens:
+    driver: local
+  # Per-host elastic-agent state (agent.id, fleet.enc, vault). One volume per
+  # host keeps agent identities stable across container recreates — without
+  # this, every recreate would mint a new agent.id and pile up offline ghosts
+  # in Fleet.
+  agent_state_web_1:
+    driver: local
+  agent_state_web_2:
+    driver: local
+  agent_state_db_1:
+    driver: local
+  agent_state_jump_box_1:
+    driver: local
+  agent_state_dev_ws_1:
+    driver: local
+  agent_state_office_ws_1:
+    driver: local
+  agent_state_office_ws_2:
+    driver: local
+  agent_state_canary_1:
     driver: local

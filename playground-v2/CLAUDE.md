@@ -157,6 +157,143 @@ Depends on `kibana:service_healthy`. Creates the `fleet-server-policy` in Kibana
 - `127.0.0.1:8220` on the VPS — loopback only (agents on the same VPS reach via Docker DNS `https://fleet-server:8220`; external agents would need port exposed + a real hostname in `FLEET_URL`).
 - Named volume `soc-playground_fleet_data` holds agent state. Deleting it forces re-enrollment on next start.
 
+### Role-clustered host population (batch 7a)
+
+Eight role containers running on the compose network — the "population" half of v2 (docs/playground-environment-v2.md §Environment population). All 8 are built from a single multi-stage `hosts/Dockerfile` selected via compose `target:` + `BASE_OS` arg.
+
+| Host | Role | OS | Service | Criticality |
+|---|---|---|---|---|
+| `web-1` / `web-2` | web | 22.04 | nginx | prod |
+| `db-1` | db | 22.04 | postgres | prod |
+| `jump-box-1` | jump-box | 24.04 | — | prod |
+| `dev-ws-1` | dev-ws | 24.04 | — | dev |
+| `office-ws-1` | office-ws | 22.04 | — | preprod |
+| `office-ws-2` | office-ws | 24.04 | — | preprod |
+| `canary-1` | canary | 22.04 | — | sandbox |
+
+Full attributes (owner, change window, trust edges out, per-host users) live in `hosts/inventory.yaml` — the source of truth. Every consumer reads from there: user seeding today, and CMDB stub / fleet policies / baseline generators / attack scenarios in later batches.
+
+**Build model.** One `hosts/Dockerfile` with stages `base` → `plain` | `web` | `db`. Context is `playground-v2/` (the whole dir) — required because the image pulls both `hosts/inventory.yaml` and `keycloak/realm.yaml`, and Docker's COPY cannot cross the build-context root. `playground-v2/.dockerignore` trims the context to just what the host images need (`hosts/**` + `keycloak/realm.yaml`). BuildKit caches the `base` stage once per `BASE_OS` across all 8 services.
+
+**Identity seeding.** `hosts/base/seed-users.py` runs at container start (not build time — lets `inventory.yaml` edits take effect with `compose up -d` alone). It:
+
+1. Reads `/opt/soc-playground/inventory.yaml` + `/opt/soc-playground/realm.yaml`.
+2. Expands `inventory.roles[*].hosts` against `realm.users` → every realm user with matching realm role lands a UNIX account on each host that role authorizes.
+3. Applies per-host `users:` overrides (e.g., `dev.dana` gets `sudo` on their own `office-ws-1`, not elsewhere).
+4. Creates/updates accounts idempotently; password is reset to `changeme` on every boot — drift from the playground baseline is a footgun, not a feature.
+
+**Cross-file invariant.** `keycloak/realm.yaml` users must match `hosts/inventory.yaml` expectations. No validator yet; maintained by hand. The failure mode is silent: a realm user with no matching inventory role simply gets no UNIX accounts anywhere.
+
+**Network positioning.** All 8 hosts join the default compose network alongside `squid`, `unbound`, and `keycloak`. No host-port exposure — access from the devcontainer is via `docker --context soc-playground exec`. Zeek (host netns) sees their inter-container traffic on the compose bridge, so cross-source correlation (Zeek conn.log + nginx access.log + auditd) works out-of-box.
+
+**What's deliberately deferred to later batches:**
+
+- **Falco + auditd** — batch 7c.
+- **Baseline activity** (jittered cron, scripted SSH sessions, web↔db traffic) — batch 8.
+- **SSH keys, pgaudit, app DB schema, nginx-as-app-frontend** — batches 8/9.
+
+### Per-role Fleet enrollment (batch 7b)
+
+Every host ships an embedded `elastic-agent` (installed in the base stage from the same `STACK_VERSION` pin as ES/Kibana/Fleet Server). The agent enrolls into a **role policy** — one Fleet policy per distinct role, shared by all hosts of that role — so policy changes propagate across peers without per-host edits.
+
+**Policy catalog** (created by the `fleet-host-policies` one-shot):
+
+| Policy id | Agents | Base integration |
+|---|---|---|
+| `host-web-policy` | `web-1`, `web-2` | system (logs+metrics via `sys_monitoring=true`) |
+| `host-db-policy` | `db-1` | system |
+| `host-jump-box-policy` | `jump-box-1` | system |
+| `host-dev-ws-policy` | `dev-ws-1` | system |
+| `host-office-ws-policy` | `office-ws-1`, `office-ws-2` | system |
+| `host-canary-policy` | `canary-1` | system |
+
+Role-specific integrations (nginx on web, postgres on db, endpoint-security, Falco+auditd shipping) are layered in batches 7c / 8.
+
+**Enrollment token distribution.** `fleet-host-policies` runs after `fleet-init`, POSTs a policy per role (409-on-conflict is the success path on re-runs), fetches the policy's enrollment API key via `GET /api/fleet/enrollment_api_keys?kuery=policy_id:<id>`, and atomic-writes the token to `/tokens/<role>.token` on the shared `fleet_tokens` volume. Each host container mounts that volume read-only and reads its role's token from `/fleet-tokens/<role>.token` at entrypoint time — hosts never hold a Kibana credential themselves.
+
+**Sentinel-gated enrollment.** `hosts/base/agent-enroll.sh` enrolls via `elastic-agent enroll --url=https://fleet-server:8220 --certificate-authorities=/fleet-certs/ca/ca.crt --enrollment-token=<cat token>` on first boot, then drops a `.enrolled` sentinel inside the per-host `agent_state_*` volume. Subsequent container recreates skip the enroll step and reuse the persisted `agent.id` + `fleet.enc` — matches v1's target-endpoint pattern, avoids stale "offline" ghosts accumulating in Kibana → Fleet → Agents across lever-down/up cycles.
+
+**Agent runs alongside sshd.** The entrypoint starts `elastic-agent run` in the background; sshd remains the foreground PID-1-child so container-level restart policies still key on sshd health, not on the agent's.
+
+**Re-enroll from scratch.** If a host gets into a bad state, nuke just its agent state volume:
+
+```bash
+docker --context soc-playground compose rm -sf web-1
+docker --context soc-playground volume rm soc-playground_agent_state_web_1
+docker --context soc-playground compose up -d web-1
+```
+
+**Re-issue a policy's token.** Delete the old enrollment API key in Kibana → Fleet, then re-run the one-shot — the shell loop regenerates the token and re-writes `/tokens/<role>.token`:
+
+```bash
+docker --context soc-playground compose up -d --force-recreate fleet-host-policies
+```
+
+Existing agents keep working (tokens are used only at enrollment); only new enrollments need the fresh key.
+
+**Resource footprint.** Each elastic-agent adds ~150–250 MB resident; 8 agents ≈ +1.6 GB on top of the existing ES/Kibana/Fleet Server. Within the CCX33 budget.
+
+**Known quirks carried from v1** (see memory `reference_fleet_server_docker_9x.md` and `reference_elastic_version_registry_lag.md`):
+
+- `elastic-agent enroll` exits non-zero from a systemd-less service-reload step even when server-side registration succeeded. `agent-enroll.sh` tolerates this with `|| true` + sentinel-on-next-line, same as v1 target-endpoint.
+- `elastic-agent status` may briefly show `x509: certificate signed by unknown authority` for sub-components — cosmetic; data still flows. Usually settles after a few check-in cycles.
+
+### Syscall monitoring (Falco — batch 7c)
+
+One shared Falco container runs against the VPS docker daemon with the **modern eBPF** engine (CO-RE BPF, no kernel module). It sees syscalls from every container on the VPS — web/db/jump-box/dev-ws/office-ws/canary, plus unbound/squid/keycloak/etc. Per-host attribution comes from Falco's built-in container plugin: every event carries `container.name`, `container.image.repository`, and `container.id`. Kibana dashboards filter by container name to get per-host views without needing one Falco per host.
+
+**Why shared, not per-host.** The kernel audit + BPF hooks are single-listener resources. Running 8 Falco instances would either require one-owns-the-driver arbitration (messy) or resort to the legacy kernel-module driver (impractical in containers). One Falco plus the container plugin gives equivalent visibility at a fraction of the resource cost (~400 MB vs. 8 × ~200 MB).
+
+**Output path.** `/var/log/falco/falco.json` on the VPS host (bind-mounted out of the container). JSON lines, one event per line, conforming to Falco's schema — includes `output`, `rule`, `priority`, `source`, `tags`, and `container.*`. `stdout` mirrors the same stream for `docker --context soc-playground logs falco`.
+
+**Ruleset.** Default Falco rules only for 7c — the bundled `falco_rules.yaml` covers the common families (terminal shell in container, sensitive file open, privileged container start, write below `/etc`). Playground-specific rules go into `/etc/falco/rules.d` in a later batch (or layered via a Fleet-managed rule bundle).
+
+**Shipping Falco events to Elastic — manual attach (one-time).**
+
+`fleet-host-policies` does not attach the Falco integration automatically (the `log` package version varies per Elastic release; baking the lookup into the one-shot makes it brittle). Attach it once, post-deploy, via Kibana UI or Fleet API.
+
+Via **Kibana UI** (simplest):
+
+1. SSH-tunnel Kibana (`ssh -L 5601:localhost:5601 soc-playground`), open `http://localhost:5601/app/fleet/policies/vps-host-policy`.
+2. *Add integration* → *Custom Logs*.
+3. Paths: `/var/log/falco/falco.json` · Dataset name: `falco.alerts` · Enable JSON parsing.
+4. Save. The host-side elastic-agent picks it up on next check-in.
+
+Via **Fleet API** (scriptable — run from the devcontainer, Kibana tunneled on 5601):
+
+```bash
+LOG_VER=$(curl -fsSu "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+  http://localhost:5601/api/fleet/epm/packages/log | jq -r '.item.version')
+
+curl -fsS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' -H 'Content-Type: application/json' \
+  -X POST http://localhost:5601/api/fleet/package_policies -d "{
+    \"policy_id\": \"vps-host-policy\",
+    \"package\": {\"name\": \"log\", \"version\": \"${LOG_VER}\"},
+    \"name\": \"falco-logs\",
+    \"namespace\": \"default\",
+    \"inputs\": [{
+      \"type\": \"logfile\", \"enabled\": true,
+      \"streams\": [{
+        \"enabled\": true,
+        \"data_stream\": {\"type\": \"logs\", \"dataset\": \"falco.alerts\"},
+        \"vars\": {\"paths\": {\"value\": [\"/var/log/falco/falco.json\"], \"type\": \"text\"}}
+      }]
+    }]
+  }"
+```
+
+**Verify.** In Kibana → Discover, filter `data_stream.dataset: falco.alerts`. Events should show up within a few seconds of an activity trigger. Quick trigger: `docker --context soc-playground exec canary-1 bash -c 'touch /tmp/.falco-test && ls /etc/shadow || true'` — Falco's "Read sensitive file untrusted" or similar rule fires.
+
+**auditd — deferred.** Per-container auditd in docker is fraught: the kernel audit socket is a single-listener resource, so only one container's auditd can actually attach to it at a time, and user-namespace interaction is still a moving target on modern kernels. Running auditd on the VPS host itself (plus Falco for syscall coverage + rsyslog for auth/sudo/cron) covers the same ground without fighting the kernel. If per-container auditd becomes necessary later, the cleanest route is an audit-dispatcher daemon on the VPS host that demuxes by PID → container; that's a separate design problem from batch 7.
+
+**Re-seeding users.** `inventory.yaml` or `realm.yaml` edits apply on container restart:
+
+```bash
+docker --context soc-playground compose up -d --build web-1 web-2 db-1 jump-box-1 dev-ws-1 office-ws-1 office-ws-2 canary-1
+```
+
+The image rebuild re-bakes the YAML files; the entrypoint re-runs `seed-users.py` and creates/updates accounts. No volume deletion needed.
+
 ## Adding a new agent
 
 ### Host-based (on the VPS itself) — first-time setup already done
