@@ -132,10 +132,11 @@ When routing REPORT:
 next_action: REPORT
 disposition: benign | false_positive | true_positive | escalated
 confidence: high | medium | low
+rationale: <one-line mechanism description grounded in this loop's evidence>
 surviving_hypotheses: [h-001, ...]   # hypothesis IDs whose final weight is not `--` (empty list if all refuted)
 ```
 
-Archetype labeling happens at REPORT time via the `archetype-match` subagent against the confirmed investigation outcome — it is not ANALYZE's job. Do not emit a `matched_archetype` field; omit it entirely. If a surviving hypothesis names a mechanism the downstream archetype catalog may cover, the `rationale` field is where you describe it in prose.
+Archetype labeling happens at REPORT time via the `archetype-match` subagent against the confirmed investigation outcome — it is not ANALYZE's job. Do not emit a `matched_archetype` field; omit it entirely. The `rationale` line is the investigation-outcome summary the downstream `archetype-match` subagent consumes, so state the confirmed mechanism crisply (e.g. "cadenced monitoring probe from internal source, legitimacy anchor confirmed authorized") — not an archetype name.
 
 When routing PREDICT:
 

@@ -140,7 +140,7 @@ def _select_routing_source(ctx: Context) -> tuple[str, bool]:
     return "forced_exhaustion", True
 
 
-def _assemble_prompt(ctx: Context) -> str:
+def _assemble_prompt(ctx: Context, *, matched_archetype: str | None = None) -> str:
     """Build the report subagent prompt with all deterministic context inline.
 
     The subagent receives alert.json, investigation.md, and every archetype's
@@ -148,6 +148,12 @@ def _assemble_prompt(ctx: Context) -> str:
     tool calls required. On the forced-exhaustion path archetype shapes are
     omitted (the subagent is instructed to emit `matched_archetype: null`
     regardless of investigation state, so carrying archetypes wastes tokens).
+
+    `matched_archetype` is the already-resolved archetype label (from the
+    handler's earlier `archetype-match` dispatch on the analyze path, from
+    the SCREEN payload on the screen path, or `None` on forced-exhaustion).
+    It is passed as a caller input rather than re-derived by the subagent
+    because ANALYZE no longer carries the field.
 
     The subagent's remaining job: pick `matched_ticket_id` from the inlined
     precedents, synthesize report.md's narrative prose, and emit the terminal
@@ -159,11 +165,13 @@ def _assemble_prompt(ctx: Context) -> str:
             "construction by the /investigate entrypoint"
         )
     routing_source, forced = _select_routing_source(ctx)
+    archetype_input = matched_archetype if matched_archetype else "null"
     header_lines = [
         f"run_dir={ctx.run_dir}",
         f"signature_id={ctx.signature_id}",
         f"identifier={ctx.ticket_id}",
         f"routing_source={routing_source}",
+        f"matched_archetype={archetype_input}",
     ]
     if forced:
         header_lines.append("forced_exhaustion=true")
@@ -205,10 +213,77 @@ class _MechanicalFallback(Exception):
     rolled back when this is raised."""
 
 
+def _resolve_matched_archetype(
+    ctx: Context,
+    *,
+    analyze_payload: dict,
+    screen_payload: dict,
+) -> tuple[str | None, str | None]:
+    """Resolve the archetype label authoritatively at REPORT-time.
+
+    Called once in `handle()` and threaded into every downstream
+    composition path (mechanical SCREEN uses its own payload archetype
+    instead; mechanical ANALYZE and the fallback subagent both receive
+    this value as caller input).
+
+    Returns `(matched_archetype, dispatch_failure_reason)`. When
+    `dispatch_failure_reason` is non-None, archetype-match could not
+    be invoked — operator should investigate. A legitimate null match
+    (the catalog doesn't cover this outcome) returns `(None, None)`.
+    """
+    if ctx.forced_report:
+        return None, None
+
+    # SCREEN fast-path already names the archetype; don't re-run matcher.
+    if (
+        screen_payload.get("screen_result") == "match"
+        and screen_payload.get("matched_archetype")
+    ):
+        return screen_payload["matched_archetype"], None
+
+    if not (analyze_payload and analyze_payload.get("disposition")):
+        return None, None
+
+    raw_disposition = analyze_payload.get("disposition")
+    disposition = "inconclusive" if raw_disposition == "escalated" else raw_disposition
+    confidence = analyze_payload.get("confidence") or "low"
+    surviving_hypotheses = analyze_payload.get("surviving_hypotheses") or []
+
+    investigation_md = load_investigation_md(ctx.run_dir)
+    gather = _extract_gather_blocks(investigation_md)
+    trust_anchors = _derive_trust_anchors(gather)
+
+    matched, _reason, dispatch_failed = _run_archetype_match(
+        ctx,
+        disposition=disposition,
+        confidence=confidence,
+        mechanism_summary=_derive_mechanism_summary(
+            surviving_hypotheses, analyze_payload,
+        ),
+        legitimacy_verdicts=_derive_legitimacy_verdicts(gather),
+        trust_anchors_confirmed=[
+            (a.get("anchor") or "") for a in trust_anchors
+            if a.get("result") == "confirmed"
+        ],
+    )
+    return matched, (_reason if dispatch_failed else None)
+
+
 def handle(ctx: Context) -> PhaseResult:
     screen_payload = ctx.outputs.get(Phase.SCREEN) or {}
     analyze_payload = ctx.outputs.get(Phase.ANALYZE) or {}
     fallback_reason: str | None = None
+
+    # Resolve the archetype label once up-front. All three downstream
+    # paths (mechanical SCREEN, mechanical ANALYZE, fallback subagent)
+    # consume this value — keeps the contract uniform and ensures the
+    # fallback subagent doesn't try to re-derive archetype from an
+    # ANALYZE block that no longer carries it.
+    matched_archetype, archetype_dispatch_failure = _resolve_matched_archetype(
+        ctx,
+        analyze_payload=analyze_payload,
+        screen_payload=screen_payload,
+    )
 
     if (
         not ctx.forced_report
@@ -218,6 +293,7 @@ def handle(ctx: Context) -> PhaseResult:
     ):
         try:
             payload = _compose_screen_match(ctx, screen_payload)
+            _annotate_archetype_failure(payload, archetype_dispatch_failure)
             return PhaseResult(next_phase=Phase.REPORT, payload=payload)
         except _MechanicalFallback as exc:
             fallback_reason = str(exc)
@@ -233,18 +309,32 @@ def handle(ctx: Context) -> PhaseResult:
         and analyze_payload.get("disposition")
     ):
         try:
-            payload = _compose_analyze_routed(ctx, analyze_payload)
+            payload = _compose_analyze_routed(
+                ctx, analyze_payload, matched_archetype=matched_archetype,
+            )
+            _annotate_archetype_failure(payload, archetype_dispatch_failure)
             return PhaseResult(next_phase=Phase.REPORT, payload=payload)
         except _MechanicalFallback as exc:
             fallback_reason = str(exc)
 
-    prompt = _assemble_prompt(ctx)
+    prompt = _assemble_prompt(ctx, matched_archetype=matched_archetype)
     raw = _invoke_subagent(prompt)
     payload = _validate_status(extract_terminal_yaml(raw))
     payload["compose_mode"] = "subagent"
     if fallback_reason:
         payload["mechanical_fallback_reason"] = fallback_reason
+    _annotate_archetype_failure(payload, archetype_dispatch_failure)
     return PhaseResult(next_phase=Phase.REPORT, payload=payload)
+
+
+def _annotate_archetype_failure(payload: dict, failure_reason: str | None) -> None:
+    """Surface archetype-match dispatch failures on the result payload.
+
+    A legitimate null match is silent; only subprocess/parse failures
+    are flagged so operators can triage why a report landed unlabeled.
+    """
+    if failure_reason:
+        payload["archetype_match_failure_reason"] = failure_reason
 
 
 # ---------------------------------------------------------------------------
@@ -531,17 +621,23 @@ def _run_archetype_match(
     mechanism_summary: str,
     legitimacy_verdicts: list[dict],
     trust_anchors_confirmed: list[str],
-) -> tuple[str | None, str]:
+) -> tuple[str | None, str, bool]:
     """Dispatch archetype-match and parse its terminal YAML.
 
-    Returns (matched_archetype, justification). On any failure (no stories,
-    subagent error, unparseable YAML), returns (None, "<reason>") — the caller
-    treats None as "no archetype label" and still writes the report without a
-    matched_archetype.
+    Returns `(matched_archetype, reason, dispatch_failed)`:
+      - `matched_archetype` is the archetype name, or `None` (both for
+        "no archetype fits" and for dispatch/parse failures).
+      - `reason` is the subagent's justification on a clean match/null,
+        or the failure description on dispatch/parse errors.
+      - `dispatch_failed` is `True` when the subagent couldn't be invoked
+        or its output couldn't be parsed — distinguishes operator-visible
+        failures from legitimate null-match outcomes. Missing catalogs
+        are treated as legitimate (dispatch_failed=False) because some
+        signatures ship without archetypes by design.
     """
     story_paths = _archetype_story_paths(ctx.signature_id)
     if not story_paths:
-        return None, "no archetype catalog for this signature"
+        return None, "no archetype catalog for this signature", False
 
     alert_path = ctx.run_dir / "alert.json"
     field_quirks_path = (
@@ -574,16 +670,16 @@ def _run_archetype_match(
     try:
         raw = _invoke_archetype_match(prompt)
     except OrchestrationError as exc:
-        return None, f"archetype-match dispatch failed: {exc}"
+        return None, f"archetype-match dispatch failed: {exc}", True
     try:
         parsed = extract_terminal_yaml(raw)
     except Exception as exc:
-        return None, f"archetype-match YAML parse failed: {exc}"
+        return None, f"archetype-match YAML parse failed: {exc}", True
     matched = parsed.get("matched_archetype")
     justification = parsed.get("justification", "")
     if isinstance(matched, str) and matched.strip() and matched != "null":
-        return matched.strip(), justification
-    return None, justification or "archetype-match returned null"
+        return matched.strip(), justification, False
+    return None, justification or "archetype-match returned null", False
 
 
 def _compose_trace(matched_pattern: str, leads_run: list[dict], disposition: str) -> str:
@@ -1212,13 +1308,23 @@ def _compose_report_md_analyze(
     return "\n".join(sections) + "\n"
 
 
-def _compose_analyze_routed(ctx: Context, analyze_payload: dict) -> dict:
+def _compose_analyze_routed(
+    ctx: Context,
+    analyze_payload: dict,
+    *,
+    matched_archetype: str | None,
+) -> dict:
     """Mechanical REPORT composer for the ANALYZE-routed path.
 
     Extracts structured fields from the ANALYZE payload + invlang gather
     blocks in investigation.md, dispatches the narrative subagent for the
     free-text sections, assembles report.md, appends the REPORT section
     to investigation.md, and runs Tier-1 validation.
+
+    `matched_archetype` is resolved upstream by `_resolve_matched_archetype`
+    (which dispatches the `archetype-match` subagent against the confirmed
+    investigation outcome). Passed in rather than re-derived here so the
+    mechanical and subagent-fallback paths share one source of truth.
 
     On any failure (narrative subagent miss, Tier-1 reject, mandatory-
     grounding violation on resolved status), rolls back partial writes and
@@ -1256,27 +1362,6 @@ def _compose_analyze_routed(ctx: Context, analyze_payload: dict) -> dict:
 
     trust_anchors = _derive_trust_anchors(gather)
     leads_pursued = len(gather)
-
-    # Archetype label is picked here at REPORT-time — archetype-match runs
-    # against the confirmed investigation outcome, not against the alert
-    # alone. See agents/archetype-match.md. Null is a valid answer (forces
-    # an unlabeled resolution / escalation).
-    mechanism_summary = _derive_mechanism_summary(
-        surviving_hypotheses, analyze_payload,
-    )
-    legitimacy_verdicts = _derive_legitimacy_verdicts(gather)
-    trust_anchors_confirmed = [
-        (a.get("anchor") or "") for a in trust_anchors
-        if a.get("result") == "confirmed"
-    ]
-    matched_archetype, _am_justification = _run_archetype_match(
-        ctx,
-        disposition=disposition,
-        confidence=confidence,
-        mechanism_summary=mechanism_summary,
-        legitimacy_verdicts=legitimacy_verdicts,
-        trust_anchors_confirmed=trust_anchors_confirmed,
-    )
 
     trace = _compose_trace_analyze(
         gather, disposition, surviving_hypotheses, matched_archetype,

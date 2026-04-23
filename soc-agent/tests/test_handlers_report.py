@@ -81,6 +81,30 @@ def stub_invoke(captured: list[str], response: str):
     return fn
 
 
+@pytest.fixture(autouse=True)
+def _default_shared_invoke_stub(monkeypatch):
+    """Autouse safety net: `_resolve_matched_archetype` dispatches the
+    `archetype-match` subagent whenever an ANALYZE-routed path is exercised,
+    which would otherwise spawn a real `claude` subprocess in unit tests.
+
+    Default: archetype-match returns null, and any other `_shared_invoke`
+    call raises — tests that need a real narrative or a specific archetype
+    override with `monkeypatch.setattr(report_handler, "_shared_invoke", ...)`
+    (the per-test override wins). Stubbing at `_shared_invoke` rather than
+    `_invoke_archetype_match` preserves the existing test pattern of
+    branching on `agent ==` inside a shared stub.
+    """
+    def _default(agent, _prompt, *, model=None, timeout=None):
+        if agent == "archetype-match":
+            return "```yaml\nmatched_archetype: null\njustification: default test stub\n```"
+        raise AssertionError(
+            f"_shared_invoke called for agent {agent!r} but no per-test stub "
+            f"was installed — add monkeypatch.setattr(report_handler, "
+            f"'_shared_invoke', ...) in the test"
+        )
+    monkeypatch.setattr(report_handler, "_shared_invoke", _default)
+
+
 # ---------------------------------------------------------------------------
 # Prompt assembly
 # ---------------------------------------------------------------------------
@@ -252,6 +276,146 @@ class TestPromptAssembly:
         ctx = make_ctx(tmp_path, ticket_id="", contextualize={})
         with pytest.raises(OrchestrationError, match="ticket_id"):
             report_handler.handle(ctx)
+
+    def test_fallback_subagent_receives_resolved_matched_archetype(
+        self, tmp_path, monkeypatch,
+    ):
+        """When the mechanical ANALYZE composer can't run (missing required
+        fields in the ANALYZE payload) the handler falls through to the
+        subagent. The subagent prompt must carry `matched_archetype=<name>`
+        from the archetype-match dispatch — ANALYZE no longer emits this
+        field, so without caller-substitution the fallback subagent would
+        fabricate null."""
+        # Omit `confidence` so the mechanical composer bails to fallback.
+        ctx = make_ctx(
+            tmp_path,
+            analyze={"disposition": "benign"},
+        )
+
+        def fake_shared(agent, _prompt, *, model=None, timeout=None):
+            if agent == "archetype-match":
+                return (
+                    "```yaml\nmatched_archetype: monitoring-probe\n"
+                    "justification: resolved at REPORT time\n```"
+                )
+            raise AssertionError(f"unexpected subagent: {agent}")
+
+        monkeypatch.setattr(report_handler, "_shared_invoke", fake_shared)
+
+        captured: list[str] = []
+        response = textwrap.dedent("""
+        ```yaml
+        status: written
+        report_path: /tmp/report.md
+        disposition: benign
+        confidence: high
+        matched_archetype: monitoring-probe
+        status_frontmatter: resolved
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            report_handler, "_invoke_subagent", stub_invoke(captured, response),
+        )
+
+        report_handler.handle(ctx)
+        assert "matched_archetype=monitoring-probe" in captured[0]
+        assert "routing_source=analyze" in captured[0]
+
+    def test_fallback_subagent_receives_null_archetype_on_forced_exhaustion(
+        self, tmp_path, monkeypatch,
+    ):
+        """Forced-exhaustion must not dispatch archetype-match — the prompt
+        carries `matched_archetype=null` verbatim per contract."""
+        ctx = make_ctx(tmp_path, forced_report=True)
+        captured: list[str] = []
+        response = textwrap.dedent("""
+        ```yaml
+        status: written
+        report_path: /tmp/report.md
+        disposition: inconclusive
+        confidence: low
+        matched_archetype: null
+        status_frontmatter: escalated
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            report_handler, "_invoke_subagent", stub_invoke(captured, response),
+        )
+        report_handler.handle(ctx)
+        assert "matched_archetype=null" in captured[0]
+
+    def test_archetype_match_dispatch_failure_surfaced_on_payload(
+        self, tmp_path, monkeypatch,
+    ):
+        """When archetype-match raises (subprocess failure, timeout), the
+        handler still emits a report but annotates the payload so operators
+        can triage the dispatch failure. Distinct from a legitimate null
+        match, which is silent."""
+        # Omit `confidence` so the mechanical path bails, isolating the
+        # archetype-match dispatch failure from mechanical-composer errors.
+        ctx = make_ctx(
+            tmp_path,
+            analyze={"disposition": "benign"},
+        )
+
+        def broken_shared(agent, _prompt, *, model=None, timeout=None):
+            if agent == "archetype-match":
+                raise OrchestrationError("claude subprocess timed out")
+            raise AssertionError(f"unexpected subagent: {agent}")
+
+        monkeypatch.setattr(report_handler, "_shared_invoke", broken_shared)
+
+        response = textwrap.dedent("""
+        ```yaml
+        status: written
+        report_path: /tmp/report.md
+        disposition: inconclusive
+        confidence: low
+        matched_archetype: null
+        status_frontmatter: escalated
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            report_handler, "_invoke_subagent", stub_invoke([], response),
+        )
+
+        result = report_handler.handle(ctx)
+        assert "archetype_match_failure_reason" in result.payload
+        assert "timed out" in result.payload["archetype_match_failure_reason"]
+
+    def test_legitimate_null_match_is_silent_on_payload(
+        self, tmp_path, monkeypatch,
+    ):
+        """A null match returned cleanly by archetype-match (catalog didn't
+        cover this outcome) is not a failure — no telemetry annotation."""
+        ctx = make_ctx(
+            tmp_path,
+            analyze={"disposition": "benign"},  # bails mechanical, exercises fallback
+        )
+
+        def null_match_shared(agent, _prompt, *, model=None, timeout=None):
+            if agent == "archetype-match":
+                return "```yaml\nmatched_archetype: null\njustification: no fit\n```"
+            raise AssertionError(f"unexpected subagent: {agent}")
+
+        monkeypatch.setattr(report_handler, "_shared_invoke", null_match_shared)
+
+        response = textwrap.dedent("""
+        ```yaml
+        status: written
+        report_path: /tmp/report.md
+        disposition: inconclusive
+        confidence: low
+        matched_archetype: null
+        status_frontmatter: escalated
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            report_handler, "_invoke_subagent", stub_invoke([], response),
+        )
+
+        result = report_handler.handle(ctx)
+        assert "archetype_match_failure_reason" not in result.payload
 
 
 # ---------------------------------------------------------------------------
@@ -1477,6 +1641,50 @@ class TestMechanicalAnalyzeCompose:
         assert "confidence=high" in prompt
         assert "mechanism_summary=" in prompt
         assert "trust_anchors_confirmed:" in prompt
+
+    def test_mechanism_summary_uses_analyze_rationale_when_present(
+        self, tmp_path, monkeypatch,
+    ):
+        """ANALYZE's optional `rationale` field (one-line mechanism summary
+        from the terminal YAML) flows into archetype-match's
+        `mechanism_summary` input. Without it, the summary falls back to
+        `surviving: <ids>` which is anemic."""
+        ctx = _seed_ctx_for_analyze_mechanical(
+            tmp_path,
+            analyze_payload={
+                "disposition": "benign",
+                "confidence": "high",
+                "rationale": "cadenced monitoring probe; anchor authorized",
+                "surviving_hypotheses": ["h-001"],
+            },
+            investigation_md=_INV_RESOLVED_ANCHOR,
+        )
+        archetype_match_prompts: list[str] = []
+
+        def fake_shared(agent, prompt, *, model=None, timeout=None):
+            if agent == "archetype-match":
+                archetype_match_prompts.append(prompt)
+                return (
+                    "```yaml\nmatched_archetype: monitoring-probe\n"
+                    "justification: stub\n```"
+                )
+            if agent == "report_narrative":
+                return "<summary>\nResolved.\n</summary>"
+            raise AssertionError(f"unexpected subagent: {agent}")
+
+        monkeypatch.setattr(report_handler, "_shared_invoke", fake_shared)
+        monkeypatch.setattr(
+            report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
+        )
+
+        report_handler.handle(ctx)
+        prompt = archetype_match_prompts[0]
+        assert (
+            "mechanism_summary=cadenced monitoring probe; anchor authorized"
+            in prompt
+        ), f"rationale not threaded into archetype-match prompt: {prompt}"
+        # The fallback shape must not appear when rationale is present.
+        assert "mechanism_summary=surviving: h-001" not in prompt
 
     def test_no_analyze_payload_skips_mechanical_path(
         self, tmp_path, monkeypatch,
