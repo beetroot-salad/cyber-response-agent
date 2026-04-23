@@ -1,7 +1,13 @@
 # Investigation Language
 
-**Status:** Spec v2.10. v2.9 implemented; v2.10 changes pending implementation (rename + temporality + past-case + orphan gate).
+**Status:** Spec v2.11. v2.9 implemented; v2.10 and v2.11 changes pending implementation (shared pass).
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
+
+**v2.11 delta:** three orthogonal resolution axes named explicitly.
+- **Impact** promoted from a signature-knowledge hand-wave to a lead-level first-class record. `impact_predictions[]` on leads declare threshold predicates before evidence lands; ANALYZE grades observations against them and emits `impact_resolutions[]` on lead outcomes; `conclude.impact_verdict` and `conclude.impact_severity` are a second axis alongside `disposition`. The authorized-but-malifying class (authorized bulk read at 3σ above baseline; authorized admin delete of 10 000 rows) resolves here — not on authz. Signature-tier `impact_profile.md` deferred pending corpus measurements; per-signature impact knowledge lives in playbook prose until threshold drift is observed.
+- **Integrity** promoted from a paragraph under §Authorization to its own §Integrity section. Mechanism-hypothesis placement reaffirmed (`?adversary-controlled-*` peers with predictions on discriminating observables); integrity is evidential, not anchored, and not a contract. Discipline: `authorization_contract` on a hypothesis whose predicted edge has an acting-entity source (`session`, `identity`, `process`) expects a peer integrity hypothesis unless `integrity_waived: <rationale>` is present — closes the authorized-bulk-read-from-compromised-account shortcut. Forthcoming validator rule; guidance applies today.
+- **Hypothesis cardinality 0-N** made explicit. §Lean hypotheses renamed §Hypothesis cardinality and leanness, with a table mapping cardinality to intent (0 = enriching, 1 = mechanism pinned, 2-3 = observable-diverging peers, >3 = refine under a hierarchical parent). Mirrors PREDICT Shapes D/E/I/A/M in `soc-agent/agents/predict.md`.
+- **Terminology cleanup.** `vertex.trust_root: true` attribute dropped — unvalidated and unqueried; the signal already lives on `outcome.trust_root_reached: v-{id}` (ref-checked) and `conclude.termination.category: trust-root`. "Anchor" reserved for external authority surfaces (`anchor_id`, `anchor_kind`, `anchor_consultations[]`); the "anchor:" gloss on `attached_to_vertex` removed — the field name self-explains.
 
 **v2.10 delta:** motivated by `docs/experiments/invlang-post-predict-assessment.md`.
 - Rename `legitimacy_contract` → `authorization_contract` and `legitimacy_resolutions` → `authorization_resolutions`. The v2.8 name was a misnomer — 100% of corpus predicates are zero-trust ABAC authorization checks, not business-impact legitimacy reasoning. Business-impact legitimacy is parked at the signature knowledge-base layer (`impact_profile`), not the graph.
@@ -102,11 +108,30 @@ resolution depends on the question being asked. Pre-decomposing adds
 entities the investigation hasn't needed to reason about — graph
 clutter without discrimination value.
 
-### Lean hypotheses
+### Hypothesis cardinality and leanness
 
-A hypothesis captures the **immediate next discrimination question**,
-not a deep causal narrative. A lean hypothesis has 1–2 predictions:
-the minimum that distinguishes it from competing hypotheses.
+The loop authors **0 to N** hypotheses per PREDICT pass (realistically
+N ≤ 3). Cardinality is not a structural requirement — it's a
+discrimination commitment. Author a hypothesis when naming it makes a
+bias explicit or partitions lead selection; don't author one when the
+next move is pure enrichment.
+
+| N | When | What the hypothesis does |
+|---|---|---|
+| 0 | Alert under-specified; the next lead enriches before a fork is possible | — |
+| 1 | Mechanism pinned by alert fields; only authz, integrity, or impact open | Makes the open axis explicit; drives lead choice |
+| 2–3 | Mechanisms diverge on already-observable fields | Makes the discriminator explicit; partitions leads |
+| > 3 | Usually a refinement that belongs under a hierarchical parent | Shelve the parent; emit children as `h-{parent}-{ordinal}` |
+
+Cardinality is structural in the companion: the `hypothesize:` block
+is present iff ≥ 1 new hypotheses are authored this loop. Omission
+means "continue the existing frontier." See PREDICT Shapes D/E/I/A/M
+(`soc-agent/agents/predict.md`) for the authoring decision procedure.
+
+A hypothesis, when authored, captures the **immediate next
+discrimination question**, not a deep causal narrative. A lean
+hypothesis has 1–2 predictions: the minimum that distinguishes it
+from competing hypotheses.
 
 Pre-committing to a deep narrative fragments the hypothesis space
 across cases that should match the same retrieval pattern, creates
@@ -161,17 +186,166 @@ an authorization question:
   is a topology question; write it as its own hypothesis attached to
   the hypothetical future edge.
 
-**Contracts answer policy, not integrity.** A contract asks "is this
-edge allowed by the relevant authority?" It does not ask "was this
-edge actually executed as it appears?" Session hijack, token theft,
-MFA bypass, process-hollowing, tool-masquerade — all integrity
-questions — are mechanism-level discriminations, not contracts. By
-construction, if AuthN was bypassed, the IAM anchor still says
-"authorized" because the session looks legitimate to it. Integrity is
-resolved by behavioral observation (impossible travel, device
-fingerprint, anomalous timing), not by anchor lookup. Contracts
-therefore bottom out at the authentication edge; below that is
-mechanism enumeration.
+**Contracts answer policy, not integrity or impact.** A contract asks
+"is this edge allowed by the relevant authority?" It does not ask
+"was this edge actually executed by the claimed actor?" (integrity —
+see §Integrity as mechanism enumeration) or "does this edge's effect
+matter enough to escalate?" (impact — see §Impact as lead-level
+prediction). The three axes are orthogonal and resolve through
+different machinery.
+
+### Integrity as mechanism enumeration
+
+Integrity — *is the acting entity what it claims to be?* — is a
+separate axis from authorization. Session hijack, token theft, MFA
+bypass, process hollowing, tool masquerade are integrity questions:
+if the impostor is presenting valid credentials, the IAM anchor will
+answer "authorized" about the claimed identity. That verdict is
+correct under the authz question's scope; it does not address whether
+the session is actually the claimed session.
+
+Integrity is **evidential, not anchored.** No single authority
+answers "is this session compromised?" — the answer is composed from
+behavioral observables: application-layer correlation, query-shape
+template match, impossible travel, device-fingerprint mismatch,
+anomalous timing against baseline, presence or absence of a
+correlating upstream request.
+
+**Representation: mechanism-hypothesis peers, not contracts.** An
+integrity concern produces a peer hypothesis
+(`?adversary-controlled-<entity>`) alongside the routine-mechanism
+hypothesis, with predictions on the discriminating observables. The
+two peers share the same authz contract (both evaluate to
+`authorized` against IAM) but differ on the predictions that test the
+premise. Discrimination happens at ANALYZE via normal weight-update
+machinery — not through a contract verdict. Contract shape doesn't
+fit integrity: the question is evidential rather than categorical, no
+single anchor owns the answer, and the question is the same across
+peer hypotheses (not mechanism-conditional the way authz is).
+
+**Acting-entity discipline.** When an `authorization_contract` is
+declared on a hypothesis whose predicted edge has an acting-entity
+source (`session`, `identity`, `process`), a peer integrity
+mechanism is expected unless the hypothesis carries an explicit
+`integrity_waived: <rationale>` note. Closes the failure mode where
+authz clears, impact clears, and the integrity premise was never
+tested — the authorized-bulk-read from a compromised service
+account. Forthcoming validator rule; guidance applies today.
+
+Integrity bottoms out at the authentication edge: below the
+session → identity authz layer, further integrity questions require
+out-of-band evidence the investigation typically cannot access (TPM
+attestation, endpoint EDR, identity-provider forensics). Reaching
+that boundary is a `termination.category: severity-ceiling`
+condition, not a trust-root.
+
+### Impact as lead-level prediction
+
+Impact — *does this edge's effect matter enough to escalate?* — is a
+third axis, orthogonal to authorization and integrity. An
+authorized, uncompromised action can still be escalation-worthy if
+its consequence exceeds a threshold (authorized backup service
+uploads 180 GB when baseline is 60 GB; authorized admin deletes
+10 000 rows from a production table). Conversely, an unauthorized
+attempt that achieves no effect stays low-impact. Disposition on the
+authz/integrity axis does not determine impact on the consequence
+axis.
+
+Impact is assessed at **ANALYZE**, graded against **pre-registered
+predicates** authored at **PREDICT** (lead-level). The
+commit-before-evidence property that makes hypothesis predictions
+reliable transfers to impact verdicts: the threshold is written into
+the record before the lead runs, so ANALYZE cannot retroactively
+shift the bar after seeing the observation.
+
+**Lead-level `impact_predictions[]`.** A PREDICT-scaffolded lead that
+measures impact-relevant observables carries one or more entries:
+
+```yaml
+lead:
+  impact_predictions:
+    - id: ip1                           # ^ip\d+$, unique within lead
+      dimension: confidentiality | integrity | availability | scope
+      claim: "<threshold predicate — e.g., session_total_bytes within 30d baseline mean ± 2σ>"
+      on_match: within                  # verdict emitted by ANALYZE when observation matches predicate
+      on_mismatch: exceeds              # verdict emitted when observation violates predicate
+      on_indeterminate: indeterminate   # verdict emitted when baseline/authority unavailable or scope-mismatched
+      escalation_on: exceeds | indeterminate | none  # which verdicts force escalation at CONCLUDE
+```
+
+One observable per claim (rule #26 applied to impact): split compound
+AND/OR predicates into multiple `ip*` entries so partial evidence can
+pivot each side independently.
+
+**Outcome-level `impact_resolutions[]`.** ANALYZE emits one entry per
+fulfilled `ip*`:
+
+```yaml
+gather[].outcome.impact_resolutions:
+  - prediction_ref: ip1                 # back-reference to the lead's impact_predictions[] entry
+    dimension: confidentiality
+    observed_value: "180GB (3σ above 30d baseline mean 60GB, σ 40GB)"
+    verdict: within | exceeds | indeterminate
+    matched_predicate: "<verbatim predicate from ip1>"
+    grounded_by_lead: l-{id}
+    grounding_kind: telemetry-baseline | business-owner-attestation | dlp-policy
+                                        # past-case NOT admissible — category reasoning, not instance reasoning
+    anchor_id: <string>                 # the specific baseline, policy record, or attestation consulted
+    anchor_kind: <string>               # vendor surface (volume-baseline, sensitive-data-registry, ...)
+    authority_for_question: full | partial
+    as_of: <iso>
+    effective_window:                   # optional; baseline-snapshot window or policy validity period
+      start: <iso>
+      end: <iso>
+    conditioning_context: []            # optional; then-true state the verdict rests on
+    reasoning: "<string>"
+```
+
+Rule #14 (partial authority caps weight) applies — a baseline that
+covers magnitude but not intent is `partial` and cannot alone force
+high-severity escalation.
+
+**Closure at CONCLUDE.** Every `impact_predictions[]` entry whose
+resolving lead ran must either have a fulfilling
+`impact_resolutions[]` entry OR appear in
+`conclude.deferred_impact_predictions[]` with rationale. Mirrors
+rule #26's orphan gate for authorization contracts.
+
+**Two-axis CONCLUDE.** The `conclude:` block carries both axes:
+
+```yaml
+conclude:
+  disposition: benign | true_positive | unclear     # authz/mechanism axis
+  impact_verdict: none | within | exceeds | indeterminate   # impact axis
+  impact_severity: null | low | moderate | high     # present when impact_verdict ∈ {exceeds, indeterminate}
+  confidence: high | medium | low
+  ...
+```
+
+The two combine orthogonally:
+- `(benign, within)` — routine activity, no escalation.
+- `(benign, exceeds)` — **authorized but malifying.** Mechanism
+  confirmed benign; consequence exceeds threshold. Requires analyst
+  review on impact even though the mechanism cleared.
+- `(true_positive, within)` — confirmed threat whose consequence
+  stayed bounded (failed probe, denied access attempt).
+- `(true_positive, exceeds)` — confirmed threat with realized
+  consequence. Highest-severity class.
+- `(unclear, *)` — mechanism indeterminate; impact verdict still
+  recorded for handoff.
+
+Escalation policy in the plugin configuration may drive on either
+axis independently.
+
+**Signature-tier deferred.** A per-signature `impact_profile.md`
+declaring static class-level impact predicates (a 2σ threshold for
+`rule-dlp-4421` regardless of instance) would strengthen the
+commit-before-evidence property further but is not required in
+v2.11. Lead-level authoring is the minimal honest starting point;
+per-signature knowledge lives in playbook prose until corpus
+measurements show PREDICT threshold drift. Promotion to a
+signature-tier record is additive — `impact_predictions[].inherited_from: sig-iq1` back-reference — and does
+not restructure the lead-level shape.
 
 ### Temporality of authorization
 
@@ -297,7 +471,6 @@ vertex:
   classification: <string>         # from seed list or {type}:{slug} provisional
   identifier: <string>             # human-readable primary key for this entity
   attributes: {}                   # type-specific key-value pairs; omit if empty
-  trust_root: true                 # omit when false
   placeholder: true                # omit when false — unknown endpoint (§Conventions)
   concerns: []                     # reliability, scope, or interpretation traps; omit if empty
   citations: []                    # source references; omit if single or implicit
@@ -308,9 +481,13 @@ vertex:
 `v-001-01`, `v-001-02`). This encodes containment in the ID itself,
 enabling prefix queries without edge traversal.
 
-**`trust_root: true`** marks where backward traversal halts because
-further upstream requires evidence inaccessible to this agent. It is
-not an authorization claim.
+**Trust-root signaling lives on lead outcomes and CONCLUDE, not
+vertices.** When a lead reaches a vertex with no accessible upstream,
+it records the vertex id in `outcome.trust_root_reached: v-{id}`; the
+terminating companion sets `conclude.termination.category:
+trust-root`. The investigation does not write a `trust_root: true`
+flag onto the vertex itself — the signal is about the frontier
+collapsing, not about the vertex having an intrinsic property.
 
 **Placeholder vertices.** When a lifecycle edge requires two
 endpoints but one is unobservable, write a placeholder vertex with
@@ -400,7 +577,7 @@ hypothesis:
   id: h-{nonce} | h-{parent}-{nonce}   # hierarchical for refinement chains
   name: "?descriptive-slug"
 
-  attached_to_vertex: v-{id}            # anchor: confirmed vertex this extension grafts onto
+  attached_to_vertex: v-{id}            # confirmed vertex this hypothesis's one-hop extension grafts onto
 
   proposed_edge:                        # the one-hop upstream extension
     relation: <string>
@@ -502,6 +679,18 @@ gather:
           read_as: "<interpretation>"
           advance_to: "<lead-name | CONCLUDE | HYPOTHESIZE>"
 
+      impact_predictions:               # optional — pre-registered threshold predicates
+                                        # for leads that measure impact-relevant observables.
+                                        # See §Impact as lead-level prediction.
+                                        # IDs local to the lead (ip1, ip2, …).
+        - id: ip1
+          dimension: confidentiality | integrity | availability | scope
+          claim: "<threshold predicate>"
+          on_match: within
+          on_mismatch: exceeds
+          on_indeterminate: indeterminate
+          escalation_on: exceeds | indeterminate | none
+
       query_details:
         system: <string>
         template: <string>
@@ -537,6 +726,26 @@ gather:
               end: <iso>
             conditioning_context: []    # optional prose list of then-true conditions the verdict rests on
             concerns: []                # optional; snapshot freshness, coverage caveats
+
+        impact_resolutions:             # optional — emitted by ANALYZE against the lead's
+                                        # pre-registered impact_predictions[]. See §Impact as
+                                        # lead-level prediction.
+          - prediction_ref: ip1
+            dimension: confidentiality
+            observed_value: <string>
+            verdict: within | exceeds | indeterminate
+            matched_predicate: "<verbatim predicate from ip*>"
+            grounded_by_lead: l-{id}
+            grounding_kind: telemetry-baseline | business-owner-attestation | dlp-policy
+            anchor_id: <string>
+            anchor_kind: <string>
+            authority_for_question: full | partial
+            as_of: <iso>
+            effective_window:           # optional
+              start: <iso>
+              end: <iso>
+            conditioning_context: []    # optional
+            reasoning: <string>
 
         trust_root_reached: v-{id}      # omit when null
         failure_reason: <string>        # omit unless errored or degraded
@@ -699,13 +908,18 @@ conclude:
   termination:
     category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
     rationale: <string>
-  disposition: benign | true_positive | unclear
+  disposition: benign | true_positive | unclear              # authz/mechanism axis
+  impact_verdict: none | within | exceeds | indeterminate    # impact axis (§Impact)
+  impact_severity: null | low | moderate | high              # present when impact_verdict ∈ {exceeds, indeterminate}
   confidence: high | medium | low
   matched_archetype: <name> | null
   surviving_hypotheses: [h-001, h-002]   # IDs of declared hypotheses whose final weight is not `--`; required by rule 24
   deferred_authorizations:               # required when any declared authorization_contract has no fulfilling resolution; see rule 26
     - contract_ref: h-{id}.ac{n}
       rationale: "<why this contract was not resolved>"
+  deferred_impact_predictions:           # required when any declared impact_predictions[] entry has no fulfilling resolution; impact-axis analog of rule 26
+    - prediction_ref: l-{id}.ip{n}
+      rationale: "<why this impact prediction was not resolved>"
   ceiling_test:                          # required when category = severity-ceiling
     kind: out-of-band-human-contact | tool-unavailable | legal-authorization | other
     subject: <string>
@@ -729,6 +943,26 @@ this list (validator rule 24). Empty list is valid — it means every
 hypothesis reached `--`. For `disposition: benign` the list is typically
 empty; for escalation shapes it names the hypotheses that kept the
 investigation from closing and should be included in the analyst handoff.
+
+**`impact_verdict` and `impact_severity`.** The impact axis is
+orthogonal to `disposition`. `impact_verdict: none` means the
+investigation declared no impact predicates (low-impact signature,
+alert class inherently bounded). `within` / `exceeds` / `indeterminate`
+are the roll-up over fulfilled `impact_resolutions[]` — `exceeds` if
+any fulfilling resolution's verdict is `exceeds`, `indeterminate` if
+any is `indeterminate` and none `exceeds`, `within` when all cleared.
+`impact_severity` is null unless `impact_verdict ∈ {exceeds,
+indeterminate}`; severity reflects the maximum across fulfilling
+resolutions, capped by `authority_for_question: partial` per rule #14.
+`(benign, exceeds)` is the authorized-but-malifying class — requires
+analyst review on consequence even though the mechanism cleared.
+
+**`deferred_impact_predictions`.** Impact-axis analog of
+`deferred_authorizations`. Lists `impact_predictions[]` entries that
+were declared but not resolved by any lead (tool unavailable, baseline
+scope-mismatch, escalation forced before the measurement landed).
+Rejected by the impact closure rule (forthcoming validator rule)
+when absent but a declared prediction has no fulfilling resolution.
 
 **Termination categories.**
 - `trust-root` — confirmed graph reached a vertex with no accessible
