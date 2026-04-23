@@ -69,10 +69,8 @@ def make_ctx(
         current_phase=Phase.GATHER,
         outputs={
             Phase.PREDICT: {
-                "mode": "fork",
                 "selected_lead": selected_lead,
                 "loop_n": loop_n,
-                "block_type": "hypothesize",
             },
         },
     )

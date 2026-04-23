@@ -110,15 +110,13 @@ hypothesize:
 ```
 
 ```yaml
-mode: fork
 selected_lead: authentication-history
-loop_n: 1
 ```
 """).strip()
 
 
 _NO_FORK_RESPONSE = textwrap.dedent("""
-## PREDICT (loop 1) — no fork yet
+## PREDICT (loop 1) — no new hypotheses
 
 **Selected lead:** source-classification — classifies srcip against
 ip-ranges.md and approved-monitoring-sources anchor; discriminates
@@ -129,9 +127,7 @@ sanctioned-automation vs unregistered-internal vs external-origin.
   not be in the cached copy; re-fetch if the classification misses.
 
 ```yaml
-mode: no-fork
 selected_lead: source-classification
-loop_n: 1
 ```
 """).strip()
 
@@ -154,9 +150,7 @@ gather:
 ```
 
 ```yaml
-mode: no-fork
 selected_lead: source-classification
-loop_n: 1
 ```
 """).strip()
 
@@ -442,7 +436,7 @@ class TestDetectBlockType:
         assert predict_handler._detect_block_type(_ERROR_RESPONSE) == "error"
 
     def test_returns_unknown_when_no_yaml_key_matches(self):
-        raw = "```yaml\nmode: fork\nselected_lead: foo\nloop_n: 1\n```"
+        raw = "```yaml\nselected_lead: foo\n```"
         # Only a trailer, no invlang block → unknown.
         assert predict_handler._detect_block_type(raw) == "unknown"
 
@@ -457,66 +451,68 @@ class TestDetectBlockType:
 
 
 class TestValidateTrailer:
-    def test_fork_mode_hypothesize_block_ok(self):
-        trailer = {"mode": "fork", "selected_lead": "foo", "loop_n": 1}
-        predict_handler._validate_trailer(
-            trailer, block_type="hypothesize", expected_loop_n=1,
-        )
+    """Post-cardinality-relaxation contract: trailer carries selected_lead
+    (required) + composite_secondary/override_data_source/lead_hint (all
+    optional). No mode, no block_type, no loop_n.
+    """
 
-    def test_no_fork_mode_no_block_ok(self):
-        """Valid no-fork shape — trailer with no invlang block (block_type=unknown)."""
-        trailer = {"mode": "no-fork", "selected_lead": "foo", "loop_n": 2}
-        predict_handler._validate_trailer(
-            trailer, block_type="unknown", expected_loop_n=2,
-        )
+    def test_minimal_trailer_ok(self):
+        trailer = {"selected_lead": "authentication-history"}
+        out = predict_handler._validate_trailer(trailer)
+        assert out["selected_lead"] == "authentication-history"
 
-    def test_no_fork_mode_with_gather_block_raises(self):
-        """A `gather:` block under no-fork is a contract violation — the
-        validator rejects it here (the handler's earlier short-circuit
-        catches it before validation in the live path, but the trailer
-        check is the backstop)."""
-        with pytest.raises(OrchestrationError, match="requires block_type"):
-            predict_handler._validate_trailer(
-                {"mode": "no-fork", "selected_lead": "x", "loop_n": 1},
-                block_type="gather", expected_loop_n=1,
-            )
+    def test_trailer_with_composite_secondary_ok(self):
+        trailer = {
+            "selected_lead": "correlated-falco-events",
+            "composite_secondary": ["source-reputation"],
+        }
+        predict_handler._validate_trailer(trailer)
 
-    def test_invalid_mode_raises(self):
-        with pytest.raises(OrchestrationError, match="invalid trailer mode"):
-            predict_handler._validate_trailer(
-                {"mode": "other", "selected_lead": "x", "loop_n": 1},
-                block_type="hypothesize", expected_loop_n=1,
-            )
-
-    def test_fork_mode_with_no_block_raises(self):
-        """fork mode requires a hypothesize: block — trailer-only is a contract
-        violation."""
-        with pytest.raises(OrchestrationError, match="requires block_type"):
-            predict_handler._validate_trailer(
-                {"mode": "fork", "selected_lead": "x", "loop_n": 1},
-                block_type="unknown", expected_loop_n=1,
-            )
+    def test_trailer_with_override_and_hint_ok(self):
+        trailer = {
+            "selected_lead": "foo",
+            "override_data_source": "host_query",
+            "lead_hint": "wazuh template targets the wrong index",
+        }
+        predict_handler._validate_trailer(trailer)
 
     def test_missing_selected_lead_raises(self):
         with pytest.raises(OrchestrationError, match="selected_lead"):
+            predict_handler._validate_trailer({})
+
+    def test_empty_selected_lead_raises(self):
+        with pytest.raises(OrchestrationError, match="selected_lead"):
+            predict_handler._validate_trailer({"selected_lead": "   "})
+
+    def test_composite_secondary_not_list_raises(self):
+        with pytest.raises(OrchestrationError, match="composite_secondary"):
             predict_handler._validate_trailer(
-                {"mode": "fork", "selected_lead": "", "loop_n": 1},
-                block_type="hypothesize", expected_loop_n=1,
+                {"selected_lead": "x", "composite_secondary": "source-reputation"}
             )
 
-    def test_non_int_loop_n_raises(self):
-        with pytest.raises(OrchestrationError, match="loop_n must be int"):
+    def test_composite_secondary_empty_string_raises(self):
+        with pytest.raises(OrchestrationError, match="composite_secondary"):
             predict_handler._validate_trailer(
-                {"mode": "fork", "selected_lead": "x", "loop_n": "1"},
-                block_type="hypothesize", expected_loop_n=1,
+                {"selected_lead": "x", "composite_secondary": ["source-reputation", ""]}
             )
 
-    def test_loop_n_mismatch_raises(self):
-        with pytest.raises(OrchestrationError, match="does not match"):
+    def test_override_data_source_empty_raises(self):
+        with pytest.raises(OrchestrationError, match="override_data_source"):
             predict_handler._validate_trailer(
-                {"mode": "fork", "selected_lead": "x", "loop_n": 5},
-                block_type="hypothesize", expected_loop_n=1,
+                {"selected_lead": "x", "override_data_source": ""}
             )
+
+    def test_lead_hint_empty_raises(self):
+        with pytest.raises(OrchestrationError, match="lead_hint"):
+            predict_handler._validate_trailer(
+                {"selected_lead": "x", "lead_hint": "  "}
+            )
+
+    def test_ad_hoc_lead_slug_is_legal(self):
+        # Ad-hoc leads — slugs that have no catalog entry — are legal.
+        # The validator is string-nonempty only; catalog membership is not
+        # checked here. gather-composite's ad-hoc path handles execution.
+        predict_handler._validate_trailer({"selected_lead": "made-up-ad-hoc-slug"})
 
 
 # ---------------------------------------------------------------------------
@@ -535,14 +531,11 @@ class TestStripTerminalRouting:
             ```
 
             ```yaml
-            mode: fork
             selected_lead: x
-            loop_n: 1
             ```
             """).strip()
         stripped = predict_handler._strip_terminal_routing(raw)
         assert "hypothesize:" in stripped
-        assert "mode: fork" not in stripped
         assert "selected_lead: x" not in stripped
 
     def test_preserves_preceding_fences(self):
@@ -559,15 +552,13 @@ class TestStripTerminalRouting:
             ```
 
             ```yaml
-            mode: fork
             selected_lead: x
-            loop_n: 1
             ```
             """).strip()
         stripped = predict_handler._strip_terminal_routing(raw)
         assert "prologue:" in stripped
         assert "hypothesize:" in stripped
-        assert "mode: fork" not in stripped
+        assert "selected_lead: x" not in stripped
 
 
 # ---------------------------------------------------------------------------
@@ -576,7 +567,9 @@ class TestStripTerminalRouting:
 
 
 class TestHandleHappyPaths:
-    def test_fork_mode_routes_to_gather(self, tmp_path, monkeypatch):
+    def test_hypotheses_block_routes_to_gather(self, tmp_path, monkeypatch):
+        """≥1 new hypotheses this loop → invlang block present. Payload carries
+        selected_lead + handler-computed loop_n. No mode/block_type fields."""
         ctx = make_ctx(tmp_path)
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
                             stub_invoke([], [_FORK_RESPONSE]))
@@ -584,14 +577,16 @@ class TestHandleHappyPaths:
                             stub_validator([[]]))
         result = predict_handler.handle(ctx)
         assert result.next_phase == Phase.GATHER
-        assert result.payload["mode"] == "fork"
         assert result.payload["selected_lead"] == "authentication-history"
         assert result.payload["loop_n"] == 1
-        assert result.payload["block_type"] == "hypothesize"
+        assert result.payload["composite_secondary"] == []
+        # Retired fields must not appear in the payload.
+        assert "mode" not in result.payload
+        assert "block_type" not in result.payload
 
-    def test_no_fork_mode_routes_to_gather(self, tmp_path, monkeypatch):
-        """No-fork emits no invlang block — narrative + trailer only.
-        Nothing is appended to investigation.md; routing still flows to GATHER."""
+    def test_zero_new_hypotheses_routes_to_gather(self, tmp_path, monkeypatch):
+        """Continue-stable-fork path: narrative-only emission (no invlang
+        block). Nothing appended to investigation.md; routing flows to GATHER."""
         ctx = make_ctx(tmp_path, existing_investigation="## CONTEXTUALIZE\n\nexisting.\n")
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
                             stub_invoke([], [_NO_FORK_RESPONSE]))
@@ -600,13 +595,33 @@ class TestHandleHappyPaths:
                             stub_validator([[]]))
         result = predict_handler.handle(ctx)
         assert result.next_phase == Phase.GATHER
-        assert result.payload["mode"] == "no-fork"
         assert result.payload["selected_lead"] == "source-classification"
-        assert result.payload["block_type"] == "unknown"
+        assert result.payload["loop_n"] == 1
+        assert result.payload["composite_secondary"] == []
 
-        # investigation.md unchanged — no-fork writes nothing.
+        # investigation.md unchanged — zero-hypotheses writes nothing.
         inv = (ctx.run_dir / "investigation.md").read_text()
         assert inv == "## CONTEXTUALIZE\n\nexisting.\n"
+
+    def test_composite_secondary_passes_through_to_payload(self, tmp_path, monkeypatch):
+        """PREDICT can prescribe multiple leads via composite_secondary.
+        Handler passes through verbatim to GATHER."""
+        response_with_secondary = textwrap.dedent("""
+            **Selected lead:** correlated-falco-events
+
+            ```yaml
+            selected_lead: correlated-falco-events
+            composite_secondary: [source-reputation]
+            ```
+        """).strip()
+        ctx = make_ctx(tmp_path)
+        monkeypatch.setattr(predict_handler, "_invoke_subagent",
+                            stub_invoke([], [response_with_secondary]))
+        monkeypatch.setattr(predict_handler, "_validate_companion_proposed",
+                            stub_validator([[]]))
+        result = predict_handler.handle(ctx)
+        assert result.payload["selected_lead"] == "correlated-falco-events"
+        assert result.payload["composite_secondary"] == ["source-reputation"]
 
     def test_prose_only_stdout_triggers_summary_not_yaml_remediation(self, tmp_path, monkeypatch):
         """Subagent emits narrative prose with no YAML fences at all (typical
@@ -632,15 +647,14 @@ class TestHandleHappyPaths:
         directive = predict_handler._FAILURE_REMEDIATIONS["stdout_summary_not_yaml"]
         assert directive in captured[1]
         assert directive not in captured[0]
-        # Final routing is the fork shape (the retry emitted _FORK_RESPONSE).
+        # Final routing is the hypotheses-block shape.
         assert result.next_phase == Phase.GATHER
-        assert result.payload["mode"] == "fork"
-        assert result.payload["block_type"] == "hypothesize"
+        assert result.payload["selected_lead"] == "authentication-history"
 
     def test_gather_block_triggers_structured_remediation_retry(self, tmp_path, monkeypatch):
         """When the subagent emits a `gather:` block, the handler retries with
         the registry-loaded `gather_block_in_predict` directive. On the
-        second attempt the subagent emits the correct no-fork shape."""
+        second attempt the subagent emits the correct zero-hypotheses shape."""
         captured: list[str] = []
         monkeypatch.setattr(
             predict_handler, "_invoke_subagent",
@@ -659,10 +673,9 @@ class TestHandleHappyPaths:
         assert "resume_from_checkpoint=true" in captured[1]
         # First-attempt prompt has no remediation directive.
         assert directive not in captured[0]
-        # Final routing is the no-fork shape.
+        # Final routing — zero-hypotheses shape, successfully parsed.
         assert result.next_phase == Phase.GATHER
-        assert result.payload["mode"] == "no-fork"
-        assert result.payload["block_type"] == "unknown"
+        assert result.payload["selected_lead"] == "source-classification"
 
     def test_appends_sections_without_trailer(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path, existing_investigation="## CONTEXTUALIZE\n\nexisting.\n")
@@ -676,8 +689,28 @@ class TestHandleHappyPaths:
         assert "## PREDICT (loop 1)" in written
         assert "hypothesize:" in written
         # Terminal trailer must not land in investigation.md.
-        assert "mode: fork" not in written
-        assert "selected_lead: authentication-history\nloop_n: 1" not in written
+        assert "selected_lead: authentication-history" not in written
+
+    def test_unresolved_prescribed_set_threaded_as_remediation_note(
+        self, tmp_path, monkeypatch,
+    ):
+        """ANALYZE's unresolved_prescribed_set feeds PREDICT's first-attempt
+        remediation_notes — guidance for the subagent to re-prescribe dropped
+        leads."""
+        ctx = make_ctx(tmp_path)
+        ctx.outputs[Phase.ANALYZE] = {
+            "route": "continue",
+            "unresolved_prescribed_set": ["source-reputation"],
+        }
+        captured: list[str] = []
+        monkeypatch.setattr(predict_handler, "_invoke_subagent",
+                            stub_invoke(captured, [_FORK_RESPONSE]))
+        monkeypatch.setattr(predict_handler, "_validate_companion_proposed",
+                            stub_validator([[]]))
+        predict_handler.handle(ctx)
+        # First-attempt prompt carries the unresolved-prescribed directive.
+        assert "UNRESOLVED PRESCRIBED LEADS" in captured[0]
+        assert "source-reputation" in captured[0]
 
 
 # ---------------------------------------------------------------------------
@@ -693,31 +726,34 @@ class TestHandleErrorPaths:
         with pytest.raises(OrchestrationError, match="error block"):
             predict_handler.handle(ctx)
 
-    def test_no_invlang_block_raises(self, tmp_path, monkeypatch):
-        ctx = make_ctx(tmp_path)
+    def test_only_trailer_no_invlang_block_ok(self, tmp_path, monkeypatch):
+        """Post-cardinality-relaxation: a trailer-only response is legal —
+        represents "continue stable fork, pick next lead, no new hypotheses."
+        Not an error; routes to GATHER."""
+        ctx = make_ctx(tmp_path, existing_investigation="## CONTEXTUALIZE\n\nexisting.\n")
         only_trailer = textwrap.dedent("""
             ```yaml
-            mode: fork
             selected_lead: x
-            loop_n: 1
             ```
             """).strip()
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
                             stub_invoke([], [only_trailer]))
-        # mode=fork without an invlang block is a contract mismatch caught
-        # by _validate_trailer — "requires block_type 'hypothesize', got
-        # 'unknown'".
-        with pytest.raises(OrchestrationError, match="requires block_type"):
-            predict_handler.handle(ctx)
+        result = predict_handler.handle(ctx)
+        assert result.next_phase == Phase.GATHER
+        assert result.payload["selected_lead"] == "x"
 
-    def test_trailer_loop_mismatch_raises(self, tmp_path, monkeypatch):
+    def test_trailer_missing_selected_lead_raises(self, tmp_path, monkeypatch):
+        """Without selected_lead, PREDICT has nothing to hand to GATHER —
+        halting is ANALYZE's responsibility, not PREDICT's."""
         ctx = make_ctx(tmp_path)
-        mismatched = _FORK_RESPONSE.replace("loop_n: 1", "loop_n: 7")
+        bad = textwrap.dedent("""
+            ```yaml
+            composite_secondary: [a]
+            ```
+            """).strip()
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
-                            stub_invoke([], [mismatched]))
-        monkeypatch.setattr(predict_handler, "_validate_companion_proposed",
-                            stub_validator([[]]))
-        with pytest.raises(OrchestrationError, match="does not match"):
+                            stub_invoke([], [bad]))
+        with pytest.raises(OrchestrationError, match="selected_lead"):
             predict_handler.handle(ctx)
 
 
@@ -786,11 +822,12 @@ class TestCheckpointRecovery:
     --print` captured nothing. Handler reads the checkpoint and synthesizes the
     response — no retry."""
 
-    def test_no_fork_checkpoint_synthesized_without_retry(self, tmp_path, monkeypatch):
+    def test_zero_hypotheses_checkpoint_synthesized_without_retry(self, tmp_path, monkeypatch):
+        """Checkpoint with selected_lead but no hypotheses list → synthesized
+        as a zero-new-hypotheses continuation. No invlang block, no retry."""
         ctx = make_ctx(tmp_path)
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "complete",
-            "mode": "no-fork",
             "selected_lead": "shell-context",
         })
         captured: list[str] = []
@@ -800,18 +837,15 @@ class TestCheckpointRecovery:
         result = predict_handler.handle(ctx)
         # No retry — recovery short-circuited the rerun.
         assert len(captured) == 1
-        assert result.payload["mode"] == "no-fork"
         assert result.payload["selected_lead"] == "shell-context"
-        assert result.payload["block_type"] == "unknown"
-        # No-fork writes nothing to investigation.md.
+        # Zero-hypotheses writes nothing to investigation.md.
         assert not (ctx.run_dir / "investigation.md").exists() or \
                "PREDICT" not in (ctx.run_dir / "investigation.md").read_text()
 
-    def test_fork_checkpoint_synthesized_and_appended(self, tmp_path, monkeypatch):
+    def test_hypotheses_checkpoint_synthesized_and_appended(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path, existing_investigation="## CONTEXTUALIZE\n\nexisting.\n")
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "complete",
-            "mode": "fork",
             "hypotheses": [
                 {
                     "id": "h-001",
@@ -844,9 +878,7 @@ class TestCheckpointRecovery:
                             stub_validator([[]]))
         result = predict_handler.handle(ctx)
         assert len(captured) == 1  # no retry
-        assert result.payload["mode"] == "fork"
         assert result.payload["selected_lead"] == "authentication-history"
-        assert result.payload["block_type"] == "hypothesize"
         written = (ctx.run_dir / "investigation.md").read_text()
         assert "existing." in written
         assert "## PREDICT (loop 1)" in written
@@ -859,7 +891,7 @@ class TestCheckpointRecovery:
         ctx = make_ctx(tmp_path)
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "drafting",  # ← not complete
-            "mode": "fork",
+            "selected_lead": "x",
         })
         captured: list[str] = []
         monkeypatch.setattr(
@@ -873,7 +905,7 @@ class TestCheckpointRecovery:
         assert len(captured) == 2
         directive = predict_handler._FAILURE_REMEDIATIONS["stdout_summary_not_yaml"]
         assert directive in captured[1]
-        assert result.payload["mode"] == "fork"
+        assert result.payload["selected_lead"] == "authentication-history"
 
     def test_no_checkpoint_file_falls_through_to_retry(self, tmp_path, monkeypatch):
         """When the subagent emits empty stdout AND wrote no checkpoint at all,
@@ -901,7 +933,6 @@ class TestCheckpointRecovery:
         ctx = make_ctx(tmp_path)
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "complete",
-            "mode": "fork",
             "hypotheses": [{"id": "h-001", "name": "?x"}],
             "selected_lead": "authentication-history",
         })
