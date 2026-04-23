@@ -1,39 +1,53 @@
 """ANALYZE phase handler.
 
-Replaces the ANALYZE section of `skills/investigate/SKILL.md` with a Python
-orchestration that dispatches the `analyze` subagent and parses its terminal
-routing YAML to decide the next phase.
+Interprets gather observations against the scaffolding PREDICT set up
+(hypotheses, predictions, authz contracts) and decides whether the
+investigation is terminal. Does NOT decide what to investigate next — that is
+PREDICT's job. ANALYZE's routing decision is binary: `continue` → PREDICT |
+`halt` → REPORT.
 
 The ANALYZE subagent (agents/analyze.md, model=sonnet) emits three sections:
     1. `## ANALYZE (loop {n})` — human-readable assessment
     2. `## Self-report`        — data wishes, uncertain claims, anomalies
     3. terminal fenced `yaml`  — machine-parsed routing decision
 
-This handler:
+Terminal YAML trailer:
+    route: continue | halt
+    # halt path:
+    termination_category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
+    disposition: benign | false_positive | true_positive | escalated
+    confidence: high | medium | low
+    matched_archetype: <name> | null
+    surviving_hypotheses: [...]
+    # continue path:
+    unresolved_prescribed_set: [...]  # optional; prescribed leads that gather
+                                      # didn't resolve. Handler back-fills from
+                                      # GATHER payload when the subagent omits.
+
+Handler responsibilities:
     - computes `loop_n` from ctx.history (count of PREDICT entries)
     - invokes the subagent via the shared `_subagent.invoke_subagent` wrapper
     - extracts the terminal routing YAML via `extract_terminal_yaml`
-    - validates the routing payload (next_action, disposition, etc.)
-    - appends the two markdown sections (stripping the terminal YAML) to
-      investigation.md, pre-validated via `validate_companion()` as a library call
+    - validates the routing payload shape
+    - back-fills `unresolved_prescribed_set` from `ctx.outputs[Phase.GATHER]`
+      when the subagent didn't compute it
+    - strips only the *last* YAML fence (the terminal routing trailer) before
+      appending; non-terminal YAML survives. This is future-proofing for when
+      the subagent starts emitting `resolutions:` sub-blocks — the invlang
+      infrastructure for three-phase co-ownership isn't landed yet, but the
+      handler should not drop signal when it does.
+    - appends the two markdown sections to investigation.md, pre-validated via
+      `validate_companion()` as a library call
     - returns PhaseResult(next_phase, payload)
 
-It does NOT compose the invlang `gather[].resolutions[]` block — that belongs
-to a future GATHER-cutover handler where observations + resolutions are
-naturally composed together. Until then, resolutions are written by whatever
-drives the loop in the skill-based flow.
-
 Input (Context):
-    ctx.run_dir, ctx.signature_id, ctx.history, ctx.alert
+    ctx.run_dir, ctx.signature_id, ctx.history, ctx.alert,
+    ctx.outputs[Phase.GATHER] (carries prescribed_leads + executed_leads)
 
 Output:
     PhaseResult
-      - next_action=REPORT → Phase.REPORT
-      - next_action=PREDICT  → Phase.PREDICT
-
-Files written:
-    {run_dir}/investigation.md — appends `## ANALYZE (loop N)` + `## Self-report`
-    markdown sections (no invlang YAML).
+      - route=halt      → Phase.REPORT
+      - route=continue  → Phase.PREDICT
 """
 
 from __future__ import annotations
@@ -65,7 +79,13 @@ SUBAGENT_TIMEOUT_SECONDS = int(
     os.environ.get("SOC_AGENT_ANALYZE_TIMEOUT_SECONDS", "300")
 )
 
-_VALID_NEXT_ACTIONS = {"REPORT", "PREDICT"}
+_VALID_ROUTES = {"continue", "halt"}
+_VALID_TERMINATION_CATEGORIES = {
+    "trust-root",
+    "adversarial-refuted",
+    "severity-ceiling",
+    "exhaustion-escalation",
+}
 _VALID_DISPOSITIONS = {"benign", "false_positive", "true_positive", "escalated"}
 _VALID_CONFIDENCES = {"high", "medium", "low"}
 
@@ -125,41 +145,79 @@ def _assemble_prompt(ctx: Context) -> str:
 
 def _validate_routing(payload: dict) -> dict:
     """Verify the terminal YAML conforms to the subagent contract."""
-    next_action = payload.get("next_action")
-    if next_action not in _VALID_NEXT_ACTIONS:
+    route = payload.get("route")
+    if route not in _VALID_ROUTES:
         raise OrchestrationError(
-            f"analyze subagent: invalid next_action {next_action!r} "
-            f"(expected one of {sorted(_VALID_NEXT_ACTIONS)})"
+            f"analyze subagent: invalid route {route!r} "
+            f"(expected one of {sorted(_VALID_ROUTES)})"
         )
 
-    if next_action == "REPORT":
+    if route == "halt":
+        category = payload.get("termination_category")
+        if category not in _VALID_TERMINATION_CATEGORIES:
+            raise OrchestrationError(
+                f"analyze subagent: route=halt requires termination_category "
+                f"∈ {sorted(_VALID_TERMINATION_CATEGORIES)}, got {category!r}"
+            )
         disposition = payload.get("disposition")
         if disposition not in _VALID_DISPOSITIONS:
             raise OrchestrationError(
-                f"analyze subagent: routing REPORT requires disposition "
+                f"analyze subagent: route=halt requires disposition "
                 f"∈ {sorted(_VALID_DISPOSITIONS)}, got {disposition!r}"
             )
         confidence = payload.get("confidence")
         if confidence not in _VALID_CONFIDENCES:
             raise OrchestrationError(
-                f"analyze subagent: routing REPORT requires confidence "
+                f"analyze subagent: route=halt requires confidence "
                 f"∈ {sorted(_VALID_CONFIDENCES)}, got {confidence!r}"
             )
         surviving = payload.get("surviving_hypotheses")
         if not isinstance(surviving, list):
             raise OrchestrationError(
-                "analyze subagent: routing REPORT requires "
-                "surviving_hypotheses[] (empty list if every hypothesis is "
-                f"refuted) — got {type(surviving).__name__}"
+                "analyze subagent: route=halt requires surviving_hypotheses[] "
+                "(empty list if every hypothesis is refuted) — got "
+                f"{type(surviving).__name__}"
             )
-    else:  # PREDICT
-        discriminator = payload.get("discriminator")
-        if not isinstance(discriminator, str) or not discriminator.strip():
-            raise OrchestrationError(
-                "analyze subagent: routing PREDICT requires a non-empty "
-                "discriminator field (one-line question the next lead must answer)"
-            )
+    else:  # continue
+        # PREDICT owns lead selection and fork evolution; ANALYZE's continue
+        # routing only needs a structural signal. unresolved_prescribed_set is
+        # optional — handler back-fills from GATHER payload when absent.
+        ups = payload.get("unresolved_prescribed_set")
+        if ups is not None:
+            if not isinstance(ups, list) or not all(
+                isinstance(x, str) and x.strip() for x in ups
+            ):
+                raise OrchestrationError(
+                    f"analyze subagent: unresolved_prescribed_set must be "
+                    f"list[str] of non-empty slugs when present "
+                    f"(got {ups!r})"
+                )
 
+    return payload
+
+
+def _backfill_unresolved_prescribed_set(payload: dict, ctx: Context) -> dict:
+    """On continue, compute unresolved_prescribed_set from GATHER payload if
+    the subagent didn't emit it. Backstop for Bug A: even if gather-composite's
+    scope-check is bypassed, ANALYZE still surfaces the gap so PREDICT can
+    re-prescribe.
+    """
+    if payload.get("route") != "continue":
+        return payload
+    if payload.get("unresolved_prescribed_set") is not None:
+        return payload
+    gather_out = ctx.outputs.get(Phase.GATHER)
+    if not isinstance(gather_out, dict):
+        # No GATHER payload (shouldn't happen in a well-formed loop); leave absent.
+        return payload
+    prescribed = gather_out.get("prescribed_leads")
+    executed = gather_out.get("executed_leads")
+    if not isinstance(prescribed, list) or not isinstance(executed, list):
+        return payload
+    executed_set = set(executed)
+    unresolved = [lead for lead in prescribed if lead not in executed_set]
+    if unresolved:
+        payload["unresolved_prescribed_set"] = unresolved
     return payload
 
 
@@ -168,34 +226,28 @@ def _validate_routing(payload: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _strip_yaml_fences(raw: str) -> str:
-    """Return `raw` with every ```yaml...``` fenced block removed.
+def _strip_terminal_routing(raw: str) -> str:
+    """Return `raw` with the last ```yaml``` fence removed.
 
-    The subagent contract forbids companion-YAML emission from ANALYZE
-    (the main agent composes `gather[].resolutions[]` downstream) and the
-    routing YAML is consumed out-of-band before this strip runs. So any
-    `yaml` fence in the appended text is either the terminal routing block
-    or an out-of-contract emission — in both cases, it must not land in
-    `investigation.md` where the invlang validator would merge it into
-    the companion graph. Strip all of them.
+    The terminal routing YAML is consumed out-of-band and must not land in
+    investigation.md — invlang validators would reject its routing keys as
+    unknown. Drop only the last yaml fence; preserve all preceding fences.
+    Matches `predict.py:_strip_terminal_routing` so both phase outputs
+    follow the same lead-block-preserving convention.
+
+    This deliberately does not strip earlier fences — future ANALYZE
+    subagent versions will emit `resolutions:` sub-blocks that must survive
+    the strip. When that lands alongside a merge-by-lead-id invlang
+    validator extension, the handler here needs no further change.
     """
-    fence = "```yaml"
-    end_marker = "```"
-    out: list[str] = []
-    i = 0
-    while True:
-        start = raw.find(fence, i)
-        if start == -1:
-            out.append(raw[i:])
-            break
-        out.append(raw[i:start])
-        body_start = start + len(fence)
-        stop = raw.find(end_marker, body_start)
-        if stop == -1:
-            # Unterminated fence — drop the remainder and stop.
-            break
-        i = stop + len(end_marker)
-    return "".join(out).rstrip() + "\n"
+    last_start = raw.rfind("```yaml")
+    if last_start == -1:
+        return raw.rstrip() + "\n"
+    end_marker_start = raw.find("```", last_start + len("```yaml"))
+    if end_marker_start == -1:
+        return raw[:last_start].rstrip() + "\n"
+    after = raw[end_marker_start + len("```"):]
+    return (raw[:last_start].rstrip() + "\n" + after.lstrip()).rstrip() + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -250,12 +302,13 @@ def handle(ctx: Context) -> PhaseResult:
     raw = _invoke_subagent(prompt)
 
     payload = _validate_routing(extract_terminal_yaml(raw))
+    payload = _backfill_unresolved_prescribed_set(payload, ctx)
 
-    sections = _strip_yaml_fences(raw)
+    sections = _strip_terminal_routing(raw)
     _validate_and_write(ctx, sections)
 
     next_phase = (
-        Phase.REPORT if payload["next_action"] == "REPORT"
+        Phase.REPORT if payload["route"] == "halt"
         else Phase.PREDICT
     )
     return PhaseResult(next_phase=next_phase, payload=payload)

@@ -1,66 +1,64 @@
 """PREDICT phase handler.
 
-Replaces the PREDICT section of `skills/investigate/SKILL.md` with a
-Python orchestration that dispatches the `predict` subagent, parses its
-terminal routing YAML, and appends the invlang block to investigation.md.
+Dispatches the `predict` subagent. PREDICT scaffolds: declares (possibly
+zero) new hypotheses, always selects a lead, and hands off to GATHER.
+Continuation planning is PREDICT's job — ANALYZE decided we're continuing;
+PREDICT picks what to investigate next.
 
-The `predict` subagent (agents/predict.md, model=sonnet) emits one of:
-    - `hypothesize:` YAML block + `Selected lead:` + `Pitfalls:` (fork mode)
-    - **No invlang YAML block** — narrative only (`Selected lead:` +
-      `Pitfalls:`) when no observable discriminates between candidate
-      classifications yet (no-fork mode). The GATHER subagent authors the
-      `gather[].lead` entry after the lead executes.
-    - `error:` block (malformed inputs)
+The subagent (agents/predict.md, model=sonnet) emits one of:
+    - `hypothesize:` invlang YAML block — when introducing 1+ new hypotheses
+      (initial fork, fork refinement, or single-story declaration).
+    - **No invlang YAML block** — when continuing an unchanged fork: the
+      hypothesize state from prior loops stands; this loop only picks the
+      next lead.
+    - `error:` block (malformed inputs — raises).
 followed by a terminal routing YAML:
+
     ```yaml
-    mode: fork | no-fork
-    selected_lead: <lead name>
-    loop_n: <integer>
+    selected_lead: <lead-slug>         # required, non-empty
+    composite_secondary: [<slug>, ...]  # optional list; second+ prescribed leads
+    override_data_source: <str>         # optional; per-lead override for GATHER
+    lead_hint: <str>                    # optional; PREDICT→GATHER prose hint
     ```
 
-The invlang block name remains `hypothesize:` for corpus back-compat
-(the phase rename does not touch YAML schema).
+No `mode`, no `block_type`, no `loop_n` in the trailer. Cardinality of new
+hypotheses is structural (invlang block present ↔ ≥1 new hypotheses). Novelty
+of a hypothesis ID is derived from the accumulated companion, not declared.
+Loop number is computed handler-side from `ctx.history` — not roundtripped
+through the subagent.
 
-A `gather:` block emitted from this subagent is a contract violation —
-`gather[].lead` entries require execution fields (`outcome`,
-`query_details`, `resolutions`) that PREDICT has no way to fill, so
-writing them to `investigation.md` would fail invlang validation. The
-handler detects this case explicitly and retries with a structured
-remediation directive.
+A `gather:` block from PREDICT is still a contract violation — `gather[].lead`
+entries require execution fields GATHER fills — and is handled with a
+structured retry directive.
 
-This handler:
+When ANALYZE's payload carries `unresolved_prescribed_set` (leads prescribed
+but unresolved by gather), the handler threads those names into the subagent
+prompt as remediation context so PREDICT preferentially re-prescribes them.
+
+Handler responsibilities:
     - computes `loop_n` from ctx.history (count of prior PREDICT entries + 1)
     - invokes the subagent via the shared `_subagent.invoke_subagent` wrapper
-    - detects and raises on `error:` blocks
-    - extracts the terminal routing YAML via `extract_terminal_yaml`
-    - validates the proposed append against the invlang validator
-      (`validate_companion`) as a library call — catching rules 26/27/28/29/30
-      (compound claim, evaluation prefix, leanness, prediction subject scope,
-      refutation→prediction links) + 1-25
-    - on validation failure: respawns with `resume_from_checkpoint=true` and
-      the validator errors as `remediation_notes`; accepts the second attempt
-      only if it validates, else raises
-    - appends the invlang sections to investigation.md
-    - always routes to Phase.GATHER (the only legal transition)
-
-Block-type inference (`hypothesize:` YAML block vs `gather:` vs `error:`) is done on the
-raw response text before the trailer is extracted. The trailer's `mode` field
-is cross-checked against the inferred block type; mismatch raises.
-
-Not in this cutover:
-    - Sibling-pair embedding-distance check for semantic non-discrimination.
-      Rationale: one corpus companion out of the current handful exhibits the
-      failure; shipping the embedding infrastructure does not pay for itself
-      at this rate. Filed as a post-cutover enhancement; revisit as corpus
-      grows or if the failure rate rises.
+    - detects `error:` blocks and raises
+    - validates the terminal trailer shape (selected_lead + optional fields)
+    - runs the invlang validator (`validate_companion`) on the proposed
+      append; retries with validator errors as remediation_notes on failure
+    - always routes to Phase.GATHER (the only legal outgoing edge)
 
 Input (Context):
-    ctx.run_dir, ctx.signature_id, ctx.history, ctx.alert
+    ctx.run_dir, ctx.signature_id, ctx.history, ctx.alert,
+    ctx.outputs[Phase.ANALYZE] (optional — carries unresolved_prescribed_set
+    when PREDICT is re-prescribing)
 
 Output:
     PhaseResult
       - always Phase.GATHER
-      - payload: {mode, selected_lead, loop_n, block_type}
+      - payload: {
+          selected_lead: str,
+          loop_n: int,
+          composite_secondary: list[str],  # empty when not prescribed
+          override_data_source?: str,
+          lead_hint?: str,
+        }
 
 Files written:
     {run_dir}/investigation.md — appends the invlang sections (no trailer).
@@ -107,8 +105,6 @@ SUBAGENT_TIMEOUT_SECONDS = int(
 )
 # Timeout fails fast — the handler does not respawn on timeout. The
 # validator-error retry path (which the handler does walk) is separate.
-
-_VALID_MODES = {"fork", "no-fork"}
 
 
 # ---------------------------------------------------------------------------
@@ -567,47 +563,45 @@ def _extract_error_reason(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _validate_trailer(trailer: dict, *, block_type: str, expected_loop_n: int) -> dict:
+def _validate_trailer(trailer: dict) -> dict:
     """Verify the terminal routing YAML conforms to the subagent contract.
 
-    Contract (option C, post-dedup-retirement):
-    - mode=fork   ⇒ block_type=hypothesize (invlang block required)
-    - mode=no-fork ⇒ block_type=unknown    (NO invlang block — narrative only)
-    - block_type=gather is always a contract violation from this subagent
-      (handled earlier via _gather_block_remediation; should not reach here)
+    Contract (post-cardinality-relaxation):
+    - `selected_lead`: required non-empty string. PREDICT always selects a
+      lead; halting is ANALYZE's responsibility. No null/empty path.
+    - `composite_secondary`: optional list of non-empty strings. Names
+      additional leads that should run alongside `selected_lead` in a
+      composite dispatch. Empty/absent → single-lead prescription.
+    - `override_data_source`, `lead_hint`: optional non-empty strings —
+      PREDICT→GATHER hint channels, unchanged from prior contract.
+    - No `mode`. No `block_type`. No `loop_n`. Cardinality of new hypotheses
+      is read structurally from the invlang block (or its absence); the
+      handler computes loop_n from ctx.history.
+
+    Ad-hoc leads are legal: the validator does not check `selected_lead`
+    against a catalog. PREDICT may name a slug that has no definition file;
+    gather-composite will execute it via the ad-hoc construction path.
+    Lead normalization is a post-mortem-loop concern, not a PREDICT-time one.
     """
-    mode = trailer.get("mode")
-    if mode not in _VALID_MODES:
-        raise OrchestrationError(
-            f"predict subagent: invalid trailer mode {mode!r} "
-            f"(expected one of {sorted(_VALID_MODES)})"
-        )
-    expected_block_by_mode = {"fork": "hypothesize", "no-fork": "unknown"}
-    expected_block = expected_block_by_mode[mode]
-    if block_type != expected_block:
-        raise OrchestrationError(
-            f"predict subagent: mode {mode!r} requires block_type "
-            f"{expected_block!r}, got {block_type!r}"
-        )
     selected_lead = trailer.get("selected_lead")
     if not isinstance(selected_lead, str) or not selected_lead.strip():
         raise OrchestrationError(
-            "predict subagent: trailer missing non-empty selected_lead"
+            "predict subagent: trailer missing non-empty selected_lead "
+            "(PREDICT always selects a lead; halting is ANALYZE's job). "
+            f"Got {selected_lead!r}."
         )
-    loop_n = trailer.get("loop_n")
-    if not isinstance(loop_n, int):
-        raise OrchestrationError(
-            f"predict subagent: trailer loop_n must be int, got {loop_n!r}"
-        )
-    if loop_n != expected_loop_n:
-        raise OrchestrationError(
-            f"predict subagent: trailer loop_n={loop_n} does not match "
-            f"orchestrator-computed loop_n={expected_loop_n}"
-        )
-    # Optional fields: `override_data_source` and `lead_hint` give PREDICT
-    # a machine-readable channel to the downstream gather subagent. Both are
-    # free-form strings when present, absent otherwise. Non-string values for
-    # either field are a contract violation.
+
+    composite_secondary = trailer.get("composite_secondary")
+    if composite_secondary is not None:
+        if not isinstance(composite_secondary, list) or not all(
+            isinstance(x, str) and x.strip() for x in composite_secondary
+        ):
+            raise OrchestrationError(
+                f"predict subagent: trailer composite_secondary must be "
+                f"list[str] of non-empty slugs when provided, got "
+                f"{composite_secondary!r}"
+            )
+
     override = trailer.get("override_data_source")
     if override is not None and (not isinstance(override, str) or not override.strip()):
         raise OrchestrationError(
@@ -789,15 +783,12 @@ def _attempt(
             [_FAILURE_REMEDIATIONS["stdout_summary_not_yaml"]],
         )
 
-    trailer = _validate_trailer(
-        extract_terminal_yaml(raw),
-        block_type=block_type,
-        expected_loop_n=expected_loop_n,
-    )
+    trailer = _validate_trailer(extract_terminal_yaml(raw))
 
-    # No-fork mode: no invlang block, nothing to append to investigation.md.
-    # The narrative (Selected lead: + Pitfalls:) is preserved in the subagent
-    # output file under subagent_outputs/; the terminal trailer drives routing.
+    # No invlang block emitted: this is the "continue stable fork" or
+    # "no new hypotheses this loop" path. Nothing to append to
+    # investigation.md; the narrative (Selected lead + Pitfalls) is preserved
+    # in subagent_outputs/ and the trailer drives routing.
     if block_type == "unknown":
         return "", block_type, trailer, []
 
@@ -806,14 +797,23 @@ def _attempt(
     return sections, block_type, trailer, errors
 
 
+_TRAILER_FIELDS = frozenset({
+    "selected_lead", "composite_secondary", "override_data_source", "lead_hint",
+})
+
+
 def _has_trailer(raw: str) -> bool:
-    """Lightweight check: does `raw` contain a trailing yaml fence that parses
-    as a routing trailer?"""
+    """Lightweight check: does `raw` contain a trailing yaml fence that looks
+    like a routing trailer? True when any trailer field is present (even if
+    the trailer is malformed — e.g., missing selected_lead). False → treat as
+    no trailer (the stdout_summary_not_yaml retry path). Malformed trailers
+    raise at _validate_trailer, not here.
+    """
     try:
         t = extract_terminal_yaml(raw)
     except Exception:  # noqa: BLE001
         return False
-    return isinstance(t, dict) and "mode" in t
+    return isinstance(t, dict) and bool(_TRAILER_FIELDS & t.keys())
 
 
 def _synthesize_from_checkpoint(
@@ -831,8 +831,9 @@ def _synthesize_from_checkpoint(
     falls through to the retry path.
 
     Contract with the subagent prompt (`agents/predict.md`): the checkpoint
-    must carry `status: complete`, `mode: fork|no-fork`, and (fork mode)
-    `hypotheses: [...]` in the same shape the stdout YAML block would have.
+    must carry `status: complete` and `selected_lead: <slug>`. `hypotheses:
+    [...]` is optional — when present and non-empty, it's transcribed as a
+    `hypothesize:` invlang block. `composite_secondary: [...]` is optional.
     """
     ckpt = ctx.run_dir / "subagent_checkpoints" / f"predict-loop-{expected_loop_n}.yaml"
     if not ckpt.exists():
@@ -843,23 +844,26 @@ def _synthesize_from_checkpoint(
         return None
     if not isinstance(data, dict) or data.get("status") != "complete":
         return None
-    mode = data.get("mode")
-    if mode not in _VALID_MODES:
-        return None
     selected_lead = data.get("selected_lead")
     if not isinstance(selected_lead, str) or not selected_lead.strip():
         return None
 
-    trailer = {"mode": mode, "selected_lead": selected_lead, "loop_n": expected_loop_n}
+    trailer: dict = {"selected_lead": selected_lead}
+    # Optional carry-through fields — preserve what the subagent wrote.
+    for opt in ("composite_secondary", "override_data_source", "lead_hint"):
+        if opt in data and data[opt] is not None:
+            trailer[opt] = data[opt]
+    # Re-run trailer validation so the synthesis path enforces the same
+    # contract as the stdout path (catches malformed checkpoint fields).
+    try:
+        trailer = _validate_trailer(trailer)
+    except OrchestrationError:
+        return None
 
-    if mode == "no-fork":
-        # No invlang block to append; caller's write step is a no-op.
-        return "", "unknown", trailer, []
-
-    # fork mode — require hypotheses list, transcribe as a `hypothesize:` block
     hypotheses = data.get("hypotheses")
     if not isinstance(hypotheses, list) or not hypotheses:
-        return None
+        # No new hypotheses this loop → no invlang block to synthesize.
+        return "", "unknown", trailer, []
 
     dumped = yaml.safe_dump(
         {"hypothesize": {"hypotheses": hypotheses}},
@@ -883,11 +887,36 @@ def _synthesize_from_checkpoint(
 # ---------------------------------------------------------------------------
 
 
+def _unresolved_prescribed_notes(ctx: Context) -> list[str]:
+    """Surface ANALYZE's unresolved_prescribed_set to PREDICT as a remediation
+    note. When ANALYZE flagged that gather didn't resolve some prescribed
+    leads, PREDICT should preferentially re-prescribe them (the subagent
+    decides; this is guidance, not a gate).
+    """
+    analyze_out = ctx.outputs.get(Phase.ANALYZE)
+    if not isinstance(analyze_out, dict):
+        return []
+    unresolved = analyze_out.get("unresolved_prescribed_set")
+    if not isinstance(unresolved, list) or not unresolved:
+        return []
+    names = ", ".join(str(x) for x in unresolved)
+    return [
+        "UNRESOLVED PRESCRIBED LEADS from prior gather: "
+        f"[{names}]. These were prescribed but gather did not produce a "
+        "resolved status. Prefer re-prescribing them via selected_lead + "
+        "composite_secondary on this loop, unless you have specific "
+        "reasoning that a different lead is now more discriminating."
+    ]
+
+
 def handle(ctx: Context) -> PhaseResult:
     expected_loop_n = _compute_loop_n(ctx)
 
+    initial_notes = _unresolved_prescribed_notes(ctx)
     sections, block_type, trailer, errors = _attempt(
-        ctx, expected_loop_n=expected_loop_n, remediation_notes=None,
+        ctx,
+        expected_loop_n=expected_loop_n,
+        remediation_notes=initial_notes or None,
     )
 
     # Retry budget is 2. For the `gather:`-block contract violation the
@@ -916,16 +945,16 @@ def handle(ctx: Context) -> PhaseResult:
             + "\n".join(f"  - {e}" for e in errors)
         )
 
-    # Only append when there's something to append. No-fork mode writes no
-    # invlang block; the narrative is preserved in the subagent output file.
+    # Only append when there's something to append. A zero-new-hypothesis
+    # loop ("continue stable fork") writes no invlang block; the narrative
+    # is preserved in the subagent output file.
     if sections:
         _append_to_investigation(ctx, sections)
 
     payload = {
-        "mode": trailer["mode"],
         "selected_lead": trailer["selected_lead"],
-        "loop_n": trailer["loop_n"],
-        "block_type": block_type,
+        "loop_n": expected_loop_n,
+        "composite_secondary": list(trailer.get("composite_secondary") or []),
     }
     # Forward optional overrides when PREDICT authored them. Omitted keys
     # keep the downstream GATHER payload clean when the subagent didn't use

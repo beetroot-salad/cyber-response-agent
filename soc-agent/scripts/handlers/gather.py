@@ -36,7 +36,14 @@ Output:
         "characterization": dict | None,
         "cross_lead_notes": str,
         "raw_result": dict,
+        "prescribed_leads": list[str],  # [selected_lead, *composite_secondary]
+        "executed_leads": list[str],    # leads whose output carries resolved status
     })
+
+Scope-check (composite path only): the subagent must emit an entry in `leads[]`
+for every prescribed lead, even when intentionally skipped (status:
+dropped_attempt). A prescribed lead that's entirely absent from output is a
+silent-drop bug and raises.
 
 Files written:
     {run_dir}/investigation.md — appends `## GATHER (loop N)` prose; no
@@ -280,6 +287,26 @@ def _assemble_prompt_single(
     return "\n".join(lines)
 
 
+def _build_lead_spec(
+    scope: Scope,
+    *,
+    override_data_source: Optional[str] = None,
+    lead_hint: Optional[str] = None,
+) -> dict:
+    spec = {
+        "lead_name": scope.lead_name,
+        "entity_bindings": scope.entity_bindings,
+        "reporting_agent": scope.reporting_agent,
+    }
+    # Per-lead PREDICT→GATHER hints ride with the lead spec so the subagent
+    # sees them attached to the specific lead, not as ambient dispatch metadata.
+    if override_data_source:
+        spec["override_data_source"] = override_data_source
+    if lead_hint:
+        spec["lead_hint"] = lead_hint
+    return spec
+
+
 def _assemble_prompt_composite(
     ctx: Context,
     scope: Scope,
@@ -289,19 +316,13 @@ def _assemble_prompt_composite(
     resume: bool = False,
     override_data_source: Optional[str] = None,
     lead_hint: Optional[str] = None,
+    secondary_scopes: Optional[list[Scope]] = None,
 ) -> str:
-    lead_spec = {
-        "lead_name": scope.lead_name,
-        "entity_bindings": scope.entity_bindings,
-        "reporting_agent": scope.reporting_agent,
-    }
-    # Per-lead PREDICT→GATHER hints. Emit inside the lead spec so the
-    # subagent sees them attached to the lead, not as ambient dispatch
-    # metadata — matters when future dispatches carry multiple leads.
-    if override_data_source:
-        lead_spec["override_data_source"] = override_data_source
-    if lead_hint:
-        lead_spec["lead_hint"] = lead_hint
+    lead_specs = [_build_lead_spec(
+        scope, override_data_source=override_data_source, lead_hint=lead_hint,
+    )]
+    for sec in secondary_scopes or []:
+        lead_specs.append(_build_lead_spec(sec))
     lines = [
         f"run_dir={ctx.run_dir}",
         f"signature_id={ctx.signature_id}",
@@ -310,7 +331,7 @@ def _assemble_prompt_composite(
         f"incident_start={scope.incident_start}",
         f"incident_end={scope.incident_end}",
         f"mode={mode}",
-        "leads=" + yaml.safe_dump([lead_spec], default_flow_style=True).strip(),
+        "leads=" + yaml.safe_dump(lead_specs, default_flow_style=True).strip(),
     ]
     if resume:
         lines.append("resume_from_checkpoint=true")
@@ -489,11 +510,13 @@ def _dispatch_composite(
     ctx: Context, scope: Scope, loop_n: int, *, mode: str,
     override_data_source: Optional[str] = None,
     lead_hint: Optional[str] = None,
+    secondary_scopes: Optional[list[Scope]] = None,
 ) -> dict:
     prompt = _assemble_prompt_composite(
         ctx, scope, loop_n, mode=mode,
         override_data_source=override_data_source,
         lead_hint=lead_hint,
+        secondary_scopes=secondary_scopes,
     )
     parsed = _parse_composite_output(_invoke_gather_composite(prompt))
     if parsed is None:
@@ -501,6 +524,7 @@ def _dispatch_composite(
             ctx, scope, loop_n, mode,
             override_data_source=override_data_source,
             lead_hint=lead_hint,
+            secondary_scopes=secondary_scopes,
         )
     return parsed
 
@@ -510,6 +534,7 @@ def _recover_composite(
     *,
     override_data_source: Optional[str] = None,
     lead_hint: Optional[str] = None,
+    secondary_scopes: Optional[list[Scope]] = None,
 ) -> dict:
     ckpt_path = _checkpoint_path_composite(ctx, loop_n)
     ckpt = _load_checkpoint(ckpt_path)
@@ -524,6 +549,7 @@ def _recover_composite(
         ctx, scope, loop_n, mode=mode, resume=True,
         override_data_source=override_data_source,
         lead_hint=lead_hint,
+        secondary_scopes=secondary_scopes,
     )
     parsed = _parse_composite_output(_invoke_gather_composite(resume_prompt))
     if parsed is None:
@@ -531,6 +557,74 @@ def _recover_composite(
             "gather-composite subagent emitted no YAML after resume re-dispatch"
         )
     return parsed
+
+
+# ---------------------------------------------------------------------------
+# Scope-check: prescribed vs executed
+# ---------------------------------------------------------------------------
+
+
+# Per-lead statuses that count as "the subagent got to a resolved answer" —
+# ok/partial produce characterization; dropped_attempt/data_missing/probe_broken/
+# siem_error are explicit non-resolutions that still cover the lead (so a
+# missing lead that ANALYZE needs to re-prescribe gets surfaced as unresolved).
+_RESOLVED_LEAD_STATUSES = {"ok", "partial"}
+
+
+def _check_composite_scope(parsed: dict, prescribed: list[str]) -> None:
+    """Reject when the subagent silently dropped a prescribed lead.
+
+    Contract: every prescribed lead must appear in `gather_composite.leads[]`,
+    with a per-lead `status` naming its fate (`dropped_attempt` for an
+    intentional skip, `data_missing` for an empty-result confirmation, etc.).
+    An entirely missing entry is a silent-drop bug — the subagent failed to
+    either execute or document the lead — and is rejected loudly.
+    """
+    if "error" in parsed:
+        # Top-level `error:` means the dispatch itself was unparseable; scope
+        # doesn't apply. Main agent handles via the error path.
+        return
+    gc = parsed.get("gather_composite") or {}
+    leads = gc.get("leads") or []
+    executed_names: set[str] = set()
+    for entry in leads:
+        if isinstance(entry, dict) and isinstance(entry.get("lead"), str):
+            executed_names.add(entry["lead"])
+    missing = [lead for lead in prescribed if lead not in executed_names]
+    if missing:
+        raise OrchestrationError(
+            f"gather-composite: prescribed leads {missing!r} are missing "
+            f"from output `leads[]`. Every prescribed lead must have an "
+            f"entry (use `status: dropped_attempt` if intentionally skipped, "
+            f"`status: data_missing` for empty-result confirmations). "
+            f"Prescribed={prescribed!r}; listed={sorted(executed_names)!r}."
+        )
+
+
+def _extract_executed_leads(payload: dict) -> list[str]:
+    """Return names of leads that produced a resolved observation.
+
+    Single-lead path: a `finding` result counts as executed; `escalate` does not.
+    Composite path: per-lead `status` in `{ok, partial}`. Dropped / data-missing
+    / probe-broken are NOT executed — ANALYZE will see them as unresolved and
+    may route PREDICT to re-prescribe.
+    """
+    raw = payload.get("raw_result") or {}
+    if "gather_composite" in raw:
+        executed: list[str] = []
+        for entry in raw["gather_composite"].get("leads") or []:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("status") in _RESOLVED_LEAD_STATUSES:
+                name = entry.get("lead")
+                if isinstance(name, str):
+                    executed.append(name)
+        return executed
+    # Single-lead path — use the normalized payload status, which is `ok` only
+    # on a `finding` result (see _normalize_single).
+    if payload.get("status") == "ok" and isinstance(payload.get("lead_name"), str):
+        return [payload["lead_name"]]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -663,7 +757,16 @@ def _append_to_investigation(ctx: Context, section: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _read_predict_payload(ctx: Context) -> tuple[str, int, Optional[str], Optional[str]]:
+@dataclass
+class _PredictPayload:
+    selected_lead: str
+    loop_n: int
+    override_data_source: Optional[str]
+    lead_hint: Optional[str]
+    composite_secondary: list[str]
+
+
+def _read_predict_payload(ctx: Context) -> _PredictPayload:
     predict_out = ctx.outputs.get(Phase.PREDICT)
     if not isinstance(predict_out, dict):
         raise OrchestrationError(
@@ -686,31 +789,61 @@ def _read_predict_payload(ctx: Context) -> tuple[str, int, Optional[str], Option
     # already validated string-ness; we pass through as-is.
     override_data_source = predict_out.get("override_data_source")
     lead_hint = predict_out.get("lead_hint")
-    return selected_lead, loop_n, override_data_source, lead_hint
+    # Composite prescription: PREDICT may name additional leads alongside the
+    # primary selected_lead. Absent field → empty list (single-lead prescription).
+    raw_secondary = predict_out.get("composite_secondary")
+    if raw_secondary is None:
+        composite_secondary: list[str] = []
+    elif isinstance(raw_secondary, list) and all(
+        isinstance(x, str) and x.strip() for x in raw_secondary
+    ):
+        composite_secondary = list(raw_secondary)
+    else:
+        raise OrchestrationError(
+            f"GATHER: PREDICT payload composite_secondary must be "
+            f"list[str] of non-empty slugs (got {raw_secondary!r})"
+        )
+    return _PredictPayload(
+        selected_lead=selected_lead,
+        loop_n=loop_n,
+        override_data_source=override_data_source,
+        lead_hint=lead_hint,
+        composite_secondary=composite_secondary,
+    )
 
 
 def handle(ctx: Context) -> PhaseResult:
-    selected_lead, loop_n, override_data_source, lead_hint = _read_predict_payload(ctx)
-    scope = _resolve_scope(ctx, selected_lead)
+    pp = _read_predict_payload(ctx)
+    scope = _resolve_scope(ctx, pp.selected_lead)
+    prescribed_leads = [pp.selected_lead, *pp.composite_secondary]
 
     # Overrides only apply to the composite subagent — single-lead gather
     # executes a fixed vendor template and has no room for a data-source
-    # override. When PREDICT authored an override, force composite
-    # dispatch even if a single-lead template exists.
-    force_composite = override_data_source is not None
+    # override. Any of these force the composite path: explicit override,
+    # prescribed secondaries (multi-lead dispatch), or no template.
+    force_composite = (
+        pp.override_data_source is not None
+        or bool(pp.composite_secondary)
+    )
 
     if scope.template_exists and not force_composite:
-        payload = _dispatch_single(ctx, scope, loop_n)
+        payload = _dispatch_single(ctx, scope, pp.loop_n)
     else:
+        secondary_scopes = [_resolve_scope(ctx, lead) for lead in pp.composite_secondary]
         composite_parsed = _dispatch_composite(
-            ctx, scope, loop_n,
+            ctx, scope, pp.loop_n,
             mode="ad-hoc" if not scope.template_exists else "composite",
-            override_data_source=override_data_source,
-            lead_hint=lead_hint,
+            override_data_source=pp.override_data_source,
+            lead_hint=pp.lead_hint,
+            secondary_scopes=secondary_scopes,
         )
+        _check_composite_scope(composite_parsed, prescribed_leads)
         payload = _normalize_composite(composite_parsed, scope)
 
-    section = _compose_markdown(payload, loop_n)
+    payload["prescribed_leads"] = prescribed_leads
+    payload["executed_leads"] = _extract_executed_leads(payload)
+
+    section = _compose_markdown(payload, pp.loop_n)
     _append_to_investigation(ctx, section)
 
     return PhaseResult(next_phase=Phase.ANALYZE, payload=payload)

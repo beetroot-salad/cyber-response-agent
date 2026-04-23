@@ -25,9 +25,9 @@ Triggers when:
 
 *Typical:* rule-5710 SSH reject, loop 1. Lead = `authentication-history` (characterize cadence + forward-success). Readings: `lp1` forward-success → escalate; `lp2` periodic cadence → loop 2 fork at identity-of-use; `lp3` non-periodic → loop 2 fork at identity-of-use with cadence-anomaly signal.
 
-Output: `mode: no-fork`. Narrative only (`Selected lead:` + `Pitfalls:` + the `lp*` readings in prose).
+Output: narrative only (`Selected lead:` + `Pitfalls:` + the `lp*` readings in prose) + terminal trailer with just `selected_lead`. No invlang block.
 
-### Shape D — data gap (no-fork)
+### Shape D — data gap (zero-new-hypothesis)
 
 A discriminating field is *null, truncated, or uninterpretable* — the field that would answer the question exists in the schema but is absent/broken on this record. Different from Shape E: Shape D fills a **field gap**; Shape E characterizes a vertex whose attributes are routine-but-unqueried.
 
@@ -179,19 +179,29 @@ hypothesize:
 - h-002: absence of a scheduler audit entry may reflect a logging gap (retention, service restart, log-shipping lag), not true job absence. Probe data-source health before inferring absence from empty result.
 
 ```yaml
-mode: fork
 selected_lead: monitoring-probe
-loop_n: 2
 ```
 
 ## Output format
 
-Fork mode (Shapes A, M, I):
+Your output has two parts: optional invlang block(s) carrying hypotheses you are authoring this loop, and a terminal routing YAML block carrying `selected_lead` + optional fields. The handler strips only the last `yaml` fence before appending to investigation.md, so earlier fences must be valid invlang.
+
+**Cardinality is implicit in what you emit**, not declared:
+
+| New hypotheses this loop | Emit invlang block? | Meaning |
+|---|---|---|
+| N ≥ 2 | yes — `hypothesize:` with all new entries | Fork (initial or expansion) |
+| 1 | yes | Single-story investigation or one-hypothesis refinement |
+| 0 | no | Continue existing stable fork — only picking the next lead |
+
+PREDICT always selects a lead. Halting is ANALYZE's job. There is no "halt" or null-lead path in this output.
+
+### With new hypotheses (1 or more):
 
 ~~~
 ```yaml
 hypothesize:
-  # invlang block per schema
+  # invlang block per schema — only the hypotheses new this loop
 ```
 
 **Selected lead:** <name> — <one-line reason>
@@ -200,44 +210,52 @@ hypothesize:
 - <h-id>: <trap>
 
 ```yaml
-mode: fork
 selected_lead: <name>
-loop_n: <integer>
 ```
 ~~~
 
-No-fork mode (Shapes E and D):
+### Zero new hypotheses (continue stable fork):
 
 ~~~
 **Selected lead:** <name> — <one-line reason, measurement + data type>
 
-**Readings (lead-level predictions for ANALYZE):**
+**Readings (lead-level predictions for ANALYZE, optional):**
 - **lp1** — `if <observable-condition> → read_as: <interpretation> → advance_to: <next-phase-or-lead>`
-- **lp2** — `if <observable-condition> → read_as: <interpretation> → advance_to: <next-phase-or-lead>`
-- **lp3** — `if <observable-condition> → read_as: <interpretation> → advance_to: <next-phase-or-lead>`
+- **lp2** — …
 
 **Pitfalls:**
 - <lead-id>: <trap>
 
 ```yaml
-mode: no-fork
 selected_lead: <name>
-loop_n: <integer>
 ```
 ~~~
 
-Shape E typically needs 2–4 `lp*` readings that exhaust the next-step branches; Shape D often needs zero (the retrieval lead's job is to fill the field, not to pre-commit branches). Readings use one observable per `if` clause — compound `if A OR B` means two readings, not one.
+Shape E (classification-first) typically needs 2–4 `lp*` readings that exhaust the next-step branches; Shape D (retrieval gap) often needs zero. Readings use one observable per `if` clause — compound `if A OR B` means two readings, not one.
 
-### Optional override fields
+Novelty of a hypothesis is implicit in its ID: a hypothesis whose `id` has not appeared in the accumulated companion is new; `h-{parent}-{ordinal}` is a refinement of `h-{parent}`. Do not re-author hypotheses that already exist — invlang v2.10 forbids a second top-level `hypothesize:` block, and the validator rejects duplicates.
 
-Inside the terminal YAML, when a prior ANALYZE flagged the lead's default data source as unable to reach the discriminator:
+### Optional trailer fields
+
+Inside the terminal YAML, alongside `selected_lead`:
 
 ```yaml
-override_data_source: host_query   # directory name under knowledge/environment/systems/
-lead_hint: "walk ancestry above runc at T=..."
+selected_lead: <name>
+composite_secondary: [<other-lead-slug>, ...]   # prescribe multiple leads at once
+override_data_source: host_query                  # bypass vendor template
+lead_hint: "walk ancestry above runc at T=..."    # prose hint to gather
 ```
 
-Do not emit on loop 1 or without a specific signal from a prior loop — overriding without cause trips gather's template-bypass path needlessly.
+- `composite_secondary` — when the investigation needs multiple leads executed against the same entities and window (a composite dispatch). Names all secondary leads. The handler builds `prescribed_leads = [selected_lead, *composite_secondary]` and hands off to gather-composite; gather-composite must echo every prescribed slug.
+- `override_data_source` / `lead_hint` — do not emit on loop 1 or without a specific signal from a prior loop. Overriding without cause trips gather's template-bypass path needlessly.
+
+### When ANALYZE flagged unresolved prescribed leads
+
+When the prompt's remediation notes include `UNRESOLVED PRESCRIBED LEADS from prior gather: [...]`, it means the previous loop prescribed those leads but gather didn't resolve them. Preferentially re-prescribe them in this loop's `selected_lead` + `composite_secondary` — unless you have specific reasoning that a different lead is now more discriminating. This is guidance, not a gate; your judgment stands.
+
+### Ad-hoc leads are legal
+
+`selected_lead` does not have to appear in the lead catalog. If your discriminator needs a lead that doesn't exist yet, invent a slug (short, descriptive) — gather-composite will execute it through the ad-hoc construction path. Lead normalization happens downstream (post-mortem loop), not at PREDICT time.
 
 ## Lead selection
 

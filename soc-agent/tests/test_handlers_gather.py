@@ -69,10 +69,8 @@ def make_ctx(
         current_phase=Phase.GATHER,
         outputs={
             Phase.PREDICT: {
-                "mode": "fork",
                 "selected_lead": selected_lead,
                 "loop_n": loop_n,
-                "block_type": "hypothesize",
             },
         },
     )
@@ -151,12 +149,12 @@ gather_composite:
   mode: "ad-hoc"
   time_range: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
   leads:
-    - lead: "custom-query"
+    - lead: "nonexistent-lead"
       reporting_agent: "target-endpoint"
       query: "freeform query"
       query_source: "ad-hoc"
       entity_bindings: {}
-      refinements_applied: ""
+      refinements_applied: "no definition; constructed ad-hoc from slug"
       health_probe: null
       characterization:
         result_count: 5
@@ -491,3 +489,204 @@ class TestPreconditions:
         ctx.outputs[Phase.PREDICT]["loop_n"] = "2"
         with pytest.raises(OrchestrationError, match="int loop_n"):
             gather_handler.handle(ctx)
+
+    def test_composite_secondary_not_list_raises(self, tmp_path):
+        ctx = make_ctx(tmp_path)
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = "source-reputation"
+        with pytest.raises(OrchestrationError, match="composite_secondary"):
+            gather_handler.handle(ctx)
+
+    def test_composite_secondary_with_empty_string_raises(self, tmp_path):
+        ctx = make_ctx(tmp_path)
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation", ""]
+        with pytest.raises(OrchestrationError, match="composite_secondary"):
+            gather_handler.handle(ctx)
+
+
+# ---------------------------------------------------------------------------
+# Scope-check (prescribed vs executed)
+# ---------------------------------------------------------------------------
+
+
+_COMPOSITE_MULTI_LEAD_OK = textwrap.dedent("""
+```yaml
+gather_composite:
+  mode: "composite"
+  time_range: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
+  leads:
+    - lead: "authentication-history"
+      reporting_agent: "target-endpoint"
+      query: "q1"
+      query_source: "template"
+      entity_bindings: {}
+      refinements_applied: ""
+      health_probe: null
+      characterization: {events: 10}
+      status: ok
+      status_detail: ""
+    - lead: "source-reputation"
+      reporting_agent: "target-endpoint"
+      query: "q2"
+      query_source: "template"
+      entity_bindings: {}
+      refinements_applied: ""
+      health_probe: null
+      characterization: {reputation: clean}
+      status: ok
+      status_detail: ""
+  cross_lead_notes: ""
+  notes: ""
+```
+""").strip()
+
+
+_COMPOSITE_SILENT_DROP = textwrap.dedent("""
+```yaml
+gather_composite:
+  mode: "composite"
+  time_range: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
+  leads:
+    - lead: "authentication-history"
+      reporting_agent: "target-endpoint"
+      query: "q1"
+      query_source: "template"
+      entity_bindings: {}
+      refinements_applied: ""
+      health_probe: null
+      characterization: {events: 10}
+      status: ok
+      status_detail: ""
+  cross_lead_notes: ""
+  notes: ""
+```
+""").strip()
+
+
+_COMPOSITE_EXPLICIT_DROP = textwrap.dedent("""
+```yaml
+gather_composite:
+  mode: "composite"
+  time_range: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
+  leads:
+    - lead: "authentication-history"
+      reporting_agent: "target-endpoint"
+      query: "q1"
+      query_source: "template"
+      entity_bindings: {}
+      refinements_applied: ""
+      health_probe: null
+      characterization: {events: 10}
+      status: ok
+      status_detail: ""
+    - lead: "source-reputation"
+      reporting_agent: "target-endpoint"
+      query: ""
+      query_source: "template"
+      entity_bindings: {}
+      refinements_applied: ""
+      health_probe: null
+      characterization: null
+      status: dropped_attempt
+      status_detail: "budget exhausted after first lead"
+  cross_lead_notes: ""
+  notes: ""
+```
+""").strip()
+
+
+class TestCompositeScopeCheck:
+    def test_multi_lead_prescription_with_full_coverage_passes(
+        self, tmp_path, monkeypatch,
+    ):
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        captured_composite: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke(captured_composite, [_COMPOSITE_MULTI_LEAD_OK]),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert result.next_phase == Phase.ANALYZE
+        assert result.payload["prescribed_leads"] == [
+            "authentication-history", "source-reputation",
+        ]
+        assert set(result.payload["executed_leads"]) == {
+            "authentication-history", "source-reputation",
+        }
+        # Composite dispatch was forced even though the primary lead has a
+        # template — composite_secondary is non-empty.
+        assert len(captured_composite) == 1
+        assert "source-reputation" in captured_composite[0]
+
+    def test_silent_drop_of_secondary_lead_raises(self, tmp_path, monkeypatch):
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke([], [_COMPOSITE_SILENT_DROP]),
+        )
+
+        with pytest.raises(OrchestrationError, match=r"prescribed leads \['source-reputation'\]"):
+            gather_handler.handle(ctx)
+
+    def test_explicit_dropped_attempt_status_passes(self, tmp_path, monkeypatch):
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke([], [_COMPOSITE_EXPLICIT_DROP]),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        # Prescribed scope is covered (entry exists with dropped_attempt status),
+        # so scope-check passes. But only the first lead is in executed_leads —
+        # dropped_attempt is not a resolved status. ANALYZE will see this gap
+        # and can surface via unresolved_prescribed_set.
+        assert result.payload["prescribed_leads"] == [
+            "authentication-history", "source-reputation",
+        ]
+        assert result.payload["executed_leads"] == ["authentication-history"]
+
+    def test_single_lead_prescription_records_executed_correctly(
+        self, tmp_path, monkeypatch,
+    ):
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            stub_invoke([], [_SINGLE_FINDING]),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert result.payload["prescribed_leads"] == ["authentication-history"]
+        assert result.payload["executed_leads"] == ["authentication-history"]
+
+    def test_single_lead_escalate_records_empty_executed(
+        self, tmp_path, monkeypatch,
+    ):
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        # Unknown trigger → escalate payload, no composite fallback
+        escalate = textwrap.dedent("""
+        ```yaml
+        result: escalate
+        trigger: some_unknown_trigger
+        context: "unknown"
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            stub_invoke([], [escalate]),
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke([], []),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert result.payload["prescribed_leads"] == ["authentication-history"]
+        # Escalate didn't produce characterization → empty executed_leads.
+        assert result.payload["executed_leads"] == []
