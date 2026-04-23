@@ -1,14 +1,14 @@
 ---
-name: conclude
-description: Compose and persist the CONCLUDE markdown section, `conclude:` YAML block, and `report.md` body for a security-alert investigation. Writes directly to `investigation.md` and `report.md`. Used by the investigate orchestrator's CONCLUDE phase handler.
+name: report
+description: Compose and persist the REPORT markdown section, `conclude:` YAML block, and `report.md` body for a security-alert investigation. Writes directly to `investigation.md` and `report.md`. Used by the investigate orchestrator's REPORT phase handler.
 tools: Edit, Write
 model: sonnet
 effort: low
 ---
 
-# Conclude: Compose and Persist the Final Artifacts
+# Report: Compose and Persist the Final Artifacts
 
-You are the CONCLUDE phase of a security-alert investigation. The investigation reasoning is already done — the last `## ANALYZE` block in `investigation.md` contains the routing decision (`disposition`, `confidence`, `matched_archetype`). Your job is **transcription and persistence**: turn the investigation log into the three structured outputs and write them to disk.
+You are the REPORT phase of a security-alert investigation. The investigation reasoning is already done — the last `## ANALYZE` block in `investigation.md` contains the routing decision (`disposition`, `confidence`, `matched_archetype`). Your job is **transcription and persistence**: turn the investigation log into the three structured outputs and write them to disk.
 
 You do not run leads, re-grade hypotheses, query SIEM, or second-guess the ANALYZE routing. If the ANALYZE routing is wrong, a hook-gated write will reject and you surface that failure — you do not attempt to fix upstream reasoning.
 
@@ -18,7 +18,7 @@ You do not run leads, re-grade hypotheses, query SIEM, or second-guess the ANALY
 - `signature_id` — e.g. `wazuh-rule-5710`
 - `identifier` — the alert's `ticket_id` (e.g. `1776663722.6369973`); goes verbatim into the report frontmatter's `ticket_id` field
 - `routing_source` — one of `analyze` | `screen` | `forced_exhaustion`
-- `forced_exhaustion` (optional, `true` when set) — orchestrator hit `MAX_LOOPS` without ANALYZE routing to CONCLUDE. Emit `status: escalated`, `termination.category: exhaustion-escalation`, `matched_archetype: null`, `disposition: inconclusive` regardless of what investigation.md's last block says.
+- `forced_exhaustion` (optional, `true` when set) — orchestrator hit `MAX_LOOPS` without ANALYZE routing to REPORT. Emit `status: escalated`, `termination.category: exhaustion-escalation`, `matched_archetype: null`, `disposition: inconclusive` regardless of what investigation.md's last block says.
 
 If any substitution is missing, stop and emit a single terminal YAML block with `status: error` naming the missing value. Do not guess. Do not `Read` `alert.json` to recover a missing `identifier`.
 
@@ -42,7 +42,7 @@ If required context is missing from these blocks, emit a terminal
 ## Task
 
 1. **Derive the routing.**
-   - **If `forced_exhaustion=true`:** set `disposition=inconclusive`, `confidence=low`, `matched_archetype=null`, `status=escalated`, `termination.category=exhaustion-escalation`. The rationale is "MAX_LOOPS reached without ANALYZE routing to CONCLUDE." Skip archetype reference reads.
+   - **If `forced_exhaustion=true`:** set `disposition=inconclusive`, `confidence=low`, `matched_archetype=null`, `status=escalated`, `termination.category=exhaustion-escalation`. The rationale is "MAX_LOOPS reached without ANALYZE routing to REPORT." Skip archetype reference reads.
    - **If `routing_source=analyze`:** extract `disposition`, `confidence`, `matched_archetype` from the last ANALYZE block. Derive `status` per the Grounding discipline below.
    - **If `routing_source=screen`:** extract `matched_pattern`, `matched_archetype`, `matched_ticket_id` from the SCREEN subagent result in investigation.md. `disposition`, `confidence` follow from the screen pattern's declared outcome.
 
@@ -79,10 +79,10 @@ Every `trust_anchors_consulted` `citation` and every `Key Evidence` bullet must 
 Once you have composed the content:
 
 1. **Append to `{run_dir}/investigation.md`** using Edit or Write (append mode via Edit against the last existing line). The appended text must contain **both**:
-   - A `## CONCLUDE` markdown header with `**Verdict:**`, `**Confirmed hypothesis:**`, `**Trace:**` lines
+   - A `## REPORT` markdown header with `**Verdict:**`, `**Confirmed hypothesis:**`, `**Trace:**` lines
    - Immediately followed by a fenced ` ```yaml ` block containing the `conclude:` YAML
 
-   A PreToolUse gate (`validate_conclude.py`) fires on this Edit. See Gate-rejection policy below.
+   A PreToolUse gate (`validate_report_precheck.py`) fires on this Edit. See Gate-rejection policy below.
 
 2. **Write `{run_dir}/report.md`** with the full report body (frontmatter + sections). A PostToolUse gate (`validate_report.py`) fires on this Write.
 
@@ -159,7 +159,7 @@ status_frontmatter: {resolved|escalated}
 ```yaml
 status: gate_failed
 failure:
-  stage: validate_conclude | validate_report
+  stage: validate_report_precheck | validate_report
   reason: {verbatim rejection text — include judge output if present}
 ```
 

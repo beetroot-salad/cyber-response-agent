@@ -29,33 +29,6 @@ from scripts.orchestrate import Context, OrchestrationError  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-SCAN_RESPONSE = textwrap.dedent("""
-```yaml
-archetype_scan:
-  - archetype: monitoring-probe
-    required_anchors: [approved-monitoring-sources]
-    disqualifiers:
-      - "attempt_count > 1"
-    shape_match: candidate
-    shape_notes: "single failure, sentinel username, internal source"
-    boundary_note: null
-  - archetype: external-bruteforce
-    required_anchors: []
-    disqualifiers: []
-    shape_match: ruled-out
-    shape_notes: "no burst evidence"
-    boundary_note: null
-
-adversarial_archetype:
-  archetype: external-bruteforce
-  required_anchors: []
-  shape_match: ruled-out
-  shape_notes: "single-alert view does not resemble a brute-force"
-  reason: "most plausible hideout for a real threat mimicking monitoring traffic"
-```
-""").strip()
-
-
 TICKET_RESPONSE_NO_DEDUP = textwrap.dedent("""
 ```yaml
 ticket_context:
@@ -147,9 +120,8 @@ def make_ctx(tmp_path: Path) -> Context:
     )
 
 
-def _wire_subagents(monkeypatch, scan=SCAN_RESPONSE, ticket=TICKET_RESPONSE_NO_DEDUP,
+def _wire_subagents(monkeypatch, ticket=TICKET_RESPONSE_NO_DEDUP,
                     prologue=PROLOGUE_RESPONSE, preflight=None):
-    monkeypatch.setattr(ctx_handler, "_invoke_scan", lambda _p: scan)
     monkeypatch.setattr(ctx_handler, "_invoke_ticket", lambda _p: ticket)
     monkeypatch.setattr(ctx_handler, "_invoke_prologue", lambda _p: prologue)
     # Default preflight: one reachable system — tests exercising preflight
@@ -245,13 +217,17 @@ class TestInvestigationWrite:
         assert "v-001" in inv
         assert "attempted_auth" in inv
 
-    def test_markdown_cites_archetype_ranking(self, tmp_path, monkeypatch):
+    def test_markdown_omits_archetype_block(self, tmp_path, monkeypatch):
+        """Archetype ranking moved to the REPORT phase. The CONTEXTUALIZE
+        markdown must not carry archetype candidate / ruled-out / adversarial
+        lines — those biased the investigation in the old flow."""
         _wire_subagents(monkeypatch)
         ctx = make_ctx(tmp_path)
         ctx_handler.handle(ctx)
         inv = (ctx.run_dir / "investigation.md").read_text()
-        assert "monitoring-probe" in inv
-        assert "external-bruteforce" in inv
+        assert "Plausible archetypes" not in inv
+        assert "Ruled-out archetypes" not in inv
+        assert "Adversarial archetype" not in inv
 
     def test_markdown_surfaces_partial_query_failure(self, tmp_path, monkeypatch):
         ticket = textwrap.dedent("""
@@ -344,15 +320,14 @@ class TestPayloadContract:
         assert result.payload["dedup"] is False
         assert result.payload["dedup_matched_ticket_id"] == "1776500000.11111111"
 
-    def test_payload_carries_archetype_ranking_for_downstream(
-        self, tmp_path, monkeypatch
-    ):
+    def test_payload_has_no_archetype_keys(self, tmp_path, monkeypatch):
+        """Archetype dispatch moved to the REPORT phase — CONTEXTUALIZE's
+        payload must not carry `archetype_ranking` or `adversarial_archetype`."""
         _wire_subagents(monkeypatch)
         ctx = make_ctx(tmp_path)
         result = ctx_handler.handle(ctx)
-        ranking = result.payload["archetype_ranking"]
-        assert isinstance(ranking, list)
-        assert any(e["archetype"] == "monitoring-probe" for e in ranking)
+        assert "archetype_ranking" not in result.payload
+        assert "adversarial_archetype" not in result.payload
 
 
 # ---------------------------------------------------------------------------

@@ -68,7 +68,7 @@ def _fake_run_factory(stdout: str = "ok\n", returncode: int = 0, stderr: str = "
 def test_argv_includes_plugin_dir_and_session_id(run_dir_env):
     fake, captured = _fake_run_factory(stdout="done\n")
     with patch.object(_subagent.subprocess, "run", fake):
-        _subagent.invoke_subagent("archetype-scan", "hello")
+        _subagent.invoke_subagent("archetype-match", "hello")
 
     argv = captured["argv"]
     assert argv[0:2] == ["claude", "-p"]
@@ -84,7 +84,7 @@ def test_allowed_tools_passed_from_frontmatter(run_dir_env):
     fake, captured = _fake_run_factory()
     with patch.object(_subagent.subprocess, "run", fake):
         # archetype-scan's frontmatter declares tools — verify they flow through
-        _subagent.invoke_subagent("archetype-scan", "hi")
+        _subagent.invoke_subagent("archetype-match", "hi")
     argv = captured["argv"]
     assert "--allowed-tools" in argv
     tools = argv[argv.index("--allowed-tools") + 1]
@@ -108,7 +108,7 @@ def test_session_mapping_written_before_invocation(run_dir_env):
         return subprocess.CompletedProcess(argv, 0, "x\n", "")
 
     with patch.object(_subagent.subprocess, "run", _fake):
-        _subagent.invoke_subagent("archetype-scan", "hi")
+        _subagent.invoke_subagent("archetype-match", "hi")
 
     assert len(mappings_before_call) == 1, (
         "expected one session mapping written before subprocess.run"
@@ -125,7 +125,7 @@ def test_no_session_mapping_when_run_dir_unset(tmp_path, monkeypatch):
     monkeypatch.delenv("SOC_AGENT_SIGNATURE_ID", raising=False)
     fake, captured = _fake_run_factory()
     with patch.object(_subagent.subprocess, "run", fake):
-        out = _subagent.invoke_subagent("archetype-scan", "hi")
+        out = _subagent.invoke_subagent("archetype-match", "hi")
     assert out  # did not crash
     # argv still includes --session-id (harmless) but no mapping files anywhere.
 
@@ -138,9 +138,9 @@ def test_no_session_mapping_when_run_dir_unset(tmp_path, monkeypatch):
 def test_subagent_output_and_audit_written(run_dir_env):
     fake, _ = _fake_run_factory(stdout="hello world\n")
     with patch.object(_subagent.subprocess, "run", fake):
-        _subagent.invoke_subagent("archetype-scan", "prompt body")
+        _subagent.invoke_subagent("archetype-match", "prompt body")
 
-    outputs = list((run_dir_env / "subagent_outputs").glob("*-archetype-scan.txt"))
+    outputs = list((run_dir_env / "subagent_outputs").glob("*-archetype-match.txt"))
     assert len(outputs) == 1
     body = outputs[0].read_text()
     assert "=== PROMPT ===" in body
@@ -152,7 +152,7 @@ def test_subagent_output_and_audit_written(run_dir_env):
     lines = [json.loads(line) for line in audit_path.read_text().splitlines() if line]
     assert len(lines) == 1
     entry = lines[0]
-    assert entry["agent"] == "archetype-scan"
+    assert entry["agent"] == "archetype-match"
     assert entry["returncode"] == 0
     assert entry["prompt_chars"] >= len("prompt body")
     assert entry["stdout_chars"] == len("hello world\n")
@@ -164,7 +164,7 @@ def test_audit_records_nonzero_returncode_before_raising(run_dir_env):
     fake, _ = _fake_run_factory(stdout="", stderr="boom", returncode=1)
     with patch.object(_subagent.subprocess, "run", fake):
         with pytest.raises(_subagent.OrchestrationError):
-            _subagent.invoke_subagent("archetype-scan", "p")
+            _subagent.invoke_subagent("archetype-match", "p")
 
     audit_path = run_dir_env / "subagent_audit.jsonl"
     assert audit_path.exists()

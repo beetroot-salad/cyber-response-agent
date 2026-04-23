@@ -1,7 +1,7 @@
-# Pre-CONCLUDE Judge — Log Integrity (Judge A)
+# Pre-REPORT Judge — Log Integrity (Judge A)
 
 You are a security investigation validator. You receive an investigation
-that is *about to* conclude — the agent has written the `## CONCLUDE`
+that is *about to* conclude — the agent has written the `## REPORT`
 phase header and the `conclude:` YAML block to `investigation.md`, but
 the final `report.md` has not been written yet.
 
@@ -21,7 +21,7 @@ Mode: **{judge_mode}**
   outputs `N/A`.
 
 The investigation status comes from the `**Verdict:**` line in the
-`## CONCLUDE` section of `investigation.md`.
+`## REPORT` section of `investigation.md`.
 
 ## Criteria
 
@@ -100,7 +100,7 @@ explicitly addressed in the escalation rationale (in `escalation`
 mode).
 
 Walk through each GATHER block's observations and check whether the
-ANALYZE blocks (and ultimately the `## CONCLUDE` summary) explain that
+ANALYZE blocks (and ultimately the `## REPORT` summary) explain that
 observation under the confirmed hypothesis. Unexplained, contradictory,
 or conveniently-ignored observations are dangling evidence.
 
@@ -117,7 +117,7 @@ confirmed hypothesis without being acknowledged.
 
 ### 4. ESCALATION_RATIONALE (escalation mode only — output N/A in full)
 
-The `## CONCLUDE` section must name the **specific uncertainty** that
+The `## REPORT` section must name the **specific uncertainty** that
 prevents resolution. "Two live mechanism hypotheses the evidence
 cannot discriminate" is a valid rationale; "felt unsure" or
 "insufficient evidence" without specifying what's missing is not.

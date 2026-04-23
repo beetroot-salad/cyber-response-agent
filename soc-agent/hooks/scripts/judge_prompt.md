@@ -6,7 +6,7 @@ been written. Your job is to verify that the **report faithfully
 reflects the investigation** — it claims only what the log supports,
 and (when a precedent is cited) the precedent actually transfers.
 
-A separate pre-CONCLUDE gate has already verified that the
+A separate pre-REPORT gate has already verified that the
 investigation itself is sound (legitimacy check, archetype shape,
 completeness, anchor-leg grounding, falsification attempts, dangling
 evidence). Do not re-run those — focus on the delta from
@@ -68,7 +68,7 @@ assumptions? Check that:
   supporting) assessment in the log.
 - Each refuted hypothesis cited in the report has at least one `--`
   (strongly refuting) assessment in the log.
-- The investigation didn't skip from CONTEXTUALIZE to CONCLUDE
+- The investigation didn't skip from CONTEXTUALIZE to REPORT
   without gathering evidence.
 
 FLAG if: conclusions rest on assumptions ("probably", "likely")
@@ -85,7 +85,7 @@ instance:
 1. **Entity-class match.** Does the precedent's `alert` field
    describe the same *kind* of instance as the current alert — same
    source classification, same identity class, same container image
-   family, same target tier? The pre-CONCLUDE judge already verified
+   family, same target tier? The pre-REPORT judge already verified
    archetype shape; this is the entity-level check. If the precedent
    is "monitoring-host `172.22.0.10` probing `target-endpoint`" and
    the current alert is "internal IP `10.99.0.5` probing
@@ -119,7 +119,7 @@ instance:
 
 If the report sets `matched_archetype` but no `matched_ticket_id`,
 output `N/A` — anchor-leg grounding (already validated by the
-pre-CONCLUDE judge) is what carries this resolution, not precedent.
+pre-REPORT judge) is what carries this resolution, not precedent.
 
 FLAG if: the precedent describes a different entity class from the
 current alert; OR the precedent's temporal anchor confirmations are

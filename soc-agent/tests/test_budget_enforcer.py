@@ -131,7 +131,7 @@ class TestResolveRunDir:
         assert run_dir == tmp_path / "run-abc"
 
     def test_concluded_run_ignored(self, tmp_path):
-        _make_run(tmp_path, "run-done", phase="CONCLUDE")
+        _make_run(tmp_path, "run-done", phase="REPORT")
         run_dir, _ = resolve_run_dir("sess-1", tmp_path)
         assert run_dir is None
 

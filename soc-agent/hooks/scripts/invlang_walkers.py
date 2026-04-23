@@ -1,6 +1,6 @@
 """Shared walkers for invlang companion dicts.
 
-`invlang_validate.py` and `validate_conclude.py` both traverse the merged
+`invlang_validate.py` and `validate_report_precheck.py` both traverse the merged
 companion to reason about hypotheses, predictions, and resolutions. The
 walkers live here so both hooks agree on what "all hypotheses" or "final
 status" means.

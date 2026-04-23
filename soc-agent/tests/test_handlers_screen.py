@@ -590,7 +590,7 @@ class TestRouting:
             screen_handler, "_invoke_screen", stub_invoke([], SCREEN_MATCH_YAML),
         )
         result = screen_handler.handle(ctx)
-        assert result.next_phase == Phase.CONCLUDE
+        assert result.next_phase == Phase.REPORT
         assert result.payload["screen_result"] == "match"
         assert result.payload["matched_archetype"] == "monitoring-probe"
         assert result.payload["matched_ticket_id"] == "SEC-2024-001"
@@ -716,7 +716,7 @@ class TestOrchestratorIntegration:
         def ctx_handler(_c):
             return PhaseResult(next_phase=Phase.SCREEN, payload={"dedup": False})
 
-        from scripts.handlers import conclude as conclude_handler
+        from scripts.handlers import report as report_handler
         conclude_response = textwrap.dedent("""\
             ```yaml
             status: written
@@ -728,7 +728,7 @@ class TestOrchestratorIntegration:
             ```
         """).strip()
         monkeypatch.setattr(
-            conclude_handler, "_invoke_subagent",
+            report_handler, "_invoke_subagent",
             stub_invoke([], conclude_response),
         )
         monkeypatch.setattr(
@@ -738,11 +738,11 @@ class TestOrchestratorIntegration:
         handlers = {
             Phase.CONTEXTUALIZE: ctx_handler,
             Phase.SCREEN: screen_handler.handle,
-            Phase.CONCLUDE: conclude_handler.handle,
+            Phase.REPORT: report_handler.handle,
         }
         result = run(ctx, handlers)
 
         assert result["status"] == "complete"
-        assert result["history"] == ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+        assert result["history"] == ["CONTEXTUALIZE", "SCREEN", "REPORT"]
         assert result["outputs"]["SCREEN"]["screen_result"] == "match"
-        assert result["outputs"]["CONCLUDE"]["status"] == "written"
+        assert result["outputs"]["REPORT"]["status"] == "written"

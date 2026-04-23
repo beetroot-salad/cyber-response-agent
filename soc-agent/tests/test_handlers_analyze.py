@@ -68,7 +68,7 @@ _CONCLUDE_RESPONSE = textwrap.dedent("""
 - ?brute-force: -- (was +) — matched refutation r1.
 
 **Surviving hypotheses:** ?benign-automation
-**Next action:** CONCLUDE → disposition: benign, confidence: high, matched_archetype: monitoring-probe
+**Next action:** REPORT → disposition: benign, confidence: high, matched_archetype: monitoring-probe
 
 ## Self-report
 
@@ -78,7 +78,7 @@ _CONCLUDE_RESPONSE = textwrap.dedent("""
   - none
 
 ```yaml
-next_action: CONCLUDE
+next_action: REPORT
 disposition: benign
 confidence: high
 matched_archetype: monitoring-probe
@@ -129,9 +129,9 @@ class TestPromptAssembly:
         assert f"run_dir={ctx.run_dir}" in captured[0]
         assert "signature_id=wazuh-rule-5710" in captured[0]
 
-    def test_prompt_inlines_alert_investigation_archetypes(self, tmp_path, monkeypatch):
-        """Handler preloads all deterministic context into the prompt so the
-        subagent doesn't need Read/Glob tools."""
+    def test_prompt_inlines_alert_investigation_no_archetypes(self, tmp_path, monkeypatch):
+        """Handler preloads alert + investigation only. Archetype context moved
+        to the REPORT phase — ANALYZE no longer sees archetype stories."""
         ctx = make_ctx(
             tmp_path,
             history=[Phase.PREDICT.value],
@@ -149,12 +149,12 @@ class TestPromptAssembly:
         assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
         # analyze handler uses mode="analyze" — tag carries a mode attribute
         assert "<investigation mode=\"analyze\">" in prompt and "</investigation>" in prompt
-        assert "<archetypes>" in prompt
+        # Archetype block explicitly absent — REPORT picks archetype, not ANALYZE
+        assert "<archetypes>" not in prompt
+        assert 'name="monitoring-probe"' not in prompt
         # Inlined content landed
         assert "alert observed." in prompt  # from investigation.md
         assert '"id": "alert-1"' in prompt  # from alert.json
-        # Real 5710 archetypes surface (live knowledge/ dir)
-        assert 'name="monitoring-probe"' in prompt
 
     def test_loop_n_counts_hypothesize_entries(self, tmp_path, monkeypatch):
         # Three PREDICT entries → loop_n = 3
@@ -189,7 +189,7 @@ class TestPromptAssembly:
 
 
 # ---------------------------------------------------------------------------
-# Routing — CONCLUDE
+# Routing — REPORT
 # ---------------------------------------------------------------------------
 
 
@@ -201,7 +201,7 @@ class TestHandleRoutesConclude:
             stub_invoke([], _CONCLUDE_RESPONSE),
         )
         result = analyze_handler.handle(ctx)
-        assert result.next_phase == Phase.CONCLUDE
+        assert result.next_phase == Phase.REPORT
         assert result.payload["disposition"] == "benign"
         assert result.payload["confidence"] == "high"
         assert result.payload["matched_archetype"] == "monitoring-probe"
@@ -218,7 +218,7 @@ class TestHandleRoutesConclude:
             stub_invoke([], response),
         )
         result = analyze_handler.handle(ctx)
-        assert result.next_phase == Phase.CONCLUDE
+        assert result.next_phase == Phase.REPORT
         assert result.payload["matched_archetype"] is None
 
     def test_escalated_with_surviving_list_accepted(self, tmp_path, monkeypatch):
@@ -237,7 +237,7 @@ class TestHandleRoutesConclude:
             stub_invoke([], response),
         )
         result = analyze_handler.handle(ctx)
-        assert result.next_phase == Phase.CONCLUDE
+        assert result.next_phase == Phase.REPORT
         assert result.payload["disposition"] == "escalated"
         assert result.payload["surviving_hypotheses"] == ["h-001", "h-002"]
 
@@ -254,7 +254,7 @@ class TestHandleRoutesConclude:
         assert "## ANALYZE (loop 2)" in written
         assert "## Self-report" in written
         # The terminal routing YAML fence must NOT have been written
-        assert "next_action: CONCLUDE" not in written
+        assert "next_action: REPORT" not in written
         assert "surviving_hypotheses: [h-001]" not in written
 
     def test_strips_all_yaml_fences_not_just_terminal(
@@ -372,7 +372,7 @@ class TestHandleMalformedOutput:
         - none
 
         ```yaml
-        next_action: CONCLUDE
+        next_action: REPORT
         confidence: high
         matched_archetype: null
         surviving_hypotheses: []
@@ -394,7 +394,7 @@ class TestHandleMalformedOutput:
         - none
 
         ```yaml
-        next_action: CONCLUDE
+        next_action: REPORT
         disposition: benign
         confidence: high
         matched_archetype: null
@@ -466,7 +466,7 @@ class TestAppendBehavior:
             stub_invoke([], _CONCLUDE_RESPONSE),
         )
         result1 = analyze_handler.handle(ctx)
-        assert result1.next_phase == Phase.CONCLUDE
+        assert result1.next_phase == Phase.REPORT
         # Only verify that a second call appends rather than duplicates the stripping behavior.
         written_once = (ctx.run_dir / "investigation.md").read_text()
         assert written_once.count("## ANALYZE (loop 2)") == 1

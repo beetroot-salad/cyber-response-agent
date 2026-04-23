@@ -14,7 +14,7 @@ self-surfacing.
 
 from schemas.state import Phase
 from scripts.orchestrate import PhaseHandler
-from scripts.handlers import analyze, contextualize, conclude, gather, predict, screen
+from scripts.handlers import analyze, contextualize, report, gather, predict, screen
 
 
 def default_handlers() -> dict[Phase, PhaseHandler]:
@@ -24,5 +24,5 @@ def default_handlers() -> dict[Phase, PhaseHandler]:
         Phase.PREDICT: predict.handle,
         Phase.GATHER: gather.handle,
         Phase.ANALYZE: analyze.handle,
-        Phase.CONCLUDE: conclude.handle,
+        Phase.REPORT: report.handle,
     }

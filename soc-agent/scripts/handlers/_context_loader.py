@@ -328,7 +328,7 @@ def format_investigation_block(
 
     Modes:
 
-    - `full` — entire file verbatim. Default. Used by CONCLUDE, which
+    - `full` — entire file verbatim. Default. Used by REPORT, which
       needs access to every phase for citation resolution.
 
     - `predict` — CONTEXTUALIZE + every PREDICT block verbatim +
@@ -345,7 +345,7 @@ def format_investigation_block(
       only (for weight-carryover / rollup-discipline). Current loop is
       the highest loop_n found across PREDICT/GATHER.
 
-    - `conclude-narrative` — CONTEXTUALIZE + the latest PREDICT and
+    - `report-narrative` — CONTEXTUALIZE + the latest PREDICT and
       latest ANALYZE blocks verbatim. GATHER sections, Self-report
       sections, and prior-loop PREDICT/ANALYZE blocks are dropped
       entirely. Used by the narrow narrative subagent that authors
@@ -359,7 +359,7 @@ def format_investigation_block(
     if not body_raw:
         return "<investigation>\n(empty — no prior phases recorded)\n</investigation>"
 
-    if mode not in {"predict", "analyze", "conclude-narrative"}:
+    if mode not in {"predict", "analyze", "report-narrative"}:
         return f"<investigation>\n{body_raw}\n</investigation>"
 
     sections = _parse_investigation_sections(body_raw)
@@ -417,7 +417,7 @@ def format_investigation_block(
         body = "\n\n".join(p.rstrip() for p in parts if p.strip())
         return f"<investigation mode=\"analyze\">\n{body}\n</investigation>"
 
-    # mode == "conclude-narrative"
+    # mode == "report-narrative"
     predict_sections = [s for s in sections if s["phase"] == "predict"]
     analyze_sections = [s for s in sections if s["phase"] == "analyze"]
     latest_hyp = predict_sections[-1] if predict_sections else None
@@ -430,7 +430,7 @@ def format_investigation_block(
             parts.append(_section_text(s))
         # Everything else (GATHER, self-report, prior PREDICT/ANALYZE) dropped.
     body = "\n\n".join(p.rstrip() for p in parts if p.strip())
-    return f"<investigation mode=\"conclude-narrative\">\n{body}\n</investigation>"
+    return f"<investigation mode=\"report-narrative\">\n{body}\n</investigation>"
 
 
 def format_signature_text_block(texts: dict[str, str]) -> str:
@@ -521,80 +521,6 @@ def format_lead_definitions_summary_block(defs: dict[str, str]) -> str:
         lines.append("  </lead>")
     lines.append("</lead-catalog>")
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Archetype-scan candidate parsing (from the CONTEXTUALIZE archetype-scan block)
-# ---------------------------------------------------------------------------
-#
-# Vocabulary: the archetype-scan subagent emits two disjoint sets — candidates
-# (alert shape is consistent with the archetype's story) and ruled-out (a
-# disqualifier tripped, or shape is incompatible). No confidence rating; those
-# imply pre-commitment that biases downstream PREDICT toward a premature
-# fork on ambiguous alerts.
-#
-# Renderer output in investigation.md:
-#   **Plausible archetypes (candidates for HYPOTHESIZE):**
-#   - <name> — <shape_notes>
-#   **Ruled-out archetypes:** (optional — omitted if empty)
-#   - <name> — <shape_notes>
-#
-# Parsers here read that rendered block and return raw archetype names. Callers
-# typically take the candidate list as an unordered set.
-
-
-def _parse_archetype_block(investigation_md: str, heading_prefix: str) -> list[str]:
-    """Return archetype names listed under a given `**heading:**` block.
-
-    Names in document order. Stops at the next `**` header or fenced block.
-    Returns empty list when the heading isn't present.
-    """
-    lines = investigation_md.splitlines()
-    try:
-        start = next(i for i, ln in enumerate(lines) if ln.startswith(heading_prefix))
-    except StopIteration:
-        return []
-    out: list[str] = []
-    for ln in lines[start + 1:]:
-        if ln.startswith("**") or ln.startswith("```"):
-            break
-        if not ln.lstrip().startswith("- "):
-            continue
-        stripped = ln.lstrip()[2:]
-        # format: `- <name> — <notes>`  OR just `- <name>`
-        name = stripped.split("—", 1)[0].strip()
-        if name and not name.startswith("("):  # skip placeholder lines
-            out.append(name)
-    return out
-
-
-def parse_archetype_candidates(investigation_md: str) -> list[str]:
-    """Return the candidate archetype names (unordered set, document-order).
-
-    Reads the `**Plausible archetypes (candidates for HYPOTHESIZE):**` block
-    emitted by contextualize.py.
-    """
-    return _parse_archetype_block(
-        investigation_md, "**Plausible archetypes (candidates for HYPOTHESIZE):**"
-    )
-
-
-def parse_ruled_out_archetypes(investigation_md: str) -> list[str]:
-    """Return ruled-out archetype names from the `**Ruled-out archetypes:**`
-    block emitted by contextualize.py."""
-    return _parse_archetype_block(investigation_md, "**Ruled-out archetypes:**")
-
-
-def parse_adversarial_archetype(investigation_md: str) -> str | None:
-    """Extract the archetype name from `**Adversarial archetype:** <name> — ...`.
-
-    Returns None when absent.
-    """
-    for ln in investigation_md.splitlines():
-        if ln.startswith("**Adversarial archetype:**"):
-            rest = ln.split("**Adversarial archetype:**", 1)[1].strip()
-            return rest.split("—", 1)[0].strip() or None
-    return None
 
 
 def format_archetype_shapes_block(

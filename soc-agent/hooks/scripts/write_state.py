@@ -5,7 +5,7 @@ State transitions are now inferred automatically by the infer_state.py
 PostToolUse hook when the agent writes ## PHASE headers to investigation.md.
 This script is retained for manual debugging and state repair — e.g.:
 
-    python3 hooks/scripts/write_state.py runs/run-xxx CONCLUDE
+    python3 hooks/scripts/write_state.py runs/run-xxx REPORT
 
 Usage:
     python3 hooks/scripts/write_state.py <run_dir> <new_phase> [ticket_id] [signature_id]
@@ -73,7 +73,7 @@ def main():
     if loops > MAX_LOOPS:
         print(
             f"Maximum investigation loops ({MAX_LOOPS}) exceeded. "
-            f"Must transition to CONCLUDE.",
+            f"Must transition to REPORT.",
             file=sys.stderr,
         )
         sys.exit(1)

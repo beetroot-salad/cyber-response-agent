@@ -1,9 +1,8 @@
 """CONTEXTUALIZE phase handler.
 
 Replaces the CONTEXTUALIZE section of `skills/investigate/SKILL.md`. Dispatches
-three subagents in parallel:
+two subagents in parallel:
 
-    - archetype-scan        — ranks archetype stories against the alert
     - ticket-context        — runs the 4-hour correlation script + emits dedup verdict
     - contextualize-prologue — builds the prologue YAML (vertices + edges)
 
@@ -12,11 +11,15 @@ combined new section against the invlang schema (by importing
 `hooks/scripts/invlang_validate.py`), and writes it to
 `{run_dir}/investigation.md`.
 
+Archetype matching has moved to the REPORT phase handler, where it runs against
+the *confirmed* investigation outcome to pick a resolvement label — not here,
+where it would bias the investigation toward enumerated candidates.
+
 Routes:
     - SCREEN   — playbook has a `## Screen` section
     - PREDICT  — default
 
-The dedup fast-path (CONTEXTUALIZE→CONCLUDE on ticket_context.dedup_candidate) is
+The dedup fast-path (CONTEXTUALIZE→REPORT on ticket_context.dedup_candidate) is
 retired pending a proper design; see tasks/dedup-fast-path.md. The ticket-context
 subagent still emits `dedup_candidate`; the handler carries it forward as
 `dedup_matched_ticket_id` telemetry only and does not steer routing on it.
@@ -56,10 +59,6 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 SUBAGENT_TIMEOUT_SECONDS = int(
     os.environ.get("SOC_AGENT_CONTEXTUALIZE_TIMEOUT_SECONDS", "300")
 )
-
-
-def _invoke_scan(prompt: str) -> str:
-    return _shared_invoke("archetype-scan", prompt, timeout=SUBAGENT_TIMEOUT_SECONDS)
 
 
 def _invoke_ticket(prompt: str) -> str:
@@ -198,31 +197,16 @@ def _extract_section_bullet_ids(
 # ---------------------------------------------------------------------------
 
 
-def _dispatch_parallel(ctx: Context, playbook: PlaybookMetadata) -> tuple[str, str, str]:
-    """Invoke the three preload subagents concurrently, return (scan_raw,
-    ticket_raw, prologue_raw) stdouts."""
-    scan_prompt = _assemble_scan_prompt(ctx, playbook)
+def _dispatch_parallel(ctx: Context, playbook: PlaybookMetadata) -> tuple[str, str]:
+    """Invoke the two preload subagents concurrently, return (ticket_raw,
+    prologue_raw) stdouts."""
     ticket_prompt = _assemble_ticket_prompt(ctx)
     prologue_prompt = _assemble_prologue_prompt(ctx)
 
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        f_scan = ex.submit(_invoke_scan, scan_prompt)
+    with ThreadPoolExecutor(max_workers=2) as ex:
         f_ticket = ex.submit(_invoke_ticket, ticket_prompt)
         f_prologue = ex.submit(_invoke_prologue, prologue_prompt)
-        return f_scan.result(), f_ticket.result(), f_prologue.result()
-
-
-def _assemble_scan_prompt(ctx: Context, playbook: PlaybookMetadata) -> str:
-    alert_path = ctx.run_dir / "alert.json"
-    field_quirks_path = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures"
-        / ctx.signature_id / "field-quirks.md"
-    )
-    return (
-        f"alert_path={alert_path}\n"
-        f"field_quirks_path={field_quirks_path}\n"
-        f"story_paths={','.join(playbook.archetype_story_paths)}"
-    )
+        return f_ticket.result(), f_prologue.result()
 
 
 def _assemble_ticket_prompt(ctx: Context) -> str:
@@ -312,40 +296,12 @@ def _summarize_preflight(preflight: dict) -> str:
 
 def _compose_markdown(
     ctx: Context,
-    scan: dict,
     ticket: dict,
     playbook: PlaybookMetadata,
     preflight_summary: str,
 ) -> str:
     tc = ticket.get("ticket_context", {})
     entities = tc.get("entities", {}) or {}
-
-    candidate_lines: list[str] = []
-    ruled_out_lines: list[str] = []
-    for entry in scan.get("archetype_scan", []) or []:
-        name = entry.get("archetype", "?")
-        shape_match = (entry.get("shape_match") or "").strip()
-        notes = entry.get("shape_notes") or ""
-        line = f"{name} — {notes}" if notes else name
-        if shape_match == "ruled-out":
-            ruled_out_lines.append(line)
-        else:
-            candidate_lines.append(line)
-
-    candidate_block = (
-        "\n".join(f"- {line}" for line in candidate_lines)
-        if candidate_lines
-        else "- (archetype-scan returned no candidates)"
-    )
-    ruled_out_block = (
-        "\n".join(f"- {line}" for line in ruled_out_lines)
-        if ruled_out_lines
-        else ""
-    )
-
-    adversarial = scan.get("adversarial_archetype") or {}
-    adversarial_name = adversarial.get("archetype", "(unspecified)")
-    adversarial_reason = adversarial.get("reason", "")
 
     hypotheses_line = (
         ", ".join(playbook.hypothesis_seeds) if playbook.hypothesis_seeds else "(none)"
@@ -364,18 +320,12 @@ def _compose_markdown(
     elif tc.get("queries_partial"):
         data_env = f"{data_env} | partial correlation: {tc['queries_partial']}"
 
-    archetype_section = f"**Plausible archetypes (candidates for HYPOTHESIZE):**\n{candidate_block}\n"
-    if ruled_out_block:
-        archetype_section += f"**Ruled-out archetypes:**\n{ruled_out_block}\n"
-
     return (
         f"## CONTEXTUALIZE\n\n"
         f"**Alert:** {ctx.ticket_id} — {ctx.signature_id}\n"
         f"**Key observables:**\n{entities_lines}\n"
         f"**Playbook hypotheses:** {hypotheses_line}\n"
         f"**Available leads:** {leads_line}\n"
-        f"{archetype_section}"
-        f"**Adversarial archetype:** {adversarial_name} — {adversarial_reason}\n"
         f"**Data environment:** {data_env}\n"
     )
 
@@ -455,12 +405,11 @@ def handle(ctx: Context) -> PhaseResult:
     preflight = _run_preflight()
     preflight_summary = _summarize_preflight(preflight)
 
-    scan_raw, ticket_raw, prologue_raw = _dispatch_parallel(ctx, playbook)
-    scan = extract_terminal_yaml(scan_raw)
+    ticket_raw, prologue_raw = _dispatch_parallel(ctx, playbook)
     ticket = extract_terminal_yaml(ticket_raw)
     prologue_yaml_str = _extract_yaml_block(prologue_raw, "prologue")
 
-    markdown = _compose_markdown(ctx, scan, ticket, playbook, preflight_summary)
+    markdown = _compose_markdown(ctx, ticket, playbook, preflight_summary)
     new_section = (
         markdown
         + "\n"
@@ -480,8 +429,6 @@ def handle(ctx: Context) -> PhaseResult:
             "dedup": False,
             "dedup_matched_ticket_id": dedup_id,
             "entities": ticket.get("ticket_context", {}).get("entities", {}),
-            "archetype_ranking": scan.get("archetype_scan", []),
-            "adversarial_archetype": scan.get("adversarial_archetype"),
             "ticket_context_result": ticket.get("ticket_context", {}),
         },
     )

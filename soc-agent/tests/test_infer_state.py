@@ -85,10 +85,10 @@ class TestExtractPhases:
             "## PREDICT (loop 1)\nstuff\n"
             "## GATHER (loop 1)\nstuff\n"
             "## ANALYZE (loop 1)\nstuff\n"
-            "## CONCLUDE\nverdicts\n"
+            "## REPORT\nverdicts\n"
         )
         assert extract_phases(f) == [
-            "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"
+            "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "REPORT"
         ]
 
     def test_loop_suffixes_stripped(self, tmp_path):
@@ -129,8 +129,8 @@ class TestExtractPhases:
 
     def test_screen_phase(self, tmp_path):
         f = tmp_path / "investigation.md"
-        f.write_text("## CONTEXTUALIZE\n\n## SCREEN\n\n## CONCLUDE\n")
-        assert extract_phases(f) == ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+        f.write_text("## CONTEXTUALIZE\n\n## SCREEN\n\n## REPORT\n")
+        assert extract_phases(f) == ["CONTEXTUALIZE", "SCREEN", "REPORT"]
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ class TestInferStateHook:
         assert state["phase"] == "CONTEXTUALIZE"
 
     def test_full_investigation_sequence(self, tmp_path):
-        """C -> H -> G -> A -> CONCLUDE through incremental writes."""
+        """C -> H -> G -> A -> REPORT through incremental writes."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
@@ -212,20 +212,20 @@ class TestInferStateHook:
             "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\nstuff\n",
             "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\nstuff\n## GATHER (loop 1)\nstuff\n",
             "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\nstuff\n## GATHER (loop 1)\nstuff\n## ANALYZE (loop 1)\nstuff\n",
-            "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\nstuff\n## GATHER (loop 1)\nstuff\n## ANALYZE (loop 1)\nstuff\n## CONCLUDE\nverdicts\n",
+            "## CONTEXTUALIZE\nstuff\n## PREDICT (loop 1)\nstuff\n## GATHER (loop 1)\nstuff\n## ANALYZE (loop 1)\nstuff\n## REPORT\nverdicts\n",
         ]
-        expected_phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+        expected_phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
 
         for i, content in enumerate(phases_content):
             result = write_investigation(run_dir, content, runs_dir)
             assert result.returncode == 0, f"Phase {expected_phases[i]} failed: {result.stderr}"
 
         state = load_state(run_dir)
-        assert state["phase"] == "CONCLUDE"
+        assert state["phase"] == "REPORT"
         assert state["history"] == expected_phases
 
     def test_screen_resolve_sequence(self, tmp_path):
-        """C -> SCREEN -> CONCLUDE is valid."""
+        """C -> SCREEN -> REPORT is valid."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
@@ -234,24 +234,24 @@ class TestInferStateHook:
         writes = [
             "## CONTEXTUALIZE\nstuff\n",
             "## CONTEXTUALIZE\nstuff\n## SCREEN\nmatched\n",
-            "## CONTEXTUALIZE\nstuff\n## SCREEN\nmatched\n## CONCLUDE\nverdicts\n",
+            "## CONTEXTUALIZE\nstuff\n## SCREEN\nmatched\n## REPORT\nverdicts\n",
         ]
         for content in writes:
             result = write_investigation(run_dir, content, runs_dir)
             assert result.returncode == 0, f"stderr: {result.stderr}"
 
         state = load_state(run_dir)
-        assert state["phase"] == "CONCLUDE"
-        assert state["history"] == ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+        assert state["phase"] == "REPORT"
+        assert state["history"] == ["CONTEXTUALIZE", "SCREEN", "REPORT"]
 
     def test_screen_fallthrough_sequence(self, tmp_path):
-        """C -> SCREEN -> H -> G -> A -> CONCLUDE is valid."""
+        """C -> SCREEN -> H -> G -> A -> REPORT is valid."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
         write_meta(run_dir)
 
-        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
         content = ""
         for phase in phases:
             suffix = " (loop 1)" if phase in ("PREDICT", "GATHER", "ANALYZE") else ""
@@ -260,11 +260,11 @@ class TestInferStateHook:
             assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
 
         state = load_state(run_dir)
-        assert state["phase"] == "CONCLUDE"
+        assert state["phase"] == "REPORT"
         assert state["history"] == phases
 
     def test_ticket_context_fast_resolve(self, tmp_path):
-        """C -> CONCLUDE (ticket-context fast-resolve) is valid."""
+        """C -> REPORT (ticket-context fast-resolve) is valid."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
@@ -272,18 +272,18 @@ class TestInferStateHook:
 
         writes = [
             "## CONTEXTUALIZE\nstuff\n",
-            "## CONTEXTUALIZE\nstuff\n## CONCLUDE\nverdicts\n",
+            "## CONTEXTUALIZE\nstuff\n## REPORT\nverdicts\n",
         ]
         for content in writes:
             result = write_investigation(run_dir, content, runs_dir)
             assert result.returncode == 0, f"stderr: {result.stderr}"
 
         state = load_state(run_dir)
-        assert state["phase"] == "CONCLUDE"
-        assert state["history"] == ["CONTEXTUALIZE", "CONCLUDE"]
+        assert state["phase"] == "REPORT"
+        assert state["history"] == ["CONTEXTUALIZE", "REPORT"]
 
     def test_investigation_with_loop(self, tmp_path):
-        """C -> H -> G -> A -> H -> G -> A -> CONCLUDE (one loop back)."""
+        """C -> H -> G -> A -> H -> G -> A -> REPORT (one loop back)."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
@@ -293,7 +293,7 @@ class TestInferStateHook:
             "CONTEXTUALIZE",
             "PREDICT", "GATHER", "ANALYZE",
             "PREDICT", "GATHER", "ANALYZE",
-            "CONCLUDE",
+            "REPORT",
         ]
         content = ""
         loop = 0
@@ -306,7 +306,7 @@ class TestInferStateHook:
             assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
 
         state = load_state(run_dir)
-        assert state["phase"] == "CONCLUDE"
+        assert state["phase"] == "REPORT"
         assert state["history"] == phases
 
     def test_max_loops_enforced(self, tmp_path):
@@ -400,16 +400,16 @@ class TestInferStateHook:
         assert "mismatch" in result.stderr
 
     def test_conclude_is_terminal(self, tmp_path):
-        """Cannot add phases after CONCLUDE."""
+        """Cannot add phases after REPORT."""
         runs_dir = tmp_path / "runs"
         run_dir = runs_dir / "run-test"
         run_dir.mkdir(parents=True)
         write_meta(run_dir)
 
-        content = "## CONTEXTUALIZE\nstuff\n## CONCLUDE\nverdicts\n"
+        content = "## CONTEXTUALIZE\nstuff\n## REPORT\nverdicts\n"
         write_investigation(run_dir, content, runs_dir)
 
-        # Try to add PREDICT after CONCLUDE
+        # Try to add PREDICT after REPORT
         content += "## PREDICT (loop 1)\nstuff\n"
         result = write_investigation(run_dir, content, runs_dir)
         assert result.returncode == 2
@@ -542,16 +542,16 @@ class TestBashDispatch:
             "## PREDICT (loop 1)\nh\n"
             "## GATHER (loop 1)\ng\n"
             "## ANALYZE (loop 1)\na\n"
-            "## CONCLUDE\nend\n"
+            "## REPORT\nend\n"
         )
         command = f"cat >> {inv} <<'EOF'\n## PREDICT ...\nEOF"
         r = run_hook(make_bash_hook_event(command), runs_dir)
         assert r.returncode == 0, f"stderr: {r.stderr}"
 
         state = load_state(run_dir)
-        assert state["phase"] == "CONCLUDE"
+        assert state["phase"] == "REPORT"
         assert state["history"] == [
-            "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE",
+            "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "REPORT",
         ]
 
     def test_tee_append_path_form(self, tmp_path):

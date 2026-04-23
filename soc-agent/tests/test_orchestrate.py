@@ -50,7 +50,7 @@ def scripted_handler(*next_phases: Phase):
     """Handler that returns each next_phase in order across successive calls.
 
     Lets one handler be reused for multi-loop tests (e.g. ANALYZE → PREDICT
-    on loop 1, ANALYZE → CONCLUDE on loop 2).
+    on loop 1, ANALYZE → REPORT on loop 2).
     """
     it = iter(next_phases)
 
@@ -69,64 +69,64 @@ def scripted_handler(*next_phases: Phase):
 
 
 def test_screen_match_path(tmp_path):
-    """CONTEXTUALIZE -> SCREEN -> CONCLUDE — the fast path."""
+    """CONTEXTUALIZE -> SCREEN -> REPORT — the fast path."""
     ctx = make_ctx(tmp_path)
     handlers = {
         Phase.CONTEXTUALIZE: const_handler(Phase.SCREEN),
-        Phase.SCREEN: const_handler(Phase.CONCLUDE),
+        Phase.SCREEN: const_handler(Phase.REPORT),
     }
     result = run(ctx, handlers)
     assert result["status"] == "complete"
-    assert result["history"] == ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+    assert result["history"] == ["CONTEXTUALIZE", "SCREEN", "REPORT"]
 
 
 def test_full_loop_single_cycle(tmp_path):
-    """C -> PREDICT -> GATHER -> ANALYZE -> CONCLUDE."""
+    """C -> PREDICT -> GATHER -> ANALYZE -> REPORT."""
     ctx = make_ctx(tmp_path)
     handlers = {
         Phase.CONTEXTUALIZE: const_handler(Phase.PREDICT),
         Phase.PREDICT: const_handler(Phase.GATHER),
         Phase.GATHER: const_handler(Phase.ANALYZE),
-        Phase.ANALYZE: const_handler(Phase.CONCLUDE),
+        Phase.ANALYZE: const_handler(Phase.REPORT),
     }
     result = run(ctx, handlers)
     assert result["status"] == "complete"
     assert result["history"] == [
-        "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE",
+        "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "REPORT",
     ]
 
 
 def test_full_loop_two_cycles(tmp_path):
-    """Two PREDICT/GATHER/ANALYZE cycles before CONCLUDE."""
+    """Two PREDICT/GATHER/ANALYZE cycles before REPORT."""
     ctx = make_ctx(tmp_path)
     handlers = {
         Phase.CONTEXTUALIZE: const_handler(Phase.PREDICT),
         Phase.PREDICT: const_handler(Phase.GATHER),
         Phase.GATHER: const_handler(Phase.ANALYZE),
-        Phase.ANALYZE: scripted_handler(Phase.PREDICT, Phase.CONCLUDE),
+        Phase.ANALYZE: scripted_handler(Phase.PREDICT, Phase.REPORT),
     }
     result = run(ctx, handlers)
     assert result["history"] == [
         "CONTEXTUALIZE",
         "PREDICT", "GATHER", "ANALYZE",
         "PREDICT", "GATHER", "ANALYZE",
-        "CONCLUDE",
+        "REPORT",
     ]
 
 
 def test_contextualize_to_conclude_direct(tmp_path):
-    """CONTEXTUALIZE -> CONCLUDE remains a legal transition in the TRANSITIONS
+    """CONTEXTUALIZE -> REPORT remains a legal transition in the TRANSITIONS
     table so orchestrator mechanics support future short-circuits. The live
     dedup fast-path that used this edge is retired (see
     tasks/dedup-fast-path.md); the structural test stays to catch regressions
     in the state machine itself."""
     ctx = make_ctx(tmp_path)
     handlers = {
-        Phase.CONTEXTUALIZE: const_handler(Phase.CONCLUDE, payload={"dedup": False}),
+        Phase.CONTEXTUALIZE: const_handler(Phase.REPORT, payload={"dedup": False}),
     }
     result = run(ctx, handlers)
     assert result["status"] == "complete"
-    assert result["history"] == ["CONTEXTUALIZE", "CONCLUDE"]
+    assert result["history"] == ["CONTEXTUALIZE", "REPORT"]
     assert result["outputs"]["CONTEXTUALIZE"] == {"dedup": False}
 
 
@@ -138,14 +138,14 @@ def test_gather_to_hypothesize_reentry(tmp_path):
         Phase.PREDICT: const_handler(Phase.GATHER),
         # First GATHER realizes a new fork; jump back to PREDICT.
         Phase.GATHER: scripted_handler(Phase.PREDICT, Phase.ANALYZE),
-        Phase.ANALYZE: const_handler(Phase.CONCLUDE),
+        Phase.ANALYZE: const_handler(Phase.REPORT),
     }
     result = run(ctx, handlers)
     assert result["history"] == [
         "CONTEXTUALIZE",
         "PREDICT", "GATHER",
         "PREDICT", "GATHER", "ANALYZE",
-        "CONCLUDE",
+        "REPORT",
     ]
 
 
@@ -177,7 +177,7 @@ def test_missing_handler_raises(tmp_path):
 
 
 def test_loop_cap_forces_conclude(tmp_path):
-    """After MAX_LOOPS PREDICT/ANALYZE entries the orchestrator forces CONCLUDE."""
+    """After MAX_LOOPS PREDICT/ANALYZE entries the orchestrator forces REPORT."""
     ctx = make_ctx(tmp_path)
     # Build a handler set that would loop forever without the cap:
     # C -> H -> G -> A -> H -> G -> A -> ...
@@ -188,10 +188,10 @@ def test_loop_cap_forces_conclude(tmp_path):
         Phase.ANALYZE: const_handler(Phase.PREDICT),  # never concludes on its own
     }
     result = run(ctx, handlers)
-    assert result["status"] == "forced_conclude"
-    # History ends with CONCLUDE
-    assert result["history"][-1] == "CONCLUDE"
-    # Loop cap: count of H or A entries in history before the forced CONCLUDE
+    assert result["status"] == "forced_report"
+    # History ends with REPORT
+    assert result["history"][-1] == "REPORT"
+    # Loop cap: count of H or A entries in history before the forced REPORT
     # should be >= MAX_LOOPS.
     ha_count = sum(1 for p in result["history"] if p in {"PREDICT", "ANALYZE"})
     assert ha_count >= MAX_LOOPS
@@ -219,7 +219,7 @@ def test_state_json_is_persisted_every_transition(tmp_path):
         Phase.CONTEXTUALIZE: recorder(Phase.PREDICT),
         Phase.PREDICT: recorder(Phase.GATHER),
         Phase.GATHER: recorder(Phase.ANALYZE),
-        Phase.ANALYZE: recorder(Phase.CONCLUDE),
+        Phase.ANALYZE: recorder(Phase.REPORT),
     }
 
     run(ctx, handlers)
@@ -233,10 +233,10 @@ def test_state_json_is_persisted_every_transition(tmp_path):
     assert histories[0] == ["CONTEXTUALIZE"]
     assert histories[-1] == ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE"]
 
-    # Final state.json after CONCLUDE
+    # Final state.json after REPORT
     final = json.loads(state_path.read_text())
-    assert final["phase"] == "CONCLUDE"
-    assert final["history"][-1] == "CONCLUDE"
+    assert final["phase"] == "REPORT"
+    assert final["history"][-1] == "REPORT"
 
 
 def test_payload_propagates_into_outputs(tmp_path):
@@ -244,7 +244,7 @@ def test_payload_propagates_into_outputs(tmp_path):
     ctx = make_ctx(tmp_path)
     handlers = {
         Phase.CONTEXTUALIZE: const_handler(Phase.SCREEN, payload={"entities": ["a", "b"]}),
-        Phase.SCREEN: const_handler(Phase.CONCLUDE, payload={"screen_result": "match"}),
+        Phase.SCREEN: const_handler(Phase.REPORT, payload={"screen_result": "match"}),
     }
     result = run(ctx, handlers)
     assert result["outputs"]["CONTEXTUALIZE"] == {"entities": ["a", "b"]}

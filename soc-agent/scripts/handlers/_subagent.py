@@ -153,10 +153,10 @@ def invoke_subagent(
     model: Optional[str] = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> str:
-    """Run a subagent by name (e.g. "archetype-scan") and return its stdout.
+    """Run a subagent by name (e.g. "archetype-match") and return its stdout.
 
     The `agent` argument is the bare subagent name — **not** the
-    `soc-agent:archetype-scan` prefixed form. The plugin prefix is a Task-tool
+    `soc-agent:archetype-match` prefixed form. The plugin prefix is a Task-tool
     convention, not a CLI one.
 
     Implementation:

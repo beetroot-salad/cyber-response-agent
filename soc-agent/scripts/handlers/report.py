@@ -1,4 +1,4 @@
-"""CONCLUDE phase handler.
+"""REPORT phase handler.
 
 Compose gradient with mechanical fast-paths for both SCREEN-matched and
 ANALYZE-routed investigations. LLM dispatch is reserved for (a) authoring the
@@ -20,7 +20,7 @@ ANALYZE path:
   **Mechanical + narrative subagent.** Handler composes every structured
     field (frontmatter, conclude: YAML, Hypothesis Outcomes, Key Evidence,
     Verdict, trace) from the ANALYZE payload + invlang `gather:` blocks in
-    investigation.md. A narrow `conclude_narrative` subagent (Haiku, no
+    investigation.md. A narrow `report_narrative` subagent (Haiku, no
     tools) authors only `## Summary` and optionally `## For Analyst`. Its
     preload is ~5-8 KB (trimmed investigation + optional single archetype)
     vs. ~50 KB for the full-context fallback.
@@ -31,7 +31,7 @@ Fallback:
     mechanical output, narrative subagent fails to emit the expected tagged
     blocks, SCREEN payload not match-shaped, or forced-exhaustion). Any
     partial mechanical writes are rolled back before fallback so the
-    subagent starts from a clean state. Uses agents/conclude.md.
+    subagent starts from a clean state. Uses agents/report.md.
 
 Payload carries `compose_mode` for telemetry:
   `screen_mechanical_grounded` | `screen_mechanical_partial` |
@@ -39,13 +39,13 @@ Payload carries `compose_mode` for telemetry:
 
 Input:
     ctx.ticket_id                               — resolved at Context construction
-    ctx.forced_conclude                         — true on MAX_LOOPS path
+    ctx.forced_report                         — true on MAX_LOOPS path
     ctx.outputs[Phase.ANALYZE]  OR
     ctx.outputs[Phase.SCREEN]
 
 Output:
     PhaseResult(
-        next_phase=Phase.CONCLUDE,  # terminal; orchestrator returns summary
+        next_phase=Phase.REPORT,  # terminal; orchestrator returns summary
         payload={
             "status": "written" | "gate_failed" | "error",
             "report_path": "...",              # on written
@@ -89,9 +89,9 @@ from scripts.handlers._subagent import (
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
-SUBAGENT_MODEL = os.environ.get("SOC_AGENT_CONCLUDE_MODEL", "haiku")
+SUBAGENT_MODEL = os.environ.get("SOC_AGENT_REPORT_MODEL", "haiku")
 SUBAGENT_TIMEOUT_SECONDS = int(
-    os.environ.get("SOC_AGENT_CONCLUDE_TIMEOUT_SECONDS", "300")
+    os.environ.get("SOC_AGENT_REPORT_TIMEOUT_SECONDS", "300")
 )
 
 
@@ -99,9 +99,21 @@ def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) ->
     """Thin per-handler binding over the shared wrapper.
 
     Kept as a module-level function so tests can monkeypatch it with
-    `monkeypatch.setattr(conclude_handler, "_invoke_subagent", stub)`.
+    `monkeypatch.setattr(report_handler, "_invoke_subagent", stub)`.
     """
-    return _shared_invoke("conclude", prompt, timeout=timeout)
+    return _shared_invoke("report", prompt, timeout=timeout)
+
+
+ARCHETYPE_MATCH_TIMEOUT_SECONDS = int(
+    os.environ.get("SOC_AGENT_ARCHETYPE_MATCH_TIMEOUT_SECONDS", "120")
+)
+
+
+def _invoke_archetype_match(prompt: str) -> str:
+    """Module-level binding for archetype-match subagent so tests can stub it."""
+    return _shared_invoke(
+        "archetype-match", prompt, timeout=ARCHETYPE_MATCH_TIMEOUT_SECONDS,
+    )
 
 
 _VALID_STATUSES = {"written", "gate_failed", "error"}
@@ -110,16 +122,16 @@ _VALID_STATUSES = {"written", "gate_failed", "error"}
 def _select_routing_source(ctx: Context) -> tuple[str, bool]:
     """Return (routing_source, forced_exhaustion).
 
-    forced_exhaustion is True when the orchestrator reached CONCLUDE via the
-    MAX_LOOPS path (`ctx.forced_conclude`). Otherwise the routing source is
+    forced_exhaustion is True when the orchestrator reached REPORT via the
+    MAX_LOOPS path (`ctx.forced_report`). Otherwise the routing source is
     whichever upstream phase routed here:
     - ANALYZE present → analyze
     - SCREEN present → screen
 
-    Dedup fast-path (CONTEXTUALIZE→CONCLUDE on dedup_candidate) is retired —
+    Dedup fast-path (CONTEXTUALIZE→REPORT on dedup_candidate) is retired —
     see handlers/contextualize.py module docstring + tasks/dedup-fast-path.md.
     """
-    if ctx.forced_conclude:
+    if ctx.forced_report:
         return "forced_exhaustion", True
     if Phase.ANALYZE in ctx.outputs:
         return "analyze", False
@@ -129,7 +141,7 @@ def _select_routing_source(ctx: Context) -> tuple[str, bool]:
 
 
 def _assemble_prompt(ctx: Context) -> str:
-    """Build the conclude subagent prompt with all deterministic context inline.
+    """Build the report subagent prompt with all deterministic context inline.
 
     The subagent receives alert.json, investigation.md, and every archetype's
     story.md + trust-anchors.md + precedent snapshots preloaded — no Read/Glob
@@ -143,7 +155,7 @@ def _assemble_prompt(ctx: Context) -> str:
     """
     if not ctx.ticket_id:
         raise OrchestrationError(
-            "CONCLUDE handler: ctx.ticket_id is empty — must be set at Context "
+            "REPORT handler: ctx.ticket_id is empty — must be set at Context "
             "construction by the /investigate entrypoint"
         )
     routing_source, forced = _select_routing_source(ctx)
@@ -180,7 +192,7 @@ def _validate_status(parsed: dict) -> dict:
     status = parsed.get("status")
     if status not in _VALID_STATUSES:
         raise OrchestrationError(
-            f"conclude subagent returned unknown status {status!r}; "
+            f"report subagent returned unknown status {status!r}; "
             f"expected one of {sorted(_VALID_STATUSES)}"
         )
     return parsed
@@ -188,7 +200,7 @@ def _validate_status(parsed: dict) -> dict:
 
 class _MechanicalFallback(Exception):
     """Raised by the mechanical composer when it can't produce a valid report
-    and wants the handler to fall through to the conclude subagent. Carries
+    and wants the handler to fall through to the report subagent. Carries
     a reason string for telemetry. Any partial writes have already been
     rolled back when this is raised."""
 
@@ -199,14 +211,14 @@ def handle(ctx: Context) -> PhaseResult:
     fallback_reason: str | None = None
 
     if (
-        not ctx.forced_conclude
+        not ctx.forced_report
         and screen_payload.get("screen_result") == "match"
         and screen_payload.get("matched_archetype")
         and screen_payload.get("gather")
     ):
         try:
             payload = _compose_screen_match(ctx, screen_payload)
-            return PhaseResult(next_phase=Phase.CONCLUDE, payload=payload)
+            return PhaseResult(next_phase=Phase.REPORT, payload=payload)
         except _MechanicalFallback as exc:
             fallback_reason = str(exc)
 
@@ -216,13 +228,13 @@ def handle(ctx: Context) -> PhaseResult:
     # (ANALYZE never ran).
     if (
         fallback_reason is None
-        and not ctx.forced_conclude
+        and not ctx.forced_report
         and analyze_payload
         and analyze_payload.get("disposition")
     ):
         try:
             payload = _compose_analyze_routed(ctx, analyze_payload)
-            return PhaseResult(next_phase=Phase.CONCLUDE, payload=payload)
+            return PhaseResult(next_phase=Phase.REPORT, payload=payload)
         except _MechanicalFallback as exc:
             fallback_reason = str(exc)
 
@@ -232,16 +244,16 @@ def handle(ctx: Context) -> PhaseResult:
     payload["compose_mode"] = "subagent"
     if fallback_reason:
         payload["mechanical_fallback_reason"] = fallback_reason
-    return PhaseResult(next_phase=Phase.CONCLUDE, payload=payload)
+    return PhaseResult(next_phase=Phase.REPORT, payload=payload)
 
 
 # ---------------------------------------------------------------------------
-# Mechanical CONCLUDE composer (SCREEN-match fast-path)
+# Mechanical REPORT composer (SCREEN-match fast-path)
 # ---------------------------------------------------------------------------
 
 
 def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
-    """Compose the CONCLUDE artifacts mechanically from the SCREEN payload.
+    """Compose the REPORT artifacts mechanically from the SCREEN payload.
 
     Returns the handler payload on success. Raises `_MechanicalFallback`
     when mechanical composition cannot produce a valid report (Level 3);
@@ -259,7 +271,7 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
                             the mechanical output (indicates a schema bug).
 
     Writes to disk (only after all invariants decided):
-      - {run_dir}/investigation.md — appends ## CONCLUDE + conclude: YAML
+      - {run_dir}/investigation.md — appends ## REPORT + conclude: YAML
       - {run_dir}/report.md        — full frontmatter + body
     Runs `validate_tier1(report_path)` post-write. On validation failure,
     rolls both writes back and raises `_MechanicalFallback`.
@@ -362,7 +374,7 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
     conclude_yaml_text = yaml.safe_dump(conclude_yaml_block, sort_keys=False).rstrip()
 
     md_lines = [
-        "## CONCLUDE",
+        "## REPORT",
         "",
         f"**Verdict:** {status} / {disposition} / {confidence}",
         f"**Confirmed hypothesis:** ?{archetype} via SCREEN fast-path",
@@ -463,6 +475,117 @@ def _derive_trust_anchors(gather: list[dict]) -> list[dict]:
     return out
 
 
+def _derive_legitimacy_verdicts(gather: list[dict]) -> list[dict]:
+    """Pull `legitimacy_resolutions[]` entries from every gather outcome.
+
+    Each entry becomes `{contract, result}` — the shape archetype-match expects
+    in its `legitimacy_verdicts` input.
+    """
+    out: list[dict] = []
+    for lead in gather:
+        outcome = (lead or {}).get("outcome") or {}
+        resolutions = outcome.get("legitimacy_resolutions") or []
+        for r in resolutions:
+            contract = r.get("contract")
+            result = r.get("result")
+            if contract and result:
+                out.append({"contract": contract, "result": result})
+    return out
+
+
+def _archetype_story_paths(signature_id: str) -> list[Path]:
+    """List every `story.md` path under this signature's archetype catalog."""
+    base = (
+        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "archetypes"
+    )
+    if not base.is_dir():
+        return []
+    return sorted(
+        d / "story.md" for d in base.iterdir()
+        if d.is_dir() and (d / "story.md").exists()
+    )
+
+
+def _derive_mechanism_summary(
+    surviving_hypotheses: list[str],
+    analyze_payload: dict,
+) -> str:
+    """One-line mechanism description for archetype-match input.
+
+    Prefer ANALYZE's own `rationale` field if present; otherwise stitch the
+    surviving-hypothesis IDs together.
+    """
+    rationale = (analyze_payload.get("rationale") or "").strip()
+    if rationale:
+        return rationale.splitlines()[0][:200]
+    if surviving_hypotheses:
+        return "surviving: " + ", ".join(surviving_hypotheses)
+    return "all hypotheses refuted"
+
+
+def _run_archetype_match(
+    ctx: Context,
+    *,
+    disposition: str,
+    confidence: str,
+    mechanism_summary: str,
+    legitimacy_verdicts: list[dict],
+    trust_anchors_confirmed: list[str],
+) -> tuple[str | None, str]:
+    """Dispatch archetype-match and parse its terminal YAML.
+
+    Returns (matched_archetype, justification). On any failure (no stories,
+    subagent error, unparseable YAML), returns (None, "<reason>") — the caller
+    treats None as "no archetype label" and still writes the report without a
+    matched_archetype.
+    """
+    story_paths = _archetype_story_paths(ctx.signature_id)
+    if not story_paths:
+        return None, "no archetype catalog for this signature"
+
+    alert_path = ctx.run_dir / "alert.json"
+    field_quirks_path = (
+        SOC_AGENT_ROOT / "knowledge" / "signatures"
+        / ctx.signature_id / "field-quirks.md"
+    )
+    prompt_lines = [
+        f"alert_path={alert_path}",
+        f"field_quirks_path={field_quirks_path}",
+        f"story_paths={','.join(str(p) for p in story_paths)}",
+        f"disposition={disposition}",
+        f"confidence={confidence}",
+        f"mechanism_summary={mechanism_summary}",
+        "legitimacy_verdicts:",
+    ]
+    if legitimacy_verdicts:
+        for v in legitimacy_verdicts:
+            prompt_lines.append(f"  - contract: {v['contract']}")
+            prompt_lines.append(f"    result: {v['result']}")
+    else:
+        prompt_lines[-1] = "legitimacy_verdicts: []"
+    if trust_anchors_confirmed:
+        prompt_lines.append("trust_anchors_confirmed:")
+        for a in trust_anchors_confirmed:
+            prompt_lines.append(f"  - {a}")
+    else:
+        prompt_lines.append("trust_anchors_confirmed: []")
+
+    prompt = "\n".join(prompt_lines)
+    try:
+        raw = _invoke_archetype_match(prompt)
+    except OrchestrationError as exc:
+        return None, f"archetype-match dispatch failed: {exc}"
+    try:
+        parsed = extract_terminal_yaml(raw)
+    except Exception as exc:
+        return None, f"archetype-match YAML parse failed: {exc}"
+    matched = parsed.get("matched_archetype")
+    justification = parsed.get("justification", "")
+    if isinstance(matched, str) and matched.strip() and matched != "null":
+        return matched.strip(), justification
+    return None, justification or "archetype-match returned null"
+
+
 def _compose_trace(matched_pattern: str, leads_run: list[dict], disposition: str) -> str:
     lead_names = [
         (entry or {}).get("lead", "?") for entry in leads_run
@@ -495,7 +618,7 @@ def _run_tier1_validation(report_path: Path) -> None:
     passed, errors, _ = validate_tier1(report_path)
     if not passed:
         raise OrchestrationError(
-            "mechanical CONCLUDE report failed Tier-1 validation:\n"
+            "mechanical REPORT report failed Tier-1 validation:\n"
             + "\n".join(f"  - {e}" for e in errors)
         )
 
@@ -584,7 +707,7 @@ def _compose_report_md_screen(
 
 
 # ---------------------------------------------------------------------------
-# Mechanical CONCLUDE composer (ANALYZE-routed path)
+# Mechanical REPORT composer (ANALYZE-routed path)
 # ---------------------------------------------------------------------------
 
 
@@ -786,7 +909,7 @@ def _derive_termination_category(
          forces escalation regardless of mechanism.
       4. `exhaustion-escalation` — default.
 
-    This mirrors the discipline in agents/conclude.md §3 without requiring
+    This mirrors the discipline in agents/report.md §3 without requiring
     the subagent to author it. Over-triggering `exhaustion-escalation` is
     the safe fallback — escalated dispositions land there.
     """
@@ -959,11 +1082,11 @@ def _dispatch_narrative_subagent(
     confidence: str,
     matched_archetype: str | None,
 ) -> tuple[str, str | None]:
-    """Invoke `conclude_narrative` subagent with a trimmed preload.
+    """Invoke `report_narrative` subagent with a trimmed preload.
 
     Preload shape (target ≤ 8 KB):
       - One-line alert summary
-      - <investigation-summary> via `format_investigation_block(mode="conclude-narrative")`
+      - <investigation-summary> via `format_investigation_block(mode="report-narrative")`
       - <archetype> block only when `matched_archetype` is non-null
       - Header metadata: status, disposition, confidence, matched_archetype
 
@@ -984,7 +1107,7 @@ def _dispatch_narrative_subagent(
     blocks = [
         "\n".join(header_lines),
         format_alert_block(alert, salt),
-        format_investigation_block(investigation_md, mode="conclude-narrative"),
+        format_investigation_block(investigation_md, mode="report-narrative"),
     ]
     if matched_archetype:
         shapes = load_archetype_shapes(
@@ -999,7 +1122,7 @@ def _dispatch_narrative_subagent(
 
     prompt = "\n\n".join(blocks)
     try:
-        raw = _shared_invoke("conclude_narrative", prompt, timeout=120)
+        raw = _shared_invoke("report_narrative", prompt, timeout=120)
     except OrchestrationError as exc:
         raise _MechanicalFallback(
             f"narrative subagent invocation failed: {exc}"
@@ -1027,7 +1150,7 @@ def _compose_report_md_analyze(
 
     Structural fields come from the ANALYZE payload + parsed gather blocks.
     `summary_md` and `analyst_md` come from the narrative subagent. Section
-    order is fixed to match agents/conclude.md §6 exactly so Tier-1 passes.
+    order is fixed to match agents/report.md §6 exactly so Tier-1 passes.
     """
     fm = {
         "ticket_id": ctx.ticket_id,
@@ -1090,11 +1213,11 @@ def _compose_report_md_analyze(
 
 
 def _compose_analyze_routed(ctx: Context, analyze_payload: dict) -> dict:
-    """Mechanical CONCLUDE composer for the ANALYZE-routed path.
+    """Mechanical REPORT composer for the ANALYZE-routed path.
 
     Extracts structured fields from the ANALYZE payload + invlang gather
     blocks in investigation.md, dispatches the narrative subagent for the
-    free-text sections, assembles report.md, appends the CONCLUDE section
+    free-text sections, assembles report.md, appends the REPORT section
     to investigation.md, and runs Tier-1 validation.
 
     On any failure (narrative subagent miss, Tier-1 reject, mandatory-
@@ -1104,7 +1227,6 @@ def _compose_analyze_routed(ctx: Context, analyze_payload: dict) -> dict:
     """
     raw_disposition = analyze_payload.get("disposition")
     confidence = analyze_payload.get("confidence")
-    matched_archetype = analyze_payload.get("matched_archetype")
     surviving_hypotheses = analyze_payload.get("surviving_hypotheses") or []
 
     if not raw_disposition or not confidence:
@@ -1118,8 +1240,8 @@ def _compose_analyze_routed(ctx: Context, analyze_payload: dict) -> dict:
     # but the report frontmatter schema (schemas/enums.py VALID_DISPOSITIONS)
     # uses {benign, false_positive, true_positive, inconclusive}. When ANALYZE
     # routes `escalated`, that maps to report-frontmatter
-    # `disposition: inconclusive` + `status: escalated`. The conclude
-    # subagent does this remapping implicitly per agents/conclude.md; the
+    # `disposition: inconclusive` + `status: escalated`. The report
+    # subagent does this remapping implicitly per agents/report.md; the
     # mechanical path does it explicitly.
     force_escalated_from_disposition = False
     if raw_disposition == "escalated":
@@ -1134,6 +1256,28 @@ def _compose_analyze_routed(ctx: Context, analyze_payload: dict) -> dict:
 
     trust_anchors = _derive_trust_anchors(gather)
     leads_pursued = len(gather)
+
+    # Archetype label is picked here at REPORT-time — archetype-match runs
+    # against the confirmed investigation outcome, not against the alert
+    # alone. See agents/archetype-match.md. Null is a valid answer (forces
+    # an unlabeled resolution / escalation).
+    mechanism_summary = _derive_mechanism_summary(
+        surviving_hypotheses, analyze_payload,
+    )
+    legitimacy_verdicts = _derive_legitimacy_verdicts(gather)
+    trust_anchors_confirmed = [
+        (a.get("anchor") or "") for a in trust_anchors
+        if a.get("result") == "confirmed"
+    ]
+    matched_archetype, _am_justification = _run_archetype_match(
+        ctx,
+        disposition=disposition,
+        confidence=confidence,
+        mechanism_summary=mechanism_summary,
+        legitimacy_verdicts=legitimacy_verdicts,
+        trust_anchors_confirmed=trust_anchors_confirmed,
+    )
+
     trace = _compose_trace_analyze(
         gather, disposition, surviving_hypotheses, matched_archetype,
     )
@@ -1223,7 +1367,7 @@ def _compose_analyze_routed(ctx: Context, analyze_payload: dict) -> dict:
         else (surviving_hypotheses[0] if surviving_hypotheses else "null")
     )
     md_lines = [
-        "## CONCLUDE",
+        "## REPORT",
         "",
         verdict_line,
         f"**Confirmed hypothesis:** {confirmed_hyp}",
@@ -1323,7 +1467,7 @@ def _compose_termination_rationale(
 
 def _truncate_summary(summary_md: str, *, max_chars: int = 300) -> str:
     """Collapse a multi-paragraph narrative summary into a 1-2 sentence
-    summary field for the CONCLUDE YAML block. Takes the first paragraph,
+    summary field for the conclude: YAML block. Takes the first paragraph,
     strips newlines, clamps to max_chars.
     """
     first_para = summary_md.strip().split("\n\n", 1)[0]

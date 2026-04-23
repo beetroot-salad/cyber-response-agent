@@ -160,7 +160,7 @@ def run_investigation_mock(
 INSTRUCTIONS:
 1. Read the investigate skill instructions from skills/investigate/SKILL.md
 2. The signature knowledge above is already resolved — do not re-read context.md, playbook.md, or checklist.md
-3. Follow the investigation loop: CONTEXTUALIZE -> PREDICT -> GATHER -> ANALYZE -> CONCLUDE
+3. Follow the investigation loop: CONTEXTUALIZE -> PREDICT -> GATHER -> ANALYZE -> REPORT
 4. At each phase, call write_state.py: python3 hooks/scripts/write_state.py {run_dir} <PHASE> {alert['ticket_id']} {sig_id}
 5. For the GATHER phase, use the MOCK SIEM DATA above instead of querying live tools
 6. Skip the Explore subagent for precedents in this test — use the mock data
@@ -476,8 +476,8 @@ def seed_prior_investigation(runs_dir: Path, alert: dict, signature_id: str = "w
         "run_id": prior_run_id,
         "ticket_id": alert.get("ticket_id", "PRIOR-001"),
         "signature_id": signature_id,
-        "phase": "CONCLUDE",
-        "history": ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"],
+        "phase": "REPORT",
+        "history": ["CONTEXTUALIZE", "SCREEN", "REPORT"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }, indent=2))
 
@@ -515,7 +515,7 @@ Alert from internal monitoring IP. Single SSH failure with testuser.
 ## SCREEN
 Pattern match: monitoring-probe. Internal IP, monitoring username, single attempt.
 
-## CONCLUDE
+## REPORT
 Resolved as benign monitoring probe matching archetype monitoring-probe.
 """)
 

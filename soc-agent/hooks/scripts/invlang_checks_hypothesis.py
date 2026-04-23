@@ -2,7 +2,7 @@
 
 Covers the lean-hypothesis and sibling-rollup rules:
 - sibling fork distinctness on parent_vertex.classification
-- hypothesis persistence at CONCLUDE
+- hypothesis persistence at REPORT
 - matched_prediction_ids hypothesis-scope (no same-level sibling rollup)
 - compound prediction claim rejection
 - evaluation-prefixed classification rejection
@@ -83,7 +83,7 @@ def _check_hypothesis_fork_distinctness(merged: dict[str, Any]) -> list[str]:
 
 
 def _check_hypothesis_persistence(merged: dict[str, Any]) -> list[str]:
-    """Rule 24 — no orphaned hypotheses at CONCLUDE.
+    """Rule 24 — no orphaned hypotheses at REPORT.
 
     When a `conclude:` block is present, every declared hypothesis must
     either have reached final weight `--` across the resolutions chain, or

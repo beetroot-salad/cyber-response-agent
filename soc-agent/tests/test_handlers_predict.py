@@ -923,9 +923,9 @@ class TestCheckpointRecovery:
 
 
 # Archetype selection was removed — PREDICT no longer consumes archetype
-# context. Archetype-scan's candidate output remains in CONTEXTUALIZE's
-# investigation.md for REPORT to read; the `_select_archetypes_for_prompt`
-# helper and the corresponding TestArchetypeSelection suite were deleted
-# in the PREDICT reframe. Coverage of the underlying
-# `parse_archetype_candidates` / `parse_adversarial_archetype` parsers
-# lives in tests/test_context_loader.py.
+# context. Archetype labeling now happens at REPORT time via the
+# `archetype-match` subagent (see tests/test_handlers_report.py
+# ::test_archetype_match_is_invoked_on_analyze_routed_path). CONTEXTUALIZE
+# no longer emits an archetype block, so the `_select_archetypes_for_prompt`
+# helper and the old parsers (`parse_archetype_candidates` /
+# `parse_adversarial_archetype`) are gone.

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: CONCLUDE transition verification gate.
+"""PreToolUse hook: REPORT transition verification gate.
 
 Fires on Write/Edit targeting `investigation.md` (narrowed by `if`
 filters in plugin.json). Computes the *proposed* post-write text from
 the tool input (not the file on disk, which hasn't been updated yet).
 
-Fires only when the proposed text contains both a `## CONCLUDE` header
+Fires only when the proposed text contains both a `## REPORT` header
 AND a parseable `conclude:` YAML block — the second of the two writes
 the agent performs at the conclusion boundary, by which point
 `matched_archetype` is declared and Judge B has the context it needs.
@@ -14,7 +14,7 @@ Two gates run:
 
 1. **ticket-context dispatched.** Silent backstop — verifies the
    ticket-context subagent fired during CONTEXTUALIZE. Not surfaced in
-   SKILL.md because by CONCLUDE time the damage is already done; this
+   SKILL.md because by REPORT time the damage is already done; this
    exists only so a broken preload surfaces somewhere.
 
 2. **Two-judge investigation soundness check.** Two Haiku judges run
@@ -34,7 +34,7 @@ Running as PreToolUse means a rejection blocks the write before
 re-issues the write from the same phase, no state-machine confusion.
 
 Exit codes:
-    0 - Passed (or not a CONCLUDE-finalising write)
+    0 - Passed (or not a REPORT-finalising write)
     2 - Gate failed (message fed back to agent, blocks the write)
 """
 
@@ -51,7 +51,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.investigation_parse import (
-    has_conclude_header,
+    has_report_header,
     is_screen_resolved,
     resolve_proposed_text,
 )
@@ -68,8 +68,8 @@ from hooks.scripts.judge_runner import (
 )
 from hooks.scripts.run_context import extract_run_dir_from_path
 
-JUDGE_A_PROMPT_PATH = Path(__file__).resolve().parent / "conclude_judge_A_prompt.md"
-JUDGE_B_PROMPT_PATH = Path(__file__).resolve().parent / "conclude_judge_B_prompt.md"
+JUDGE_A_PROMPT_PATH = Path(__file__).resolve().parent / "report_judge_A_prompt.md"
+JUDGE_B_PROMPT_PATH = Path(__file__).resolve().parent / "report_judge_B_prompt.md"
 
 YAML_BLOCK_RE = re.compile(r"```yaml[ \t]*\r?\n(.*?)\r?\n```", re.DOTALL)
 VERDICT_LINE_RE = re.compile(
@@ -122,8 +122,8 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
         "Bash(python3 scripts/tools/ticket_context.py --run-dir X "
         "--signature-id Y) (or the legacy Agent subagent), as described in "
         "SKILL.md §CONTEXTUALIZE step 2; the audit log has no matching call. "
-        "Dispatch it before re-issuing this CONCLUDE write. Next action: "
-        "stay in CONCLUDE, run ticket_context.py, then retry the write."
+        "Dispatch it before re-issuing this REPORT write. Next action: "
+        "stay in REPORT, run ticket_context.py, then retry the write."
     )
 
 
@@ -149,7 +149,7 @@ def extract_conclude_yaml(text: str) -> dict | None:
 
 def extract_status(text: str) -> str | None:
     """Return 'resolved' or 'escalated' from the `**Verdict:**` line in
-    the CONCLUDE section, or None if not present / unparseable."""
+    the REPORT section, or None if not present / unparseable."""
     m = VERDICT_LINE_RE.search(text)
     if not m:
         return None
@@ -295,9 +295,9 @@ def run_judges(run_dir: Path, proposed_text: str) -> str | None:
     status = extract_status(proposed_text)
     if status is None:
         return (
-            "CONCLUDE write is missing a parseable `**Verdict:** resolved|escalated` "
-            "line in the ## CONCLUDE section. Add it per the SKILL.md §CONCLUDE "
-            "template and retry. Next action: stay in CONCLUDE, fix the verdict "
+            "REPORT write is missing a parseable `**Verdict:** resolved|escalated` "
+            "line in the ## REPORT section. Add it per the SKILL.md §REPORT "
+            "template and retry. Next action: stay in REPORT, fix the verdict "
             "line, retry the write."
         )
 
@@ -361,7 +361,7 @@ def run_judges(run_dir: Path, proposed_text: str) -> str | None:
 
     if flags:
         return "\n\n".join(flags) + (
-            "\n\nNext action: stay in CONCLUDE, address the FLAG(s) above by "
+            "\n\nNext action: stay in REPORT, address the FLAG(s) above by "
             "either revising the investigation log (additional ANALYZE, a new "
             "lead, or downgrading a hypothesis grade) or escalating instead of "
             "resolving, then retry the write."
@@ -381,7 +381,7 @@ _RESOLVING_TERMINATION_CATEGORIES = {"trust-root", "adversarial-refuted"}
 
 
 def check_frontier_closure(proposed_text: str) -> str | None:
-    """Every declared hypothesis must have a terminal status at CONCLUDE —
+    """Every declared hypothesis must have a terminal status at REPORT —
     but only for resolving investigations.
 
     A hypothesis is terminal when it's `confirmed` (last resolution `++`
@@ -430,7 +430,7 @@ def check_frontier_closure(proposed_text: str) -> str | None:
 
     return (
         f"frontier-closure failed: hypothesis id(s) {sorted(active)} are "
-        f"still 'active' at CONCLUDE but termination.category is {category!r} "
+        f"still 'active' at REPORT but termination.category is {category!r} "
         f"(a resolving category). Every declared hypothesis must end in "
         f"'confirmed' (++), 'refuted' (--), or 'shelved' (via a lead's shelved "
         f"list) before you can claim {category!r}. If a hypothesis can't be "
@@ -439,7 +439,7 @@ def check_frontier_closure(proposed_text: str) -> str | None:
         f"or 'exhaustion-escalation'. "
         f"Next action: author the missing resolution/shelving in a new "
         f"gather block, or change the termination category, then retry the "
-        f"CONCLUDE write."
+        f"REPORT write."
     )
 
 
@@ -447,7 +447,7 @@ ESCALATION_CATEGORIES = {"exhaustion-escalation", "severity-ceiling"}
 
 
 def check_termination_vs_verdict(proposed_text: str) -> str | None:
-    """Block CONCLUDE writes where termination.category contradicts the
+    """Block REPORT writes where termination.category contradicts the
     frontmatter's verdict / matched_archetype.
 
     The ANALYZE subagent picks termination.category as its routing
@@ -457,7 +457,7 @@ def check_termination_vs_verdict(proposed_text: str) -> str | None:
     or, for exhaustion-escalation, names a non-null matched_archetype,
     it is contradicting its own routing — the exact self-contradiction
     observed in run #34 where ANALYZE loop 2 said "no matching
-    archetype, exhaustion-escalation" but CONCLUDE wrote
+    archetype, exhaustion-escalation" but REPORT wrote
     `matched_archetype: monitoring-probe / resolved`.
 
     Rules enforced:
@@ -507,7 +507,7 @@ def check_termination_vs_verdict(proposed_text: str) -> str | None:
     return (
         "termination-vs-verdict contradiction: "
         + " | ".join(errors)
-        + " Next action: reconcile the CONCLUDE frontmatter with the "
+        + " Next action: reconcile the REPORT frontmatter with the "
         "ANALYZE routing, then retry the write."
     )
 
@@ -526,7 +526,7 @@ def main():
     if run_dir is None or proposed_text is None:
         sys.exit(0)
 
-    if not has_conclude_header(proposed_text):
+    if not has_report_header(proposed_text):
         sys.exit(0)
 
     errors: list[str] = []
@@ -549,7 +549,7 @@ def main():
             errors.append(err)
 
     if errors:
-        print("CONCLUDE gate failed:", file=sys.stderr)
+        print("REPORT gate failed:", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         sys.exit(2)

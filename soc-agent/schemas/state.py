@@ -16,7 +16,7 @@ class Phase(str, Enum):
     PREDICT = "PREDICT"
     GATHER = "GATHER"
     ANALYZE = "ANALYZE"
-    CONCLUDE = "CONCLUDE"
+    REPORT = "REPORT"
 
 
 # Legal transitions: from_phase -> set of allowed to_phases.
@@ -29,12 +29,12 @@ class Phase(str, Enum):
 #     that a new fork has opened and wants to articulate it before ANALYZE.
 #   - ANALYZE → PREDICT remains the canonical loop re-entry.
 TRANSITIONS: dict[Phase, set[Phase]] = {
-    Phase.CONTEXTUALIZE: {Phase.SCREEN, Phase.PREDICT, Phase.GATHER, Phase.CONCLUDE},
-    Phase.SCREEN: {Phase.PREDICT, Phase.CONCLUDE},       # resolve or fall through
+    Phase.CONTEXTUALIZE: {Phase.SCREEN, Phase.PREDICT, Phase.GATHER, Phase.REPORT},
+    Phase.SCREEN: {Phase.PREDICT, Phase.REPORT},         # resolve or fall through
     Phase.PREDICT: {Phase.GATHER},
     Phase.GATHER: {Phase.ANALYZE, Phase.PREDICT},
-    Phase.ANALYZE: {Phase.PREDICT, Phase.CONCLUDE},
-    Phase.CONCLUDE: set(),  # Terminal
+    Phase.ANALYZE: {Phase.PREDICT, Phase.REPORT},
+    Phase.REPORT: set(),  # Terminal
 }
 
 # CONTEXTUALIZE is the only valid initial phase

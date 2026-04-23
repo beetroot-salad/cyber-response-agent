@@ -44,12 +44,12 @@
           {
             "type": "command",
             "if": "Write(*/investigation.md)",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate_conclude.py"
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate_report_precheck.py"
           },
           {
             "type": "command",
             "if": "Edit(*/investigation.md)",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate_conclude.py"
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate_report_precheck.py"
           },
           {
             "type": "command",

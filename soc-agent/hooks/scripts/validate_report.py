@@ -474,9 +474,9 @@ def assemble_prompt(
 ) -> str:
     """Assemble the slimmed Tier 2 judge prompt.
 
-    The slimmed judge (post-CONCLUDE refactor) only validates the
+    The slimmed judge (post-REPORT refactor) only validates the
     report↔log delta plus precedent transfer. Archetype / shape /
-    completeness / anchor-leg checks moved to the pre-CONCLUDE judges.
+    completeness / anchor-leg checks moved to the pre-REPORT judges.
 
     Two modes:
     - `full`: status=resolved. INTERNAL_CONSISTENCY + EVIDENCE_SUFFICIENCY
@@ -533,7 +533,7 @@ def run_tier2(run_dir: Path, fields: dict) -> tuple[bool, str]:
             )
 
     # Load artifacts. The slimmed Tier 2 judge no longer reads archetype
-    # descriptions — shape/completeness moved to the pre-CONCLUDE judges.
+    # descriptions — shape/completeness moved to the pre-REPORT judges.
     # Tier 2's only archetype-adjacent check is PRECEDENT_TRANSFER, which
     # uses the precedent snapshot directly.
     salt = get_run_salt(run_dir)

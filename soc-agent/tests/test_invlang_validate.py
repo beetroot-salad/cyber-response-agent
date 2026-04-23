@@ -160,7 +160,7 @@ FULL_COMPANION_MD = f"""## CONTEXTUALIZE
 {VALID_LEAD_YAML}
 ```
 
-## CONCLUDE
+## REPORT
 
 **Verdict:** resolved
 
@@ -345,7 +345,7 @@ class TestCheckRouteCompliance:
         assert "expected" in warnings[0]
 
     def test_terminal_lead_with_conclude_is_silent(self):
-        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "CONCLUDE"}]
+        preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "REPORT"}]
         merged = _merged_with_leads([_lead("first", preds)])
         assert _check_route_compliance(merged) == []
 

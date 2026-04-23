@@ -22,7 +22,7 @@ Schema v2.8. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on 
 
 **Leads.** A lead is a graph operation: topology-extending (new vertices/edges enter the confirmed graph via `outcome.observations`) or attribute-refining (existing vertices enriched via `attribute_updates`), or both. `tests` declares which hypotheses it discriminates; `resolutions` records weight effects with reasoning. A lead that does not collapse a fork (no `tests`) may still pre-commit to a reading via lead-level `predictions` — conditional branch plans that bind how an interpretation-vulnerable outcome should be read and what to run next.
 
-**Corpus.** Past investigations are queryable. Query before PREDICT to calibrate hypothesis names and weights; set `matched_archetype` at CONCLUDE to connect this run.
+**Corpus.** Past investigations are queryable. Query before PREDICT to calibrate hypothesis names and weights; set `matched_archetype` at REPORT to connect this run.
 
 ---
 
@@ -35,7 +35,7 @@ Schema v2.8. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on 
 | PREDICT | `hypothesize:` | end of PREDICT |
 | GATHER | narrative only — no YAML block | during GATHER |
 | ANALYZE | complete `gather:` lead block (outcome + resolutions together) | end of ANALYZE |
-| CONCLUDE | `conclude:` | after the `## CONCLUDE` header + verdict line, before report.md |
+| REPORT | `conclude:` | after the `## REPORT` header + verdict line, before report.md |
 
 Call `invlang --enum` before writing any block that introduces new IDs or references existing ones.
 
@@ -193,7 +193,7 @@ predictions:                    # optional; pre-committed conditional branch pla
   - id: lp1
     if: "<outcome pattern>"           # how to recognise this branch in the result
     read_as: "<interpretation>"       # what this outcome means
-    advance_to: "<lead-name | CONCLUDE | PREDICT>"   # pre-committed next step
+    advance_to: "<lead-name | REPORT | PREDICT>"   # pre-committed next step
 query_details:
   system: <string>
   template: <string>
@@ -303,7 +303,7 @@ conclude:
                                      # knowledge/signatures/{sig}/archetypes/{name}/
   surviving_hypotheses: [h-001, ...] # IDs of declared hypotheses whose final
                                      # weight is not `--` — validator rule 24
-                                     # rejects silent drops at CONCLUDE write time
+                                     # rejects silent drops at REPORT write time
   ceiling_test:                   # required when category = severity-ceiling
     kind: out-of-band-human-contact | tool-unavailable | legal-authorization | other
     subject: <string>
@@ -492,7 +492,7 @@ A gathering lead whose outcome is interpretation-vulnerable but does not collaps
 5. **`trust_anchor_result` completeness.** When present, all five fields (`anchor_id`, `kind`, `result`, `as_of`, `authority_for_question`) are required.
 6. **Partial authority cap.** A resolution grounded solely by `authority_for_question: partial` cannot push a hypothesis past `+` or `-`.
 7. **`screen_result` scope.** Only valid on `mode: screen` leads; only on the final lead in a SCREEN sequence. SCREEN-matched companions omit the top-level `hypothesize` block.
-8. **Lead-level predictions.** When present, each entry has `id` (matching `^lp\d+$`), `if`, `read_as`, `advance_to`. IDs are unique within the lead. `advance_to` is either the name of another lead in the same or subsequent loop, or one of `CONCLUDE` / `PREDICT`. The actual next step should match at least one pre-committed branch — mismatches are flagged by the validator.
+8. **Lead-level predictions.** When present, each entry has `id` (matching `^lp\d+$`), `if`, `read_as`, `advance_to`. IDs are unique within the lead. `advance_to` is either the name of another lead in the same or subsequent loop, or one of `REPORT` / `PREDICT`. The actual next step should match at least one pre-committed branch — mismatches are flagged by the validator.
 9. **Legitimacy contract edge_ref.** Every `hypothesis.legitimacy_contract[].edge_ref` is either the literal `proposed` (referring to the hypothesis's own `proposed_edge`) or an `e-*` id declared elsewhere in the companion.
 10. **Legitimacy back-reference.** Every `gather[].outcome.legitimacy_resolutions[].fulfills_contract` of shape `h-{id}.lc{n}` points to an existing hypothesis whose `legitimacy_contract` contains that entry.
 11. **Legitimacy-gated disposition.** `conclude.disposition: benign` requires every `legitimacy_contract` on a live-weight hypothesis (weight `++`/`+`, status `confirmed`/`active`) to have at least one fulfilling `legitimacy_resolutions` entry in the *effective* set (after supersede chain) with `verdict: authorized`. Unfulfilled contracts, or any non-`authorized` effective verdict, force escalation.

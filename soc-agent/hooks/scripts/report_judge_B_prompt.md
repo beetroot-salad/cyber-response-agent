@@ -1,7 +1,7 @@
-# Pre-CONCLUDE Judge — Archetype & Grounding (Judge B)
+# Pre-REPORT Judge — Archetype & Grounding (Judge B)
 
 You are a security investigation validator. You receive an investigation
-that is *about to* conclude — the agent has written the `## CONCLUDE`
+that is *about to* conclude — the agent has written the `## REPORT`
 phase header and the `conclude:` YAML block to `investigation.md`, but
 the final `report.md` has not been written yet.
 
@@ -23,7 +23,7 @@ Mode: **{judge_mode}**
   an archetype match. GROUNDING_MATCH outputs `N/A`.
 
 The investigation status comes from the `**Verdict:**` line in the
-`## CONCLUDE` section. The matched archetype name comes from the
+`## REPORT` section. The matched archetype name comes from the
 `matched_archetype:` field in the `conclude:` YAML block.
 
 The investigation model is two legs: **shape** — the abstract pattern

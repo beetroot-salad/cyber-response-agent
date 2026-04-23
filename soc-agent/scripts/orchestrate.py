@@ -4,7 +4,7 @@ Replaces the main-LLM-agent loop in skills/investigate/SKILL.md. Each phase is a
 pure function: it receives the accumulated context, returns a next-phase decision
 and an opaque payload. The orchestrator validates transitions against
 schemas/state.py, persists state.json, enforces the loop cap, and loops until a
-terminal phase (CONCLUDE) or an error.
+terminal phase (REPORT) or an error.
 
 At this skeleton stage, phase handlers are stub functions passed in by the caller
 (typically a test). Real handlers that shell out to `claude --print` subagents
@@ -66,7 +66,7 @@ class Context:
     outputs: dict[Phase, dict] = field(default_factory=dict)
     history: list[str] = field(default_factory=list)
     current_phase: Optional[Phase] = None
-    forced_conclude: bool = False
+    forced_report: bool = False
 
 
 PhaseHandler = Callable[[Context], PhaseResult]
@@ -109,32 +109,32 @@ def run(ctx: Context, handlers: dict[Phase, PhaseHandler]) -> dict:
         ctx.history.append(proposed.value)
         _persist_state(ctx)
 
-        if proposed == Phase.CONCLUDE:
-            # CONCLUDE is terminal, but a registered handler still runs once
+        if proposed == Phase.REPORT:
+            # REPORT is terminal, but a registered handler still runs once
             # to compose report.md and persist the conclude: YAML. Tests can
             # omit the handler to exercise pure-transition behaviour.
-            handler = handlers.get(Phase.CONCLUDE)
+            handler = handlers.get(Phase.REPORT)
             if handler is not None:
                 result = handler(ctx)
-                ctx.outputs[Phase.CONCLUDE] = result.payload
-            return _summary("forced_conclude" if forced else "complete", ctx)
+                ctx.outputs[Phase.REPORT] = result.payload
+            return _summary("forced_report" if forced else "complete", ctx)
 
         if count_loops(ctx.history) >= MAX_LOOPS:
-            # Next legal move from the current phase must include CONCLUDE for
+            # Next legal move from the current phase must include REPORT for
             # the forced path to land. Every non-terminal phase in the schema
-            # already allows CONCLUDE either directly (C, SCREEN, ANALYZE) or
+            # already allows REPORT either directly (C, SCREEN, ANALYZE) or
             # one hop away (GATHER, PREDICT) — if the current phase can't
-            # reach CONCLUDE directly, raise rather than silently extend.
+            # reach REPORT directly, raise rather than silently extend.
             from schemas.state import TRANSITIONS
 
-            if Phase.CONCLUDE not in TRANSITIONS[proposed]:
+            if Phase.REPORT not in TRANSITIONS[proposed]:
                 raise OrchestrationError(
-                    f"loop cap hit in {proposed.value} but CONCLUDE is not reachable "
+                    f"loop cap hit in {proposed.value} but REPORT is not reachable "
                     f"in one hop; handler must route there itself"
                 )
-            proposed = Phase.CONCLUDE
+            proposed = Phase.REPORT
             forced = True
-            ctx.forced_conclude = True
+            ctx.forced_report = True
             continue
 
         handler = handlers.get(proposed)

@@ -1,9 +1,9 @@
 """Shared investigation.md parsers used by hooks.
 
-Centralizes the regexes and walkers so infer_state.py and validate_conclude.py
-agree on what counts as a phase header, a GATHER block, a lead declaration,
-or a CONCLUDE marker. The parsers are line-oriented and do not depend on a
-full Markdown parser.
+Centralizes the regexes and walkers so infer_state.py and
+validate_report_precheck.py agree on what counts as a phase header, a GATHER
+block, a lead declaration, or a REPORT marker. The parsers are line-oriented
+and do not depend on a full Markdown parser.
 """
 
 import re
@@ -17,7 +17,7 @@ _PHASE_NAMES = "|".join(p.value for p in Phase)
 
 PHASE_HEADER_RE = re.compile(rf"^## ({_PHASE_NAMES})\b", re.MULTILINE)
 
-CONCLUDE_HEADER_RE = re.compile(r"^## CONCLUDE\b", re.MULTILINE)
+REPORT_HEADER_RE = re.compile(r"^## REPORT\b", re.MULTILINE)
 
 SCREEN_HEADER_RE = re.compile(r"^## SCREEN\b", re.MULTILINE)
 
@@ -32,8 +32,8 @@ def iter_phase_headers(text: str) -> Iterator[str]:
     return iter(PHASE_HEADER_RE.findall(text))
 
 
-def has_conclude_header(text: str) -> bool:
-    return bool(CONCLUDE_HEADER_RE.search(text))
+def has_report_header(text: str) -> bool:
+    return bool(REPORT_HEADER_RE.search(text))
 
 
 def has_screen_block(text: str) -> bool:
@@ -90,7 +90,7 @@ def resolve_proposed_text(hook_data: dict) -> tuple[Path | None, str | None]:
     """Return (run_dir, proposed_text) for a PreToolUse targeting
     investigation.md, or (None, None) if the event is unrelated.
 
-    Shared by invlang_validate.py and validate_conclude.py — both hooks
+    Shared by invlang_validate.py and validate_report_precheck.py — both hooks
     need the same Write/Edit projection to reason about the post-write
     text without depending on on-disk state the write hasn't produced yet.
 
