@@ -110,15 +110,17 @@ class TestCheckSilentEmpty:
         )]}
         assert _check_silent_empty_result_warnings(merged) == []
 
-    def test_tests_with_trust_anchor_result_silent(self):
+    def test_tests_with_anchor_consultation_silent(self):
         merged = {"gather": [self._lead(
             ["h-001"],
             {
                 "observations": {"vertices": [], "edges": []},
-                "trust_anchor_result": {
-                    "anchor_id": "x", "kind": "k", "result": "unavailable",
+                "anchor_consultations": [{
+                    "anchor_id": "x", "anchor_kind": "k",
+                    "grounding_kind": "telemetry-baseline",
+                    "result": "no-data",
                     "as_of": "2026-04-17", "authority_for_question": "full",
-                },
+                }],
             },
         )]}
         assert _check_silent_empty_result_warnings(merged) == []

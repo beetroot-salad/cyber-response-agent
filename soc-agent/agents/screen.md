@@ -110,21 +110,19 @@ Exactly one of the following per lead:
    ```
    Omit `observations` entirely.
 
-2. **`trust_anchor_result`** — for leads that consult a standing authority (registry, policy, approved-* list). Typical: `approved-monitoring-sources`, any anchor lookup. Shape:
+2. **`anchor_consultations`** — for leads that consult a standing authority (registry, policy, approved-* list) or baseline. Typical: `approved-monitoring-sources`, asset-inventory lookup, user-cadence baseline. Shape:
    ```yaml
    outcome:
-     trust_anchor_result:
-       anchor_id: {anchor name, e.g. "approved-monitoring-sources"}
-       kind: org-authority          # or telemetry-baseline for baselines
-       asks: authorization          # or expectation for baselines
-       verdict: authorized | unauthorized | indeterminate
-                                    # required when asks: authorization;
-                                    # OMIT entirely when asks: expectation
-       result: confirmed | refuted | unavailable
-       as_of: {ISO 8601 timestamp from observation}
-       authority_for_question: full
+     anchor_consultations:
+       - anchor_id: {concrete identifier, e.g. "approved-monitoring-sources"}
+         anchor_kind: {vendor-level surface, e.g. "approved-monitoring-sources" | "asset-inventory" | "user-cadence"}
+         grounding_kind: org-authority        # or telemetry-baseline for baselines
+         result: confirmed | refuted | partial | no-data
+         as_of: {ISO 8601 timestamp from observation}
+         authority_for_question: full
+         anchor_query: {short human-readable record of what was asked}
    ```
-   Omit `observations` and `attribute_updates`.
+   SCREEN runs before any hypothesis is declared, so no `authorization_contract` is in flight — these are always `anchor_consultations[]`, never `authorization_resolutions[]` (which require a contract and live inline on the edge). Omit `observations` and `attribute_updates`.
 
 3. **`observations`** — for leads that materialize new graph elements or whose output is raw telemetry without a classification or authority verdict. Typical: `authentication-history`, any telemetry-baseline query. Shape:
    ```yaml
@@ -181,7 +179,7 @@ gather:
       system: {adapter or "classification-lookup" or "authority-consult"}
       template: {optional}
     outcome:
-      {attribute_updates | trust_anchor_result | observations}
+      {attribute_updates | anchor_consultations | observations}
     resolutions: []
   - id: l-002
     # ... one entry per leads_run[i], same order

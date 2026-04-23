@@ -7,8 +7,12 @@ status values. Imported by report_frontmatter.py and precedent.py.
 # What action was taken on the alert
 VALID_STATUSES = ("resolved", "escalated")
 
-# The investigative conclusion about what happened
-VALID_DISPOSITIONS = ("benign", "false_positive", "true_positive", "inconclusive")
+# The investigative conclusion about the mechanism / authorization axis.
+# v2.11 collapses the four-way (benign / false_positive / true_positive /
+# inconclusive) to the three-way (benign / true_positive / unclear) —
+# false_positive collapses into benign (no threat + no impact) and
+# inconclusive becomes unclear.
+VALID_DISPOSITIONS = ("benign", "true_positive", "unclear")
 
 # How confident the investigation is in its conclusion
 VALID_CONFIDENCES = ("high", "medium", "low")
@@ -16,21 +20,27 @@ VALID_CONFIDENCES = ("high", "medium", "low")
 # Current state of a hypothesis during/after investigation
 VALID_HYPOTHESIS_STATUSES = ("active", "confirmed", "refuted", "untested")
 
-# Trust anchor citation kinds — distinguishes org authorities from
-# telemetry-derived pragmatic anchors (e.g. image-baseline)
-VALID_ANCHOR_KINDS = ("org-authority", "telemetry-baseline")
+# Verdict returned by an authorization-class anchor consultation.
+VALID_AUTHORIZATION_VERDICTS = ("authorized", "unauthorized", "indeterminate")
 
-# Result of a trust anchor consultation
-VALID_ANCHOR_RESULTS = ("confirmed", "refuted", "unavailable")
+# Grounding kinds: which surface the consultation rests on. v2.11 splits
+# the v2.10 `VALID_ANCHOR_KINDS` tuple into three surface-specific tuples —
+# authorization resolutions, baseline/registry consultations, and impact
+# resolutions have different admissible sets (schema rule #11).
+VALID_AUTHZ_GROUNDING_KINDS = ("org-authority", "past-case")
+VALID_CONSULTATION_GROUNDING_KINDS = ("org-authority", "telemetry-baseline")
+VALID_IMPACT_GROUNDING_KINDS = (
+    "telemetry-baseline",
+    "business-owner-attestation",
+    "dlp-policy",
+)
 
-# What an authority consultation is asking about. Distinct from `result`:
-#   asks: authorization  — "is this action sanctioned right now?"
-#                          → emits a verdict (authorized/unauthorized/indeterminate)
-#   asks: expectation    — "does this match our historical baseline / registry?"
-#                          → no verdict; baselines don't authorize
-VALID_ASKS = ("expectation", "authorization")
+# Anchor-consultation result vocabulary (baseline / registry lookups).
+VALID_CONSULTATION_RESULTS = ("confirmed", "refuted", "partial", "no-data")
 
-# Verdict returned by an authorization-class authority consultation.
-# Required when trust_anchor_result.asks == "authorization"; forbidden
-# when asks == "expectation" (telemetry baselines don't authorize).
-VALID_LEGITIMACY_VERDICTS = ("authorized", "unauthorized", "indeterminate")
+# Impact axis enums (rules #29–#31 + CONCLUDE two-axis block).
+VALID_IMPACT_DIMENSIONS = ("confidentiality", "integrity", "availability", "scope")
+VALID_IMPACT_VERDICTS = ("within", "exceeds", "indeterminate")
+# CONCLUDE adds `none` (no impact predictions declared or all `within`).
+VALID_CONCLUDE_IMPACT_VERDICTS = ("none", "within", "exceeds", "indeterminate")
+VALID_IMPACT_SEVERITIES = (None, "low", "moderate", "high")

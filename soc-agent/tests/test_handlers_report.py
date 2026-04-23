@@ -1195,7 +1195,7 @@ class TestMechanicalAnalyzeCompose:
         ctx = _seed_ctx_for_analyze_mechanical(
             tmp_path,
             analyze_payload={
-                "disposition": "inconclusive",
+                "disposition": "unclear",
                 "confidence": "medium",
                 "matched_archetype": None,
                 "surviving_hypotheses": ["h-003"],
@@ -1549,13 +1549,13 @@ class TestMechanicalAnalyzeCompose:
         assert gather[0]["name"] == "yaml-form-lead"
         assert gather[0]["outcome"]["trust_anchor_result"]["verdict"] == "authorized"
 
-    def test_analyze_escalated_disposition_remaps_to_inconclusive(
+    def test_analyze_escalated_disposition_remaps_to_unclear(
         self, tmp_path, monkeypatch,
     ):
         """ANALYZE emits `disposition: escalated` per its routing schema;
-        report frontmatter's VALID_DISPOSITIONS doesn't include `escalated`.
-        Handler must remap to `disposition: inconclusive` + `status:
-        escalated` so Tier-1 passes."""
+        report frontmatter's VALID_DISPOSITIONS (v2.11) doesn't include
+        `escalated`. Handler must remap to `disposition: unclear` +
+        `status: escalated` so Tier-1 passes."""
         ctx = _seed_ctx_for_analyze_mechanical(
             tmp_path,
             analyze_payload={
@@ -1587,11 +1587,11 @@ class TestMechanicalAnalyzeCompose:
         result = report_handler.handle(ctx)
         assert result.payload["compose_mode"] == "analyze_mechanical"
         assert result.payload["status_frontmatter"] == "escalated"
-        assert result.payload["disposition"] == "inconclusive"  # remapped
+        assert result.payload["disposition"] == "unclear"  # remapped
 
         report = (ctx.run_dir / "report.md").read_text()
         assert "status: escalated" in report
-        assert "disposition: inconclusive" in report
+        assert "disposition: unclear" in report
         # disposition value `escalated` must not appear as a disposition
         # enum (it's only valid as a status).
         assert "disposition: escalated" not in report

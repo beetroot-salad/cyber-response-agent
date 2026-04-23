@@ -85,23 +85,68 @@ def _check_prediction_coverage(merged: dict[str, Any]) -> list[str]:
 
 
 def _check_partial_authority_cap(merged: dict[str, Any]) -> list[str]:
-    """Rule 6 (partial authority cap): anchor-only grounding cannot produce ++/--.
+    """Rule #14 (partial authority cap): anchor-only grounding cannot produce ++/--.
 
-    If a lead's `trust_anchor_result.authority_for_question == "partial"`,
-    any resolution on that lead that has no `supporting_edges` (i.e. the
-    only grounding is the partial anchor) cannot be graded `++` or `--`.
-    Mixed grounding — a partial anchor plus a qualifying supporting edge —
-    passes; the rule only caps resolutions grounded *solely* by the anchor.
+    A resolution on a lead is capped at `+` or `-` when its only
+    grounding is an entry with `authority_for_question: "partial"`. The
+    cap applies across all three v2.11 grounding surfaces:
+
+    - `authorization_resolutions[]` on edges emitted by this lead
+      (either inline on new edges in `outcome.observations.edges[]` or
+      via `outcome.attribute_updates[].updates.authorization_resolutions[]`)
+    - `anchor_consultations[]` on the lead outcome
+    - `impact_resolutions[]` on the lead outcome
+
+    Mixed grounding — any `partial` entry accompanied by at least one
+    qualifying `supporting_edges` — passes; the rule only caps
+    resolutions grounded *solely* by one or more partial entries.
     """
     errors: list[str] = []
     for lead in merged.get("gather", []) or []:
         if not isinstance(lead, dict):
             continue
-        tar = lead.get("outcome", {}).get("trust_anchor_result")
-        if not isinstance(tar, dict):
+        outcome = lead.get("outcome") if isinstance(lead.get("outcome"), dict) else {}
+        has_partial = False
+
+        # anchor_consultations (baseline / registry lookups)
+        for entry in outcome.get("anchor_consultations") or []:
+            if isinstance(entry, dict) and entry.get("authority_for_question") == "partial":
+                has_partial = True
+                break
+        # impact_resolutions
+        if not has_partial:
+            for entry in outcome.get("impact_resolutions") or []:
+                if isinstance(entry, dict) and entry.get("authority_for_question") == "partial":
+                    has_partial = True
+                    break
+        # edge-inline authorization_resolutions
+        if not has_partial:
+            obs = outcome.get("observations") if isinstance(outcome.get("observations"), dict) else {}
+            for e in obs.get("edges", []) or []:
+                if not isinstance(e, dict):
+                    continue
+                for entry in e.get("authorization_resolutions") or []:
+                    if isinstance(entry, dict) and entry.get("authority_for_question") == "partial":
+                        has_partial = True
+                        break
+                if has_partial:
+                    break
+        # attribute_updates authorization_resolutions
+        if not has_partial:
+            for upd in outcome.get("attribute_updates") or []:
+                if not isinstance(upd, dict):
+                    continue
+                updates = upd.get("updates") if isinstance(upd.get("updates"), dict) else {}
+                for entry in updates.get("authorization_resolutions") or []:
+                    if isinstance(entry, dict) and entry.get("authority_for_question") == "partial":
+                        has_partial = True
+                        break
+                if has_partial:
+                    break
+
+        if not has_partial:
             continue
-        if tar.get("authority_for_question") != "partial":
-            continue
+
         lid = lead.get("id", "?")
         for res in lead.get("resolutions", []) or []:
             if not isinstance(res, dict):
@@ -114,8 +159,8 @@ def _check_partial_authority_cap(merged: dict[str, Any]) -> list[str]:
             hid = res.get("hypothesis", "?")
             errors.append(
                 f"lead {lid}: resolution for {hid} has after: {after!r} but is "
-                f"grounded solely by trust_anchor_result with "
-                f"authority_for_question: \"partial\" (empty supporting_edges). "
+                f"grounded solely by a partial-authority consultation / resolution "
+                f"(authority_for_question: \"partial\") with empty supporting_edges. "
                 f"Partial authority caps the weight at \"+\" or \"-\"."
             )
     return errors

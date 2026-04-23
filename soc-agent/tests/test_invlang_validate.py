@@ -2,8 +2,9 @@
 
 This module hosts the shared YAML fixtures re-exported by the per-concern
 test modules (test_invlang_structural.py, test_invlang_predictions.py,
-test_invlang_legitimacy.py, test_invlang_hypothesis.py, test_invlang_warnings.py)
-along with end-to-end and subprocess-level coverage:
+test_invlang_authorization.py, test_invlang_impact.py,
+test_invlang_hypothesis.py, test_invlang_warnings.py) along with end-to-end
+and subprocess-level coverage:
 
 - `TestValidateCompanion`   — orchestrator smoke tests
 - `TestCheckAppendOnly`     — block-level append-only guard
@@ -126,6 +127,8 @@ conclude:
     category: adversarial-refuted
     rationale: "All adversarial hypotheses refuted with -- evidence"
   disposition: benign
+  impact_verdict: none
+  impact_severity: null
   confidence: high
   matched_archetype: external-bruteforce
   surviving_hypotheses: []
@@ -182,24 +185,26 @@ def _parse_yaml_block(text: str) -> dict:
 
 def _companion_with_contract(
     contract_edge_ref: str = "proposed",
-    contract_id: str = "lc1",
+    contract_id: str = "ac1",
     resolutions: list[dict] | None = None,
     disposition: str = "benign",
     hypothesis_weight: str = "+",
     extra_edges: list[dict] | None = None,
-    trust_anchor_result: dict | None = None,
+    anchor_consultations: list[dict] | None = None,
 ) -> dict:
-    """Build a merged companion carrying one hypothesis with one legitimacy_contract.
+    """Build a merged companion carrying one hypothesis with one authorization_contract.
 
-    Post-migration shape: `legitimacy_resolutions[]` lives in
-    `gather[0].outcome.legitimacy_resolutions[]` as a sibling of
-    `attribute_updates`. The lead also carries a `trust_anchor_result`
-    with `asks: authorization` and `verdict: authorized` — resolutions
-    must be backed by an explicit authority consultation.
+    Post-v2.11 shape:
+      - `authorization_resolutions[]` lives INLINE on the observed edge
+        (`gather[0].outcome.observations.edges[0].authorization_resolutions[]`).
+      - The lead also carries a minimal `anchor_consultations[]` entry
+        (telemetry-baseline baseline) to exercise the provenance checks.
+      - The parent_vertex.type is `endpoint` (non-acting-entity) so the
+        rule-#32 integrity-peer discipline does not apply by default.
 
     Defaults shape a live-weight benign resolution with one `authorized`
-    verdict targeting edge e-002. Override parameters to flip individual
-    dimensions for negative cases.
+    verdict on the edge. Override parameters to flip individual dimensions
+    for negative cases.
     """
     edges = [
         {
@@ -212,31 +217,39 @@ def _companion_with_contract(
     ]
     if extra_edges:
         edges.extend(extra_edges)
+    default_resolutions = [
+        {
+            "verdict": "authorized",
+            "anchor_kind": "approved-monitoring-sources",
+            "anchor_id": "ams-registry-2026-01",
+            "grounding_kind": "org-authority",
+            "authority_for_question": "full",
+            "anchor_query": "source triple lookup",
+            "as_of": "2026-04-18T00:00:00Z",
+            "resolved_by_lead": "l-001",
+            "fulfills_contract": f"h-001.{contract_id}",
+        }
+    ]
     observed_edge = {
         "id": "e-002",
         "relation": "classified_as",
         "source_vertex": "v-001",
         "target_vertex": "v-002",
         "authority": {"kind": "authoritative-source", "source": "registry"},
+        "authorization_resolutions": (
+            resolutions if resolutions is not None else default_resolutions
+        ),
     }
-    default_resolutions = [
+    default_consultations = [
         {
-            "id": "lr1",
-            "target": "e-002",
-            "fulfills_contract": f"h-001.{contract_id}",
-            "verdict": "authorized",
+            "anchor_id": "approved-monitoring-sources",
+            "anchor_kind": "approved-monitoring-sources",
+            "grounding_kind": "org-authority",
+            "result": "confirmed",
+            "as_of": "2026-04-18T00:00:00Z",
+            "authority_for_question": "full",
         }
     ]
-    default_tar = {
-        "anchor_id": "approved-monitoring-sources",
-        "anchor_name": "approved-monitoring-sources",
-        "kind": "org-authority",
-        "asks": "authorization",
-        "verdict": "authorized",
-        "result": "confirmed",
-        "as_of": "2026-04-18T00:00:00Z",
-        "authority_for_question": "full",
-    }
     return {
         "prologue": {
             "vertices": [
@@ -253,10 +266,10 @@ def _companion_with_contract(
                     "attached_to_vertex": "v-001",
                     "proposed_edge": {
                         "relation": "attempted_auth",
-                        "parent_vertex": {"type": "identity", "classification": "unknown"},
+                        "parent_vertex": {"type": "endpoint", "classification": "unknown"},
                     },
                     "predictions": [{"id": "p1", "claim": "source resolves to an approved entry"}],
-                    "legitimacy_contract": [
+                    "authorization_contract": [
                         {
                             "id": contract_id,
                             "edge_ref": contract_edge_ref,
@@ -273,18 +286,15 @@ def _companion_with_contract(
             {
                 "id": "l-001",
                 "loop": 1,
-                "name": "trust-anchor-lookup",
+                "name": "authorization-lookup",
                 "target": "v-001",
                 "query_details": {},
                 "outcome": {
                     "observations": {"vertices": [], "edges": [observed_edge]},
-                    "trust_anchor_result": (
-                        trust_anchor_result
-                        if trust_anchor_result is not None
-                        else default_tar
-                    ),
-                    "legitimacy_resolutions": (
-                        resolutions if resolutions is not None else default_resolutions
+                    "anchor_consultations": (
+                        anchor_consultations
+                        if anchor_consultations is not None
+                        else default_consultations
                     ),
                 },
                 "resolutions": [
@@ -357,11 +367,6 @@ class TestCheckRouteCompliance:
         assert "terminal" in warnings[0].lower()
 
     def test_hypothesize_advance_does_not_require_next_lead(self):
-        # advance_to PREDICT is valid even on a terminal lead — the
-        # companion may continue in a follow-up PREDICT block elsewhere.
-        # Here we check the non-terminal case: if next lead isn't PREDICT-
-        # flavored (which it won't be — phases aren't leads), that's still a
-        # mismatch, and the warning is correct.
         preds = [{"id": "lp1", "if": "x", "read_as": "y", "advance_to": "PREDICT"}]
         merged = _merged_with_leads([_lead("first", preds), _lead("some-other")])
         warnings = _check_route_compliance(merged)
@@ -434,7 +439,8 @@ class TestValidateCompanion:
         assert validate_companion(text, None) == []
 
     def test_valid_full_companion_passes(self):
-        assert validate_companion(FULL_COMPANION_MD, None) == []
+        errs = validate_companion(FULL_COMPANION_MD, None)
+        assert errs == [], errs
 
     def test_yaml_parse_error_caught(self):
         text = "## CONTEXTUALIZE\n\n```yaml\n: invalid: yaml: [\n```\n"
@@ -597,34 +603,6 @@ gather:
         assert result.returncode == 2
         assert "matched_refutation_ids" in result.stderr
 
-    def test_trust_anchor_incomplete_fails(self, tmp_path):
-        incomplete_tar = """\
-gather:
-  - id: l-001
-    loop: 1
-    name: test
-    target: v-001
-    query_details:
-      system: wazuh
-      template: t
-      query: q
-      time_window: 1h
-      substitutions: {}
-    outcome:
-      trust_anchor_result:
-        anchor_id: approved-sources
-        kind: org-authority
-        # missing: result, as_of, authority_for_question
-      observations:
-        vertices: []
-        edges: []
-    resolutions: []
-"""
-        content = f"## ANALYZE\n\n```yaml\n{incomplete_tar}```\n"
-        result = _run_hook(content, tmp_path=tmp_path)
-        assert result.returncode == 2
-        assert "trust_anchor_result" in result.stderr
-
     def test_screen_result_on_non_screen_lead_fails(self, tmp_path):
         bad_screen = """\
 gather:
@@ -652,7 +630,6 @@ gather:
 
     def test_append_only_removing_block_fails(self, tmp_path):
         existing = f"## CONTEXTUALIZE\n\n```yaml\n{VALID_PROLOGUE_YAML}```\n"
-        # Proposed content replaces the prologue block with nothing
         proposed = "## CONTEXTUALIZE\n\nsome prose only\n"
         result = _run_hook(
             content=proposed,
@@ -670,7 +647,6 @@ gather:
         assert "parse error" in result.stderr.lower()
 
     def test_dangling_id_reference_fails(self, tmp_path):
-        # Lead targets v-999 which is not declared
         bad_ref = """\
 gather:
   - id: l-001

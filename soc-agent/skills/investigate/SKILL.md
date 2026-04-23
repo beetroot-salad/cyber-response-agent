@@ -85,7 +85,15 @@ This means:
 1. **When uncertain, escalate.** A missed threat is catastrophically worse than escalating a benign alert. If two interpretations remain plausible after pursuing all leads, escalate. Your value is knowing when you *don't* know.
 2. **No remediation.** You investigate and recommend only. No blocking IPs, no account changes, no firewall rules.
 3. **Evidence over assumption.** If you don't have evidence, you don't know. Say so.
-4. **Resolve legitimacy through lead-outcome resolutions.** When a hypothesis's disposition depends on authorization (same mechanism is consistent with benign or adversarial intent depending on who/what ran it), declare a `legitimacy_contract` on the hypothesis naming the edge(s) and the authority that resolves them. The resolving lead writes two coupled records in its own `outcome`: a `trust_anchor_result` with `asks: authorization` (the consultation itself) and a `legitimacy_resolutions[]` entry with `target: e-*` and `fulfills_contract: h-*.lc*` (the back-reference to the contract). Edge records stay write-once; an edge's current authorization state is a computed rollup over lead order with `supersedes` chain support. See `docs/investigation-language.md` §Legitimacy as edge attribute and `docs/design-v3-authority-consultation.md`. Disposition is structurally gated: `benign` requires every contract on a live-weight hypothesis to have an *effective* `authorized` verdict (after supersede resolution); any `indeterminate` or `unauthorized` effective verdict forces `status: escalated`. The "don't miss" principle sits in that structure — dangerous explanations can't be quietly deprioritized, they have to be answered by an authority. Contracts answer *policy* (is this allowed?), not integrity (was it executed as it appears?); integrity questions — session hijack, process-hollowing, tool-masquerade — are mechanism-level discriminations resolved by behavioral observation. Hypotheses remain *upstream causal questions* — "did the cause have what it needed?" — not downstream consequence checks ("did they succeed? is there lateral movement?"). Verifying downstream consequences (post-compromise scope, lateral movement, persistence) is incident-response work; this agent's scope is triage. If evidence strongly suggests success and downstream scope is unknown, escalate — don't attempt IR inline.
+4. **Resolve on three orthogonal axes (v2.11).** The alert's disposition depends on three independent questions: **authorization** (is this edge permitted by policy?), **integrity** (is the acting entity what it claims to be?), **impact** (does this edge's effect matter enough to escalate?). Each has its own shape and placement.
+
+   *Authorization* is categorical and anchor-backed. When a hypothesis's disposition depends on policy (same mechanism is consistent with benign or adversarial intent depending on who/what ran it), declare an `authorization_contract` on the hypothesis naming the edge(s) and the authority that resolves them. The resolving lead writes the verdict inline on the materializing edge via `authorization_resolutions[]` (on an already-confirmed edge, via `attribute_updates` against that edge id), with `fulfills_contract: h-*.ac*` back-referencing the contract. The consultation itself is recorded on the lead outcome via `anchor_consultations[]`. See `docs/investigation-language.md` §Edge authorization and `docs/design-v3-authority-consultation.md`. Disposition is structurally gated: `benign` requires every contract on a live-weight hypothesis to have a fulfilling `authorized` verdict OR be listed in `conclude.deferred_authorizations[]`; any `indeterminate` or `unauthorized` verdict forces escalation. The "don't miss" principle sits in that structure — dangerous explanations can't be quietly deprioritized, they have to be answered by an authority.
+
+   *Integrity* is evidential and composed from observables — no single anchor. It's a peer-hypothesis discipline: when `authorization_contract` is declared on a hypothesis whose `proposed_edge` sources from an acting-entity type (`session`, `identity`, `process`), a peer `?adversary-controlled-*` hypothesis is expected, with predictions on discriminating observables (application-layer correlation, query-shape, timing-against-baseline, device/geo consistency). Escape hatch: `integrity_waived: <rationale>` on the contract-carrying hypothesis when integrity is genuinely out of scope for the case (schema rule #32).
+
+   *Impact* is quantitative and threshold-gated. When a lead measures an impact-relevant observable, PREDICT authors `impact_predictions[]` on the lead (per-dimension threshold predicate). ANALYZE grades observation against predicate into `impact_resolutions[]`. CONCLUDE rolls the set up into `impact_verdict` (none | within | exceeds | indeterminate) and `impact_severity`, capped by any `authority_for_question: partial` per rule #14. Unfulfilled predictions must be listed in `conclude.deferred_impact_predictions[]` with rationale (rule #31).
+
+   Hypotheses remain *upstream causal questions* — "did the cause have what it needed?" — not downstream consequence checks ("did they succeed? is there lateral movement?"). Verifying downstream consequences (post-compromise scope, lateral movement, persistence) is incident-response work; this agent's scope is triage. If evidence strongly suggests success and downstream scope is unknown, escalate — don't attempt IR inline.
 5. **No auto-close without archetype + grounding.** `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding — either every `required_anchors` entry confirmed OR a `matched_ticket_id` citing a valid precedent snapshot under the same archetype. An archetype that declares no required anchors cannot resolve without `matched_ticket_id`.
 6. **Fail safe.** Errors, timeouts, missing data — escalate with context gathered so far.
 7. **Stay in scope.** Investigate within the signature's detection domain. Don't expand scope — escalate instead.
@@ -342,7 +350,7 @@ gather:
     query_details: { ... }
     outcome:
       # attribute_updates: include only if the lead refined a vertex/edge attribute
-      # trust_anchor_result: include only on anchor-consulting leads
+      # anchor_consultations: include only on anchor-consulting leads (registry/baseline)
       # observations: OMIT if the lead materialized no new vertices/edges
       # screen_result: match | no_match — final screen lead only
     resolutions: []
@@ -353,7 +361,7 @@ Emit all screen leads in one write. Four constraints that trip up the validator 
 - `resolutions: []` is required (validator rejects missing `resolutions` even when empty) — it encodes "this lead didn't grade any hypothesis," which is the correct state for SCREEN.
 - **Do not set `tests` on screen leads.** `tests: [h-...]` means "this lead discriminates these hypotheses," but no hypothesis IDs exist yet at SCREEN time (PREDICT comes after). A screen lead with `tests: [h-001]` is rejected as an unknown-ID reference. Omit `tests` entirely on `mode: screen` leads.
 - **Omit empty subblocks** — do not write `observations: { vertices: [], edges: [] }`, `attribute_updates: []`, or `resolutions: []` placeholders inside `outcome`. The validator reads these defensively with safe defaults; the only *required* top-level keys inside `outcome` are the ones your lead actually produced. `resolutions: []` at the lead level stays required; `outcome.*` sub-keys do not.
-- **Classification and anchor leads have no observations.** A source-classification, username-classification, or approved-monitoring-sources lookup refines an attribute or records a trust-anchor verdict — it does not materialize new graph vertices/edges. Leave `observations` out entirely.
+- **Classification and anchor leads have no observations.** A source-classification, username-classification, or approved-monitoring-sources lookup refines an attribute or records an `anchor_consultations[]` entry — it does not materialize new graph vertices/edges. Leave `observations` out entirely.
 
 ### PREDICT
 
@@ -367,11 +375,11 @@ A **hypothesis** is a one-hop proposed extension of the confirmed graph — one 
 
 A **lead** is an edge measurement that collapses the proposed frontier. Playbooks carry hypothesis seeds (candidate one-hop classifications) and archetypes (a cache of past-ticket outcomes with required anchors); both inform formation but neither is authoritative. Umbrella classes like `?compromise-confirmed` or `?malicious-activity` are not hypotheses — they aggregate two or more independent one-hops under a label that carries no new information.
 
-For the full structural spec (attached_to_vertex, proposed_edge, predictions, refutation_shape, legitimacy_contract) see `docs/investigation-language.md` §Hypothesis.
+For the full structural spec (attached_to_vertex, proposed_edge, predictions, refutation_shape, authorization_contract, integrity_waived, impact_predictions) see `docs/investigation-language.md` §Hypothesis and §Lead.
 
 #### Dispatch the PREDICT subagent
 
-Hypothesis formation is owned by `soc-agent:hypothesize` (Sonnet, `agents/hypothesize.md`). The subagent reads the alert, `investigation.md`, the signature's playbook + context, and returns the `hypothesize:` YAML block plus `Selected lead:` and `Pitfalls:` lines. The methodology — anchor location, one-hop parent enumeration, **causal-story discipline** (each hypothesis carries a concrete causal chain from which predictions and refutation shapes derive — labels without stories max out at `+` regardless of evidence), refinement via hierarchical IDs, three shapes of adversariness, legitimacy-contract declaration, lead selection — lives in the subagent's prompt, not here.
+Hypothesis formation is owned by `soc-agent:hypothesize` (Sonnet, `agents/hypothesize.md`). The subagent reads the alert, `investigation.md`, the signature's playbook + context, and returns the `hypothesize:` YAML block plus `Selected lead:` and `Pitfalls:` lines. The methodology — anchor location, one-hop parent enumeration, **causal-story discipline** (each hypothesis carries a concrete causal chain from which predictions and refutation shapes derive — labels without stories max out at `+` regardless of evidence), refinement via hierarchical IDs, three shapes of adversariness, `authorization_contract` declaration, lead selection — lives in the subagent's prompt, not here.
 
 ```python
 Agent(
@@ -516,7 +524,8 @@ ANALYZE runs as a dedicated subagent. You do not grade hypotheses inline — you
 
 If the gate rejects the write, the error message names the failed criterion. Respond by fixing the underlying gap in `investigation.md` and retrying:
 
-- Unfulfilled or `indeterminate` `legitimacy_contract` on a live-weight hypothesis → run the resolving lead against the declared authority, or escalate.
+- Unfulfilled or `indeterminate` `authorization_contract` on a live-weight hypothesis → run the resolving lead against the declared authority, or escalate.
+- Unfulfilled `impact_predictions[]` on a gather lead → grade the observation into `impact_resolutions[]` at ANALYZE, or defer to `conclude.deferred_impact_predictions[]` with rationale at CONCLUDE.
 - A `++` grade with no falsification path → downgrade to `+`, or run a check that could have refuted it.
 - Dangling evidence (observations the confirmed hypothesis doesn't explain) → add an ANALYZE pass that accounts for them, or expand the hypothesis space.
 - Archetype shape mismatch or sibling archetype unaddressed → revisit archetype selection or escalate as a novel variant.
@@ -546,7 +555,7 @@ The `identifier` is the alert's `ticket_id` — you already have it from CONTEXT
 2. **Edit `{run_dir}/investigation.md`** to append the first block (the `## CONCLUDE` header + verdict/hypothesis/trace lines) followed immediately by the second block (the ```yaml fenced `conclude:` block). This is a single Edit that triggers the PreToolUse gate (`validate_conclude.py` + parallel Haiku judges). If the gate rejects, fix the investigation's upstream issue (per the failure modes above), re-dispatch the subagent, and retry.
 3. **Write `{run_dir}/report.md`** with the third block as the file contents. This triggers `validate_report.py` (Tier 1 structural + Tier 2 semantic delta judge). If rejected, fix the investigation's upstream issue, re-dispatch, and retry.
 
-Do **not** re-author any of the subagent's three blocks inline. If something needs correcting, it's an upstream gap (missing ANALYZE grade, unreconciled legitimacy_contract, unconfirmed anchor) — fix that in `investigation.md`, not in the CONCLUDE output.
+Do **not** re-author any of the subagent's three blocks inline. If something needs correcting, it's an upstream gap (missing ANALYZE grade, unreconciled authorization_contract, unfulfilled impact_predictions, unconfirmed anchor) — fix that in `investigation.md`, not in the CONCLUDE output.
 
 **Grounding leg (enforced by Tier 1 — the subagent handles this but the discipline lives here):**
 - Every anchor in the matched archetype's `required_anchors` frontmatter appears in `trust_anchors_consulted` with `result: confirmed` and a concrete citation, OR

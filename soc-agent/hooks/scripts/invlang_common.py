@@ -2,9 +2,9 @@
 
 This module is consumed by the per-concern check modules:
 - `invlang_checks_structural.py`
-- `invlang_checks_legitimacy.py`
+- `invlang_checks_authorization.py`
+- `invlang_checks_impact.py`
 - `invlang_checks_hypothesis.py`
-- `invlang_warnings.py`
 
 All symbols here are implementation detail of `invlang_validate`; the
 entrypoint (`invlang_validate.py`) re-exports what external callers need.
@@ -44,14 +44,15 @@ _ID_RE = re.compile(r"^[vehl]-[a-z0-9][a-z0-9-]*$")
 # hypothesis predictions (p1, p2) to avoid collision.
 _LEAD_PREDICTION_ID_RE = re.compile(r"^lp\d+$")
 
-# Every contract's id must be `lc` followed by digits. Used to compose the
-# back-reference format `h-{id}.lc{n}` that legitimacy_resolutions must cite.
-_LEGITIMACY_CONTRACT_ID_RE = re.compile(r"^lc\d+$")
+# Every authorization contract's id must be `ac` followed by digits. Used to
+# compose the back-reference format `h-{id}.ac{n}` that
+# `authorization_resolutions[].fulfills_contract` must cite.
+_AUTHORIZATION_CONTRACT_ID_RE = re.compile(r"^ac\d+$")
 
-# Every lead-outcome resolution carries an `lr-{n}` id; agents reference
-# earlier entries via `supersedes: lr-X`. Legacy edge-attached resolutions
-# predate this and carry no id — they are always live (can't be superseded).
-_LR_ID_RE = re.compile(r"^lr\d+$")
+# Lead-level impact-prediction IDs match `ip\d+`; the full cross-lead
+# identity is `l-{lead_id}.ip{n}` (used by rule #30 back-refs and rule
+# #31 closure).
+_IMPACT_PREDICTION_ID_RE = re.compile(r"^ip\d+$")
 
 # ---------------------------------------------------------------------------
 # Structural constants
@@ -60,16 +61,64 @@ _LR_ID_RE = re.compile(r"^lr\d+$")
 # Required fields on every lead entry under gather:
 _LEAD_REQUIRED = {"id", "loop", "name", "target", "query_details", "outcome", "resolutions"}
 
-# trust_anchor_result must have all five of these when present
-_TRUST_ANCHOR_FIELDS = {"anchor_id", "kind", "result", "as_of", "authority_for_question"}
-
 # Required fields on every lead.predictions entry
 _LEAD_PREDICTION_REQUIRED = {"id", "if", "read_as", "advance_to"}
 
 # IDs that are valid authority kinds for strong (++/--) resolutions
 _STRONG_AUTHORITY_KINDS = {"siem-event", "runtime-audit", "authoritative-source"}
 
-_LEGITIMACY_VERDICTS = {"authorized", "unauthorized", "indeterminate"}
+_AUTHORIZATION_VERDICTS = {"authorized", "unauthorized", "indeterminate"}
+
+# Grounding-kind tuples for rule #11 (split by surface).
+_AUTHZ_GROUNDING_KINDS = {"org-authority", "past-case"}
+_CONSULTATION_GROUNDING_KINDS = {"org-authority", "telemetry-baseline"}
+_IMPACT_GROUNDING_KINDS = {
+    "telemetry-baseline",
+    "business-owner-attestation",
+    "dlp-policy",
+}
+
+# Required fields on every authorization_resolutions[] entry (rule #11).
+_AUTHZ_REQUIRED_FIELDS = (
+    "verdict",
+    "anchor_kind",
+    "anchor_id",
+    "grounding_kind",
+    "authority_for_question",
+    "as_of",
+    "resolved_by_lead",
+    "fulfills_contract",
+)
+
+# Required fields on every anchor_consultations[] entry (rule #11).
+_CONSULTATION_REQUIRED_FIELDS = (
+    "anchor_id",
+    "anchor_kind",
+    "grounding_kind",
+    "result",
+    "as_of",
+    "authority_for_question",
+)
+
+# Required fields on every impact_resolutions[] entry (rule #30).
+_IMPACT_RES_REQUIRED_FIELDS = (
+    "prediction_ref",
+    "dimension",
+    "verdict",
+    "grounding_kind",
+    "authority_for_question",
+    "as_of",
+    "reasoning",
+)
+
+# Acting-entity vertex types (rule #32).
+_ACTING_ENTITY_TYPES = {"session", "identity", "process"}
+
+# Impact-axis enums.
+_IMPACT_DIMENSIONS = {"confidentiality", "integrity", "availability", "scope"}
+_IMPACT_VERDICTS = {"within", "exceeds", "indeterminate"}
+_IMPACT_SEVERITIES = {None, "low", "moderate", "high"}
+_CONCLUDE_IMPACT_VERDICTS = {"none", "within", "exceeds", "indeterminate"}
 
 
 # ---------------------------------------------------------------------------
@@ -175,13 +224,13 @@ def _collect_declared_edge_ids(merged: dict[str, Any]) -> set[str]:
 
 
 def _collect_contract_ids(merged: dict[str, Any]) -> set[str]:
-    """All `h-{id}.lc{n}` back-reference targets declared across hypotheses."""
+    """All `h-{id}.ac{n}` back-reference targets declared across hypotheses."""
     out: set[str] = set()
     for h in iter_hypotheses(merged):
         hid = h.get("id")
         if not isinstance(hid, str):
             continue
-        for c in h.get("legitimacy_contract") or []:
+        for c in h.get("authorization_contract") or []:
             if not isinstance(c, dict):
                 continue
             cid = c.get("id")
@@ -190,61 +239,110 @@ def _collect_contract_ids(merged: dict[str, Any]) -> set[str]:
     return out
 
 
+def _collect_impact_prediction_refs(merged: dict[str, Any]) -> set[str]:
+    """All `l-{lead_id}.ip{n}` impact prediction ids declared across leads.
+
+    Rule #30 back-refs use these; rule #31 closure joins against them.
+    """
+    out: set[str] = set()
+    for lead in merged.get("gather", []) or []:
+        if not isinstance(lead, dict):
+            continue
+        lid = lead.get("id")
+        if not isinstance(lid, str):
+            continue
+        for ip in lead.get("impact_predictions") or []:
+            if not isinstance(ip, dict):
+                continue
+            ipid = ip.get("id")
+            if isinstance(ipid, str):
+                out.add(f"{lid}.{ipid}")
+    return out
+
+
 # ---------------------------------------------------------------------------
-# Lead-outcome legitimacy resolution walkers
+# Lead-outcome authorization resolution walkers
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class LeadResolution:
-    """One legitimacy_resolutions entry, walked in declaration order.
+    """One authorization_resolutions entry, walked in declaration order.
 
-    `lead_idx` + `entry_idx` preserve declaration order across all leads
-    for rule #21's supersede-chain resolution. `lr_id` is None for legacy
-    edge-attached resolutions (they predate the supersede mechanism and
-    are always live). `supersedes` is None for first-time resolutions and
-    for legacy entries.
+    `lead_idx` + `entry_idx` preserve declaration order across all leads for
+    reporting. v2.11 dropped the supersede-chain mechanism — entries have
+    no ids and cannot be superseded. The walker still emits every entry in
+    order so rule-#21 aggregation can count verdicts per contract.
     """
     lead_idx: int
     entry_idx: int
     location: str             # for error messages
-    lr_id: str | None         # None for legacy edge-attached
-    contract_ref: str         # "h-{id}.lc{n}"
-    target: str               # "v-{id}" or "e-{id}"
+    contract_ref: str         # "h-{id}.ac{n}"
+    target: str               # edge id if the authz entry targeted an existing
+                              # edge via attribute_updates, else "<inline edge>"
     verdict: str
-    supersedes: str | None
 
 
 def _iter_resolutions(
     merged: dict[str, Any],
 ) -> Iterator[tuple[str, str, dict[str, Any], int, int]]:
     """Yield (location, target_id, resolution, lead_idx, entry_idx) for every
-    legitimacy_resolutions entry.
+    authorization_resolutions[] entry the companion declares.
 
-    Resolutions live on lead outcomes — `gather[i].outcome.legitimacy_resolutions[j]`
-    — as a sibling of `attribute_updates`. Edge records are write-once and
-    carry no resolution list; an edge's authorization state is a computed
-    rollup over every lead that names it as its `target`, in declaration
-    order. `lead_idx` and `entry_idx` preserve that order for rule #21's
-    supersede-chain resolution.
+    v2.11 embeds authz resolutions on the edge object — two sources:
+      (a) inline on newly-materialized edges under
+          `gather[].outcome.observations.edges[].authorization_resolutions[]`;
+      (b) on already-confirmed edges via attribute_updates —
+          `gather[].outcome.attribute_updates[].updates.authorization_resolutions[]`
+          where the update's `target` is the edge id.
+
+    `target_id` is the edge id in case (b); in case (a) it's the edge's own
+    id (the edge the entry lives on). `entry_idx` is the per-source entry
+    index (0 is the first entry on that edge record).
     """
     for lead_idx, lead in enumerate(merged.get("gather", []) or []):
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")
         outcome = lead.get("outcome", {}) if isinstance(lead.get("outcome"), dict) else {}
-        for entry_idx, r in enumerate(outcome.get("legitimacy_resolutions") or []):
-            if not isinstance(r, dict):
+
+        # (a) inline on new edges
+        obs = outcome.get("observations") if isinstance(outcome.get("observations"), dict) else {}
+        for e_idx, e in enumerate(obs.get("edges", []) or []):
+            if not isinstance(e, dict):
                 continue
-            target = r.get("target")
-            target_id = target if isinstance(target, str) else "?"
-            yield f"lead {lid} outcome.legitimacy_resolutions[{entry_idx}]", target_id, r, lead_idx, entry_idx
+            eid = e.get("id") if isinstance(e.get("id"), str) else "?"
+            entries = e.get("authorization_resolutions") or []
+            for entry_idx, r in enumerate(entries):
+                if not isinstance(r, dict):
+                    continue
+                loc = (
+                    f"lead {lid} outcome.observations.edges[{e_idx}] "
+                    f"({eid}) authorization_resolutions[{entry_idx}]"
+                )
+                yield loc, eid, r, lead_idx, entry_idx
+
+        # (b) on attribute_updates targeting an existing edge
+        for u_idx, upd in enumerate(outcome.get("attribute_updates") or []):
+            if not isinstance(upd, dict):
+                continue
+            target = upd.get("target") if isinstance(upd.get("target"), str) else "?"
+            updates = upd.get("updates") if isinstance(upd.get("updates"), dict) else {}
+            entries = updates.get("authorization_resolutions") or []
+            for entry_idx, r in enumerate(entries):
+                if not isinstance(r, dict):
+                    continue
+                loc = (
+                    f"lead {lid} attribute_updates[{u_idx}].updates"
+                    f".authorization_resolutions[{entry_idx}] (target {target})"
+                )
+                yield loc, target, r, lead_idx, entry_idx
 
 
 def _collect_lead_resolutions(merged: dict[str, Any]) -> list[LeadResolution]:
     """Walk _iter_resolutions and build structured LeadResolution records.
 
     Skips malformed entries (missing/wrong-type `fulfills_contract` or
-    `verdict`) — those are caught by rule #20 / rule #21's shape checks
+    `verdict`) — those are caught by the provenance and back-ref checks
     with dedicated error messages; this builder just needs well-formed
     rows for aggregation.
     """
@@ -254,31 +352,12 @@ def _collect_lead_resolutions(merged: dict[str, Any]) -> list[LeadResolution]:
         verdict = r.get("verdict")
         if not isinstance(cref, str) or not isinstance(verdict, str):
             continue
-        raw_id = r.get("id")
-        lr_id = raw_id if isinstance(raw_id, str) else None
-        raw_sup = r.get("supersedes")
-        supersedes = raw_sup if isinstance(raw_sup, str) else None
         out.append(LeadResolution(
             lead_idx=lead_idx,
             entry_idx=entry_idx,
             location=location,
-            lr_id=lr_id,
             contract_ref=cref,
             target=target_id,
             verdict=verdict,
-            supersedes=supersedes,
         ))
     return out
-
-
-def _compute_effective_resolutions(
-    all_res: list[LeadResolution],
-) -> list[LeadResolution]:
-    """Filter superseded entries out of the full list.
-
-    An entry is excluded when some later resolution names it as its
-    `supersedes` target. Legacy entries (lr_id is None) cannot be
-    referenced and are never filtered.
-    """
-    superseded_ids = {r.supersedes for r in all_res if r.supersedes is not None}
-    return [r for r in all_res if r.lr_id is None or r.lr_id not in superseded_ids]

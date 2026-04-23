@@ -314,7 +314,7 @@ class TestJudgeGating:
             ticket_id: SEC-001
             signature_id: wazuh-rule-5710
             status: escalated
-            disposition: inconclusive
+            disposition: unclear
             confidence: low
             leads_pursued: 2
             ---

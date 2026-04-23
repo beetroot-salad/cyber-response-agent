@@ -20,6 +20,7 @@ from hooks.scripts.invlang_validate import (
     _check_compound_prediction_claim,
     _check_hypothesis_fork_distinctness,
     _check_hypothesis_persistence,
+    _check_integrity_peer_discipline,
     _check_prediction_id_hypothesis_scope,
     _check_prediction_subject_scope,
     _check_predictions_leanness,
@@ -480,7 +481,7 @@ class TestCheckCompoundPredictionClaim:
 
 class TestCheckClassificationEvaluationPrefix:
     """Rule 27 — classifications and hypothesis names must not start with
-    legitimacy/intent prefixes."""
+    authorization/intent prefixes."""
 
     @staticmethod
     def _h(hid: str, classification: str, name: str | None = None) -> dict:
@@ -789,3 +790,120 @@ class TestCheckRefutationPredictionLinks:
         errors = _check_refutation_prediction_links(merged)
         assert len(errors) == 1
         assert "h-002" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Rule #32 — Integrity peer discipline
+# ---------------------------------------------------------------------------
+
+
+class TestCheckIntegrityPeerDiscipline:
+    """Rule #32 — acting-entity contracts require a peer or an explicit waiver."""
+
+    @staticmethod
+    def _contract_h(hid: str, attached: str, parent_type: str, *, name: str | None = None,
+                    waiver: str | None = None) -> dict:
+        h: dict = {
+            "id": hid,
+            "name": name if name is not None else f"?m-{hid}",
+            "attached_to_vertex": attached,
+            "proposed_edge": {
+                "relation": "initiated_by",
+                "parent_vertex": {"type": parent_type, "classification": "some-classification"},
+            },
+            "predictions": [{"id": "p1", "claim": "..."}],
+            "authorization_contract": [{
+                "id": "ac1",
+                "edge_ref": "proposed",
+                "anchor_kind": "iam-policy",
+                "predicate": "authorized iff role match",
+                "on_unauthorized": "escalate",
+                "on_indeterminate": "escalate",
+            }],
+        }
+        if waiver is not None:
+            h["integrity_waived"] = waiver
+        return h
+
+    @staticmethod
+    def _peer_h(hid: str, attached: str, parent_type: str = "process") -> dict:
+        return {
+            "id": hid,
+            "name": f"?adversary-controlled-{hid}",
+            "attached_to_vertex": attached,
+            "proposed_edge": {
+                "relation": "initiated_by",
+                "parent_vertex": {"type": parent_type, "classification": "impostor"},
+            },
+            "predictions": [{"id": "p1", "claim": "..."}],
+        }
+
+    def test_session_contract_with_peer_passes(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._contract_h("h-001", "v-001", "session"),
+            self._peer_h("h-002", "v-001"),
+        ]}}
+        assert _check_integrity_peer_discipline(merged) == []
+
+    def test_identity_contract_with_peer_passes(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._contract_h("h-001", "v-001", "identity"),
+            self._peer_h("h-002", "v-001"),
+        ]}}
+        assert _check_integrity_peer_discipline(merged) == []
+
+    def test_process_contract_with_waiver_passes(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._contract_h("h-001", "v-001", "process",
+                             waiver="integrity tested out-of-band by EDR"),
+        ]}}
+        assert _check_integrity_peer_discipline(merged) == []
+
+    def test_session_contract_without_peer_or_waiver_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._contract_h("h-001", "v-001", "session"),
+        ]}}
+        errors = _check_integrity_peer_discipline(merged)
+        assert len(errors) == 1
+        assert "h-001" in errors[0]
+        assert "session" in errors[0]
+
+    def test_empty_waiver_does_not_satisfy(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._contract_h("h-001", "v-001", "session", waiver=""),
+        ]}}
+        errors = _check_integrity_peer_discipline(merged)
+        assert errors
+
+    def test_non_acting_entity_type_exempt(self):
+        # endpoint / file / storage are not acting-entity types; rule #32 ignores them.
+        merged = {"hypothesize": {"hypotheses": [
+            self._contract_h("h-001", "v-001", "endpoint"),
+        ]}}
+        assert _check_integrity_peer_discipline(merged) == []
+
+    def test_peer_on_different_attached_vertex_does_not_count(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._contract_h("h-001", "v-001", "session"),
+            # peer attached to different vertex — not in the same sibling group
+            self._peer_h("h-002", "v-777"),
+        ]}}
+        errors = _check_integrity_peer_discipline(merged)
+        assert errors
+        assert "h-001" in errors[0]
+
+    def test_hypothesis_without_contract_exempt(self):
+        # No authorization_contract → integrity-peer discipline doesn't apply.
+        merged = {"hypothesize": {"hypotheses": [
+            {
+                "id": "h-001",
+                "name": "?session-something",
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "initiated_by",
+                    "parent_vertex": {"type": "session", "classification": "x"},
+                },
+                "predictions": [{"id": "p1", "claim": "..."}],
+            },
+        ]}}
+        assert _check_integrity_peer_discipline(merged) == []

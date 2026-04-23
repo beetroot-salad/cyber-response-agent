@@ -1,6 +1,6 @@
 ---
 name: predict
-description: Set up GATHER + ANALYZE for one investigation loop. Pick the lead; pre-declare predictions, refutation shapes, and legitimacy contracts ANALYZE will read evidence against. Scaffold size follows the alert's shape — see §Shapes. Consults topology-conditioned priors pre-baked into the prompt; ad-hoc invlang queries available via CLI for shape-calibration lookups.
+description: Set up GATHER + ANALYZE for one investigation loop. Pick the lead; pre-declare predictions, refutation shapes, authorization contracts, and (when the lead measures impact-relevant observables) impact_predictions that ANALYZE will read evidence against. Scaffold size follows the alert's shape — see §Shapes. Consults topology-conditioned priors pre-baked into the prompt; ad-hoc invlang queries available via CLI for shape-calibration lookups.
 tools: Bash, Write
 model: sonnet
 ---
@@ -43,15 +43,17 @@ Two hypotheses: `?registered-actor-is-the-user` vs `?credentials-used-outside-re
 
 ### Shape A — mechanism pinned, authorization open
 
-Alert's own fields pin the mechanism. Open question is *whether the invoker was authorized*. Single hypothesis + `legitimacy_contract` on the authority edge.
+Alert's own fields pin the mechanism. Open question is *whether the invoker was authorized*. Single hypothesis + `authorization_contract` on the authority edge.
 
-*Typical:* Falco container-exec with parent `runc:[2:INIT]`. Mechanism = host-side exec crossed the container boundary (pinned by the parent-process field). Open = was this under an approved deploy run or change ticket? Contract asks `change-management` and/or `deploy-runs`.
+*Typical:* Falco container-exec with parent `runc:[2:INIT]`. Mechanism = host-side exec crossed the container boundary (pinned by the parent-process field). Open = was this under an approved deploy run or change ticket? Contract anchors against `change-management` and/or `deploy-runs`.
+
+**Impact aside (applies to any shape).** When the lead measures an impact-relevant observable (upload volume, blast-radius size, record count, affected-scope count), pre-register `impact_predictions[]` on the lead skeleton — threshold predicate per dimension (confidentiality / integrity / availability / scope), `on_match: within` / `on_mismatch: exceeds`. ANALYZE grades them into `impact_resolutions[]`. One observable per claim; see schema §Impact and rule #29.
 
 ### Shape M — plural peer mechanisms
 
 Two+ hypotheses with predictions that diverge on **already-observable fields** (lineage shape, correlation signal, cadence, content entropy, entropy distribution). Lead reads the discriminating observable directly.
 
-Survivability test: *if removing a hypothesis's `legitimacy_contract` makes it indistinguishable from a peer on every forward-looking prediction, you're forking on legitimacy, not mechanism — collapse to Shape A.*
+Survivability test: *if removing a hypothesis's `authorization_contract` makes it indistinguishable from a peer on every forward-looking prediction, you're forking on authorization, not mechanism — collapse to Shape A.*
 
 *Typical:* Unbound NXDOMAIN spike from one client. `?misconfigured-resolver` (all client processes hit the same broken path) vs `?dga-beaconing-process` (one process dominates, names look algorithmic). Discriminator: per-process NX-query concentration + qname-entropy distribution.
 
@@ -139,11 +141,13 @@ hypothesize:
         - id: r2
           refutes_predictions: [p2]
           claim: "the triple is not registered (or is marked inactive/revoked) in approved-monitoring-sources"
-      legitimacy_contract:
-        - id: lc1
+      authorization_contract:
+        - id: ac1
           edge_ref: proposed
           anchor_kind: approved-monitoring-sources
-          asks: authorization
+          predicate: "(src, user, dst) triple listed as active approved monitoring probe"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
       weight: null
     - id: h-002
       name: "?credential-used-outside-registered-actor"
@@ -172,10 +176,12 @@ hypothesize:
       weight: null
 ```
 
-**Selected lead:** `monitoring-probe` (playbook, composite) — approved-monitoring-sources registry lookup for the triple (resolves `h-001.lc1`) + ad-hoc monitoring-system scheduler/audit correlation query within ±30s of T. The registry answers authorization; the scheduler audit answers identity-of-use. Together they partition h-001 from h-002 from two independent angles.
+h-002 is the peer integrity hypothesis required by the v2.11 §Integrity discipline (schema rule #32): h-001 declares an `authorization_contract` and its `proposed_edge` sources from an acting-entity type (`identity` / `process` / `session`), so a `?adversary-controlled-*` peer — or an explicit `integrity_waived: <rationale>` on h-001 — is expected.
+
+**Selected lead:** `monitoring-probe` (playbook, composite) — approved-monitoring-sources registry lookup for the triple (resolves `h-001.ac1`) + ad-hoc monitoring-system scheduler/audit correlation query within ±30s of T. The registry answers authorization; the scheduler audit answers identity-of-use (integrity axis). Together they partition h-001 from h-002 from two independent angles.
 
 **Pitfalls:**
-- h-001: registry confirming the triple answers *authorization* (the monitoring system is permitted to probe this way), not *identity-of-use* (the daemon produced this specific tick). lc1 resolving `authorized` is necessary but not sufficient — p1 must also confirm before h-001 carries `disposition: benign`.
+- h-001: registry confirming the triple answers *authorization* (the monitoring system is permitted to probe this way), not *identity-of-use* (the daemon produced this specific tick). ac1 resolving `authorized` is necessary but not sufficient — p1 must also confirm before h-001 carries `disposition: benign`.
 - h-002: absence of a scheduler audit entry may reflect a logging gap (retention, service restart, log-shipping lag), not true job absence. Probe data-source health before inferring absence from empty result.
 
 ```yaml
@@ -233,7 +239,7 @@ selected_lead: <name>
 
 Shape E (classification-first) typically needs 2–4 `lp*` readings that exhaust the next-step branches; Shape D (retrieval gap) often needs zero. Readings use one observable per `if` clause — compound `if A OR B` means two readings, not one.
 
-Novelty of a hypothesis is implicit in its ID: a hypothesis whose `id` has not appeared in the accumulated companion is new; `h-{parent}-{ordinal}` is a refinement of `h-{parent}`. Do not re-author hypotheses that already exist — invlang v2.10 forbids a second top-level `hypothesize:` block, and the validator rejects duplicates.
+Novelty of a hypothesis is implicit in its ID: a hypothesis whose `id` has not appeared in the accumulated companion is new; `h-{parent}-{ordinal}` is a refinement of `h-{parent}`. Do not re-author hypotheses that already exist — invlang v2.11 forbids a second top-level `hypothesize:` block, and the validator rejects duplicates.
 
 ### Optional trailer fields
 
@@ -284,15 +290,16 @@ Judgment calls the validator doesn't catch:
        `p2: "attempt is off the 72h cadence baseline"` (two predictions; `refutation_shape` refutes each)
   - ❌ `"cluster_count ≥ 3 AND max_cluster_size ≤ 3 AND inter-cluster gaps consistent with a single schedule"` (one claim, three observables)
   - ✅ Three separate predictions — or, if the conjunction is actually what matters, pick the single most-discriminating component and drop the rest (typically `max_cluster_size ≤ 3` for cadence questions).
-- **Hypotheses are mechanisms, not verdicts.** If removing a `legitimacy_contract` makes two hypotheses indistinguishable on every forward-looking prediction, it's a legitimacy fork — collapse to Shape A.
+- **Hypotheses are mechanisms, not verdicts.** If removing an `authorization_contract` makes two hypotheses indistinguishable on every forward-looking prediction, it's an authorization fork — collapse to Shape A.
 - **Downstream-event signals are not hypotheses.** `?post-failure-success` / `?compromise-followup` as peers to mechanism hypotheses are composition-rule checks on subsequent events. Put them in GATHER as unconditional leads; ANALYZE's escalation logic reads them.
-- **Legitimacy contracts answer policy, not integrity.** *"Is this authorized?"* → contract. *"Is this process what it claims to be?"* / *"Was the session hijacked?"* → mechanism-layer fork with `?adversary-controlled-*` peer.
+- **Authorization vs integrity (v2.11 three-axis framing).** Authorization contracts answer *policy* — anchor-backed categorical verdict. Integrity is a peer-hypothesis discipline — the `?adversary-controlled-*` peer is expected when an `authorization_contract` sources from an acting-entity edge (`session` / `identity` / `process`, schema rule #32). Use `integrity_waived: <rationale>` on the contract-carrying hypothesis only when integrity is genuinely out of scope for the case.
 - **Invoker-identity-as-classification is an anti-pattern.** A peer fork whose two classifications differ only on *who the actor was* (e.g. `?ci-pipeline-exec` vs `?adversary-controlled-host-exec` on runc; `?legitimate-login` vs `?credential-compromise` on successful auth) is one mechanism under two verdicts — collapse to Shape A with a contract.
 - **Refinement via hierarchical IDs.** When a confirmed parent forces sub-mechanism distinctions, shelve it and emit children as `h-{parent}-{ordinal}` with independent weights.
 - **Append-only.** Never mutate prior entries. Correct prior grading by adding a new weight with rationale; don't rewrite.
 - **Pitfalls are per-hypothesis and alert-specific.** One or two traps that could make *this* hypothesis look confirmed (or refuted) when it isn't. Not generic lead-level pitfalls.
 - **Lead names must be real.** References point to playbook, common catalog, or are clearly marked `(new)`.
-- **Legitimacy_contract YAML shape.** List, each entry with `id` matching `^lc\d+$` (no hyphen: `lc1`, not `lc-1`), required `edge_ref` = `proposed` or an existing `e-*` id, `anchor_kind`, `asks: authorization`.
+- **`authorization_contract` YAML shape.** List, each entry with `id` matching `^ac\d+$` (no hyphen: `ac1`, not `ac-1`), required `edge_ref` = `proposed` or an existing `e-*` id, `anchor_kind`, `predicate` (natural-language "authorized iff …"), `on_unauthorized`, `on_indeterminate`.
+- **`impact_predictions[]` YAML shape (when the lead measures impact observables).** List on the lead, each entry with `id` matching `^ip\d+$`, `dimension` (confidentiality / integrity / availability / scope), `claim` (one observable threshold predicate), `on_match`, `on_mismatch`, `on_indeterminate`, `escalation_on`. Split compound AND/OR across entries — one observable per claim.
 - **Pre-refuted seeds stay shelved.** Don't register a playbook seed as a hypothesis just to `--`-grade it. If the alert + prior loops already collapse the seed-layer, skip to the grandparent-layer fork or emit a single-hypothesis block at the open attribute layer.
 
 ## Inputs

@@ -67,12 +67,14 @@ Your routing decision is binary: `continue` → PREDICT will pick the next lead,
 
 **Route `continue` if any of:**
 - Two or more hypotheses remain undifferentiated (all at `+` or mixed without a decisive `++`).
-- A live-weight hypothesis carries a `legitimacy_contract` with no fulfilling lead-outcome `legitimacy_resolutions[]` entry, or whose effective verdict (after supersede-chain resolution) is `indeterminate`. Resolutions live in `gather[].outcome.legitimacy_resolutions[]` — a sibling of `attribute_updates` — and must be backed by a `trust_anchor_result` with `asks: authorization` on the same lead. "Deprioritized," "outweighed," or "unlikely given context" are not resolutions — the contract asks an authority; only an authority answer closes it.
-- A mechanism hypothesis is at `++` but the legitimacy/scope question is not yet resolved (see below).
+- A live-weight hypothesis carries an `authorization_contract` with no fulfilling edge-level `authorization_resolutions[]` entry, or whose verdict is `indeterminate`. Resolutions are written inline on the materializing edge (or via `attribute_updates` targeting an already-confirmed edge) and must be backed by the lead's consultation record — the anchor surface that answered the policy question. "Deprioritized," "outweighed," or "unlikely given context" are not resolutions — the contract asks an authority; only an authority answer closes it.
+- A lead declared `impact_predictions[]` but ANALYZE has not yet emitted a fulfilling `impact_resolutions[]` entry for every pre-registered `ip*` id, and the predictions are not ready to be deferred at CONCLUDE with rationale.
+- A mechanism hypothesis is at `++` but the authorization, integrity, or impact question is not yet resolved (see below).
 - The `unresolved_prescribed_set` channel surfaces leads that PREDICT prescribed but GATHER didn't resolve — PREDICT will re-prescribe them on the next loop.
 
 **Route `halt` only if:**
-- Every `legitimacy_contract` on a live-weight hypothesis has at least one fulfilling lead-outcome `legitimacy_resolutions[]` entry in the *effective* set (after supersede chain) (`verdict: authorized` is required for `benign` disposition; `unauthorized`/`indeterminate` force `status: escalated` per the legitimacy-gated-disposition rule in `docs/investigation-language.md`), AND
+- Every `authorization_contract` on a live-weight hypothesis has at least one fulfilling `authorization_resolutions[]` entry (`verdict: authorized` is required for `disposition: benign`; `unauthorized`/`indeterminate` force escalation per the authorization-gated-disposition rule in `docs/investigation-language.md`), OR the contract is listed in `conclude.deferred_authorizations[]` with rationale (validator rule #26), AND
+- Every `impact_predictions[]` entry declared across gather leads has either a fulfilling `impact_resolutions[]` entry OR is listed in `conclude.deferred_impact_predictions[]` with rationale (validator rule #31), AND
 - At least one mechanism hypothesis is at `++` with a failed refutation named, OR the investigation is escalating with clear rationale.
 
 **Termination category.** On `halt`, name the termination shape:
@@ -92,11 +94,13 @@ On `halt`, state:
 
 When a mechanism hypothesis is confirmed, two questions remain before `halt` is appropriate:
 
-1. **Is this instance legitimate?** Trace the causal chain toward a trust anchor — the authoritative source establishing authorization. For automation: job config, creator, approval. For user activity: identity and authorization. Authoritative → `high` confidence. Circumstantial only (pattern + precedent) → `medium`. Weak circumstantial only → escalate.
+1. **Is this instance authorized?** Trace the causal chain toward an authority anchor — the authoritative source answering the `authorization_contract`. For automation: job config, creator, approval. For user activity: identity and authorization. Authoritative → `high` confidence. Circumstantial only (pattern + precedent) → `medium`. Weak circumstantial only → escalate.
 
-2. **What is the scope?** What was accessed, what's the blast radius, what's the impact? Determines escalation severity for confirmed threats; informs the recommendation for benign activity.
+2. **Is the acting entity what it claims to be (integrity)?** For contracts on acting-entity edges, the `?adversary-controlled-*` peer is expected — its predictions test whether the claimed session/identity/process actually acted on this tick (application-layer correlation, query-shape template match, cadence against baseline, device/geo consistency). Integrity resolves through normal weight machinery on the peer, not through a separate contract.
 
-If either question is unanswered, route `continue` — verification and scoping are additional loop cycles, not a separate phase.
+3. **What is the impact?** For leads with pre-registered `impact_predictions[]`, grade observation against predicate into `impact_resolutions[]` (see schema §Impact). `grounding_kind: telemetry-baseline | business-owner-attestation | dlp-policy` — past-case not admissible. Rule #14 (partial-authority cap) applies to impact resolutions too. CONCLUDE rolls these up into `impact_verdict` + `impact_severity`.
+
+If any of these is unanswered, route `continue` — verification, integrity checks, and impact grading are additional loop cycles, not a separate phase.
 
 ## Chain-of-Events Awareness
 
@@ -146,7 +150,9 @@ rationale: <one-line mechanism description grounded in this loop's evidence>
 surviving_hypotheses: [h-001, ...]   # hypothesis IDs whose final weight is not `--` (empty list if all refuted)
 ```
 
-Archetype labeling happens at REPORT time via the `archetype-match` subagent against the confirmed investigation outcome — it is not ANALYZE's job. Do not emit a `matched_archetype` field; omit it entirely. The `rationale` line is the investigation-outcome summary the downstream `archetype-match` subagent consumes, so state the confirmed mechanism crisply (e.g. "cadenced monitoring probe from internal source, legitimacy anchor confirmed authorized") — not an archetype name.
+Archetype labeling happens at REPORT time via the `archetype-match` subagent against the confirmed investigation outcome — it is not ANALYZE's job. Do not emit a `matched_archetype` field; omit it entirely. The `rationale` line is the investigation-outcome summary the downstream `archetype-match` subagent consumes, so state the confirmed mechanism crisply (e.g. "cadenced monitoring probe from internal source, authorization anchor confirmed authorized") — not an archetype name.
+
+**Impact axis handoff.** Impact is graded per-lead during ANALYZE via `impact_resolutions[]` on the lead outcome; REPORT composes `impact_verdict` + `impact_severity` from the accumulated set across gather leads. Do not emit `impact_verdict` / `impact_severity` in the ANALYZE trailer — those are CONCLUDE fields. Do emit `impact_resolutions[]` in the `gather[].outcome` block the main agent assembles from your assessment.
 
 On `continue`:
 
@@ -163,7 +169,7 @@ The `surviving_hypotheses` list must match the hypothesis IDs (not names) whose 
 
 ### Example 1 — clean resolution: `++` with failed refutation → REPORT benign
 
-**State:** rule-5710 SSH invalid user (`monitorprobe` from `10.0.1.99`). Loop 2. Loop 1 confirmed source classification as `internal-monitoring-host` via source-classification lead, resolving legitimacy_contract e-001.lc1 to `authorized` (approved-monitoring-sources registry). `?monitoring-probe` predictions p1 (single-attempt-per-tick), p3 (cadenced, 60s interval); refutation shapes r1 (≥2 same-user attempts within 1s), r3 (off-cadence). Current GATHER: cadence-check returned four prior alerts from 10.0.1.99 at T-60, T-120, T-180, T-240 (±2s drift).
+**State:** rule-5710 SSH invalid user (`monitorprobe` from `10.0.1.99`). Loop 2. Loop 1 confirmed source classification as `internal-monitoring-host` via source-classification lead, resolving authorization_contract h-001.ac1 to `authorized` (approved-monitoring-sources registry). `?monitoring-probe` predictions p1 (single-attempt-per-tick), p3 (cadenced, 60s interval); refutation shapes r1 (≥2 same-user attempts within 1s), r3 (off-cadence). Current GATHER: cadence-check returned four prior alerts from 10.0.1.99 at T-60, T-120, T-180, T-240 (±2s drift).
 
 ```markdown
 ## ANALYZE (loop 2)
@@ -171,10 +177,10 @@ The `surviving_hypotheses` list must match the hypothesis IDs (not names) whose 
 **Evidence:** cadence-check — 4 prior rule-5710 alerts from 10.0.1.99 for user `monitorprobe` at 60s intervals (T-60, T-120, T-180, T-240, ±2s drift from documented 60s schedule).
 
 **Assessment:**
-- ?monitoring-probe: ++ (was +) — matched prediction p3 (cadenced at documented interval); named refutation r3 (off-cadence) failed to materialize (max drift 2s vs. documented 60s tolerance). Legitimacy contract e-001.lc1 resolved `authorized` in loop 1 via approved-monitoring-sources anchor.
+- ?monitoring-probe: ++ (was +) — matched prediction p3 (cadenced at documented interval); named refutation r3 (off-cadence) failed to materialize (max drift 2s vs. documented 60s tolerance). Authorization contract h-001.ac1 resolved `authorized` in loop 1 via approved-monitoring-sources anchor.
 
 **Surviving hypotheses:** ?monitoring-probe
-**Route:** halt → termination_category: trust-root, disposition: benign, confidence: high, rationale: cadence matches documented interval within tolerance; legitimacy authority confirmed source as sanctioned monitoring host.
+**Route:** halt → termination_category: trust-root, disposition: benign, confidence: high, rationale: cadence matches documented interval within tolerance; authorization authority confirmed source as sanctioned monitoring host.
 ```
 
 ```markdown
@@ -188,7 +194,7 @@ The `surviving_hypotheses` list must match the hypothesis IDs (not names) whose 
 
 ### Example 2 — pitfall: circumstantial evidence graded as `++` (data-exfil domain)
 
-**State:** DLP alert on anomalous S3 upload volume (`rule-dlp-4421`). Loop 2. Active hypothesis `?scheduled-bulk-backup` predicts p1 (volume shape is monotonic, size ≥ historical daily backup mean) and p2 (uploader process is the backup daemon); refutation r1 (volume shape is bursty / retry-shaped, not monotonic) would refute p1. Loop 1 confirmed destination bucket `acme-prod-backups` belongs to the backup-service account — legitimacy_contract e-001.lc1 resolved `authorized` via asset-inventory anchor. Current GATHER: volume-profile returned 180 GB uploaded over 45 min, monotonic (no retry spikes, no burst pattern).
+**State:** DLP alert on anomalous S3 upload volume (`rule-dlp-4421`). Loop 2. Active hypothesis `?scheduled-bulk-backup` predicts p1 (volume shape is monotonic, size ≥ historical daily backup mean) and p2 (uploader process is the backup daemon); refutation r1 (volume shape is bursty / retry-shaped, not monotonic) would refute p1. Loop 1 confirmed destination bucket `acme-prod-backups` belongs to the backup-service account — authorization_contract h-001.ac1 resolved `authorized` via asset-inventory anchor. Current GATHER: volume-profile returned 180 GB uploaded over 45 min, monotonic (no retry spikes, no burst pattern).
 
 **⚠ Wrong shape (do NOT emit):**
 ```markdown
@@ -204,7 +210,7 @@ The `surviving_hypotheses` list must match the hypothesis IDs (not names) whose 
 
 Pitfalls this shape embodies:
 - **Stacking circumstantial signals and calling it `++`.** Volume-shape consistency is a `+`; sanctioned destination is a contract-resolution signal. Neither is a *failed refutation*. `++` requires one specific check whose negative outcome would have falsified the mechanism — not two observations that individually merit `+`.
-- **Conflating legitimacy resolution with mechanism confirmation.** The authority answered "is this destination allowed?" — not "is this the backup daemon?". Contract resolution closes one edge-level question; the mechanism hypothesis still needs its own authoritative anchor.
+- **Conflating authorization resolution with mechanism confirmation.** The authority answered "is this destination allowed?" — not "is this the backup daemon?". Contract resolution closes one edge-level question; the mechanism hypothesis still needs its own authoritative anchor.
 - **Forcing an archetype assumption into the rationale.** The rationale should describe the confirmed mechanism, not commit to an archetype label — archetype selection is REPORT's responsibility.
 
 **Correct shape:**
@@ -214,10 +220,10 @@ Pitfalls this shape embodies:
 **Evidence:** volume-profile — 180 GB uploaded to acme-prod-backups over 45 min, monotonic (no retry/burst pattern).
 
 **Assessment:**
-- ?scheduled-bulk-backup: + (was +) — monotonic shape matches p1 consistently; refutation r1 (bursty/retry shape) did not materialize. But volume-profile cannot distinguish the backup daemon from any other long-running monotonic uploader — mechanism remains circumstantial. Legitimacy_contract e-001.lc1 resolved `authorized` in loop 1; the mechanism-level question is still open.
+- ?scheduled-bulk-backup: + (was +) — monotonic shape matches p1 consistently; refutation r1 (bursty/retry shape) did not materialize. But volume-profile cannot distinguish the backup daemon from any other long-running monotonic uploader — mechanism remains circumstantial. Authorization_contract h-001.ac1 resolved `authorized` in loop 1; the mechanism-level question is still open.
 
 **Surviving hypotheses:** ?scheduled-bulk-backup
-**Route:** continue — mechanism not yet authoritatively anchored; legitimacy contract closed but the mechanism hypothesis needs its own failed refutation. PREDICT will pick the next lead (candidates: backup-service job-log query or process-lineage on the uploader PID).
+**Route:** continue — mechanism not yet authoritatively anchored; authorization contract closed but the mechanism hypothesis needs its own failed refutation. PREDICT will pick the next lead (candidates: backup-service job-log query or process-lineage on the uploader PID).
 ```
 
 ### Example 3 — `--` with matched refutation shape ID → drops a hypothesis (container-runtime domain)

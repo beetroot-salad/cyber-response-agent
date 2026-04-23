@@ -8,12 +8,11 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from schemas.enums import (
-    VALID_ANCHOR_KINDS,
-    VALID_ANCHOR_RESULTS,
-    VALID_ASKS,
+    VALID_AUTHORIZATION_VERDICTS,
     VALID_CONFIDENCES,
+    VALID_CONSULTATION_GROUNDING_KINDS,
+    VALID_CONSULTATION_RESULTS,
     VALID_DISPOSITIONS,
-    VALID_LEGITIMACY_VERDICTS,
     VALID_STATUSES,
 )
 
@@ -33,7 +32,7 @@ class ReportFrontmatter:
     ticket_id: str
     signature_id: str
     status: str  # resolved | escalated
-    disposition: str  # benign | false_positive | true_positive | inconclusive
+    disposition: str  # benign | true_positive | unclear
     confidence: str  # high | medium | low
     leads_pursued: int
 
@@ -88,7 +87,10 @@ class ReportFrontmatter:
                     "matched_ticket_id cannot be set without matched_archetype"
                 )
 
-        # Validate trust_anchors_consulted shape (when present)
+        # Validate trust_anchors_consulted shape (when present). v2.11 retains
+        # the rolled-up frontmatter shape for report-level consumption; the
+        # kind/result vocabularies mirror the on-companion
+        # `anchor_consultations[]` block.
         if self.trust_anchors_consulted:
             if not isinstance(self.trust_anchors_consulted, list):
                 errors.append("trust_anchors_consulted must be a list")
@@ -105,42 +107,26 @@ class ReportFrontmatter:
                                 f"trust_anchors_consulted[{i}] missing '{required_key}'"
                             )
                     kind = entry.get("kind")
-                    if kind and kind not in VALID_ANCHOR_KINDS:
+                    if kind and kind not in VALID_CONSULTATION_GROUNDING_KINDS:
                         errors.append(
                             f"trust_anchors_consulted[{i}] kind must be one of "
-                            f"{VALID_ANCHOR_KINDS}, got '{kind}'"
+                            f"{VALID_CONSULTATION_GROUNDING_KINDS}, got '{kind}'"
                         )
                     result = entry.get("result")
-                    if result and result not in VALID_ANCHOR_RESULTS:
+                    if result and result not in VALID_CONSULTATION_RESULTS:
                         errors.append(
                             f"trust_anchors_consulted[{i}] result must be one of "
-                            f"{VALID_ANCHOR_RESULTS}, got '{result}'"
+                            f"{VALID_CONSULTATION_RESULTS}, got '{result}'"
                         )
-                    # Optional fields added with the authority-consultation
-                    # unification (v2.9). Entries authored pre-v2.9 omit
-                    # these; entries sourced from lead-outcome rollups
-                    # carry them.
-                    asks = entry.get("asks")
-                    if asks is not None and asks not in VALID_ASKS:
-                        errors.append(
-                            f"trust_anchors_consulted[{i}] asks must be one of "
-                            f"{VALID_ASKS}, got '{asks}'"
-                        )
+                    # `verdict` is optional at the report-frontmatter layer.
+                    # It's populated when a rolled-up authorization_resolutions
+                    # entry is surfaced; must match the authz verdict vocab
+                    # when present.
                     verdict = entry.get("verdict")
-                    if verdict is not None and verdict not in VALID_LEGITIMACY_VERDICTS:
+                    if verdict is not None and verdict not in VALID_AUTHORIZATION_VERDICTS:
                         errors.append(
                             f"trust_anchors_consulted[{i}] verdict must be one of "
-                            f"{VALID_LEGITIMACY_VERDICTS}, got '{verdict}'"
-                        )
-                    if asks == "authorization" and verdict is None:
-                        errors.append(
-                            f"trust_anchors_consulted[{i}] asks is 'authorization' "
-                            f"but verdict is missing"
-                        )
-                    if asks == "expectation" and verdict is not None:
-                        errors.append(
-                            f"trust_anchors_consulted[{i}] asks is 'expectation' "
-                            f"but verdict={verdict!r} is set — baselines don't authorize"
+                            f"{VALID_AUTHORIZATION_VERDICTS}, got '{verdict}'"
                         )
 
         return errors

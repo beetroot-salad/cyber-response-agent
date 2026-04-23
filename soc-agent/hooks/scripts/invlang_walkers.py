@@ -142,3 +142,30 @@ def iter_resolutions(merged: dict[str, Any]) -> Iterator[tuple[dict[str, Any], d
         for res in lead.get("resolutions", []) or []:
             if isinstance(res, dict):
                 yield lead, res
+
+
+def iter_siblings(merged: dict[str, Any], h_id: str) -> Iterator[dict[str, Any]]:
+    """Yield hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` with h_id.
+
+    Returns the "sibling group" used by rule #23 (fork distinctness) and
+    rule #32 (integrity peer discipline). The hypothesis identified by
+    `h_id` is excluded from the yielded set — "siblings of" means others
+    in the same group.
+    """
+    target_parent = parent_hypothesis_id(h_id)
+    target_attached = None
+    for h in iter_hypotheses(merged):
+        if h.get("id") == h_id:
+            target_attached = h.get("attached_to_vertex")
+            break
+    if target_attached is None:
+        return
+    for h in iter_hypotheses(merged):
+        hid = h.get("id")
+        if not isinstance(hid, str) or hid == h_id:
+            continue
+        if parent_hypothesis_id(hid) != target_parent:
+            continue
+        if h.get("attached_to_vertex") != target_attached:
+            continue
+        yield h

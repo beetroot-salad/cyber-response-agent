@@ -1,8 +1,9 @@
-"""Unit tests for structural invlang checks (rules 1-9).
+"""Unit tests for structural invlang checks.
 
 Covers: lead required fields, ID formats, ID references, edge authority,
-refutation IDs, trust_anchor_result completeness, screen_result scope,
-lead.predictions structural shape.
+refutation IDs, screen_result scope, lead.predictions structural shape,
+plus rule #11 provenance checks (authorization_resolutions,
+anchor_consultations).
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.invlang_validate import (
+    _check_anchor_consultation_provenance,
+    _check_authorization_resolution_provenance,
     _check_edge_authority,
     _check_id_formats,
     _check_id_references,
@@ -21,7 +24,6 @@ from hooks.scripts.invlang_validate import (
     _check_lead_required_fields,
     _check_refutation_ids,
     _check_screen_result_scope,
-    _check_trust_anchor_completeness,
     _merge_blocks,
 )
 
@@ -29,6 +31,7 @@ from tests.test_invlang_validate import (
     VALID_PREDICT_YAML,
     VALID_LEAD_YAML,
     VALID_PROLOGUE_YAML,
+    _companion_with_contract,
     _parse_yaml_block,
 )
 
@@ -102,7 +105,7 @@ class TestCheckIdReferences:
     def test_dangling_target_ref(self):
         merged = {"gather": [{
             "id": "l-001", "loop": 1, "name": "test",
-            "target": "v-999",  # doesn't exist
+            "target": "v-999",
             "query_details": {}, "outcome": {}, "resolutions": [],
         }]}
         errors = _check_id_references(merged)
@@ -211,85 +214,6 @@ class TestCheckRefutationIds:
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: _check_trust_anchor_completeness
-# ---------------------------------------------------------------------------
-
-
-class TestCheckTrustAnchorCompleteness:
-    def test_complete_passes(self):
-        merged = {"gather": [{
-            "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
-            "query_details": {}, "outcome": {
-                "trust_anchor_result": {
-                    "anchor_id": "approved-monitoring-sources",
-                    "kind": "org-authority",
-                    "result": "confirmed",
-                    "as_of": "2026-04-17T09:00:00Z",
-                    "authority_for_question": "full",
-                },
-                "observations": {"vertices": [], "edges": []},
-            },
-            "resolutions": [],
-        }]}
-        assert _check_trust_anchor_completeness(merged) == []
-
-    def test_missing_two_fields_fails(self):
-        merged = {"gather": [{
-            "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
-            "query_details": {}, "outcome": {
-                "trust_anchor_result": {
-                    "anchor_id": "approved-monitoring-sources",
-                    "kind": "org-authority",
-                    # missing: result, as_of, authority_for_question
-                },
-            },
-            "resolutions": [],
-        }]}
-        errors = _check_trust_anchor_completeness(merged)
-        assert errors
-        assert "l-001" in errors[0]
-
-    def test_kind_from_edge_authority_taxonomy_rejected(self):
-        """The agent commonly writes `authoritative-source` (an edge-authority
-        term) into trust_anchor_result.kind — it must be caught at invlang
-        layer so the error points at the right schema slot."""
-        merged = {"gather": [{
-            "id": "l-004", "loop": 0, "name": "approved-monitoring-sources",
-            "target": "e-001", "mode": "screen",
-            "query_details": {}, "outcome": {
-                "trust_anchor_result": {
-                    "anchor_id": "approved-monitoring-sources",
-                    "kind": "authoritative-source",
-                    "result": "confirmed",
-                    "as_of": "2026-04-18T20:32:05Z",
-                    "authority_for_question": "full",
-                },
-            },
-            "resolutions": [],
-        }]}
-        errors = _check_trust_anchor_completeness(merged)
-        assert any("trust_anchor_result.kind must be one of" in e for e in errors)
-        assert any("l-004" in e for e in errors)
-        assert any("authoritative-source" in e for e in errors)
-
-    def test_kind_telemetry_baseline_passes(self):
-        merged = {"gather": [{
-            "id": "l-001", "loop": 0, "name": "image-baseline",
-            "target": "e-001", "query_details": {}, "outcome": {
-                "trust_anchor_result": {
-                    "anchor_id": "image-baseline",
-                    "kind": "telemetry-baseline",
-                    "result": "confirmed",
-                    "as_of": "2026-04-18T20:32:05Z",
-                    "authority_for_question": "full",
-                },
-            },
-            "resolutions": [],
-        }]}
-        assert _check_trust_anchor_completeness(merged) == []
-
-
-# ---------------------------------------------------------------------------
 # Unit tests: _check_screen_result_scope
 # ---------------------------------------------------------------------------
 
@@ -307,7 +231,6 @@ class TestCheckScreenResultScope:
     def test_screen_result_on_non_screen_lead_fails(self):
         merged = {"gather": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
-            # mode: screen absent
             "query_details": {}, "outcome": {"screen_result": "no_match"},
             "resolutions": [],
         }]}
@@ -386,3 +309,108 @@ class TestCheckLeadPredictions:
         }]}
         errors = _check_lead_predictions(merged)
         assert any("must be a list" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: rule #11 — authorization_resolutions[] provenance
+# ---------------------------------------------------------------------------
+
+
+class TestCheckAuthorizationResolutionProvenance:
+    """Rule #11 for authz entries — required fields + grounding enum."""
+
+    def test_full_entry_passes(self):
+        merged = _companion_with_contract()
+        assert _check_authorization_resolution_provenance(merged) == []
+
+    def test_missing_required_fields_reported(self):
+        merged = _companion_with_contract()
+        edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        # Strip several required fields to verify they all get reported.
+        for field in ("anchor_kind", "anchor_id", "as_of"):
+            edge["authorization_resolutions"][0].pop(field, None)
+        errors = _check_authorization_resolution_provenance(merged)
+        assert any("missing required field" in e for e in errors)
+        joined = " ".join(errors)
+        assert "anchor_kind" in joined
+        assert "anchor_id" in joined
+        assert "as_of" in joined
+
+    def test_telemetry_baseline_grounding_rejected(self):
+        merged = _companion_with_contract()
+        edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        edge["authorization_resolutions"][0]["grounding_kind"] = "telemetry-baseline"
+        errors = _check_authorization_resolution_provenance(merged)
+        assert any("telemetry-baseline" in e for e in errors)
+
+    def test_past_case_requires_cites_past_case(self):
+        merged = _companion_with_contract()
+        edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        edge["authorization_resolutions"][0]["grounding_kind"] = "past-case"
+        # No cites_past_case field
+        errors = _check_authorization_resolution_provenance(merged)
+        assert any("cites_past_case" in e for e in errors)
+
+    def test_past_case_with_valid_cites_passes(self):
+        merged = _companion_with_contract()
+        edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        edge["authorization_resolutions"][0]["grounding_kind"] = "past-case"
+        edge["authorization_resolutions"][0]["cites_past_case"] = {
+            "run_id": "run-2025-01", "contract_ref": "h-001.ac1",
+        }
+        assert _check_authorization_resolution_provenance(merged) == []
+
+    def test_past_case_missing_run_id_fails(self):
+        merged = _companion_with_contract()
+        edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        edge["authorization_resolutions"][0]["grounding_kind"] = "past-case"
+        edge["authorization_resolutions"][0]["cites_past_case"] = {"contract_ref": "h-001.ac1"}
+        errors = _check_authorization_resolution_provenance(merged)
+        assert any("run_id" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: rule #11 — anchor_consultations[] provenance
+# ---------------------------------------------------------------------------
+
+
+class TestCheckAnchorConsultationProvenance:
+    """Rule #11 for consultations — required fields + grounding enum."""
+
+    def test_full_entry_passes(self):
+        merged = _companion_with_contract()
+        assert _check_anchor_consultation_provenance(merged) == []
+
+    def test_missing_required_fields_reported(self):
+        merged = _companion_with_contract()
+        cons = merged["gather"][0]["outcome"]["anchor_consultations"][0]
+        cons.pop("result")
+        cons.pop("anchor_id")
+        errors = _check_anchor_consultation_provenance(merged)
+        assert any("missing required field" in e for e in errors)
+        joined = " ".join(errors)
+        assert "result" in joined
+        assert "anchor_id" in joined
+
+    def test_past_case_grounding_rejected(self):
+        merged = _companion_with_contract(
+            anchor_consultations=[{
+                "anchor_id": "x", "anchor_kind": "x",
+                "grounding_kind": "past-case",  # forbidden on consultations
+                "result": "confirmed", "as_of": "2026-04-18",
+                "authority_for_question": "full",
+            }],
+        )
+        errors = _check_anchor_consultation_provenance(merged)
+        assert any("past-case" in e for e in errors)
+
+    def test_telemetry_baseline_passes(self):
+        merged = _companion_with_contract(
+            anchor_consultations=[{
+                "anchor_id": "image-baseline", "anchor_kind": "image-baseline",
+                "grounding_kind": "telemetry-baseline",
+                "result": "confirmed", "as_of": "2026-04-18",
+                "authority_for_question": "full",
+            }],
+        )
+        assert _check_anchor_consultation_provenance(merged) == []

@@ -1343,16 +1343,19 @@ def _compose_analyze_routed(
 
     # ANALYZE's routing schema (agents/analyze.md) uses
     # disposition ∈ {benign, false_positive, true_positive, escalated}
-    # but the report frontmatter schema (schemas/enums.py VALID_DISPOSITIONS)
-    # uses {benign, false_positive, true_positive, inconclusive}. When ANALYZE
-    # routes `escalated`, that maps to report-frontmatter
-    # `disposition: inconclusive` + `status: escalated`. The report
-    # subagent does this remapping implicitly per agents/report.md; the
-    # mechanical path does it explicitly.
+    # but the report frontmatter schema (schemas/enums.py VALID_DISPOSITIONS,
+    # v2.11) uses {benign, true_positive, unclear}. When ANALYZE routes
+    # `escalated`, that maps to report-frontmatter `disposition: unclear`
+    # + `status: escalated`. `false_positive` is collapsed into `benign`
+    # (no threat + no impact) per v2.11 three-way disposition vocabulary.
     force_escalated_from_disposition = False
     if raw_disposition == "escalated":
-        disposition = "inconclusive"
+        disposition = "unclear"
         force_escalated_from_disposition = True
+    elif raw_disposition == "false_positive":
+        disposition = "benign"
+    elif raw_disposition == "inconclusive":
+        disposition = "unclear"
     else:
         disposition = raw_disposition
 
