@@ -72,7 +72,7 @@ def make_lead(
     failure_reason: str | None = None,
     attribute_updates: list[dict[str, Any]] | None = None,
     observations: dict[str, Any] | None = None,
-    trust_anchor_result: dict[str, Any] | None = None,
+    anchor_consultations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     lead: dict[str, Any] = {
         "id": id,
@@ -88,8 +88,8 @@ def make_lead(
         outcome["attribute_updates"] = attribute_updates
     if observations:
         outcome["observations"] = observations
-    if trust_anchor_result:
-        outcome["trust_anchor_result"] = trust_anchor_result
+    if anchor_consultations:
+        outcome["anchor_consultations"] = anchor_consultations
     if resolutions:
         lead["resolutions"] = resolutions
     lead["outcome"] = outcome

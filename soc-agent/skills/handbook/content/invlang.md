@@ -51,7 +51,7 @@ From `hooks/scripts/invlang_validate.py::validate_companion`:
 5. **ID references resolve.** Every cross-reference (e.g. `resolutions[].hypothesis`, `supporting_edges`, `tests`, `observes[].hypothesis`) names a declared ID.
 6. **Edge authority.** Every `++` or `--` resolution must cite at least one `supporting_edge` whose authority kind is `siem-event`, `runtime-audit`, or `authoritative-source`. Client-asserted and inferred edges alone cannot push weight to the strong grades.
 7. **Refutation IDs.** Every `--` resolution has non-empty `matched_refutation_ids` referencing IDs that exist in the target hypothesis's `refutation_shape`.
-8. **Trust-anchor completeness.** When a lead includes `trust_anchor_result`, all five fields are required: `anchor_id`, `kind`, `result`, `as_of`, `authority_for_question`.
+8. **Anchor-consultation completeness (rule #11).** Every `anchor_consultations[]` entry on a lead outcome requires `anchor_id`, `anchor_kind`, `grounding_kind`, `result`, `as_of`, `authority_for_question`. `grounding_kind ∈ {org-authority, telemetry-baseline}` on consultations; `past-case` is authz-only. Authorization resolutions live inline on edges (or via `attribute_updates`) and have their own required-field set (verdict, anchor_id, anchor_kind, grounding_kind, authority_for_question, as_of, resolved_by_lead, fulfills_contract).
 9. **`screen_result` scope.** Only valid on leads with `mode: screen`, and only on the final lead in a SCREEN sequence.
 10. **Lead-level predictions.** When present, each entry has `id` (matches `^lp\d+$`, unique within the lead), `if`, `read_as`, and `advance_to` (another lead name in the same or subsequent loop, or one of `CONCLUDE` / `PREDICT`).
 

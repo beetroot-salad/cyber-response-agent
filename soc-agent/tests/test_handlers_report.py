@@ -152,7 +152,7 @@ class TestPromptAssembly:
         ```yaml
         status: written
         report_path: /tmp/report.md
-        disposition: inconclusive
+        disposition: unclear
         confidence: low
         matched_archetype: null
         status_frontmatter: escalated
@@ -234,7 +234,7 @@ class TestPromptAssembly:
         ```yaml
         status: written
         report_path: /tmp/report.md
-        disposition: inconclusive
+        disposition: unclear
         confidence: low
         matched_archetype: null
         status_frontmatter: escalated
@@ -259,7 +259,7 @@ class TestPromptAssembly:
         ```yaml
         status: written
         report_path: /tmp/report.md
-        disposition: inconclusive
+        disposition: unclear
         confidence: low
         matched_archetype: null
         status_frontmatter: escalated
@@ -332,7 +332,7 @@ class TestPromptAssembly:
         ```yaml
         status: written
         report_path: /tmp/report.md
-        disposition: inconclusive
+        disposition: unclear
         confidence: low
         matched_archetype: null
         status_frontmatter: escalated
@@ -369,7 +369,7 @@ class TestPromptAssembly:
         ```yaml
         status: written
         report_path: /tmp/report.md
-        disposition: inconclusive
+        disposition: unclear
         confidence: low
         matched_archetype: null
         status_frontmatter: escalated
@@ -404,7 +404,7 @@ class TestPromptAssembly:
         ```yaml
         status: written
         report_path: /tmp/report.md
-        disposition: inconclusive
+        disposition: unclear
         confidence: low
         matched_archetype: null
         status_frontmatter: escalated
@@ -619,7 +619,7 @@ class TestOrchestratorIntegration:
         ```yaml
         status: written
         report_path: /runs/run-forced/report.md
-        disposition: inconclusive
+        disposition: unclear
         confidence: low
         matched_archetype: null
         status_frontmatter: escalated
@@ -720,15 +720,14 @@ def _seed_ctx_for_mechanical(tmp_path: Path, *, matched_ticket_id: str | None) -
                 "id": "l-003", "loop": 0, "name": "approved-monitoring-sources",
                 "target": "e-001", "mode": "screen",
                 "outcome": {
-                    "trust_anchor_result": {
+                    "anchor_consultations": [{
                         "anchor_id": "approved-monitoring-sources",
-                        "kind": "org-authority",
-                        "asks": "authorization",
-                        "verdict": "authorized",
+                        "anchor_kind": "approved-monitoring-sources",
+                        "grounding_kind": "org-authority",
                         "result": "confirmed",
                         "as_of": "2026-04-20T19:25:01Z",
                         "authority_for_question": "full",
-                    },
+                    }],
                 },
             },
         ],
@@ -810,7 +809,7 @@ class TestMechanicalScreenCompose:
         Level 2: status=escalated, SCREEN's disposition preserved, confidence
         clamped to medium. No subagent call, no raise."""
         ctx = _seed_ctx_for_mechanical(tmp_path, matched_ticket_id="SEC-9999-999")
-        # Drop the confirmed trust_anchor_result so the anchor leg also fails.
+        # Drop the confirmed anchor_consultations so the anchor leg also fails.
         screen = ctx.outputs[Phase.SCREEN]
         screen["gather"] = [
             {
@@ -1026,13 +1025,25 @@ gather:
   target: e-001
   mode: screen
   outcome:
-    trust_anchor_result:
-      anchor_id: approved-monitoring-sources
-      kind: org-authority
-      asks: authorization
-      verdict: authorized
-      result: confirmed
-      as_of: '2026-04-22T07:00:00Z'
+    anchor_consultations:
+      - anchor_id: approved-monitoring-sources
+        anchor_kind: approved-monitoring-sources
+        grounding_kind: org-authority
+        result: confirmed
+        as_of: '2026-04-22T07:00:00Z'
+        authority_for_question: full
+    observations:
+      edges:
+        - id: e-001
+          authorization_resolutions:
+            - verdict: authorized
+              anchor_id: approved-monitoring-sources
+              anchor_kind: approved-monitoring-sources
+              grounding_kind: org-authority
+              authority_for_question: full
+              as_of: '2026-04-22T07:00:00Z'
+              resolved_by_lead: l-002
+              fulfills_contract: h-001.ac1
     resolutions:
     - hypothesis: h-001
       weight: ++
@@ -1099,9 +1110,19 @@ class TestMechanicalAnalyzeCompose:
         assert "first analyze" not in text
 
     def test_derive_termination_category_trust_root_from_anchor(self):
-        gather = [
-            {"name": "l-001", "outcome": {"trust_anchor_result": {"verdict": "authorized"}}}
-        ]
+        # v2.11: trust-root fires on any edge-inline
+        # authorization_resolutions[] with verdict: authorized.
+        gather = [{
+            "name": "l-001",
+            "outcome": {
+                "observations": {
+                    "edges": [{
+                        "id": "e-001",
+                        "authorization_resolutions": [{"verdict": "authorized"}],
+                    }],
+                },
+            },
+        }]
         cat = report_handler._derive_termination_category({}, gather, "")
         assert cat == "trust-root"
 
@@ -1452,7 +1473,7 @@ class TestMechanicalAnalyzeCompose:
         ```yaml
         status: written
         report_path: /tmp/report.md
-        disposition: inconclusive
+        disposition: unclear
         confidence: low
         matched_archetype: null
         status_frontmatter: escalated
@@ -1470,7 +1491,7 @@ class TestMechanicalAnalyzeCompose:
     def test_adversarial_disposition_forces_escalation_even_with_archetype(
         self, tmp_path, monkeypatch,
     ):
-        """disposition=true_positive or inconclusive must NOT resolve, even
+        """disposition=true_positive or unclear must NOT resolve, even
         if matched_archetype is set and anchors are confirmed. Mirrors the
         legitimacy-gated-disposition rule in invlang v2.9."""
         ctx = _seed_ctx_for_analyze_mechanical(
@@ -1540,26 +1561,26 @@ class TestMechanicalAnalyzeCompose:
             "- id: l-001\n"
             "  name: yaml-form-lead\n"
             "  outcome:\n"
-            "    trust_anchor_result:\n"
-            "      verdict: authorized\n"
+            "    anchor_consultations:\n"
+            "      - anchor_id: x\n"
+            "        result: confirmed\n"
             "```\n"
         )
         gather = report_handler._extract_gather_blocks(md)
         assert len(gather) == 1
         assert gather[0]["name"] == "yaml-form-lead"
-        assert gather[0]["outcome"]["trust_anchor_result"]["verdict"] == "authorized"
+        assert gather[0]["outcome"]["anchor_consultations"][0]["result"] == "confirmed"
 
-    def test_analyze_escalated_disposition_remaps_to_unclear(
+    def test_analyze_unclear_disposition_passes_through(
         self, tmp_path, monkeypatch,
     ):
-        """ANALYZE emits `disposition: escalated` per its routing schema;
-        report frontmatter's VALID_DISPOSITIONS (v2.11) doesn't include
-        `escalated`. Handler must remap to `disposition: unclear` +
-        `status: escalated` so Tier-1 passes."""
+        """v2.11: ANALYZE emits disposition ∈ {benign, true_positive, unclear}
+        directly — no handler-side remap. Non-benign dispositions always
+        escalate; unclear specifically surfaces to frontmatter unchanged."""
         ctx = _seed_ctx_for_analyze_mechanical(
             tmp_path,
             analyze_payload={
-                "disposition": "escalated",  # ANALYZE's escalated enum
+                "disposition": "unclear",
                 "confidence": "medium",
                 "matched_archetype": None,
                 "surviving_hypotheses": ["h-001", "h-002"],
@@ -1587,13 +1608,12 @@ class TestMechanicalAnalyzeCompose:
         result = report_handler.handle(ctx)
         assert result.payload["compose_mode"] == "analyze_mechanical"
         assert result.payload["status_frontmatter"] == "escalated"
-        assert result.payload["disposition"] == "unclear"  # remapped
+        assert result.payload["disposition"] == "unclear"
 
         report = (ctx.run_dir / "report.md").read_text()
         assert "status: escalated" in report
         assert "disposition: unclear" in report
-        # disposition value `escalated` must not appear as a disposition
-        # enum (it's only valid as a status).
+        # `escalated` is a status, never a disposition.
         assert "disposition: escalated" not in report
 
     def test_archetype_match_is_invoked_on_analyze_routed_path(
@@ -1696,7 +1716,7 @@ class TestMechanicalAnalyzeCompose:
         ```yaml
         status: written
         report_path: /tmp/report.md
-        disposition: inconclusive
+        disposition: unclear
         confidence: low
         matched_archetype: null
         status_frontmatter: escalated

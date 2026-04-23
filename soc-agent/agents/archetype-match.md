@@ -18,7 +18,7 @@ The caller substitutes these values in the user message:
 - `alert_path` — absolute path to `alert.json`
 - `field_quirks_path` — absolute path to the signature's `field-quirks.md`
 - `story_paths` — comma-separated absolute paths to each archetype's `story.md`
-- `disposition` — one of `benign` | `false_positive` | `true_positive` | `inconclusive`
+- `disposition` — one of `benign` | `true_positive` | `unclear`
 - `confidence` — one of `high` | `medium` | `low`
 - `mechanism_summary` — one-line description of the confirmed mechanism class from the final ANALYZE (e.g. "monitoring probe against sentinel username from internal subnet")
 - `authorization_verdicts` — YAML-list of `{contract: <name>, result: authorized|unauthorized|indeterminate}` from the investigation's edge resolutions

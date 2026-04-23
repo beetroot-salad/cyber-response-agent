@@ -58,7 +58,7 @@ naming the missing context and stop.
 - **`++` requires a named failed refutation.** Before committing `++`, name one concrete check that would refute the hypothesis if its result came back a specific way. Cite either the just-run GATHER as that check, or an earlier GATHER observation that already satisfies it. If no refutation path is runnable in scope, the maximum grade is `+` — route to PREDICT and pursue a differentiating lead.
 - **`--` requires a named matched refutation shape.** A hypothesis's PREDICT block declares `refutation_shape: [{id: r1, ...}, ...]` entries before evidence lands. Grade `--` only when you can name the specific `r{N}` ID(s) whose shape the just-run evidence matches — state them in your reasoning ("matched refutation r1: ..."). If the argument for refutation is structural but no pre-registered refutation shape covers it, the max grade is `-`. Downstream YAML composition requires `matched_refutation_ids` non-empty on `--` and will be rejected otherwise; pick the nearest pre-registered shape or stay at `-`.
 - **Circumstantial ≠ authoritative.** "Evidence consistent with X" is at most `+`. `++` on a mechanism hypothesis tied to an anchored archetype requires authoritative confirmation (sanction registry, change-management ticket with confirmed operator, direct query answer) — not pattern consistency alone.
-- **No rollup across hypotheses (validator rule 25).** A hypothesis's grade reflects evidence on *that specific mechanism*. Every `matched_prediction_ids[]` entry on a resolution must be a prediction declared on the resolution's target hypothesis; mis-citing a sibling's prediction ID is rejected by the validator (rule 25 — same-level sibling rollup). Do not upgrade a mechanism hypothesis on the strength of evidence that supports a sibling. Do not invent a parent class (`?compromise-confirmed`, `?malicious-activity`) to aggregate sibling grades. If two mechanism hypotheses are both `+` and neither is refuted, the honest outcome is REPORT with `escalated / inconclusive` listing both as surviving — or PREDICT for a discriminating lead.
+- **No rollup across hypotheses (validator rule 25).** A hypothesis's grade reflects evidence on *that specific mechanism*. Every `matched_prediction_ids[]` entry on a resolution must be a prediction declared on the resolution's target hypothesis; mis-citing a sibling's prediction ID is rejected by the validator (rule 25 — same-level sibling rollup). Do not upgrade a mechanism hypothesis on the strength of evidence that supports a sibling. Do not invent a parent class (`?compromise-confirmed`, `?malicious-activity`) to aggregate sibling grades. If two mechanism hypotheses are both `+` and neither is refuted, the honest outcome is REPORT with `status: escalated / disposition: unclear` listing both as surviving — or PREDICT for a discriminating lead.
 - **Route compliance for pre-registered readings.** If the just-run lead carried a `predictions` block, check that the observed outcome pattern matches one of the `if` branches. If the observation fits no branch, that's a signal the fork space was incomplete — route `continue` and let PREDICT extend the fork, not `halt` on the closest branch.
 
 ## Routing Rules
@@ -86,7 +86,7 @@ Your routing decision is binary: `continue` → PREDICT will pick the next lead,
 **Hypothesis persistence on halt (validator rule 24).** On `halt`, every declared hypothesis must either have reached final weight `--` or appear in `surviving_hypotheses[]` (emitted in the terminal YAML below). Silent drop — a hypothesis neither refuted nor listed — is rejected at write-time. If a hypothesis remains at `+` or `-` with no runnable refutation, list it as surviving and let the escalation rationale carry it; do not pretend it didn't exist.
 
 On `halt`, state:
-- `disposition`: `benign` | `false_positive` | `true_positive` | `escalated`
+- `disposition`: `benign` | `true_positive` | `unclear`
 - `confidence`: `high` | `medium` | `low`
 - Brief rationale tying each surviving hypothesis's final grade to the disposition
 
@@ -144,7 +144,7 @@ On `halt`:
 ```yaml
 route: halt
 termination_category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
-disposition: benign | false_positive | true_positive | escalated
+disposition: benign | true_positive | unclear
 confidence: high | medium | low
 rationale: <one-line mechanism description grounded in this loop's evidence>
 surviving_hypotheses: [h-001, ...]   # hypothesis IDs whose final weight is not `--` (empty list if all refuted)

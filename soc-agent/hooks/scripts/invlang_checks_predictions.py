@@ -87,9 +87,9 @@ def _check_prediction_coverage(merged: dict[str, Any]) -> list[str]:
 def _check_partial_authority_cap(merged: dict[str, Any]) -> list[str]:
     """Rule #14 (partial authority cap): anchor-only grounding cannot produce ++/--.
 
-    A resolution on a lead is capped at `+` or `-` when its only
-    grounding is an entry with `authority_for_question: "partial"`. The
-    cap applies across all three v2.11 grounding surfaces:
+    A resolution on a lead is capped at `+` or `-` when *every* grounding
+    source on the lead is partial. The cap applies across all three v2.11
+    grounding surfaces:
 
     - `authorization_resolutions[]` on edges emitted by this lead
       (either inline on new edges in `outcome.observations.edges[]` or
@@ -97,9 +97,12 @@ def _check_partial_authority_cap(merged: dict[str, Any]) -> list[str]:
     - `anchor_consultations[]` on the lead outcome
     - `impact_resolutions[]` on the lead outcome
 
-    Mixed grounding — any `partial` entry accompanied by at least one
-    qualifying `supporting_edges` — passes; the rule only caps
-    resolutions grounded *solely* by one or more partial entries.
+    Scoping: `has_partial` tracks "any partial entry present"; `has_full`
+    tracks "any full-authority entry present". The cap fires only when
+    `has_partial and not has_full` — a full-authority entry on the same
+    lead is load-bearing on its own and lets the weight land past `+`/`-`
+    regardless of a co-located partial consultation. Mixed grounding via
+    `supporting_edges` continues to exempt the resolution row-wise.
     """
     errors: list[str] = []
     for lead in merged.get("gather", []) or []:
@@ -107,45 +110,41 @@ def _check_partial_authority_cap(merged: dict[str, Any]) -> list[str]:
             continue
         outcome = lead.get("outcome") if isinstance(lead.get("outcome"), dict) else {}
         has_partial = False
+        has_full = False
+
+        def _classify(entry: Any) -> None:
+            nonlocal has_partial, has_full
+            if not isinstance(entry, dict):
+                return
+            afq = entry.get("authority_for_question")
+            if afq == "partial":
+                has_partial = True
+            elif afq == "full":
+                has_full = True
 
         # anchor_consultations (baseline / registry lookups)
         for entry in outcome.get("anchor_consultations") or []:
-            if isinstance(entry, dict) and entry.get("authority_for_question") == "partial":
-                has_partial = True
-                break
+            _classify(entry)
         # impact_resolutions
-        if not has_partial:
-            for entry in outcome.get("impact_resolutions") or []:
-                if isinstance(entry, dict) and entry.get("authority_for_question") == "partial":
-                    has_partial = True
-                    break
+        for entry in outcome.get("impact_resolutions") or []:
+            _classify(entry)
         # edge-inline authorization_resolutions
-        if not has_partial:
-            obs = outcome.get("observations") if isinstance(outcome.get("observations"), dict) else {}
-            for e in obs.get("edges", []) or []:
-                if not isinstance(e, dict):
-                    continue
-                for entry in e.get("authorization_resolutions") or []:
-                    if isinstance(entry, dict) and entry.get("authority_for_question") == "partial":
-                        has_partial = True
-                        break
-                if has_partial:
-                    break
+        obs = outcome.get("observations") if isinstance(outcome.get("observations"), dict) else {}
+        for e in obs.get("edges", []) or []:
+            if not isinstance(e, dict):
+                continue
+            for entry in e.get("authorization_resolutions") or []:
+                _classify(entry)
         # attribute_updates authorization_resolutions
-        if not has_partial:
-            for upd in outcome.get("attribute_updates") or []:
-                if not isinstance(upd, dict):
-                    continue
-                updates = upd.get("updates") if isinstance(upd.get("updates"), dict) else {}
-                for entry in updates.get("authorization_resolutions") or []:
-                    if isinstance(entry, dict) and entry.get("authority_for_question") == "partial":
-                        has_partial = True
-                        break
-                if has_partial:
-                    break
+        for upd in outcome.get("attribute_updates") or []:
+            if not isinstance(upd, dict):
+                continue
+            updates = upd.get("updates") if isinstance(upd.get("updates"), dict) else {}
+            for entry in updates.get("authorization_resolutions") or []:
+                _classify(entry)
 
-        if not has_partial:
-            continue
+        if not has_partial or has_full:
+            continue  # either no partial at all, or a co-located full grounds it
 
         lid = lead.get("id", "?")
         for res in lead.get("resolutions", []) or []:

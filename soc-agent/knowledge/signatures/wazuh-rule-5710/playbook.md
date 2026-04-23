@@ -122,20 +122,24 @@ fork resolves `++` on one side do mechanism-layer children register:
 Do not register these at loop 1 — they depend on the root fork
 having resolved. Identity-of-use first, mechanism second.
 
-### Legitimacy-contract case (when the triple is NOT registered)
+### Authorization-contract case (when the triple is NOT registered)
 
 When the source/username pair is NOT in the registry — external
-source or internal-other — the fork is a single legitimacy question
-on the `attempted_auth` edge carried as a `legitimacy_contract`
+source or internal-other — the fork is a single authorization question
+on the `attempted_auth` edge carried as an `authorization_contract`
 (same mechanism, only the authority answer differs). The resolving
-lead writes two coupled records in its own `outcome`:
+lead writes the verdict inline on the materializing edge:
 
-- a `trust_anchor_result` with `asks: authorization`, `kind: org-authority`,
-  and `verdict: authorized | unauthorized | indeterminate`;
-- a `legitimacy_resolutions[]` entry with `target: e-*` pointing at
-  the `attempted_auth` edge and `fulfills_contract: h-*.lc*`.
+- an `authorization_resolutions[]` entry on the `attempted_auth`
+  edge (or via `attribute_updates[].updates.authorization_resolutions[]`
+  if the edge already exists), with `verdict: authorized | unauthorized
+  | indeterminate`, `grounding_kind: org-authority`,
+  `fulfills_contract: h-*.ac*`, and a concrete `anchor_id` / `anchor_kind`;
+- the consultation itself is recorded on the lead outcome via
+  `anchor_consultations[]` — baseline/registry lookups are consultations,
+  not resolutions.
 
-The contract's verdict routes to archetype:
+The resolution's verdict routes to archetype:
 - `authorized` → `monitoring-probe` or `service-account-rotation`
   depending on username class.
 - `unauthorized` → `credential-stuffing` or `external-bruteforce`
@@ -154,7 +158,7 @@ are adversarial-by-mechanism: classification carries the claim and
 no contract is declared. Their `--` refutation comes from concrete
 volume/shape evidence, not from an anchor lookup.
 
-See `docs/investigation-language.md` §Legitimacy as edge attribute and
+See `docs/investigation-language.md` §Authorization as edge attribute and
 `docs/design-v3-authority-consultation.md` for the full primitive.
 
 ## Starter lead order

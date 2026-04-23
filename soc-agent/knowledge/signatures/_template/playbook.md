@@ -15,7 +15,7 @@ Description of the first candidate explanation.
 **Typical profile:** Key indicators that characterize this hypothesis.
 
 ### ?hypothesis-2
-Description of the second candidate explanation. If an adversarial variant predicts observationally distinct world-states (`?adversary-controlled-*`, `?runtime-exec-injection`), enumerate it as its own hypothesis — classification carries the claim. When the same mechanism is consistent with benign or adversarial intent depending on authorization (CFO vs external identity, operator vs attacker), declare a `legitimacy_contract` on the hypothesis instead of forking into `?sanctioned-*`/`?unsanctioned-*` pairs. See `docs/investigation-language.md` §Legitimacy as edge attribute.
+Description of the second candidate explanation. If an adversarial variant predicts observationally distinct world-states (`?adversary-controlled-*`, `?runtime-exec-injection`), enumerate it as its own hypothesis — classification carries the claim. When the same mechanism is consistent with benign or adversarial intent depending on authorization (CFO vs external identity, operator vs attacker), declare an `authorization_contract` on the hypothesis instead of forking into `?sanctioned-*`/`?unsanctioned-*` pairs. See `docs/investigation-language.md` §Authorization as edge attribute. When the hypothesis's predicted edge sources from an acting-entity type (`session`, `identity`, `process`), the acting-entity integrity discipline (rule #32) applies — emit a peer `?adversary-controlled-*` hypothesis or carry `integrity_waived: <rationale>`.
 
 **Typical profile:** Key indicators.
 
@@ -62,7 +62,7 @@ Recommend which lead to pursue first and why.
 
 All must be true:
 1. Exactly one hypothesis remains with `++` support
-2. Every `legitimacy_contract` on a live-weight hypothesis has a fulfilling lead-outcome `legitimacy_resolutions[]` entry (authored in `gather[].outcome.legitimacy_resolutions[]`, backed by a sibling `trust_anchor_result` with `asks: authorization`) whose effective verdict after the supersede chain is `authorized`; any mechanism-level adversarial hypothesis (`?adversary-controlled-*`, etc.) has `--` refutation
+2. Every `authorization_contract` on a live-weight hypothesis has a fulfilling edge-level `authorization_resolutions[]` entry (written inline on the materializing edge or via `attribute_updates[].updates.authorization_resolutions[]`, with `fulfills_contract: h-*.ac*` back-referencing the contract) whose `verdict` is `authorized` — OR the contract appears in `conclude.deferred_authorizations[]` with rationale (rule #26); any mechanism-level adversarial hypothesis (`?adversary-controlled-*`, etc.) has `--` refutation
 3. A matching precedent exists
 4. No escalation triggers present
 5. Confidence is high

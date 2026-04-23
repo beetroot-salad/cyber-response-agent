@@ -144,7 +144,7 @@ _ESCALATION_CONCLUDE = (
     "  termination:\n"
     "    category: severity-ceiling\n"
     "    rationale: \"tool-unavailable\"\n"
-    "  disposition: inconclusive\n"
+    "  disposition: unclear\n"
     "  confidence: medium\n"
     "  ceiling_test:\n"
     "    kind: tool-unavailable\n"
@@ -241,7 +241,7 @@ class TestCheckFrontierClosure:
             "  termination:\n"
             "    category: exhaustion-escalation\n"
             "    rationale: \"loop budget exhausted\"\n"
-            "  disposition: inconclusive\n"
+            "  disposition: unclear\n"
             "  confidence: low\n"
             "  summary: \"out of loops\"\n"
         )
@@ -647,13 +647,13 @@ class TestHookJudgeFlags:
         bin_dir = tmp_path / "bin"
         _make_fake_claude(
             bin_dir,
-            judge_a_output="LEGITIMACY_CHECK: FLAG — legitimacy_contract on live hypothesis not resolved\nVERDICT: FLAG — legitimacy",
+            judge_a_output="AUTHORIZATION_CHECK: FLAG — authorization_contract on live hypothesis not resolved\nVERDICT: FLAG — authorization",
         )
         event = _make_hook_event(str(run_dir / "investigation.md"))
         result = _run_hook(event, runs_dir, fake_claude_dir=bin_dir)
         assert result.returncode == 2
         assert "Judge A" in result.stderr
-        assert "legitimacy" in result.stderr.lower()
+        assert "authorization" in result.stderr.lower()
 
     def test_judge_b_flag_blocks(self, tmp_path):
         runs_dir, run_dir = _setup_run(tmp_path)

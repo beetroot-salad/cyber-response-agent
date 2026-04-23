@@ -1,6 +1,6 @@
 # Investigation Language
 
-**Status:** Spec v2.11. v2.9 implemented; v2.10 and v2.11 changes pending implementation (shared pass).
+**Status:** Spec v2.11. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
 
 **v2.11 delta:** three orthogonal resolution axes named explicitly.
@@ -1274,3 +1274,51 @@ coverage.
     itself cite another past-case as its grounding. Prevents bootstrap
     drift where similar alerts recursively authorize themselves
     without any real policy consultation in the chain.
+
+29. **Impact prediction structure.** Every `impact_predictions[]`
+    entry on a lead has `id` matching `^ip\d+$` and unique within the
+    lead, plus required fields `dimension` (one of `confidentiality`,
+    `integrity`, `availability`, `scope`), `claim`, `on_match`,
+    `on_mismatch`, `on_indeterminate`, `escalation_on`. `claim` names
+    one observable per entry — compound `AND` / `OR` / semicolon
+    predicates must be split across entries. The full cross-lead
+    identity of the prediction is `l-{lead_id}.ip{n}`.
+
+30. **Impact resolution back-refs and grounding.** Every
+    `impact_resolutions[]` entry on a lead outcome has `prediction_ref`
+    resolving to a declared `impact_predictions[]` id somewhere in the
+    companion (bare `ip{n}` resolves within the emitting lead; fully
+    qualified `l-{id}.ip{n}` resolves across leads). `dimension` must
+    match the referenced prediction's `dimension`. `verdict ∈ {within,
+    exceeds, indeterminate}`. `grounding_kind ∈ {telemetry-baseline,
+    business-owner-attestation, dlp-policy}` — `past-case` is forbidden
+    on impact resolutions (impact is per-instance reasoning, not
+    category-of-event). Required fields: `prediction_ref`, `dimension`,
+    `verdict`, `grounding_kind`, `authority_for_question`, `as_of`,
+    `reasoning`.
+
+31. **Impact closure at CONCLUDE.** When a `conclude:` block is
+    written, every declared `impact_predictions[]` id across all
+    leads must either (a) have at least one fulfilling
+    `impact_resolutions[]` entry, OR (b) appear in
+    `conclude.deferred_impact_predictions[]` with a non-empty
+    rationale. Mirrors rule #26's orphan gate for authorization
+    contracts. `conclude.impact_verdict ∈ {none, within, exceeds,
+    indeterminate}`; `conclude.impact_severity ∈ {null, low, moderate,
+    high}` and is required when `impact_verdict ∈ {exceeds,
+    indeterminate}` and forbidden otherwise. Rule #14 (partial
+    authority cap) applies to impact resolutions as well.
+
+32. **Integrity peer discipline.** When a hypothesis carries an
+    `authorization_contract` AND its
+    `proposed_edge.parent_vertex.type` is an acting-entity type
+    (`session`, `identity`, `process`), either (a) a sibling
+    hypothesis sharing `(parent_hypothesis_id, attached_to_vertex)`
+    whose `name` starts with `?adversary-controlled-` must exist, OR
+    (b) the contract-carrying hypothesis must carry
+    `integrity_waived: <non-empty rationale>`. Non-acting-entity
+    parent vertex types (endpoint, file, storage, database, …) are
+    exempt. Closes the authorized-bulk-read-from-compromised-account
+    shortcut — authz clears, impact clears, but the integrity premise
+    was never tested. Integrity resolves through normal weight
+    machinery on the peer, not through a separate contract.

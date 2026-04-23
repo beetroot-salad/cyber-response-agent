@@ -210,6 +210,24 @@ class TestCheckPartialAuthorityCap:
         errors = _check_partial_authority_cap(merged)
         assert errors
 
+    def test_mixed_partial_and_full_on_same_lead_passes(self):
+        # Rule #14: cap applies only when every grounding entry on the lead
+        # is partial. A co-located full-authority resolution is load-bearing
+        # on its own and lifts the cap on `++`/`--`.
+        merged = _partial_consultation_fixture("++", [])
+        # Add a full-authority impact_resolution alongside the partial
+        # anchor_consultation.
+        merged["gather"][0]["outcome"]["impact_resolutions"] = [{
+            "prediction_ref": "l-001.ip1",
+            "dimension": "confidentiality",
+            "verdict": "within",
+            "grounding_kind": "telemetry-baseline",
+            "authority_for_question": "full",
+            "as_of": "2026-04-17T00:00:00Z",
+            "reasoning": "observed value well within baseline",
+        }]
+        assert _check_partial_authority_cap(merged) == []
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: _check_prediction_lifecycle (append-only on prediction IDs)

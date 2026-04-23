@@ -19,7 +19,7 @@ You do not run leads, re-grade hypotheses, query SIEM, or second-guess the ANALY
 - `identifier` — the alert's `ticket_id` (e.g. `1776663722.6369973`); goes verbatim into the report frontmatter's `ticket_id` field
 - `routing_source` — one of `analyze` | `screen` | `forced_exhaustion`
 - `matched_archetype` — already-resolved archetype label (or `null`). On `analyze` routing, this comes from the `archetype-match` subagent run by the handler; on `screen` routing, it's the archetype from the SCREEN match; on `forced_exhaustion`, always `null`. Use verbatim — do not override based on the investigation log.
-- `forced_exhaustion` (optional, `true` when set) — orchestrator hit `MAX_LOOPS` without ANALYZE routing to REPORT. Emit `status: escalated`, `termination.category: exhaustion-escalation`, `disposition: inconclusive` regardless of what investigation.md's last block says (`matched_archetype` is already `null` from the caller).
+- `forced_exhaustion` (optional, `true` when set) — orchestrator hit `MAX_LOOPS` without ANALYZE routing to REPORT. Emit `status: escalated`, `termination.category: exhaustion-escalation`, `disposition: unclear` regardless of what investigation.md's last block says (`matched_archetype` is already `null` from the caller).
 
 If any substitution is missing, stop and emit a single terminal YAML block with `status: error` naming the missing value. Do not guess. Do not `Read` `alert.json` to recover a missing `identifier`.
 
@@ -43,7 +43,7 @@ If required context is missing from these blocks, emit a terminal
 ## Task
 
 1. **Derive the routing.** `matched_archetype` comes verbatim from the caller input in every case — do not re-derive it.
-   - **If `forced_exhaustion=true`:** set `disposition=inconclusive`, `confidence=low`, `status=escalated`, `termination.category=exhaustion-escalation`. The rationale is "MAX_LOOPS reached without ANALYZE routing to REPORT." Skip archetype reference reads. The caller passes `matched_archetype=null`.
+   - **If `forced_exhaustion=true`:** set `disposition=unclear`, `confidence=low`, `status=escalated`, `termination.category=exhaustion-escalation`. The rationale is "MAX_LOOPS reached without ANALYZE routing to REPORT." Skip archetype reference reads. The caller passes `matched_archetype=null`.
    - **If `routing_source=analyze`:** extract `disposition`, `confidence` from the last ANALYZE block (it does **not** carry `matched_archetype` — use the caller input). Derive `status` per the Grounding discipline below.
    - **If `routing_source=screen`:** extract `matched_pattern`, `matched_ticket_id` from the SCREEN subagent result in investigation.md. `disposition`, `confidence` follow from the screen pattern's declared outcome. `matched_archetype` is the caller input (which matches what SCREEN emitted).
 
@@ -93,7 +93,7 @@ conclude:
   termination:
     category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
     rationale: {one-sentence reason the investigation halted}
-  disposition: benign | false_positive | true_positive | inconclusive         # authz/mechanism axis
+  disposition: benign | true_positive | unclear                                 # authz/mechanism axis
   impact_verdict: none | within | exceeds | indeterminate                      # impact axis
   impact_severity: null | low | moderate | high                                # present when impact_verdict ∈ {exceeds, indeterminate}
   confidence: high | medium | low
@@ -118,7 +118,7 @@ Report frontmatter shape:
 ticket_id: "{identifier — verbatim from the caller's prompt}"
 signature_id: {signature_id}
 status: {resolved|escalated}
-disposition: {benign|false_positive|true_positive|inconclusive}
+disposition: {benign|true_positive|unclear}
 confidence: {high|medium|low}
 matched_archetype: {archetype-name|null}
 matched_ticket_id: {SEC-YYYY-NNN|null}
@@ -163,7 +163,7 @@ After all writes succeed (or a gate_failed terminates you), emit **exactly one**
 ```yaml
 status: written
 report_path: {run_dir}/report.md
-disposition: {benign|false_positive|true_positive|inconclusive}
+disposition: {benign|true_positive|unclear}
 confidence: {high|medium|low}
 matched_archetype: {name|null}
 status_frontmatter: {resolved|escalated}

@@ -150,7 +150,7 @@ Use the value from your top-level `screen_result`. If `screen_result: error`, om
 ```yaml
 screen_result: match | no_match | error
 matched_pattern: "{row name or null}"
-disposition: "{benign|false_positive|true_positive or null}"
+disposition: "{benign|true_positive|unclear or null}"
 matched_archetype: "{archetype-name or null}"
 matched_ticket_id: "{SEC-YYYY-NNN or null}"
 confidence: "{high or null}"
