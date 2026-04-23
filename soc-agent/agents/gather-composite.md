@@ -149,6 +149,38 @@ next_intended_step: "compile final YAML and emit to stdout"    # one line; alway
 
 **Recovery behavior when YOU are the recovery dispatch:** if invoked with `resume_from_checkpoint=true` (or equivalent), read the checkpoint, transcribe per-lead entries verbatim into the final YAML, and emit. Do NOT re-run queries that the checkpoint marks `status: ok`/`partial`/`dropped_attempt`/`data_missing`. Only execute leads the checkpoint marks `pending` or mid-query. Write one final checkpoint with `status: complete` before emitting the YAML — consistent with the primary dispatch's cadence step 4, and protects against a recovery-time termination cascading.
 
+## Prescribed-lead scope discipline (handler-enforced)
+
+Every lead the dispatch prescribes (one per entry in `leads`) must appear as
+its own entry in the output `leads[]`, echoing the prescribed `lead_name`
+verbatim. This holds regardless of whether you executed the query, skipped it,
+or found the data source empty — the entry's `status` tells the main agent
+which it was. A prescribed lead that's entirely missing from output is a
+silent-drop bug; the GATHER handler rejects such outputs with
+`OrchestrationError`.
+
+- Executed lead → echo `lead_name`, populate `query` + `characterization`,
+  set `status: ok` (or `partial` if not all `What to Characterize` bullets
+  were reachable).
+- Intentionally skipped (budget / dispatch order / data-source-known-unreachable)
+  → echo `lead_name`, set `status: dropped_attempt`, `characterization: null`,
+  write the reason in `status_detail`.
+- Empty-result confirmation (data source reachable, query ran, zero hits
+  verified via data-source-debug) → echo `lead_name`, set `status: data_missing`,
+  `characterization: null`.
+- Probe broken / siem error → echo `lead_name` with the matching status per
+  the enum below.
+
+The rule is simple: **never omit a prescribed lead from `leads[]`**. If you
+can't say what happened to it, that's still an entry — with
+`status: dropped_attempt` and a `status_detail` explaining why you couldn't
+characterize it.
+
+Ad-hoc leads carry the same rule: the prescribed slug (even when made up by
+PREDICT with no definition file) is the lead's identity. Echo it in `lead`.
+Your ad-hoc query construction goes in `query` + `refinements_applied`; it
+does not rename the lead.
+
 ## Lead status & status_detail
 
 ### Status discriminator
