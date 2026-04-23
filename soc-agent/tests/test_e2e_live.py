@@ -58,7 +58,7 @@ def assert_valid_state_transitions(result: InvestigationResult):
     history = state["history"]
     assert len(history) >= 2, f"Investigation too short: {history}"
     assert history[0] == "CONTEXTUALIZE", f"Must start with CONTEXTUALIZE, got {history}"
-    assert history[-1] == "CONCLUDE", f"Must end with CONCLUDE, got {history}"
+    assert history[-1] == "REPORT", f"Must end with REPORT, got {history}"
 
     current = None
     for phase in history:

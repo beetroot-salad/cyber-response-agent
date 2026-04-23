@@ -1,6 +1,6 @@
 ---
 title: Rename HYPOTHESIZE → PREDICT, reframe prompt, drop archetypes from its context
-status: doing
+status: done
 groups: predict, hypothesize, state-machine, prompt
 ---
 

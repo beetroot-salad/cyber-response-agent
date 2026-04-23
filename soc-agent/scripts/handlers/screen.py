@@ -16,7 +16,7 @@ Input (Context):
 
 Output:
     PhaseResult
-      - match → Phase.CONCLUDE, payload carrying the match summary
+      - match → Phase.REPORT, payload carrying the match summary
       - no_match | error | structural-downgraded → Phase.PREDICT
       - empty Screen section → Phase.PREDICT without any subagent call
 
@@ -259,7 +259,7 @@ def _compose_markdown(
         ticket = screen_result.get("matched_ticket_id") or "?"
         outcome_parts.append(
             f"matched pattern={matched}, archetype={archetype}, "
-            f"precedent={ticket} — proceeding to CONCLUDE"
+            f"precedent={ticket} — proceeding to REPORT"
         )
     elif screen_result.get("screen_result") == "no_match":
         reason = screen_result.get("reason") or "(no reason given)"
@@ -333,7 +333,7 @@ def _match_payload(parsed: dict) -> dict:
         "confidence": parsed.get("confidence"),
         "leads_run": parsed.get("leads_run") or [],
         "evidence_summary": parsed.get("evidence_summary"),
-        # Preserve the invlang gather block so the CONCLUDE handler can
+        # Preserve the invlang gather block so the REPORT handler can
         # compose trust_anchors_consulted mechanically without re-reading
         # investigation.md.
         "gather": parsed.get("gather") or [],
@@ -394,7 +394,7 @@ def handle(ctx: Context) -> PhaseResult:
     # Step 4: route.
     if parsed.get("screen_result") == "match" and downgrade_reason is None:
         return PhaseResult(
-            next_phase=Phase.CONCLUDE, payload=_match_payload(parsed),
+            next_phase=Phase.REPORT, payload=_match_payload(parsed),
         )
     return PhaseResult(
         next_phase=Phase.PREDICT,

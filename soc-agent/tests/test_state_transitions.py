@@ -38,7 +38,7 @@ class TestValidateTransition:
         assert "initial phase" in error
 
     def test_initial_cannot_be_conclude(self):
-        valid, _ = validate_transition(None, "CONCLUDE")
+        valid, _ = validate_transition(None, "REPORT")
         assert not valid
 
     def test_all_legal_transitions(self):
@@ -46,14 +46,14 @@ class TestValidateTransition:
             ("CONTEXTUALIZE", "SCREEN"),       # screen if playbook has it
             ("CONTEXTUALIZE", "PREDICT"),  # branching-first case
             ("CONTEXTUALIZE", "GATHER"),       # pure-gathering first lead (no/no cell)
-            ("CONTEXTUALIZE", "CONCLUDE"),     # ticket-context fast-resolve
+            ("CONTEXTUALIZE", "REPORT"),     # ticket-context fast-resolve
             ("SCREEN", "PREDICT"),         # screen fall-through
-            ("SCREEN", "CONCLUDE"),            # screen resolved
+            ("SCREEN", "REPORT"),            # screen resolved
             ("PREDICT", "GATHER"),
             ("GATHER", "ANALYZE"),
             ("GATHER", "PREDICT"),         # mid-lead fork discovery
             ("ANALYZE", "PREDICT"),        # loop back
-            ("ANALYZE", "CONCLUDE"),           # finish
+            ("ANALYZE", "REPORT"),           # finish
         ]
         for current, proposed in legal:
             valid, error = validate_transition(current, proposed)
@@ -69,18 +69,18 @@ class TestValidateTransition:
             ("PREDICT", "CONTEXTUALIZE"),
             ("PREDICT", "SCREEN"),
             ("PREDICT", "ANALYZE"),
-            ("PREDICT", "CONCLUDE"),
+            ("PREDICT", "REPORT"),
             ("GATHER", "CONTEXTUALIZE"),
             ("GATHER", "SCREEN"),
-            ("GATHER", "CONCLUDE"),
+            ("GATHER", "REPORT"),
             ("ANALYZE", "CONTEXTUALIZE"),
             ("ANALYZE", "SCREEN"),
             ("ANALYZE", "GATHER"),
-            ("CONCLUDE", "CONTEXTUALIZE"),
-            ("CONCLUDE", "SCREEN"),
-            ("CONCLUDE", "PREDICT"),
-            ("CONCLUDE", "GATHER"),
-            ("CONCLUDE", "ANALYZE"),
+            ("REPORT", "CONTEXTUALIZE"),
+            ("REPORT", "SCREEN"),
+            ("REPORT", "PREDICT"),
+            ("REPORT", "GATHER"),
+            ("REPORT", "ANALYZE"),
         ]
         for current, proposed in illegal:
             valid, error = validate_transition(current, proposed)
@@ -159,8 +159,8 @@ class TestMakeState:
 
 class TestTransitionSequence:
     def test_complete_investigation(self):
-        """Simulate a full C->H->G->A->CONCLUDE sequence."""
-        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+        """Simulate a full C->H->G->A->REPORT sequence."""
+        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -168,10 +168,10 @@ class TestTransitionSequence:
             current = phase
 
     def test_investigation_with_loop(self):
-        """Simulate C->H->G->A->H->G->A->CONCLUDE (one loop)."""
+        """Simulate C->H->G->A->H->G->A->REPORT (one loop)."""
         phases = [
             "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE",
-            "PREDICT", "GATHER", "ANALYZE", "CONCLUDE",
+            "PREDICT", "GATHER", "ANALYZE", "REPORT",
         ]
         current = None
         for phase in phases:
@@ -180,8 +180,8 @@ class TestTransitionSequence:
             current = phase
 
     def test_screen_resolve_sequence(self):
-        """C -> SCREEN -> CONCLUDE is valid (screen resolved)."""
-        phases = ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+        """C -> SCREEN -> REPORT is valid (screen resolved)."""
+        phases = ["CONTEXTUALIZE", "SCREEN", "REPORT"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -189,8 +189,8 @@ class TestTransitionSequence:
             current = phase
 
     def test_screen_fallthrough_sequence(self):
-        """C -> SCREEN -> H -> G -> A -> CONCLUDE (screen didn't resolve)."""
-        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+        """C -> SCREEN -> H -> G -> A -> REPORT (screen didn't resolve)."""
+        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -198,8 +198,8 @@ class TestTransitionSequence:
             current = phase
 
     def test_ticket_context_fast_resolve_sequence(self):
-        """C -> CONCLUDE is valid (ticket-context fast-resolve for repeat alerts)."""
-        phases = ["CONTEXTUALIZE", "CONCLUDE"]
+        """C -> REPORT is valid (ticket-context fast-resolve for repeat alerts)."""
+        phases = ["CONTEXTUALIZE", "REPORT"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -207,8 +207,8 @@ class TestTransitionSequence:
             current = phase
 
     def test_skip_screen_sequence(self):
-        """C -> H -> G -> A -> CONCLUDE (no screen section in playbook)."""
-        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+        """C -> H -> G -> A -> REPORT (no screen section in playbook)."""
+        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -216,9 +216,9 @@ class TestTransitionSequence:
             current = phase
 
     def test_conclude_is_terminal(self):
-        """Cannot transition out of CONCLUDE."""
+        """Cannot transition out of REPORT."""
         for phase in Phase:
-            valid, _ = validate_transition("CONCLUDE", phase.value)
+            valid, _ = validate_transition("REPORT", phase.value)
             assert not valid
 
 
@@ -313,7 +313,7 @@ class TestWriteStateScript:
         run_dir = tmp_path / "run-test"
         run_dir.mkdir()
 
-        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
         for phase in phases:
             result = subprocess.run(
                 [sys.executable, str(script), str(run_dir), phase],
@@ -323,18 +323,18 @@ class TestWriteStateScript:
             assert result.returncode == 0, f"Failed at {phase}: {result.stderr}"
 
         state = json.loads((run_dir / "state.json").read_text())
-        assert state["phase"] == "CONCLUDE"
+        assert state["phase"] == "REPORT"
         assert state["history"] == phases
 
     def test_write_state_ticket_context_fast_resolve(self, tmp_path):
-        """Test C -> CONCLUDE via the script (ticket-context fast-resolve)."""
+        """Test C -> REPORT via the script (ticket-context fast-resolve)."""
         import subprocess
 
         script = SOC_AGENT_ROOT / "hooks" / "scripts" / "write_state.py"
         run_dir = tmp_path / "run-test"
         run_dir.mkdir()
 
-        phases = ["CONTEXTUALIZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "REPORT"]
         for phase in phases:
             args = [sys.executable, str(script), str(run_dir), phase]
             if phase == "CONTEXTUALIZE":
@@ -343,18 +343,18 @@ class TestWriteStateScript:
             assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
 
         state = json.loads((run_dir / "state.json").read_text())
-        assert state["phase"] == "CONCLUDE"
+        assert state["phase"] == "REPORT"
         assert state["history"] == phases
 
     def test_write_state_screen_resolve_sequence(self, tmp_path):
-        """Test C -> SCREEN -> CONCLUDE via the script."""
+        """Test C -> SCREEN -> REPORT via the script."""
         import subprocess
 
         script = SOC_AGENT_ROOT / "hooks" / "scripts" / "write_state.py"
         run_dir = tmp_path / "run-test"
         run_dir.mkdir()
 
-        phases = ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "SCREEN", "REPORT"]
         for phase in phases:
             args = [sys.executable, str(script), str(run_dir), phase]
             if phase == "CONTEXTUALIZE":
@@ -363,18 +363,18 @@ class TestWriteStateScript:
             assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
 
         state = json.loads((run_dir / "state.json").read_text())
-        assert state["phase"] == "CONCLUDE"
+        assert state["phase"] == "REPORT"
         assert state["history"] == phases
 
     def test_write_state_screen_fallthrough_sequence(self, tmp_path):
-        """Test C -> SCREEN -> H -> G -> A -> CONCLUDE via the script."""
+        """Test C -> SCREEN -> H -> G -> A -> REPORT via the script."""
         import subprocess
 
         script = SOC_AGENT_ROOT / "hooks" / "scripts" / "write_state.py"
         run_dir = tmp_path / "run-test"
         run_dir.mkdir()
 
-        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
         for phase in phases:
             args = [sys.executable, str(script), str(run_dir), phase]
             if phase == "CONTEXTUALIZE":
@@ -383,7 +383,7 @@ class TestWriteStateScript:
             assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
 
         state = json.loads((run_dir / "state.json").read_text())
-        assert state["phase"] == "CONCLUDE"
+        assert state["phase"] == "REPORT"
         assert state["history"] == phases
 
 

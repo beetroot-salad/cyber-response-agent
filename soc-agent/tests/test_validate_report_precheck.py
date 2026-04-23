@@ -1,6 +1,6 @@
-"""Tests for the CONCLUDE transition verification hook.
+"""Tests for the REPORT transition verification hook.
 
-Tests validate_conclude.py: helper unit tests, plus end-to-end via
+Tests validate_report_precheck.py: helper unit tests, plus end-to-end via
 subprocess simulating PreToolUse events on stdin. Judge subprocess
 calls are intercepted by shadowing the `claude` CLI with a fake
 script on PATH whose stdout is controlled per-test.
@@ -18,10 +18,10 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.investigation_parse import (
-    has_conclude_header,
+    has_report_header,
     is_screen_resolved,
 )
-from hooks.scripts.validate_conclude import (
+from hooks.scripts.validate_report_precheck import (
     check_frontier_closure,
     check_termination_vs_verdict,
     extract_conclude_yaml,
@@ -30,7 +30,7 @@ from hooks.scripts.validate_conclude import (
     load_sibling_archetypes,
 )
 
-HOOK_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "validate_conclude.py"
+HOOK_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "validate_report_precheck.py"
 
 
 # ---------------------------------------------------------------------------
@@ -40,19 +40,19 @@ HOOK_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "validate_conclude.py"
 
 class TestExtractStatus:
     def test_resolved(self):
-        text = "## CONCLUDE\n\n**Verdict:** resolved — monitoring probe\n"
+        text = "## REPORT\n\n**Verdict:** resolved — monitoring probe\n"
         assert extract_status(text) == "resolved"
 
     def test_escalated(self):
-        text = "## CONCLUDE\n\n**Verdict:** escalated — two live hypotheses\n"
+        text = "## REPORT\n\n**Verdict:** escalated — two live hypotheses\n"
         assert extract_status(text) == "escalated"
 
     def test_case_insensitive(self):
-        text = "## CONCLUDE\n\n**Verdict:** Resolved — foo\n"
+        text = "## REPORT\n\n**Verdict:** Resolved — foo\n"
         assert extract_status(text) == "resolved"
 
     def test_missing(self):
-        text = "## CONCLUDE\nno verdict line here\n"
+        text = "## REPORT\nno verdict line here\n"
         assert extract_status(text) is None
 
     def test_empty(self):
@@ -67,7 +67,7 @@ class TestExtractStatus:
 class TestExtractConcludeYaml:
     def test_extracts_conclude_block(self):
         text = textwrap.dedent("""\
-            ## CONCLUDE
+            ## REPORT
             text
 
             ```yaml
@@ -84,7 +84,7 @@ class TestExtractConcludeYaml:
         assert result["disposition"] == "benign"
 
     def test_no_yaml_block(self):
-        text = "## CONCLUDE\n**Verdict:** resolved — foo\n"
+        text = "## REPORT\n**Verdict:** resolved — foo\n"
         assert extract_conclude_yaml(text) is None
 
     def test_other_yaml_block_only(self):
@@ -125,7 +125,7 @@ def _companion_md(yaml_blocks: list[str]) -> str:
     parts = ["## CONTEXTUALIZE\n"]
     for block in yaml_blocks:
         parts.append("\n```yaml\n" + block + "\n```\n")
-    parts.append("\n## CONCLUDE\n\n**Verdict:** resolved\n")
+    parts.append("\n## REPORT\n\n**Verdict:** resolved\n")
     return "".join(parts)
 
 
@@ -156,7 +156,7 @@ _ESCALATION_CONCLUDE = (
 
 class TestCheckFrontierClosure:
     def test_no_yaml_blocks_passes(self):
-        assert check_frontier_closure("## CONCLUDE\nprose only\n") is None
+        assert check_frontier_closure("## REPORT\nprose only\n") is None
 
     def test_all_resolved_passes(self):
         hypothesize = (
@@ -352,7 +352,7 @@ class TestArchetypeLoaders:
     def test_load_archetype_description_existing(self, monkeypatch, tmp_path):
         # Build a fake knowledge tree under tmp_path and point the module
         # at it via monkeypatching SOC_AGENT_ROOT.
-        from hooks.scripts import validate_conclude as vc
+        from hooks.scripts import validate_report_precheck as vc
 
         sig_dir = tmp_path / "knowledge" / "signatures" / "sig-1" / "archetypes"
         (sig_dir / "alpha").mkdir(parents=True)
@@ -369,7 +369,7 @@ class TestArchetypeLoaders:
         )
 
     def test_load_archetype_description_missing(self, monkeypatch, tmp_path):
-        from hooks.scripts import validate_conclude as vc
+        from hooks.scripts import validate_report_precheck as vc
         monkeypatch.setattr(vc, "SOC_AGENT_ROOT", tmp_path)
         assert vc.load_archetype_description("sig-1", "nonexistent") is None
 
@@ -378,7 +378,7 @@ class TestArchetypeLoaders:
         assert load_archetype_description("sig-1", "") is None
 
     def test_load_sibling_archetypes_excludes_matched(self, monkeypatch, tmp_path):
-        from hooks.scripts import validate_conclude as vc
+        from hooks.scripts import validate_report_precheck as vc
 
         sig_dir = tmp_path / "knowledge" / "signatures" / "sig-1" / "archetypes"
         (sig_dir / "alpha").mkdir(parents=True)
@@ -398,7 +398,7 @@ class TestArchetypeLoaders:
         assert load_sibling_archetypes("", None) == ""
 
     def test_load_sibling_archetypes_unknown_signature(self, monkeypatch, tmp_path):
-        from hooks.scripts import validate_conclude as vc
+        from hooks.scripts import validate_report_precheck as vc
         monkeypatch.setattr(vc, "SOC_AGENT_ROOT", tmp_path)
         assert vc.load_sibling_archetypes("nope", None) == ""
 
@@ -410,20 +410,20 @@ class TestArchetypeLoaders:
 
 class TestIsScreenResolved:
     def test_screen_only(self):
-        text = "## CONTEXTUALIZE\n## SCREEN\n**Result:** match\n## CONCLUDE\n"
+        text = "## CONTEXTUALIZE\n## SCREEN\n**Result:** match\n## REPORT\n"
         assert is_screen_resolved(text) is True
 
     def test_screen_with_full_loop(self):
         text = (
             "## CONTEXTUALIZE\n## SCREEN\n## PREDICT (loop 1)\n"
-            "## GATHER (loop 1)\n## ANALYZE (loop 1)\n## CONCLUDE\n"
+            "## GATHER (loop 1)\n## ANALYZE (loop 1)\n## REPORT\n"
         )
         assert is_screen_resolved(text) is False
 
     def test_full_loop_only(self):
         text = (
             "## CONTEXTUALIZE\n## PREDICT (loop 1)\n"
-            "## GATHER (loop 1)\n## ANALYZE (loop 1)\n## CONCLUDE\n"
+            "## GATHER (loop 1)\n## ANALYZE (loop 1)\n## REPORT\n"
         )
         assert is_screen_resolved(text) is False
 
@@ -459,7 +459,7 @@ hypotheses:
     weight: "--"
     reasoning: single attempt contradicts brute-force prediction of >50
 
-## CONCLUDE
+## REPORT
 
 **Verdict:** resolved — monitoring probe from approved source
 **Confirmed hypothesis:** ?monitoring-probe
@@ -486,9 +486,9 @@ SCREEN_RESOLVED_INVESTIGATION = """\
 
 **Result:** match
 **Leads run:** authentication-history (no anomalies)
-**Outcome:** proceeding to CONCLUDE
+**Outcome:** proceeding to REPORT
 
-## CONCLUDE
+## REPORT
 
 **Verdict:** resolved — known monitoring probe pattern
 
@@ -577,9 +577,9 @@ def _make_fake_claude(
             import sys
             # `claude -p --model haiku --output-format text` with prompt on stdin
             prompt = sys.stdin.read()
-            if "Pre-CONCLUDE Judge — Log Integrity" in prompt:
+            if "Pre-REPORT Judge — Log Integrity" in prompt:
                 sys.stdout.write({judge_a_output!r})
-            elif "Pre-CONCLUDE Judge — Archetype" in prompt:
+            elif "Pre-REPORT Judge — Archetype" in prompt:
                 sys.stdout.write({judge_b_output!r})
             else:
                 sys.stdout.write("VERDICT: PASS — unknown prompt, defaulting")
@@ -624,9 +624,9 @@ class TestHookHappyPath:
 
     def test_edit_event_appending_conclude(self, tmp_path):
         # Realistic Edit: on-disk investigation.md ends at ANALYZE; the
-        # Edit replaces the full pre-CONCLUDE text with itself plus a
-        # trailing ## CONCLUDE section + conclude: yaml block.
-        pre_conclude = VALID_INVESTIGATION.split("## CONCLUDE", 1)[0]
+        # Edit replaces the full pre-REPORT text with itself plus a
+        # trailing ## REPORT section + conclude: yaml block.
+        pre_conclude = VALID_INVESTIGATION.split("## REPORT", 1)[0]
         new_text = VALID_INVESTIGATION
         runs_dir, run_dir = _setup_run(tmp_path, investigation_text=pre_conclude)
         bin_dir = tmp_path / "bin"
@@ -719,11 +719,11 @@ class TestScreenResolved:
 
 
 class TestPreYamlConcludeWrite:
-    """First CONCLUDE write (header + prose only, no yaml block yet) is
+    """First REPORT write (header + prose only, no yaml block yet) is
     a deferred-pass — wait for the conclude: yaml block before judging."""
 
     def test_header_only_passes(self, tmp_path):
-        # Strip the yaml block — leaves just ## CONCLUDE + verdict prose.
+        # Strip the yaml block — leaves just ## REPORT + verdict prose.
         text = VALID_INVESTIGATION.split("```yaml", 1)[0]
         runs_dir, run_dir = _setup_run(tmp_path, investigation_text=text)
         # No fake claude — must not invoke a judge.
@@ -741,7 +741,7 @@ class TestHookNonTriggers:
         assert result.returncode == 0
 
     def test_investigation_without_conclude(self, tmp_path):
-        text = VALID_INVESTIGATION.replace("## CONCLUDE", "## ANALYZE (loop 3)")
+        text = VALID_INVESTIGATION.replace("## REPORT", "## ANALYZE (loop 3)")
         runs_dir, run_dir = _setup_run(tmp_path, investigation_text=text)
         event = _make_hook_event(str(run_dir / "investigation.md"))
         result = _run_hook(event, runs_dir)
@@ -752,7 +752,7 @@ class TestHookNonTriggers:
         runs_dir.mkdir()
         other = tmp_path / "other"
         other.mkdir()
-        (other / "investigation.md").write_text("## CONCLUDE\n")
+        (other / "investigation.md").write_text("## REPORT\n")
         event = _make_hook_event(str(other / "investigation.md"))
         result = _run_hook(event, runs_dir)
         assert result.returncode == 0
@@ -762,7 +762,7 @@ class TestHookNonTriggers:
         runs_dir.mkdir()
         nested = runs_dir / "run-x" / "subdir"
         nested.mkdir(parents=True)
-        (nested / "investigation.md").write_text("## CONCLUDE\n")
+        (nested / "investigation.md").write_text("## REPORT\n")
         event = _make_hook_event(str(nested / "investigation.md"))
         result = _run_hook(event, runs_dir)
         assert result.returncode == 0
@@ -838,7 +838,7 @@ def _conclude_md(verdict: str, category: str, matched_archetype: str | None) -> 
         else "  matched_archetype: null\n"
     )
     return (
-        "## CONCLUDE\n\n"
+        "## REPORT\n\n"
         f"**Verdict:** {verdict} — test\n\n"
         "```yaml\n"
         "conclude:\n"
@@ -898,12 +898,12 @@ class TestCheckTerminationVsVerdict:
         assert "exhaustion-escalation" in err
 
     def test_no_conclude_yaml_passes(self):
-        text = "## CONCLUDE\n\n**Verdict:** resolved\n"
+        text = "## REPORT\n\n**Verdict:** resolved\n"
         assert check_termination_vs_verdict(text) is None
 
     def test_missing_termination_category_passes(self):
         text = (
-            "## CONCLUDE\n\n**Verdict:** resolved\n"
+            "## REPORT\n\n**Verdict:** resolved\n"
             "```yaml\nconclude:\n  disposition: benign\n```\n"
         )
         assert check_termination_vs_verdict(text) is None

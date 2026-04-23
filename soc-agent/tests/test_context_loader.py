@@ -27,9 +27,6 @@ from scripts.handlers._context_loader import (  # noqa: E402
     load_lead_definitions,
     load_run_salt,
     load_signature_text,
-    parse_adversarial_archetype,
-    parse_archetype_candidates,
-    parse_ruled_out_archetypes,
 )
 
 
@@ -405,27 +402,7 @@ class TestFormatLeadDefinitionsSummaryBlock:
         assert out.count('<lead name=') == 1
 
 
-class TestParseArchetypeCandidates:
-    def test_new_heading_candidates_doc_order(self):
-        md = (
-            "**Plausible archetypes (candidates for HYPOTHESIZE):**\n"
-            "- alpha — notes\n"
-            "- beta — notes\n"
-            "- gamma — notes\n"
-            "**Ruled-out archetypes:**\n"
-            "- delta — disqualifier tripped\n"
-            "**Adversarial archetype:** alpha — r\n"
-        )
-        assert parse_archetype_candidates(md) == ["alpha", "beta", "gamma"]
-        assert parse_ruled_out_archetypes(md) == ["delta"]
-
-    def test_missing_block_returns_empty(self):
-        assert parse_archetype_candidates("no archetype block here") == []
-        assert parse_ruled_out_archetypes("no archetype block here") == []
-
-    def test_parse_adversarial(self):
-        md = "**Adversarial archetype:** post-exploit-interactive — because\n"
-        assert parse_adversarial_archetype(md) == "post-exploit-interactive"
-
-    def test_missing_adversarial_returns_none(self):
-        assert parse_adversarial_archetype("no adversarial line") is None
+# Archetype-block parsers (parse_archetype_candidates / parse_ruled_out_archetypes
+# / parse_adversarial_archetype) were removed when the CONTEXTUALIZE-time
+# archetype dispatch moved to REPORT time. CONTEXTUALIZE no longer emits the
+# Plausible/Ruled-out/Adversarial archetype block, so no parser is needed.

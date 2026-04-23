@@ -29,7 +29,7 @@ cross-ref).
 Warnings (non-blocking, printed to stderr with exit 0):
 - Route compliance: when a lead with `predictions` is followed by another lead
   in the same companion, the follower's `name` should match at least one
-  `advance_to`; terminal leads with no follower should have `CONCLUDE` in at
+  `advance_to`; terminal leads with no follower should have `REPORT` in at
   least one `advance_to`.
 - Lead dedup: two leads share the same template + query + substitutions.
 - Silent empty result: a discriminating lead returns no observations, no
@@ -100,7 +100,7 @@ from hooks.scripts.invlang_checks_hypothesis import (
 )
 
 # Re-exports required by consumers importing from this module path
-# (validate_conclude.py, scripts/handlers/*.py, tests/test_invlang_validate.py).
+# (validate_report_precheck.py, scripts/handlers/*.py, tests/test_invlang_validate.py).
 __all__ = [
     "YAML_BLOCK_RE",
     "COMPANION_TOP_LEVEL",
@@ -173,7 +173,7 @@ def _check_route_compliance(merged: dict[str, Any]) -> list[str]:
       - if there's a following lead in the same companion, its `name` should
         appear in at least one `advance_to`.
       - if there's no following lead (this is the last lead in `gather`),
-        `CONCLUDE` should appear in at least one `advance_to`.
+        `REPORT` should appear in at least one `advance_to`.
 
     Returns a list of warning strings (empty if all compliant). Warnings do not
     block the write; route mismatches are legitimate signals (the fork space
@@ -202,11 +202,11 @@ def _check_route_compliance(merged: dict[str, Any]) -> list[str]:
         lid = lead.get("id", "?")
         next_lead = leads[idx + 1] if idx + 1 < len(leads) else None
         if next_lead is None:
-            # Terminal lead in this companion — CONCLUDE should be a declared route.
-            if "CONCLUDE" not in advance_tos:
+            # Terminal lead in this companion — REPORT should be a declared route.
+            if "REPORT" not in advance_tos:
                 warnings.append(
                     f"lead {lid}: terminal lead with predictions but no advance_to names "
-                    f"CONCLUDE (declared: {sorted(a for a in advance_tos if a)})"
+                    f"REPORT (declared: {sorted(a for a in advance_tos if a)})"
                 )
             continue
 

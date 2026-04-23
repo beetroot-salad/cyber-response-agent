@@ -147,7 +147,7 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
     """Merge every ```yaml block in an investigation.md into one companion body.
 
     Live investigations write one block per phase (prologue at CONTEXTUALIZE,
-    hypothesize at PREDICT, gather lead at ANALYZE, conclude at CONCLUDE);
+    hypothesize at PREDICT, gather lead at ANALYZE, conclude at REPORT);
     gather blocks may appear multiple times. This mirrors the merge in cli.py's
     `--ids` handler.
     """

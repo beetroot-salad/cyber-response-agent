@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared helpers for invoking Haiku judges via the claude CLI.
 
-Used by validate_conclude.py (pre-CONCLUDE gate, two parallel judges)
+Used by validate_report_precheck.py (pre-REPORT gate, two parallel judges)
 and validate_report.py (post-report Tier 2). Centralising the
 subprocess invocation, salted-delimiter wrapping, and verdict parsing
 keeps both gates on the same contract.

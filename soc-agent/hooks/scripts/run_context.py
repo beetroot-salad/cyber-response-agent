@@ -127,7 +127,7 @@ def _find_unmapped_active_run(runs_dir: Path, sessions_dir: Path) -> Path | None
     """Find the most recent run dir with meta.json that has no session mapping.
 
     A run is considered active if it has no state.json or its phase is not
-    CONCLUDE. Runs that already have a session mapping file pointing to them
+    REPORT. Runs that already have a session mapping file pointing to them
     are excluded.
     """
     mapped_run_dirs: set[str] = set()
@@ -150,7 +150,7 @@ def _find_unmapped_active_run(runs_dir: Path, sessions_dir: Path) -> Path | None
         if state_path.exists():
             try:
                 state = json.loads(state_path.read_text())
-                if state.get("phase") == "CONCLUDE":
+                if state.get("phase") == "REPORT":
                     continue
             except Exception:
                 pass

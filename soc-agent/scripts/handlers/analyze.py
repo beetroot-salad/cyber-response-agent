@@ -28,7 +28,7 @@ Input (Context):
 
 Output:
     PhaseResult
-      - next_action=CONCLUDE → Phase.CONCLUDE
+      - next_action=REPORT → Phase.REPORT
       - next_action=PREDICT  → Phase.PREDICT
 
 Files written:
@@ -47,10 +47,8 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._context_loader import (
     format_alert_block,
-    format_archetype_shapes_block,
     format_investigation_block,
     load_alert,
-    load_archetype_shapes,
     load_investigation_md,
     load_run_salt,
 )
@@ -67,7 +65,7 @@ SUBAGENT_TIMEOUT_SECONDS = int(
     os.environ.get("SOC_AGENT_ANALYZE_TIMEOUT_SECONDS", "300")
 )
 
-_VALID_NEXT_ACTIONS = {"CONCLUDE", "PREDICT"}
+_VALID_NEXT_ACTIONS = {"REPORT", "PREDICT"}
 _VALID_DISPOSITIONS = {"benign", "false_positive", "true_positive", "escalated"}
 _VALID_CONFIDENCES = {"high", "medium", "low"}
 
@@ -105,23 +103,18 @@ def _compute_loop_n(ctx: Context) -> int:
 def _assemble_prompt(ctx: Context) -> str:
     """Build the analyze subagent prompt with all deterministic context inline.
 
-    The subagent receives alert.json, investigation.md, and every archetype's
-    story.md + trust-anchors.md preloaded — no Read tool calls required.
-    Only the narrative synthesis (ANALYZE + Self-report + terminal YAML)
-    remains as the subagent's work.
+    The subagent receives alert.json and investigation.md preloaded — no Read
+    tool calls required. Archetype context is not preloaded; archetype
+    labeling moved to the REPORT phase.
     """
     loop_n = _compute_loop_n(ctx)
     alert = load_alert(ctx.run_dir)
     salt = load_run_salt(ctx.run_dir)
     investigation_md = load_investigation_md(ctx.run_dir)
-    archetype_shapes = load_archetype_shapes(
-        ctx.signature_id, SOC_AGENT_ROOT, include_precedents=False,
-    )
     return "\n\n".join([
         f"run_dir={ctx.run_dir}\nloop_n={loop_n}\nsignature_id={ctx.signature_id}",
         format_alert_block(alert, salt),
         format_investigation_block(investigation_md, mode="analyze"),
-        format_archetype_shapes_block(archetype_shapes, with_precedents=False),
     ])
 
 
@@ -139,28 +132,23 @@ def _validate_routing(payload: dict) -> dict:
             f"(expected one of {sorted(_VALID_NEXT_ACTIONS)})"
         )
 
-    if next_action == "CONCLUDE":
+    if next_action == "REPORT":
         disposition = payload.get("disposition")
         if disposition not in _VALID_DISPOSITIONS:
             raise OrchestrationError(
-                f"analyze subagent: routing CONCLUDE requires disposition "
+                f"analyze subagent: routing REPORT requires disposition "
                 f"∈ {sorted(_VALID_DISPOSITIONS)}, got {disposition!r}"
             )
         confidence = payload.get("confidence")
         if confidence not in _VALID_CONFIDENCES:
             raise OrchestrationError(
-                f"analyze subagent: routing CONCLUDE requires confidence "
+                f"analyze subagent: routing REPORT requires confidence "
                 f"∈ {sorted(_VALID_CONFIDENCES)}, got {confidence!r}"
-            )
-        if "matched_archetype" not in payload:
-            raise OrchestrationError(
-                "analyze subagent: routing CONCLUDE requires matched_archetype "
-                "(use null for no-archetype outcomes)"
             )
         surviving = payload.get("surviving_hypotheses")
         if not isinstance(surviving, list):
             raise OrchestrationError(
-                "analyze subagent: routing CONCLUDE requires "
+                "analyze subagent: routing REPORT requires "
                 "surviving_hypotheses[] (empty list if every hypothesis is "
                 f"refuted) — got {type(surviving).__name__}"
             )
@@ -267,7 +255,7 @@ def handle(ctx: Context) -> PhaseResult:
     _validate_and_write(ctx, sections)
 
     next_phase = (
-        Phase.CONCLUDE if payload["next_action"] == "CONCLUDE"
+        Phase.REPORT if payload["next_action"] == "REPORT"
         else Phase.PREDICT
     )
     return PhaseResult(next_phase=next_phase, payload=payload)

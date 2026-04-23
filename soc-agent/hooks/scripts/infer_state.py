@@ -129,7 +129,7 @@ def validate_phase_sequence(
         if loops > MAX_LOOPS:
             print(
                 f"Maximum investigation loops ({MAX_LOOPS}) exceeded. "
-                f"Must transition to CONCLUDE.",
+                f"Must transition to REPORT.",
                 file=sys.stderr,
             )
             sys.exit(2)

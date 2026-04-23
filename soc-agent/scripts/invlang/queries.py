@@ -17,7 +17,7 @@ Classes (phase tag = which investigation phase typically consumes the output):
   9  weight_reversal_mining        — [ANALYZE]       resolutions where weight moved positive→negative
   10 lead_pair_synergy             — [PREDICT]   composite-dispatch pairs where combined > sum of individual deltas
   11 post_failure_recovery         — [GATHER]        after a dead lead, what lead came next and how effective was it?
-  12 independent_datasource_metric — [CONCLUDE]      distinct system count per case, grouped by disposition + confidence
+  12 independent_datasource_metric — [REPORT]         distinct system count per case, grouped by disposition + confidence
 
 Handler-facing topology retrieval (separate from the numbered classes):
   lead_effectiveness_for_topology            — [PREDICT] pre-baked class-8 conditioned on frontier topology
@@ -515,7 +515,7 @@ def _lead_effectiveness_rows(
                 # Next lead in the companion, if any
                 next_lead_name = leads[idx + 1].get("name") if idx + 1 < len(leads) else None
                 if next_lead_name is None:
-                    matched = "CONCLUDE" in advance_tos
+                    matched = "REPORT" in advance_tos
                 else:
                     matched = next_lead_name in advance_tos
                 fidelity_hits.setdefault(name, []).append(1 if matched else 0)
@@ -1343,7 +1343,7 @@ def post_failure_recovery(
 
 
 # ---------------------------------------------------------------------------
-# Class 12 — independent data source metric (CONCLUDE — termination / confidence grounding)
+# Class 12 — independent data source metric (REPORT — termination / confidence grounding)
 # ---------------------------------------------------------------------------
 
 def independent_datasource_metric(

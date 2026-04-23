@@ -2,7 +2,7 @@
 
 The slimmed Tier 2 judge only validates the report↔log delta plus
 precedent transfer. Shape/completeness/anchor-leg checks moved to the
-pre-CONCLUDE judges (see test_validate_conclude.py).
+pre-REPORT judges (see test_validate_report_precheck.py).
 
 Tests the deterministic parts: prompt assembly, verdict parsing,
 precedent loading, and gating logic. Does NOT test LLM invocation
@@ -135,7 +135,7 @@ class TestAssemblePrompt:
         assert "PRECEDENT_TRANSFER" in prompt
 
     def test_prompt_excludes_pre_conclude_criteria(self):
-        """Shape/completeness/anchor-leg moved to pre-CONCLUDE judges."""
+        """Shape/completeness/anchor-leg moved to pre-REPORT judges."""
         prompt = assemble_prompt("a", "b", "c", "d", "salt")
         assert "SHAPE_MATCH" not in prompt
         assert "COMPLETENESS" not in prompt

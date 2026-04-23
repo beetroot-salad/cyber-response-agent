@@ -65,8 +65,8 @@ class TestStateTransitionContract:
     """Test that the state machine contract works for full investigations."""
 
     def test_minimal_investigation_sequence(self):
-        """C -> H -> G -> A -> CONCLUDE is a valid minimal investigation."""
-        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+        """C -> H -> G -> A -> REPORT is a valid minimal investigation."""
+        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -79,7 +79,7 @@ class TestStateTransitionContract:
             "CONTEXTUALIZE",
             "PREDICT", "GATHER", "ANALYZE",
             "PREDICT", "GATHER", "ANALYZE",
-            "CONCLUDE",
+            "REPORT",
         ]
         current = None
         for phase in phases:
@@ -88,8 +88,8 @@ class TestStateTransitionContract:
             current = phase
 
     def test_screen_resolve_sequence(self):
-        """C -> SCREEN -> CONCLUDE is valid (screen resolved)."""
-        phases = ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+        """C -> SCREEN -> REPORT is valid (screen resolved)."""
+        phases = ["CONTEXTUALIZE", "SCREEN", "REPORT"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -97,8 +97,8 @@ class TestStateTransitionContract:
             current = phase
 
     def test_screen_fallthrough_sequence(self):
-        """C -> SCREEN -> H -> G -> A -> CONCLUDE (screen didn't resolve)."""
-        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+        """C -> SCREEN -> H -> G -> A -> REPORT (screen didn't resolve)."""
+        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -187,7 +187,7 @@ class TestWriteStateIntegration:
         run_dir = tmp_path / "run-test"
         run_dir.mkdir()
 
-        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
         for phase in phases:
             result = subprocess.run(
                 [sys.executable, str(script), str(run_dir), phase, "TEST-001", "wazuh-rule-5710"],
@@ -196,7 +196,7 @@ class TestWriteStateIntegration:
             assert result.returncode == 0, f"Phase {phase} failed: {result.stderr}"
 
         state = json.loads((run_dir / "state.json").read_text())
-        assert state["phase"] == "CONCLUDE"
+        assert state["phase"] == "REPORT"
         assert state["history"] == phases
         assert state["ticket_id"] == "TEST-001"
         assert state["signature_id"] == "wazuh-rule-5710"
@@ -258,17 +258,17 @@ class TestLLMInvestigation:
 
         # Validate minimum length based on actual path taken
         if "SCREEN" in history and "PREDICT" not in history:
-            # Screen-resolved path: C -> SCREEN -> CONCLUDE
+            # Screen-resolved path: C -> SCREEN -> REPORT
             assert len(history) >= 3, (
                 f"Screen-resolved path needs >= 3 phases, got {history}"
             )
         elif "SCREEN" in history:
-            # Screen fallthrough + full loop: C -> SCREEN -> H -> G -> A -> CONCLUDE
+            # Screen fallthrough + full loop: C -> SCREEN -> H -> G -> A -> REPORT
             assert len(history) >= 6, (
                 f"Screen-fallthrough path needs >= 6 phases, got {history}"
             )
         else:
-            # No screen (skip path): C -> H -> G -> A -> CONCLUDE
+            # No screen (skip path): C -> H -> G -> A -> REPORT
             assert len(history) >= 5, (
                 f"Full investigation path needs >= 5 phases, got {history}"
             )

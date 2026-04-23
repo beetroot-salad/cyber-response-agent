@@ -213,9 +213,9 @@ Screen-resolved monitoring probe.
 
     def test_screen_resolved_passes_tier1(self, tmp_path):
         """Screen-resolved report passes Tier 1 (leads floor is enforced at
-        CONCLUDE transition now, not report validation)."""
+        REPORT transition now, not report validation)."""
         run_dir = self._setup_screen_run(
-            tmp_path, ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]
+            tmp_path, ["CONTEXTUALIZE", "SCREEN", "REPORT"]
         )
         passed, errors, _ = validate_tier1(run_dir / "report.md")
         assert passed, f"Expected pass but got: {errors}"
@@ -227,7 +227,7 @@ Screen-resolved monitoring probe.
         )
         run_dir = tmp_path / "run-no-playbook"
         run_dir.mkdir()
-        state = {"phase": "CONCLUDE", "history": ["CONTEXTUALIZE", "SCREEN", "CONCLUDE"]}
+        state = {"phase": "REPORT", "history": ["CONTEXTUALIZE", "SCREEN", "REPORT"]}
         (run_dir / "state.json").write_text(json.dumps(state))
         (run_dir / "report.md").write_text(report_text)
         passed, errors, _ = validate_tier1(run_dir / "report.md")
@@ -241,7 +241,7 @@ Screen-resolved monitoring probe.
     def test_is_screen_resolved_with_hypothesize(self, tmp_path):
         """SCREEN in history but also PREDICT means fallthrough, not screen-resolved."""
         state = {
-            "history": ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
+            "history": ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "REPORT"]
         }
         (tmp_path / "state.json").write_text(json.dumps(state))
         assert is_screen_resolved(tmp_path) is False

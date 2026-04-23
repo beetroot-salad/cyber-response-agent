@@ -107,7 +107,7 @@ class TestHypothesisForkDistinctness:
 
 
 # ---------------------------------------------------------------------------
-# Rule 24 — Hypothesis persistence at CONCLUDE
+# Rule 24 — Hypothesis persistence at REPORT
 # ---------------------------------------------------------------------------
 
 

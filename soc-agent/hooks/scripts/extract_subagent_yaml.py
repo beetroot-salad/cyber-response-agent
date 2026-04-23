@@ -30,7 +30,7 @@ import sys
 # subagent_type → short name used in the annotation header.
 YAML_STRICT_SUBAGENTS: dict[str, str] = {
     "soc-agent:ticket-context": "ticket-context",
-    "soc-agent:archetype-scan": "archetype-scan",
+    "soc-agent:archetype-match": "archetype-match",
 }
 
 # Matches a ```yaml ... ``` fenced block. Non-greedy body so the first block

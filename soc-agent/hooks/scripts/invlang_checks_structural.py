@@ -226,7 +226,7 @@ def _check_lead_predictions(merged: dict[str, Any]) -> list[str]:
     """Validate lead.predictions structural shape when present.
 
     Each entry: {id, if, read_as, advance_to}. IDs match ^lp\\d+$ and are
-    unique within the lead. advance_to is either CONCLUDE, PREDICT, or a
+    unique within the lead. advance_to is either REPORT, PREDICT, or a
     lead name declared elsewhere in the companion.
     """
     errors: list[str] = []

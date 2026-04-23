@@ -1,6 +1,6 @@
 ---
 name: analyze
-description: Weight evidence against surviving hypotheses and route the next action (CONCLUDE or PREDICT) for the current loop of a security-alert investigation. Returns an ANALYZE block plus a Self-report section + terminal routing YAML. Used by the investigate orchestrator's ANALYZE phase.
+description: Weight evidence against surviving hypotheses and route the next action (REPORT or PREDICT) for the current loop of a security-alert investigation. Returns an ANALYZE block plus a Self-report section + terminal routing YAML. Used by the investigate orchestrator's ANALYZE phase.
 tools: []
 model: sonnet
 ---
@@ -29,12 +29,6 @@ Context is pre-loaded as tagged XML-style blocks:
 - `<investigation>…</investigation>` — the full investigation log so far
   (CONTEXTUALIZE, any SCREEN, prior PREDICT/GATHER/ANALYZE cycles, and
   the current cycle's PREDICT + GATHER blocks).
-- `<archetypes>…</archetypes>` — declared archetypes for this signature as
-  candidate matches, each with its `<story>` and optional `<trust-anchors>`
-  body inline. Treat these as common cases to compare against when
-  assessing `matched_archetype` (see §Routing Rules / `matched_archetype`
-  self-check).
-
 The current cycle is loop `{loop_n}`. The GATHER block for this loop is
 already present in `<investigation>` with the raw observations you weight
 below.
@@ -48,7 +42,7 @@ naming the missing context and stop.
 
 2. **Weight each surviving hypothesis.** Assign `++`, `+`, `-`, or `--` based on the new evidence. Carry prior weights forward and adjust — this is rollup-aware grading, not fresh grading from scratch.
 
-3. **Route.** Decide `CONCLUDE` (with disposition, confidence, matched_archetype) or `PREDICT` (with what the next lead must discriminate).
+3. **Route.** Decide `REPORT` (with disposition, confidence) or `PREDICT` (with what the next lead must discriminate). Archetype labeling is not your job — it happens at REPORT time via `archetype-match` against the confirmed outcome.
 
 4. **Flag anomalies.** If anything in the prior investigation log looks inconsistent with refutation discipline — an unjustified prior grade, a silent drop, a `++` without a named failed refutation — surface it in the self-report section. Discretionary, not mandatory; a spurious flag on a legitimate upgrade is worse than a silent correction.
 
@@ -64,8 +58,8 @@ naming the missing context and stop.
 - **`++` requires a named failed refutation.** Before committing `++`, name one concrete check that would refute the hypothesis if its result came back a specific way. Cite either the just-run GATHER as that check, or an earlier GATHER observation that already satisfies it. If no refutation path is runnable in scope, the maximum grade is `+` — route to PREDICT and pursue a differentiating lead.
 - **`--` requires a named matched refutation shape.** A hypothesis's PREDICT block declares `refutation_shape: [{id: r1, ...}, ...]` entries before evidence lands. Grade `--` only when you can name the specific `r{N}` ID(s) whose shape the just-run evidence matches — state them in your reasoning ("matched refutation r1: ..."). If the argument for refutation is structural but no pre-registered refutation shape covers it, the max grade is `-`. Downstream YAML composition requires `matched_refutation_ids` non-empty on `--` and will be rejected otherwise; pick the nearest pre-registered shape or stay at `-`.
 - **Circumstantial ≠ authoritative.** "Evidence consistent with X" is at most `+`. `++` on a mechanism hypothesis tied to an anchored archetype requires authoritative confirmation (sanction registry, change-management ticket with confirmed operator, direct query answer) — not pattern consistency alone.
-- **No rollup across hypotheses (validator rule 25).** A hypothesis's grade reflects evidence on *that specific mechanism*. Every `matched_prediction_ids[]` entry on a resolution must be a prediction declared on the resolution's target hypothesis; mis-citing a sibling's prediction ID is rejected by the validator (rule 25 — same-level sibling rollup). Do not upgrade a mechanism hypothesis on the strength of evidence that supports a sibling. Do not invent a parent class (`?compromise-confirmed`, `?malicious-activity`) to aggregate sibling grades. If two mechanism hypotheses are both `+` and neither is refuted, the honest outcome is CONCLUDE with `escalated / inconclusive` listing both as surviving — or PREDICT for a discriminating lead.
-- **Route compliance for pre-registered readings.** If the just-run lead carried a `predictions` block, check that the observed outcome pattern matches one of the `if` branches and that your routing matches the corresponding `advance_to`. If the observation fits no branch, that's a signal the fork space was incomplete — route PREDICT to extend it, not CONCLUDE on the closest branch.
+- **No rollup across hypotheses (validator rule 25).** A hypothesis's grade reflects evidence on *that specific mechanism*. Every `matched_prediction_ids[]` entry on a resolution must be a prediction declared on the resolution's target hypothesis; mis-citing a sibling's prediction ID is rejected by the validator (rule 25 — same-level sibling rollup). Do not upgrade a mechanism hypothesis on the strength of evidence that supports a sibling. Do not invent a parent class (`?compromise-confirmed`, `?malicious-activity`) to aggregate sibling grades. If two mechanism hypotheses are both `+` and neither is refuted, the honest outcome is REPORT with `escalated / inconclusive` listing both as surviving — or PREDICT for a discriminating lead.
+- **Route compliance for pre-registered readings.** If the just-run lead carried a `predictions` block, check that the observed outcome pattern matches one of the `if` branches and that your routing matches the corresponding `advance_to`. If the observation fits no branch, that's a signal the fork space was incomplete — route PREDICT to extend it, not REPORT on the closest branch.
 
 ## Routing Rules
 
@@ -74,29 +68,20 @@ naming the missing context and stop.
 - A live-weight hypothesis carries a `legitimacy_contract` with no fulfilling lead-outcome `legitimacy_resolutions[]` entry, or whose effective verdict (after supersede-chain resolution) is `indeterminate`. Resolutions live in `gather[].outcome.legitimacy_resolutions[]` — a sibling of `attribute_updates` — and must be backed by a `trust_anchor_result` with `asks: authorization` on the same lead. "Deprioritized," "outweighed," or "unlikely given context" are not resolutions — the contract asks an authority; only an authority answer closes it.
 - A mechanism hypothesis is at `++` but the legitimacy/scope question is not yet resolved (see below).
 
-**Route to CONCLUDE only if:**
+**Route to REPORT only if:**
 - Every `legitimacy_contract` on a live-weight hypothesis has at least one fulfilling lead-outcome `legitimacy_resolutions[]` entry in the *effective* set (after supersede chain) (`verdict: authorized` is required for `benign` disposition; `unauthorized`/`indeterminate` force `status: escalated` per the legitimacy-gated-disposition rule in `docs/investigation-language.md`), AND
 - At least one mechanism hypothesis is at `++` with a failed refutation named, OR the investigation is escalating with clear rationale.
 
-**Hypothesis persistence on CONCLUDE (validator rule 24).** When routing CONCLUDE, every declared hypothesis must either have reached final weight `--` or appear in `surviving_hypotheses[]` (emitted in the terminal YAML below). Silent drop — a hypothesis neither refuted nor listed — is rejected at write-time. If a hypothesis remains at `+` or `-` with no runnable refutation, list it as surviving and let the escalation rationale carry it; do not pretend it didn't exist.
+**Hypothesis persistence on REPORT (validator rule 24).** When routing REPORT, every declared hypothesis must either have reached final weight `--` or appear in `surviving_hypotheses[]` (emitted in the terminal YAML below). Silent drop — a hypothesis neither refuted nor listed — is rejected at write-time. If a hypothesis remains at `+` or `-` with no runnable refutation, list it as surviving and let the escalation rationale carry it; do not pretend it didn't exist.
 
-When routing CONCLUDE, state:
+When routing REPORT, state:
 - `disposition`: `benign` | `false_positive` | `true_positive` | `escalated`
 - `confidence`: `high` | `medium` | `low`
-- `matched_archetype`: the archetype directory name under `knowledge/signatures/{signature_id}/archetypes/`, or `null` if no archetype cleanly fits
 - Brief rationale tying each surviving hypothesis's final grade to the disposition
-
-You make the archetype *claim* here. Anchor grounding (confirming `required_anchors` are satisfied or a precedent snapshot is cited) is enforced downstream at report validation — your job is to name the claim correctly based on the evidence weighted.
-
-**Before emitting a non-null `matched_archetype`, self-verify its shape.** Walk the archetype's `story.md` out-of-archetype conditions (the "disqualifier" clauses — *"disqualified if parent is not an application binary"*, *"disqualified if cmdline is non-interactive"*, etc.) against the full evidence gathered across this loop's leads, not just the single alert. If **any** disqualifier is triggered, set `matched_archetype: null` and name the triggered disqualifier in your rationale. The closest-label fallback is not allowed; forcing a near-match that has a live disqualifier is worse than escalating without an archetype.
-
-`matched_archetype: null` is a first-class outcome — novel variants, mixed shapes, and evidence the current catalog doesn't describe all legitimately produce null. Disposition and confidence are independent of archetype match: `escalated / true_positive / high / matched_archetype: null` is a valid shape. Do not force an archetype to satisfy a sense that the `matched_archetype` field "ought to be filled."
-
-The Tier 2 judge audits this shape-verification at report-write time; your job is to do it honestly in the first place so the judge's audit is a confirmation, not a rejection.
 
 ## Verification and Scoping (when a mechanism reaches `++`)
 
-When a mechanism hypothesis is confirmed, two questions remain before CONCLUDE is appropriate:
+When a mechanism hypothesis is confirmed, two questions remain before REPORT is appropriate:
 
 1. **Is this instance legitimate?** Trace the causal chain toward a trust anchor — the authoritative source establishing authorization. For automation: job config, creator, approval. For user activity: identity and authorization. Authoritative → `high` confidence. Circumstantial only (pattern + precedent) → `medium`. Weak circumstantial only → escalate.
 
@@ -122,9 +107,9 @@ Respond with exactly the following three sections, in order, and nothing else. T
 - ?hypothesis-name: {weight} (was {prior weight or "new"}) — {reasoning}
 
 **Surviving hypotheses:** ?hyp-1, ?hyp-2
-**Next action:** CONCLUDE | PREDICT
+**Next action:** REPORT | PREDICT
 {one of:
-  CONCLUDE → disposition: {...}, confidence: {...}, matched_archetype: {... or null}, rationale: {...}
+  REPORT → disposition: {...}, confidence: {...}, rationale: {...}
   PREDICT → what the next lead must discriminate, and why
 }
 ```
@@ -141,15 +126,17 @@ Respond with exactly the following three sections, in order, and nothing else. T
 
 Finally, emit the terminal routing YAML. This is machine-parsed — no surrounding prose, no trailing text after the closing fence.
 
-When routing CONCLUDE:
+When routing REPORT:
 
 ```yaml
-next_action: CONCLUDE
+next_action: REPORT
 disposition: benign | false_positive | true_positive | escalated
 confidence: high | medium | low
-matched_archetype: <archetype-name-or-null>
+rationale: <one-line mechanism description grounded in this loop's evidence>
 surviving_hypotheses: [h-001, ...]   # hypothesis IDs whose final weight is not `--` (empty list if all refuted)
 ```
+
+Archetype labeling happens at REPORT time via the `archetype-match` subagent against the confirmed investigation outcome — it is not ANALYZE's job. Do not emit a `matched_archetype` field; omit it entirely. The `rationale` line is the investigation-outcome summary the downstream `archetype-match` subagent consumes, so state the confirmed mechanism crisply (e.g. "cadenced monitoring probe from internal source, legitimacy anchor confirmed authorized") — not an archetype name.
 
 When routing PREDICT:
 
@@ -158,11 +145,11 @@ next_action: PREDICT
 discriminator: <one-line question the next lead must answer>
 ```
 
-The `surviving_hypotheses` list must match the hypothesis IDs (not names) whose final effective weight in the `gather[].resolutions[]` chain is not `--`. Mis-match is caught by validator rule 24 at CONCLUDE write time.
+The `surviving_hypotheses` list must match the hypothesis IDs (not names) whose final effective weight in the `gather[].resolutions[]` chain is not `--`. Mis-match is caught by validator rule 24 at REPORT write time.
 
 ## Examples
 
-### Example 1 — clean resolution: `++` with failed refutation → CONCLUDE benign
+### Example 1 — clean resolution: `++` with failed refutation → REPORT benign
 
 **State:** rule-5710 SSH invalid user (`monitorprobe` from `10.0.1.99`). Loop 2. Loop 1 confirmed source classification as `internal-monitoring-host` via source-classification lead, resolving legitimacy_contract e-001.lc1 to `authorized` (approved-monitoring-sources registry). `?monitoring-probe` predictions p1 (single-attempt-per-tick), p3 (cadenced, 60s interval); refutation shapes r1 (≥2 same-user attempts within 1s), r3 (off-cadence). Current GATHER: cadence-check returned four prior alerts from 10.0.1.99 at T-60, T-120, T-180, T-240 (±2s drift).
 
@@ -175,7 +162,7 @@ The `surviving_hypotheses` list must match the hypothesis IDs (not names) whose 
 - ?monitoring-probe: ++ (was +) — matched prediction p3 (cadenced at documented interval); named refutation r3 (off-cadence) failed to materialize (max drift 2s vs. documented 60s tolerance). Legitimacy contract e-001.lc1 resolved `authorized` in loop 1 via approved-monitoring-sources anchor.
 
 **Surviving hypotheses:** ?monitoring-probe
-**Next action:** CONCLUDE → disposition: benign, confidence: high, matched_archetype: scheduled-monitoring-probe, rationale: cadence matches documented interval within tolerance; legitimacy authority confirmed source as sanctioned monitoring host.
+**Next action:** REPORT → disposition: benign, confidence: high, rationale: cadence matches documented interval within tolerance; legitimacy authority confirmed source as sanctioned monitoring host.
 ```
 
 ```markdown
@@ -200,13 +187,13 @@ The `surviving_hypotheses` list must match the hypothesis IDs (not names) whose 
 **Assessment:**
 - ?scheduled-bulk-backup: ++ (was +) — volume shape consistent with backup AND destination is sanctioned ⚠ two +-strength signals stacked
 
-**Next action:** CONCLUDE → disposition: benign, confidence: high, matched_archetype: scheduled-nightly-backup ⚠ forced archetype match without mechanism confirmation
+**Next action:** REPORT → disposition: benign, confidence: high ⚠ forced archetype assumption without mechanism confirmation
 ```
 
 Pitfalls this shape embodies:
 - **Stacking circumstantial signals and calling it `++`.** Volume-shape consistency is a `+`; sanctioned destination is a contract-resolution signal. Neither is a *failed refutation*. `++` requires one specific check whose negative outcome would have falsified the mechanism — not two observations that individually merit `+`.
 - **Conflating legitimacy resolution with mechanism confirmation.** The authority answered "is this destination allowed?" — not "is this the backup daemon?". Contract resolution closes one edge-level question; the mechanism hypothesis still needs its own authoritative anchor.
-- **Forcing `matched_archetype` to fill the field.** The archetype's story almost certainly carries a "disqualified if uploader process is not the backup daemon" clause — which cannot be self-verified here because the uploader has not been identified. Force-matching an archetype with a live disqualifier is worse than `matched_archetype: null`.
+- **Forcing an archetype assumption into the rationale.** The rationale should describe the confirmed mechanism, not commit to an archetype label — archetype selection is REPORT's responsibility.
 
 **Correct shape:**
 ```markdown
