@@ -61,7 +61,7 @@ Pulled from `validate_report.py::validate_tier1` and `schemas/report_frontmatter
 
 3. **Enum values legal.** `status` ∈ `{resolved, escalated}`. `disposition` ∈ `{benign, false_positive, true_positive, inconclusive}`. `confidence` ∈ `{high, medium, low}`. `trust_anchors_consulted[*].kind` ∈ the allowed anchor kinds. `trust_anchors_consulted[*].result` ∈ the allowed anchor results.
 
-4. **Screen-resolved structural consistency.** If `state.json` history contains `SCREEN` but not `HYPOTHESIZE` (fast-path), the playbook for the signature must actually have a `## Screen` section — a screen-resolved outcome is impossible without one.
+4. **Screen-resolved structural consistency.** If `state.json` history contains `SCREEN` but not `PREDICT` (fast-path), the playbook for the signature must actually have a `## Screen` section — a screen-resolved outcome is impossible without one.
 
 5. **Resolved → archetype required.** `status=resolved` must set `matched_archetype`. A resolved report without one is rejected outright — the shape leg of the two-leg model is non-negotiable.
 

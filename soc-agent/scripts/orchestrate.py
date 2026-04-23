@@ -123,7 +123,7 @@ def run(ctx: Context, handlers: dict[Phase, PhaseHandler]) -> dict:
             # Next legal move from the current phase must include CONCLUDE for
             # the forced path to land. Every non-terminal phase in the schema
             # already allows CONCLUDE either directly (C, SCREEN, ANALYZE) or
-            # one hop away (GATHER, HYPOTHESIZE) — if the current phase can't
+            # one hop away (GATHER, PREDICT) — if the current phase can't
             # reach CONCLUDE directly, raise rather than silently extend.
             from schemas.state import TRANSITIONS
 

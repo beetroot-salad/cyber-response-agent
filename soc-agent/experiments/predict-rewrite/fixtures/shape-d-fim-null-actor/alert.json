@@ -1,0 +1,31 @@
+{
+  "agent": {
+    "ip": "10.0.7.44",
+    "name": "corp-hr-db-04",
+    "id": "012"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
+  "syscheck": {
+    "path": "/var/tmp/.cache/auth-dump-2026-04-22.bin",
+    "size_before": "0",
+    "size_after": "847362",
+    "md5_before": null,
+    "md5_after": "a7e932c4b8d1f0e5a3c9b6d2f7e4a1c8",
+    "sha1_after": "b9f4c2e8a6d3f1c0b7e5a2d9f4c6e1b8a3d0c7f5",
+    "sha256_after": "c4a9e2b7d1f5c8e3a6b0d4f2c9e5a1b8d3f7c4a0e5b8d2f6c1a9e3b7d4f0c5a8",
+    "event": "added",
+    "mode": "realtime"
+  },
+  "data": {
+    "write_actor": null,
+    "write_actor_reason": "EDR process-exec chain rotated before FIM hash completed; write-actor attribution unavailable for this event"
+  },
+  "rule": {
+    "id": "550",
+    "level": 7,
+    "description": "Integrity checksum changed"
+  },
+  "timestamp": "2026-04-22T14:32:07.884+0000"
+}

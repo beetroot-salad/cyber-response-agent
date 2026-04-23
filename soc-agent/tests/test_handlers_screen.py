@@ -300,7 +300,7 @@ class TestPlaybookEmptyShortCircuit:
 
         result = screen_handler.handle(ctx)
 
-        assert result.next_phase == Phase.HYPOTHESIZE
+        assert result.next_phase == Phase.PREDICT
         assert result.payload["screen_result"] == "skipped"
         assert result.payload["reason"] == "empty_screen_section"
         assert screen_calls == []
@@ -315,7 +315,7 @@ class TestPlaybookEmptyShortCircuit:
             screen_handler, "_invoke_screen", stub_invoke(screen_calls, ""),
         )
         result = screen_handler.handle(ctx)
-        assert result.next_phase == Phase.HYPOTHESIZE
+        assert result.next_phase == Phase.PREDICT
         assert result.payload["reason"] == "empty_screen_section"
         assert screen_calls == []
 
@@ -603,7 +603,7 @@ class TestRouting:
             screen_handler, "_invoke_screen", stub_invoke([], SCREEN_NOMATCH_YAML),
         )
         result = screen_handler.handle(ctx)
-        assert result.next_phase == Phase.HYPOTHESIZE
+        assert result.next_phase == Phase.PREDICT
         assert result.payload["screen_result"] == "no_match"
 
     def test_structural_downgrade_routes_to_hypothesize(self, tmp_path, monkeypatch):
@@ -674,7 +674,7 @@ class TestRouting:
             screen_handler, "_invoke_screen", stub_invoke([], broken),
         )
         result = screen_handler.handle(ctx)
-        assert result.next_phase == Phase.HYPOTHESIZE
+        assert result.next_phase == Phase.PREDICT
         assert result.payload["screen_result"] == "error"
         assert "authentication-history" in result.payload["reason"]
         # Gather block dropped on downgrade — investigation.md has the SCREEN
@@ -692,7 +692,7 @@ class TestRouting:
             stub_invoke([], SCREEN_ERROR_EMPTY_LEADS),
         )
         result = screen_handler.handle(ctx)
-        assert result.next_phase == Phase.HYPOTHESIZE
+        assert result.next_phase == Phase.PREDICT
         assert result.payload["screen_result"] == "error"
 
 

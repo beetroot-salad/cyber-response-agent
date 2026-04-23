@@ -206,9 +206,9 @@ class TestFullInvestigationEscalate:
         assert_valid_report(result)
         assert_investigation_md_exists(result)
 
-        # Full loop: must have HYPOTHESIZE → GATHER → ANALYZE
+        # Full loop: must have PREDICT → GATHER → ANALYZE
         history = result.state_json["history"]
-        assert "HYPOTHESIZE" in history, f"No HYPOTHESIZE phase: {history}"
+        assert "PREDICT" in history, f"No PREDICT phase: {history}"
         assert "GATHER" in history, f"No GATHER phase: {history}"
         assert "ANALYZE" in history, f"No ANALYZE phase: {history}"
 

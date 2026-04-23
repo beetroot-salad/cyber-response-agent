@@ -1,0 +1,39 @@
+{
+  "agent": {
+    "ip": "172.22.0.13",
+    "name": "target-endpoint",
+    "id": "002"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
+  "data": {
+    "output": "19:25:01.512345678: Notice A shell was spawned in a container with an attached terminal (evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=runc command=bash terminal=34816 exe_flags=<NA> container_id=7f9cabcd1234 container_image=payments-api container_image_tag=v1.4.2 container_name=payments-api-7f9c k8s_ns=default k8s_pod_name=payments-api-7f9c-xz4lm)",
+    "proc": {
+      "name": "bash",
+      "cmdline": "bash",
+      "pname": "runc:[2:INIT]",
+      "aname": ["runc:[2:INIT]", "runc", "containerd-shim-runc-v2", "containerd", "systemd"],
+      "tty": 34816
+    },
+    "container": {
+      "id": "7f9cabcd1234",
+      "image": "payments-api:v1.4.2",
+      "name": "payments-api-7f9c"
+    },
+    "k8s": {
+      "namespace": "default",
+      "pod_name": "payments-api-7f9c-xz4lm"
+    },
+    "user": {
+      "name": "root",
+      "uid": 0
+    }
+  },
+  "rule": {
+    "id": "100001",
+    "level": 7,
+    "description": "Terminal shell in container"
+  },
+  "timestamp": "2026-04-22T19:25:01.512+0000"
+}

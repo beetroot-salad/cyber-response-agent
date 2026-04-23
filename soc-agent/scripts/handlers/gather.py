@@ -13,20 +13,20 @@ The handler is strictly mechanical:
       Haiku fast path; anything else is composite.
     - Scope fields (`incident_start/end`, `vendor`, `reporting_agent`,
       `entity_bindings`) are derived from the alert + signature + lead
-      template frontmatter. The HYPOTHESIZE payload only supplies
+      template frontmatter. The PREDICT payload only supplies
       `selected_lead` + `loop_n`; scope derivation is the handler's job.
     - `gather` returns `result: escalate` with trigger ∈ the composite-fallback
       set → re-dispatch via `gather-composite` in `redispatch` mode.
     - Silent-termination recovery: on truncated YAML output, read the
       checkpoint under `{run_dir}/subagent_checkpoints/`; if `status: complete`,
       transcribe verbatim, else re-dispatch with `resume_from_checkpoint=true`.
-    - Always routes to Phase.ANALYZE. GATHER → HYPOTHESIZE re-entry is
+    - Always routes to Phase.ANALYZE. GATHER → PREDICT re-entry is
       deliberately not taken from here — ANALYZE owns rollup-driven routing
       (the orchestrator's transition table still permits both edges so the
-      existing `test_gather_to_hypothesize_reentry` test keeps working).
+      existing `test_gather_to_predict_reentry` test keeps working).
 
 Input (Context):
-    ctx.run_dir, ctx.signature_id, ctx.alert, ctx.outputs[Phase.HYPOTHESIZE]
+    ctx.run_dir, ctx.signature_id, ctx.alert, ctx.outputs[Phase.PREDICT]
 
 Output:
     PhaseResult(next_phase=Phase.ANALYZE, payload={
@@ -295,7 +295,7 @@ def _assemble_prompt_composite(
         "entity_bindings": scope.entity_bindings,
         "reporting_agent": scope.reporting_agent,
     }
-    # Per-lead HYPOTHESIZE→GATHER hints. Emit inside the lead spec so the
+    # Per-lead PREDICT→GATHER hints. Emit inside the lead spec so the
     # subagent sees them attached to the lead, not as ambient dispatch
     # metadata — matters when future dispatches carry multiple leads.
     if override_data_source:
@@ -663,39 +663,39 @@ def _append_to_investigation(ctx: Context, section: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _read_hypothesize_payload(ctx: Context) -> tuple[str, int, Optional[str], Optional[str]]:
-    hypothesize_out = ctx.outputs.get(Phase.HYPOTHESIZE)
-    if not isinstance(hypothesize_out, dict):
+def _read_predict_payload(ctx: Context) -> tuple[str, int, Optional[str], Optional[str]]:
+    predict_out = ctx.outputs.get(Phase.PREDICT)
+    if not isinstance(predict_out, dict):
         raise OrchestrationError(
-            "GATHER: Phase.HYPOTHESIZE payload not found on ctx.outputs — "
-            "HYPOTHESIZE must run before GATHER"
+            "GATHER: Phase.PREDICT payload not found on ctx.outputs — "
+            "PREDICT must run before GATHER"
         )
-    selected_lead = hypothesize_out.get("selected_lead")
+    selected_lead = predict_out.get("selected_lead")
     if not isinstance(selected_lead, str) or not selected_lead.strip():
         raise OrchestrationError(
-            f"GATHER: HYPOTHESIZE payload missing non-empty selected_lead "
+            f"GATHER: PREDICT payload missing non-empty selected_lead "
             f"(got {selected_lead!r})"
         )
-    loop_n = hypothesize_out.get("loop_n")
+    loop_n = predict_out.get("loop_n")
     if not isinstance(loop_n, int):
         raise OrchestrationError(
-            f"GATHER: HYPOTHESIZE payload missing int loop_n (got {loop_n!r})"
+            f"GATHER: PREDICT payload missing int loop_n (got {loop_n!r})"
         )
-    # Optional HYPOTHESIZE→GATHER hints — forwarded into the gather-composite
-    # dispatch when present, omitted otherwise. HYPOTHESIZE trailer parser
+    # Optional PREDICT→GATHER hints — forwarded into the gather-composite
+    # dispatch when present, omitted otherwise. PREDICT trailer parser
     # already validated string-ness; we pass through as-is.
-    override_data_source = hypothesize_out.get("override_data_source")
-    lead_hint = hypothesize_out.get("lead_hint")
+    override_data_source = predict_out.get("override_data_source")
+    lead_hint = predict_out.get("lead_hint")
     return selected_lead, loop_n, override_data_source, lead_hint
 
 
 def handle(ctx: Context) -> PhaseResult:
-    selected_lead, loop_n, override_data_source, lead_hint = _read_hypothesize_payload(ctx)
+    selected_lead, loop_n, override_data_source, lead_hint = _read_predict_payload(ctx)
     scope = _resolve_scope(ctx, selected_lead)
 
     # Overrides only apply to the composite subagent — single-lead gather
     # executes a fixed vendor template and has no room for a data-source
-    # override. When HYPOTHESIZE authored an override, force composite
+    # override. When PREDICT authored an override, force composite
     # dispatch even if a single-lead template exists.
     force_composite = override_data_source is not None
 

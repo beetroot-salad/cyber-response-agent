@@ -26,12 +26,12 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
    **Why a script for ticket-context.** The subagent's prompt explicitly forbids reasoning ("No characterization. You do not use phrases like 'monitoring traffic', 'internal source'..."). Every step was mechanical — extract JSON paths, dispatch parallel queries, cluster by dimension matching, apply compression rules. Against measured subagent runs at ~65-100s and ~24k tokens per dispatch, the equivalent Python script runs in ~5-10s with zero LLM tokens and deterministic output (no YAML-drift, no "mid-task narrative is not a terminal state" failure mode). Inline dispatch — whether script or subagent — replaces an earlier background-preload design whose detached child raced the main agent's first read; synchronous invocation eliminates that race.
 4. **Build a resolution map** of the data environment: for each lead in the playbook, which abstract operation does it need, which concrete operations and data sources cover it, and are those sources healthy right now? Data gaps are noted explicitly because they constrain which hypotheses can actually be discriminated in later phases.
 
-**Legal next phases:** `SCREEN`, `HYPOTHESIZE`, `GATHER`, `CONCLUDE`.
+**Legal next phases:** `SCREEN`, `PREDICT`, `GATHER`, `CONCLUDE`.
 
 - `CONCLUDE` only when ticket-context's `repeats` cluster (or an already-open ticket) justifies a duplicate / immediate-dedup disposition — main agent's judgment.
 - `SCREEN` only if the playbook has a `## Screen` section.
-- `HYPOTHESIZE` when the first lead depends on which competing story is true (fork already open).
-- `GATHER` when the first lead is mechanical or interpretive and does not branch on a hypothesis fork. HYPOTHESIZE is on-demand (invlang v2.7) — a run may enter the loop at GATHER and only enter HYPOTHESIZE later if a fork opens.
+- `PREDICT` when the first lead depends on which competing story is true (fork already open).
+- `GATHER` when the first lead is mechanical or interpretive and does not branch on a hypothesis fork. PREDICT is on-demand (invlang v2.7) — a run may enter the loop at GATHER and only enter PREDICT later if a fork opens.
 
 **investigation.md shape:**
 
@@ -54,7 +54,7 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 
 **Goal:** Attempt fast resolution via mechanical pattern matching before entering the full loop.
 
-**When to enter:** The playbook has a `## Screen` section. Otherwise skip straight to `HYPOTHESIZE`.
+**When to enter:** The playbook has a `## Screen` section. Otherwise skip straight to `PREDICT`.
 
 **Work:**
 
@@ -62,10 +62,10 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 2. The subagent tries to match the alert against the pattern table. For each pattern, every indicator must be unambiguous — if any indicator is uncertain, the subagent must return `no_match`.
 3. Parse the subagent response:
    - `screen_result: match` → validate the output is well-formed (required YAML fields, non-empty observations, `matched_pattern` exists in the Screen table). If valid, go to `CONCLUDE`. The report validation hooks will do the deeper semantic check.
-   - `screen_result: no_match` → go to `HYPOTHESIZE`. The leads already run during screening become part of the investigation record and should not be re-run unless there's reason to believe the results were incomplete.
+   - `screen_result: no_match` → go to `PREDICT`. The leads already run during screening become part of the investigation record and should not be re-run unless there's reason to believe the results were incomplete.
    - Malformed output → treat as `no_match`.
 
-**Legal next phases:** `HYPOTHESIZE`, `CONCLUDE`.
+**Legal next phases:** `PREDICT`, `CONCLUDE`.
 
 **investigation.md shape:**
 
@@ -74,16 +74,16 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 
 **Result:** {match|no_match}
 **Leads run:** {lead names and observations from screen subagent}
-**Outcome:** {proceeding to CONCLUDE | falling through to HYPOTHESIZE — reason}
+**Outcome:** {proceeding to CONCLUDE | falling through to PREDICT — reason}
 ```
 
 **Safety note:** A screen-resolved report is exempt from the CONCLUDE-transition self-check (Layer 0) and from the playbook-has-Screen-section Tier-1 cross-check — the latter verifies that a report claiming the fast-path actually targets a playbook that declares a `## Screen` section. Screen-resolved safety comes from the mechanical pattern match + precedent + Tier 2 judge.
 
-## HYPOTHESIZE
+## PREDICT
 
 **Entry:** from `CONTEXTUALIZE`, `SCREEN` (fall-through), or `ANALYZE` (loop).
 
-**Goal:** Articulate an investigation fork and pick the lead that collapses it. HYPOTHESIZE is **on-demand** — enter it when the very next lead branches on which explanation is true. If the immediate next lead is the same regardless of which story is true, you are not in a branching regime; stay in the mechanical/interpretive lane and return to GATHER.
+**Goal:** Articulate an investigation fork and pick the lead that collapses it. PREDICT is **on-demand** — enter it when the very next lead branches on which explanation is true. If the immediate next lead is the same regardless of which story is true, you are not in a branching regime; stay in the mechanical/interpretive lane and return to GATHER.
 
 **Work:**
 
@@ -92,12 +92,12 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 3. **Select the lead with highest discrimination.** For each surviving hypothesis, construct the story in three layers (causal sequence → predicted artifacts → observable signals given the data environment). Find the point where the stories diverge most. That divergence is your diagnostic lead. Prefer leads where different hypotheses predict *different* outcomes; reject leads where they predict the same observation.
 4. **Check past investigation patterns.** The CONTEXTUALIZE archetype scan already ranked the archetype stories for this signature against the current alert — one entry per `story.md` under `knowledge/signatures/{signature_id}/archetypes/*/`. Review that ranking here to see which archetypes match and what anchors they require. If you need grounding detail, read the archetype's `trust-anchors.md` (anchor definitions) and the precedent snapshot JSONs under the matched archetype directory.
 
-**Legal next phase:** `GATHER` only. You cannot skip from `HYPOTHESIZE` to `CONCLUDE` — the loop enforces that every hypothesis update is followed by evidence gathering, not self-convincing.
+**Legal next phase:** `GATHER` only. You cannot skip from `PREDICT` to `CONCLUDE` — the loop enforces that every hypothesis update is followed by evidence gathering, not self-convincing.
 
 **investigation.md shape:**
 
 ```markdown
-## HYPOTHESIZE (loop {N})
+## PREDICT (loop {N})
 
 **Active hypotheses:** ?hypothesis-1, ?hypothesis-2
 **Selected lead:** {lead-name}
@@ -108,7 +108,7 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 
 ## GATHER
 
-**Entry:** from `HYPOTHESIZE`.
+**Entry:** from `PREDICT`.
 
 **Goal:** Run the selected lead(s) and record raw observations without interpreting them.
 
@@ -133,7 +133,7 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 4. **Validate results.** Check data source health. If the result is zero, unexpectedly low, or the latest event is stale, follow `leads/data-source-debug/definition.md` before assuming "absence is evidence." A query that returned zero because the pipeline is broken is not the same as a query that returned zero because nothing happened.
 5. **Characterize, do not interpret.** "Timing is periodic, 5 min ± 3 s" is characterization. "This is a monitoring probe" is interpretation — save that for `ANALYZE`.
 
-**Legal next phases:** `ANALYZE` (normal path), or `HYPOTHESIZE` (a new fork opened mid-lead and should be articulated before weighing evidence).
+**Legal next phases:** `ANALYZE` (normal path), or `PREDICT` (a new fork opened mid-lead and should be articulated before weighing evidence).
 
 **investigation.md shape:**
 
@@ -157,10 +157,10 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 1. **Assign a weight per hypothesis.** `++` strongly supports (observation exactly matches prediction). `+` weakly supports (consistent but not distinctive). `-` weakly refutes. `--` strongly refutes (contradicts a core prediction). Subjective confidence words are not allowed — every assessment must map to one of these four weights.
 2. **Check severity of tests.** If every surviving hypothesis predicted the same outcome for the lead you just ran, the lead didn't actually discriminate. You haven't earned the evidence you think you have.
 3. **Watch for the unexplained.** If your best hypothesis leaves significant observations unexplained, your hypothesis space is probably incomplete. Add or revise hypotheses rather than forcing the evidence to fit.
-4. **Verification and scoping.** When a mechanism hypothesis is confirmed, two questions remain before you can conclude: *is this instance legitimate?* (trace to a trust anchor — for archetypes this is the `required_anchors` list) and *what is the scope?* (blast radius, impact). These are new HYPOTHESIZE→GATHER→ANALYZE cycles, not a new phase.
+4. **Verification and scoping.** When a mechanism hypothesis is confirmed, two questions remain before you can conclude: *is this instance legitimate?* (trace to a trust anchor — for archetypes this is the `required_anchors` list) and *what is the scope?* (blast radius, impact). These are new PREDICT→GATHER→ANALYZE cycles, not a new phase.
 5. **Chain-of-events awareness.** When confirming a mechanism that implies prior stages (data exfiltration implies unauthorized access; lateral movement implies initial compromise), note the implied stages as follow-up scopes. Do not expand the current investigation to chase them — the "stay in scope" principle says flag, don't chase.
 
-**Legal next phases:** `HYPOTHESIZE` (need more evidence) or `CONCLUDE` (mechanism confirmed + verified + scoped, or explicit escalation).
+**Legal next phases:** `PREDICT` (need more evidence) or `CONCLUDE` (mechanism confirmed + verified + scoped, or explicit escalation).
 
 **investigation.md shape:**
 
@@ -181,7 +181,7 @@ hypotheses:
 ```
 
 **Surviving hypotheses:** ?hypothesis-1
-**Next action:** CONCLUDE | HYPOTHESIZE (need lead-name to discriminate X)
+**Next action:** CONCLUDE | PREDICT (need lead-name to discriminate X)
 ```
 
 ## CONCLUDE
@@ -209,8 +209,8 @@ hypotheses:
 
 ## Phase count and loop bounds
 
-A **cycle** is counted as any `HYPOTHESIZE` or `ANALYZE` entry in `state.json` history. `MAX_LOOPS = 12` (from `schemas/state.py`). The next transition into `HYPOTHESIZE` or `ANALYZE` past the cap is rejected with a state machine error directing the agent to `CONCLUDE`. See `content/investigation-loop.md#why-loops-are-capped-instead-of-open-ended`.
+A **cycle** is counted as any `PREDICT` or `ANALYZE` entry in `state.json` history. `MAX_LOOPS = 12` (from `schemas/state.py`). The next transition into `PREDICT` or `ANALYZE` past the cap is rejected with a state machine error directing the agent to `CONCLUDE`. See `content/investigation-loop.md#why-loops-are-capped-instead-of-open-ended`.
 
-Counting ANALYZE alongside HYPOTHESIZE keeps the guardrail meaningful under invlang v2.7's on-demand HYPOTHESIZE: a run that keeps gathering without re-hypothesizing still accumulates cycles and will eventually trip the cap.
+Counting ANALYZE alongside PREDICT keeps the guardrail meaningful under invlang v2.7's on-demand PREDICT: a run that keeps gathering without re-hypothesizing still accumulates cycles and will eventually trip the cap.
 
 Most investigations resolve in 2–3 cycles. If you're past 8 without convergence, the hypothesis space is probably incomplete and escalation is the correct call anyway.

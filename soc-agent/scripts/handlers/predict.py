@@ -1,10 +1,10 @@
-"""HYPOTHESIZE phase handler.
+"""PREDICT phase handler.
 
-Replaces the HYPOTHESIZE section of `skills/investigate/SKILL.md` with a
-Python orchestration that dispatches the `hypothesize` subagent, parses its
+Replaces the PREDICT section of `skills/investigate/SKILL.md` with a
+Python orchestration that dispatches the `predict` subagent, parses its
 terminal routing YAML, and appends the invlang block to investigation.md.
 
-The `hypothesize` subagent (agents/hypothesize.md, model=sonnet) emits one of:
+The `predict` subagent (agents/predict.md, model=sonnet) emits one of:
     - `hypothesize:` YAML block + `Selected lead:` + `Pitfalls:` (fork mode)
     - **No invlang YAML block** — narrative only (`Selected lead:` +
       `Pitfalls:`) when no observable discriminates between candidate
@@ -18,15 +18,18 @@ followed by a terminal routing YAML:
     loop_n: <integer>
     ```
 
+The invlang block name remains `hypothesize:` for corpus back-compat
+(the phase rename does not touch YAML schema).
+
 A `gather:` block emitted from this subagent is a contract violation —
 `gather[].lead` entries require execution fields (`outcome`,
-`query_details`, `resolutions`) that HYPOTHESIZE has no way to fill, so
+`query_details`, `resolutions`) that PREDICT has no way to fill, so
 writing them to `investigation.md` would fail invlang validation. The
 handler detects this case explicitly and retries with a structured
 remediation directive.
 
 This handler:
-    - computes `loop_n` from ctx.history (count of prior HYPOTHESIZE entries + 1)
+    - computes `loop_n` from ctx.history (count of prior PREDICT entries + 1)
     - invokes the subagent via the shared `_subagent.invoke_subagent` wrapper
     - detects and raises on `error:` blocks
     - extracts the terminal routing YAML via `extract_terminal_yaml`
@@ -40,7 +43,7 @@ This handler:
     - appends the invlang sections to investigation.md
     - always routes to Phase.GATHER (the only legal transition)
 
-Block-type inference (`hypothesize:` vs `gather:` vs `error:`) is done on the
+Block-type inference (`hypothesize:` YAML block vs `gather:` vs `error:`) is done on the
 raw response text before the trailer is extracted. The trailer's `mode` field
 is cross-checked against the inferred block type; mismatch raises.
 
@@ -77,18 +80,14 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._context_loader import (
     format_alert_block,
-    format_archetype_shapes_block,
     format_investigation_block,
     format_lead_definitions_summary_block,
     format_signature_text_block,
     load_alert,
-    load_archetype_shapes,
     load_investigation_md,
     load_lead_definitions,
     load_run_salt,
     load_signature_text,
-    parse_adversarial_archetype,
-    parse_archetype_candidates,
 )
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
@@ -104,7 +103,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 SUBAGENT_TIMEOUT_SECONDS = int(
-    os.environ.get("SOC_AGENT_HYPOTHESIZE_TIMEOUT_SECONDS", "450")
+    os.environ.get("SOC_AGENT_PREDICT_TIMEOUT_SECONDS", "450")
 )
 # Timeout fails fast — the handler does not respawn on timeout. The
 # validator-error retry path (which the handler does walk) is separate.
@@ -121,9 +120,9 @@ def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) ->
     """Module-level wrapper over the shared subagent dispatcher.
 
     Kept as a module-level function so tests can monkeypatch it with
-    `monkeypatch.setattr(hypothesize_handler, "_invoke_subagent", stub)`.
+    `monkeypatch.setattr(predict_handler, "_invoke_subagent", stub)`.
     """
-    return _shared_invoke("hypothesize", prompt, timeout=timeout)
+    return _shared_invoke("predict", prompt, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -131,50 +130,32 @@ def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) ->
 # ---------------------------------------------------------------------------
 
 
-def _select_archetypes_for_prompt(investigation_md: str) -> list[str] | None:
-    """Pick the archetype names to inline into the subagent prompt.
-
-    Returns the candidate archetypes from CONTEXTUALIZE's archetype-scan
-    (unordered set of archetypes whose shape is consistent with the alert),
-    unioned with the adversarial archetype so the adversarial-discipline rule
-    always sees its shape even when the shape is ruled-out.
-
-    Returns None when the scan is absent or unparseable — callers fall back to
-    shipping every archetype (original behavior).
-    """
-    candidates = parse_archetype_candidates(investigation_md)
-    if not candidates:
-        return None  # fall back to all archetypes
-    out = list(candidates)
-    adversarial = parse_adversarial_archetype(investigation_md)
-    if adversarial and adversarial not in out:
-        out.append(adversarial)
-    return out
-
-
 def _compute_loop_n(ctx: Context) -> int:
-    """Current loop number = count of prior HYPOTHESIZE entries + 1.
+    """Current loop number = count of prior PREDICT entries + 1.
 
-    HYPOTHESIZE stamps the loop number on the block it is about to emit
+    PREDICT stamps the loop number on the block it is about to emit
     (ANALYZE counts the prior loops retrospectively).
     """
-    prior = sum(1 for p in ctx.history if p == Phase.HYPOTHESIZE.value)
+    prior = sum(1 for p in ctx.history if p == Phase.PREDICT.value)
     # History includes the current phase (appended in orchestrate.run() before
     # the handler is called). Subtract 1 for the current entry so the count
     # reflects truly prior loops.
-    if ctx.current_phase == Phase.HYPOTHESIZE and prior > 0:
+    if ctx.current_phase == Phase.PREDICT and prior > 0:
         prior -= 1
     return prior + 1
 
 
 def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None) -> str:
-    """Build the hypothesize subagent prompt with all deterministic context inline.
+    """Build the predict subagent prompt with all deterministic context inline.
 
     The subagent receives alert.json, investigation.md, signature playbook +
-    context, every archetype's story/trust-anchors, and the full lead catalog
-    preloaded — no Read tool calls required. Bash stays available for invlang
-    corpus queries (pre-baked priors are inlined, but CLI is retained for
-    shape-calibration lookups the priors don't answer).
+    context, and the full lead catalog preloaded — no Read tool calls
+    required. Bash stays available for invlang corpus queries (pre-baked
+    priors are inlined, but CLI is retained for shape-calibration lookups the
+    priors don't answer).
+
+    Archetype context is intentionally absent: PREDICT works at the mechanism
+    layer, archetypes are a disposition-routing concern that REPORT consumes.
     """
     loop_n = _compute_loop_n(ctx)
     priors_section = _safe_priors_section(ctx)
@@ -183,11 +164,6 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
     salt = load_run_salt(ctx.run_dir)
     investigation_md = load_investigation_md(ctx.run_dir)
     signature_texts = load_signature_text(ctx.signature_id, SOC_AGENT_ROOT)
-    archetype_shapes = load_archetype_shapes(
-        ctx.signature_id, SOC_AGENT_ROOT,
-        archetype_names=_select_archetypes_for_prompt(investigation_md),
-        include_precedents=False,
-    )
     lead_defs = load_lead_definitions(SOC_AGENT_ROOT)
 
     blocks = [
@@ -198,9 +174,8 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
         ),
         priors_section,
         format_alert_block(alert, salt),
-        format_investigation_block(investigation_md, mode="hypothesize"),
+        format_investigation_block(investigation_md, mode="predict"),
         format_signature_text_block(signature_texts),
-        format_archetype_shapes_block(archetype_shapes, with_precedents=False),
         format_lead_definitions_summary_block(lead_defs),
     ]
 
@@ -312,47 +287,58 @@ def _prologue_signature_summary(prologue: dict) -> dict:
 
 
 def _format_prologue_priors(payload: dict) -> str:
-    """Render the loop-1 prologue-keyed priors block."""
+    """Render the loop-1 prologue-keyed priors block.
+
+    Baseline-recommendation format: when the corpus carries strong support
+    for a top-lead at this prologue topology, emit a single recommendation
+    line — "use this scaffold unless the alert contradicts it." When
+    support is weak, emit a sparse-prior fallback that tells PREDICT to
+    scaffold from first principles.
+
+    Peer-classification rendering is intentionally absent. A list of
+    historically-proposed classifications drives enumerate-every-mechanism
+    behavior (the FM4/FM5 failure modes); the priors block should nudge
+    scaffold choice, not seed a fork space.
+    """
     sig = payload["prologue_signature"]
     scope = payload["scope"]
     leads = payload["leads"]
-    peers = payload["peers"]
+
+    lead_rows = leads.get("hits") or []
+    top = lead_rows[0] if lead_rows else None
+
+    is_strong = (
+        top is not None
+        and (top.get("branching_support") or 0) >= _STRONG_PRIOR_MIN_SUPPORT
+        and (top.get("fidelity_rate") or 0.0) >= _STRONG_PRIOR_MIN_FIDELITY
+    )
 
     lines = [
         "## Past-investigation priors",
         "",
-        f"### Loop 1 — keyed on prologue topology ({scope} scope, "
+        f"Prologue topology — {scope} scope, "
         f"tier {leads['tier_used']}: {leads['tier_label']}, "
-        f"{leads.get('cases_matched', 0)} cases matched)",
-        "Prologue vertex types: " + (", ".join(sig["vertex_types"]) or "—"),
-        "Prologue edge relations: " + (", ".join(sig["edge_relations"]) or "—"),
+        f"{leads.get('cases_matched', 0)} cases matched. "
+        f"Vertex types: {', '.join(sig['vertex_types']) or '—'}. "
+        f"Edge relations: {', '.join(sig['edge_relations']) or '—'}.",
+        "",
     ]
 
-    lead_rows = (leads.get("hits") or [])[:_PRIORS_LEADS_TOP_N]
-    if lead_rows:
-        lines.append("")
-        lines.append("Leads ranked at this prologue topology (per-occurrence effectiveness; n = support):")
-        for row in lead_rows:
-            lines.append(
-                f"  - {row['lead_name']}: "
-                f"score={_fmt_num(row.get('mean_branching_delta'))}, "
-                f"fidelity={_fmt_num(row.get('fidelity_rate'))}, "
-                f"n={row.get('branching_support') or 0}"
-            )
+    if is_strong:
+        n = top.get("branching_support") or 0
+        total = leads.get("cases_matched") or n
+        fidelity = top.get("fidelity_rate") or 0.0
+        lines.append(
+            f"**Strongest prior at this topology:** `{top['lead_name']}` "
+            f"({n}/{total} cases, {int(fidelity * 100)}% fidelity rate). "
+            "Use this scaffold unless the alert specifically contradicts it."
+        )
     else:
-        lines.append("Leads: (no corpus matches)")
+        lines.append(
+            "Priors at this topology are sparse — scaffold from first principles "
+            "per PREDICT's ASSESS gate."
+        )
 
-    peer_rows = (peers.get("hits") or [])[:_PRIORS_PEERS_TOP_N]
-    if peer_rows:
-        lines.append("")
-        lines.append("Hypothesis classifications proposed historically at this prologue topology:")
-        for p in peer_rows:
-            hist = p.get("final_weight_histogram") or {}
-            hist_str = ", ".join(f"{k}={v}" for k, v in hist.items() if v) or "—"
-            lines.append(
-                f"  - {p['classification']} "
-                f"({p['peer_count']} cases, weights: {hist_str})"
-            )
     return "\n".join(lines)
 
 
@@ -462,6 +448,17 @@ def _compute_priors(frontier: list[dict]) -> list[dict]:
 _PRIORS_LEADS_TOP_N = 5
 _PRIORS_PEERS_TOP_N = 5
 
+# Baseline-recommendation thresholds for _format_prologue_priors. Calibrated
+# against the current corpus depth (~40 companions); revisit as the corpus
+# grows or if eval shows the recommendation missing real patterns.
+#   - support (branching_support): the per-lead case count at this topology.
+#     Below 5 we can't reliably distinguish signal from coincidence.
+#   - fidelity (fidelity_rate): fraction of cases where the lead's
+#     prediction materialized — i.e. the lead actually discriminated when
+#     it was fired. Below 0.5 the prior is a coin flip.
+_STRONG_PRIOR_MIN_SUPPORT = 5
+_STRONG_PRIOR_MIN_FIDELITY = 0.5
+
 
 def _format_priors(priors: list[dict]) -> str:
     """Render a concise markdown block. Empty frontier or empty retrieval
@@ -525,7 +522,9 @@ _FIRST_FENCE_RE = re.compile(
 def _detect_block_type(raw: str) -> str:
     """Return the first top-level invlang key present in any yaml fence.
 
-    Returns one of: "hypothesize", "gather", "error", "unknown". The terminal
+    Returns one of: "hypothesize", "gather", "error", "unknown" (the first
+    three name invlang YAML-block keys, which are unchanged by the phase
+    rename). The terminal
     routing YAML (whose top-level keys are `mode/selected_lead/loop_n`) is
     distinguishable and not counted.
     """
@@ -580,45 +579,45 @@ def _validate_trailer(trailer: dict, *, block_type: str, expected_loop_n: int) -
     mode = trailer.get("mode")
     if mode not in _VALID_MODES:
         raise OrchestrationError(
-            f"hypothesize subagent: invalid trailer mode {mode!r} "
+            f"predict subagent: invalid trailer mode {mode!r} "
             f"(expected one of {sorted(_VALID_MODES)})"
         )
     expected_block_by_mode = {"fork": "hypothesize", "no-fork": "unknown"}
     expected_block = expected_block_by_mode[mode]
     if block_type != expected_block:
         raise OrchestrationError(
-            f"hypothesize subagent: mode {mode!r} requires block_type "
+            f"predict subagent: mode {mode!r} requires block_type "
             f"{expected_block!r}, got {block_type!r}"
         )
     selected_lead = trailer.get("selected_lead")
     if not isinstance(selected_lead, str) or not selected_lead.strip():
         raise OrchestrationError(
-            "hypothesize subagent: trailer missing non-empty selected_lead"
+            "predict subagent: trailer missing non-empty selected_lead"
         )
     loop_n = trailer.get("loop_n")
     if not isinstance(loop_n, int):
         raise OrchestrationError(
-            f"hypothesize subagent: trailer loop_n must be int, got {loop_n!r}"
+            f"predict subagent: trailer loop_n must be int, got {loop_n!r}"
         )
     if loop_n != expected_loop_n:
         raise OrchestrationError(
-            f"hypothesize subagent: trailer loop_n={loop_n} does not match "
+            f"predict subagent: trailer loop_n={loop_n} does not match "
             f"orchestrator-computed loop_n={expected_loop_n}"
         )
-    # Optional fields: `override_data_source` and `lead_hint` give HYPOTHESIZE
+    # Optional fields: `override_data_source` and `lead_hint` give PREDICT
     # a machine-readable channel to the downstream gather subagent. Both are
     # free-form strings when present, absent otherwise. Non-string values for
     # either field are a contract violation.
     override = trailer.get("override_data_source")
     if override is not None and (not isinstance(override, str) or not override.strip()):
         raise OrchestrationError(
-            f"hypothesize subagent: trailer override_data_source must be a "
+            f"predict subagent: trailer override_data_source must be a "
             f"non-empty string if provided, got {override!r}"
         )
     lead_hint = trailer.get("lead_hint")
     if lead_hint is not None and (not isinstance(lead_hint, str) or not lead_hint.strip()):
         raise OrchestrationError(
-            f"hypothesize subagent: trailer lead_hint must be a non-empty "
+            f"predict subagent: trailer lead_hint must be a non-empty "
             f"string if provided, got {lead_hint!r}"
         )
     return trailer
@@ -699,12 +698,12 @@ def _append_to_investigation(ctx: Context, new_section: str) -> None:
 # semantics against its checkpoint.
 
 _FAILURE_REMEDIATIONS: dict[str, str] = {
-    "gather_block_in_hypothesize": (
+    "gather_block_in_predict": (
         "CONTRACT VIOLATION: your prior attempt emitted a `gather:` YAML "
-        "block. HYPOTHESIZE must never emit a `gather:` block — "
+        "block. PREDICT must never emit a `gather:` block — "
         "`gather[].lead` entries require execution fields (outcome, "
         "query_details, resolutions) that the GATHER subagent fills, not "
-        "HYPOTHESIZE. REMEDIATION: drop the `gather:` block entirely. For "
+        "PREDICT. REMEDIATION: drop the `gather:` block entirely. For "
         "no-fork mode, emit only narrative (`Selected lead:` + `Pitfalls:`) "
         "followed by the terminal routing YAML with `mode: no-fork`. Any "
         "lead-level predictions you want to communicate belong in the "
@@ -715,10 +714,10 @@ _FAILURE_REMEDIATIONS: dict[str, str] = {
         "summary of your work — no YAML fences at all. The YAML IS the "
         "deliverable; a prose summary of the YAML is not. If you already "
         "wrote a checkpoint at "
-        "`{run_dir}/subagent_checkpoints/hypothesize-loop-{loop_n}.yaml` "
+        "`{run_dir}/subagent_checkpoints/predict-loop-{loop_n}.yaml` "
         "with the completed work, use it as the source of truth and "
         "transcribe it to stdout in the required shape. REMEDIATION: "
-        "re-emit the full Return contract from `agents/hypothesize.md`: "
+        "re-emit the full Return contract from `agents/predict.md`: "
         "for fork mode, a ```yaml``` block containing `hypothesize:` with "
         "all declared hypotheses + Selected lead + Pitfalls + the terminal "
         "routing ```yaml``` block with {mode, selected_lead, loop_n}; for "
@@ -756,10 +755,10 @@ def _attempt(
     block_type = _detect_block_type(raw)
     if block_type == "error":
         raise OrchestrationError(
-            f"hypothesize subagent returned error block: {_extract_error_reason(raw)}"
+            f"predict subagent returned error block: {_extract_error_reason(raw)}"
         )
 
-    # Contract violation: `gather:` block from HYPOTHESIZE is never valid.
+    # Contract violation: `gather:` block from PREDICT is never valid.
     # Short-circuit to a retry with a registry-loaded remediation directive —
     # don't bother parsing the trailer or running the validator.
     if block_type == "gather":
@@ -768,7 +767,7 @@ def _attempt(
             "",  # no sections to append yet
             block_type,
             trailer_for_loop_check,
-            [_FAILURE_REMEDIATIONS["gather_block_in_hypothesize"]],
+            [_FAILURE_REMEDIATIONS["gather_block_in_predict"]],
         )
 
     # Empty-stdout path: `claude --print` captures only the final text turn,
@@ -831,11 +830,11 @@ def _synthesize_from_checkpoint(
     checkpoint is absent / incomplete / shape-invalid. On None the caller
     falls through to the retry path.
 
-    Contract with the subagent prompt (`agents/hypothesize.md`): the checkpoint
+    Contract with the subagent prompt (`agents/predict.md`): the checkpoint
     must carry `status: complete`, `mode: fork|no-fork`, and (fork mode)
     `hypotheses: [...]` in the same shape the stdout YAML block would have.
     """
-    ckpt = ctx.run_dir / "subagent_checkpoints" / f"hypothesize-loop-{expected_loop_n}.yaml"
+    ckpt = ctx.run_dir / "subagent_checkpoints" / f"predict-loop-{expected_loop_n}.yaml"
     if not ckpt.exists():
         return None
     try:
@@ -867,7 +866,7 @@ def _synthesize_from_checkpoint(
         sort_keys=False, default_flow_style=False,
     )
     section = (
-        f"## HYPOTHESIZE (loop {expected_loop_n})\n\n"
+        f"## PREDICT (loop {expected_loop_n})\n\n"
         f"```yaml\n{dumped.rstrip()}\n```\n"
     )
     errors = _validate_companion_proposed(ctx, section)
@@ -913,7 +912,7 @@ def handle(ctx: Context) -> PhaseResult:
         )
     if errors:
         raise OrchestrationError(
-            f"HYPOTHESIZE failed after {attempts_used} attempts:\n"
+            f"PREDICT failed after {attempts_used} attempts:\n"
             + "\n".join(f"  - {e}" for e in errors)
         )
 
@@ -928,7 +927,7 @@ def handle(ctx: Context) -> PhaseResult:
         "loop_n": trailer["loop_n"],
         "block_type": block_type,
     }
-    # Forward optional overrides when HYPOTHESIZE authored them. Omitted keys
+    # Forward optional overrides when PREDICT authored them. Omitted keys
     # keep the downstream GATHER payload clean when the subagent didn't use
     # this channel.
     if trailer.get("override_data_source") is not None:

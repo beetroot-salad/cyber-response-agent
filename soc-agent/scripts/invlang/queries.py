@@ -8,20 +8,20 @@ and the caller is likely querying against the wrong vocabulary.
 Classes (phase tag = which investigation phase typically consumes the output):
   1  coarse_case_lookup            — [ad-hoc]        filter by conclude-block fields
   2  anchor_calibration            — [GATHER]        anchor results × authority → disposition
-  3  refinement_chain_shapes       — [HYPOTHESIZE]   hypothesis refinement tree depth/branching
+  3  refinement_chain_shapes       — [PREDICT]   hypothesis refinement tree depth/branching
   4  dead_lead_lookup              — [GATHER]        leads that errored or returned degraded data
   5  lead_sequence_pattern         — [ad-hoc]        serialize gather blocks as trace strings
-  6  hypothesis_name_wildcard      — [HYPOTHESIZE]   fnmatch on hypothesis names; filter by final weight
+  6  hypothesis_name_wildcard      — [PREDICT]   fnmatch on hypothesis names; filter by final weight
   7  prose_substring               — [ad-hoc]        substring scan across all prose fields
-  8  lead_effectiveness            — [HYPOTHESIZE]   score leads on branching_delta + prediction_fidelity + kind_mix
+  8  lead_effectiveness            — [PREDICT]   score leads on branching_delta + prediction_fidelity + kind_mix
   9  weight_reversal_mining        — [ANALYZE]       resolutions where weight moved positive→negative
-  10 lead_pair_synergy             — [HYPOTHESIZE]   composite-dispatch pairs where combined > sum of individual deltas
+  10 lead_pair_synergy             — [PREDICT]   composite-dispatch pairs where combined > sum of individual deltas
   11 post_failure_recovery         — [GATHER]        after a dead lead, what lead came next and how effective was it?
   12 independent_datasource_metric — [CONCLUDE]      distinct system count per case, grouped by disposition + confidence
 
 Handler-facing topology retrieval (separate from the numbered classes):
-  lead_effectiveness_for_topology            — [HYPOTHESIZE] pre-baked class-8 conditioned on frontier topology
-  peer_hypothesis_distribution_for_topology  — [HYPOTHESIZE] co-proposed classifications at the same topology
+  lead_effectiveness_for_topology            — [PREDICT] pre-baked class-8 conditioned on frontier topology
+  peer_hypothesis_distribution_for_topology  — [PREDICT] co-proposed classifications at the same topology
 """
 
 from __future__ import annotations
@@ -155,7 +155,7 @@ def anchor_calibration(
 
 
 # ---------------------------------------------------------------------------
-# Class 3 — refinement chain shapes (HYPOTHESIZE — refine vs propose directly)
+# Class 3 — refinement chain shapes (PREDICT — refine vs propose directly)
 # ---------------------------------------------------------------------------
 
 def _parse_hypothesis_chain(h_id: str) -> list[str]:
@@ -304,7 +304,7 @@ def lead_sequence_pattern(
 
 
 # ---------------------------------------------------------------------------
-# Class 6 — hypothesis name wildcard (HYPOTHESIZE — seed-vocabulary discovery)
+# Class 6 — hypothesis name wildcard (PREDICT — seed-vocabulary discovery)
 # ---------------------------------------------------------------------------
 
 def hypothesis_name_wildcard(
@@ -402,7 +402,7 @@ def prose_substring(
 
 
 # ---------------------------------------------------------------------------
-# Class 8 — lead effectiveness (HYPOTHESIZE — lead-selection priors; pre-baked into handler)
+# Class 8 — lead effectiveness (PREDICT — lead-selection priors; pre-baked into handler)
 # ---------------------------------------------------------------------------
 
 def _abs_delta(before: Any, after: Any) -> float:
@@ -1151,7 +1151,7 @@ def weight_reversal_mining(
 
     'Positive' means before ∈ {null, +, ++}; 'negative' means after ∈ {-, --}.
     These reversals surface pitfall text — evidence that appeared supportive but
-    turned out not to be. Useful for pre-registering pitfalls at HYPOTHESIZE time.
+    turned out not to be. Useful for pre-registering pitfalls at PREDICT time.
 
     hypothesis_pattern  — fnmatch filter on hypothesis name.
     reversals_only      — when True, return only rows where is_true_reversal=True
@@ -1192,7 +1192,7 @@ def weight_reversal_mining(
 
 
 # ---------------------------------------------------------------------------
-# Class 10 — lead pair synergy (HYPOTHESIZE / GATHER — composite-dispatch design)
+# Class 10 — lead pair synergy (PREDICT / GATHER — composite-dispatch design)
 # ---------------------------------------------------------------------------
 
 def lead_pair_synergy(corpus: list[Companion]) -> dict[str, Any]:

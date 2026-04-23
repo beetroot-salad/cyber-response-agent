@@ -15,7 +15,7 @@ You are invoked by the CONCLUDE phase handler to author the **two free-text sect
 Three tagged blocks in the user prompt:
 
 - `<alert>…</alert>` — one-paragraph summary of the triggering alert (rule, time, actor, command or action).
-- `<investigation-summary>…</investigation-summary>` — the final `## CONTEXTUALIZE`, final `## HYPOTHESIZE`, and final `## ANALYZE` sections of investigation.md, concatenated. This is the complete load-bearing narrative.
+- `<investigation-summary>…</investigation-summary>` — the final `## CONTEXTUALIZE`, final `## PREDICT`, and final `## ANALYZE` sections of investigation.md, concatenated. This is the complete load-bearing narrative.
 - `<archetype>…</archetype>` — **optional.** Present only when the investigation matched an archetype. Contains the archetype's story.md body.
 
 Plus a small metadata header with: `status` (resolved|escalated), `disposition`, `confidence`, `matched_archetype` (may be null).

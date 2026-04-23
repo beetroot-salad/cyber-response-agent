@@ -4,7 +4,7 @@ All three subagent invocations are mocked — these tests exercise:
     - playbook metadata loading (against real knowledge/signatures/wazuh-rule-5710/)
     - markdown composition
     - investigation.md validation + write (real invlang_validate, not mocked)
-    - routing (SCREEN when playbook has_screen, HYPOTHESIZE default; dedup retired)
+    - routing (SCREEN when playbook has_screen, PREDICT default; dedup retired)
     - payload keys required downstream by conclude.py
 """
 
@@ -209,7 +209,7 @@ class TestRouting:
         monkeypatch.setattr(ctx_handler, "load_playbook_metadata", fake_meta)
 
         result = ctx_handler.handle(ctx)
-        assert result.next_phase == Phase.HYPOTHESIZE
+        assert result.next_phase == Phase.PREDICT
 
     def test_dedup_candidate_no_longer_routes_to_conclude(self, tmp_path, monkeypatch):
         """Dedup fast-path is retired — see tasks/dedup-fast-path.md. A

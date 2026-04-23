@@ -217,7 +217,7 @@ def _check_route_compliance(merged: dict[str, Any]) -> list[str]:
             warnings.append(
                 f"lead {lid}: next lead {next_name!r} does not match any advance_to "
                 f"(declared: {sorted(a for a in advance_tos if a)}). "
-                f"If the fork space was incomplete, HYPOTHESIZE to extend it."
+                f"If the fork space was incomplete, PREDICT to extend it."
             )
 
     return warnings

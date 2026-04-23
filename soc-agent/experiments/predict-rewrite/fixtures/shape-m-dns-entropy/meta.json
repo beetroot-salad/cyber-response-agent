@@ -1,0 +1,8 @@
+{
+  "run_id": "shape-m-dns-entropy-fixture",
+  "signature_id": "wazuh-rule-100110",
+  "severity": 6,
+  "salt": "shapemsalt0000000",
+  "created_at": "2026-04-22T17:08:45.000000+00:00",
+  "predict_loop_n": 1
+}

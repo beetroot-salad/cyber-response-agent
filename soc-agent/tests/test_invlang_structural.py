@@ -26,7 +26,7 @@ from hooks.scripts.invlang_validate import (
 )
 
 from tests.test_invlang_validate import (
-    VALID_HYPOTHESIZE_YAML,
+    VALID_PREDICT_YAML,
     VALID_LEAD_YAML,
     VALID_PROLOGUE_YAML,
     _parse_yaml_block,
@@ -93,7 +93,7 @@ class TestCheckIdReferences:
     def test_all_refs_resolve(self):
         import yaml
         prologue = yaml.safe_load(VALID_PROLOGUE_YAML)
-        hyp = yaml.safe_load(VALID_HYPOTHESIZE_YAML)
+        hyp = yaml.safe_load(VALID_PREDICT_YAML)
         lead_raw = yaml.safe_load(VALID_LEAD_YAML)
         merged = _merge_blocks([prologue, hyp, lead_raw])
         errors = _check_id_references(merged)
@@ -343,7 +343,7 @@ class TestCheckLeadPredictions:
             {"id": "lp1", "if": "volume within 1σ", "read_as": "authorized",
              "advance_to": "change-management-lookup"},
             {"id": "lp2", "if": "volume >3σ", "read_as": "anomalous",
-             "advance_to": "HYPOTHESIZE"},
+             "advance_to": "PREDICT"},
         ])
         assert _check_lead_predictions(merged) == []
 

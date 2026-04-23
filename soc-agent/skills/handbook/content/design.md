@@ -51,8 +51,8 @@ See `content/validation.md` for the three-layer CONCLUDE validation detail (Laye
 ```
 CONTEXTUALIZE ─┬─→ CONCLUDE        (main-agent dedup when ticket-context surfaces a live repeat)
                ├─→ SCREEN ─┬─→ CONCLUDE  (mechanical pattern match)
-               │            └─→ HYPOTHESIZE
-               └─→ HYPOTHESIZE → GATHER → ANALYZE ─┬─→ HYPOTHESIZE (loop)
+               │            └─→ PREDICT
+               └─→ PREDICT → GATHER → ANALYZE ─┬─→ PREDICT (loop)
                                                     └─→ CONCLUDE
 ```
 
@@ -65,12 +65,12 @@ See `content/investigation-loop.md` for the authoritative diagram and legal tran
 
 - **CONTEXTUALIZE** — read signature knowledge, parse alert, integrate preloaded ticket-context and archetype-scan context, build a resolution map of available tools.
 - **SCREEN** *(optional, if the playbook defines a `## Screen` section)* — a cheap subagent attempts a mechanical pattern match against known benign outcomes. Match → straight to CONCLUDE. No match → fall through to the full loop with evidence already gathered.
-- **HYPOTHESIZE** — generate or update candidate explanations, pick the most diagnostic lead.
+- **PREDICT** — generate or update candidate explanations, pick the most diagnostic lead.
 - **GATHER** — execute the lead (single or composite dispatch), characterize raw observations.
 - **ANALYZE** — weight evidence against each surviving hypothesis. Loop back, or conclude.
 - **CONCLUDE** — write `report.md` with structured frontmatter and a trace line.
 
-A maximum of `MAX_LOOPS = 12` cycles (HYPOTHESIZE + ANALYZE entries combined) is enforced by the state machine. Most investigations resolve in 2–3.
+A maximum of `MAX_LOOPS = 12` cycles (PREDICT + ANALYZE entries combined) is enforced by the state machine. Most investigations resolve in 2–3.
 
 ## Core separation of concerns
 

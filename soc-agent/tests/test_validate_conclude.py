@@ -415,14 +415,14 @@ class TestIsScreenResolved:
 
     def test_screen_with_full_loop(self):
         text = (
-            "## CONTEXTUALIZE\n## SCREEN\n## HYPOTHESIZE (loop 1)\n"
+            "## CONTEXTUALIZE\n## SCREEN\n## PREDICT (loop 1)\n"
             "## GATHER (loop 1)\n## ANALYZE (loop 1)\n## CONCLUDE\n"
         )
         assert is_screen_resolved(text) is False
 
     def test_full_loop_only(self):
         text = (
-            "## CONTEXTUALIZE\n## HYPOTHESIZE (loop 1)\n"
+            "## CONTEXTUALIZE\n## PREDICT (loop 1)\n"
             "## GATHER (loop 1)\n## ANALYZE (loop 1)\n## CONCLUDE\n"
         )
         assert is_screen_resolved(text) is False
@@ -440,7 +440,7 @@ VALID_INVESTIGATION = """\
 **Source entity:** 10.0.1.50
 **Playbook hypotheses:** ?monitoring-probe, ?brute-force
 
-## HYPOTHESIZE (loop 1)
+## PREDICT (loop 1)
 
 **Selected lead:** authentication-history
 

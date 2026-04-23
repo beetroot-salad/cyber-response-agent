@@ -66,7 +66,7 @@ class TestStateTransitionContract:
 
     def test_minimal_investigation_sequence(self):
         """C -> H -> G -> A -> CONCLUDE is a valid minimal investigation."""
-        phases = ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -77,8 +77,8 @@ class TestStateTransitionContract:
         """Two hypothesis-gather-analyze loops before concluding."""
         phases = [
             "CONTEXTUALIZE",
-            "HYPOTHESIZE", "GATHER", "ANALYZE",
-            "HYPOTHESIZE", "GATHER", "ANALYZE",
+            "PREDICT", "GATHER", "ANALYZE",
+            "PREDICT", "GATHER", "ANALYZE",
             "CONCLUDE",
         ]
         current = None
@@ -98,7 +98,7 @@ class TestStateTransitionContract:
 
     def test_screen_fallthrough_sequence(self):
         """C -> SCREEN -> H -> G -> A -> CONCLUDE (screen didn't resolve)."""
-        phases = ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -106,11 +106,11 @@ class TestStateTransitionContract:
             current = phase
 
     def test_cannot_skip_gather(self):
-        valid, _ = validate_transition("HYPOTHESIZE", "ANALYZE")
+        valid, _ = validate_transition("PREDICT", "ANALYZE")
         assert not valid
 
     def test_context_to_gather_is_on_demand_allowed(self):
-        # HYPOTHESIZE is on-demand (invlang v2.7); pure-gathering first leads
+        # PREDICT is on-demand (invlang v2.7); pure-gathering first leads
         # may enter GATHER directly from CONTEXTUALIZE.
         valid, _ = validate_transition("CONTEXTUALIZE", "GATHER")
         assert valid
@@ -187,7 +187,7 @@ class TestWriteStateIntegration:
         run_dir = tmp_path / "run-test"
         run_dir.mkdir()
 
-        phases = ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
         for phase in phases:
             result = subprocess.run(
                 [sys.executable, str(script), str(run_dir), phase, "TEST-001", "wazuh-rule-5710"],
@@ -257,7 +257,7 @@ class TestLLMInvestigation:
         history = state["history"]
 
         # Validate minimum length based on actual path taken
-        if "SCREEN" in history and "HYPOTHESIZE" not in history:
+        if "SCREEN" in history and "PREDICT" not in history:
             # Screen-resolved path: C -> SCREEN -> CONCLUDE
             assert len(history) >= 3, (
                 f"Screen-resolved path needs >= 3 phases, got {history}"
@@ -312,7 +312,7 @@ class TestLLMInvestigation:
 
         # Must have phase headers
         assert "CONTEXTUALIZE" in content, "Missing CONTEXTUALIZE phase"
-        assert "HYPOTHESIZE" in content, "Missing HYPOTHESIZE phase"
+        assert "PREDICT" in content, "Missing PREDICT phase"
         assert "GATHER" in content, "Missing GATHER phase"
         assert "ANALYZE" in content, "Missing ANALYZE phase"
 

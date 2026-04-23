@@ -467,17 +467,17 @@ class TestOrchestratorIntegration:
 
         def ctx_handler(_c):
             return PhaseResult(
-                next_phase=Phase.HYPOTHESIZE,
+                next_phase=Phase.PREDICT,
                 payload={},
             )
 
         handlers = {
             Phase.CONTEXTUALIZE: ctx_handler,
-            Phase.HYPOTHESIZE: lambda _c: PhaseResult(next_phase=Phase.GATHER),
+            Phase.PREDICT: lambda _c: PhaseResult(next_phase=Phase.GATHER),
             Phase.GATHER: lambda _c: PhaseResult(next_phase=Phase.ANALYZE),
-            # ANALYZE never routes to CONCLUDE — bounces back to HYPOTHESIZE
+            # ANALYZE never routes to CONCLUDE — bounces back to PREDICT
             # until MAX_LOOPS is hit and orchestrator forces CONCLUDE.
-            Phase.ANALYZE: lambda _c: PhaseResult(next_phase=Phase.HYPOTHESIZE),
+            Phase.ANALYZE: lambda _c: PhaseResult(next_phase=Phase.PREDICT),
             Phase.CONCLUDE: conclude_handler.handle,
         }
 
@@ -829,7 +829,7 @@ prologue:
   edges: []
 ```
 
-## HYPOTHESIZE (loop 1)
+## PREDICT (loop 1)
 
 ?monitoring-probe — approved cron probe.
 

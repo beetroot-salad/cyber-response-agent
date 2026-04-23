@@ -28,9 +28,9 @@ The main agent substitutes these values:
 - `vendor` — the SIEM vendor whose CLI you will invoke (e.g., `wazuh`)
 - `incident_start`, `incident_end` — ISO 8601 UTC bounds
 - `mode` — one of `composite` | `ad-hoc` | `redispatch`
-- `leads` — an ordered list of lead specs (one for single ad-hoc/redispatch). Each spec: `{lead_name, entity_bindings, reporting_agent}` plus two optional HYPOTHESIZE→GATHER hint fields:
-  - `override_data_source` — when present, HYPOTHESIZE has determined that the lead's default vendor template targets the wrong data source and that a specific alternative is required. Treat as a directive: construct the query against the named data source (e.g. `host_query`, `playground_ticket`) even if `lead_name` has a populated `{vendor}.md` template. Use the alternative data source's CLI conventions from `environment/systems/{data_source}/SKILL.md`.
-  - `lead_hint` — a short free-form prose note from HYPOTHESIZE explaining *why* this lead execution differs from the default (often paired with `override_data_source`). Treat as authoring context, not an instruction — useful when deciding between multiple sub-queries within the override data source.
+- `leads` — an ordered list of lead specs (one for single ad-hoc/redispatch). Each spec: `{lead_name, entity_bindings, reporting_agent}` plus two optional PREDICT→GATHER hint fields:
+  - `override_data_source` — when present, PREDICT has determined that the lead's default vendor template targets the wrong data source and that a specific alternative is required. Treat as a directive: construct the query against the named data source (e.g. `host_query`, `playground_ticket`) even if `lead_name` has a populated `{vendor}.md` template. Use the alternative data source's CLI conventions from `environment/systems/{data_source}/SKILL.md`.
+  - `lead_hint` — a short free-form prose note from PREDICT explaining *why* this lead execution differs from the default (often paired with `override_data_source`). Treat as authoring context, not an instruction — useful when deciding between multiple sub-queries within the override data source.
 - `cross_lead_hint` (composite only, optional) — the main agent's one-line articulation of *why* these leads are composite (e.g., "session window from auth-history refines data-access query range").
 
 ## Context to read (in parallel, single turn)
@@ -58,7 +58,7 @@ For each lead whose `definition.md` frontmatter has non-empty `data_tags`, run t
 
 For **template-available** leads: plug `entity_bindings` into the template's base query, execute via the SIEM CLI. Pass `--run-dir {run_dir}` so output is wrapped in untrusted-data delimiters.
 
-**Exception: `override_data_source` takes precedence over the template.** When a lead spec carries `override_data_source: X`, do NOT execute the `{vendor}.md` template. Instead, construct the query against data source `X` using `environment/systems/X/SKILL.md` conventions — this is explicit HYPOTHESIZE guidance that the template's data source is wrong for the current discriminator. Record in `refinements_applied` as `"override_data_source={X} per HYPOTHESIZE directive; bypassed {lead_name}/{vendor}.md template"`. The `What to Characterize` contract from the lead's `definition.md` still applies — override changes *how* the data is fetched, not *what* must be reported.
+**Exception: `override_data_source` takes precedence over the template.** When a lead spec carries `override_data_source: X`, do NOT execute the `{vendor}.md` template. Instead, construct the query against data source `X` using `environment/systems/X/SKILL.md` conventions — this is explicit PREDICT guidance that the template's data source is wrong for the current discriminator. Record in `refinements_applied` as `"override_data_source={X} per PREDICT directive; bypassed {lead_name}/{vendor}.md template"`. The `What to Characterize` contract from the lead's `definition.md` still applies — override changes *how* the data is fetched, not *what* must be reported.
 
 For **ad-hoc / missing-template** leads, or **missing-definition** leads (no `leads/{lead_name}/definition.md` at all): construct the query using (a) the field mappings in `knowledge/environment/systems/{vendor}/SKILL.md`, (b) any `{vendor}/field-quirks.md` sibling for non-obvious field semantics, and (c) the `leads/ad-hoc/definition.md` construction discipline. For missing-definition leads, infer intent from the `lead_name` + `entity_bindings` + any caller-supplied tags. Set `query_source: "ad-hoc"` and record the fallback in `refinements_applied` ("no definition for {lead_name}; constructed ad-hoc from intent + entity_bindings"). Do not bounce a missing-definition back to the main agent — that's a subagent respawn for work you can do inline.
 
@@ -83,7 +83,7 @@ Exception: when a lead's `status` is `dropped_attempt` or `data_missing`, set `c
 
 ### 5. Cross-lead notes (composite only)
 
-After all leads execute, emit a `cross_lead_notes` field describing consistencies, contradictions, and refinements applied across the lead set. This is where composite dispatch earns its keep — the main agent uses these notes to decide whether to HYPOTHESIZE further or proceed to ANALYZE. Still characterization, not interpretation: *"lead 1's session boundary (20:30–20:50) contains all 14 data-access events from lead 2"* is a cross-lead note; *"this looks like a legitimate operator session"* is not.
+After all leads execute, emit a `cross_lead_notes` field describing consistencies, contradictions, and refinements applied across the lead set. This is where composite dispatch earns its keep — the main agent uses these notes to decide whether to PREDICT further or proceed to ANALYZE. Still characterization, not interpretation: *"lead 1's session boundary (20:30–20:50) contains all 14 data-access events from lead 2"* is a cross-lead note; *"this looks like a legitimate operator session"* is not.
 
 ## Progress checkpoint (write-as-you-go)
 

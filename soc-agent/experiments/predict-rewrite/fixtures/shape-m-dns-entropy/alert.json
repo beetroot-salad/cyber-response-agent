@@ -1,0 +1,28 @@
+{
+  "agent": {
+    "ip": "10.0.14.22",
+    "name": "corp-dev-22",
+    "id": "047"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
+  "data": {
+    "srcip": "10.0.14.22",
+    "dns_query_type": "A",
+    "dns_domain": "x9p2qkz7m4lv8wnrt3fby0.cloudapp-cdn.example.net",
+    "dns_subdomain_entropy": 3.94,
+    "dns_subdomain_length": 22,
+    "window_5min": {
+      "nxdomain_count": 412,
+      "distinct_qnames": 387,
+      "avg_label_entropy": 3.82
+    }
+  },
+  "rule": {
+    "id": "100110",
+    "level": 6,
+    "description": "DNS query with high-entropy subdomain"
+  },
+  "timestamp": "2026-04-22T17:08:44.210+0000"
+}

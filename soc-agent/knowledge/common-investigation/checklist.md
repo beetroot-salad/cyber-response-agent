@@ -70,7 +70,7 @@ work above still runs — but the outcome is escalation, not auto-close.
 - [ ] `trace` line summarizes the full investigation path
 
 ### Investigation Log
-- [ ] `investigation.md` has phase headers: `## CONTEXTUALIZE`, `## HYPOTHESIZE`, `## GATHER`, `## ANALYZE`
+- [ ] `investigation.md` has phase headers: `## CONTEXTUALIZE`, `## PREDICT`, `## GATHER`, `## ANALYZE`
 - [ ] Each phase has the structured format from the investigator instructions
 - [ ] ANALYZE phases have YAML assessment blocks
 

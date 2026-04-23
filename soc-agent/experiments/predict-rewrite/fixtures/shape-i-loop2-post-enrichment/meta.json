@@ -1,0 +1,8 @@
+{
+  "run_id": "shape-i-loop2-post-enrichment-fixture",
+  "signature_id": "wazuh-rule-5710",
+  "severity": 5,
+  "salt": "loop2salt00000000",
+  "created_at": "2026-04-20T19:25:02.000000+00:00",
+  "predict_loop_n": 2
+}

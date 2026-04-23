@@ -74,7 +74,7 @@ For each entry in `leads_run` (in the order you ran them), compose one invlang l
 For each lead you ran, emit one object under `gather:` with these invariants:
 
 - `id: l-{NNN}` — sequential starting at `l-001`
-- `loop: 0` — SCREEN leads are pre-HYPOTHESIZE
+- `loop: 0` — SCREEN leads are pre-PREDICT
 - `name: {lead_name}` — the lead name from the Screen table
 - `target: v-{id} | e-{id}` — the prologue element this lead is about (target-selection rules below)
 - `mode: screen` — always
@@ -199,6 +199,6 @@ After emitting this block, your turn is over. Do not run further tools. Do not s
 - **`gather` order mirrors `leads_run` order.** Both sections list the same leads in the same order.
 - **Classification/anchor leads have no observations in `outcome`.** Omit `observations` on those leads; do not emit `observations: { vertices: [], edges: [] }` as a placeholder.
 - **Final lead only carries `screen_result` inside `outcome`.** Every earlier lead's `outcome` ends before `screen_result`.
-- **No tests, no observes, no predictions, no new_hypotheses, no selection_rationale.** Screen leads are pre-HYPOTHESIZE; none of those fields are valid.
+- **No tests, no observes, no predictions, no new_hypotheses, no selection_rationale.** Screen leads are pre-PREDICT; none of those fields are valid.
 - **`resolutions: []` always.** Required by the validator.
 - **Omit empty `attributes` / `concerns` / `citations` maps.** Do not emit placeholder empty structures.

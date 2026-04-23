@@ -160,7 +160,7 @@ def run_investigation_mock(
 INSTRUCTIONS:
 1. Read the investigate skill instructions from skills/investigate/SKILL.md
 2. The signature knowledge above is already resolved — do not re-read context.md, playbook.md, or checklist.md
-3. Follow the investigation loop: CONTEXTUALIZE -> HYPOTHESIZE -> GATHER -> ANALYZE -> CONCLUDE
+3. Follow the investigation loop: CONTEXTUALIZE -> PREDICT -> GATHER -> ANALYZE -> CONCLUDE
 4. At each phase, call write_state.py: python3 hooks/scripts/write_state.py {run_dir} <PHASE> {alert['ticket_id']} {sig_id}
 5. For the GATHER phase, use the MOCK SIEM DATA above instead of querying live tools
 6. Skip the Explore subagent for precedents in this test — use the mock data

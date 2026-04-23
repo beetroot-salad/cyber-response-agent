@@ -33,7 +33,7 @@ class TestValidateTransition:
         assert valid
 
     def test_initial_cannot_be_hypothesize(self):
-        valid, error = validate_transition(None, "HYPOTHESIZE")
+        valid, error = validate_transition(None, "PREDICT")
         assert not valid
         assert "initial phase" in error
 
@@ -44,15 +44,15 @@ class TestValidateTransition:
     def test_all_legal_transitions(self):
         legal = [
             ("CONTEXTUALIZE", "SCREEN"),       # screen if playbook has it
-            ("CONTEXTUALIZE", "HYPOTHESIZE"),  # branching-first case
+            ("CONTEXTUALIZE", "PREDICT"),  # branching-first case
             ("CONTEXTUALIZE", "GATHER"),       # pure-gathering first lead (no/no cell)
             ("CONTEXTUALIZE", "CONCLUDE"),     # ticket-context fast-resolve
-            ("SCREEN", "HYPOTHESIZE"),         # screen fall-through
+            ("SCREEN", "PREDICT"),         # screen fall-through
             ("SCREEN", "CONCLUDE"),            # screen resolved
-            ("HYPOTHESIZE", "GATHER"),
+            ("PREDICT", "GATHER"),
             ("GATHER", "ANALYZE"),
-            ("GATHER", "HYPOTHESIZE"),         # mid-lead fork discovery
-            ("ANALYZE", "HYPOTHESIZE"),        # loop back
+            ("GATHER", "PREDICT"),         # mid-lead fork discovery
+            ("ANALYZE", "PREDICT"),        # loop back
             ("ANALYZE", "CONCLUDE"),           # finish
         ]
         for current, proposed in legal:
@@ -66,10 +66,10 @@ class TestValidateTransition:
             ("SCREEN", "GATHER"),
             ("SCREEN", "ANALYZE"),
             ("SCREEN", "SCREEN"),
-            ("HYPOTHESIZE", "CONTEXTUALIZE"),
-            ("HYPOTHESIZE", "SCREEN"),
-            ("HYPOTHESIZE", "ANALYZE"),
-            ("HYPOTHESIZE", "CONCLUDE"),
+            ("PREDICT", "CONTEXTUALIZE"),
+            ("PREDICT", "SCREEN"),
+            ("PREDICT", "ANALYZE"),
+            ("PREDICT", "CONCLUDE"),
             ("GATHER", "CONTEXTUALIZE"),
             ("GATHER", "SCREEN"),
             ("GATHER", "CONCLUDE"),
@@ -78,7 +78,7 @@ class TestValidateTransition:
             ("ANALYZE", "GATHER"),
             ("CONCLUDE", "CONTEXTUALIZE"),
             ("CONCLUDE", "SCREEN"),
-            ("CONCLUDE", "HYPOTHESIZE"),
+            ("CONCLUDE", "PREDICT"),
             ("CONCLUDE", "GATHER"),
             ("CONCLUDE", "ANALYZE"),
         ]
@@ -93,7 +93,7 @@ class TestValidateTransition:
         assert "unknown phase" in error
 
     def test_unknown_current_phase(self):
-        valid, error = validate_transition("INVALID", "HYPOTHESIZE")
+        valid, error = validate_transition("INVALID", "PREDICT")
         assert not valid
         assert "unknown current phase" in error
 
@@ -102,32 +102,32 @@ class TestValidateTransition:
 
 
 class TestCountLoops:
-    # A cycle = any HYPOTHESIZE or ANALYZE entry. One full H→G→A cycle yields 2.
+    # A cycle = any PREDICT or ANALYZE entry. One full H→G→A cycle yields 2.
     def test_no_loops(self):
         assert count_loops(["CONTEXTUALIZE"]) == 0
 
     def test_one_cycle_counts_two(self):
-        history = ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE"]
+        history = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE"]
         assert count_loops(history) == 2
 
     def test_two_cycles_count_four(self):
         history = [
-            "CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE",
-            "HYPOTHESIZE", "GATHER", "ANALYZE",
+            "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE",
+            "PREDICT", "GATHER", "ANALYZE",
         ]
         assert count_loops(history) == 4
 
     def test_gather_analyze_without_rehypothesis_still_counts(self):
-        # Under on-demand HYPOTHESIZE, a GATHER→ANALYZE cycle with no
-        # re-entry to HYPOTHESIZE still advances the loop counter.
+        # Under on-demand PREDICT, a GATHER→ANALYZE cycle with no
+        # re-entry to PREDICT still advances the loop counter.
         history = [
-            "CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE",
-            "GATHER", "ANALYZE",  # no new HYPOTHESIZE
+            "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE",
+            "GATHER", "ANALYZE",  # no new PREDICT
         ]
         assert count_loops(history) == 3  # 1 H + 2 A
 
     def test_screen_does_not_count_as_loop(self):
-        history = ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE"]
+        history = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE"]
         assert count_loops(history) == 2  # 1 H + 1 A
 
 
@@ -160,7 +160,7 @@ class TestMakeState:
 class TestTransitionSequence:
     def test_complete_investigation(self):
         """Simulate a full C->H->G->A->CONCLUDE sequence."""
-        phases = ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -170,8 +170,8 @@ class TestTransitionSequence:
     def test_investigation_with_loop(self):
         """Simulate C->H->G->A->H->G->A->CONCLUDE (one loop)."""
         phases = [
-            "CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE",
-            "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE",
+            "CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE",
+            "PREDICT", "GATHER", "ANALYZE", "CONCLUDE",
         ]
         current = None
         for phase in phases:
@@ -190,7 +190,7 @@ class TestTransitionSequence:
 
     def test_screen_fallthrough_sequence(self):
         """C -> SCREEN -> H -> G -> A -> CONCLUDE (screen didn't resolve)."""
-        phases = ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -208,7 +208,7 @@ class TestTransitionSequence:
 
     def test_skip_screen_sequence(self):
         """C -> H -> G -> A -> CONCLUDE (no screen section in playbook)."""
-        phases = ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
         current = None
         for phase in phases:
             valid, error = validate_transition(current, phase)
@@ -288,7 +288,7 @@ class TestWriteStateScript:
         # maximum number of full cycles that still fits under the cap.
         full_cycles = MAX_LOOPS // 2
         for _ in range(full_cycles):
-            for phase in ["HYPOTHESIZE", "GATHER", "ANALYZE"]:
+            for phase in ["PREDICT", "GATHER", "ANALYZE"]:
                 result = subprocess.run(
                     [sys.executable, str(script), str(run_dir), phase],
                     capture_output=True,
@@ -296,9 +296,9 @@ class TestWriteStateScript:
                 )
                 assert result.returncode == 0, f"Failed at {phase}: {result.stderr}"
 
-        # Next HYPOTHESIZE would push count past MAX_LOOPS → rejected.
+        # Next PREDICT would push count past MAX_LOOPS → rejected.
         result = subprocess.run(
-            [sys.executable, str(script), str(run_dir), "HYPOTHESIZE"],
+            [sys.executable, str(script), str(run_dir), "PREDICT"],
             capture_output=True,
             text=True,
         )
@@ -313,7 +313,7 @@ class TestWriteStateScript:
         run_dir = tmp_path / "run-test"
         run_dir.mkdir()
 
-        phases = ["CONTEXTUALIZE", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
         for phase in phases:
             result = subprocess.run(
                 [sys.executable, str(script), str(run_dir), phase],
@@ -374,7 +374,7 @@ class TestWriteStateScript:
         run_dir = tmp_path / "run-test"
         run_dir.mkdir()
 
-        phases = ["CONTEXTUALIZE", "SCREEN", "HYPOTHESIZE", "GATHER", "ANALYZE", "CONCLUDE"]
+        phases = ["CONTEXTUALIZE", "SCREEN", "PREDICT", "GATHER", "ANALYZE", "CONCLUDE"]
         for phase in phases:
             args = [sys.executable, str(script), str(run_dir), phase]
             if phase == "CONTEXTUALIZE":
@@ -495,23 +495,23 @@ class TestInferStatePre:
         hook = _edit_hook_data(
             inv,
             old_string="some content",
-            new_string="some content\n\n## HYPOTHESIZE (loop 1)\n\nhypotheses here",
+            new_string="some content\n\n## PREDICT (loop 1)\n\nhypotheses here",
         )
         result = _run_pre_hook(hook, runs_dir=runs_dir)
         assert result.returncode == 0
 
     def test_edit_illegal_skip_blocked(self, tmp_path):
-        """Skipping GATHER (going HYPOTHESIZE→ANALYZE directly) is blocked."""
+        """Skipping GATHER (going PREDICT→ANALYZE directly) is blocked."""
         run_dir, inv, runs_dir = self._setup_run(tmp_path)
         state = {
             "run_id": "run-test",
             "ticket_id": "",
             "signature_id": "wazuh-rule-test",
-            "phase": "HYPOTHESIZE",
-            "history": ["CONTEXTUALIZE", "HYPOTHESIZE"],
+            "phase": "PREDICT",
+            "history": ["CONTEXTUALIZE", "PREDICT"],
         }
         (run_dir / "state.json").write_text(json.dumps(state))
-        inv.write_text("## CONTEXTUALIZE\n\n## HYPOTHESIZE (loop 1)\n\nhypotheses\n")
+        inv.write_text("## CONTEXTUALIZE\n\n## PREDICT (loop 1)\n\nhypotheses\n")
 
         hook = _edit_hook_data(
             inv,
@@ -520,7 +520,7 @@ class TestInferStatePre:
         )
         result = _run_pre_hook(hook, runs_dir=runs_dir)
         assert result.returncode == 2
-        assert "HYPOTHESIZE -> ANALYZE" in result.stderr
+        assert "PREDICT -> ANALYZE" in result.stderr
 
     def test_non_investigation_file_ignored(self, tmp_path):
         other = tmp_path / "report.md"
