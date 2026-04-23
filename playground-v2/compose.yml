@@ -85,7 +85,14 @@ services:
   elasticsearch:
     depends_on:
       setup:
-        condition: service_healthy
+        # service_completed_successfully — setup is a one-shot. On first boot
+        # it runs for tens of seconds (cert gen + wait-for-ES + kibana_system
+        # password) and its healthcheck has time to fire. On recreate (certs
+        # already in the shared volume) setup's fast-path exits in <1s, often
+        # before the 2s healthcheck interval, leaving compose stuck on
+        # service_healthy forever. Kibana already uses service_completed_successfully
+        # for the same reason.
+        condition: service_completed_successfully
     image: *es-image
     container_name: elasticsearch
     environment:
@@ -202,6 +209,11 @@ services:
         condition: service_completed_successfully
     image: curlimages/curl:latest
     container_name: soc-playground-fleet-host-policies
+    # curlimages/curl runs as the `curl_user` (uid 100) by default; named
+    # volumes are created root-owned on first attach, so writes to /tokens
+    # fail with EACCES. Running as root here is fine — it's a one-shot and
+    # the tokens are read-only-mounted into host containers anyway.
+    user: "0"
     environment:
       - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
     volumes:
@@ -407,13 +419,19 @@ services:
       # Output — bind-mounted to the VPS host so the host agent can tail it
       # without going through a docker volume.
       - /var/log/falco:/var/log/falco
-    command: ["/usr/bin/falco", "--modern-bpf"]
+    # Engine selection is in /etc/falco/falco.yaml (engine.kind: modern_ebpf).
+    # Falco 0.39 dropped the `--modern-bpf` CLI flag in favor of config-only;
+    # rely on the image's default ENTRYPOINT which reads falco.yaml.
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -x falco >/dev/null"]
+      # Falco image ships neither pgrep nor ps, so inspect its output file
+      # instead — once Falco has emitted a single event, the file is non-empty
+      # and we know the pipeline works end-to-end (engine + rules + file
+      # output). start_period gives BPF load + initial rule-load time.
+      test: ["CMD-SHELL", "[ -s /var/log/falco/falco.json ]"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 45s
+      start_period: 60s
 
   zeek:
     build: ./zeek
