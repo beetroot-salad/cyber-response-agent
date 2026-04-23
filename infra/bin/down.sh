@@ -21,6 +21,25 @@ fi
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DESCRIPTION="${SERVER_NAME} lever-down ${TIMESTAMP}"
 
+# Prune the docker daemon before snapshotting. Hetzner snapshots copy every
+# disk block ever written vs. the parent cloud image, not just what's live on
+# disk now — dangling image layers, stopped intermediate build containers,
+# and BuildKit caches all inflate the snapshot (and its creation time) without
+# adding anything the restored stack actually needs. `compose up -d --build`
+# on the next `up.sh` rebuilds whatever's missing from Docker Hub + apt.
+#
+# SKIP_PRUNE=1 bypasses for rare "I'm not sure the daemon is healthy" cases.
+if [ "${SKIP_PRUNE:-0}" != "1" ]; then
+    echo "==> Pruning docker images + buildx cache on VPS (pre-snapshot)"
+    # `system prune` without `--volumes` keeps named volumes intact (es_data,
+    # kibana_data, agent_state_*, fleet_tokens, certs) — they're what makes
+    # lever-up "just work" without re-enrolling or regenerating TLS.
+    docker --context "${SERVER_NAME}" system prune -af >/dev/null \
+        || echo "   (system prune failed — continuing)"
+    docker --context "${SERVER_NAME}" buildx prune -af >/dev/null \
+        || echo "   (buildx prune failed — continuing)"
+fi
+
 echo "==> Taking snapshot: ${DESCRIPTION}"
 hcloud server create-image --type=snapshot \
     --description "${DESCRIPTION}" \
