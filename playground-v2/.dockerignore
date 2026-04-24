@@ -1,9 +1,13 @@
 # Applies only to builds whose `context:` is playground-v2/ (the host images —
-# see hosts/Dockerfile). Services with scoped contexts (./keycloak, ./squid,
-# ./unbound, ./zeek) have their own context roots and are unaffected.
+# see hosts/Dockerfile — and the cmdb stub which needs hosts/inventory.yaml).
+# Services with scoped contexts (./keycloak, ./squid, ./unbound, ./zeek,
+# ./threat-intel, ./change-mgmt) have their own context roots and are unaffected.
 #
-# Host builds only need hosts/ + keycloak/realm.yaml. Everything else is noise.
+# Root-context builds only need hosts/, cmdb/, and keycloak/realm.yaml.
+# Everything else is noise.
 *
 !hosts/
 !hosts/**
+!cmdb/
+!cmdb/**
 !keycloak/realm.yaml

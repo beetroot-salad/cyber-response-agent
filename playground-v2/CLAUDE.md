@@ -345,6 +345,67 @@ docker --context soc-playground exec web-1 tail -30 /var/log/nginx/access.log
 
 **Gotcha — sshpass + password auth is a playground shortcut.** Production hosts would use SSH keys from a secrets manager. We accept the password-auth shape because PR #122 already set `PasswordAuthentication yes` on the host image and the stack is behind a loopback tunnel. Attack scenarios (batch 10) can still exercise credential-abuse archetypes against this same surface — the synthetic benign side just happens to use the same auth channel.
 
+### Stub services (batch 9): CMDB, threat intel, change mgmt, ticketing
+
+Four auth-less FastAPI stubs that round out the Tier 0/1 data layer defined in `docs/playground-environment-v2.md` §Data. Each runs in its own container on the compose network, listens on 8080 internally, and is published on VPS loopback at `127.0.0.1:8001-8004` for debugging. In-cluster consumers reach them via Docker DNS: `http://cmdb:8080`, `http://threat-intel:8080`, `http://change-mgmt:8080`, `http://ticket-server:8080`.
+
+Footprint: 4 × 256 MB ≈ 1 GB — matches the v2 design allocation for "Ticket stub, CMDB stub, proxy, TI stub".
+
+Shared healthcheck pattern via a `&stub-health` YAML anchor on `cmdb` (reused by the other three). Uses Python's `urllib` against `http://127.0.0.1:8080/health` — `python:3.12-slim` has no `curl` and baking one in just for liveness is wasteful (same "use what's in the image" move as Keycloak's bash+/dev/tcp probe).
+
+#### cmdb (batch 9)
+
+FastAPI over `hosts/inventory.yaml`. Loads the `hosts:` list into an immutable `BASE` dict at startup; an in-memory `OVERLAY` dict shallow-merges over `BASE` on every read. The overlay exists as a scaffold for the stale-CMDB chaos modes in batch 11 — batch 9 ships the surface (`POST /admin/overlay/{name}`, `DELETE /admin/overlay/{name}`, `POST /admin/reset`), not a driver.
+
+- Build context is `playground-v2/` (not `./cmdb`) because the image must COPY `hosts/inventory.yaml` from outside its own dir. `playground-v2/.dockerignore` whitelists `cmdb/**` alongside the existing `hosts/**` + `keycloak/realm.yaml` so the root-context tar stays small.
+- Endpoints: `GET /health`, `GET /hosts[?role&criticality&owner]`, `GET /hosts/{name}`, `GET /roles`, `POST/DELETE /admin/overlay/{name}`, `POST /admin/reset`.
+- Merge is shallow on purpose — chaos scenarios flip a single field (owner, criticality). Deep-merging nested `os` / `service` dicts can come if a scenario needs it.
+
+#### threat-intel (batch 9)
+
+Local VT/OTX-shaped reputation stub, offline. Seed lives at `threat-intel/seed/indicators.json` (baked into the image — scoped build context `./threat-intel`). Mixed verdicts + types give agent tests enough material; obviously-fake IPs/domains keep the file from ever being confused with live TI.
+
+- Endpoints: `GET /health`, `GET /lookup/{value}`, `POST /lookup`, `GET /indicators[?verdict&type&tag]`, `POST /admin/reset`.
+- `/lookup/{value}` never 404s — mirrors VT/OTX, returns a synthetic `{verdict: "unknown", score: 0}` record on miss. Lets callers treat lookup as a pure function without a try/except on every call.
+
+#### change-mgmt (batch 9)
+
+YAML + FastAPI — the "authorized-change context" primitive from the v2 doc. Seed at `change-mgmt/seed/changes.yaml` is baked into the image; in-memory store is mutable (POST `/changes`, `POST /changes/{id}/transitions`) but resets on container restart unless the seed file is edited.
+
+- Endpoints: `GET /health`, `GET /changes[?status&host&active_at]`, `GET /changes/{id}`, `GET /changes/active?host=<h>&at=<iso>`, `POST /changes`, `POST /changes/{id}/transitions`, `POST /admin/reset`.
+- Seed windows tie to `hosts/inventory.yaml`'s `change_window` fields (e.g., `CHG-1042` covers web-1/web-2 during their Tue 02:00-04:00 UTC window). One seed CR (`CHG-1050`) intentionally spans "today" so smoke tests against `/changes/active` don't need to mint a CR.
+
+#### ticket-server (reused from v1)
+
+Built from `../playground/ticket-server` — the existing v1 FastAPI app. Kept in place (not moved into `playground-v2/`) so v1 integrations stay working. `build:` packages the context into a tar locally before sending to the remote daemon, so the relative path resolves on the client side and works under `--context soc-playground`.
+
+- Seed at `../playground/ticket-server/seed/tickets.json` is bind-mounted read-only (not baked) — edits apply on `compose up -d` with no rebuild. The container's `TICKET_SEED_PATH` default matches the mount point.
+- Endpoints: unchanged from v1 — `GET /health`, `GET /tickets[?status&label&q]`, `GET /tickets/{key}`, `POST /tickets`, `POST /tickets/{key}/transitions`, `POST /tickets/{key}/comments`, `POST /admin/reset`.
+
+#### Verifying the stubs
+
+From a host container via Docker DNS:
+
+```bash
+docker --context soc-playground exec web-1 bash -c '
+  curl -fsS http://cmdb:8080/hosts/web-1 | jq .owner &&
+  curl -fsS http://threat-intel:8080/lookup/185.220.101.45 | jq .verdict &&
+  curl -fsS "http://change-mgmt:8080/changes/active?host=web-1&at=2026-04-24T12:00:00Z" | jq ".[].id" &&
+  curl -fsS http://ticket-server:8080/tickets | jq .total
+'
+```
+
+CMDB overlay round-trip:
+
+```bash
+docker --context soc-playground exec web-1 bash -c '
+  curl -fsS -X POST -H "Content-Type: application/json" \
+    -d "{\"owner\":\"team.platform\"}" http://cmdb:8080/admin/overlay/web-1
+  curl -fsS http://cmdb:8080/hosts/web-1 | jq .owner   # team.platform
+  curl -fsS -X DELETE http://cmdb:8080/admin/overlay/web-1
+'
+```
+
 ## Adding a new agent
 
 ### Host-based (on the VPS itself) — first-time setup already done

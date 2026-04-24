@@ -18,8 +18,14 @@ name: soc-playground
 #    dev-ws-1         — plain, ubuntu 24.04, dev (developer workstation)
 #    office-ws-1, -2  — plain, ubuntu 22.04 / 24.04, preprod (office-user workstations)
 #    canary-1         — plain, ubuntu 22.04, sandbox (designated attack target)
-# Exposed on loopback only. External access via SSH tunnel:
-#   ssh -L 9200:localhost:9200 -L 5601:localhost:5601 -L 8220:localhost:8220 -L 8080:localhost:8080 soc-playground
+#  Stubs (batch 9 — docs/playground-environment-v2.md §Data):
+#    cmdb             — FastAPI over hosts/inventory.yaml + in-mem mutation overlay
+#    threat-intel     — FastAPI over offline VT/OTX-shaped indicator seed
+#    change-mgmt      — FastAPI over authorized-change seed tied to inventory change_windows
+#    ticket-server    — reused from v1 playground/ticket-server
+# Exposed on loopback only. External access via SSH tunnel (add 8001-8004 for stubs):
+#   ssh -L 9200:localhost:9200 -L 5601:localhost:5601 -L 8220:localhost:8220 -L 8080:localhost:8080 \
+#       -L 8001:localhost:8001 -L 8002:localhost:8002 -L 8003:localhost:8003 -L 8004:localhost:8004 soc-playground
 
 x-es-image: &es-image docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
 
@@ -676,6 +682,72 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_canary_1:/var/lib/elastic-agent
+
+  # Batch 9 stubs: CMDB, threat intel, change management, ticketing.
+  # All auth-less FastAPI servers on 8080 internal. Exposed on loopback
+  # 127.0.0.1:8001-8004 on the VPS for debugging; in-cluster access via
+  # Docker DNS (http://cmdb:8080, etc.). Shared healthcheck below uses
+  # python's urllib — python:3.12-slim has no curl, and adding one bloats
+  # the image for a single liveness probe.
+
+  cmdb:
+    # Build context widened to playground-v2/ root so the image can COPY
+    # hosts/inventory.yaml — same pattern as hosts/Dockerfile. The root
+    # .dockerignore whitelists hosts/** and cmdb/** to keep the tar small.
+    build:
+      context: .
+      dockerfile: cmdb/Dockerfile
+    image: soc-playground/cmdb:local
+    container_name: cmdb
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:8001:8080"
+    healthcheck: &stub-health
+      test: ["CMD-SHELL", "python -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/health\",timeout=2).status==200 else 1)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  threat-intel:
+    build: ./threat-intel
+    image: soc-playground/threat-intel:local
+    container_name: threat-intel
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:8002:8080"
+    healthcheck: *stub-health
+
+  change-mgmt:
+    build: ./change-mgmt
+    image: soc-playground/change-mgmt:local
+    container_name: change-mgmt
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:8003:8080"
+    healthcheck: *stub-health
+
+  ticket-server:
+    # Reuses the existing v1 FastAPI app in-place (see v2 §Data: "keep stub
+    # over Elastic Cases"). `build:` packages the context into a tar locally
+    # before sending to the remote daemon, so the relative path resolves on
+    # the client side and works against --context soc-playground.
+    build: ../playground/ticket-server
+    image: soc-playground/ticket-server:local
+    container_name: ticket-server
+    restart: unless-stopped
+    mem_limit: 256m
+    volumes:
+      # Bind-mounted so seed edits apply with `compose up -d` alone — no
+      # rebuild needed. ticket-server's Dockerfile doesn't COPY the seed dir,
+      # and the default TICKET_SEED_PATH points here.
+      - ../playground/ticket-server/seed:/app/seed:ro
+    ports:
+      - "127.0.0.1:8004:8080"
+    healthcheck: *stub-health
 
 volumes:
   certs:
