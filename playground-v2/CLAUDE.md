@@ -406,6 +406,49 @@ docker --context soc-playground exec web-1 bash -c '
 '
 ```
 
+### Attack scenarios (batch 10)
+
+Parameterized, seed-reproducible attack scenarios that generate realistic telemetry across auth/metadata, execution, and data-access signal categories (docs/playground-environment-v2.md §Attack-simulation surface). Runner + catalog live in `playground-v2/attacks/`. Dispatches happen from the devcontainer against compose-network containers via `docker --context soc-playground exec`. Each run writes `attacks/runs/<run_id>/meta.json` with start/end timestamps + per-step exit codes — the time-window raw material that batch 10b's fixture-capture pass will use to bound Elasticsearch queries.
+
+Catalog (4 starter scenarios):
+
+| id | category | source → target | signal surface |
+|---|---|---|---|
+| `ssh-brute-force-canary` | auth-metadata | `office-ws-1` as `dev.dana` → `canary-1` | rule-5710 / SSH invalid-user bursts on canary sshd |
+| `living-off-the-land` | execution | `canary-1` (root) → self | curl-to-bash + base64-decoded shell payload — Falco execution lineage |
+| `persistence-authorized-keys` | execution | `canary-1` (root) → self | append attacker key to `/root/.ssh/authorized_keys` — rule-550 FIM + Falco `write_below_etc` analog |
+| `cross-tier-ssh-probe` | data-access | `office-ws-1` as `dev.dana` → `db-1` | cross-credential-anomaly — office-ws has no `trust_edges_out` to db; dev.dana has no account on db-1 |
+
+Run workflow:
+
+```bash
+cd /workspace/playground-v2/attacks
+./runner.py list
+# Quiesce baseline so synthetic benign traffic doesn't pollute the capture window:
+sed -i 's/^V2_BASELINE_ENABLED=.*/V2_BASELINE_ENABLED=false/' ../.env
+docker --context soc-playground compose -f ../compose.yml up -d \
+  --force-recreate web-1 web-2 db-1 jump-box-1 dev-ws-1 office-ws-1 office-ws-2 canary-1
+# Run:
+./runner.py run ssh-brute-force-canary --seed 42 --intensity 8
+# Review:
+cat runs/<run_id>/meta.json
+# Re-enable baseline (reverse the sed + re-recreate) for steady state.
+```
+
+**Design notes:**
+
+- **Reproducibility.** Per-iteration PRNG seeded as `sha256(scenario_id:seed:step_index:iteration)` — same seed + same catalog → same dispatches. The runner itself is deterministic; any non-determinism must come from inside the dispatched shell commands (e.g., `$(date +%s)` in `persistence-authorized-keys`), which is fine because fixture capture keys by time window rather than byte-identical re-runs.
+- **Baseline is a sibling concern.** The runner deliberately does NOT toggle `V2_BASELINE_ENABLED` — that lever already exists from batch 8 and bundling it here would muddy the separation. Operators flip it + `compose up -d --force-recreate` around a capture.
+- **Source/target realism.** Source hosts and identities are real compose containers + realm users, so Keycloak events, Zeek conns, sshd/auth.log, and Falco syscall events all carry the right labels. `office-ws-1` + `dev.dana` reaching `db-1` is telemetry-wise a compromised-workstation signal because neither the role mapping nor the `trust_edges_out` in `hosts/inventory.yaml` permits that path.
+- **Per-step templating.** `${host}`, `${target}`, `${user}`, `${iteration}`, `${intensity}` substitute in each step's `cmd`. Repeat counts can be literal ints or the string `"${intensity}"`; `delay_s_between` sleeps between repeats; `allow_fail` lets a step's non-zero rc proceed to the next step (ssh brute force is expected to fail, so it uses `allow_fail: true`).
+- **Run artifacts.** `runs/` is gitignored except for its `.gitignore` — run manifests are ephemeral until batch 10b packages them into fixture bundles.
+
+**Deferred to batch 10b / 11:**
+
+- `wazuh_cli.py --replay` and the fixture bundle schema (docs/evaluation-and-chaos-design.md §Tool intercept, §Fixture structure).
+- Chaos control plane that drives the CMDB overlay, toxiproxy-style service outages, schema drift, and data drops (docs/playground-environment-v2.md §Phased build Phase 4).
+- MinIO-dependent data-access archetypes (blob enumeration, staged exfil) — MinIO is a Tier-2 dependency.
+
 ## Adding a new agent
 
 ### Host-based (on the VPS itself) — first-time setup already done

