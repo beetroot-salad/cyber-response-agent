@@ -128,12 +128,23 @@ class TestPromptAssembly:
         assert "signature_id=wazuh-rule-5710" in captured[0]
 
     def test_prompt_inlines_alert_investigation_no_archetypes(self, tmp_path, monkeypatch):
-        """Handler preloads alert + investigation only. Archetype context moved
-        to the REPORT phase — ANALYZE no longer sees archetype stories."""
+        """Handler preloads alert + investigation (YAML-only) + archetype-free
+        context. Markdown prose is stripped — only YAML fence content reaches
+        the subagent so archetype-catalog / playbook-hypothesis enumerations
+        cannot be mistaken for grading targets."""
         ctx = make_ctx(
             tmp_path,
             history=[Phase.PREDICT.value],
-            existing_investigation="## CONTEXTUALIZE\n\nalert observed.\n",
+            existing_investigation=(
+                "## CONTEXTUALIZE\n\n"
+                "**Playbook hypotheses:** ?bleed-target, ?should-not-grade\n\n"
+                "```yaml\n"
+                "prologue:\n"
+                "  vertices:\n"
+                "  - id: v-001\n"
+                "    type: endpoint\n"
+                "```\n"
+            ),
         )
         captured: list[str] = []
         monkeypatch.setattr(
@@ -150,8 +161,12 @@ class TestPromptAssembly:
         # Archetype block explicitly absent — REPORT picks archetype, not ANALYZE
         assert "<archetypes>" not in prompt
         assert 'name="monitoring-probe"' not in prompt
-        # Inlined content landed
-        assert "alert observed." in prompt  # from investigation.md
+        # YAML fence content lands, markdown prose is stripped (the
+        # "Playbook hypotheses:" enumeration is the exact bleed surface
+        # d03ac81d tripped on — must not reach the subagent).
+        assert "v-001" in prompt  # from the YAML fence
+        assert "?bleed-target" not in prompt
+        assert "Playbook hypotheses" not in prompt
         assert '"id": "alert-1"' in prompt  # from alert.json
 
     def test_loop_n_counts_hypothesize_entries(self, tmp_path, monkeypatch):
@@ -787,6 +802,140 @@ class TestFindingsSynthesis:
         # Declared hypothesis resolved; undeclared dropped.
         assert "hypothesis: h-001" in written
         assert "image-entrypoint" not in written.split("findings:")[-1]
+
+    def test_supporting_edges_defaulted_on_confirmed_weights(
+        self, tmp_path, monkeypatch,
+    ):
+        """Any ++/-- resolution must cite at least one authoritative edge in
+        `supporting_edges` (invlang structural rule). The subagent doesn't
+        author graph-level edge references; the handler defaults them to the
+        prologue's authoritative edges (kind ∈
+        {siem-event, runtime-audit, authoritative-source}).
+        """
+        prologue_with_edges = textwrap.dedent("""\
+            ## CONTEXTUALIZE
+
+            ```yaml
+            prologue:
+              vertices:
+                - id: v-001
+                  type: endpoint
+                  classification: target-endpoint
+                  identifier: "target-endpoint"
+                - id: v-002
+                  type: process
+                  classification: runtime-exec-primitive
+                  identifier: runc
+              edges:
+                - id: e-001
+                  relation: spawned
+                  source_vertex: v-002
+                  target_vertex: v-001
+                  authority: {kind: runtime-audit, source: "Wazuh (rule 100001)"}
+                - id: e-002
+                  relation: observed
+                  source_vertex: v-001
+                  target_vertex: v-002
+                  authority: {kind: siem-event, source: "Wazuh"}
+            ```
+
+            ## PREDICT (loop 1)
+
+            ```yaml
+            hypothesize:
+              hypotheses:
+                - id: h-001
+                  name: "?underlying-host"
+                  proposed_edge:
+                    id: e-p001
+                    parent_vertex: {type: process, classification: host-invoker, identifier: "runc"}
+                    attached_to_vertex: v-002
+                    relation: invoked
+                    authority: siem-event
+                  predictions:
+                    - id: p1
+                      subject: proposed_edge
+                      claim: "prior events exist in the 7d window"
+                  refutation_shape:
+                    - id: r1
+                      refutes_predictions: [p1]
+                      claim: "empty baseline"
+                  weight: null
+            ```
+            """)
+        ctx = make_ctx(
+            tmp_path,
+            history=[Phase.PREDICT.value],
+            existing_investigation=prologue_with_edges,
+        )
+        ctx.outputs[Phase.GATHER] = {
+            "leads": [
+                {
+                    "id": "l-001",
+                    "name": "container-baseline",
+                    "status": "ok",
+                    "query": {"system": "wazuh", "query": "rule.id:100001"},
+                    "characterization": {"total_events": 36},
+                },
+            ],
+            "prescribed_leads": ["container-baseline"],
+            "executed_leads": ["container-baseline"],
+            "raw_details_paths": [],
+        }
+        response = textwrap.dedent("""
+        ```yaml
+        analyze:
+          loop: 1
+          resolutions:
+            - lead_ref: "l-001"
+              entries:
+                - hypothesis_id: "h-001"
+                  weight: "++"
+                  matched_prediction_ids: [p1]
+                  reasoning: "36 prior events; r1 failed to materialize."
+          routing:
+            decision: continue
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            analyze_handler, "_invoke_subagent",
+            stub_invoke([], response),
+        )
+        analyze_handler.handle(ctx)
+        written = (ctx.run_dir / "investigation.md").read_text()
+        findings_yaml = written.split("findings:")[-1]
+        # Both authoritative prologue edges land as supporting_edges defaults.
+        assert "supporting_edges" in findings_yaml
+        assert "e-001" in findings_yaml
+        assert "e-002" in findings_yaml
+
+    def test_supporting_edges_not_emitted_on_weak_weights(
+        self, tmp_path, monkeypatch,
+    ):
+        """+/- grades do not carry supporting_edges — only ++/-- do. The
+        invlang rule doesn't fire on weak grades, so defaulting them would
+        add noise.
+        """
+        ctx = make_ctx(
+            tmp_path,
+            history=[Phase.PREDICT.value],
+            existing_investigation=self._PROLOGUE,  # has no edges
+        )
+        ctx.outputs[Phase.GATHER] = {
+            "leads": [{"id": "l-001", "name": "auth", "status": "ok",
+                       "query": {"system": "wazuh"}}],
+            "prescribed_leads": ["auth"],
+            "executed_leads": ["auth"],
+            "raw_details_paths": [],
+        }
+        monkeypatch.setattr(
+            analyze_handler, "_invoke_subagent",
+            stub_invoke([], self._halt_response_with_resolutions()),
+        )
+        analyze_handler.handle(ctx)
+        written = (ctx.run_dir / "investigation.md").read_text()
+        findings_yaml = written.split("findings:")[-1]
+        assert "supporting_edges" not in findings_yaml
 
     def test_skips_synthesis_when_gather_leads_absent(self, tmp_path, monkeypatch):
         # SCREEN-matched and forced-exhaustion paths reach ANALYZE without
