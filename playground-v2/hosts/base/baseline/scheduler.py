@@ -149,8 +149,13 @@ def dispatch(action_id: str, user: str, cmd: str, log: logging.Logger) -> None:
     """Execute `cmd` as `user` via runuser. Captures exit code + elapsed time."""
     start = time.monotonic()
     try:
+        # runuser on util-linux treats -u and -s as mutually exclusive, so we
+        # skip -s and pass `bash -c` as the explicit argv instead — this
+        # overrides the identity's login shell (e.g., /usr/sbin/nologin for
+        # service accounts) in exactly the same way systemd timers dispatch
+        # jobs as nologin service users.
         proc = subprocess.run(
-            ["runuser", "-u", user, "-s", "/bin/bash", "--", "bash", "-c", cmd],
+            ["runuser", "-u", user, "--", "bash", "-c", cmd],
             capture_output=True, text=True, timeout=60,
         )
         rc = proc.returncode

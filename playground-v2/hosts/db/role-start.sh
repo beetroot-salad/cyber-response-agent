@@ -16,17 +16,18 @@
 # bridge only (no host port), so network exposure is the docker DNS surface.
 set -euo pipefail
 
-service postgresql start >/dev/null
-
-# Resolve the cluster's config dir so this survives a minor-version bump
-# (PG 14/15/16 each live at a different /etc/postgresql path).
-PG_CONF_DIR=$(find /etc/postgresql -maxdepth 2 -name postgresql.conf -printf '%h\n' | head -n1)
+# Write config changes BEFORE starting the cluster — listen_addresses is a
+# PGC_POSTMASTER setting, which means postgres only picks up changes at
+# start, not on SIGHUP/reload. The postgresql package lays down the cluster's
+# config skeleton at install time, so these paths exist in the image even
+# though the daemon isn't running yet.
+PG_CONF_DIR=$(find /etc/postgresql -maxdepth 3 -name postgresql.conf -printf '%h\n' | head -n1)
 if [[ -z "${PG_CONF_DIR}" ]]; then
   echo "[db/role-start] FATAL: no postgresql.conf under /etc/postgresql" >&2
   exit 1
 fi
 
-# Open listen_addresses once — the sed is idempotent via a sentinel comment.
+# Open listen_addresses once — the append is idempotent via a sentinel comment.
 if ! grep -q "# soc-playground: listen_addresses" "${PG_CONF_DIR}/postgresql.conf"; then
   printf "\n# soc-playground: listen_addresses\nlisten_addresses = '*'\n" \
     >> "${PG_CONF_DIR}/postgresql.conf"
@@ -41,7 +42,7 @@ host    all             all             0.0.0.0/0               md5
 EOF
 fi
 
-service postgresql reload >/dev/null
+service postgresql start >/dev/null
 
 # Seed role + DB + table as the postgres superuser. Each step is check-before-
 # create so rerunning is safe.
