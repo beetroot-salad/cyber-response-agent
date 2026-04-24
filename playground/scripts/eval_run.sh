@@ -145,6 +145,10 @@ print(json.dumps(a, separators=(',',':')))
 
 # soc-agent run dir lives inside the eval dir so it's also isolated
 export SOC_AGENT_RUNS_DIR="$EVAL_DIR/runs"
+# Corpus lives in the canonical runs tree, not the per-eval tmpdir. Without
+# this override, invlang.corpus falls back to SOC_AGENT_RUNS_DIR (empty here)
+# and PREDICT priors always come back "0 cases matched".
+export INVLANG_CORPUS_ROOT="${INVLANG_CORPUS_ROOT:-$REPO_ROOT/runs}"
 
 # Point the Stop hook (investigation_summary.py) at the tee'd transcript.
 # --no-session-persistence means the path Claude Code passes into the hook
@@ -167,7 +171,8 @@ fi
 
 echo "[+] Launching claude (isolated, transcript → $EVAL_DIR/transcript.jsonl)..."
 echo "    cwd: $(pwd)"
-echo "    SOC_AGENT_RUNS_DIR: $SOC_AGENT_RUNS_DIR"
+echo "    SOC_AGENT_RUNS_DIR:   $SOC_AGENT_RUNS_DIR"
+echo "    INVLANG_CORPUS_ROOT:  $INVLANG_CORPUS_ROOT"
 echo
 
 # stdbuf to keep the tee buffer flushing in real time

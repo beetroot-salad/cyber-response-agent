@@ -491,14 +491,42 @@ def format_current_gather_block(leads: list[dict]) -> str:
     return f"<current_gather>\n{body}\n</current_gather>"
 
 
-def format_signature_text_block(texts: dict[str, str]) -> str:
+_ARCHETYPES_SECTION_RE = re.compile(
+    r"^##\s+Archetypes\s*\n.*?(?=^##\s|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def _strip_archetype_catalog(playbook_md: str) -> str:
+    """Remove the `## Archetypes` section from a playbook.
+
+    Archetype labels are a disposition-routing concern consumed by REPORT;
+    they confuse PREDICT's mechanism-layer reasoning by presenting named
+    buckets (`ci-pipeline-exec`, `operator-runtime-debug`, ...) as
+    first-class shape candidates. Composition rules and hypothesis seeds
+    stay because they encode escalation policy + mechanism-class structure
+    that PREDICT legitimately consumes.
+    """
+    return _ARCHETYPES_SECTION_RE.sub("", playbook_md).rstrip() + "\n"
+
+
+def format_signature_text_block(
+    texts: dict[str, str],
+    *,
+    exclude_archetype_catalog: bool = False,
+) -> str:
     """Render the signature's playbook.md + context.md as a tagged block.
 
     Missing files render as empty `<playbook/>` / `<context/>` tags so the
     subagent can still recognize them as absent rather than failing silently.
+
+    `exclude_archetype_catalog=True` strips the `## Archetypes` section — use
+    from PREDICT (archetypes are a REPORT concern and confuse shape choice).
     """
     lines = ["<signature-knowledge>"]
     playbook = (texts.get("playbook_md") or "").rstrip()
+    if playbook and exclude_archetype_catalog:
+        playbook = _strip_archetype_catalog(playbook).rstrip()
     context = (texts.get("context_md") or "").rstrip()
     if playbook:
         lines.append("  <playbook>")

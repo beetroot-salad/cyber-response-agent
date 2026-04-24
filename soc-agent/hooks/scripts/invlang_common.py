@@ -130,7 +130,21 @@ def _is_valid_id(value: Any) -> bool:
 
 
 def _merge_blocks(blocks: list[dict[str, Any]]) -> dict[str, Any]:
-    """Merge multiple YAML companion blocks into a single body dict."""
+    """Merge multiple YAML companion blocks into a single body dict.
+
+    Per-key merge semantics:
+      - `findings`: append. Each GATHER/ANALYZE loop contributes its own
+        lead records; order matters.
+      - `hypothesize`: additive on `hypotheses` (first-wins by id),
+        union on `shelved`. A later PREDICT loop may emit a
+        `hypothesize:` block containing only *new* hypotheses; prior
+        hypotheses remain declared without needing re-emission. Without
+        this, referencing h-ids in later leads breaks when a subsequent
+        hypothesize block is written.
+      - `prologue`, `conclude`: overwrite (last wins). Only CONTEXTUALIZE
+        emits a prologue and only CONCLUDE emits a conclude block, so
+        overwrite is safe.
+    """
     merged: dict[str, Any] = {}
     for doc in blocks:
         for key in COMPANION_TOP_LEVEL:
@@ -140,6 +154,33 @@ def _merge_blocks(blocks: list[dict[str, Any]]) -> dict[str, Any]:
                 merged.setdefault("findings", [])
                 if isinstance(doc[key], list):
                     merged["findings"].extend(doc[key])
+            elif key == "hypothesize":
+                incoming = doc[key]
+                if not isinstance(incoming, dict):
+                    continue
+                existing = merged.setdefault(
+                    "hypothesize", {"hypotheses": [], "shelved": []}
+                )
+                if not isinstance(existing.get("hypotheses"), list):
+                    existing["hypotheses"] = []
+                if not isinstance(existing.get("shelved"), list):
+                    existing["shelved"] = []
+                existing_ids = {
+                    h.get("id")
+                    for h in existing["hypotheses"]
+                    if isinstance(h, dict)
+                }
+                for h in incoming.get("hypotheses") or []:
+                    if not isinstance(h, dict):
+                        continue
+                    hid = h.get("id")
+                    if hid in existing_ids:
+                        continue  # first-wins; prior declaration is authoritative
+                    existing["hypotheses"].append(h)
+                    existing_ids.add(hid)
+                for s in incoming.get("shelved") or []:
+                    if s not in existing["shelved"]:
+                        existing["shelved"].append(s)
             else:
                 merged[key] = doc[key]
     return merged

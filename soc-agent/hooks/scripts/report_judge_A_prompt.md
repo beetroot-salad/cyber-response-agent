@@ -55,10 +55,15 @@ it against an authority? See `docs/investigation-language.md`
 - `verdict: unauthorized` or `verdict: indeterminate` forces
   escalation (disposition ∈ {unclear, true_positive}); they cannot
   coexist with `disposition: benign`.
-- When the contract-carrying hypothesis's `proposed_edge.parent_vertex.type`
-  is an acting-entity type (`session`, `identity`, `process`), a peer
-  `?adversary-controlled-*` hypothesis must exist OR the hypothesis
-  must carry `integrity_waived: <rationale>` (rule #32).
+- If two hypotheses share `attached_to_vertex` + `proposed_edge.relation`
+  + `proposed_edge.parent_vertex.type` AND one's prediction claims are a
+  subset of the other's, where at least one carries an
+  `authorization_contract` — that's the invoker-identity anti-pattern
+  (rule #32, v2.12+). Integrity should collapse into the contract
+  resolution; peers are only legitimate when their predictions diverge on
+  observable fields the contract-carrier doesn't cover. A single
+  contract-carrying hypothesis with no peer is fine; `integrity_waived`
+  is optional documentation, not required.
 - For mechanism-level adversarial hypotheses (no contract), the agent
   must still show the `--` refutation is specific (cites concrete
   observations from a GATHER block), not generic ("unlikely given
@@ -76,9 +81,9 @@ nor a `conclude.deferred_authorizations[]` deferral; OR
 `disposition: benign` coexists with a non-`authorized` verdict; OR the
 resolution's reasoning is vague ("consistent with sanctioned sources"
 instead of a specific authority answer); OR a mechanism-level
-adversarial hypothesis disappeared without specific refutation; OR an
-acting-entity contract is declared without a `?adversary-controlled-*`
-peer or `integrity_waived` rationale.
+adversarial hypothesis disappeared without specific refutation; OR two
+sibling hypotheses share proposed_edge + predictions (invoker-identity
+anti-pattern, rule #32).
 
 ### 2. PLUS_PLUS_FALSIFICATION
 

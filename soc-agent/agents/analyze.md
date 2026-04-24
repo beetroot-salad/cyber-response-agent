@@ -43,15 +43,21 @@ analyze:
     - lead_ref: "{lead-id}"
       asks: ["{anchor-id}", ...]
       verdict: "authorized" | "unauthorized" | "indeterminate"
+      grounding_kind: "org-authority" | "telemetry-baseline"
+      authority_for_question: "{anchor-id}"
+      as_of: "{ISO-8601 or null}"
       reasoning: "what the anchor said, why it answers the question"
 
   legitimacy_resolutions:               # one entry per lead that closes an authorization_contract
     - lead_ref: "{lead-id}"
       entries:
-        - edge_id: "e-..."
-          contract_id: "h-...ac1"
+        - edge_id: "e-001"              # materialized edge id from <investigation> findings;
+                                         # if the hypothesis's proposed_edge has not been
+                                         # materialized in a prior loop, omit this entry —
+                                         # the contract cannot close this loop.
+          contract_id: "h-001.ac1"      # dotted form: h-{hypothesis-id}.ac{n}
           verdict: "authorized" | "unauthorized" | "indeterminate"
-          grounding_kind: "anchor-consultation" | "past-case"
+          grounding_kind: "org-authority" | "past-case"
           authority_for_question: "{anchor-id or past-case ticket}"
           as_of: "{ISO-8601 or null}"
           reasoning: "brief"
@@ -145,6 +151,9 @@ Failure modes seen in prior runs. Each is a hard rule in context; check your dra
 - **Grading a hypothesis via its sibling's evidence.** If lead l-001's result supports `h-001.p1`, do not cite `p1` on `h-002` to upgrade `h-002`. Each hypothesis is graded against predictions *declared on itself*. Siblings may share a lead id as `lead_ref`, but `matched_prediction_ids` must name predictions on the resolution's own `hypothesis_id`. If you cannot find a prediction on `h-002` that this lead tested, the honest grade is no entry (don't resolve `h-002` on this lead) — not a cross-sibling citation. Validator rule 25 will reject the synthesis; more importantly, it misrepresents what the evidence covers.
 - **Trailing explanatory prose outside the YAML fence.** See hard rule 1. If you find yourself writing "Rationale:" or "Not emitted — explanatory only:" after the fence, that content belongs in a `reasoning` field or not at all.
 - **Grading `--` on a structural argument with no matched refutation shape.** If the evidence would structurally falsify a prediction but no pre-registered `refutation_shape` entry covers that shape, cap at `-`. The `matched_refutation_ids[]` field must name a real `r{N}` id declared on the hypothesis; "the observation clearly refutes this" is not admissible without a shape to match against.
+- **Citing `h-{id}.proposed_edge` or `h-{id}:proposed_edge` as an `edge_id`.** `legitimacy_resolutions[].entries[].edge_id` must be an `e-*` id declared in `<investigation>`. A hypothesis's `proposed_edge` object is not an id — it's an embedded description until the handler materializes it into an `e-*` edge (typically when a GATHER lead confirms the hop). If the hypothesis you want to resolve has no materialized edge yet, omit the `legitimacy_resolutions` entry and let the contract carry over; CONCLUDE can list it under `deferred_authorizations[]` with rationale.
+- **`contract_id` format.** Always dotted: `h-001.ac1`, never `h-001ac1`. The validator matches `^h-[^.]+\.ac\d+$`.
+- **`grounding_kind` enum.** `authorization_resolutions` take `org-authority` or `past-case` only — `anchor-consultation` is not a value (anchor consultation is the *mechanism*, not a grounding kind). Baseline lookups belong in `trust_anchor_result` with `grounding_kind: telemetry-baseline`, which the handler synthesizes into `anchor_consultations[]` rather than into a contract resolution.
 
 ## Examples
 

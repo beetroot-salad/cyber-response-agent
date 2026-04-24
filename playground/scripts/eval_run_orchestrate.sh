@@ -98,11 +98,16 @@ print(json.dumps(a, separators=(',',':')))
 ")
 
 export SOC_AGENT_RUNS_DIR="$EVAL_DIR/runs"
+# Corpus lives in the canonical runs tree, not the per-eval tmpdir. Without
+# this override, invlang.corpus falls back to SOC_AGENT_RUNS_DIR (empty here)
+# and PREDICT priors always come back "0 cases matched".
+export INVLANG_CORPUS_ROOT="${INVLANG_CORPUS_ROOT:-$REPO_ROOT/runs}"
 
 SIGNATURE_ID="wazuh-rule-$RULE_ID"
 
 echo "[+] Launching orchestrator (driver log → $EVAL_DIR/driver.log)..."
-echo "    SOC_AGENT_RUNS_DIR: $SOC_AGENT_RUNS_DIR"
+echo "    SOC_AGENT_RUNS_DIR:   $SOC_AGENT_RUNS_DIR"
+echo "    INVLANG_CORPUS_ROOT:  $INVLANG_CORPUS_ROOT"
 echo
 
 set +e
