@@ -6,43 +6,32 @@ investigation is terminal. Does NOT decide what to investigate next — that is
 PREDICT's job. ANALYZE's routing decision is binary: `continue` → PREDICT |
 `halt` → REPORT.
 
-The ANALYZE subagent (agents/analyze.md, model=sonnet) emits three sections:
-    1. `## ANALYZE (loop {n})` — human-readable assessment
-    2. `## Self-report`        — data wishes, uncertain claims, anomalies
-    3. terminal fenced `yaml`  — machine-parsed routing decision
-
-Terminal YAML trailer:
-    route: continue | halt
-    # halt path:
-    termination_category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
-    disposition: benign | true_positive | unclear
-    confidence: high | medium | low
-    matched_archetype: <name> | null
-    surviving_hypotheses: [...]
-    # continue path:
-    unresolved_prescribed_set: [...]  # optional; prescribed leads that gather
-                                      # didn't resolve. Handler back-fills from
-                                      # GATHER payload when the subagent omits.
+The ANALYZE subagent (agents/analyze.md, model=sonnet) emits a single
+envelope with a top-level `analyze:` key (v2.12). The envelope carries
+per-lead resolutions, authority verdicts, authorization closures, impact
+grades, anomalies, data wishes, and the routing trailer. The handler
+synthesizes a prose `## ANALYZE (loop N)` section from the envelope and
+appends it to investigation.md.
 
 Handler responsibilities:
     - computes `loop_n` from ctx.history (count of PREDICT entries)
+    - preloads per-lead raw SIEM payloads from
+      `ctx.outputs[Phase.GATHER]["raw_details_paths"]` into a
+      `<raw_details>` block alongside `<alert>` + `<investigation>`
     - invokes the subagent via the shared `_subagent.invoke_subagent` wrapper
-    - extracts the terminal routing YAML via `extract_terminal_yaml`
-    - validates the routing payload shape
+    - parses the `analyze:` envelope via `parse_analyze_envelope`
     - back-fills `unresolved_prescribed_set` from `ctx.outputs[Phase.GATHER]`
       when the subagent didn't compute it
-    - strips only the *last* YAML fence (the terminal routing trailer) before
-      appending; non-terminal YAML survives. This is future-proofing for when
-      the subagent starts emitting `resolutions:` sub-blocks — the invlang
-      infrastructure for three-phase co-ownership isn't landed yet, but the
-      handler should not drop signal when it does.
-    - appends the two markdown sections to investigation.md, pre-validated via
-      `validate_companion()` as a library call
-    - returns PhaseResult(next_phase, payload)
+    - renders a prose `## ANALYZE (loop N)` section from the envelope and
+      appends to investigation.md, pre-validated via `validate_companion()`
+    - returns PhaseResult(next_phase, payload) with a backwards-compat
+      payload shape (route, termination_category, disposition, confidence,
+      matched_archetype, surviving_hypotheses, unresolved_prescribed_set)
 
 Input (Context):
     ctx.run_dir, ctx.signature_id, ctx.history, ctx.alert,
-    ctx.outputs[Phase.GATHER] (carries prescribed_leads + executed_leads)
+    ctx.outputs[Phase.GATHER] (carries prescribed_leads, executed_leads,
+    raw_details_paths)
 
 Output:
     PhaseResult
@@ -53,8 +42,12 @@ Output:
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
@@ -66,8 +59,12 @@ from scripts.handlers._context_loader import (
     load_investigation_md,
     load_run_salt,
 )
+from scripts.handlers._output_parser import (
+    AnalyzeEnvelope,
+    AnalyzeOutputError,
+    parse_analyze_envelope,
+)
 from scripts.handlers._subagent import (
-    extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
 )
 
@@ -78,16 +75,6 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 SUBAGENT_TIMEOUT_SECONDS = int(
     os.environ.get("SOC_AGENT_ANALYZE_TIMEOUT_SECONDS", "300")
 )
-
-_VALID_ROUTES = {"continue", "halt"}
-_VALID_TERMINATION_CATEGORIES = {
-    "trust-root",
-    "adversarial-refuted",
-    "severity-ceiling",
-    "exhaustion-escalation",
-}
-_VALID_DISPOSITIONS = {"benign", "true_positive", "unclear"}
-_VALID_CONFIDENCES = {"high", "medium", "low"}
 
 
 # ---------------------------------------------------------------------------
@@ -114,101 +101,122 @@ def _compute_loop_n(ctx: Context) -> int:
 
     loop_n is the count of PREDICT entries observed — every loop begins
     with PREDICT, so the most recent PREDICT closes the current loop.
-    Fallback to 1 for safety (shouldn't happen — ANALYZE should always
-    follow at least one PREDICT in a well-formed run).
+    Fallback to 1 for safety.
     """
     return sum(1 for p in ctx.history if p == Phase.PREDICT.value) or 1
+
+
+def _load_raw_details(ctx: Context) -> str:
+    """Read the per-lead raw payloads gather-handler wrote to disk and
+    concatenate them into a `<raw_details>` block for the analyze prompt.
+
+    `ctx.outputs[Phase.GATHER]["raw_details_paths"]` carries the absolute
+    paths. Returns an empty string when no paths are present (screen-matched
+    flows, pre-v2.12 runs, or gather leads that produced no raw payload).
+    """
+    gather_out = ctx.outputs.get(Phase.GATHER)
+    if not isinstance(gather_out, dict):
+        return ""
+    paths = gather_out.get("raw_details_paths") or []
+    if not paths:
+        return ""
+    lines = ["<raw_details>"]
+    for p in paths:
+        path = Path(p)
+        try:
+            body = path.read_text()
+        except FileNotFoundError:
+            continue
+        lines.append(f"  <lead id=\"{path.stem}\">")
+        lines.append(body)
+        lines.append(f"  </lead>")
+    lines.append("</raw_details>")
+    return "\n".join(lines)
 
 
 def _assemble_prompt(ctx: Context) -> str:
     """Build the analyze subagent prompt with all deterministic context inline.
 
-    The subagent receives alert.json and investigation.md preloaded — no Read
-    tool calls required. Archetype context is not preloaded; archetype
-    labeling moved to the REPORT phase.
+    The subagent receives alert.json, investigation.md, and the per-lead
+    raw SIEM payloads (under `<raw_details>`) preloaded — no Read tool
+    calls required. Archetype context is not preloaded; archetype labeling
+    moved to the REPORT phase.
     """
     loop_n = _compute_loop_n(ctx)
     alert = load_alert(ctx.run_dir)
     salt = load_run_salt(ctx.run_dir)
     investigation_md = load_investigation_md(ctx.run_dir)
-    return "\n\n".join([
+
+    blocks = [
         f"run_dir={ctx.run_dir}\nloop_n={loop_n}\nsignature_id={ctx.signature_id}",
         format_alert_block(alert, salt),
         format_investigation_block(investigation_md, mode="analyze"),
-    ])
+    ]
+    raw_details_block = _load_raw_details(ctx)
+    if raw_details_block:
+        blocks.append(raw_details_block)
+    return "\n\n".join(blocks)
 
 
 # ---------------------------------------------------------------------------
-# Terminal YAML validation
+# Routing payload (backwards-compat projection from the envelope)
 # ---------------------------------------------------------------------------
 
 
-def _validate_routing(payload: dict) -> dict:
-    """Verify the terminal YAML conforms to the subagent contract."""
-    route = payload.get("route")
-    if route not in _VALID_ROUTES:
-        raise OrchestrationError(
-            f"analyze subagent: invalid route {route!r} "
-            f"(expected one of {sorted(_VALID_ROUTES)})"
-        )
+def _routing_payload(envelope: AnalyzeEnvelope) -> dict[str, Any]:
+    """Flatten the envelope's routing trailer + interpretation fields into
+    the payload shape REPORT / PREDICT consume.
 
+    Preserved keys (pre-v2.12 compat):
+        route, termination_category, disposition, confidence,
+        matched_archetype, surviving_hypotheses (on halt)
+        route, unresolved_prescribed_set (on continue)
+
+    New keys (v2.12):
+        resolutions_by_lead, trust_anchor_by_lead, legitimacy_by_lead,
+        impact_by_lead, anomalies, data_wishes
+    """
+    r = envelope.routing
+    route = r["decision"]
+    out: dict[str, Any] = {"route": route}
     if route == "halt":
-        category = payload.get("termination_category")
-        if category not in _VALID_TERMINATION_CATEGORIES:
-            raise OrchestrationError(
-                f"analyze subagent: route=halt requires termination_category "
-                f"∈ {sorted(_VALID_TERMINATION_CATEGORIES)}, got {category!r}"
-            )
-        disposition = payload.get("disposition")
-        if disposition not in _VALID_DISPOSITIONS:
-            raise OrchestrationError(
-                f"analyze subagent: route=halt requires disposition "
-                f"∈ {sorted(_VALID_DISPOSITIONS)}, got {disposition!r}"
-            )
-        confidence = payload.get("confidence")
-        if confidence not in _VALID_CONFIDENCES:
-            raise OrchestrationError(
-                f"analyze subagent: route=halt requires confidence "
-                f"∈ {sorted(_VALID_CONFIDENCES)}, got {confidence!r}"
-            )
-        surviving = payload.get("surviving_hypotheses")
-        if not isinstance(surviving, list):
-            raise OrchestrationError(
-                "analyze subagent: route=halt requires surviving_hypotheses[] "
-                "(empty list if every hypothesis is refuted) — got "
-                f"{type(surviving).__name__}"
-            )
-    else:  # continue
-        # PREDICT owns lead selection and fork evolution; ANALYZE's continue
-        # routing only needs a structural signal. unresolved_prescribed_set is
-        # optional — handler back-fills from GATHER payload when absent.
-        ups = payload.get("unresolved_prescribed_set")
-        if ups is not None:
-            if not isinstance(ups, list) or not all(
-                isinstance(x, str) and x.strip() for x in ups
-            ):
-                raise OrchestrationError(
-                    f"analyze subagent: unresolved_prescribed_set must be "
-                    f"list[str] of non-empty slugs when present "
-                    f"(got {ups!r})"
-                )
+        out["termination_category"] = r["termination_category"]
+        out["disposition"] = r["disposition"]
+        out["confidence"] = r["confidence"]
+        out["matched_archetype"] = r.get("matched_archetype")
+        out["surviving_hypotheses"] = r.get("surviving_hypotheses", [])
+    else:
+        ups = r.get("unresolved_prescribed_set")
+        if ups:
+            out["unresolved_prescribed_set"] = ups
 
-    return payload
+    # Expose the envelope's structured fields so REPORT can consume them
+    # without re-parsing investigation.md. These are pass-through: the
+    # handler does not re-validate them here (invlang_validate will when
+    # REPORT writes the findings block, or earlier via validate_companion
+    # when the handler appends its prose section).
+    out["resolutions_by_lead"] = envelope.resolutions_by_lead
+    out["trust_anchor_by_lead"] = envelope.trust_anchor_by_lead
+    out["legitimacy_by_lead"] = envelope.legitimacy_by_lead
+    out["impact_by_lead"] = envelope.impact_by_lead
+    out["anomalies"] = envelope.anomalies
+    out["data_wishes"] = envelope.data_wishes
+    return out
 
 
-def _backfill_unresolved_prescribed_set(payload: dict, ctx: Context) -> dict:
+def _backfill_unresolved_prescribed_set(
+    payload: dict[str, Any], ctx: Context,
+) -> dict[str, Any]:
     """On continue, compute unresolved_prescribed_set from GATHER payload if
-    the subagent didn't emit it. Backstop for Bug A: even if gather-composite's
-    scope-check is bypassed, ANALYZE still surfaces the gap so PREDICT can
-    re-prescribe.
+    the subagent didn't emit it. Even if gather-composite's scope-check is
+    bypassed, ANALYZE still surfaces the gap so PREDICT can re-prescribe.
     """
     if payload.get("route") != "continue":
         return payload
-    if payload.get("unresolved_prescribed_set") is not None:
+    if payload.get("unresolved_prescribed_set"):
         return payload
     gather_out = ctx.outputs.get(Phase.GATHER)
     if not isinstance(gather_out, dict):
-        # No GATHER payload (shouldn't happen in a well-formed loop); leave absent.
         return payload
     prescribed = gather_out.get("prescribed_leads")
     executed = gather_out.get("executed_leads")
@@ -222,32 +230,289 @@ def _backfill_unresolved_prescribed_set(payload: dict, ctx: Context) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Markdown section extraction
+# Prose section composition
 # ---------------------------------------------------------------------------
 
 
-def _strip_terminal_routing(raw: str) -> str:
-    """Return `raw` with the last ```yaml``` fence removed.
+_WEIGHT_ORDER = {"++": 0, "+": 1, "-": 2, "--": 3}
 
-    The terminal routing YAML is consumed out-of-band and must not land in
-    investigation.md — invlang validators would reject its routing keys as
-    unknown. Drop only the last yaml fence; preserve all preceding fences.
-    Matches `predict.py:_strip_terminal_routing` so both phase outputs
-    follow the same lead-block-preserving convention.
 
-    This deliberately does not strip earlier fences — future ANALYZE
-    subagent versions will emit `resolutions:` sub-blocks that must survive
-    the strip. When that lands alongside a merge-by-lead-id invlang
-    validator extension, the handler here needs no further change.
+def _compose_section(envelope: AnalyzeEnvelope, loop_n: int) -> str:
+    """Render the envelope as a `## ANALYZE (loop N)` prose section.
+
+    Resolutions render as an assessment list keyed by hypothesis id; the
+    `reasoning` string on each resolution is the human-readable rationale.
+    Anomalies + data_wishes replace the old prose Self-report block.
     """
-    last_start = raw.rfind("```yaml")
-    if last_start == -1:
-        return raw.rstrip() + "\n"
-    end_marker_start = raw.find("```", last_start + len("```yaml"))
-    if end_marker_start == -1:
-        return raw[:last_start].rstrip() + "\n"
-    after = raw[end_marker_start + len("```"):]
-    return (raw[:last_start].rstrip() + "\n" + after.lstrip()).rstrip() + "\n"
+    lines = [f"## ANALYZE (loop {loop_n})", ""]
+
+    # Collect all resolution entries across leads; order by hypothesis id.
+    # Assessments read better flat (one entry per hypothesis) than grouped
+    # by lead — a hypothesis graded on multiple leads shows up as multiple
+    # lines with distinct lead_refs, which matches the audit-trail intent.
+    lines.append("**Assessment:**")
+    assessment_lines: list[str] = []
+    for lead_ref, entries in envelope.resolutions_by_lead.items():
+        for e in entries:
+            hid = e.get("hypothesis_id", "?")
+            w = e.get("weight", "?")
+            reasoning = e.get("reasoning", "")
+            assessment_lines.append(
+                f"- {hid} ({w}) via {lead_ref} — {reasoning}"
+            )
+    if not assessment_lines:
+        assessment_lines.append("- (no resolutions this loop)")
+    lines.extend(assessment_lines)
+
+    # Authority verdicts, when any.
+    if envelope.trust_anchor_by_lead:
+        lines.append("")
+        lines.append("**Authority verdicts:**")
+        for lead_ref, r in envelope.trust_anchor_by_lead.items():
+            verdict = r.get("verdict", "?")
+            reasoning = r.get("reasoning", "")
+            lines.append(f"- {lead_ref}: {verdict} — {reasoning}")
+
+    # Routing.
+    r = envelope.routing
+    lines.append("")
+    if r["decision"] == "halt":
+        lines.append(
+            f"**Route:** halt → termination_category: {r['termination_category']}, "
+            f"disposition: {r['disposition']}, confidence: {r['confidence']}"
+        )
+        sh = r.get("surviving_hypotheses") or []
+        if sh:
+            lines.append(f"**Surviving hypotheses:** {', '.join(sh)}")
+    else:
+        lines.append("**Route:** continue")
+        ups = r.get("unresolved_prescribed_set") or []
+        if ups:
+            lines.append(f"**Unresolved prescribed:** {', '.join(ups)}")
+
+    # Anomalies + data wishes (replacing the old Self-report block).
+    if envelope.anomalies or envelope.data_wishes:
+        lines.append("")
+        lines.append("**Self-report:**")
+        if envelope.anomalies:
+            lines.append("- Anomalies:")
+            for a in envelope.anomalies:
+                lines.append(f"  - {a}")
+        if envelope.data_wishes:
+            lines.append("- Data wishes:")
+            for d in envelope.data_wishes:
+                lines.append(f"  - {d}")
+
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Invlang findings synthesis
+# ---------------------------------------------------------------------------
+
+
+_PROLOGUE_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
+
+
+def _first_prologue_vertex_id(investigation_md: str) -> str | None:
+    """Return the first `v-*` id declared in any prologue block of the
+    companion, or None if no prologue block is present.
+
+    Used as the default `target` for synthesized `findings[]` lead entries
+    when the gather envelope doesn't specify one. Non-SCREEN flows don't
+    prescribe a target vertex per lead — the lead is investigating the
+    alert's subject vertex, which is always v-001 in practice.
+    """
+    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
+        try:
+            doc = yaml.safe_load(body)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        vertices = doc.get("prologue", {}).get("vertices") or []
+        for v in vertices:
+            if isinstance(v, dict) and isinstance(v.get("id"), str):
+                return v["id"]
+    return None
+
+
+def _translate_trust_anchor_to_consultation(
+    entry: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Map an analyze-envelope trust_anchor_result entry onto invlang's
+    `outcome.anchor_consultations[]` shape (see schema §Lead outcome).
+
+    The envelope carries {asks, verdict, reasoning}. Anchor consultations
+    require {anchor_id, anchor_kind, grounding_kind, result, as_of,
+    authority_for_question}. We translate what we can and leave the rest
+    to downstream validators — a malformed consultation is preferable to
+    silent loss of the trust-anchor signal.
+    """
+    if not isinstance(entry, dict):
+        return None
+    asks = entry.get("asks") or []
+    anchor_id = asks[0] if asks else None
+    verdict = entry.get("verdict")
+    # Minimal result mapping: authorized → confirmed, unauthorized → refuted,
+    # indeterminate → partial. Schema rule #11 requires anchor_kind +
+    # grounding_kind; we use "policy" / "org-authority" as conservative
+    # defaults (policy checks against an authority anchor).
+    result_map = {
+        "authorized": "confirmed",
+        "unauthorized": "refuted",
+        "indeterminate": "partial",
+    }
+    out: dict[str, Any] = {
+        "anchor_id": anchor_id or "unspecified",
+        "anchor_kind": "policy",
+        "grounding_kind": "org-authority",
+        "result": result_map.get(verdict, "partial"),
+        "authority_for_question": "full",
+    }
+    if entry.get("reasoning"):
+        out["reasoning"] = entry["reasoning"]
+    return out
+
+
+def _synthesize_findings_block(
+    envelope: AnalyzeEnvelope,
+    gather_leads: list[dict[str, Any]],
+    loop_n: int,
+    default_target: str,
+) -> str:
+    """Build the `findings:` invlang YAML block for this loop, combining
+    gather's envelope leads with analyze's per-lead interpretation.
+
+    Required lead fields per validator: id, loop, name, target,
+    query_details, outcome, resolutions. `outcome: {}` and `resolutions: []`
+    are valid when empty — this keeps the synthesis simple for leads with
+    no structured observations.
+
+    Returns an empty string when there are no gather leads to ground
+    (SCREEN-matched flow or missing gather envelope).
+    """
+    if not gather_leads:
+        return ""
+
+    findings: list[dict[str, Any]] = []
+    for lead in gather_leads:
+        lead_id = lead.get("id")
+        if not isinstance(lead_id, str):
+            continue
+
+        query = lead.get("query") or {}
+        # The envelope `query` carries {system, template, query, time_window,
+        # substitutions} — which matches the schema's `query_details` shape
+        # (see schema §Lead). Pass through as-is.
+        query_details = query if isinstance(query, dict) else {}
+
+        # Per-lead outcome: start with any structured observations gather
+        # emitted, then overlay analyze's interpretation fields.
+        outcome: dict[str, Any] = {}
+        obs = lead.get("observations")
+        if isinstance(obs, dict):
+            outcome["observations"] = obs
+        attr_updates = lead.get("attribute_updates")
+        if isinstance(attr_updates, list) and attr_updates:
+            outcome["attribute_updates"] = attr_updates
+        consultations = lead.get("consultations")
+        if isinstance(consultations, list) and consultations:
+            outcome["anchor_consultations"] = consultations
+
+        # Analyze-authored: trust-anchor verdicts → anchor_consultations[].
+        trust = envelope.trust_anchor_by_lead.get(lead_id)
+        if isinstance(trust, dict):
+            consult = _translate_trust_anchor_to_consultation(trust)
+            if consult is not None:
+                outcome.setdefault("anchor_consultations", []).append(consult)
+
+        # Analyze-authored: legitimacy closures → attribute_updates on the
+        # edge with authorization_resolutions[]. The envelope's per-lead
+        # entries carry {edge_id, contract_id, verdict, grounding_kind,
+        # authority_for_question, as_of, reasoning}. We translate to
+        # invlang's authorization_resolutions shape and stash under
+        # attribute_updates targeting the edge.
+        for legit in envelope.legitimacy_by_lead.get(lead_id, []):
+            if not isinstance(legit, dict):
+                continue
+            edge_id = legit.get("edge_id")
+            if not isinstance(edge_id, str):
+                continue
+            authz_entry = {
+                "verdict": legit.get("verdict", "indeterminate"),
+                "fulfills_contract": legit.get("contract_id", ""),
+                "anchor_kind": "policy",
+                "anchor_id": legit.get("authority_for_question", "unspecified"),
+                "grounding_kind": legit.get("grounding_kind", "org-authority"),
+                "authority_for_question": "full",
+                "as_of": legit.get("as_of"),
+                "resolved_by_lead": lead_id,
+            }
+            if legit.get("reasoning"):
+                authz_entry["reasoning"] = legit["reasoning"]
+            attr_upd = {
+                "target": edge_id,
+                "updates": {"authorization_resolutions": [authz_entry]},
+            }
+            outcome.setdefault("attribute_updates", []).append(attr_upd)
+
+        # Analyze-authored: impact grades → outcome.impact_resolutions.
+        for ir in envelope.impact_by_lead.get(lead_id, []):
+            if not isinstance(ir, dict):
+                continue
+            # Map envelope shape (prediction_ref, dimension, verdict,
+            # grounding_kind, authority_for_question, as_of, reasoning)
+            # onto schema shape. The schema's `matched_predicate` +
+            # `observed_value` aren't in the envelope; omit.
+            outcome.setdefault("impact_resolutions", []).append({
+                "prediction_ref": ir.get("prediction_ref"),
+                "dimension": ir.get("dimension"),
+                "verdict": ir.get("verdict", "indeterminate"),
+                "grounded_by_lead": lead_id,
+                "grounding_kind": ir.get("grounding_kind", "telemetry-baseline"),
+                "authority_for_question": ir.get(
+                    "authority_for_question", "full",
+                ),
+                "as_of": ir.get("as_of"),
+                "reasoning": ir.get("reasoning"),
+            })
+
+        # Analyze-authored: top-level resolutions (hypothesis grades).
+        # Envelope entries carry {hypothesis_id, weight,
+        # matched_prediction_ids, matched_refutation_ids, reasoning}.
+        # Schema expects {hypothesis, before, after, matched_prediction_ids,
+        # matched_refutation_ids, reasoning, ...}. Translate.
+        resolutions: list[dict[str, Any]] = []
+        for r in envelope.resolutions_by_lead.get(lead_id, []):
+            if not isinstance(r, dict):
+                continue
+            res: dict[str, Any] = {
+                "hypothesis": r.get("hypothesis_id", ""),
+                "after": r.get("weight", ""),
+                "matched_prediction_ids": r.get(
+                    "matched_prediction_ids", [],
+                ),
+                "reasoning": r.get("reasoning", ""),
+            }
+            mrefs = r.get("matched_refutation_ids")
+            if mrefs:
+                res["matched_refutation_ids"] = mrefs
+            resolutions.append(res)
+
+        entry: dict[str, Any] = {
+            "id": lead_id,
+            "loop": loop_n,
+            "name": lead.get("name", ""),
+            "target": lead.get("target") or default_target,
+            "query_details": query_details,
+            "outcome": outcome,
+            "resolutions": resolutions,
+        }
+        findings.append(entry)
+
+    body = yaml.safe_dump({"findings": findings}, sort_keys=False)
+    return "```yaml\n" + body + "```\n"
 
 
 # ---------------------------------------------------------------------------
@@ -258,17 +523,6 @@ def _strip_terminal_routing(raw: str) -> str:
 def _validate_and_write(ctx: Context, new_section: str) -> None:
     """Append `new_section` to investigation.md after running
     `validate_companion` as a library check.
-
-    `validate_companion` is a pure function that walks any YAML blocks
-    present in the text; appending markdown-only prose leaves the YAML set
-    unchanged so the validator is effectively idempotent on this path, but
-    we run it anyway to catch any drift in the accumulated document.
-
-    Note: validation runs *after* the subagent has been spawned, so a
-    failure here sinks the subagent's cost — there's no pre-spawn path
-    that could catch it, since the text being validated is the subagent's
-    own output. On failure, `OrchestrationError` bubbles up and the
-    orchestrator halts the run.
     """
     hooks_scripts = str(SOC_AGENT_ROOT / "hooks")
     if hooks_scripts not in sys.path:
@@ -298,17 +552,50 @@ def _validate_and_write(ctx: Context, new_section: str) -> None:
 
 
 def handle(ctx: Context) -> PhaseResult:
+    loop_n = _compute_loop_n(ctx)
     prompt = _assemble_prompt(ctx)
     raw = _invoke_subagent(prompt)
 
-    payload = _validate_routing(extract_terminal_yaml(raw))
+    try:
+        # loop_n is computed handler-side from ctx.history; we don't enforce
+        # it against the subagent's emitted `analyze.loop` because retries
+        # and recovery paths legitimately drift. The envelope's loop field
+        # is an audit-trail carry-through.
+        envelope = parse_analyze_envelope(raw)
+    except AnalyzeOutputError as exc:
+        raise OrchestrationError(
+            f"analyze subagent: envelope shape violation — {exc}"
+        ) from exc
+
+    payload = _routing_payload(envelope)
     payload = _backfill_unresolved_prescribed_set(payload, ctx)
 
-    sections = _strip_terminal_routing(raw)
-    _validate_and_write(ctx, sections)
+    # Compose investigation.md section: prose assessment + invlang findings
+    # block. The findings block is synthesized from gather's envelope (which
+    # the handler stashed in ctx.outputs[Phase.GATHER]["leads"]) plus
+    # analyze's interpretation envelope, merged here — gather-handler did
+    # not write any invlang YAML, so analyze-handler authors the complete
+    # `findings[]` lead block for this loop.
+    section = _compose_section(envelope, loop_n)
+
+    gather_out = ctx.outputs.get(Phase.GATHER)
+    gather_leads: list[dict[str, Any]] = []
+    if isinstance(gather_out, dict):
+        raw_leads = gather_out.get("leads") or []
+        if isinstance(raw_leads, list):
+            gather_leads = [x for x in raw_leads if isinstance(x, dict)]
+    default_target = _first_prologue_vertex_id(
+        load_investigation_md(ctx.run_dir)
+    ) or ""
+    findings_block = _synthesize_findings_block(
+        envelope, gather_leads, loop_n, default_target,
+    )
+    if findings_block:
+        section = section + "\n" + findings_block
+
+    _validate_and_write(ctx, section)
 
     next_phase = (
-        Phase.REPORT if payload["route"] == "halt"
-        else Phase.PREDICT
+        Phase.REPORT if payload["route"] == "halt" else Phase.PREDICT
     )
     return PhaseResult(next_phase=next_phase, payload=payload)

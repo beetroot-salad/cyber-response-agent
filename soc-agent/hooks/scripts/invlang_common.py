@@ -31,7 +31,7 @@ from hooks.scripts.invlang_walkers import iter_hypotheses  # noqa: E402
 # Same regex used by corpus.py — extract ```yaml ... ``` spans from markdown
 YAML_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
 
-COMPANION_TOP_LEVEL = {"prologue", "hypothesize", "gather", "conclude"}
+COMPANION_TOP_LEVEL = {"prologue", "hypothesize", "findings", "conclude"}
 
 # ---------------------------------------------------------------------------
 # ID patterns
@@ -136,10 +136,10 @@ def _merge_blocks(blocks: list[dict[str, Any]]) -> dict[str, Any]:
         for key in COMPANION_TOP_LEVEL:
             if key not in doc:
                 continue
-            if key == "gather":
-                merged.setdefault("gather", [])
+            if key == "findings":
+                merged.setdefault("findings", [])
                 if isinstance(doc[key], list):
-                    merged["gather"].extend(doc[key])
+                    merged["findings"].extend(doc[key])
             else:
                 merged[key] = doc[key]
     return merged
@@ -158,7 +158,7 @@ def _collect_declared_ids(merged: dict[str, Any]) -> set[str]:
     for h in merged.get("hypothesize", {}).get("hypotheses", []):
         if hid := h.get("id"):
             ids.add(hid)
-    for lead in merged.get("gather", []):
+    for lead in merged.get("findings", []):
         if not isinstance(lead, dict):
             continue
         if lid := lead.get("id"):
@@ -177,10 +177,18 @@ def _collect_declared_ids(merged: dict[str, Any]) -> set[str]:
 
 
 def _index_hypothesis_id_field_ids(merged: dict[str, Any]) -> dict[str, dict[str, set[str]]]:
-    """For every hypothesis: collect prediction and refutation IDs.
+    """For every hypothesis: collect prediction, attribute-prediction, and refutation IDs.
 
-    Returns {hypothesis_id: {"predictions": {pid, ...}, "refutations": {rid, ...}}}.
-    Used by the lifecycle guard to diff between current and proposed companions.
+    Returns {hypothesis_id: {"predictions": {pid, ...},
+                              "attribute_predictions": {apid, ...},
+                              "refutations": {rid, ...}}}.
+    Used by the lifecycle guard to diff between current and proposed companions,
+    and by sibling-rollup / refutation-link checks to enforce that cited IDs
+    belong to the hypothesis they're cited against.
+
+    `predictions` and `attribute_predictions` are indexed separately but the
+    same-hypothesis-id-space rule (rules #25, #30, #33) treats their union
+    as the valid citation target for resolutions and refutations.
     """
     out: dict[str, dict[str, set[str]]] = {}
     for h in iter_hypotheses(merged):
@@ -191,6 +199,10 @@ def _index_hypothesis_id_field_ids(merged: dict[str, Any]) -> dict[str, dict[str
             p.get("id") for p in (h.get("predictions") or [])
             if isinstance(p, dict) and isinstance(p.get("id"), str)
         }
+        attr_preds = {
+            a.get("id") for a in (h.get("attribute_predictions") or [])
+            if isinstance(a, dict) and isinstance(a.get("id"), str)
+        }
         refs = {
             r.get("id") for r in (h.get("refutation_shape") or [])
             if isinstance(r, dict) and isinstance(r.get("id"), str)
@@ -198,8 +210,12 @@ def _index_hypothesis_id_field_ids(merged: dict[str, Any]) -> dict[str, dict[str
         # Union across multiple declarations (same hypothesis appearing in
         # hypothesize and later lead.new_hypotheses — shouldn't happen in a
         # valid companion, but union is the safe conservative choice).
-        entry = out.setdefault(hid, {"predictions": set(), "refutations": set()})
+        entry = out.setdefault(
+            hid,
+            {"predictions": set(), "attribute_predictions": set(), "refutations": set()},
+        )
         entry["predictions"] |= preds
+        entry["attribute_predictions"] |= attr_preds
         entry["refutations"] |= refs
     return out
 
@@ -212,7 +228,7 @@ def _collect_declared_edge_ids(merged: dict[str, Any]) -> set[str]:
             eid = e.get("id")
             if isinstance(eid, str):
                 eids.add(eid)
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         for e in lead.get("outcome", {}).get("observations", {}).get("edges", []) or []:
@@ -245,7 +261,7 @@ def _collect_impact_prediction_refs(merged: dict[str, Any]) -> set[str]:
     Rule #30 back-refs use these; rule #31 closure joins against them.
     """
     out: set[str] = set()
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id")
@@ -299,7 +315,7 @@ def _iter_resolutions(
     id (the edge the entry lives on). `entry_idx` is the per-source entry
     index (0 is the first entry on that edge record).
     """
-    for lead_idx, lead in enumerate(merged.get("gather", []) or []):
+    for lead_idx, lead in enumerate(merged.get("findings", []) or []):
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")

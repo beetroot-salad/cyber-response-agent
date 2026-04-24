@@ -382,9 +382,9 @@ def _run_ids(path_str: str) -> int:
         for key in ("prologue", "hypothesize", "conclude"):
             if key in doc:
                 merged[key] = doc[key]
-        if "gather" in doc:
-            merged.setdefault("gather", [])
-            merged["gather"].extend(doc["gather"])
+        if "findings" in doc:
+            merged.setdefault("findings", [])
+            merged["findings"].extend(doc["findings"])
 
     ids = extract_ids(merged)
     for kind, id_list in ids.items():

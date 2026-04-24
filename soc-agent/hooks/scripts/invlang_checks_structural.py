@@ -28,7 +28,7 @@ from hooks.scripts.invlang_common import (
 
 def _check_lead_required_fields(merged: dict[str, Any]) -> list[str]:
     errors = []
-    for i, lead in enumerate(merged.get("gather", [])):
+    for i, lead in enumerate(merged.get("findings", [])):
         if not isinstance(lead, dict):
             errors.append(f"gather[{i}]: entry must be a mapping (lead object)")
             continue
@@ -56,7 +56,7 @@ def _check_id_formats(merged: dict[str, Any]) -> list[str]:
         _check(e.get("id"), "prologue edge")
     for h in merged.get("hypothesize", {}).get("hypotheses", []):
         _check(h.get("id"), "hypothesize hypothesis")
-    for lead in merged.get("gather", []):
+    for lead in merged.get("findings", []):
         if not isinstance(lead, dict):
             continue
         _check(lead.get("id"), "gather lead")
@@ -80,7 +80,7 @@ def _check_id_references(merged: dict[str, Any]) -> list[str]:
         if isinstance(id_val, str) and id_val and id_val not in declared:
             errors.append(f"{context}: references unknown ID {id_val!r}")
 
-    for lead in merged.get("gather", []):
+    for lead in merged.get("findings", []):
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")
@@ -117,7 +117,7 @@ def _check_edge_authority(merged: dict[str, Any]) -> list[str]:
         kind = e.get("authority", {}).get("kind", "")
         if eid:
             edge_authority[eid] = kind
-    for lead in merged.get("gather", []):
+    for lead in merged.get("findings", []):
         if not isinstance(lead, dict):
             continue
         obs = lead.get("outcome", {}).get("observations", {})
@@ -127,7 +127,7 @@ def _check_edge_authority(merged: dict[str, Any]) -> list[str]:
             if eid:
                 edge_authority[eid] = kind
 
-    for lead in merged.get("gather", []):
+    for lead in merged.get("findings", []):
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")
@@ -162,7 +162,7 @@ def _check_edge_authority(merged: dict[str, Any]) -> list[str]:
 def _check_refutation_ids(merged: dict[str, Any]) -> list[str]:
     """-- resolutions must have non-empty matched_refutation_ids."""
     errors = []
-    for lead in merged.get("gather", []):
+    for lead in merged.get("findings", []):
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")
@@ -180,7 +180,7 @@ def _check_refutation_ids(merged: dict[str, Any]) -> list[str]:
 def _check_screen_result_scope(merged: dict[str, Any]) -> list[str]:
     """screen_result is only valid on leads where mode: screen."""
     errors = []
-    for lead in merged.get("gather", []):
+    for lead in merged.get("findings", []):
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")
@@ -202,7 +202,7 @@ def _check_lead_predictions(merged: dict[str, Any]) -> list[str]:
     """
     errors: list[str] = []
 
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         preds = lead.get("predictions")
@@ -305,7 +305,7 @@ def _check_anchor_consultation_provenance(merged: dict[str, Any]) -> list[str]:
     authz evidence and live in `authorization_resolutions[]`).
     """
     errors: list[str] = []
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")

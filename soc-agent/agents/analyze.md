@@ -29,11 +29,16 @@ Context is pre-loaded as tagged XML-style blocks:
 - `<investigation>…</investigation>` — the full investigation log so far
   (CONTEXTUALIZE, any SCREEN, prior PREDICT/GATHER/ANALYZE cycles, and
   the current cycle's PREDICT + GATHER blocks).
-The current cycle is loop `{loop_n}`. The GATHER block for this loop is
-already present in `<investigation>` with the raw observations you weight
-below.
+- `<raw_details>…</raw_details>` — per-lead raw SIEM / anchor payloads for
+  the current loop's GATHER leads (keyed by lead id). These are verbatim
+  query responses — the source-of-truth for observations. Cross-reference
+  against the GATHER block's prose characterization when grading.
 
-If required context is missing from these blocks, emit an `error:` note
+The current cycle is loop `{loop_n}`. The GATHER block for this loop is
+already present in `<investigation>` with the prose characterization; the
+raw bytes behind it sit in `<raw_details>`.
+
+If required context is missing from these blocks, emit an error note
 naming the missing context and stop.
 
 ## Task
@@ -106,64 +111,102 @@ If any of these is unanswered, route `continue` — verification, integrity chec
 
 When confirming a mechanism that implies prior stages (e.g., data exfiltration implies prior access; lateral movement implies initial compromise), do not chase the full kill chain. Flag implied stages in your rationale for follow-up, and stay in the current investigation's scope.
 
-## Output Format
+## Output envelope
 
-Respond with exactly the following three sections, in order, and nothing else. The final fenced `yaml` block is the **terminal routing decision** — the orchestrator parses it deterministically, so it must be the last thing you emit and must be valid YAML.
-
-```markdown
-## ANALYZE (loop {loop_n})
-
-**Evidence:** {lead-name} — {key raw observation from the just-run GATHER}
-
-**Assessment:**
-- ?hypothesis-name: {weight} (was {prior weight or "new"}) — {reasoning; for ++ name the failed refutation}
-- ?hypothesis-name: {weight} (was {prior weight or "new"}) — {reasoning}
-
-**Surviving hypotheses:** ?hyp-1, ?hyp-2
-**Route:** halt | continue
-{one of:
-  halt → termination_category: {...}, disposition: {...}, confidence: {...}, rationale: {...}
-  continue → brief note on why the investigation isn't done (PREDICT picks the next lead)
-}
-```
-
-```markdown
-## Self-report
-
-- **Context wished for:** {files, fields, or prior observations you wished you had, or "none"}
-- **Uncertain claims:** {claims in your assessment you felt least confident about, or "none"}
-- **Anomalies:**
-  - {structured list — each entry names a specific prior-loop element (e.g., "loop 2 ANALYZE graded ?brute-force as ++ without naming a failed refutation") and what looks inconsistent}
-  - {or a single "none" entry if no anomalies}
-```
-
-Finally, emit the terminal routing YAML. This is machine-parsed — no surrounding prose, no trailing text after the closing fence. It is the **last** fenced `yaml` block in your output; only this fence is stripped by the handler before write. Any earlier fences (e.g., future `resolutions:` sub-blocks) survive and must therefore be valid invlang.
-
-On `halt`:
+Emit **exactly one** fenced YAML block wrapping everything in a top-level `analyze:` key. The handler parses this envelope, synthesizes the per-lead `findings[].outcome.*` fragments, and merges them into the companion. Do not emit a companion-shaped `findings:` block — the handler owns that synthesis.
 
 ```yaml
-route: halt
-termination_category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
-disposition: benign | true_positive | unclear
-confidence: high | medium | low
-rationale: <one-line mechanism description grounded in this loop's evidence>
-surviving_hypotheses: [h-001, ...]   # hypothesis IDs whose final weight is not `--` (empty list if all refuted)
+analyze:
+  loop: {loop_n}
+
+  # Per-lead resolutions — hypothesis grades keyed by the lead id whose
+  # evidence drove the grade. Each entry has `lead_ref` + `entries[]`.
+  # Each entry in `entries` needs hypothesis_id, weight, matched_prediction_ids,
+  # reasoning; `--` needs matched_refutation_ids non-empty. (The handler feeds
+  # these into `findings[].outcome.resolutions[]`.)
+  resolutions:
+    - lead_ref: "{lead-id}"
+      entries:
+        - hypothesis_id: "{h-...}"
+          weight: "++" | "+" | "-" | "--"
+          matched_prediction_ids: ["p1", ...]        # required
+          matched_refutation_ids: ["r1", ...]        # required when weight == "--"
+          reasoning: "{for ++: name the failed refutation; for --: name the matched refutation shape}"
+
+  # Authority verdicts — one entry per lead that consulted an anchor.
+  # Populates `findings[].outcome.trust_anchor_result`. Omit when no
+  # consultation happened on this lead.
+  trust_anchor_result:
+    - lead_ref: "{lead-id}"
+      asks: ["{anchor-id}", ...]
+      verdict: "authorized" | "unauthorized" | "indeterminate"
+      reasoning: "{1-2 sentences: what the anchor said, and why it answers the question}"
+
+  # Contract closures — one entry per lead that materialized an edge whose
+  # declaring hypothesis carries an `authorization_contract`. Populates
+  # `findings[].outcome.legitimacy_resolutions[]` (validator rules #21, #26).
+  legitimacy_resolutions:
+    - lead_ref: "{lead-id}"
+      entries:
+        - edge_id: "{e-...}"
+          contract_id: "{h-...ac1}"
+          verdict: "authorized" | "unauthorized" | "indeterminate"
+          grounding_kind: "anchor-consultation" | "past-case"
+          authority_for_question: "{anchor-id or past-case ticket}"
+          as_of: "{ISO-8601 or null}"
+          reasoning: "{brief}"
+
+  # Impact grading — one entry per lead that declared `impact_predictions[]`.
+  # Populates `findings[].outcome.impact_resolutions[]` (validator rules
+  # #29-#31). Grounding_kind ∈ {telemetry-baseline, business-owner-attestation,
+  # dlp-policy}; past-case not admissible for impact.
+  impact_resolutions:
+    - lead_ref: "{lead-id}"
+      entries:
+        - prediction_ref: "{l-...ip1}"
+          dimension: "{dimension-name}"
+          verdict: "within" | "exceeds" | "indeterminate"
+          grounding_kind: "telemetry-baseline" | "business-owner-attestation" | "dlp-policy"
+          authority_for_question: "{authority identifier}"
+          as_of: "{ISO-8601 or null}"
+          reasoning: "{brief}"
+
+  # Anomalies — structured replacement for the old prose Self-report.
+  # Each string names a specific prior-loop element that looks inconsistent
+  # with refutation discipline (unjustified prior grade, silent drop,
+  # `++` without a named failed refutation, etc.).
+  anomalies:
+    - "{short, specific: e.g. 'loop 2 ANALYZE graded ?brute-force as ++ without naming a failed refutation'}"
+    # empty list OK when no anomalies
+
+  # Data wishes — what additional context would have sharpened the grading.
+  # Discretionary; feeds PREDICT's next-loop planning when present.
+  data_wishes:
+    - "{short: e.g. 'wanted cron-schedule anchor to cap the ++ confidence'}"
+    # empty list OK
+
+  routing:
+    decision: "halt" | "continue"
+
+    # halt path — all four fields below are required when decision=halt:
+    termination_category: "trust-root" | "adversarial-refuted" | "severity-ceiling" | "exhaustion-escalation"
+    disposition: "benign" | "true_positive" | "unclear"
+    confidence: "high" | "medium" | "low"
+    surviving_hypotheses: ["h-...", ...]   # hypothesis IDs whose final weight is not `--` (empty list if all refuted)
+    matched_archetype: null                # archetype labeling runs at REPORT; keep null
+
+    # continue path — optional:
+    unresolved_prescribed_set: ["lead-a", "lead-b"]   # omit if all prescribed leads were resolved
 ```
 
-Archetype labeling happens at REPORT time via the `archetype-match` subagent against the confirmed investigation outcome — it is not ANALYZE's job. Do not emit a `matched_archetype` field; omit it entirely. The `rationale` line is the investigation-outcome summary the downstream `archetype-match` subagent consumes, so state the confirmed mechanism crisply (e.g. "cadenced monitoring probe from internal source, authorization anchor confirmed authorized") — not an archetype name.
+### Field discipline
 
-**Impact axis handoff.** Impact is graded per-lead during ANALYZE via `impact_resolutions[]` on the lead outcome; REPORT composes `impact_verdict` + `impact_severity` from the accumulated set across gather leads. Do not emit `impact_verdict` / `impact_severity` in the ANALYZE trailer — those are CONCLUDE fields. Do emit `impact_resolutions[]` in the `gather[].outcome` block the main agent assembles from your assessment.
-
-On `continue`:
-
-```yaml
-route: continue
-unresolved_prescribed_set: [lead-a, lead-b]   # optional; omit if all prescribed leads were resolved
-```
-
-`unresolved_prescribed_set` names leads PREDICT prescribed that GATHER didn't resolve (status not in {ok, partial}). When present, PREDICT will preferentially re-prescribe these before picking anything new. If the subagent omits this field, the handler back-fills it from GATHER's prescribed-vs-executed diff — so you can't hide a gap by staying silent.
-
-The `surviving_hypotheses` list must match the hypothesis IDs (not names) whose final effective weight in the `gather[].resolutions[]` chain is not `--`. Mis-match is caught by validator rule 24 at write time.
+- **Each resolution carries its own `reasoning`.** That free-text line is your audit trail — for `++` name the failed refutation; for `--` name the matched refutation shape. Validator catches `matched_refutation_ids` missing on `--`.
+- **`matched_prediction_ids[]` must name predictions declared on the same hypothesis** (validator rule 25 — same-level sibling rollup). Do not cite sibling predictions.
+- **`surviving_hypotheses` on halt** lists hypothesis IDs whose final effective weight is not `--`. Silent drop — a hypothesis neither refuted nor listed — is rejected at write-time (validator rule 24).
+- **Archetype labeling at REPORT.** `matched_archetype: null` on halt; `archetype-match` runs downstream against the confirmed mechanism.
+- **Impact verdict is per-lead, not trailer-level.** CONCLUDE composes `impact_verdict` + `impact_severity` from the accumulated `impact_resolutions[]` across gather leads; do not emit those at the analyze level.
+- **`unresolved_prescribed_set` (continue path)** names leads PREDICT prescribed that GATHER didn't resolve (status ∉ {ok, partial}). When you omit the field, the handler back-fills it from GATHER's prescribed-vs-executed diff.
 
 ## Examples
 
@@ -255,7 +298,7 @@ Pitfalls this shape embodies:
 ## Rules
 
 - Do NOT run additional leads. Your job is grading and routing on the evidence already gathered.
-- Do NOT modify earlier phases. The main agent owns the investigation log.
-- Do NOT emit the `gather:` lead YAML block. The main agent composes that from your resolutions + the GATHER observations.
-- Be specific in `Evidence` and `Assessment` — name exact counts, IPs, usernames, UIDs. "12 attempts from 203.0.113.5" not "several attempts from an external IP."
+- Do NOT modify earlier phases. The handler owns investigation.md.
+- Do NOT emit the `findings:` lead YAML block. The handler composes that from your envelope + the GATHER observations.
+- Be specific in each `reasoning` field — name exact counts, IPs, usernames, UIDs. "12 attempts from 203.0.113.5" not "several attempts from an external IP."
 - If the just-run GATHER observation is ambiguous or incomplete, grade honestly (`+` or `-`) and route `continue`; do not force a grade the evidence doesn't support.

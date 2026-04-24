@@ -188,7 +188,7 @@ class TestCheckAuthorizationGatedDisposition:
             resolutions=[],
         )
         merged["hypothesize"]["hypotheses"][0]["refutation_shape"] = [{"id": "r1", "claim": "x"}]
-        merged["gather"][0]["resolutions"][0]["matched_refutation_ids"] = ["r1"]
+        merged["findings"][0]["resolutions"][0]["matched_refutation_ids"] = ["r1"]
         assert _check_authorization_gated_disposition(merged) == []
 
 
@@ -199,7 +199,7 @@ class TestCheckAttributeUpdatesTargetShape:
                 "vertices": [{"id": "v-001", "type": "endpoint"}],
                 "edges": [{"id": "e-001", "relation": "attempted_auth"}],
             },
-            "gather": [
+            "findings": [
                 {
                     "id": "l-001",
                     "loop": 1,
@@ -261,7 +261,7 @@ class TestAuthorizationCrossContract:
             "on_indeterminate": "escalate",
         })
         # Add a second lead emitting an unauthorized resolution for ac2 on a new edge.
-        merged["gather"].append({
+        merged["findings"].append({
             "id": "l-002", "loop": 1, "name": "cm-ticket-lookup",
             "target": "v-001", "query_details": {},
             "outcome": {
@@ -303,9 +303,9 @@ class TestAuthorizationResolutionFromAttributeUpdate:
     def test_attribute_update_resolution_counts_for_rule_21(self):
         merged = _companion_with_contract()
         # Drop the edge-inline resolution; emit it via attribute_updates instead.
-        obs_edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        obs_edge = merged["findings"][0]["outcome"]["observations"]["edges"][0]
         obs_edge.pop("authorization_resolutions", None)
-        merged["gather"][0]["outcome"]["attribute_updates"] = [
+        merged["findings"][0]["outcome"]["attribute_updates"] = [
             {
                 "target": "e-001",
                 "updates": {

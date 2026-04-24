@@ -119,7 +119,7 @@ SCREEN_MATCH_YAML = textwrap.dedent("""\
         observation: "cluster_count=5, max_cluster_size=2, no successful logins after"
     evidence_summary: "approved monitoring triple with periodic cadence and no successful login follow-up"
     reason: null
-    gather:
+    findings:
       - id: l-001
         loop: 0
         name: source-classification
@@ -195,7 +195,7 @@ SCREEN_NOMATCH_YAML = textwrap.dedent("""\
         observation: "admin -> unclassified-identity"
     evidence_summary: "username does not match monitoring-pattern sentinels"
     reason: "username_classification did not match"
-    gather:
+    findings:
       - id: l-001
         loop: 0
         name: source-classification
@@ -437,18 +437,18 @@ class TestStructuralVerifier:
 class TestGatherExtraction:
     def test_extracts_gather_from_parsed(self):
         parsed = {
-            "gather": [
+            "findings": [
                 {"id": "l-001", "loop": 0, "name": "x"},
                 {"id": "l-002", "loop": 0, "name": "y"},
             ],
         }
-        out = screen_handler._extract_gather_yaml_from_parsed(parsed)
-        assert out.startswith("gather:")
+        out = screen_handler._extract_findings_yaml_from_parsed(parsed)
+        assert out.startswith("findings:")
         assert "l-001" in out and "l-002" in out
 
     def test_empty_when_gather_absent(self):
-        assert screen_handler._extract_gather_yaml_from_parsed({}) == ""
-        assert screen_handler._extract_gather_yaml_from_parsed({"gather": []}) == ""
+        assert screen_handler._extract_findings_yaml_from_parsed({}) == ""
+        assert screen_handler._extract_findings_yaml_from_parsed({"findings": []}) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -553,7 +553,7 @@ class TestInvestigationWrite:
                 observation: "n=1"
             evidence_summary: fake
             reason: null
-            gather:
+            findings:
               - id: l-001
                 loop: 0
                 name: source-classification
@@ -626,7 +626,7 @@ class TestRouting:
                 observation: "(triple) -> authorized"
             evidence_summary: "fake match"
             reason: null
-            gather:
+            findings:
               - id: l-001
                 loop: 0
                 name: source-classification

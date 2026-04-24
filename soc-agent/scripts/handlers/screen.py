@@ -3,7 +3,7 @@
 Replaces the SCREEN section of `skills/investigate/SKILL.md` with a Python
 orchestration that dispatches one merged Sonnet subagent (`screen`). The
 subagent emits a single terminal YAML block carrying both the pattern-match
-verdict and the invlang `gather:` transcription — replacing the previous
+verdict and the invlang `findings:` transcription — replacing the previous
 Haiku screen + Haiku screen-invlang split.
 
 The handler runs a Python structural verifier on the match claim:
@@ -22,7 +22,7 @@ Output:
 
 Files written:
     {run_dir}/investigation.md — appends a `## SCREEN` markdown block + the
-    fenced `gather:` YAML. Append is pre-validated via
+    fenced `findings:` YAML. Append is pre-validated via
     `hooks/scripts/invlang_validate.validate_companion()` lazy-imported as a
     library call; the PreToolUse hook is the write-time backstop.
 """
@@ -277,19 +277,19 @@ def _compose_markdown(
     )
 
 
-def _extract_gather_yaml_from_parsed(parsed: dict) -> str:
-    """Re-serialize the `gather` key from the merged screen subagent's
+def _extract_findings_yaml_from_parsed(parsed: dict) -> str:
+    """Re-serialize the `findings` key from the merged screen subagent's
     parsed dict back to a YAML string (without fence markers) for inlining
     into investigation.md.
 
-    Returns an empty string when `gather` is absent — the handler still
+    Returns an empty string when `findings` is absent — the handler still
     writes the markdown section but skips the invlang block (consistent
     with the empty-Screen short-circuit).
     """
-    gather = parsed.get("gather")
-    if not gather:
+    findings = parsed.get("findings")
+    if not findings:
         return ""
-    return yaml.safe_dump({"gather": gather}, sort_keys=False)
+    return yaml.safe_dump({"findings": findings}, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -333,10 +333,10 @@ def _match_payload(parsed: dict) -> dict:
         "confidence": parsed.get("confidence"),
         "leads_run": parsed.get("leads_run") or [],
         "evidence_summary": parsed.get("evidence_summary"),
-        # Preserve the invlang gather block so the REPORT handler can
+        # Preserve the invlang findings block so the REPORT handler can
         # compose trust_anchors_consulted mechanically without re-reading
         # investigation.md.
-        "gather": parsed.get("gather") or [],
+        "findings": parsed.get("findings") or [],
     }
 
 
@@ -379,16 +379,16 @@ def handle(ctx: Context) -> PhaseResult:
     if downgrade_reason is not None:
         parsed["screen_result"] = "error"
         parsed["reason"] = downgrade_reason
-        # Downgrade invalidates the gather block — drop it so we don't write
+        # Downgrade invalidates the findings block — drop it so we don't write
         # an invlang audit trail claiming a match that the verifier rejected.
-        parsed.pop("gather", None)
+        parsed.pop("findings", None)
 
     # Step 3: compose + validate + append to investigation.md.
-    gather_yaml = _extract_gather_yaml_from_parsed(parsed)
+    findings_yaml = _extract_findings_yaml_from_parsed(parsed)
     markdown = _compose_markdown(parsed, downgrade_reason)
     new_section = markdown
-    if gather_yaml:
-        new_section = markdown + "\n```yaml\n" + gather_yaml + "```\n"
+    if findings_yaml:
+        new_section = markdown + "\n```yaml\n" + findings_yaml + "```\n"
     _validate_and_write(ctx, new_section)
 
     # Step 4: route.

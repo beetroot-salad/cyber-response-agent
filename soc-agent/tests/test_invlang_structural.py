@@ -47,7 +47,7 @@ class TestCheckLeadRequiredFields:
         assert _check_lead_required_fields(merged) == []
 
     def test_missing_resolutions(self):
-        merged = {"gather": [{
+        merged = {"findings": [{
             "id": "l-001", "loop": 1, "name": "test", "target": "v-001",
             "query_details": {}, "outcome": {},
             # resolutions missing
@@ -56,7 +56,7 @@ class TestCheckLeadRequiredFields:
         assert any("resolutions" in e for e in errors)
 
     def test_missing_multiple_fields(self):
-        merged = {"gather": [{"id": "l-001"}]}
+        merged = {"findings": [{"id": "l-001"}]}
         errors = _check_lead_required_fields(merged)
         assert errors
         assert any("l-001" in e for e in errors)
@@ -103,7 +103,7 @@ class TestCheckIdReferences:
         assert errors == [], errors
 
     def test_dangling_target_ref(self):
-        merged = {"gather": [{
+        merged = {"findings": [{
             "id": "l-001", "loop": 1, "name": "test",
             "target": "v-999",
             "query_details": {}, "outcome": {}, "resolutions": [],
@@ -114,7 +114,7 @@ class TestCheckIdReferences:
     def test_dangling_resolution_hypothesis(self):
         merged = {
             "prologue": {"vertices": [{"id": "v-001"}], "edges": [{"id": "e-001", "authority": {"kind": "siem-event"}}]},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "test", "target": "v-001",
                 "query_details": {}, "outcome": {},
                 "resolutions": [{"hypothesis": "h-999", "after": "+", "supporting_edges": ["e-001"]}],
@@ -138,7 +138,7 @@ class TestCheckEdgeAuthority:
                             "source_vertex": "v-001", "target_vertex": "v-002",
                             "authority": {"kind": authority_kind, "source": "wazuh"}}]
             },
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "test", "target": "v-001",
                 "query_details": {}, "outcome": {"observations": {"vertices": [], "edges": []}},
                 "resolutions": [{
@@ -165,7 +165,7 @@ class TestCheckEdgeAuthority:
     def test_pp_empty_supporting_edges_fails(self):
         merged = {
             "prologue": {"vertices": [], "edges": []},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "test", "target": "v-001",
                 "query_details": {}, "outcome": {"observations": {"vertices": [], "edges": []}},
                 "resolutions": [{"hypothesis": "h-001", "after": "++", "supporting_edges": []}],
@@ -185,7 +185,7 @@ class TestCheckEdgeAuthority:
 
 class TestCheckRefutationIds:
     def test_mm_with_ids_passes(self):
-        merged = {"gather": [{
+        merged = {"findings": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {},
             "resolutions": [{"hypothesis": "h-001", "after": "--",
@@ -194,7 +194,7 @@ class TestCheckRefutationIds:
         assert _check_refutation_ids(merged) == []
 
     def test_mm_empty_ids_fails(self):
-        merged = {"gather": [{
+        merged = {"findings": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {},
             "resolutions": [{"hypothesis": "h-001", "after": "--",
@@ -205,7 +205,7 @@ class TestCheckRefutationIds:
         assert "l-001" in errors[0]
 
     def test_mm_missing_key_fails(self):
-        merged = {"gather": [{
+        merged = {"findings": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {},
             "resolutions": [{"hypothesis": "h-001", "after": "--", "supporting_edges": []}],
@@ -220,7 +220,7 @@ class TestCheckRefutationIds:
 
 class TestCheckScreenResultScope:
     def test_screen_result_on_screen_lead_passes(self):
-        merged = {"gather": [{
+        merged = {"findings": [{
             "id": "l-001", "loop": 0, "name": "t", "target": "v-001",
             "mode": "screen",
             "query_details": {}, "outcome": {"screen_result": "no_match"},
@@ -229,7 +229,7 @@ class TestCheckScreenResultScope:
         assert _check_screen_result_scope(merged) == []
 
     def test_screen_result_on_non_screen_lead_fails(self):
-        merged = {"gather": [{
+        merged = {"findings": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {"screen_result": "no_match"},
             "resolutions": [],
@@ -245,7 +245,7 @@ class TestCheckScreenResultScope:
 
 
 def _lead_with_predictions(predictions):
-    return {"gather": [{
+    return {"findings": [{
         "id": "l-001", "loop": 1, "name": "volume-profile", "target": "v-001",
         "query_details": {}, "outcome": {},
         "predictions": predictions,
@@ -255,7 +255,7 @@ def _lead_with_predictions(predictions):
 
 class TestCheckLeadPredictions:
     def test_absent_predictions_passes(self):
-        merged = {"gather": [{
+        merged = {"findings": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {}, "resolutions": [],
         }]}
@@ -301,7 +301,7 @@ class TestCheckLeadPredictions:
         assert any("non-empty string" in e for e in errors)
 
     def test_predictions_not_a_list(self):
-        merged = {"gather": [{
+        merged = {"findings": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {},
             "predictions": "not a list",
@@ -325,7 +325,7 @@ class TestCheckAuthorizationResolutionProvenance:
 
     def test_missing_required_fields_reported(self):
         merged = _companion_with_contract()
-        edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        edge = merged["findings"][0]["outcome"]["observations"]["edges"][0]
         # Strip several required fields to verify they all get reported.
         for field in ("anchor_kind", "anchor_id", "as_of"):
             edge["authorization_resolutions"][0].pop(field, None)
@@ -338,14 +338,14 @@ class TestCheckAuthorizationResolutionProvenance:
 
     def test_telemetry_baseline_grounding_rejected(self):
         merged = _companion_with_contract()
-        edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        edge = merged["findings"][0]["outcome"]["observations"]["edges"][0]
         edge["authorization_resolutions"][0]["grounding_kind"] = "telemetry-baseline"
         errors = _check_authorization_resolution_provenance(merged)
         assert any("telemetry-baseline" in e for e in errors)
 
     def test_past_case_requires_cites_past_case(self):
         merged = _companion_with_contract()
-        edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        edge = merged["findings"][0]["outcome"]["observations"]["edges"][0]
         edge["authorization_resolutions"][0]["grounding_kind"] = "past-case"
         # No cites_past_case field
         errors = _check_authorization_resolution_provenance(merged)
@@ -353,7 +353,7 @@ class TestCheckAuthorizationResolutionProvenance:
 
     def test_past_case_with_valid_cites_passes(self):
         merged = _companion_with_contract()
-        edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        edge = merged["findings"][0]["outcome"]["observations"]["edges"][0]
         edge["authorization_resolutions"][0]["grounding_kind"] = "past-case"
         edge["authorization_resolutions"][0]["cites_past_case"] = {
             "run_id": "run-2025-01", "contract_ref": "h-001.ac1",
@@ -362,7 +362,7 @@ class TestCheckAuthorizationResolutionProvenance:
 
     def test_past_case_missing_run_id_fails(self):
         merged = _companion_with_contract()
-        edge = merged["gather"][0]["outcome"]["observations"]["edges"][0]
+        edge = merged["findings"][0]["outcome"]["observations"]["edges"][0]
         edge["authorization_resolutions"][0]["grounding_kind"] = "past-case"
         edge["authorization_resolutions"][0]["cites_past_case"] = {"contract_ref": "h-001.ac1"}
         errors = _check_authorization_resolution_provenance(merged)
@@ -383,7 +383,7 @@ class TestCheckAnchorConsultationProvenance:
 
     def test_missing_required_fields_reported(self):
         merged = _companion_with_contract()
-        cons = merged["gather"][0]["outcome"]["anchor_consultations"][0]
+        cons = merged["findings"][0]["outcome"]["anchor_consultations"][0]
         cons.pop("result")
         cons.pop("anchor_id")
         errors = _check_anchor_consultation_provenance(merged)

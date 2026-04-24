@@ -30,7 +30,7 @@ def iter_hypotheses(merged: dict[str, Any]) -> Iterator[dict[str, Any]]:
     for h in merged.get("hypothesize", {}).get("hypotheses", []) or []:
         if isinstance(h, dict):
             yield h
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         for h in lead.get("new_hypotheses", []) or []:
@@ -68,7 +68,7 @@ def compute_final_weight(merged: dict[str, Any], h_id: str) -> Any:
     wins. Returns None if no resolution mentioned this hypothesis.
     """
     final: Any = None
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         for res in lead.get("resolutions", []) or []:
@@ -95,7 +95,7 @@ def compute_final_status(merged: dict[str, Any], h_id: str) -> FinalStatus:
     terminal by schema convention.
     """
     # Check explicit shelving first — terminal.
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         for sid in lead.get("shelved", []) or []:
@@ -136,7 +136,7 @@ def collect_hypothesis_ids(merged: dict[str, Any]) -> list[str]:
 
 def iter_resolutions(merged: dict[str, Any]) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
     """Yield (lead, resolution) pairs across the whole companion."""
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         for res in lead.get("resolutions", []) or []:

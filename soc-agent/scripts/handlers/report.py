@@ -19,7 +19,7 @@ SCREEN path:
 ANALYZE path:
   **Mechanical + narrative subagent.** Handler composes every structured
     field (frontmatter, conclude: YAML, Hypothesis Outcomes, Key Evidence,
-    Verdict, trace) from the ANALYZE payload + invlang `gather:` blocks in
+    Verdict, trace) from the ANALYZE payload + invlang `findings:` blocks in
     investigation.md. A narrow `report_narrative` subagent (Haiku, no
     tools) authors only `## Summary` and optionally `## For Analyst`. Its
     preload is ~5-8 KB (trimmed investigation + optional single archetype)
@@ -249,8 +249,8 @@ def _resolve_matched_archetype(
     surviving_hypotheses = analyze_payload.get("surviving_hypotheses") or []
 
     investigation_md = load_investigation_md(ctx.run_dir)
-    gather = _extract_gather_blocks(investigation_md)
-    trust_anchors = _derive_trust_anchors(gather)
+    findings = _extract_findings_blocks(investigation_md)
+    trust_anchors = _derive_trust_anchors(findings)
 
     matched, _reason, dispatch_failed = _run_archetype_match(
         ctx,
@@ -259,7 +259,7 @@ def _resolve_matched_archetype(
         mechanism_summary=_derive_mechanism_summary(
             surviving_hypotheses, analyze_payload,
         ),
-        authorization_verdicts=_derive_authorization_verdicts(gather),
+        authorization_verdicts=_derive_authorization_verdicts(findings),
         trust_anchors_confirmed=[
             (a.get("anchor") or "") for a in trust_anchors
             if a.get("result") == "confirmed"
@@ -288,7 +288,7 @@ def handle(ctx: Context) -> PhaseResult:
         not ctx.forced_report
         and screen_payload.get("screen_result") == "match"
         and screen_payload.get("matched_archetype")
-        and screen_payload.get("gather")
+        and screen_payload.get("findings")
     ):
         try:
             payload = _compose_screen_match(ctx, screen_payload)
@@ -370,7 +370,7 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
     screen_confidence = screen_payload.get("confidence") or "high"
     evidence_summary = screen_payload.get("evidence_summary") or ""
     leads_run = screen_payload.get("leads_run") or []
-    gather = screen_payload.get("gather") or []
+    findings = screen_payload.get("findings") or []
     matched_pattern = screen_payload.get("matched_pattern") or archetype
 
     archetype_dir = (
@@ -392,7 +392,7 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
     if precedent_missing:
         matched_ticket_id = None  # drop from frontmatter; note in rationale
 
-    trust_anchors = _derive_trust_anchors(gather)
+    trust_anchors = _derive_trust_anchors(findings)
     confirmed_anchor_ids = {
         ta["anchor"] for ta in trust_anchors if ta.get("result") == "confirmed"
     }
@@ -565,8 +565,8 @@ def _iter_lead_authz_resolutions(outcome: dict) -> list[dict]:
     return out
 
 
-def _derive_trust_anchors(gather: list[dict]) -> list[dict]:
-    """Extract trust_anchors_consulted records from the invlang gather block.
+def _derive_trust_anchors(findings: list[dict]) -> list[dict]:
+    """Extract trust_anchors_consulted records from the invlang findings block.
 
     v2.11 sources two surfaces:
     - `outcome.anchor_consultations[]` — baseline / registry / reference
@@ -582,7 +582,7 @@ def _derive_trust_anchors(gather: list[dict]) -> list[dict]:
     `{anchor, kind, result, citation}`.
     """
     out: list[dict] = []
-    for lead in gather:
+    for lead in findings:
         outcome = (lead or {}).get("outcome") or {}
 
         # Non-authz consultations (baselines, registries, reference lookups).
@@ -619,8 +619,8 @@ def _derive_trust_anchors(gather: list[dict]) -> list[dict]:
     return out
 
 
-def _derive_authorization_verdicts(gather: list[dict]) -> list[dict]:
-    """Pull `authorization_resolutions[]` entries from every gather outcome.
+def _derive_authorization_verdicts(findings: list[dict]) -> list[dict]:
+    """Pull `authorization_resolutions[]` entries from every findings outcome.
 
     Each entry becomes `{contract, result}` — the shape archetype-match
     expects in its `authorization_verdicts` input. `contract` is the
@@ -628,7 +628,7 @@ def _derive_authorization_verdicts(gather: list[dict]) -> list[dict]:
     the `verdict`.
     """
     out: list[dict] = []
-    for lead in gather:
+    for lead in findings:
         outcome = (lead or {}).get("outcome") or {}
         for entry in _iter_lead_authz_resolutions(outcome):
             contract = entry.get("fulfills_contract")
@@ -862,11 +862,11 @@ def _compose_report_md_screen(
 # ---------------------------------------------------------------------------
 
 
-def _extract_gather_blocks(investigation_md: str) -> list[dict]:
-    """Extract gather lead entries from investigation.md.
+def _extract_findings_blocks(investigation_md: str) -> list[dict]:
+    """Extract findings lead entries from investigation.md.
 
     Preference order:
-      1. Invlang `gather: [...]` YAML fences (structured form — carries
+      1. Invlang `findings: [...]` YAML fences (structured form — carries
          full outcome shape including anchor_consultations,
          authorization_resolutions, resolutions,
          attribute_updates).
@@ -887,24 +887,24 @@ def _extract_gather_blocks(investigation_md: str) -> list[dict]:
             continue
         if not isinstance(parsed, dict):
             continue
-        gather = parsed.get("gather")
-        if not isinstance(gather, list):
+        findings = parsed.get("findings")
+        if not isinstance(findings, list):
             continue
-        for entry in gather:
+        for entry in findings:
             if isinstance(entry, dict):
                 merged.append(entry)
     if merged:
         return merged
 
     # Fallback: parse prose-form GATHER sections.
-    return _extract_gather_blocks_prose(investigation_md)
+    return _extract_findings_blocks_prose(investigation_md)
 
 
 _GATHER_HEADER_RE = None
 _LEAD_FIELD_RE = None
 
 
-def _extract_gather_blocks_prose(investigation_md: str) -> list[dict]:
+def _extract_findings_blocks_prose(investigation_md: str) -> list[dict]:
     """Parse prose-form `## GATHER (loop N)` sections into lead entries.
 
     Each GATHER section is assumed to have a `**Lead:** <name>` line and
@@ -996,7 +996,7 @@ def _extract_final_analyze_section(investigation_md: str) -> str:
 
 
 def _compose_trace_analyze(
-    gather: list[dict],
+    findings: list[dict],
     disposition: str,
     surviving_hypotheses: list[str] | None,
     matched_archetype: str | None,
@@ -1009,7 +1009,7 @@ def _compose_trace_analyze(
     hypothesis, else the disposition itself (so "escalated" still lands).
     """
     parts: list[str] = []
-    for entry in gather:
+    for entry in findings:
         name = entry.get("name") or entry.get("id") or "?"
         outcome_obj = entry.get("outcome") or {}
         authz_entries = _iter_lead_authz_resolutions(outcome_obj)
@@ -1043,13 +1043,13 @@ def _compose_trace_analyze(
 
 def _derive_termination_category(
     analyze_payload: dict,
-    gather: list[dict],
+    findings: list[dict],
     final_analyze_text: str,
 ) -> str:
     """Decide `conclude.termination.category` from the available signals.
 
     Order of precedence:
-      1. `trust-root` — a gather lead carries an edge-level
+      1. `trust-root` — a findings lead carries an edge-level
          `authorization_resolutions[]` entry with `verdict: authorized`
          (inline on a new edge or via `attribute_updates`), OR
          `outcome.trust_root_reached` names a confirmed vertex, OR an
@@ -1068,7 +1068,7 @@ def _derive_termination_category(
     the subagent to author it. Over-triggering `exhaustion-escalation` is
     the safe fallback — escalated dispositions land there.
     """
-    for entry in gather:
+    for entry in findings:
         outcome = entry.get("outcome") or {}
         if outcome.get("trust_root_reached"):
             return "trust-root"
@@ -1103,12 +1103,12 @@ def _derive_termination_category(
 
 
 def _compose_hypothesis_outcomes_md(
-    gather: list[dict],
+    findings: list[dict],
     surviving_hypotheses: list[str] | None,
 ) -> str:
-    """Render `## Hypothesis Outcomes` from invlang gather resolutions.
+    """Render `## Hypothesis Outcomes` from invlang findings resolutions.
 
-    Walks gather blocks for `outcome.resolutions[]` entries, collecting
+    Walks findings blocks for `outcome.resolutions[]` entries, collecting
     the final weight per hypothesis ID. Output is a bulleted list:
 
         - **?hypothesis-id (h-NNN):** final-weight — source lead(s).
@@ -1120,7 +1120,7 @@ def _compose_hypothesis_outcomes_md(
     """
     # hypothesis_id -> (latest_weight, lead_names_that_resolved_it)
     resolved: dict[str, tuple[str, list[str]]] = {}
-    for entry in gather:
+    for entry in findings:
         outcome = entry.get("outcome") or {}
         resolutions = outcome.get("resolutions")
         if not isinstance(resolutions, list):
@@ -1153,11 +1153,11 @@ def _compose_hypothesis_outcomes_md(
             for h in surviving_hypotheses
         )
 
-    return "- (no hypothesis records found in gather blocks)"
+    return "- (no hypothesis records found in findings blocks)"
 
 
-def _compose_key_evidence_md(gather: list[dict]) -> str:
-    """Render `## Key Evidence` from invlang gather outcomes.
+def _compose_key_evidence_md(findings: list[dict]) -> str:
+    """Render `## Key Evidence` from invlang findings outcomes.
 
     One bullet per lead. Preference order for what to cite:
       1. authorization_resolutions[] — anchor verdict + as_of.
@@ -1167,7 +1167,7 @@ def _compose_key_evidence_md(gather: list[dict]) -> str:
       5. fallback — lead name + status string.
     """
     lines: list[str] = []
-    for entry in gather:
+    for entry in findings:
         name = entry.get("name") or entry.get("id") or "?"
         outcome = entry.get("outcome") or {}
         citation: str
@@ -1212,7 +1212,7 @@ def _compose_key_evidence_md(gather: list[dict]) -> str:
             citation = f"lead completed (status: `{status}`)"
         lines.append(f"- **{name}:** {citation}")
     if not lines:
-        return "- (no gather leads recorded)"
+        return "- (no findings leads recorded)"
     return "\n".join(lines)
 
 
@@ -1322,7 +1322,7 @@ def _compose_report_md_analyze(
 ) -> str:
     """Assemble report.md for the ANALYZE-routed mechanical path.
 
-    Structural fields come from the ANALYZE payload + parsed gather blocks.
+    Structural fields come from the ANALYZE payload + parsed findings blocks.
     `summary_md` and `analyst_md` come from the narrative subagent. Section
     order is fixed to match agents/report.md §6 exactly so Tier-1 passes.
     """
@@ -1394,7 +1394,7 @@ def _compose_analyze_routed(
 ) -> dict:
     """Mechanical REPORT composer for the ANALYZE-routed path.
 
-    Extracts structured fields from the ANALYZE payload + invlang gather
+    Extracts structured fields from the ANALYZE payload + invlang findings
     blocks in investigation.md, dispatches the narrative subagent for the
     free-text sections, assembles report.md, appends the REPORT section
     to investigation.md, and runs Tier-1 validation.
@@ -1420,22 +1420,22 @@ def _compose_analyze_routed(
         )
 
     investigation_md = load_investigation_md(ctx.run_dir)
-    gather = _extract_gather_blocks(investigation_md)
+    findings = _extract_findings_blocks(investigation_md)
     final_analyze_text = _extract_final_analyze_section(investigation_md)
 
-    trust_anchors = _derive_trust_anchors(gather)
-    leads_pursued = len(gather)
+    trust_anchors = _derive_trust_anchors(findings)
+    leads_pursued = len(findings)
 
     trace = _compose_trace_analyze(
-        gather, disposition, surviving_hypotheses, matched_archetype,
+        findings, disposition, surviving_hypotheses, matched_archetype,
     )
     termination_category = _derive_termination_category(
-        analyze_payload, gather, final_analyze_text,
+        analyze_payload, findings, final_analyze_text,
     )
     hypothesis_outcomes_md = _compose_hypothesis_outcomes_md(
-        gather, surviving_hypotheses,
+        findings, surviving_hypotheses,
     )
-    key_evidence_md = _compose_key_evidence_md(gather)
+    key_evidence_md = _compose_key_evidence_md(findings)
 
     # Resolve grounding status. The ANALYZE disposition steers, but
     # `resolved` requires either (a) required_anchors all confirmed or

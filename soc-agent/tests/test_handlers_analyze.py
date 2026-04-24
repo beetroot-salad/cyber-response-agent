@@ -59,55 +59,53 @@ def stub_invoke(captured: list[str], response: str):
 
 # Canned valid response fragments used across several tests.
 _HALT_RESPONSE = textwrap.dedent("""
-## ANALYZE (loop 2)
-
-**Evidence:** cadence-check — cadence matches declared 60s interval (±1.8s).
-
-**Assessment:**
-- ?benign-automation: ++ (was +) — matched prediction p2; r2 failed.
-- ?brute-force: -- (was +) — matched refutation r1.
-
-**Surviving hypotheses:** ?benign-automation
-**Route:** halt → trust-root, disposition: benign, confidence: high, matched_archetype: monitoring-probe
-
-## Self-report
-
-- **Context wished for:** none
-- **Uncertain claims:** none
-- **Anomalies:**
-  - none
-
 ```yaml
-route: halt
-termination_category: trust-root
-disposition: benign
-confidence: high
-matched_archetype: monitoring-probe
-surviving_hypotheses: [h-001]
+analyze:
+  loop: 2
+  resolutions:
+    - lead_ref: "l-002"
+      entries:
+        - hypothesis_id: "h-001"
+          weight: "++"
+          matched_prediction_ids: [p2]
+          reasoning: "matched prediction p2; refutation r2 failed"
+        - hypothesis_id: "h-002"
+          weight: "--"
+          matched_prediction_ids: [p1]
+          matched_refutation_ids: [r1]
+          reasoning: "matched refutation r1"
+  anomalies: []
+  data_wishes: []
+  routing:
+    decision: halt
+    termination_category: trust-root
+    disposition: benign
+    confidence: high
+    matched_archetype: monitoring-probe
+    surviving_hypotheses: [h-001]
 ```
 """).strip()
 
 _CONTINUE_RESPONSE = textwrap.dedent("""
-## ANALYZE (loop 1)
-
-**Evidence:** source-classification — IP matches approved registry.
-
-**Assessment:**
-- ?benign-automation: + (was new) — consistent with registry.
-- ?brute-force: + (was new) — no differentiating evidence yet.
-
-**Surviving hypotheses:** ?benign-automation, ?brute-force
-**Route:** continue — fork still undifferentiated.
-
-## Self-report
-
-- **Context wished for:** cadence data
-- **Uncertain claims:** registry freshness
-- **Anomalies:**
-  - none
-
 ```yaml
-route: continue
+analyze:
+  loop: 1
+  resolutions:
+    - lead_ref: "l-001"
+      entries:
+        - hypothesis_id: "h-001"
+          weight: "+"
+          matched_prediction_ids: [p1]
+          reasoning: "consistent with registry"
+        - hypothesis_id: "h-002"
+          weight: "+"
+          matched_prediction_ids: [p1]
+          reasoning: "no differentiating evidence yet"
+  anomalies: []
+  data_wishes:
+    - "cadence data would sharpen grading"
+  routing:
+    decision: continue
 ```
 """).strip()
 
@@ -247,9 +245,11 @@ class TestHandleRoutesConclude:
         assert result.payload["surviving_hypotheses"] == ["h-001", "h-002"]
         assert result.payload["termination_category"] == "severity-ceiling"
 
-    def test_writes_markdown_sections_without_terminal_yaml(
+    def test_writes_markdown_section_rendered_from_envelope(
         self, tmp_path, monkeypatch,
     ):
+        # Single-PREDICT history → loop_n = 1. Envelope's loop field (2) is
+        # audit-trail only — the handler uses ctx.history for composing.
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
@@ -257,56 +257,13 @@ class TestHandleRoutesConclude:
         )
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
-        assert "## ANALYZE (loop 2)" in written
-        assert "## Self-report" in written
-        # The terminal routing YAML fence must NOT have been written
-        assert "route: halt" not in written
-        assert "surviving_hypotheses: [h-001]" not in written
-
-    def test_strip_preserves_non_terminal_yaml_fences(
-        self, tmp_path, monkeypatch,
-    ):
-        # New contract (commit 2): strip only the last fence (the terminal
-        # routing trailer). Non-terminal YAML fences survive — future-proofs
-        # for ANALYZE emitting `resolutions:` sub-blocks once the invlang
-        # merge-by-lead-id infrastructure lands. For now we don't expect any
-        # non-terminal YAML in practice, but the handler must not drop it.
-        response = textwrap.dedent("""
-        ## ANALYZE (loop 1)
-
-        **Evidence:** test
-
-        ```yaml
-        # future-shape resolutions sub-block (hypothetical)
-        resolutions:
-          - hypothesis: h-001
-            after: "+"
-        ```
-
-        More prose after the embedded block.
-
-        ## Self-report
-
-        - none
-
-        ```yaml
-        route: continue
-        ```
-        """).strip()
-        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
-        monkeypatch.setattr(
-            analyze_handler, "_invoke_subagent",
-            stub_invoke([], response),
-        )
-        analyze_handler.handle(ctx)
-        written = (ctx.run_dir / "investigation.md").read_text()
         assert "## ANALYZE (loop 1)" in written
-        assert "More prose after the embedded block." in written
-        # Non-terminal YAML fence preserved
-        assert "resolutions:" in written
-        assert "hypothesis: h-001" in written
-        # Terminal routing trailer dropped
-        assert "route: continue" not in written
+        assert "**Assessment:**" in written
+        # Per-resolution reasoning rendered.
+        assert "matched refutation r1" in written
+        # The envelope's routing fields — handler does NOT echo the raw YAML.
+        assert "analyze:" not in written
+        assert "surviving_hypotheses: [h-001]" not in written
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +291,10 @@ class TestHandleRoutesContinue:
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
         assert "## ANALYZE (loop 1)" in written
-        assert "## Self-report" in written
+        # Self-report block present because the CONTINUE envelope carries
+        # a non-empty data_wishes list.
+        assert "**Self-report:**" in written
+        assert "cadence data would sharpen" in written
 
 
 class TestUnresolvedPrescribedSetBackfill:
@@ -386,18 +346,14 @@ class TestUnresolvedPrescribedSetBackfill:
         self, tmp_path, monkeypatch,
     ):
         # Subagent emits its own unresolved_prescribed_set — handler does not
-        # overwrite from GATHER payload. (Subagent may know more than the
-        # mechanical diff — e.g., a lead that was "resolved" but whose
-        # observations didn't actually answer the predicate.)
+        # overwrite from GATHER payload.
         response = textwrap.dedent("""
-        ## ANALYZE (loop 1)
-
-        ## Self-report
-        - none
-
         ```yaml
-        route: continue
-        unresolved_prescribed_set: [custom-lead]
+        analyze:
+          loop: 1
+          routing:
+            decision: continue
+            unresolved_prescribed_set: [custom-lead]
         ```
         """).strip()
         ctx = self._ctx_with_gather(
@@ -433,25 +389,23 @@ class TestUnresolvedPrescribedSetBackfill:
 
 
 class TestHandleMalformedOutput:
-    def test_missing_terminal_yaml_raises(self, tmp_path, monkeypatch):
+    def test_missing_envelope_raises(self, tmp_path, monkeypatch):
         response = "## ANALYZE (loop 1)\n\nSome markdown but no YAML.\n"
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
         )
-        with pytest.raises(OrchestrationError, match="terminal YAML"):
+        with pytest.raises(OrchestrationError, match="envelope shape violation"):
             analyze_handler.handle(ctx)
 
     def test_invalid_route_raises(self, tmp_path, monkeypatch):
         response = textwrap.dedent("""
-        ## ANALYZE (loop 1)
-
-        ## Self-report
-        - none
-
         ```yaml
-        route: BOGUS
+        analyze:
+          loop: 1
+          routing:
+            decision: BOGUS
         ```
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
@@ -459,22 +413,20 @@ class TestHandleMalformedOutput:
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
         )
-        with pytest.raises(OrchestrationError, match="invalid route"):
+        with pytest.raises(OrchestrationError, match="decision must be one of"):
             analyze_handler.handle(ctx)
 
     def test_halt_without_termination_category_raises(self, tmp_path, monkeypatch):
         response = textwrap.dedent("""
-        ## ANALYZE (loop 1)
-
-        ## Self-report
-        - none
-
         ```yaml
-        route: halt
-        disposition: benign
-        confidence: high
-        matched_archetype: null
-        surviving_hypotheses: []
+        analyze:
+          loop: 1
+          routing:
+            decision: halt
+            disposition: benign
+            confidence: high
+            matched_archetype: null
+            surviving_hypotheses: []
         ```
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
@@ -487,17 +439,15 @@ class TestHandleMalformedOutput:
 
     def test_halt_without_disposition_raises(self, tmp_path, monkeypatch):
         response = textwrap.dedent("""
-        ## ANALYZE (loop 1)
-
-        ## Self-report
-        - none
-
         ```yaml
-        route: halt
-        termination_category: trust-root
-        confidence: high
-        matched_archetype: null
-        surviving_hypotheses: []
+        analyze:
+          loop: 1
+          routing:
+            decision: halt
+            termination_category: trust-root
+            confidence: high
+            matched_archetype: null
+            surviving_hypotheses: []
         ```
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
@@ -508,19 +458,19 @@ class TestHandleMalformedOutput:
         with pytest.raises(OrchestrationError, match="disposition"):
             analyze_handler.handle(ctx)
 
-    def test_halt_without_surviving_hypotheses_raises(self, tmp_path, monkeypatch):
+    def test_halt_without_surviving_hypotheses_accepted(self, tmp_path, monkeypatch):
+        # surviving_hypotheses is optional in the envelope — defaults to []
+        # when the subagent omits it (every hypothesis refuted).
         response = textwrap.dedent("""
-        ## ANALYZE (loop 1)
-
-        ## Self-report
-        - none
-
         ```yaml
-        route: halt
-        termination_category: trust-root
-        disposition: benign
-        confidence: high
-        matched_archetype: null
+        analyze:
+          loop: 1
+          routing:
+            decision: halt
+            termination_category: trust-root
+            disposition: benign
+            confidence: high
+            matched_archetype: null
         ```
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
@@ -528,21 +478,17 @@ class TestHandleMalformedOutput:
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
         )
-        with pytest.raises(OrchestrationError, match="surviving_hypotheses"):
-            analyze_handler.handle(ctx)
+        result = analyze_handler.handle(ctx)
+        assert result.payload["surviving_hypotheses"] == []
 
-    def test_continue_accepts_minimal_trailer(self, tmp_path, monkeypatch):
-        # Continue has no required fields beyond `route` itself (discriminator
-        # was dropped — PREDICT derives from companion state). A minimal
-        # continue trailer passes validation.
+    def test_continue_accepts_minimal_envelope(self, tmp_path, monkeypatch):
+        # Continue has no required fields beyond decision itself.
         response = textwrap.dedent("""
-        ## ANALYZE (loop 1)
-
-        ## Self-report
-        - none
-
         ```yaml
-        route: continue
+        analyze:
+          loop: 1
+          routing:
+            decision: continue
         ```
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
@@ -557,14 +503,12 @@ class TestHandleMalformedOutput:
         self, tmp_path, monkeypatch,
     ):
         response = textwrap.dedent("""
-        ## ANALYZE (loop 1)
-
-        ## Self-report
-        - none
-
         ```yaml
-        route: continue
-        unresolved_prescribed_set: "source-reputation"
+        analyze:
+          loop: 1
+          routing:
+            decision: continue
+            unresolved_prescribed_set: "source-reputation"
         ```
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
@@ -617,4 +561,158 @@ class TestAppendBehavior:
         assert result1.next_phase == Phase.REPORT
         # Only verify that a second call appends rather than duplicates the stripping behavior.
         written_once = (ctx.run_dir / "investigation.md").read_text()
-        assert written_once.count("## ANALYZE (loop 2)") == 1
+        # Handler uses ctx.history to compute loop_n → loop 1 for a single
+        # PREDICT entry in history. Envelope's loop field (2) is audit-only.
+        assert written_once.count("## ANALYZE (loop 1)") == 1
+
+
+# ---------------------------------------------------------------------------
+# Findings synthesis (handler authors invlang from gather + analyze envelopes)
+# ---------------------------------------------------------------------------
+
+
+class TestFindingsSynthesis:
+    """Analyze-handler synthesizes the `findings[]` invlang block from
+    gather's envelope (stashed in ctx.outputs[Phase.GATHER]["leads"]) +
+    analyze's interpretation envelope. Validator-valid output is required —
+    the handler writes via `validate_companion`, which rejects on schema
+    errors.
+    """
+
+    _PROLOGUE = textwrap.dedent("""\
+        ## CONTEXTUALIZE
+
+        ```yaml
+        prologue:
+          vertices:
+            - id: v-001
+              type: endpoint
+              classification: target-endpoint
+              identifier: "target-endpoint"
+          edges: []
+        ```
+
+        ## PREDICT (loop 1)
+
+        ```yaml
+        hypothesize:
+          hypotheses:
+            - id: h-001
+              name: "?monitoring-probe"
+              status: active
+              classification: benign-mechanism
+              proposed_edge:
+                id: e-p001
+                parent_vertex: {type: identity, classification: external-source, identifier: "monitorprobe"}
+                attached_to_vertex: v-001
+                relation: authenticates_to
+                authority: siem-event
+              predictions:
+                - id: p1
+                  subject: proposed_parent
+                  claim: "single attempt per tick"
+              weight: null
+        ```
+        """)
+
+    def _halt_response_with_resolutions(self) -> str:
+        # Uses `+` instead of `++` — avoids the supporting_edges
+        # requirement that confirmed-weight resolutions impose (validator
+        # rule on edge authority). The test asserts on the synthesis
+        # mechanics, not the grading discipline.
+        return textwrap.dedent("""
+        ```yaml
+        analyze:
+          loop: 1
+          resolutions:
+            - lead_ref: "l-001"
+              entries:
+                - hypothesis_id: "h-001"
+                  weight: "+"
+                  matched_prediction_ids: [p1]
+                  reasoning: "consistent with p1"
+          anomalies: []
+          data_wishes: []
+          routing:
+            decision: halt
+            termination_category: severity-ceiling
+            disposition: unclear
+            confidence: medium
+            matched_archetype: null
+            surviving_hypotheses: [h-001]
+        ```
+        """).strip()
+
+    def test_synthesizes_findings_from_envelopes(self, tmp_path, monkeypatch):
+        ctx = make_ctx(
+            tmp_path,
+            history=[Phase.PREDICT.value],
+            existing_investigation=self._PROLOGUE,
+        )
+        # Stash gather envelope in ctx.outputs — mirrors what gather.py
+        # emits to ctx.outputs[Phase.GATHER] on a real dispatch.
+        ctx.outputs[Phase.GATHER] = {
+            "leads": [
+                {
+                    "id": "l-001",
+                    "name": "authentication-history",
+                    "status": "ok",
+                    "query": {
+                        "system": "wazuh-indexer",
+                        "template": "source-ip-lookup",
+                        "query": "rule.groups:sshd",
+                        "time_window": {
+                            "start": "2026-04-20T18:25:00Z",
+                            "end": "2026-04-20T19:25:00Z",
+                        },
+                        "substitutions": {"ip": "10.0.1.99"},
+                    },
+                    "characterization": {"total_events": 11},
+                    "observations": {"vertices": [], "edges": []},
+                },
+            ],
+            "prescribed_leads": ["authentication-history"],
+            "executed_leads": ["authentication-history"],
+            "raw_details_paths": [],
+        }
+        monkeypatch.setattr(
+            analyze_handler, "_invoke_subagent",
+            stub_invoke([], self._halt_response_with_resolutions()),
+        )
+
+        result = analyze_handler.handle(ctx)
+
+        assert result.next_phase == Phase.REPORT
+        written = (ctx.run_dir / "investigation.md").read_text()
+        # The handler wrote an invlang `findings:` block alongside the
+        # prose ANALYZE section. Validator would have rejected an invalid
+        # block via validate_companion, so reaching this assertion proves
+        # the synthesized YAML passes schema checks.
+        assert "findings:" in written
+        assert "id: l-001" in written
+        assert "target: v-001" in written  # default from prologue
+        assert "hypothesis: h-001" in written
+        assert "after: +" in written or "after: '+'" in written
+
+    def test_skips_synthesis_when_gather_leads_absent(self, tmp_path, monkeypatch):
+        # SCREEN-matched and forced-exhaustion paths reach ANALYZE without
+        # a gather envelope — synthesis must silently skip.
+        ctx = make_ctx(
+            tmp_path,
+            history=[Phase.PREDICT.value],
+            existing_investigation=self._PROLOGUE,
+        )
+        # No ctx.outputs[Phase.GATHER] — synthesis bails.
+        monkeypatch.setattr(
+            analyze_handler, "_invoke_subagent",
+            stub_invoke([], self._halt_response_with_resolutions()),
+        )
+
+        result = analyze_handler.handle(ctx)
+        assert result.next_phase == Phase.REPORT
+        written = (ctx.run_dir / "investigation.md").read_text()
+        # Prose section landed; no findings block (no gather leads to synthesize).
+        assert "## ANALYZE (loop 1)" in written
+        # findings: appears only in the prose "Assessment" header area;
+        # no YAML fence with findings key.
+        assert "findings:\n  -" not in written

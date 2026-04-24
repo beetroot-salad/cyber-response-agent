@@ -16,6 +16,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.invlang_validate import (
+    _check_attribute_prediction_structure,
     _check_classification_evaluation_prefix,
     _check_compound_prediction_claim,
     _check_hypothesis_fork_distinctness,
@@ -97,7 +98,7 @@ class TestHypothesisForkDistinctness:
             "hypothesize": {"hypotheses": [
                 self._h("h-001", "v-001", "runtime-descendant"),
             ]},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {}, "resolutions": [],
                 "new_hypotheses": [self._h("h-002", "v-001", "runtime-descendant")],
@@ -149,7 +150,7 @@ class TestCheckHypothesisPersistence:
     def test_hypothesis_refuted_passes(self):
         merged = {
             "hypothesize": {"hypotheses": [self._hypothesis("h-001")]},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {},
                 "resolutions": [self._resolution("h-001", "--")],
@@ -166,7 +167,7 @@ class TestCheckHypothesisPersistence:
     def test_hypothesis_in_surviving_list_passes(self):
         merged = {
             "hypothesize": {"hypotheses": [self._hypothesis("h-001")]},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {},
                 "resolutions": [self._resolution("h-001", "+")],
@@ -186,7 +187,7 @@ class TestCheckHypothesisPersistence:
                 self._hypothesis("h-001"),
                 self._hypothesis("h-002"),
             ]},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {},
                 "resolutions": [self._resolution("h-001", "--")],
@@ -206,7 +207,7 @@ class TestCheckHypothesisPersistence:
     def test_plus_weight_not_listed_fails(self):
         merged = {
             "hypothesize": {"hypotheses": [self._hypothesis("h-001")]},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {},
                 "resolutions": [self._resolution("h-001", "+")],
@@ -225,7 +226,7 @@ class TestCheckHypothesisPersistence:
     def test_shelved_hypothesis_passes(self):
         merged = {
             "hypothesize": {"hypotheses": [self._hypothesis("h-001")]},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {},
                 "resolutions": [],
@@ -257,7 +258,7 @@ class TestCheckHypothesisPersistence:
     def test_new_hypotheses_in_leads_participate(self):
         merged = {
             "hypothesize": {"hypotheses": []},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {},
                 "resolutions": [],
@@ -317,7 +318,7 @@ class TestCheckPredictionIdHypothesisScope:
     def test_own_prediction_ids_pass(self):
         merged = {
             "hypothesize": {"hypotheses": [self._h("h-001", ["p1", "p2"])]},
-            "gather": [self._lead("l-001", "h-001", ["p1"])],
+            "findings": [self._lead("l-001", "h-001", ["p1"])],
         }
         assert _check_prediction_id_hypothesis_scope(merged) == []
 
@@ -327,7 +328,7 @@ class TestCheckPredictionIdHypothesisScope:
                 self._h("h-001", ["pA"]),
                 self._h("h-002", ["pB"]),
             ]},
-            "gather": [self._lead("l-001", "h-001", ["pB"])],
+            "findings": [self._lead("l-001", "h-001", ["pB"])],
         }
         errors = _check_prediction_id_hypothesis_scope(merged)
         assert len(errors) == 1
@@ -337,7 +338,7 @@ class TestCheckPredictionIdHypothesisScope:
     def test_empty_matched_passes(self):
         merged = {
             "hypothesize": {"hypotheses": [self._h("h-001", ["p1"])]},
-            "gather": [self._lead("l-001", "h-001", [])],
+            "findings": [self._lead("l-001", "h-001", [])],
         }
         assert _check_prediction_id_hypothesis_scope(merged) == []
 
@@ -347,7 +348,7 @@ class TestCheckPredictionIdHypothesisScope:
                 self._h("h-001", ["p1"]),
                 self._h("h-002", ["p2"]),
             ]},
-            "gather": [self._lead("l-001", "h-001", ["p1", "p2"])],
+            "findings": [self._lead("l-001", "h-001", ["p1", "p2"])],
         }
         errors = _check_prediction_id_hypothesis_scope(merged)
         assert len(errors) == 1
@@ -360,14 +361,14 @@ class TestCheckPredictionIdHypothesisScope:
         # stays silent to avoid double-reporting the same root cause.
         merged = {
             "hypothesize": {"hypotheses": [self._h("h-001", ["p1"])]},
-            "gather": [self._lead("l-001", "h-999", ["p1"])],
+            "findings": [self._lead("l-001", "h-999", ["p1"])],
         }
         assert _check_prediction_id_hypothesis_scope(merged) == []
 
     def test_new_hypotheses_predictions_counted(self):
         merged = {
             "hypothesize": {"hypotheses": []},
-            "gather": [
+            "findings": [
                 {
                     "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                     "query_details": {}, "outcome": {},
@@ -463,7 +464,7 @@ class TestCheckCompoundPredictionClaim:
     def test_new_hypotheses_in_leads_participate(self):
         merged = {
             "hypothesize": {"hypotheses": []},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {}, "resolutions": [],
                 "new_hypotheses": [self._h("h-002", ["a; b"])],
@@ -539,7 +540,7 @@ class TestCheckClassificationEvaluationPrefix:
     def test_new_hypotheses_in_leads_participate(self):
         merged = {
             "hypothesize": {"hypotheses": []},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {}, "resolutions": [],
                 "new_hypotheses": [self._h("h-002", "malicious-tool")],
@@ -605,7 +606,7 @@ class TestCheckPredictionsLeanness:
     def test_new_hypotheses_in_leads_participate(self):
         merged = {
             "hypothesize": {"hypotheses": []},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {}, "resolutions": [],
                 "new_hypotheses": [self._h("h-002", 4)],
@@ -676,7 +677,7 @@ class TestCheckPredictionSubjectScope:
     def test_new_hypotheses_in_leads_participate(self):
         merged = {
             "hypothesize": {"hypotheses": []},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {}, "resolutions": [],
                 "new_hypotheses": [self._h("h-002", [
@@ -779,7 +780,7 @@ class TestCheckRefutationPredictionLinks:
     def test_new_hypotheses_in_leads_participate(self):
         merged = {
             "hypothesize": {"hypotheses": []},
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
                 "query_details": {}, "outcome": {}, "resolutions": [],
                 "new_hypotheses": [self._h("h-002", ["p1"], [
@@ -907,3 +908,190 @@ class TestCheckIntegrityPeerDiscipline:
             },
         ]}}
         assert _check_integrity_peer_discipline(merged) == []
+
+
+# ---------------------------------------------------------------------------
+# Rule #33 — attribute_predictions[] structure
+# ---------------------------------------------------------------------------
+
+
+class TestAttributePredictionStructure:
+    """Rule #33 — attribute_predictions[] entries have id/target/attribute/claim."""
+
+    @staticmethod
+    def _h_with_attr_preds(attr_preds):
+        return {"hypothesize": {"hypotheses": [{
+            "id": "h-001",
+            "name": "?scheduled-automation",
+            "attached_to_vertex": "v-001",
+            "proposed_edge": {
+                "relation": "initiated_by",
+                "parent_vertex": {"type": "process", "classification": "monitoring-daemon"},
+            },
+            "predictions": [{"id": "p1", "claim": "cadence is periodic within ±5s"}],
+            "attribute_predictions": attr_preds,
+        }]}}
+
+    def test_valid_attribute_predictions_pass(self):
+        merged = self._h_with_attr_preds([
+            {"id": "ap1", "target": "proposed_parent", "attribute": "cmdline",
+             "claim": "matches /monitord|nagios-plugin/"},
+            {"id": "ap2", "target": "proposed_parent", "attribute": "user_loginuid",
+             "claim": "system user (UID < 1000)"},
+        ])
+        assert _check_attribute_prediction_structure(merged) == []
+
+    def test_absent_attribute_predictions_pass(self):
+        # Optional field — omitting is legal.
+        merged = {"hypothesize": {"hypotheses": [{
+            "id": "h-001", "name": "?x", "attached_to_vertex": "v-001",
+            "proposed_edge": {"relation": "r", "parent_vertex": {"type": "process", "classification": "x"}},
+            "predictions": [{"id": "p1", "claim": "..."}],
+        }]}}
+        assert _check_attribute_prediction_structure(merged) == []
+
+    def test_bad_id_pattern_fails(self):
+        merged = self._h_with_attr_preds([
+            {"id": "attr-1", "target": "proposed_parent", "attribute": "cmdline", "claim": "x"},
+        ])
+        errors = _check_attribute_prediction_structure(merged)
+        assert errors and "ap\\d+" in errors[0]
+
+    def test_duplicate_id_fails(self):
+        merged = self._h_with_attr_preds([
+            {"id": "ap1", "target": "proposed_parent", "attribute": "cmdline", "claim": "x"},
+            {"id": "ap1", "target": "proposed_parent", "attribute": "pname", "claim": "y"},
+        ])
+        errors = _check_attribute_prediction_structure(merged)
+        assert errors and "duplicate" in errors[0]
+
+    def test_bad_target_fails(self):
+        merged = self._h_with_attr_preds([
+            {"id": "ap1", "target": "random_thing", "attribute": "cmdline", "claim": "x"},
+        ])
+        errors = _check_attribute_prediction_structure(merged)
+        assert errors and "target" in errors[0]
+
+    def test_missing_attribute_fails(self):
+        merged = self._h_with_attr_preds([
+            {"id": "ap1", "target": "proposed_parent", "claim": "x"},
+        ])
+        errors = _check_attribute_prediction_structure(merged)
+        assert errors and "attribute" in errors[0]
+
+    def test_empty_claim_fails(self):
+        merged = self._h_with_attr_preds([
+            {"id": "ap1", "target": "proposed_parent", "attribute": "cmdline", "claim": ""},
+        ])
+        errors = _check_attribute_prediction_structure(merged)
+        assert errors and "claim" in errors[0]
+
+    def test_non_list_attribute_predictions_fails(self):
+        merged = {"hypothesize": {"hypotheses": [{
+            "id": "h-001", "name": "?x", "attached_to_vertex": "v-001",
+            "proposed_edge": {"relation": "r", "parent_vertex": {"type": "process", "classification": "x"}},
+            "predictions": [{"id": "p1", "claim": "..."}],
+            "attribute_predictions": "not-a-list",
+        }]}}
+        errors = _check_attribute_prediction_structure(merged)
+        assert errors and "must be a list" in errors[0]
+
+
+class TestRefutationCitesAttributePrediction:
+    """Rule #33 extension — refutation_shape.refutes_predictions may cite ap* ids."""
+
+    def test_refutation_citing_ap_id_passes(self):
+        merged = {"hypothesize": {"hypotheses": [{
+            "id": "h-001", "name": "?x", "attached_to_vertex": "v-001",
+            "proposed_edge": {"relation": "r", "parent_vertex": {"type": "process", "classification": "x"}},
+            "predictions": [{"id": "p1", "claim": "..."}],
+            "attribute_predictions": [
+                {"id": "ap1", "target": "proposed_parent", "attribute": "cmdline",
+                 "claim": "matches /monitord/"},
+            ],
+            "refutation_shape": [
+                {"id": "r1", "refutes_predictions": ["ap1"],
+                 "claim": "cmdline is shell/curl-pipe pattern"},
+            ],
+        }]}}
+        assert _check_refutation_prediction_links(merged) == []
+
+    def test_refutation_citing_both_p_and_ap_ids_passes(self):
+        merged = {"hypothesize": {"hypotheses": [{
+            "id": "h-001", "name": "?x", "attached_to_vertex": "v-001",
+            "proposed_edge": {"relation": "r", "parent_vertex": {"type": "process", "classification": "x"}},
+            "predictions": [{"id": "p1", "claim": "cadence periodic"}],
+            "attribute_predictions": [
+                {"id": "ap1", "target": "proposed_parent", "attribute": "cmdline", "claim": "..."},
+            ],
+            "refutation_shape": [
+                {"id": "r1", "refutes_predictions": ["p1", "ap1"],
+                 "claim": "combined refutation"},
+            ],
+        }]}}
+        assert _check_refutation_prediction_links(merged) == []
+
+    def test_refutation_citing_foreign_ap_id_fails(self):
+        merged = {"hypothesize": {"hypotheses": [{
+            "id": "h-001", "name": "?x", "attached_to_vertex": "v-001",
+            "proposed_edge": {"relation": "r", "parent_vertex": {"type": "process", "classification": "x"}},
+            "predictions": [{"id": "p1", "claim": "..."}],
+            "refutation_shape": [
+                {"id": "r1", "refutes_predictions": ["ap99"],
+                 "claim": "nonexistent attribute"},
+            ],
+        }]}}
+        errors = _check_refutation_prediction_links(merged)
+        assert errors and "ap99" in errors[0]
+
+
+class TestResolutionCitesAttributePrediction:
+    """Rule #33 extension — matched_prediction_ids may cite ap* ids."""
+
+    @staticmethod
+    def _merged_with_res(matched_ids):
+        return {
+            "hypothesize": {"hypotheses": [{
+                "id": "h-001", "name": "?x", "attached_to_vertex": "v-001",
+                "proposed_edge": {"relation": "r", "parent_vertex": {"type": "process", "classification": "x"}},
+                "predictions": [{"id": "p1", "claim": "..."}],
+                "attribute_predictions": [
+                    {"id": "ap1", "target": "proposed_parent", "attribute": "cmdline", "claim": "..."},
+                ],
+            }]},
+            "findings": [{
+                "id": "l-001",
+                "resolutions": [{
+                    "hypothesis": "h-001",
+                    "after": "+",
+                    "matched_prediction_ids": matched_ids,
+                }],
+            }],
+        }
+
+    def test_matched_ap_id_passes(self):
+        assert _check_prediction_id_hypothesis_scope(self._merged_with_res(["ap1"])) == []
+
+    def test_matched_mixed_ids_pass(self):
+        assert _check_prediction_id_hypothesis_scope(self._merged_with_res(["p1", "ap1"])) == []
+
+    def test_matched_foreign_ap_id_fails(self):
+        errors = _check_prediction_id_hypothesis_scope(self._merged_with_res(["ap99"]))
+        assert errors and "ap99" in errors[0]
+
+
+class TestCompoundAttributePredictionClaim:
+    """Rule #26 extension — compound-claim discipline applies to attribute_predictions."""
+
+    def test_and_in_attribute_claim_fails(self):
+        merged = {"hypothesize": {"hypotheses": [{
+            "id": "h-001", "name": "?x", "attached_to_vertex": "v-001",
+            "proposed_edge": {"relation": "r", "parent_vertex": {"type": "process", "classification": "x"}},
+            "predictions": [{"id": "p1", "claim": "..."}],
+            "attribute_predictions": [
+                {"id": "ap1", "target": "proposed_parent", "attribute": "cmdline",
+                 "claim": "matches /monitord/ AND non-interactive"},
+            ],
+        }]}}
+        errors = _check_compound_prediction_claim(merged)
+        assert errors and "ap1" in errors[0] and "'AND'" in errors[0]

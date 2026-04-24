@@ -88,11 +88,11 @@ class TestExtractConcludeYaml:
         assert extract_conclude_yaml(text) is None
 
     def test_other_yaml_block_only(self):
-        # A non-conclude yaml block (e.g., a gather: block earlier in
+        # A non-conclude yaml block (e.g., a findings: block earlier in
         # the file) does not satisfy the gate.
         text = textwrap.dedent("""\
             ```yaml
-            gather:
+            findings:
               - id: l-1
                 name: foo
             ```
@@ -166,7 +166,7 @@ class TestCheckFrontierClosure:
             "      name: \"?scanner\"\n"
         )
         lead = (
-            "gather:\n"
+            "findings:\n"
             "  - id: l-001\n"
             "    loop: 1\n"
             "    name: t\n"
@@ -195,7 +195,7 @@ class TestCheckFrontierClosure:
         )
         # Only h-001 gets a resolution; h-002 remains active.
         lead = (
-            "gather:\n"
+            "findings:\n"
             "  - id: l-001\n"
             "    loop: 1\n"
             "    name: t\n"
@@ -267,7 +267,7 @@ class TestCheckFrontierClosure:
             "      name: \"?scanner\"\n"
         )
         lead = (
-            "gather:\n"
+            "findings:\n"
             "  - id: l-001\n"
             "    loop: 1\n"
             "    name: t\n"
@@ -291,7 +291,7 @@ class TestCheckFrontierClosure:
             "      name: \"?scanner\"\n"
         )
         lead = (
-            "gather:\n"
+            "findings:\n"
             "  - id: l-001\n"
             "    loop: 1\n"
             "    name: t\n"

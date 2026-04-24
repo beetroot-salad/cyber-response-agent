@@ -84,7 +84,7 @@ hypothesize:
 """
 
 VALID_LEAD_YAML = """\
-gather:
+findings:
   - id: l-001
     loop: 1
     name: source-classification
@@ -282,7 +282,7 @@ def _companion_with_contract(
                 }
             ]
         },
-        "gather": [
+        "findings": [
             {
                 "id": "l-001",
                 "loop": 1,
@@ -324,7 +324,7 @@ def _companion_with_contract(
 
 
 def _merged_with_leads(leads):
-    return {"gather": leads}
+    return {"findings": leads}
 
 
 def _lead(name, predictions=None):
@@ -377,7 +377,7 @@ class TestCollectWarnings:
     def test_companion_with_route_warning(self):
         text = (
             "```yaml\n"
-            "gather:\n"
+            "findings:\n"
             "  - id: l-001\n"
             "    loop: 1\n"
             "    name: first\n"
@@ -508,7 +508,7 @@ class TestHookIntegration:
 
     def test_missing_lead_field_fails(self, tmp_path):
         bad_lead = """\
-gather:
+findings:
   - id: l-001
     loop: 1
     name: test
@@ -533,7 +533,7 @@ gather:
     def test_pp_missing_supporting_edges_fails(self, tmp_path):
         prologue_content = f"## CONTEXTUALIZE\n\n```yaml\n{VALID_PROLOGUE_YAML}```\n"
         lead_no_edges = """\
-gather:
+findings:
   - id: l-001
     loop: 1
     name: test
@@ -565,7 +565,7 @@ gather:
 
     def test_mm_missing_refutation_ids_fails(self, tmp_path):
         bad_resolution = """\
-gather:
+findings:
   - id: l-001
     loop: 1
     name: test
@@ -605,7 +605,7 @@ gather:
 
     def test_screen_result_on_non_screen_lead_fails(self, tmp_path):
         bad_screen = """\
-gather:
+findings:
   - id: l-001
     loop: 1
     name: test
@@ -648,7 +648,7 @@ gather:
 
     def test_dangling_id_reference_fails(self, tmp_path):
         bad_ref = """\
-gather:
+findings:
   - id: l-001
     loop: 1
     name: test

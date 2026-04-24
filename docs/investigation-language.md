@@ -1,7 +1,9 @@
 # Investigation Language
 
-**Status:** Spec v2.11. Implemented.
+**Status:** Spec v2.12. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
+
+**v2.12 delta:** top-level block rename `gather:` → `findings:`. Same merge semantics (same-id append; ANALYZE merges outcome.resolutions + verdicts onto the GATHER-populated entry), clearer name for cross-phase state. Handler-authored: subagents emit plain-YAML envelopes; `scripts/handlers/gather.py` + `scripts/handlers/analyze.py` synthesize `findings[]` and merge via the existing validator. Raw SIEM/anchor payloads moved off the companion to `runs/<run-id>/raw_details/loop-<N>/<lead-id>.yaml`; analyze-handler preloads them per-loop.
 
 **v2.11 delta:** three orthogonal resolution axes named explicitly.
 - **Impact** promoted from a signature-knowledge hand-wave to a lead-level first-class record. `impact_predictions[]` on leads declare threshold predicates before evidence lands; ANALYZE grades observations against them and emits `impact_resolutions[]` on lead outcomes; `conclude.impact_verdict` and `conclude.impact_severity` are a second axis alongside `disposition`. The authorized-but-malifying class (authorized bulk read at 3σ above baseline; authorized admin delete of 10 000 rows) resolves here — not on authz. Signature-tier `impact_profile.md` deferred pending corpus measurements; per-signature impact knowledge lives in playbook prose until threshold drift is observed.
@@ -444,7 +446,7 @@ prologue:           # CONTEXTUALIZE: vertices + edges derived from the alert
 hypothesize:        # HYPOTHESIZE: initial proposed frontier (omit for SCREEN-matched cases)
   hypotheses: [...]
 
-gather:             # GATHER + ANALYZE: ordered lead blocks
+findings:           # GATHER + ANALYZE: ordered lead blocks (same id merges across phases)
   - lead: {...}
 
 conclude:           # CONCLUDE
@@ -655,7 +657,7 @@ confabulate.
 ### Lead
 
 ```yaml
-gather:
+findings:
   - lead:
       id: l-{nonce}
       loop: <int>

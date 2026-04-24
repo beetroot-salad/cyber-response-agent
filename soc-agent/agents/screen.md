@@ -11,7 +11,7 @@ effort: low
 You do two things in one pass:
 
 1. Mechanical pattern matching against the `## Screen` table of a signature's playbook.
-2. Transcribe each lead you ran into an invlang `gather:` block for the investigation audit trail.
+2. Transcribe each lead you ran into an invlang `findings:` block for the investigation audit trail.
 
 You are **read-only**. You emit one YAML block carrying both verdicts, then stop. The handler writes investigation.md; you do not touch any file.
 
@@ -67,11 +67,11 @@ Compare observations against each pattern row's indicators.
 
 ### Step 6 — Transcribe to invlang gather block
 
-For each entry in `leads_run` (in the order you ran them), compose one invlang lead object using the rules below. Emit the whole thing as `gather:` under the same terminal YAML block as the screen verdict.
+For each entry in `leads_run` (in the order you ran them), compose one invlang lead object using the rules below. Emit the whole thing as `findings:` under the same terminal YAML block as the screen verdict.
 
 ## Invlang per-lead shape
 
-For each lead you ran, emit one object under `gather:` with these invariants:
+For each lead you ran, emit one object under `findings:` with these invariants:
 
 - `id: l-{NNN}` — sequential starting at `l-001`
 - `loop: 0` — SCREEN leads are pre-PREDICT
@@ -169,7 +169,7 @@ evaluated_indicators:             # optional; lists which indicators each lead
     passed: true | false
 evidence_summary: "{1-2 sentences — what was observed}"
 reason: "{required when no_match or error — which indicator failed or what errored}"
-gather:
+findings:
   - id: l-001
     loop: 0
     name: {lead name}

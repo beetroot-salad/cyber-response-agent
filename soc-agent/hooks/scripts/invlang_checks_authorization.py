@@ -244,7 +244,7 @@ def _check_attribute_updates_target_shape(merged: dict[str, Any]) -> list[str]:
     """
     errors: list[str] = []
     declared_ids = _collect_declared_ids(merged)
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")

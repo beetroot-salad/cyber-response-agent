@@ -21,10 +21,10 @@ The narrative log remains agent-owned; the companion blocks give the plugin a ma
 | Phase | Companion block written | When | Notes |
 |---|---|---|---|
 | CONTEXTUALIZE | `prologue:` | end of phase | vertices + edges derived from alert entities |
-| SCREEN | first `gather:` lead with `mode: screen` | after screen subagent returns | `screen_result: match | no_match` on the final screen lead; SCREEN-matched companions omit `hypothesize` |
+| SCREEN | first `findings:` lead with `mode: screen` | after screen subagent returns | `screen_result: match | no_match` on the final screen lead; SCREEN-matched companions omit `hypothesize` |
 | PREDICT | `hypothesize:` | end of phase | initial proposed frontier of hypotheses |
 | GATHER | *(no YAML block)* | narrative only | the lead block is written at ANALYZE |
-| ANALYZE | complete `gather:` lead (outcome + resolutions) | end of phase | one entry per lead; entries in the same cycle share `loop:` |
+| ANALYZE | complete `findings:` lead (outcome + resolutions) | end of phase | one entry per lead; entries in the same cycle share `loop:` |
 | CONCLUDE | `conclude:` | after the `## CONCLUDE` header + verdict line, before `report.md` | `termination`, `disposition`, `confidence`, `matched_archetype` |
 
 The schema is **graph-first** (Schema v2.7 as of this writing):
@@ -46,7 +46,7 @@ From `hooks/scripts/invlang_validate.py::validate_companion`:
 
 1. **YAML parses.** Each extracted block must parse via `yaml.safe_load`.
 2. **Append-only.** The proposed text must not shrink an existing companion block. Removing or mutating a prior record is rejected. Decomposition is done by appending sub-vertices with hierarchical IDs (`v-{parent}-{nonce}`); attribute changes go through new `attribute_updates`.
-3. **Lead required fields.** Every entry under `gather:` has `id`, `loop`, `name`, `target`, `query_details`, `outcome`.
+3. **Lead required fields.** Every entry under `findings:` has `id`, `loop`, `name`, `target`, `query_details`, `outcome`.
 4. **ID format.** Vertices match `v-…`, edges `e-…`, hypotheses `h-…`, leads `l-…`, predictions `p\d+`, lead-level predictions `lp\d+`, refutations `r\d+`.
 5. **ID references resolve.** Every cross-reference (e.g. `resolutions[].hypothesis`, `supporting_edges`, `tests`, `observes[].hypothesis`) names a declared ID.
 6. **Edge authority.** Every `++` or `--` resolution must cite at least one `supporting_edge` whose authority kind is `siem-event`, `runtime-audit`, or `authoritative-source`. Client-asserted and inferred edges alone cannot push weight to the strong grades.

@@ -1,6 +1,6 @@
 # Investigation Language — Agent Reference
 
-Schema v2.11. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes). Full spec: `docs/investigation-language.md`.
+Schema v2.12. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes). Full spec: `docs/investigation-language.md`.
 
 Three orthogonal resolution axes:
 
@@ -35,10 +35,10 @@ CONCLUDE carries both the authz/mechanism axis (`disposition`) and the impact ax
 | Phase | Block written | When |
 |---|---|---|
 | CONTEXTUALIZE | `prologue:` | end of CONTEXTUALIZE |
-| SCREEN | first `gather:` lead with `mode: screen` | after screen subagent returns |
+| SCREEN | first `findings:` lead with `mode: screen` | after screen subagent returns |
 | PREDICT | `hypothesize:` (only when ≥ 1 new hypotheses); lead skeleton with `impact_predictions[]` when applicable | end of PREDICT |
-| GATHER | narrative only — no YAML block | during GATHER |
-| ANALYZE | complete `gather:` lead block (outcome + resolutions + `impact_resolutions[]`) | end of ANALYZE |
+| GATHER | `findings:` lead entry populated with query + observations + consultations + attribute_updates (no resolutions — those are ANALYZE's) | end of GATHER |
+| ANALYZE | same-lead merge into `findings[]` adding outcome.resolutions + trust_anchor_result + legitimacy_resolutions + impact_resolutions | end of ANALYZE |
 | REPORT | `conclude:` | after the `## REPORT` header + verdict line, before report.md |
 
 Call `invlang --enum` before writing any block that introduces new IDs or references existing ones.
@@ -64,7 +64,8 @@ hypothesize:    # proposed frontier; omit when PREDICT authors 0 new hypotheses
     - id: h-001          # hypothesis object fields directly
       ...
 
-gather:         # one entry per lead; written at ANALYZE, not during GATHER
+findings:       # one entry per lead; GATHER populates query + observations; ANALYZE
+                # merges in outcome.resolutions + verdicts on the same lead id
   - id: l-001            # lead object fields directly
     loop: 1
     ...
@@ -179,9 +180,24 @@ predictions:
   - id: p1
     subject: proposed_parent   # one of: proposed_parent | attached_vertex | proposed_edge
     claim: "<source-agnostic claim about world state>"
+attribute_predictions:     # optional; makes implicit classification stereotypes explicit.
+                           # IDs local to the hypothesis, pattern ^ap\d+$.
+                           # Claim one observable attribute per entry — gather will read
+                           # this attribute as part of lead execution, analyze will match.
+                           # Load-bearing when (a) the parent-vertex classification carries
+                           # non-trivial stereotypes (cmdline shape, running-as user,
+                           # parent-process genre) and (b) an observationally similar
+                           # peer hypothesis exists that the attribute profile would
+                           # discriminate. Omit when the classification is self-evidencing.
+  - id: ap1
+    target: proposed_parent       # one of: proposed_parent | attached_vertex | proposed_edge
+    attribute: <field-name>       # e.g. cmdline, user_loginuid, parent_pname, tty
+    claim: "<one observable attribute assertion>"
 refutation_shape:          # omit if no clean refutation shape exists
   - id: r1
-    refutes_predictions: [p1]  # non-empty list of prediction ids on THIS hypothesis
+    refutes_predictions: [p1]  # non-empty list of ids on THIS hypothesis —
+                               # may reference both predictions (p*) and
+                               # attribute_predictions (ap*)
     claim: "<observation that would contradict a core prediction>"
 authorization_contract: [] # optional; present when disposition depends on policy
                            # authorization. Declare when the mechanism is consistent
@@ -218,7 +234,7 @@ Omit the peer only when the integrity premise is out of scope for the case; in t
 
 ## Lead
 
-Fields of a lead object (list item under `gather`):
+Fields of a lead object (list item under `findings`):
 
 ```yaml
 id: l-{nonce}
@@ -660,3 +676,4 @@ h-002 is the peer integrity hypothesis required by the §Integrity discipline �
 30. **Impact resolution back-reference and grounding.** Every `impact_resolutions[]` entry has `prediction_ref` pointing to an `impact_predictions[]` id on a lead in the companion, `dimension` matching the prediction's `dimension`, `verdict` ∈ {`within`, `exceeds`, `indeterminate`}, `grounding_kind` ∈ {`telemetry-baseline`, `business-owner-attestation`, `dlp-policy`} (past-case not admissible), `authority_for_question`, `as_of`, and `reasoning`.
 31. **Impact closure at CONCLUDE.** Every declared `impact_predictions[]` entry must either have a fulfilling `impact_resolutions[]` entry OR appear in `conclude.deferred_impact_predictions[]` with a non-empty rationale.
 32. **Integrity peer discipline.** When an `authorization_contract` is declared on a hypothesis whose `proposed_edge.parent_vertex.type` is an acting-entity type (`session`, `identity`, `process`), either a peer integrity hypothesis (`?adversary-controlled-*` sharing `attached_to_vertex`) must exist in the same sibling group, or the contract-carrying hypothesis must carry `integrity_waived: <rationale>` with a non-empty string.
+33. **Attribute-prediction structure.** Each `attribute_predictions[]` entry has `id` (matching `^ap\d+$`, unique within the hypothesis), `target` ∈ {`proposed_parent`, `attached_vertex`, `proposed_edge`}, `attribute` (non-empty string), and `claim` (non-empty string, one observable — compound AND/OR claims split into separate entries). `refutation_shape[].refutes_predictions` may cite `ap*` ids alongside `p*` ids on the same hypothesis. `matched_prediction_ids[]` on a resolution may likewise cite both `p*` and `ap*` ids from the target hypothesis.

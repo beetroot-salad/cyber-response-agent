@@ -13,6 +13,7 @@ Covers the lean-hypothesis and sibling-rollup rules:
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from hooks.scripts.invlang_common import (
@@ -135,15 +136,19 @@ def _check_prediction_id_hypothesis_scope(merged: dict[str, Any]) -> list[str]:
     """Rule 25 — matched_prediction_ids must be hypothesis-scoped.
 
     Each id in `matched_prediction_ids[]` on a resolution for hypothesis H
-    must appear in H's own declared `predictions[]`. Rule 5 enforces the
-    equivalent for `matched_refutation_ids` on `--` resolutions; rule 25
-    closes the equivalent loophole for prediction IDs on every weight.
-    Mis-citing a sibling's prediction ID is same-level sibling rollup —
-    upgrading H on the strength of a peer's confirmed prediction.
+    must appear in H's own declared `predictions[]` or `attribute_predictions[]`.
+    Rule 5 enforces the equivalent for `matched_refutation_ids` on `--`
+    resolutions; rule 25 closes the equivalent loophole for prediction IDs on
+    every weight. Mis-citing a sibling's prediction ID is same-level sibling
+    rollup — upgrading H on the strength of a peer's confirmed prediction.
+
+    Per rule #33, the valid citation space for a resolution is the union of
+    `p*` and `ap*` IDs on the target hypothesis — both represent things the
+    lead's evidence can match against.
     """
     errors: list[str] = []
     declared = _index_hypothesis_id_field_ids(merged)
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")
@@ -162,15 +167,17 @@ def _check_prediction_id_hypothesis_scope(merged: dict[str, Any]) -> list[str]:
             if not isinstance(matched, list):
                 continue
             h_preds = declared[hid].get("predictions", set())
-            foreign = [m for m in matched if isinstance(m, str) and m not in h_preds]
+            h_attr_preds = declared[hid].get("attribute_predictions", set())
+            valid = h_preds | h_attr_preds
+            foreign = [m for m in matched if isinstance(m, str) and m not in valid]
             if foreign:
                 errors.append(
                     f"lead {lid}: resolution for {hid} cites "
                     f"matched_prediction_ids {sorted(foreign)} that do not "
-                    f"appear in {hid}'s declared predictions "
-                    f"{sorted(h_preds) or '[]'}. Each prediction ID on a "
-                    f"resolution must belong to the target hypothesis — "
-                    f"mis-citing a sibling's ID is same-level sibling rollup."
+                    f"appear in {hid}'s declared predictions {sorted(h_preds) or '[]'} "
+                    f"or attribute_predictions {sorted(h_attr_preds) or '[]'}. Each "
+                    f"prediction ID on a resolution must belong to the target "
+                    f"hypothesis — mis-citing a sibling's ID is same-level sibling rollup."
                 )
     return errors
 
@@ -194,10 +201,14 @@ def _check_compound_prediction_claim(merged: dict[str, Any]) -> list[str]:
     single-observable disjunction (e.g. "pattern matches foo or bar") is
     tolerated; the corpus-observed compound failures all use the
     uppercase/semicolon form.
+
+    Applies equivalently to `attribute_predictions[].claim` (rule #33 extends
+    the one-observable discipline to the parent-vertex attribute surface).
     """
     errors: list[str] = []
     for h in iter_hypotheses(merged):
         hid = h.get("id", "?")
+        # predictions[]
         for pred in h.get("predictions", []) or []:
             if not isinstance(pred, dict):
                 continue
@@ -214,6 +225,105 @@ def _check_compound_prediction_claim(merged: dict[str, Any]) -> list[str]:
                         f"compound claims into separate prediction entries."
                     )
                     break  # one complaint per prediction is enough
+        # attribute_predictions[] — same discipline
+        for apred in h.get("attribute_predictions", []) or []:
+            if not isinstance(apred, dict):
+                continue
+            claim = apred.get("claim")
+            if not isinstance(claim, str):
+                continue
+            apid = apred.get("id", "?")
+            for token, description in _COMPOUND_CLAIM_PATTERNS:
+                if token in claim:
+                    errors.append(
+                        f"hypothesis {hid} attribute_prediction {apid}: claim contains "
+                        f"{description} ({token!r}). An attribute_prediction names one "
+                        f"observable attribute assertion; split compound claims into "
+                        f"separate entries."
+                    )
+                    break
+    return errors
+
+
+_ATTR_PRED_ID_RE = re.compile(r"^ap\d+$")
+_VALID_ATTR_PRED_TARGETS = frozenset({"proposed_parent", "attached_vertex", "proposed_edge"})
+
+
+def _check_attribute_prediction_structure(merged: dict[str, Any]) -> list[str]:
+    """Rule 33 — structural validation of `attribute_predictions[]` entries.
+
+    Each entry must have:
+      - `id` matching `^ap\\d+$`, unique within the hypothesis
+      - `target` ∈ {proposed_parent, attached_vertex, proposed_edge}
+      - `attribute` — non-empty string
+      - `claim`    — non-empty string (one observable; compound-split enforced by rule #26)
+
+    The one-observable discipline for `claim` is enforced in
+    `_check_compound_prediction_claim` (rule #26 extension).
+    """
+    errors: list[str] = []
+    for h in iter_hypotheses(merged):
+        hid = h.get("id", "?")
+        entries = h.get("attribute_predictions")
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            errors.append(
+                f"hypothesis {hid}: attribute_predictions must be a list, got "
+                f"{type(entries).__name__}"
+            )
+            continue
+
+        seen_ids: set[str] = set()
+        for idx, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                errors.append(
+                    f"hypothesis {hid} attribute_predictions[{idx}]: entry must be "
+                    f"a mapping, got {type(entry).__name__}"
+                )
+                continue
+
+            # id
+            apid = entry.get("id")
+            if not isinstance(apid, str) or not _ATTR_PRED_ID_RE.match(apid):
+                errors.append(
+                    f"hypothesis {hid} attribute_predictions[{idx}]: `id` must match "
+                    f"^ap\\d+$ (e.g. ap1), got {apid!r}"
+                )
+            elif apid in seen_ids:
+                errors.append(
+                    f"hypothesis {hid} attribute_predictions[{idx}]: duplicate id {apid!r} "
+                    f"— attribute_prediction ids must be unique within the hypothesis"
+                )
+            else:
+                seen_ids.add(apid)
+
+            # target
+            target = entry.get("target")
+            if target not in _VALID_ATTR_PRED_TARGETS:
+                errors.append(
+                    f"hypothesis {hid} attribute_prediction {apid or '?'}: `target` must be one of "
+                    f"{sorted(_VALID_ATTR_PRED_TARGETS)}, got {target!r}"
+                )
+
+            # attribute
+            attribute = entry.get("attribute")
+            if not isinstance(attribute, str) or not attribute.strip():
+                errors.append(
+                    f"hypothesis {hid} attribute_prediction {apid or '?'}: `attribute` must be "
+                    f"a non-empty string naming the parent/edge attribute under assertion, "
+                    f"got {attribute!r}"
+                )
+
+            # claim
+            claim = entry.get("claim")
+            if not isinstance(claim, str) or not claim.strip():
+                errors.append(
+                    f"hypothesis {hid} attribute_prediction {apid or '?'}: `claim` must be "
+                    f"a non-empty string with one observable attribute assertion, got "
+                    f"{claim!r}"
+                )
+
     return errors
 
 
@@ -416,9 +526,10 @@ def _check_refutation_prediction_links(merged: dict[str, Any]) -> list[str]:
     """Rule 30 — every refutation_shape entry cites the predictions it refutes.
 
     `refutation_shape[].refutes_predictions` must be a non-empty list of
-    prediction ids declared on the same hypothesis. A refutation that cites
-    no prediction is a free-floating negation (unclear what it overturns); a
-    refutation citing a prediction id not on the hypothesis is pointing
+    ids declared on the same hypothesis, where the valid citation space is
+    the union of `predictions[]` (`p*`) and `attribute_predictions[]` (`ap*`)
+    per rule #33. A refutation that cites no prediction is a free-floating
+    negation; a refutation citing an id not on the hypothesis is pointing
     across a sibling boundary (the kind of rollup rule 25 catches for
     resolutions).
     """
@@ -430,6 +541,12 @@ def _check_refutation_prediction_links(merged: dict[str, Any]) -> list[str]:
             for p in (h.get("predictions") or [])
             if isinstance(p, dict) and isinstance(p.get("id"), str)
         }
+        declared_attr_preds = {
+            a.get("id")
+            for a in (h.get("attribute_predictions") or [])
+            if isinstance(a, dict) and isinstance(a.get("id"), str)
+        }
+        valid = declared_preds | declared_attr_preds
         for r in h.get("refutation_shape", []) or []:
             if not isinstance(r, dict):
                 continue
@@ -449,13 +566,13 @@ def _check_refutation_prediction_links(merged: dict[str, Any]) -> list[str]:
                     f"prediction ids, got {refutes!r}."
                 )
                 continue
-            foreign = [p for p in refutes if not isinstance(p, str) or p not in declared_preds]
+            foreign = [p for p in refutes if not isinstance(p, str) or p not in valid]
             if foreign:
                 errors.append(
                     f"hypothesis {hid} refutation {rid}: refutes_predictions "
                     f"{sorted(str(f) for f in foreign)} do not appear in "
-                    f"{hid}'s declared predictions {sorted(declared_preds) or '[]'}. "
-                    f"A refutation can only overturn predictions on its own "
-                    f"hypothesis."
+                    f"{hid}'s declared predictions {sorted(declared_preds) or '[]'} "
+                    f"or attribute_predictions {sorted(declared_attr_preds) or '[]'}. "
+                    f"A refutation can only overturn predictions on its own hypothesis."
                 )
     return errors

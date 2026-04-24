@@ -74,7 +74,7 @@ All hooks live under `soc-agent/hooks/scripts/` and are registered in `soc-agent
 | PreToolUse | `Task\|Agent` | `inject_env_context.py` | Inject environment context into subagent prompts |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `infer_state_pre.py` | Pre-write state transition check |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `validate_conclude.py` | Pre-write CONCLUDE self-contradiction guards |
-| PreToolUse | `Write\|Edit` on `*/investigation.md` | `invlang_validate.py` | Pre-write schema validation (23 rules) — blocks writes on schema errors |
+| PreToolUse | `Write\|Edit` on `*/investigation.md` | `invlang_validate.py` | Pre-write schema validation (33 rules) — blocks writes on schema errors |
 | PostToolUse | `Task\|Agent` | `extract_subagent_yaml.py` | Extract subagent YAML output into the investigation record |
 | PostToolUse | `Write\|Edit\|Bash` | `infer_state.py` | Infer state transitions from `## PHASE` headers |
 | PostToolUse | `Write\|Edit` | `validate_report.py` | Two-tier report validation (Tier 1 structural + Tier 2 Haiku judge) |
@@ -88,7 +88,7 @@ Shared helpers: `run_context.py` (session→run resolution), `permissions.py` (p
 ### Safety Architecture
 
 - **Two-tier report validation** — `validate_report.py` (PostToolUse Write|Edit) fires when `report.md` is written. Tier 1 enforces structural constraints deterministically. Tier 2 calls Haiku via the claude CLI to validate report consistency, precedent match validity, and evidence sufficiency (full mode = 5 checks for resolved-with-precedent; no-precedent mode = 4 checks for escalated). Untrusted content is wrapped in per-run salted delimiters to block prompt injection.
-- **Invlang schema validation** — `invlang_validate.py` (PreToolUse) blocks any write/edit to `investigation.md` that violates the 22 validator rules (see `docs/investigation-language.md`).
+- **Invlang schema validation** — `invlang_validate.py` (PreToolUse) blocks any write/edit to `investigation.md` that violates the 33 validator rules (see `docs/investigation-language.md`).
 - **CONCLUDE judges** — pre-CONCLUDE, `validate_conclude.py` runs parallel Haiku judges (prompts A/B) to catch self-contradictions before the CONCLUDE block lands.
 - **State machine** (`infer_state.py` PostToolUse + `infer_state_pre.py` PreToolUse) prevents phase skipping — inferred from `## PHASE` headers in `investigation.md`; agent must follow CONTEXTUALIZE→[SCREEN]→(ASSESS↔HYPOTHESIZE↔GATHER↔ANALYZE loop)→CONCLUDE.
 - **Two-leg resolution requirement** — `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding: every `required_anchors` entry confirmed OR `matched_ticket_id` citing a valid precedent snapshot inside that archetype directory. Archetypes with no required anchors must be grounded by `matched_ticket_id`.
@@ -240,7 +240,7 @@ pytest soc-agent/tests/test_judge_report.py -m llm          # Tier 2 judge
 
 ## Investigation Flow Language
 
-**Full spec:** `docs/investigation-language.md` (v2.8, implemented). Query CLI: invoke via `bash soc-agent/scripts/invlang/run.sh` (see the canonical invocation note — `python -m invlang` and direct `cli.py` calls fail). Schema loaded into the investigate prompt lives at `soc-agent/knowledge/invlang/schema.md`. Validator runs as a PreToolUse hook on `investigation.md` writes (`hooks/scripts/invlang_validate.py`).
+**Full spec:** `docs/investigation-language.md` (v2.12, implemented). Query CLI: invoke via `bash soc-agent/scripts/invlang/run.sh` (see the canonical invocation note — `python -m invlang` and direct `cli.py` calls fail). Schema loaded into the investigate prompt lives at `soc-agent/knowledge/invlang/schema.md`. Validator runs as a PreToolUse hook on `investigation.md` writes (`hooks/scripts/invlang_validate.py`).
 
 ### Purpose
 
@@ -268,7 +268,7 @@ prologue:       # CONTEXTUALIZE: vertices + edges derived from the alert
 hypothesize:    # HYPOTHESIZE: initial proposed frontier (omit for SCREEN-matched cases)
   hypotheses: []
 
-gather:         # GATHER + ANALYZE: ordered lead blocks
+findings:       # GATHER + ANALYZE: ordered lead blocks (same id merges across phases)
   - lead: {...}
 
 conclude:       # CONCLUDE: termination category, disposition, confidence, matched_archetype
@@ -394,7 +394,7 @@ Detailed documentation in `docs/`:
 - `design-v3-reproduction.md` — Reproduction sandbox design
 - `design-v3-init-and-connect.md` — Initialization and SIEM connection
 - `design-v3-post-mortem.md` — Post-v3 retrospective notes
-- `investigation-language.md` — Invlang spec (v2.8) + validator rules
+- `investigation-language.md` — Invlang spec (v2.12) + validator rules
 - `evaluation-and-chaos-design.md` — Evaluation harness and chaos engineering
 - `security-model.md` — Threat model and defense layers
 - `packaging.md` — Dependency and packaging strategy

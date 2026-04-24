@@ -93,50 +93,77 @@ def stub_invoke(captured: list[str], responses: list[str]):
 
 _SINGLE_FINDING = textwrap.dedent("""
 ```yaml
-result: finding
-lead: "authentication-history"
-reporting_agent: "target-endpoint"
-query: "rule.groups:sshd AND data.srcip:172.22.0.10"
-time_range: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
-health_probe: null
-characterization:
-  distinct_users: 1
-  distinct_srcports: 1
-  total_events: 11
-  time_distribution: "periodic, 5min intervals ±3s"
-notes: ""
+gather:
+  loop: 1
+  mode: "single"
+  leads:
+    - id: "l-001"
+      name: "authentication-history"
+      reporting_agent: "target-endpoint"
+      status: ok
+      query:
+        system: "wazuh-indexer"
+        template: "source-ip-lookup"
+        query: "rule.groups:sshd AND data.srcip:172.22.0.10"
+        time_window: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
+        substitutions: {ip: "172.22.0.10"}
+      health_probe: null
+      characterization:
+        distinct_users: 1
+        distinct_srcports: 1
+        total_events: 11
+        time_distribution: "periodic, 5min intervals ±3s"
+      notes: ""
+      raw:
+        siem_response: |
+          [{"ts": "2026-04-20T19:20:00Z", "srcip": "172.22.0.10", "user": "nagios"}]
 ```
 """).strip()
 
 
 _SINGLE_ESCALATE_EMPTY = textwrap.dedent("""
 ```yaml
-result: escalate
-trigger: empty_result
-health_probe: null
-context: "rule.groups:sshd AND data.srcip:172.22.0.10 returned 0 events"
+gather:
+  loop: 1
+  mode: "single"
+  leads:
+    - id: "l-001"
+      name: "authentication-history"
+      reporting_agent: "target-endpoint"
+      status: error
+      escalate_trigger: empty_result
+      escalate_context: "rule.groups:sshd AND data.srcip:172.22.0.10 returned 0 events"
+      health_probe: null
+      raw:
+        siem_response: ""
 ```
 """).strip()
 
 
 _COMPOSITE_OK = textwrap.dedent("""
 ```yaml
-gather_composite:
+gather:
+  loop: 1
   mode: "redispatch"
-  time_range: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
   leads:
-    - lead: "authentication-history"
+    - id: "l-001"
+      name: "authentication-history"
       reporting_agent: "target-endpoint"
-      query: "rule.groups:sshd AND data.srcuser:nagios"
-      query_source: "template"
-      entity_bindings: {user: "nagios", host: "target-endpoint"}
-      refinements_applied: "original srcip empty; rebound to srcuser"
+      status: ok
+      status_detail: ""
+      query:
+        system: "wazuh-indexer"
+        query: "rule.groups:sshd AND data.srcuser:nagios"
+        query_source: "template"
+        substitutions: {user: "nagios", host: "target-endpoint"}
+        refinements_applied: "original srcip empty; rebound to srcuser"
+        time_window: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
       health_probe: null
       characterization:
         distinct_sources: 3
         total_events: 47
-      status: ok
-      status_detail: ""
+      raw:
+        siem_response: "(47 rows)"
   cross_lead_notes: ""
   notes: ""
 ```
@@ -145,21 +172,27 @@ gather_composite:
 
 _COMPOSITE_AD_HOC = textwrap.dedent("""
 ```yaml
-gather_composite:
+gather:
+  loop: 1
   mode: "ad-hoc"
-  time_range: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
   leads:
-    - lead: "nonexistent-lead"
+    - id: "l-001"
+      name: "nonexistent-lead"
       reporting_agent: "target-endpoint"
-      query: "freeform query"
-      query_source: "ad-hoc"
-      entity_bindings: {}
-      refinements_applied: "no definition; constructed ad-hoc from slug"
+      status: ok
+      status_detail: ""
+      query:
+        system: "wazuh-indexer"
+        query: "freeform query"
+        query_source: "ad-hoc"
+        substitutions: {}
+        refinements_applied: "no definition; constructed ad-hoc from slug"
+        time_window: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
       health_probe: null
       characterization:
         result_count: 5
-      status: ok
-      status_detail: ""
+      raw:
+        siem_response: "(5 rows)"
   cross_lead_notes: ""
   notes: ""
 ```
@@ -223,6 +256,39 @@ class TestScopeDerivation:
         )
         assert exists is False
         assert bindings == {}
+
+    def test_scope_override_expands_window_hours(self):
+        """PREDICT's routing.scope_override.window_hours replaces the default
+        1h lookback. Anchor defaults to 'alert' (window ends at @timestamp)."""
+        alert = {"@timestamp": "2026-04-20T19:25:00.000Z"}
+        start, end = gather_handler._derive_incident_window(
+            alert, scope_override={"window_hours": 24, "anchor": "alert"},
+        )
+        assert end == "2026-04-20T19:25:00Z"
+        # 24h before the alert timestamp:
+        assert start == "2026-04-19T19:25:00Z"
+
+    def test_scope_override_anchor_now_ignores_alert_timestamp(self):
+        """anchor=now moves the window end to the current wall clock —
+        useful for since-last-baseline semantics where the alert timestamp
+        is not the right anchor."""
+        alert = {"@timestamp": "2026-04-20T19:25:00.000Z"}
+        start, end = gather_handler._derive_incident_window(
+            alert, scope_override={"window_hours": 48, "anchor": "now"},
+        )
+        # End is now (wall-clock), not the alert timestamp. Just assert the
+        # ordering + that the alert timestamp didn't leak through.
+        assert start < end
+        assert end != "2026-04-20T19:25:00Z"
+
+    def test_no_scope_override_preserves_default_1h(self):
+        """None-override path preserves the documented 1h alert-anchored
+        window — the test_incident_window_from_atsign_timestamp invariant
+        still holds for the no-override case."""
+        alert = {"@timestamp": "2026-04-20T19:25:00.000Z"}
+        start, end = gather_handler._derive_incident_window(alert, scope_override=None)
+        assert end == "2026-04-20T19:25:00Z"
+        assert start == "2026-04-20T18:25:00Z"
 
 
 # ---------------------------------------------------------------------------
@@ -301,10 +367,18 @@ class TestEscalateFallback:
         ctx = make_ctx(tmp_path, selected_lead="authentication-history")
         escalate = textwrap.dedent(f"""
         ```yaml
-        result: escalate
-        trigger: {trigger}
-        health_probe: null
-        context: "test-trigger {trigger}"
+        gather:
+          loop: 1
+          mode: "single"
+          leads:
+            - id: "l-001"
+              name: "authentication-history"
+              status: error
+              escalate_trigger: {trigger}
+              escalate_context: "test-trigger {trigger}"
+              health_probe: null
+              raw:
+                siem_response: ""
         ```
         """).strip()
         captured_single: list[str] = []
@@ -333,9 +407,17 @@ class TestEscalateFallback:
         ctx = make_ctx(tmp_path, selected_lead="authentication-history")
         escalate = textwrap.dedent("""
         ```yaml
-        result: escalate
-        trigger: some_unknown_trigger
-        context: "unknown"
+        gather:
+          loop: 1
+          mode: "single"
+          leads:
+            - id: "l-001"
+              name: "authentication-history"
+              status: error
+              escalate_trigger: some_unknown_trigger
+              escalate_context: "unknown"
+              raw:
+                siem_response: ""
         ```
         """).strip()
         monkeypatch.setattr(
@@ -351,7 +433,7 @@ class TestEscalateFallback:
 
         assert result.next_phase == Phase.ANALYZE
         assert result.payload["mode"] == "single"
-        assert result.payload["status"] == "escalate"
+        assert result.payload["status"] == "error"
 
 
 # ---------------------------------------------------------------------------
@@ -369,14 +451,18 @@ class TestRecovery:
         ckpt = {
             "subagent": "gather",
             "loop_n": 2,
+            "lead_id": "l-002",
             "lead_name": "authentication-history",
             "status": "complete",
             "result": {
-                "kind": "finding",
-                "query": "cached-query",
+                "id": "l-002",
+                "name": "authentication-history",
+                "status": "ok",
+                "query": {"query": "cached-query"},
                 "health_probe": None,
                 "characterization": {"distinct_users": 5, "total_events": 99},
                 "notes": "",
+                "raw": {"siem_response": "(99 rows)"},
             },
         }
         (ckpt_dir / "gather-loop-2-authentication-history.yaml").write_text(
@@ -412,9 +498,27 @@ class TestRecovery:
             yaml.safe_dump(ckpt),
         )
         captured: list[str] = []
+        # The resume re-dispatch receives the envelope emitted after the
+        # subagent finishes — loop 2, lead id l-002.
+        resume_envelope = textwrap.dedent("""
+        ```yaml
+        gather:
+          loop: 2
+          mode: "single"
+          leads:
+            - id: "l-002"
+              name: "authentication-history"
+              status: ok
+              query: {system: "wazuh-indexer", query: "q"}
+              health_probe: null
+              characterization: {distinct_users: 1, total_events: 11}
+              raw:
+                siem_response: "(11 rows)"
+        ```
+        """).strip()
         monkeypatch.setattr(
             gather_handler, "_invoke_gather",
-            stub_invoke(captured, ["(truncated)", _SINGLE_FINDING]),
+            stub_invoke(captured, ["(truncated)", resume_envelope]),
         )
 
         result = gather_handler.handle(ctx)
@@ -510,30 +614,30 @@ class TestPreconditions:
 
 _COMPOSITE_MULTI_LEAD_OK = textwrap.dedent("""
 ```yaml
-gather_composite:
+gather:
+  loop: 1
   mode: "composite"
-  time_range: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
   leads:
-    - lead: "authentication-history"
+    - id: "l-001"
+      name: "authentication-history"
       reporting_agent: "target-endpoint"
-      query: "q1"
-      query_source: "template"
-      entity_bindings: {}
-      refinements_applied: ""
+      status: ok
+      status_detail: ""
+      query: {system: "wazuh-indexer", query: "q1"}
       health_probe: null
       characterization: {events: 10}
+      raw:
+        siem_response: "(10 rows)"
+    - id: "l-001b"
+      name: "source-reputation"
+      reporting_agent: "target-endpoint"
       status: ok
       status_detail: ""
-    - lead: "source-reputation"
-      reporting_agent: "target-endpoint"
-      query: "q2"
-      query_source: "template"
-      entity_bindings: {}
-      refinements_applied: ""
+      query: {system: "wazuh-indexer", query: "q2"}
       health_probe: null
       characterization: {reputation: clean}
-      status: ok
-      status_detail: ""
+      raw:
+        siem_response: "(clean)"
   cross_lead_notes: ""
   notes: ""
 ```
@@ -542,20 +646,20 @@ gather_composite:
 
 _COMPOSITE_SILENT_DROP = textwrap.dedent("""
 ```yaml
-gather_composite:
+gather:
+  loop: 1
   mode: "composite"
-  time_range: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
   leads:
-    - lead: "authentication-history"
+    - id: "l-001"
+      name: "authentication-history"
       reporting_agent: "target-endpoint"
-      query: "q1"
-      query_source: "template"
-      entity_bindings: {}
-      refinements_applied: ""
-      health_probe: null
-      characterization: {events: 10}
       status: ok
       status_detail: ""
+      query: {system: "wazuh-indexer", query: "q1"}
+      health_probe: null
+      characterization: {events: 10}
+      raw:
+        siem_response: "(10 rows)"
   cross_lead_notes: ""
   notes: ""
 ```
@@ -564,30 +668,30 @@ gather_composite:
 
 _COMPOSITE_EXPLICIT_DROP = textwrap.dedent("""
 ```yaml
-gather_composite:
+gather:
+  loop: 1
   mode: "composite"
-  time_range: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
   leads:
-    - lead: "authentication-history"
+    - id: "l-001"
+      name: "authentication-history"
       reporting_agent: "target-endpoint"
-      query: "q1"
-      query_source: "template"
-      entity_bindings: {}
-      refinements_applied: ""
-      health_probe: null
-      characterization: {events: 10}
       status: ok
       status_detail: ""
-    - lead: "source-reputation"
-      reporting_agent: "target-endpoint"
-      query: ""
-      query_source: "template"
-      entity_bindings: {}
-      refinements_applied: ""
+      query: {system: "wazuh-indexer", query: "q1"}
       health_probe: null
-      characterization: null
+      characterization: {events: 10}
+      raw:
+        siem_response: "(10 rows)"
+    - id: "l-001b"
+      name: "source-reputation"
+      reporting_agent: "target-endpoint"
       status: dropped_attempt
       status_detail: "budget exhausted after first lead"
+      query: {system: "wazuh-indexer", query: ""}
+      health_probe: null
+      characterization: null
+      raw:
+        siem_response: ""
   cross_lead_notes: ""
   notes: ""
 ```
@@ -668,12 +772,20 @@ class TestCompositeScopeCheck:
         self, tmp_path, monkeypatch,
     ):
         ctx = make_ctx(tmp_path, selected_lead="authentication-history")
-        # Unknown trigger → escalate payload, no composite fallback
+        # Unknown trigger → error payload surfaced as-is, no composite fallback
         escalate = textwrap.dedent("""
         ```yaml
-        result: escalate
-        trigger: some_unknown_trigger
-        context: "unknown"
+        gather:
+          loop: 1
+          mode: "single"
+          leads:
+            - id: "l-001"
+              name: "authentication-history"
+              status: error
+              escalate_trigger: some_unknown_trigger
+              escalate_context: "unknown"
+              raw:
+                siem_response: ""
         ```
         """).strip()
         monkeypatch.setattr(
