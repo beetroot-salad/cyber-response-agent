@@ -105,7 +105,7 @@ This means:
 
 ## Investigation Loop
 
-After CONTEXTUALIZE and after every ANALYZE, dispatch the PREDICT subagent. The subagent owns the branching question ("does the hypothesis space fork at this anchor?") and picks the output shape accordingly — a `hypothesize:` block when there's a real fork, a `gather:` block (with lead-level pre-registered predictions on any interpretation-vulnerable outcome fields) when the next lead is mechanical or pure enrichment. Your job is to transcribe and proceed.
+After CONTEXTUALIZE and after every ANALYZE, dispatch the PREDICT subagent. The subagent owns the branching question ("does the hypothesis space fork at this anchor?") and picks the output shape accordingly — a `hypothesize:` block when there's a real fork, a `findings:` block (with lead-level pre-registered predictions on any interpretation-vulnerable outcome fields) when the next lead is mechanical or pure enrichment. Your job is to transcribe and proceed.
 
 ```
 CONTEXTUALIZE
@@ -113,7 +113,7 @@ CONTEXTUALIZE
       ▼
  PREDICT ◀──────────────┐      (subagent emits:
    │                         │       fork    → hypothesize:
-   ▼                         │       no fork → gather: with
+   ▼                         │       no fork → findings: with
  GATHER                      │                 pre-registered
    │                         │                 predictions)
    ▼                         │
@@ -338,10 +338,10 @@ Append to `{run_dir}/investigation.md`:
 **Outcome:** {proceeding to CONCLUDE | falling through to PREDICT — reason}
 ```
 
-**Then compose one `gather:` YAML entry per lead the screen subagent ran.** Screen leads share the same top-level `gather:` block as normal leads, but with a reduced shape: each is `mode: screen` with `resolutions: []` (SCREEN has no hypotheses yet, so there is nothing to grade). The final lead in the screen sequence carries `screen_result: match | no_match` inside its `outcome`.
+**Then compose one `findings:` YAML entry per lead the screen subagent ran.** Screen leads share the same top-level `findings:` block as normal leads, but with a reduced shape: each is `mode: screen` with `resolutions: []` (SCREEN has no hypotheses yet, so there is nothing to grade). The final lead in the screen sequence carries `screen_result: match | no_match` inside its `outcome`.
 
 ```yaml
-gather:
+findings:
   - id: l-{nonce}
     loop: 0
     name: {lead-name from screen subagent}
@@ -391,7 +391,7 @@ Agent(
 
 **When the subagent returns:**
 - Transcribe the YAML verbatim under `## PREDICT (loop {N})` along with `Selected lead:` and `Pitfalls:`. Run `bash scripts/invlang/run.sh --ids {run_dir}/investigation.md` first to confirm the ID namespace.
-- If it returned a `gather:` block instead (no fork observable — discriminating data not yet in hand, or already resolved by prior leads), transcribe under `## GATHER (loop {N})` with the lead-level `predictions` triples and proceed to GATHER.
+- If it returned a `findings:` block instead (no fork observable — discriminating data not yet in hand, or already resolved by prior leads), transcribe under `## GATHER (loop {N})` with the lead-level `predictions` triples and proceed to GATHER.
 - If it returned `error:`, surface the reason and stop. Do not form hypotheses inline.
 
 #### Verify leanness + story presence before accepting the subagent's output
@@ -437,7 +437,7 @@ Agent(
 - `gather`: `gather-loop-{loop_n}-{lead_name}.yaml` (see `agents/gather.md`)
 - `gather-composite`: `gather-composite-loop-{loop_n}.yaml` (see `agents/gather-composite.md`)
 
-If a dispatch returns a tool_result with **no YAML block, truncated YAML, or missing trailing fields** (for composite: no `cross_lead_notes`, no final `notes:`; for gather: no `result:` line or no closing `characterization`/`context`), don't accept it — instead:
+If a dispatch returns a tool_result with **no YAML block, truncated YAML, or missing trailing fields** (for composite: no `cross_lead_notes`, no final `notes:`; for gather single-lead: no `result:` line or no closing `characterization`/`context`), don't accept it — instead:
 
 1. Read the matching checkpoint for the loop (and lead, for `gather`) you just dispatched in.
 2. Respawn the **same subagent type** with `resume_from_checkpoint=true`. For `gather`: `Agent(subagent_type="soc-agent:gather", description="Resume from checkpoint", prompt="run_dir={run_dir}\nloop_n={loop_n}\nlead_name={lead_name}\nresume_from_checkpoint=true\n\nRead your checkpoint at {run_dir}/subagent_checkpoints/gather-loop-{loop_n}-{lead_name}.yaml. Continue from `next_intended_step`. Finish the Decision YAML per the contract and emit it — no additional tool calls unless the checkpoint says you were mid-query.")`. For `gather-composite`: same shape, swap paths per the file above.
@@ -454,7 +454,7 @@ Do not try to reconstruct from raw query output files; the checkpoint has the st
 **Cross-lead notes:** {composite only}
 ```
 
-**No YAML block at GATHER.** Characterize the raw observation in prose; do not interpret. The complete `gather:` lead block — including `query_details`, `outcome`, and `resolutions` — is written at ANALYZE once both observation and analysis are complete.
+**No YAML block at GATHER.** Characterize the raw observation in prose; do not interpret. The complete `findings:` lead block — including `query_details`, `outcome`, and `resolutions` — is written at ANALYZE once both observation and analysis are complete.
 
 #### Pre-registering readings (non-branching interpretive leads)
 
@@ -498,13 +498,13 @@ ANALYZE runs as a dedicated subagent. You do not grade hypotheses inline — you
 
 3. **Paste the ANALYZE block into `{run_dir}/investigation.md`** verbatim, appending at end-of-file. The subagent's output already includes the `## ANALYZE (loop N)` header. Anchor the Edit/Write at the last line of the current file (read the tail if unsure) — never insert ahead of an existing phase header, or `infer_state_pre.py` will reject on phase-order mismatch. Do not paste the `## Self-report` section; it is for your consumption only.
 
-4. **Compose the `gather:` YAML block for the current loop** using the subagent's Assessment as the source of `resolutions`, and the GATHER prose observations as the source of `outcome.observations`. Run first to confirm the ID namespace:
+4. **Compose the `findings:` YAML block for the current loop** using the subagent's Assessment as the source of `resolutions`, and the GATHER prose observations as the source of `outcome.observations`. Run first to confirm the ID namespace:
    ```
    bash scripts/invlang/run.sh --ids {run_dir}/investigation.md
    ```
    Write the full block in one write — `outcome` (observations + attribute_updates) and `resolutions` together. No partial blocks.
    ```yaml
-   gather:
+   findings:
      - id: l-{nonce}
        loop: {N}
        name: {lead-name}

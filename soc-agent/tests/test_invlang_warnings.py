@@ -43,14 +43,14 @@ def _dedup_lead(lead_id: str, template: str, query: str, subs: dict | None = Non
 
 class TestCheckLeadDedup:
     def test_distinct_queries_silent(self):
-        merged = {"gather": [
+        merged = {"findings": [
             _dedup_lead("l-001", "t1", "src_ip:1.2.3.4"),
             _dedup_lead("l-002", "t1", "src_ip:5.6.7.8"),
         ]}
         assert _check_lead_dedup_warnings(merged) == []
 
     def test_duplicate_query_warns(self):
-        merged = {"gather": [
+        merged = {"findings": [
             _dedup_lead("l-001", "t1", "src_ip:1.2.3.4", {"ip": "1.2.3.4"}),
             _dedup_lead("l-002", "t1", "src_ip:1.2.3.4", {"ip": "1.2.3.4"}),
         ]}
@@ -60,7 +60,7 @@ class TestCheckLeadDedup:
         assert "l-001" in warnings[0]
 
     def test_same_query_different_subs_silent(self):
-        merged = {"gather": [
+        merged = {"findings": [
             _dedup_lead("l-001", "t1", "src_ip:${ip}", {"ip": "1.2.3.4"}),
             _dedup_lead("l-002", "t1", "src_ip:${ip}", {"ip": "5.6.7.8"}),
         ]}
@@ -84,18 +84,18 @@ class TestCheckSilentEmpty:
         }
 
     def test_no_tests_silent(self):
-        merged = {"gather": [self._lead([], {"observations": {"vertices": [], "edges": []}})]}
+        merged = {"findings": [self._lead([], {"observations": {"vertices": [], "edges": []}})]}
         assert _check_silent_empty_result_warnings(merged) == []
 
     def test_tests_with_observations_silent(self):
-        merged = {"gather": [self._lead(
+        merged = {"findings": [self._lead(
             ["h-001"],
             {"observations": {"vertices": [{"id": "v-002"}], "edges": []}},
         )]}
         assert _check_silent_empty_result_warnings(merged) == []
 
     def test_tests_with_empty_outcome_warns(self):
-        merged = {"gather": [self._lead(
+        merged = {"findings": [self._lead(
             ["h-001"],
             {"observations": {"vertices": [], "edges": []}},
         )]}
@@ -104,14 +104,14 @@ class TestCheckSilentEmpty:
         assert "l-001" in warnings[0]
 
     def test_tests_with_failure_reason_silent(self):
-        merged = {"gather": [self._lead(
+        merged = {"findings": [self._lead(
             ["h-001"],
             {"observations": {"vertices": [], "edges": []}, "failure_reason": "timeout"},
         )]}
         assert _check_silent_empty_result_warnings(merged) == []
 
     def test_tests_with_anchor_consultation_silent(self):
-        merged = {"gather": [self._lead(
+        merged = {"findings": [self._lead(
             ["h-001"],
             {
                 "observations": {"vertices": [], "edges": []},
@@ -126,7 +126,7 @@ class TestCheckSilentEmpty:
         assert _check_silent_empty_result_warnings(merged) == []
 
     def test_tests_with_attribute_updates_silent(self):
-        merged = {"gather": [self._lead(
+        merged = {"findings": [self._lead(
             ["h-001"],
             {
                 "observations": {"vertices": [], "edges": []},
@@ -154,7 +154,7 @@ class TestCheckToolAuditCrossRef:
 
     def _lead_with_query(self, query: str) -> dict:
         return {
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
                 "query_details": {
                     "system": "wazuh", "template": "t", "query": query,

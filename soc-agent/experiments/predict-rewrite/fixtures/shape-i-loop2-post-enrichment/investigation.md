@@ -77,7 +77,7 @@ Lead-level reading: lp2 matches — cadence is periodic (cluster_count ≥ 3 ✓
 However: registration-style anchor consultation (approved-monitoring-sources) answers whether the (172.22.0.10, nagios, target-endpoint) triple is registered — it does **not** confirm that the registered monitoring system was the specific actor producing this tick. The identity-of-use question is live. Any process on 172.22.0.10 with shell access could emit the same wire triple at a time that happens to land near the monitoring cadence. Move the identity-of-use fork into PREDICT loop 2 as prescribed by the playbook's post-enrichment branching.
 
 ```yaml
-gather:
+findings:
   - id: l-001
     loop: 1
     name: authentication-history

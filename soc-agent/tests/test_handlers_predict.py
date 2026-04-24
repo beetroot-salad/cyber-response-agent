@@ -85,16 +85,10 @@ def stub_validator(results: list[list[str]]):
 # block(s) precede it. Handler strips only the last fence before appending.
 
 _FORK_RESPONSE = textwrap.dedent("""
-## PREDICT (loop 1)
-
-**Active hypotheses:** ?scheduled-automation-health-check, ?adversary-controlled-monitoring-host
-**Selected lead:** authentication-history
-**Pitfalls:**
-- ?scheduled-automation-health-check: …
-- ?adversary-controlled-monitoring-host: …
-
 ```yaml
-hypothesize:
+predict:
+  loop: 1
+  shape: M
   hypotheses:
     - id: h-001
       name: "?scheduled-automation-health-check"
@@ -107,54 +101,59 @@ hypothesize:
       refutation_shape:
         - {id: r1, refutes_predictions: [p1], claim: "event cadence is off-documented-interval"}
       weight: null
-```
-
-```yaml
-selected_lead: authentication-history
+    - id: h-002
+      name: "?adversary-controlled-monitoring-host"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: initiated_by
+        parent_vertex: {type: identity, classification: adversary-controlled-monitoring-host}
+      predictions:
+        - {id: p1, subject: proposed_parent, claim: "event pattern deviates from documented probe"}
+      refutation_shape:
+        - {id: r1, refutes_predictions: [p1], claim: "event pattern matches documented probe"}
+      weight: null
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
 ```
 """).strip()
 
 
+# Shape E — no hypotheses, branch_plan only. Replaces the old "no new
+# hypotheses" / "continue stable fork" shape.
 _NO_FORK_RESPONSE = textwrap.dedent("""
-## PREDICT (loop 1) — no new hypotheses
-
-**Selected lead:** source-classification — classifies srcip against
-ip-ranges.md and approved-monitoring-sources anchor; discriminates
-sanctioned-automation vs unregistered-internal vs external-origin.
-
-**Pitfalls:**
-- l-001: anchor registry lag — a newly-added approved source may
-  not be in the cached copy; re-fetch if the classification misses.
-
 ```yaml
-selected_lead: source-classification
+predict:
+  loop: 1
+  shape: E
+  branch_plan:
+    primary_lead: source-classification
+    predictions:
+      - {id: lp1, if: "classifies as internal-monitoring-host", read_as: "sanctioned", advance_to: authentication-history}
+      - {id: lp2, if: "classifies as external-origin", read_as: "bruteforce", advance_to: escalate}
+  routing:
+    selected_lead: source-classification
+    composite_secondary: []
 ```
 """).strip()
 
 
-# A legacy shape: the subagent incorrectly emits a `gather:` block. This
-# is the contract violation the handler catches and retries with the
-# gather_block_in_predict remediation directive.
+# Contract violation: subagent emitted an invlang `hypothesize:` block instead
+# of the unified `predict:` envelope. The parser rejects it; the handler
+# passes the error verbatim as a remediation note.
 _NO_FORK_WITH_GATHER_BLOCK_RESPONSE = textwrap.dedent("""
 ```yaml
-gather:
+findings:
   - id: l-001
     loop: 1
     name: source-classification
-    target: v-001
-    query_details: {}
-    outcome: {}
-    resolutions: []
-    predictions:
-      - {id: lp1, if: "classifies as internal-monitoring-host", read_as: "sanctioned", advance_to: authentication-history}
-```
-
-```yaml
-selected_lead: source-classification
 ```
 """).strip()
 
 
+# Malformed envelope: the subagent returned invlang `error:` but not wrapped
+# in the `predict:` envelope. The parser rejects with a missing-top-level-
+# key error which becomes the remediation note.
 _ERROR_RESPONSE = textwrap.dedent("""
 ```yaml
 error: "investigation.md missing prologue — cannot form hypotheses"
@@ -220,9 +219,7 @@ class TestPromptAssembly:
             Phase.PREDICT.value,
         ]
         ctx = make_ctx(tmp_path, history=history)
-        response = _FORK_RESPONSE.replace("loop_n: 1", "loop_n: 2").replace(
-            "PREDICT (loop 1)", "PREDICT (loop 2)"
-        )
+        response = _FORK_RESPONSE.replace("loop: 1", "loop: 2")
         captured: list[str] = []
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
                             stub_invoke(captured, [response]))
@@ -326,7 +323,7 @@ def _synthetic_companion():
                 }
             ]
         },
-        "gather": [
+        "findings": [
             {
                 "id": "l-001",
                 "name": "auth-history",
@@ -416,149 +413,12 @@ class TestPriorsIntegration:
 # ---------------------------------------------------------------------------
 
 
-class TestDetectBlockType:
-    def test_detects_hypothesize_block(self):
-        assert predict_handler._detect_block_type(_FORK_RESPONSE) == "hypothesize"
-
-    def test_detects_gather_block_as_contract_violation(self):
-        """A `gather:` block in hypothesize output is now a contract
-        violation — detection still returns "gather", and the handler
-        catches it upstream to trigger the registry-loaded remediation."""
-        assert predict_handler._detect_block_type(
-            _NO_FORK_WITH_GATHER_BLOCK_RESPONSE
-        ) == "gather"
-
-    def test_detects_no_block_when_only_trailer(self):
-        """The valid no-fork shape — narrative + trailer, no invlang block."""
-        assert predict_handler._detect_block_type(_NO_FORK_RESPONSE) == "unknown"
-
-    def test_detects_error_block(self):
-        assert predict_handler._detect_block_type(_ERROR_RESPONSE) == "error"
-
-    def test_returns_unknown_when_no_yaml_key_matches(self):
-        raw = "```yaml\nselected_lead: foo\n```"
-        # Only a trailer, no invlang block → unknown.
-        assert predict_handler._detect_block_type(raw) == "unknown"
-
-    def test_returns_unknown_on_malformed_yaml(self):
-        raw = "```yaml\n: : : :\n```"
-        assert predict_handler._detect_block_type(raw) == "unknown"
-
-
-# ---------------------------------------------------------------------------
-# Trailer validation
-# ---------------------------------------------------------------------------
-
-
-class TestValidateTrailer:
-    """Post-cardinality-relaxation contract: trailer carries selected_lead
-    (required) + composite_secondary/override_data_source/lead_hint (all
-    optional). No mode, no block_type, no loop_n.
-    """
-
-    def test_minimal_trailer_ok(self):
-        trailer = {"selected_lead": "authentication-history"}
-        out = predict_handler._validate_trailer(trailer)
-        assert out["selected_lead"] == "authentication-history"
-
-    def test_trailer_with_composite_secondary_ok(self):
-        trailer = {
-            "selected_lead": "correlated-falco-events",
-            "composite_secondary": ["source-reputation"],
-        }
-        predict_handler._validate_trailer(trailer)
-
-    def test_trailer_with_override_and_hint_ok(self):
-        trailer = {
-            "selected_lead": "foo",
-            "override_data_source": "host_query",
-            "lead_hint": "wazuh template targets the wrong index",
-        }
-        predict_handler._validate_trailer(trailer)
-
-    def test_missing_selected_lead_raises(self):
-        with pytest.raises(OrchestrationError, match="selected_lead"):
-            predict_handler._validate_trailer({})
-
-    def test_empty_selected_lead_raises(self):
-        with pytest.raises(OrchestrationError, match="selected_lead"):
-            predict_handler._validate_trailer({"selected_lead": "   "})
-
-    def test_composite_secondary_not_list_raises(self):
-        with pytest.raises(OrchestrationError, match="composite_secondary"):
-            predict_handler._validate_trailer(
-                {"selected_lead": "x", "composite_secondary": "source-reputation"}
-            )
-
-    def test_composite_secondary_empty_string_raises(self):
-        with pytest.raises(OrchestrationError, match="composite_secondary"):
-            predict_handler._validate_trailer(
-                {"selected_lead": "x", "composite_secondary": ["source-reputation", ""]}
-            )
-
-    def test_override_data_source_empty_raises(self):
-        with pytest.raises(OrchestrationError, match="override_data_source"):
-            predict_handler._validate_trailer(
-                {"selected_lead": "x", "override_data_source": ""}
-            )
-
-    def test_lead_hint_empty_raises(self):
-        with pytest.raises(OrchestrationError, match="lead_hint"):
-            predict_handler._validate_trailer(
-                {"selected_lead": "x", "lead_hint": "  "}
-            )
-
-    def test_ad_hoc_lead_slug_is_legal(self):
-        # Ad-hoc leads — slugs that have no catalog entry — are legal.
-        # The validator is string-nonempty only; catalog membership is not
-        # checked here. gather-composite's ad-hoc path handles execution.
-        predict_handler._validate_trailer({"selected_lead": "made-up-ad-hoc-slug"})
-
-
-# ---------------------------------------------------------------------------
-# Terminal-routing strip
-# ---------------------------------------------------------------------------
-
-
-class TestStripTerminalRouting:
-    def test_strips_only_last_fence(self):
-        raw = textwrap.dedent("""
-            ## PREDICT
-
-            ```yaml
-            hypothesize:
-              hypotheses: []
-            ```
-
-            ```yaml
-            selected_lead: x
-            ```
-            """).strip()
-        stripped = predict_handler._strip_terminal_routing(raw)
-        assert "hypothesize:" in stripped
-        assert "selected_lead: x" not in stripped
-
-    def test_preserves_preceding_fences(self):
-        # Two invlang fences (rare but possible) + trailer — only trailer dropped.
-        raw = textwrap.dedent("""
-            ```yaml
-            prologue:
-              vertices: []
-            ```
-
-            ```yaml
-            hypothesize:
-              hypotheses: []
-            ```
-
-            ```yaml
-            selected_lead: x
-            ```
-            """).strip()
-        stripped = predict_handler._strip_terminal_routing(raw)
-        assert "prologue:" in stripped
-        assert "hypothesize:" in stripped
-        assert "selected_lead: x" not in stripped
+# (Legacy test classes TestDetectBlockType, TestValidateTrailer, and
+# TestStripTerminalRouting removed — the helpers they covered
+# (_detect_block_type, _validate_trailer, _strip_terminal_routing) are part
+# of the old two-fence contract superseded by the unified `predict:`
+# envelope + parse_predict_output pipeline. Coverage of the new shape lives
+# in tests/test_output_parser.py.)
 
 
 # ---------------------------------------------------------------------------
@@ -604,14 +464,30 @@ class TestHandleHappyPaths:
         assert inv == "## CONTEXTUALIZE\n\nexisting.\n"
 
     def test_composite_secondary_passes_through_to_payload(self, tmp_path, monkeypatch):
-        """PREDICT can prescribe multiple leads via composite_secondary.
+        """PREDICT can prescribe multiple leads via routing.composite_secondary.
         Handler passes through verbatim to GATHER."""
         response_with_secondary = textwrap.dedent("""
-            **Selected lead:** correlated-falco-events
-
             ```yaml
-            selected_lead: correlated-falco-events
-            composite_secondary: [source-reputation]
+            predict:
+              loop: 1
+              shape: A
+              hypotheses:
+                - id: h-001
+                  name: "?host-runtime-exec"
+                  attached_to_vertex: v-001
+                  proposed_edge:
+                    relation: spawned
+                    parent_vertex: {type: process, classification: host-side-exec-invoker}
+                  predictions:
+                    - {id: p1, claim: "baseline has prior runc-parent shell"}
+                  refutation_shape:
+                    - {id: r1, refutes_predictions: [p1], claim: "no baseline"}
+                  authorization_contract:
+                    - {id: ac1, edge_ref: proposed, anchor_kind: ci-cd-job-record, asks: authorization}
+                  weight: null
+              routing:
+                selected_lead: correlated-falco-events
+                composite_secondary: [source-reputation]
             ```
         """).strip()
         ctx = make_ctx(tmp_path)
@@ -623,38 +499,34 @@ class TestHandleHappyPaths:
         assert result.payload["selected_lead"] == "correlated-falco-events"
         assert result.payload["composite_secondary"] == ["source-reputation"]
 
-    def test_prose_only_stdout_triggers_summary_not_yaml_remediation(self, tmp_path, monkeypatch):
-        """Subagent emits narrative prose with no YAML fences at all (typical
-        when it wrote a detailed checkpoint and then 'summarized' for the
-        caller). Handler detects the missing structured output and retries
-        with the `stdout_summary_not_yaml` directive."""
-        prose_only = textwrap.dedent("""
-            PREDICT loop 1 complete. Three mutually exclusive mechanism
-            hypotheses formed against v-001. Next lead: container-baseline.
-        """).strip()
+    def test_empty_stdout_triggers_stdout_empty_remediation(self, tmp_path, monkeypatch):
+        """Empty stdout (M_last pathology — subagent ended on tool_use, dropped
+        by `claude --print`) with no checkpoint to recover from → retry with
+        the `stdout_empty` remediation directive."""
         captured: list[str] = []
         monkeypatch.setattr(
             predict_handler, "_invoke_subagent",
-            stub_invoke(captured, [prose_only, _FORK_RESPONSE]),
+            stub_invoke(captured, ["", _FORK_RESPONSE]),
         )
         monkeypatch.setattr(predict_handler, "_validate_companion_proposed",
                             stub_validator([[]]))
         ctx = make_ctx(tmp_path)
         result = predict_handler.handle(ctx)
 
-        # Retry fired with the registry directive.
+        # Retry fired with the stdout_empty directive.
         assert len(captured) == 2
-        directive = predict_handler._FAILURE_REMEDIATIONS["stdout_summary_not_yaml"]
+        directive = predict_handler._FAILURE_REMEDIATIONS["stdout_empty"]
         assert directive in captured[1]
         assert directive not in captured[0]
-        # Final routing is the hypotheses-block shape.
+        # Final routing lands on the fork-shape response.
         assert result.next_phase == Phase.GATHER
         assert result.payload["selected_lead"] == "authentication-history"
 
-    def test_gather_block_triggers_structured_remediation_retry(self, tmp_path, monkeypatch):
-        """When the subagent emits a `gather:` block, the handler retries with
-        the registry-loaded `gather_block_in_predict` directive. On the
-        second attempt the subagent emits the correct zero-hypotheses shape."""
+    def test_non_predict_envelope_triggers_parse_error_retry(self, tmp_path, monkeypatch):
+        """When the subagent emits a YAML block without the top-level
+        `predict:` key (e.g., an invlang `findings:` block directly), the parser
+        rejects with a PredictOutputError. The handler passes the error
+        verbatim as a remediation note and retries."""
         captured: list[str] = []
         monkeypatch.setattr(
             predict_handler, "_invoke_subagent",
@@ -667,13 +539,10 @@ class TestHandleHappyPaths:
 
         # Two attempts — the second is the retry.
         assert len(captured) == 2
-        # The retry prompt carries the registry-loaded directive verbatim.
-        directive = predict_handler._FAILURE_REMEDIATIONS["gather_block_in_predict"]
-        assert directive in captured[1]
+        # Parser's error message lands in the retry prompt as a remediation.
+        assert "top-level key `predict:`" in captured[1]
         assert "resume_from_checkpoint=true" in captured[1]
-        # First-attempt prompt has no remediation directive.
-        assert directive not in captured[0]
-        # Final routing — zero-hypotheses shape, successfully parsed.
+        # Final routing — Shape E response successfully parsed.
         assert result.next_phase == Phase.GATHER
         assert result.payload["selected_lead"] == "source-classification"
 
@@ -719,40 +588,51 @@ class TestHandleHappyPaths:
 
 
 class TestHandleErrorPaths:
-    def test_error_block_raises(self, tmp_path, monkeypatch):
+    def test_error_block_triggers_retry_then_raises_after_budget(self, tmp_path, monkeypatch):
+        """Under the unified envelope, an `error:` top-level block (without
+        the `predict:` wrapper) fails the parser with a missing-top-level-
+        key error. That's a retry-directive, not a raise. Three failed
+        attempts in a row exhaust the retry budget → OrchestrationError."""
         ctx = make_ctx(tmp_path)
-        monkeypatch.setattr(predict_handler, "_invoke_subagent",
-                            stub_invoke([], [_ERROR_RESPONSE]))
-        with pytest.raises(OrchestrationError, match="error block"):
+        monkeypatch.setattr(
+            predict_handler, "_invoke_subagent",
+            stub_invoke([], [_ERROR_RESPONSE, _ERROR_RESPONSE, _ERROR_RESPONSE]),
+        )
+        with pytest.raises(OrchestrationError, match="failed after"):
             predict_handler.handle(ctx)
 
-    def test_only_trailer_no_invlang_block_ok(self, tmp_path, monkeypatch):
-        """Post-cardinality-relaxation: a trailer-only response is legal —
-        represents "continue stable fork, pick next lead, no new hypotheses."
-        Not an error; routes to GATHER."""
+    def test_shape_E_branch_plan_only_is_legal(self, tmp_path, monkeypatch):
+        """Shape E — no hypotheses, branch_plan with lead-level readings.
+        Under the unified envelope this is a first-class shape; handler routes
+        to GATHER and passes branch_plan.predictions through the payload."""
         ctx = make_ctx(tmp_path, existing_investigation="## CONTEXTUALIZE\n\nexisting.\n")
-        only_trailer = textwrap.dedent("""
-            ```yaml
-            selected_lead: x
-            ```
-            """).strip()
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
-                            stub_invoke([], [only_trailer]))
+                            stub_invoke([], [_NO_FORK_RESPONSE]))
         result = predict_handler.handle(ctx)
         assert result.next_phase == Phase.GATHER
-        assert result.payload["selected_lead"] == "x"
+        assert result.payload["selected_lead"] == "source-classification"
+        # branch_plan.predictions propagated to GATHER via the payload.
+        assert "branch_plan_predictions" in result.payload
+        assert len(result.payload["branch_plan_predictions"]) == 2
 
-    def test_trailer_missing_selected_lead_raises(self, tmp_path, monkeypatch):
-        """Without selected_lead, PREDICT has nothing to hand to GATHER —
-        halting is ANALYZE's responsibility, not PREDICT's."""
+    def test_routing_missing_selected_lead_retries_then_raises(self, tmp_path, monkeypatch):
+        """Missing routing.selected_lead is a parser-level rejection. Handler
+        retries; three failures exhaust the retry budget → OrchestrationError."""
         ctx = make_ctx(tmp_path)
         bad = textwrap.dedent("""
             ```yaml
-            composite_secondary: [a]
+            predict:
+              loop: 1
+              shape: E
+              branch_plan:
+                primary_lead: x
+                predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]
+              routing:
+                composite_secondary: []
             ```
             """).strip()
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
-                            stub_invoke([], [bad]))
+                            stub_invoke([], [bad, bad, bad]))
         with pytest.raises(OrchestrationError, match="selected_lead"):
             predict_handler.handle(ctx)
 
@@ -820,15 +700,30 @@ def _write_checkpoint(run_dir: Path, loop_n: int, payload: dict) -> None:
 class TestCheckpointRecovery:
     """Empty-stdout case: subagent ended on tool_use(Write M_last), `claude
     --print` captured nothing. Handler reads the checkpoint and synthesizes the
-    response — no retry."""
+    response — no retry. Checkpoint shape mirrors the unified envelope:
+    {status: complete, predict: {...}}.
+    """
 
-    def test_zero_hypotheses_checkpoint_synthesized_without_retry(self, tmp_path, monkeypatch):
-        """Checkpoint with selected_lead but no hypotheses list → synthesized
-        as a zero-new-hypotheses continuation. No invlang block, no retry."""
+    def test_shape_E_checkpoint_synthesized_without_retry(self, tmp_path, monkeypatch):
+        """Checkpoint with a Shape E envelope (branch_plan only, no
+        hypotheses) → synthesized, no invlang block appended, no retry."""
         ctx = make_ctx(tmp_path)
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "complete",
-            "selected_lead": "shell-context",
+            "predict": {
+                "loop": 1,
+                "shape": "E",
+                "branch_plan": {
+                    "primary_lead": "shell-context",
+                    "predictions": [
+                        {"id": "lp1", "if": "a", "read_as": "b", "advance_to": "c"},
+                    ],
+                },
+                "routing": {
+                    "selected_lead": "shell-context",
+                    "composite_secondary": [],
+                },
+            },
         })
         captured: list[str] = []
         # Subagent returns empty stdout (the pathology).
@@ -838,38 +733,47 @@ class TestCheckpointRecovery:
         # No retry — recovery short-circuited the rerun.
         assert len(captured) == 1
         assert result.payload["selected_lead"] == "shell-context"
-        # Zero-hypotheses writes nothing to investigation.md.
+        # Shape E writes nothing to investigation.md (branch_plan flows via payload).
         assert not (ctx.run_dir / "investigation.md").exists() or \
                "PREDICT" not in (ctx.run_dir / "investigation.md").read_text()
 
     def test_hypotheses_checkpoint_synthesized_and_appended(self, tmp_path, monkeypatch):
+        """Checkpoint with hypotheses → synthesized as `hypothesize:` block
+        appended to investigation.md, no retry."""
         ctx = make_ctx(tmp_path, existing_investigation="## CONTEXTUALIZE\n\nexisting.\n")
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "complete",
-            "hypotheses": [
-                {
-                    "id": "h-001",
-                    "name": "?scheduled-automation-health-check",
-                    "attached_to_vertex": "v-001",
-                    "proposed_edge": {
-                        "relation": "initiated_by",
-                        "parent_vertex": {
-                            "type": "identity",
-                            "classification": "scheduled-automation-health-check",
+            "predict": {
+                "loop": 1,
+                "shape": "M",
+                "hypotheses": [
+                    {
+                        "id": "h-001",
+                        "name": "?scheduled-automation-health-check",
+                        "attached_to_vertex": "v-001",
+                        "proposed_edge": {
+                            "relation": "initiated_by",
+                            "parent_vertex": {
+                                "type": "identity",
+                                "classification": "scheduled-automation-health-check",
+                            },
                         },
+                        "predictions": [
+                            {"id": "p1", "subject": "proposed_parent",
+                             "claim": "event cadence matches documented probe interval within ±5s"},
+                        ],
+                        "refutation_shape": [
+                            {"id": "r1", "refutes_predictions": ["p1"],
+                             "claim": "event cadence is off-documented-interval"},
+                        ],
+                        "weight": None,
                     },
-                    "predictions": [
-                        {"id": "p1", "subject": "proposed_parent",
-                         "claim": "event cadence matches documented probe interval within ±5s"},
-                    ],
-                    "refutation_shape": [
-                        {"id": "r1", "refutes_predictions": ["p1"],
-                         "claim": "event cadence is off-documented-interval"},
-                    ],
-                    "weight": None,
+                ],
+                "routing": {
+                    "selected_lead": "authentication-history",
+                    "composite_secondary": [],
                 },
-            ],
-            "selected_lead": "authentication-history",
+            },
         })
         captured: list[str] = []
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
@@ -887,11 +791,18 @@ class TestCheckpointRecovery:
     def test_incomplete_checkpoint_falls_through_to_retry(self, tmp_path, monkeypatch):
         """Checkpoint with status != 'complete' should NOT synthesize — the
         subagent needs to finish the work. Handler falls through to the
-        existing stdout_summary_not_yaml retry path."""
+        stdout_empty retry path."""
         ctx = make_ctx(tmp_path)
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "drafting",  # ← not complete
-            "selected_lead": "x",
+            "predict": {
+                "loop": 1,
+                "shape": "E",
+                "branch_plan": {"primary_lead": "x", "predictions": [
+                    {"id": "lp1", "if": "a", "read_as": "b", "advance_to": "c"},
+                ]},
+                "routing": {"selected_lead": "x", "composite_secondary": []},
+            },
         })
         captured: list[str] = []
         monkeypatch.setattr(
@@ -901,9 +812,9 @@ class TestCheckpointRecovery:
         monkeypatch.setattr(predict_handler, "_validate_companion_proposed",
                             stub_validator([[]]))
         result = predict_handler.handle(ctx)
-        # Retry fired — the second call carried the stdout_summary_not_yaml directive.
+        # Retry fired — the second call carried the stdout_empty directive.
         assert len(captured) == 2
-        directive = predict_handler._FAILURE_REMEDIATIONS["stdout_summary_not_yaml"]
+        directive = predict_handler._FAILURE_REMEDIATIONS["stdout_empty"]
         assert directive in captured[1]
         assert result.payload["selected_lead"] == "authentication-history"
 
@@ -933,8 +844,44 @@ class TestCheckpointRecovery:
         ctx = make_ctx(tmp_path)
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "complete",
-            "hypotheses": [{"id": "h-001", "name": "?x"}],
-            "selected_lead": "authentication-history",
+            "predict": {
+                "loop": 1,
+                "shape": "M",
+                "hypotheses": [
+                    {
+                        "id": "h-001",
+                        "name": "?x",
+                        "attached_to_vertex": "v-001",
+                        "proposed_edge": {
+                            "relation": "spawned",
+                            "parent_vertex": {"type": "process", "classification": "x"},
+                        },
+                        "predictions": [{"id": "p1", "claim": "..."}],
+                        "refutation_shape": [
+                            {"id": "r1", "refutes_predictions": ["p1"], "claim": "..."},
+                        ],
+                        "weight": None,
+                    },
+                    {
+                        "id": "h-002",
+                        "name": "?y",
+                        "attached_to_vertex": "v-001",
+                        "proposed_edge": {
+                            "relation": "spawned",
+                            "parent_vertex": {"type": "process", "classification": "y"},
+                        },
+                        "predictions": [{"id": "p1", "claim": "..."}],
+                        "refutation_shape": [
+                            {"id": "r1", "refutes_predictions": ["p1"], "claim": "..."},
+                        ],
+                        "weight": None,
+                    },
+                ],
+                "routing": {
+                    "selected_lead": "authentication-history",
+                    "composite_secondary": [],
+                },
+            },
         })
         captured: list[str] = []
         # All 3 attempts return empty stdout (retry budget = 2 → 3 total).
@@ -944,7 +891,7 @@ class TestCheckpointRecovery:
         )
         # Validator flags synthesis output on attempt 1, forcing the retry
         # path; attempts 2 + 3 then hit empty-stdout and (with recovery
-        # disabled) surface the stdout_summary_not_yaml error.
+        # disabled) surface the stdout_empty error.
         monkeypatch.setattr(predict_handler, "_validate_companion_proposed",
                             stub_validator([["invlang rule 27 violation"]]))
         with pytest.raises(OrchestrationError, match="failed after"):

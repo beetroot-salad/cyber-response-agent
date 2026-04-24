@@ -86,6 +86,7 @@ from hooks.scripts.invlang_checks_impact import (
     _check_impact_resolution_backrefs,
 )
 from hooks.scripts.invlang_checks_hypothesis import (
+    _check_attribute_prediction_structure,
     _check_classification_evaluation_prefix,
     _check_compound_prediction_claim,
     _check_hypothesis_fork_distinctness,
@@ -136,6 +137,7 @@ __all__ = [
     "_check_predictions_leanness",
     "_check_prediction_subject_scope",
     "_check_refutation_prediction_links",
+    "_check_attribute_prediction_structure",
     "_check_lead_dedup_warnings",
     "_check_silent_empty_result_warnings",
     "_check_tool_audit_cross_ref_warnings",
@@ -175,7 +177,7 @@ def _check_route_compliance(merged: dict[str, Any]) -> list[str]:
         `REPORT` should appear in at least one `advance_to`.
     """
     warnings: list[str] = []
-    leads = merged.get("gather", []) or []
+    leads = merged.get("findings", []) or []
     if not isinstance(leads, list):
         return warnings
 
@@ -221,7 +223,7 @@ def _check_lead_dedup_warnings(merged: dict[str, Any]) -> list[str]:
     """Warn when two leads share the same template + query + substitutions."""
     warnings: list[str] = []
     seen: dict[tuple[str, str, tuple[tuple[str, Any], ...]], str] = {}
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         qd = lead.get("query_details") or {}
@@ -263,7 +265,7 @@ def _check_silent_empty_result_warnings(merged: dict[str, Any]) -> list[str]:
     attribute_updates, anchor_consultations, or failure_reason.
     """
     warnings: list[str] = []
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         tests = lead.get("tests") or []
@@ -343,7 +345,7 @@ def _check_tool_audit_cross_ref_warnings(
     MIN_QUERY_LEN = 12
 
     warnings: list[str] = []
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         qd = lead.get("query_details") or {}
@@ -442,6 +444,7 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_prediction_subject_scope(merged))
     errors.extend(_check_refutation_prediction_links(merged))
     errors.extend(_check_integrity_peer_discipline(merged))
+    errors.extend(_check_attribute_prediction_structure(merged))
 
     # Predictions / weight coverage
     errors.extend(_check_prediction_coverage(merged))

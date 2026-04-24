@@ -68,23 +68,23 @@ def _lead_with_impact(predictions=None, resolutions=None) -> dict:
 
 class TestCheckImpactPredictionStructure:
     def test_well_formed_passes(self):
-        merged = {"gather": [_lead_with_impact(predictions=[_impact_pred()])]}
+        merged = {"findings": [_lead_with_impact(predictions=[_impact_pred()])]}
         assert _check_impact_prediction_structure(merged) == []
 
     def test_missing_required_field_fails(self):
         pred = _impact_pred()
         pred.pop("on_match")
-        merged = {"gather": [_lead_with_impact(predictions=[pred])]}
+        merged = {"findings": [_lead_with_impact(predictions=[pred])]}
         errors = _check_impact_prediction_structure(merged)
         assert any("on_match" in e for e in errors)
 
     def test_bad_id_pattern_fails(self):
-        merged = {"gather": [_lead_with_impact(predictions=[_impact_pred(id="lp1")])]}
+        merged = {"findings": [_lead_with_impact(predictions=[_impact_pred(id="lp1")])]}
         errors = _check_impact_prediction_structure(merged)
         assert any("^ip\\d+$" in e for e in errors)
 
     def test_duplicate_id_within_lead_fails(self):
-        merged = {"gather": [_lead_with_impact(predictions=[
+        merged = {"findings": [_lead_with_impact(predictions=[
             _impact_pred(id="ip1"),
             _impact_pred(id="ip1"),
         ])]}
@@ -92,7 +92,7 @@ class TestCheckImpactPredictionStructure:
         assert any("duplicate id" in e for e in errors)
 
     def test_unknown_dimension_fails(self):
-        merged = {"gather": [_lead_with_impact(predictions=[
+        merged = {"findings": [_lead_with_impact(predictions=[
             _impact_pred(dimension="nonsense"),
         ])]}
         errors = _check_impact_prediction_structure(merged)
@@ -100,13 +100,13 @@ class TestCheckImpactPredictionStructure:
 
     def test_compound_AND_claim_rejected(self):
         pred = _impact_pred(claim="bytes > X AND destination is external")
-        merged = {"gather": [_lead_with_impact(predictions=[pred])]}
+        merged = {"findings": [_lead_with_impact(predictions=[pred])]}
         errors = _check_impact_prediction_structure(merged)
         assert any("'AND'" in e for e in errors)
 
     def test_compound_semicolon_claim_rejected(self):
         pred = _impact_pred(claim="bytes > X; destination is external")
-        merged = {"gather": [_lead_with_impact(predictions=[pred])]}
+        merged = {"findings": [_lead_with_impact(predictions=[pred])]}
         errors = _check_impact_prediction_structure(merged)
         assert any("semicolon" in e for e in errors)
 
@@ -118,21 +118,21 @@ class TestCheckImpactPredictionStructure:
 
 class TestCheckImpactResolutionBackrefs:
     def test_bare_ref_resolves_within_lead(self):
-        merged = {"gather": [_lead_with_impact(
+        merged = {"findings": [_lead_with_impact(
             predictions=[_impact_pred()],
             resolutions=[_impact_res(prediction_ref="ip1")],
         )]}
         assert _check_impact_resolution_backrefs(merged) == []
 
     def test_qualified_ref_resolves(self):
-        merged = {"gather": [_lead_with_impact(
+        merged = {"findings": [_lead_with_impact(
             predictions=[_impact_pred()],
             resolutions=[_impact_res(prediction_ref="l-001.ip1")],
         )]}
         assert _check_impact_resolution_backrefs(merged) == []
 
     def test_unknown_ref_fails(self):
-        merged = {"gather": [_lead_with_impact(
+        merged = {"findings": [_lead_with_impact(
             predictions=[_impact_pred()],
             resolutions=[_impact_res(prediction_ref="ip99")],
         )]}
@@ -140,7 +140,7 @@ class TestCheckImpactResolutionBackrefs:
         assert any("does not resolve" in e for e in errors)
 
     def test_dimension_mismatch_fails(self):
-        merged = {"gather": [_lead_with_impact(
+        merged = {"findings": [_lead_with_impact(
             predictions=[_impact_pred(dimension="confidentiality")],
             resolutions=[_impact_res(dimension="availability")],
         )]}
@@ -148,7 +148,7 @@ class TestCheckImpactResolutionBackrefs:
         assert any("does not match" in e for e in errors)
 
     def test_past_case_grounding_rejected(self):
-        merged = {"gather": [_lead_with_impact(
+        merged = {"findings": [_lead_with_impact(
             predictions=[_impact_pred()],
             resolutions=[_impact_res(grounding_kind="past-case")],
         )]}
@@ -158,7 +158,7 @@ class TestCheckImpactResolutionBackrefs:
     def test_missing_reasoning_fails(self):
         res = _impact_res()
         res.pop("reasoning")
-        merged = {"gather": [_lead_with_impact(
+        merged = {"findings": [_lead_with_impact(
             predictions=[_impact_pred()],
             resolutions=[res],
         )]}
@@ -166,7 +166,7 @@ class TestCheckImpactResolutionBackrefs:
         assert any("reasoning" in e for e in errors)
 
     def test_bad_verdict_fails(self):
-        merged = {"gather": [_lead_with_impact(
+        merged = {"findings": [_lead_with_impact(
             predictions=[_impact_pred()],
             resolutions=[_impact_res(verdict="maybe")],
         )]}
@@ -182,7 +182,7 @@ class TestCheckImpactResolutionBackrefs:
 class TestCheckImpactClosure:
     def test_resolved_passes(self):
         merged = {
-            "gather": [_lead_with_impact(
+            "findings": [_lead_with_impact(
                 predictions=[_impact_pred()],
                 resolutions=[_impact_res()],
             )],
@@ -192,7 +192,7 @@ class TestCheckImpactClosure:
 
     def test_orphaned_fails(self):
         merged = {
-            "gather": [_lead_with_impact(predictions=[_impact_pred()], resolutions=[])],
+            "findings": [_lead_with_impact(predictions=[_impact_pred()], resolutions=[])],
             "conclude": {"disposition": "benign"},
         }
         errors = _check_impact_closure(merged)
@@ -200,7 +200,7 @@ class TestCheckImpactClosure:
 
     def test_deferred_with_rationale_passes(self):
         merged = {
-            "gather": [_lead_with_impact(predictions=[_impact_pred()], resolutions=[])],
+            "findings": [_lead_with_impact(predictions=[_impact_pred()], resolutions=[])],
             "conclude": {
                 "disposition": "unclear",
                 "deferred_impact_predictions": [
@@ -213,7 +213,7 @@ class TestCheckImpactClosure:
 
     def test_deferred_empty_rationale_fails(self):
         merged = {
-            "gather": [_lead_with_impact(predictions=[_impact_pred()], resolutions=[])],
+            "findings": [_lead_with_impact(predictions=[_impact_pred()], resolutions=[])],
             "conclude": {
                 "disposition": "unclear",
                 "deferred_impact_predictions": [
@@ -226,7 +226,7 @@ class TestCheckImpactClosure:
 
     def test_no_conclude_block_skips(self):
         merged = {
-            "gather": [_lead_with_impact(predictions=[_impact_pred()], resolutions=[])],
+            "findings": [_lead_with_impact(predictions=[_impact_pred()], resolutions=[])],
         }
         assert _check_impact_closure(merged) == []
 

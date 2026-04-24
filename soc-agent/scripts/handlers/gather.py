@@ -66,6 +66,11 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._output_parser import (
+    GatherEnvelope,
+    GatherOutputError,
+    parse_gather_envelope,
+)
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
@@ -179,27 +184,48 @@ def _derive_reporting_agent(alert: dict) -> str:
     )
 
 
-def _derive_incident_window(alert: dict) -> tuple[str, str]:
+def _derive_incident_window(
+    alert: dict, scope_override: Optional[dict] = None,
+) -> tuple[str, str]:
     """Return (incident_start, incident_end) ISO-8601 UTC strings.
 
-    Uses the alert's top-level `@timestamp` when present. Window is
-    `[t - _DEFAULT_WINDOW, t]`. When the timestamp is absent or unparseable,
-    fall back to now-window..now so the lead still runs; the subagent's
-    data-source health probe will flag anomalies either way.
+    Default window: `[t - _DEFAULT_WINDOW, t]` anchored at the alert's
+    `@timestamp` (or `now` if the timestamp is absent/unparseable — the
+    subagent's data-source health probe flags that case either way).
+
+    When `scope_override` is provided by PREDICT, it overrides:
+      - `window_hours`: lookback duration (replaces _DEFAULT_WINDOW)
+      - `anchor`: 'alert' (default) keeps T=@timestamp; 'now' moves T to
+        current wall-clock time (useful for leads whose semantics are
+        "since-last-baseline", not "at-incident-time")
+
+    Per the predict output-parser contract (scope_override validated at
+    parse time), the override is trusted here — no re-validation.
     """
-    raw = _alert_dot_path(alert, "@timestamp") or _alert_dot_path(alert, "timestamp")
+    window = _DEFAULT_WINDOW
+    anchor = "alert"
+    if scope_override:
+        hours = scope_override.get("window_hours")
+        if isinstance(hours, int) and hours > 0:
+            window = timedelta(hours=hours)
+        anchor_override = scope_override.get("anchor")
+        if anchor_override in ("alert", "now"):
+            anchor = anchor_override
+
     end: Optional[datetime] = None
-    if raw:
-        try:
-            # Wazuh `@timestamp` is ISO-8601 with a trailing `Z` or offset.
-            end = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-            if end.tzinfo is None:
-                end = end.replace(tzinfo=timezone.utc)
-        except ValueError:
-            end = None
+    if anchor == "alert":
+        raw = _alert_dot_path(alert, "@timestamp") or _alert_dot_path(alert, "timestamp")
+        if raw:
+            try:
+                # Wazuh `@timestamp` is ISO-8601 with a trailing `Z` or offset.
+                end = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                if end.tzinfo is None:
+                    end = end.replace(tzinfo=timezone.utc)
+            except ValueError:
+                end = None
     if end is None:
         end = datetime.now(timezone.utc)
-    start = end - _DEFAULT_WINDOW
+    start = end - window
     return _iso(start), _iso(end)
 
 
@@ -237,10 +263,14 @@ def _derive_entity_bindings(
     return bindings, True
 
 
-def _resolve_scope(ctx: Context, lead_name: str) -> Scope:
+def _resolve_scope(
+    ctx: Context, lead_name: str, *, scope_override: Optional[dict] = None,
+) -> Scope:
     vendor = _derive_vendor(ctx.signature_id)
     reporting_agent = _derive_reporting_agent(ctx.alert)
-    incident_start, incident_end = _derive_incident_window(ctx.alert)
+    incident_start, incident_end = _derive_incident_window(
+        ctx.alert, scope_override=scope_override,
+    )
     entity_bindings, template_exists = _derive_entity_bindings(
         ctx.alert, lead_name, vendor,
     )
@@ -268,6 +298,21 @@ def _format_entity_bindings(bindings: dict[str, str]) -> str:
     return "{" + pairs + "}"
 
 
+def _lead_id_for(loop_n: int, index: int) -> str:
+    """Deterministic invlang lead id for an envelope entry.
+
+    Single-lead dispatches use index=0 → `l-{loop_n:03d}`. Composite
+    secondaries use 1, 2, ... → `l-{loop_n:03d}b`, `l-{loop_n:03d}c`, ...
+    Predictable for tests and stable across retries within the same loop.
+    """
+    suffix = ""
+    if index > 0:
+        # 'b' for index 1, 'c' for index 2, ... (matches how humans read
+        # "sibling lead in the same loop").
+        suffix = chr(ord("b") + index - 1)
+    return f"l-{loop_n:03d}{suffix}"
+
+
 def _assemble_prompt_single(
     ctx: Context, scope: Scope, loop_n: int, *, resume: bool = False,
 ) -> str:
@@ -275,6 +320,7 @@ def _assemble_prompt_single(
         f"run_dir={ctx.run_dir}",
         f"signature_id={ctx.signature_id}",
         f"loop_n={loop_n}",
+        f"lead_id={_lead_id_for(loop_n, 0)}",
         f"lead_name={scope.lead_name}",
         f"reporting_agent={scope.reporting_agent}",
         f"incident_start={scope.incident_start}",
@@ -318,11 +364,15 @@ def _assemble_prompt_composite(
     lead_hint: Optional[str] = None,
     secondary_scopes: Optional[list[Scope]] = None,
 ) -> str:
-    lead_specs = [_build_lead_spec(
+    primary_spec = _build_lead_spec(
         scope, override_data_source=override_data_source, lead_hint=lead_hint,
-    )]
-    for sec in secondary_scopes or []:
-        lead_specs.append(_build_lead_spec(sec))
+    )
+    primary_spec["lead_id"] = _lead_id_for(loop_n, 0)
+    lead_specs = [primary_spec]
+    for idx, sec in enumerate(secondary_scopes or [], start=1):
+        spec = _build_lead_spec(sec)
+        spec["lead_id"] = _lead_id_for(loop_n, idx)
+        lead_specs.append(spec)
     lines = [
         f"run_dir={ctx.run_dir}",
         f"signature_id={ctx.signature_id}",
@@ -346,9 +396,8 @@ def _assemble_prompt_composite(
 def _try_extract_terminal_yaml(raw: str) -> Optional[dict]:
     """Return the terminal YAML block parsed as a mapping, or None on miss.
 
-    Wraps the shared `extract_terminal_yaml`, converting its "no block / parse
-    failure" raises into `None` so callers can treat absence as a truncation
-    signal and route to the checkpoint-recovery path.
+    Retained for checkpoint recovery paths that still want a best-effort
+    parse without envelope shape enforcement.
     """
     try:
         return extract_terminal_yaml(raw)
@@ -356,31 +405,25 @@ def _try_extract_terminal_yaml(raw: str) -> Optional[dict]:
         return None
 
 
-def _parse_gather_output(raw: str) -> Optional[dict]:
-    """Parse the single-gather subagent's terminal YAML.
+def _parse_envelope_response(
+    raw: str, *, loop_n: int, mode: str,
+) -> Optional[GatherEnvelope]:
+    """Parse a gather / gather-composite envelope from subagent stdout.
 
-    Returns the parsed dict when the expected `result:` key is present;
-    returns None on truncation / missing-key so the caller triggers recovery.
+    Returns None on truncation / unparseable output so the caller can route
+    to the checkpoint-recovery path. Envelope-shape violations (missing
+    fields, bad enums) also return None — the recovery path has better
+    context for reconstructing from the checkpoint than we have here.
+
+    `loop_n` is the orchestrator's computed loop number; we don't enforce
+    it against the subagent's emitted `loop` field because retries and
+    resume paths legitimately drift. The envelope carries the subagent's
+    asserted loop for audit trails.
     """
-    parsed = _try_extract_terminal_yaml(raw)
-    if parsed is None or "result" not in parsed:
+    try:
+        return parse_gather_envelope(raw, mode=mode)
+    except GatherOutputError:
         return None
-    return parsed
-
-
-def _parse_composite_output(raw: str) -> Optional[dict]:
-    """Parse the composite subagent's terminal YAML.
-
-    Returns a dict carrying either `gather_composite:` or `error:` at the
-    top level; returns None on truncation / unrecognized shape so the caller
-    triggers recovery.
-    """
-    parsed = _try_extract_terminal_yaml(raw)
-    if parsed is None:
-        return None
-    if "gather_composite" not in parsed and "error" not in parsed:
-        return None
-    return parsed
 
 
 # ---------------------------------------------------------------------------
@@ -413,9 +456,15 @@ def _load_checkpoint(path: Path) -> Optional[dict]:
         return None
 
 
-def _reconstruct_single_from_checkpoint(checkpoint: dict) -> dict:
-    """Map a complete-single-gather checkpoint's `result` block back into the
-    shape `_parse_gather_output` would have returned from the subagent stdout.
+def _reconstruct_single_from_checkpoint(
+    checkpoint: dict, *, loop_n: int,
+) -> GatherEnvelope:
+    """Rebuild a `GatherEnvelope` from a complete-single-gather checkpoint.
+
+    Checkpoint schema mirrors the envelope's single-lead entry (see
+    `agents/gather.md` §Progress checkpoint). We wrap the `result` block in
+    a one-lead envelope so recovery emits the same shape a fresh dispatch
+    would.
     """
     result_block = checkpoint.get("result")
     if not isinstance(result_block, dict):
@@ -423,38 +472,70 @@ def _reconstruct_single_from_checkpoint(checkpoint: dict) -> dict:
             "gather checkpoint: `result:` block missing or malformed; cannot "
             "reconstruct — re-dispatch required"
         )
-    # The subagent's Decision YAML top-level shape is literally
-    # `{result: finding, ...}` or `{result: escalate, ...}`. The checkpoint
-    # stores all the same keys under its own `result:` wrapper, so we unwrap
-    # by copying kind into `result` and lifting the siblings.
-    kind = result_block.get("kind")
-    if kind not in {"finding", "escalate"}:
+    status = result_block.get("status")
+    if status not in {
+        "ok", "partial", "data_missing", "dropped_attempt",
+        "probe_broken", "siem_error", "error",
+    }:
         raise OrchestrationError(
-            f"gather checkpoint: unrecognized `result.kind` {kind!r}"
+            f"gather checkpoint: unrecognized `result.status` {status!r}"
         )
-    out = {"result": kind}
+
+    lead_entry: dict[str, Any] = {
+        "id": result_block.get("id") or _lead_id_for(loop_n, 0),
+        "name": result_block.get("name") or checkpoint.get("lead_name"),
+        "status": status,
+    }
     for key, value in result_block.items():
-        if key == "kind":
+        if key in {"id", "name", "status", "raw"}:
             continue
-        out[key] = value
-    return out
+        lead_entry[key] = value
+
+    raw_by_lead: dict[str, dict[str, Any]] = {}
+    raw = result_block.get("raw")
+    if isinstance(raw, dict):
+        raw_by_lead[lead_entry["id"]] = raw
+
+    return GatherEnvelope(
+        leads=[lead_entry],
+        raw_by_lead=raw_by_lead,
+        telemetry={"loop": loop_n, "mode": "single"},
+    )
 
 
-def _reconstruct_composite_from_checkpoint(checkpoint: dict) -> dict:
-    """Map a complete-composite checkpoint back into the subagent-stdout shape."""
-    leads = checkpoint.get("leads")
-    if not isinstance(leads, list):
+def _reconstruct_composite_from_checkpoint(
+    checkpoint: dict, *, loop_n: int,
+) -> GatherEnvelope:
+    """Rebuild a `GatherEnvelope` from a complete-composite checkpoint.
+
+    Per-lead entries already mirror the envelope shape (see
+    `agents/gather-composite.md` §Progress checkpoint); we just lift them
+    into a GatherEnvelope with raw payloads split off.
+    """
+    raw_leads = checkpoint.get("leads")
+    if not isinstance(raw_leads, list):
         raise OrchestrationError(
             "gather-composite checkpoint: `leads:` missing or malformed"
         )
-    return {
-        "gather_composite": {
-            "mode": "redispatch",
-            "leads": leads,
-            "cross_lead_notes": "",
-            "notes": "reconstructed from checkpoint after silent termination",
-        },
-    }
+
+    leads: list[dict[str, Any]] = []
+    raw_by_lead: dict[str, dict[str, Any]] = {}
+    for i, lead in enumerate(raw_leads):
+        if not isinstance(lead, dict):
+            continue
+        lead_id = lead.get("id") or _lead_id_for(loop_n, i)
+        clean = {k: v for k, v in lead.items() if k != "raw"}
+        clean.setdefault("id", lead_id)
+        leads.append(clean)
+        raw = lead.get("raw")
+        if isinstance(raw, dict):
+            raw_by_lead[lead_id] = raw
+
+    return GatherEnvelope(
+        leads=leads,
+        raw_by_lead=raw_by_lead,
+        telemetry={"loop": loop_n, "mode": "composite"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -464,29 +545,35 @@ def _reconstruct_composite_from_checkpoint(checkpoint: dict) -> dict:
 
 def _dispatch_single(
     ctx: Context, scope: Scope, loop_n: int,
-) -> dict:
+) -> GatherEnvelope:
     """Invoke the single-gather subagent; on truncation, recover via
     checkpoint; on recoverable escalate triggers, fall back to composite.
-    Returns a normalized payload dict.
+    Returns a `GatherEnvelope` (mode="single" or "composite" after fallback).
     """
     prompt = _assemble_prompt_single(ctx, scope, loop_n)
-    parsed = _parse_gather_output(_invoke_gather(prompt))
+    envelope = _parse_envelope_response(
+        _invoke_gather(prompt), loop_n=loop_n, mode="single",
+    )
 
-    if parsed is None:
-        parsed = _recover_single(ctx, scope, loop_n)
+    if envelope is None:
+        envelope = _recover_single(ctx, scope, loop_n)
 
-    if parsed.get("result") == "escalate":
-        trigger = parsed.get("trigger")
+    # Escalate-to-composite fallback. The single-gather envelope has exactly
+    # one lead; if it says status=error with a recoverable trigger, redispatch
+    # via the composite path so the Sonnet worker can run data-source-debug
+    # or multi-query construction.
+    first = envelope.leads[0] if envelope.leads else {}
+    if first.get("status") == "error":
+        trigger = first.get("escalate_trigger")
         if trigger in _COMPOSITE_FALLBACK_TRIGGERS:
-            composite_parsed = _dispatch_composite(
+            return _dispatch_composite(
                 ctx, scope, loop_n, mode="redispatch",
             )
-            return _normalize_composite(composite_parsed, scope)
-        # Unrecognized trigger → surface escalate payload to ANALYZE as-is.
-    return _normalize_single(parsed, scope)
+        # Unrecognized trigger → surface single-lead error envelope as-is.
+    return envelope
 
 
-def _recover_single(ctx: Context, scope: Scope, loop_n: int) -> dict:
+def _recover_single(ctx: Context, scope: Scope, loop_n: int) -> GatherEnvelope:
     ckpt_path = _checkpoint_path_single(ctx, loop_n, scope.lead_name)
     ckpt = _load_checkpoint(ckpt_path)
     if ckpt is None:
@@ -495,15 +582,17 @@ def _recover_single(ctx: Context, scope: Scope, loop_n: int) -> dict:
             f"exists at {ckpt_path}; cannot recover"
         )
     if ckpt.get("status") == "complete":
-        return _reconstruct_single_from_checkpoint(ckpt)
+        return _reconstruct_single_from_checkpoint(ckpt, loop_n=loop_n)
     # In-progress or unclear: re-dispatch with resume flag.
     resume_prompt = _assemble_prompt_single(ctx, scope, loop_n, resume=True)
-    parsed = _parse_gather_output(_invoke_gather(resume_prompt))
-    if parsed is None:
+    envelope = _parse_envelope_response(
+        _invoke_gather(resume_prompt), loop_n=loop_n, mode="single",
+    )
+    if envelope is None:
         raise OrchestrationError(
             "gather subagent emitted no Decision YAML after resume re-dispatch"
         )
-    return parsed
+    return envelope
 
 
 def _dispatch_composite(
@@ -511,22 +600,24 @@ def _dispatch_composite(
     override_data_source: Optional[str] = None,
     lead_hint: Optional[str] = None,
     secondary_scopes: Optional[list[Scope]] = None,
-) -> dict:
+) -> GatherEnvelope:
     prompt = _assemble_prompt_composite(
         ctx, scope, loop_n, mode=mode,
         override_data_source=override_data_source,
         lead_hint=lead_hint,
         secondary_scopes=secondary_scopes,
     )
-    parsed = _parse_composite_output(_invoke_gather_composite(prompt))
-    if parsed is None:
+    envelope = _parse_envelope_response(
+        _invoke_gather_composite(prompt), loop_n=loop_n, mode="composite",
+    )
+    if envelope is None:
         return _recover_composite(
             ctx, scope, loop_n, mode,
             override_data_source=override_data_source,
             lead_hint=lead_hint,
             secondary_scopes=secondary_scopes,
         )
-    return parsed
+    return envelope
 
 
 def _recover_composite(
@@ -535,7 +626,7 @@ def _recover_composite(
     override_data_source: Optional[str] = None,
     lead_hint: Optional[str] = None,
     secondary_scopes: Optional[list[Scope]] = None,
-) -> dict:
+) -> GatherEnvelope:
     ckpt_path = _checkpoint_path_composite(ctx, loop_n)
     ckpt = _load_checkpoint(ckpt_path)
     if ckpt is None:
@@ -544,19 +635,21 @@ def _recover_composite(
             f"exists at {ckpt_path}; cannot recover"
         )
     if ckpt.get("status") == "complete":
-        return _reconstruct_composite_from_checkpoint(ckpt)
+        return _reconstruct_composite_from_checkpoint(ckpt, loop_n=loop_n)
     resume_prompt = _assemble_prompt_composite(
         ctx, scope, loop_n, mode=mode, resume=True,
         override_data_source=override_data_source,
         lead_hint=lead_hint,
         secondary_scopes=secondary_scopes,
     )
-    parsed = _parse_composite_output(_invoke_gather_composite(resume_prompt))
-    if parsed is None:
+    envelope = _parse_envelope_response(
+        _invoke_gather_composite(resume_prompt), loop_n=loop_n, mode="composite",
+    )
+    if envelope is None:
         raise OrchestrationError(
             "gather-composite subagent emitted no YAML after resume re-dispatch"
         )
-    return parsed
+    return envelope
 
 
 # ---------------------------------------------------------------------------
@@ -571,113 +664,131 @@ def _recover_composite(
 _RESOLVED_LEAD_STATUSES = {"ok", "partial"}
 
 
-def _check_composite_scope(parsed: dict, prescribed: list[str]) -> None:
+def _check_composite_scope(
+    envelope: GatherEnvelope, prescribed: list[str],
+) -> None:
     """Reject when the subagent silently dropped a prescribed lead.
 
-    Contract: every prescribed lead must appear in `gather_composite.leads[]`,
-    with a per-lead `status` naming its fate (`dropped_attempt` for an
-    intentional skip, `data_missing` for an empty-result confirmation, etc.).
-    An entirely missing entry is a silent-drop bug — the subagent failed to
-    either execute or document the lead — and is rejected loudly.
+    Contract: every prescribed lead must appear in `envelope.leads[]`, with
+    a per-lead `status` naming its fate (`dropped_attempt` for an intentional
+    skip, `data_missing` for an empty-result confirmation, etc.). An entirely
+    missing entry is a silent-drop bug and is rejected loudly.
+
+    A single-lead envelope with `status: error` and an `escalate_trigger`
+    represents a dispatch-unparseable signal — scope enforcement doesn't
+    apply because the subagent never got to executing leads. The handler
+    routes those directly to ANALYZE.
     """
-    if "error" in parsed:
-        # Top-level `error:` means the dispatch itself was unparseable; scope
-        # doesn't apply. Main agent handles via the error path.
-        return
-    gc = parsed.get("gather_composite") or {}
-    leads = gc.get("leads") or []
-    executed_names: set[str] = set()
-    for entry in leads:
-        if isinstance(entry, dict) and isinstance(entry.get("lead"), str):
-            executed_names.add(entry["lead"])
+    if len(envelope.leads) == 1:
+        only = envelope.leads[0]
+        if only.get("status") == "error" and only.get("escalate_trigger"):
+            return
+    executed_names = {
+        lead.get("name") for lead in envelope.leads
+        if isinstance(lead.get("name"), str)
+    }
     missing = [lead for lead in prescribed if lead not in executed_names]
     if missing:
         raise OrchestrationError(
             f"gather-composite: prescribed leads {missing!r} are missing "
-            f"from output `leads[]`. Every prescribed lead must have an "
+            f"from envelope `leads[]`. Every prescribed lead must have an "
             f"entry (use `status: dropped_attempt` if intentionally skipped, "
             f"`status: data_missing` for empty-result confirmations). "
-            f"Prescribed={prescribed!r}; listed={sorted(executed_names)!r}."
+            f"Prescribed={prescribed!r}; listed={sorted(n for n in executed_names if n)!r}."
         )
 
 
-def _extract_executed_leads(payload: dict) -> list[str]:
+def _extract_executed_leads(envelope: GatherEnvelope) -> list[str]:
     """Return names of leads that produced a resolved observation.
 
-    Single-lead path: a `finding` result counts as executed; `escalate` does not.
-    Composite path: per-lead `status` in `{ok, partial}`. Dropped / data-missing
-    / probe-broken are NOT executed — ANALYZE will see them as unresolved and
-    may route PREDICT to re-prescribe.
+    ok/partial = executed. dropped_attempt / data_missing / probe_broken /
+    siem_error / error are NOT executed — ANALYZE will see them as unresolved
+    and may route PREDICT to re-prescribe.
     """
-    raw = payload.get("raw_result") or {}
-    if "gather_composite" in raw:
-        executed: list[str] = []
-        for entry in raw["gather_composite"].get("leads") or []:
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("status") in _RESOLVED_LEAD_STATUSES:
-                name = entry.get("lead")
-                if isinstance(name, str):
-                    executed.append(name)
-        return executed
-    # Single-lead path — use the normalized payload status, which is `ok` only
-    # on a `finding` result (see _normalize_single).
-    if payload.get("status") == "ok" and isinstance(payload.get("lead_name"), str):
-        return [payload["lead_name"]]
-    return []
+    executed: list[str] = []
+    for lead in envelope.leads:
+        if lead.get("status") in _RESOLVED_LEAD_STATUSES:
+            name = lead.get("name")
+            if isinstance(name, str):
+                executed.append(name)
+    return executed
 
 
 # ---------------------------------------------------------------------------
-# Payload normalization
+# Raw details — write to disk, stash paths
 # ---------------------------------------------------------------------------
 
 
-def _normalize_single(parsed: dict, scope: Scope) -> dict:
-    result_kind = parsed.get("result")
-    if result_kind == "finding":
-        return {
-            "lead_name": scope.lead_name,
-            "mode": "single",
-            "status": "ok",
-            "characterization": parsed.get("characterization") or {},
-            "cross_lead_notes": "",
-            "raw_result": parsed,
-        }
-    # escalate path
-    return {
-        "lead_name": scope.lead_name,
-        "mode": "single",
-        "status": "escalate",
-        "characterization": None,
-        "cross_lead_notes": "",
-        "raw_result": parsed,
-    }
+def _write_raw_details(
+    ctx: Context, loop_n: int, raw_by_lead: dict[str, dict],
+) -> list[str]:
+    """Write per-lead raw payloads to `runs/<run>/raw_details/loop-<N>/<lead-id>.yaml`.
+
+    Returns the list of absolute path strings written, in lead-id order.
+    Never raises on empty input — composite leads without a `raw` block
+    (pure dropped_attempt / data_missing) simply contribute nothing.
+    """
+    if not raw_by_lead:
+        return []
+    detail_dir = ctx.run_dir / "raw_details" / f"loop-{loop_n}"
+    detail_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[str] = []
+    for lead_id in sorted(raw_by_lead.keys()):
+        path = detail_dir / f"{lead_id}.yaml"
+        path.write_text(yaml.safe_dump(raw_by_lead[lead_id], sort_keys=False))
+        paths.append(str(path))
+    return paths
 
 
-def _normalize_composite(parsed: dict, scope: Scope) -> dict:
-    if "error" in parsed:
-        return {
-            "lead_name": scope.lead_name,
-            "mode": "composite",
-            "status": "error",
-            "characterization": None,
-            "cross_lead_notes": "",
-            "raw_result": parsed,
-        }
-    gc = parsed.get("gather_composite", {})
-    leads = gc.get("leads") or []
-    # For a single-lead composite dispatch (the common case from fallback),
-    # the first lead's characterization is the focal payload.
-    first = leads[0] if leads else {}
-    status = first.get("status", "ok")
-    return {
-        "lead_name": first.get("lead", scope.lead_name),
-        "mode": "composite",
-        "status": status,
+# ---------------------------------------------------------------------------
+# Payload synthesis (backwards-compat with the pre-v2.12 shape)
+# ---------------------------------------------------------------------------
+
+
+def _build_payload(
+    envelope: GatherEnvelope,
+    *,
+    scope: Scope,
+    prescribed: list[str],
+    raw_paths: list[str],
+    cross_lead_notes: str,
+    mode: str,
+) -> dict:
+    """Flatten the envelope into the handler-contract payload consumed by
+    ANALYZE and by the handler's own tests.
+
+    Preserves these top-level fields for callers that still read them:
+        mode, status, lead_name, characterization, cross_lead_notes, raw_result
+
+    Adds:
+        leads                — full envelope.leads list (structured data)
+        raw_details_paths    — absolute paths to the per-lead raw payloads
+        prescribed_leads     — what PREDICT asked for
+        executed_leads       — which prescribed leads produced resolved data
+    """
+    first = envelope.leads[0] if envelope.leads else {}
+    first_status = first.get("status", "ok")
+
+    payload: dict[str, Any] = {
+        "mode": mode,
+        "status": first_status,
+        "lead_name": first.get("name", scope.lead_name),
         "characterization": first.get("characterization"),
-        "cross_lead_notes": gc.get("cross_lead_notes") or "",
-        "raw_result": parsed,
+        "cross_lead_notes": cross_lead_notes,
+        "raw_result": {
+            "gather": {
+                "loop": envelope.telemetry.get("loop"),
+                "mode": mode,
+                "leads": envelope.leads,
+                "cross_lead_notes": cross_lead_notes,
+            },
+        },
+        "leads": envelope.leads,
+        "raw_details_paths": raw_paths,
+        "prescribed_leads": prescribed,
     }
+    payload["executed_leads"] = _extract_executed_leads(envelope)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -693,15 +804,15 @@ def _compose_markdown(payload: dict, loop_n: int) -> str:
         f"**Status:** {payload['status']}",
     ]
 
-    raw = payload["raw_result"]
-    if payload["mode"] == "single":
-        query = raw.get("query") or "(not recorded)"
-        lines.append(f"**Query:** `{query}`")
+    first = (payload.get("leads") or [{}])[0]
+    query_block = first.get("query")
+    if isinstance(query_block, dict):
+        query_str = query_block.get("query") or "(not recorded)"
+    elif isinstance(query_block, str):
+        query_str = query_block
     else:
-        leads = raw.get("gather_composite", {}).get("leads") or []
-        first = leads[0] if leads else {}
-        query = first.get("query") or "(not recorded)"
-        lines.append(f"**Query:** `{query}`")
+        query_str = "(not recorded)"
+    lines.append(f"**Query:** `{query_str}`")
 
     characterization = payload.get("characterization")
     if characterization:
@@ -710,14 +821,24 @@ def _compose_markdown(payload: dict, loop_n: int) -> str:
         for key, value in characterization.items():
             lines.append(f"- {key}: {value}")
     else:
-        context = raw.get("context") if payload["mode"] == "single" else None
+        context = first.get("escalate_context") or first.get("status_detail")
         lines.append("")
-        lines.append(f"**No characterization** — {context or 'see raw_result'}")
+        lines.append(
+            f"**No characterization** — {context or 'see raw_details/loop-' + str(loop_n) + '/'}"
+        )
 
     cross = payload.get("cross_lead_notes") or ""
     if cross:
         lines.append("")
         lines.append(f"**Cross-lead notes:** {cross}")
+
+    if payload.get("raw_details_paths"):
+        lines.append("")
+        lines.append(
+            "**Raw details:** "
+            + ", ".join(Path(p).name for p in payload["raw_details_paths"])
+            + f" under `raw_details/loop-{loop_n}/`"
+        )
 
     return "\n".join(lines) + "\n"
 
@@ -764,6 +885,18 @@ class _PredictPayload:
     override_data_source: Optional[str]
     lead_hint: Optional[str]
     composite_secondary: list[str]
+    # Lead-level predictions (`lp*` readings) pre-committed by PREDICT on the
+    # Shape E path. Non-empty only when PREDICT emitted a `branch_plan`.
+    # GATHER stamps these onto the gather[] entry's `predictions[]` so ANALYZE
+    # matches the observed outcome against a pre-registered branch.
+    branch_plan_predictions: list[dict]
+    # Structured scope override from predict.routing.scope_override. Keys
+    # (validated by the predict output parser at parse time):
+    #   window_hours: int > 0   — replaces gather's default 1h lookback
+    #   anchor: 'alert' | 'now' — window anchor point (default 'alert')
+    # None when PREDICT did not override (use the default 1h alert-anchored
+    # window).
+    scope_override: Optional[dict]
 
 
 def _read_predict_payload(ctx: Context) -> _PredictPayload:
@@ -803,18 +936,39 @@ def _read_predict_payload(ctx: Context) -> _PredictPayload:
             f"GATHER: PREDICT payload composite_secondary must be "
             f"list[str] of non-empty slugs (got {raw_secondary!r})"
         )
+    raw_bp = predict_out.get("branch_plan_predictions")
+    if raw_bp is None:
+        branch_plan_predictions: list[dict] = []
+    elif isinstance(raw_bp, list) and all(isinstance(x, dict) for x in raw_bp):
+        branch_plan_predictions = list(raw_bp)
+    else:
+        raise OrchestrationError(
+            f"GATHER: PREDICT payload branch_plan_predictions must be "
+            f"list[dict] when provided, got {raw_bp!r}"
+        )
+    # scope_override is a pass-through dict — parser-validated at predict
+    # time, gather-side treats it as trusted structural input to
+    # _derive_incident_window. Absent key → no override (default 1h window).
+    raw_so = predict_out.get("scope_override")
+    if raw_so is not None and not isinstance(raw_so, dict):
+        raise OrchestrationError(
+            f"GATHER: PREDICT payload scope_override must be a mapping when "
+            f"provided, got {type(raw_so).__name__}"
+        )
     return _PredictPayload(
         selected_lead=selected_lead,
         loop_n=loop_n,
         override_data_source=override_data_source,
         lead_hint=lead_hint,
         composite_secondary=composite_secondary,
+        branch_plan_predictions=branch_plan_predictions,
+        scope_override=raw_so,
     )
 
 
 def handle(ctx: Context) -> PhaseResult:
     pp = _read_predict_payload(ctx)
-    scope = _resolve_scope(ctx, pp.selected_lead)
+    scope = _resolve_scope(ctx, pp.selected_lead, scope_override=pp.scope_override)
     prescribed_leads = [pp.selected_lead, *pp.composite_secondary]
 
     # Overrides only apply to the composite subagent — single-lead gather
@@ -827,21 +981,37 @@ def handle(ctx: Context) -> PhaseResult:
     )
 
     if scope.template_exists and not force_composite:
-        payload = _dispatch_single(ctx, scope, pp.loop_n)
+        envelope = _dispatch_single(ctx, scope, pp.loop_n)
+        # _dispatch_single may have fallen back to composite under the
+        # escalate-trigger path. Telemetry carries the resolved mode.
+        mode = envelope.telemetry.get("mode", "single")
     else:
-        secondary_scopes = [_resolve_scope(ctx, lead) for lead in pp.composite_secondary]
-        composite_parsed = _dispatch_composite(
+        # Secondary leads share the primary's scope override — PREDICT
+        # prescribed them as part of one composite investigation step, so
+        # the window is scoped identically across the dispatch.
+        secondary_scopes = [
+            _resolve_scope(ctx, lead, scope_override=pp.scope_override)
+            for lead in pp.composite_secondary
+        ]
+        envelope = _dispatch_composite(
             ctx, scope, pp.loop_n,
             mode="ad-hoc" if not scope.template_exists else "composite",
             override_data_source=pp.override_data_source,
             lead_hint=pp.lead_hint,
             secondary_scopes=secondary_scopes,
         )
-        _check_composite_scope(composite_parsed, prescribed_leads)
-        payload = _normalize_composite(composite_parsed, scope)
+        _check_composite_scope(envelope, prescribed_leads)
+        mode = "composite"
 
-    payload["prescribed_leads"] = prescribed_leads
-    payload["executed_leads"] = _extract_executed_leads(payload)
+    raw_paths = _write_raw_details(ctx, pp.loop_n, envelope.raw_by_lead)
+    payload = _build_payload(
+        envelope,
+        scope=scope,
+        prescribed=prescribed_leads,
+        raw_paths=raw_paths,
+        cross_lead_notes=envelope.cross_lead_notes,
+        mode=mode,
+    )
 
     section = _compose_markdown(payload, pp.loop_n)
     _append_to_investigation(ctx, section)

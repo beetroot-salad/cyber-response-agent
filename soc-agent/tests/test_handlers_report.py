@@ -710,7 +710,7 @@ def _seed_ctx_for_mechanical(tmp_path: Path, *, matched_ticket_id: str | None) -
                 "observation": "cluster_count=1, no successful logins after",
             },
         ],
-        "gather": [
+        "findings": [
             {
                 "id": "l-001", "loop": 0, "name": "source-classification",
                 "target": "v-001", "mode": "screen",
@@ -811,7 +811,7 @@ class TestMechanicalScreenCompose:
         ctx = _seed_ctx_for_mechanical(tmp_path, matched_ticket_id="SEC-9999-999")
         # Drop the confirmed anchor_consultations so the anchor leg also fails.
         screen = ctx.outputs[Phase.SCREEN]
-        screen["gather"] = [
+        screen["findings"] = [
             {
                 "id": "l-001", "loop": 0, "name": "source-classification",
                 "target": "v-001", "mode": "screen",
@@ -1008,7 +1008,7 @@ hypothesize:
 **Lead:** approved-monitoring-sources
 
 ```yaml
-gather:
+findings:
 - id: l-001
   loop: 1
   name: source-classification
@@ -1061,27 +1061,27 @@ gather:
 
 
 class TestMechanicalAnalyzeCompose:
-    def test_extract_gather_blocks_merges_across_loops(self, tmp_path):
+    def test_extract_findings_blocks_merges_across_loops(self, tmp_path):
         md = (
             "## CONTEXTUALIZE\n\n"
             "```yaml\n"
-            "gather:\n"
+            "findings:\n"
             "- id: l-001\n"
             "  name: source-classification\n"
             "```\n\n"
             "## GATHER (loop 2)\n\n"
             "```yaml\n"
-            "gather:\n"
+            "findings:\n"
             "- id: l-002\n"
             "  name: authentication-history\n"
             "- id: l-003\n"
             "  name: host-query\n"
             "```\n"
         )
-        gather = report_handler._extract_gather_blocks(md)
+        gather = report_handler._extract_findings_blocks(md)
         assert [g["id"] for g in gather] == ["l-001", "l-002", "l-003"]
 
-    def test_extract_gather_blocks_skips_non_gather_yaml(self, tmp_path):
+    def test_extract_findings_blocks_skips_non_gather_yaml(self, tmp_path):
         md = (
             "## CONTEXTUALIZE\n\n"
             "```yaml\n"
@@ -1089,12 +1089,12 @@ class TestMechanicalAnalyzeCompose:
             "  vertices: []\n"
             "```\n\n"
             "```yaml\n"
-            "gather:\n"
+            "findings:\n"
             "- id: l-001\n"
             "  name: foo\n"
             "```\n"
         )
-        gather = report_handler._extract_gather_blocks(md)
+        gather = report_handler._extract_findings_blocks(md)
         assert [g["id"] for g in gather] == ["l-001"]
 
     def test_extract_final_analyze_section_returns_last(self, tmp_path):
@@ -1524,7 +1524,7 @@ class TestMechanicalAnalyzeCompose:
         assert result.payload["disposition"] == "true_positive"
 
     def test_prose_form_gather_fallback_parser(self, tmp_path):
-        """When investigation.md has no `gather:` YAML fences but has
+        """When investigation.md has no `findings:` YAML fences but has
         prose-form `## GATHER` sections with `**Lead:**` / `**Status:**`
         lines (the shape ANALYZE currently produces), the parser falls back
         to prose extraction and returns lead entries with name + status +
@@ -1542,7 +1542,7 @@ class TestMechanicalAnalyzeCompose:
             "**Status:** data_missing\n\n"
             "## ANALYZE (loop 2)\n\nfinal routing.\n"
         )
-        gather = report_handler._extract_gather_blocks(md)
+        gather = report_handler._extract_findings_blocks(md)
         assert len(gather) == 2
         assert gather[0]["name"] == "container-baseline"
         assert gather[0]["loop"] == 1
@@ -1557,7 +1557,7 @@ class TestMechanicalAnalyzeCompose:
             "## GATHER (loop 1)\n\n"
             "**Lead:** prose-form-lead\n\n"
             "```yaml\n"
-            "gather:\n"
+            "findings:\n"
             "- id: l-001\n"
             "  name: yaml-form-lead\n"
             "  outcome:\n"
@@ -1566,7 +1566,7 @@ class TestMechanicalAnalyzeCompose:
             "        result: confirmed\n"
             "```\n"
         )
-        gather = report_handler._extract_gather_blocks(md)
+        gather = report_handler._extract_findings_blocks(md)
         assert len(gather) == 1
         assert gather[0]["name"] == "yaml-form-lead"
         assert gather[0]["outcome"]["anchor_consultations"][0]["result"] == "confirmed"

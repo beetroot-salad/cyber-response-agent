@@ -43,7 +43,7 @@ def _check_prediction_coverage(merged: dict[str, Any]) -> list[str]:
     # Aggregate covered IDs and track which hypotheses reached ++.
     covered: dict[str, set[str]] = {}
     reached_pp: dict[str, str] = {}  # h_id → lead_id where ++ first seen
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")
@@ -105,7 +105,7 @@ def _check_partial_authority_cap(merged: dict[str, Any]) -> list[str]:
     `supporting_edges` continues to exempt the resolution row-wise.
     """
     errors: list[str] = []
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         outcome = lead.get("outcome") if isinstance(lead.get("outcome"), dict) else {}

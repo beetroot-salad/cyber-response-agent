@@ -69,6 +69,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -88,8 +89,12 @@ from scripts.handlers._context_loader import (
     load_signature_text,
 )
 from scripts.handlers._subagent import (
-    extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
+)
+from scripts.handlers._output_parser import (
+    PredictOutputError,
+    PredictParseResult,
+    parse_predict_output,
 )
 
 # Lazy imports for priors (invlang + contextualize) live inside the priors
@@ -515,129 +520,12 @@ _FIRST_FENCE_RE = re.compile(
 )
 
 
-def _detect_block_type(raw: str) -> str:
-    """Return the first top-level invlang key present in any yaml fence.
-
-    Returns one of: "hypothesize", "gather", "error", "unknown" (the first
-    three name invlang YAML-block keys, which are unchanged by the phase
-    rename). The terminal
-    routing YAML (whose top-level keys are `mode/selected_lead/loop_n`) is
-    distinguishable and not counted.
-    """
-    for m in _FIRST_FENCE_RE.finditer(raw):
-        body = m.group("body")
-        try:
-            parsed = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        keys = set(parsed.keys())
-        if "hypothesize" in keys:
-            return "hypothesize"
-        if "gather" in keys:
-            return "gather"
-        if "error" in keys:
-            return "error"
-        # Skip the terminal routing block (mode/selected_lead/loop_n).
-    return "unknown"
-
-
-def _extract_error_reason(raw: str) -> str:
-    for m in _FIRST_FENCE_RE.finditer(raw):
-        try:
-            parsed = yaml.safe_load(m.group("body"))
-        except yaml.YAMLError:
-            continue
-        if isinstance(parsed, dict) and "error" in parsed:
-            err = parsed["error"]
-            if isinstance(err, str):
-                return err
-            if isinstance(err, dict):
-                return str(err.get("reason", err))
-    return "<no reason provided>"
-
-
-# ---------------------------------------------------------------------------
-# Trailer validation
-# ---------------------------------------------------------------------------
-
-
-def _validate_trailer(trailer: dict) -> dict:
-    """Verify the terminal routing YAML conforms to the subagent contract.
-
-    Contract (post-cardinality-relaxation):
-    - `selected_lead`: required non-empty string. PREDICT always selects a
-      lead; halting is ANALYZE's responsibility. No null/empty path.
-    - `composite_secondary`: optional list of non-empty strings. Names
-      additional leads that should run alongside `selected_lead` in a
-      composite dispatch. Empty/absent → single-lead prescription.
-    - `override_data_source`, `lead_hint`: optional non-empty strings —
-      PREDICT→GATHER hint channels, unchanged from prior contract.
-    - No `mode`. No `block_type`. No `loop_n`. Cardinality of new hypotheses
-      is read structurally from the invlang block (or its absence); the
-      handler computes loop_n from ctx.history.
-
-    Ad-hoc leads are legal: the validator does not check `selected_lead`
-    against a catalog. PREDICT may name a slug that has no definition file;
-    gather-composite will execute it via the ad-hoc construction path.
-    Lead normalization is a post-mortem-loop concern, not a PREDICT-time one.
-    """
-    selected_lead = trailer.get("selected_lead")
-    if not isinstance(selected_lead, str) or not selected_lead.strip():
-        raise OrchestrationError(
-            "predict subagent: trailer missing non-empty selected_lead "
-            "(PREDICT always selects a lead; halting is ANALYZE's job). "
-            f"Got {selected_lead!r}."
-        )
-
-    composite_secondary = trailer.get("composite_secondary")
-    if composite_secondary is not None:
-        if not isinstance(composite_secondary, list) or not all(
-            isinstance(x, str) and x.strip() for x in composite_secondary
-        ):
-            raise OrchestrationError(
-                f"predict subagent: trailer composite_secondary must be "
-                f"list[str] of non-empty slugs when provided, got "
-                f"{composite_secondary!r}"
-            )
-
-    override = trailer.get("override_data_source")
-    if override is not None and (not isinstance(override, str) or not override.strip()):
-        raise OrchestrationError(
-            f"predict subagent: trailer override_data_source must be a "
-            f"non-empty string if provided, got {override!r}"
-        )
-    lead_hint = trailer.get("lead_hint")
-    if lead_hint is not None and (not isinstance(lead_hint, str) or not lead_hint.strip()):
-        raise OrchestrationError(
-            f"predict subagent: trailer lead_hint must be a non-empty "
-            f"string if provided, got {lead_hint!r}"
-        )
-    return trailer
-
-
-# ---------------------------------------------------------------------------
-# Section extraction (strip the terminal routing fence)
-# ---------------------------------------------------------------------------
-
-
-def _strip_terminal_routing(raw: str) -> str:
-    """Return `raw` with the last ```yaml``` fence removed.
-
-    The terminal routing YAML is consumed out-of-band and must not land in
-    investigation.md — invlang validators would reject the `mode/selected_lead/
-    loop_n` keys as unknown. Drop the last yaml fence; preserve all preceding
-    fences (which carry the invlang `hypothesize:` / `gather:` blocks).
-    """
-    last_start = raw.rfind("```yaml")
-    if last_start == -1:
-        return raw.rstrip() + "\n"
-    end_marker_start = raw.find("```", last_start + len("```yaml"))
-    if end_marker_start == -1:
-        return raw[:last_start].rstrip() + "\n"
-    after = raw[end_marker_start + len("```"):]
-    return (raw[:last_start].rstrip() + "\n" + after.lstrip()).rstrip() + "\n"
+# (Removed: _detect_block_type, _extract_error_reason, _validate_trailer,
+# and _strip_terminal_routing — all internal helpers of the pre-unified-
+# envelope contract. Superseded by parse_predict_output in
+# scripts/handlers/_output_parser.py, which handles envelope extraction,
+# shape validation, routing-field validation, and contract-violation
+# messaging in one pass against a single YAML-block envelope.)
 
 
 # ---------------------------------------------------------------------------
@@ -692,34 +580,59 @@ def _append_to_investigation(ctx: Context, new_section: str) -> None:
 # semantics against its checkpoint.
 
 _FAILURE_REMEDIATIONS: dict[str, str] = {
-    "gather_block_in_predict": (
-        "CONTRACT VIOLATION: your prior attempt emitted a `gather:` YAML "
-        "block. PREDICT must never emit a `gather:` block — "
-        "`gather[].lead` entries require execution fields (outcome, "
-        "query_details, resolutions) that the GATHER subagent fills, not "
-        "PREDICT. REMEDIATION: drop the `gather:` block entirely. For "
-        "no-fork mode, emit only narrative (`Selected lead:` + `Pitfalls:`) "
-        "followed by the terminal routing YAML with `mode: no-fork`. Any "
-        "lead-level predictions you want to communicate belong in the "
-        "narrative prose, not as invlang YAML."
-    ),
-    "stdout_summary_not_yaml": (
-        "CONTRACT VIOLATION: your prior attempt emitted only a prose "
-        "summary of your work — no YAML fences at all. The YAML IS the "
-        "deliverable; a prose summary of the YAML is not. If you already "
-        "wrote a checkpoint at "
-        "`{run_dir}/subagent_checkpoints/predict-loop-{loop_n}.yaml` "
-        "with the completed work, use it as the source of truth and "
-        "transcribe it to stdout in the required shape. REMEDIATION: "
-        "re-emit the full Return contract from `agents/predict.md`: "
-        "for fork mode, a ```yaml``` block containing `hypothesize:` with "
-        "all declared hypotheses + Selected lead + Pitfalls + the terminal "
-        "routing ```yaml``` block with {mode, selected_lead, loop_n}; for "
-        "no-fork mode, just Selected lead + Pitfalls narrative + the "
-        "terminal routing block. The checkpoint file and stdout must BOTH "
-        "reflect the final state — stdout is not optional."
+    "stdout_empty": (
+        "CONTRACT VIOLATION: your prior attempt produced no stdout — "
+        "likely because your final assistant turn was a tool_use (Write "
+        "M_last) instead of text. `claude --print` captures only the last "
+        "text turn, so a response ending in a tool call is lost. "
+        "REMEDIATION: write the checkpoint file FIRST, then emit your final "
+        "YAML response as text. The text response is the deliverable; "
+        "stdout is not optional. If you already wrote a checkpoint at "
+        "`{run_dir}/subagent_checkpoints/predict-loop-{loop_n}.yaml` with "
+        "the completed work, transcribe it verbatim to stdout in the "
+        "single `predict: {...}` envelope shape."
     ),
 }
+
+
+@dataclass
+class _AttemptResult:
+    """Outcome of one subagent invocation + envelope parse + validator run.
+
+    `section` is the markdown block to append to investigation.md (empty when
+    no hypotheses landed this loop).
+    `result` is the PredictParseResult when the envelope parsed cleanly.
+    `errors` is the remediation-retry payload — non-empty means retry.
+    """
+    section: str
+    result: PredictParseResult | None
+    errors: list[str]
+
+
+def _compose_section(result: PredictParseResult, loop_n: int) -> str:
+    """Render the invlang-state delta from a parsed predict output into the
+    markdown section the handler appends to investigation.md.
+
+    On shape E (branch_plan only, no hypotheses) no section is emitted —
+    the branch_plan predictions are carried via PhaseResult.payload and
+    stamped by the GATHER handler onto its gather entry.
+
+    On shape A/I/M/D-with-fork the hypotheses are rendered as a single
+    `hypothesize:` invlang block under a `## PREDICT (loop N)` header.
+    Invlang's block merge semantics fold multiple `hypothesize:` blocks
+    (one per loop) into one accumulated companion state.
+    """
+    hypotheses = result.invlang_delta.get("hypotheses")
+    if not hypotheses:
+        return ""
+    dumped = yaml.safe_dump(
+        {"hypothesize": {"hypotheses": hypotheses}},
+        sort_keys=False, default_flow_style=False,
+    )
+    return (
+        f"## PREDICT (loop {loop_n})\n\n"
+        f"```yaml\n{dumped.rstrip()}\n```\n"
+    )
 
 
 def _attempt(
@@ -728,112 +641,73 @@ def _attempt(
     expected_loop_n: int,
     remediation_notes: list[str] | None,
     allow_checkpoint_recovery: bool = True,
-) -> tuple[str, str, dict, list[str]]:
+) -> _AttemptResult:
     """Run one subagent invocation end-to-end.
 
-    Returns `(sections_to_append, block_type, trailer, validator_errors)`.
-    Raises OrchestrationError for unrecoverable shapes (error block, malformed
-    trailer). Recoverable contract violations (emitting a `gather:` block,
-    validator errors) are surfaced via the returned error list so the caller
-    can retry with structured remediation.
+    Flow:
+      1. Assemble the prompt (with optional remediation notes from a prior
+         failing attempt) and dispatch the subagent.
+      2. On empty stdout, try checkpoint recovery (skipped on retries).
+      3. Parse the envelope via `parse_predict_output`. PredictOutputError
+         becomes a remediation-retry payload — the error message is passed
+         verbatim so the subagent can read its own complaint.
+      4. Compose the markdown section from `invlang_delta.hypotheses` (if
+         any) and run `validate_companion_proposed` against it.
+      5. Return the section + parsed result + any validator errors.
 
-    `allow_checkpoint_recovery` gates the empty-stdout → checkpoint synthesis
-    path. `handle()` passes False on the retry attempt so a stale or broken
-    checkpoint cannot loop the recovery synthesis indefinitely: on retry,
-    empty stdout is always a subagent failure, not a harness quirk to
-    recover from.
+    `allow_checkpoint_recovery` gates the empty-stdout path. `handle()`
+    passes False on the retry attempt so a stale/broken checkpoint cannot
+    loop the recovery synthesis indefinitely.
     """
     prompt = _assemble_prompt(ctx, remediation_notes=remediation_notes)
     raw = _invoke_subagent(prompt)
 
-    block_type = _detect_block_type(raw)
-    if block_type == "error":
-        raise OrchestrationError(
-            f"predict subagent returned error block: {_extract_error_reason(raw)}"
-        )
-
-    # Contract violation: `gather:` block from PREDICT is never valid.
-    # Short-circuit to a retry with a registry-loaded remediation directive —
-    # don't bother parsing the trailer or running the validator.
-    if block_type == "gather":
-        trailer_for_loop_check = extract_terminal_yaml(raw) if _has_trailer(raw) else {}
-        return (
-            "",  # no sections to append yet
-            block_type,
-            trailer_for_loop_check,
-            [_FAILURE_REMEDIATIONS["gather_block_in_predict"]],
-        )
-
     # Empty-stdout path: `claude --print` captures only the final text turn,
     # so when the subagent ends on a tool_use (Write M_last after emitting
     # the YAML response), stdout is empty. Before retrying, look for the
-    # M_last checkpoint — if present and complete, synthesize the response
-    # from it. This converts a 300s retry into a ~0s checkpoint read.
-    # Skipped on retry attempts (see docstring).
-    if not _has_trailer(raw):
+    # checkpoint — if present and complete, synthesize the response from it.
+    # This converts a 300s retry into a ~0s checkpoint read.
+    if not raw.strip():
         if allow_checkpoint_recovery:
             recovered = _synthesize_from_checkpoint(ctx, expected_loop_n)
             if recovered is not None:
                 return recovered
-        # Fall through to the retry path with the directive.
-        return (
-            "",
-            block_type,
-            {},
-            [_FAILURE_REMEDIATIONS["stdout_summary_not_yaml"]],
+        return _AttemptResult(
+            section="",
+            result=None,
+            errors=[_FAILURE_REMEDIATIONS["stdout_empty"]],
         )
 
-    trailer = _validate_trailer(extract_terminal_yaml(raw))
-
-    # No invlang block emitted: this is the "continue stable fork" or
-    # "no new hypotheses this loop" path. Nothing to append to
-    # investigation.md; the narrative (Selected lead + Pitfalls) is preserved
-    # in subagent_outputs/ and the trailer drives routing.
-    if block_type == "unknown":
-        return "", block_type, trailer, []
-
-    sections = _strip_terminal_routing(raw)
-    errors = _validate_companion_proposed(ctx, sections)
-    return sections, block_type, trailer, errors
-
-
-_TRAILER_FIELDS = frozenset({
-    "selected_lead", "composite_secondary", "override_data_source", "lead_hint",
-})
-
-
-def _has_trailer(raw: str) -> bool:
-    """Lightweight check: does `raw` contain a trailing yaml fence that looks
-    like a routing trailer? True when any trailer field is present (even if
-    the trailer is malformed — e.g., missing selected_lead). False → treat as
-    no trailer (the stdout_summary_not_yaml retry path). Malformed trailers
-    raise at _validate_trailer, not here.
-    """
+    # Parse the envelope. PredictOutputError surfaces contract violations
+    # (missing `predict:` key, bad shape matrix, bad routing, loop mismatch)
+    # as retry-directives — the subagent reads its own error on retry.
     try:
-        t = extract_terminal_yaml(raw)
-    except Exception:  # noqa: BLE001
-        return False
-    return isinstance(t, dict) and bool(_TRAILER_FIELDS & t.keys())
+        result = parse_predict_output(raw, expected_loop_n=expected_loop_n)
+    except PredictOutputError as e:
+        return _AttemptResult(section="", result=None, errors=[str(e)])
+
+    # Compose section + validate against companion.
+    section = _compose_section(result, expected_loop_n)
+    errors = _validate_companion_proposed(ctx, section) if section else []
+    return _AttemptResult(section=section, result=result, errors=errors)
 
 
 def _synthesize_from_checkpoint(
     ctx: Context, expected_loop_n: int,
-) -> tuple[str, str, dict, list[str]] | None:
+) -> _AttemptResult | None:
     """Recovery path for the stdout-empty case.
 
     When the subagent wrote the M_last checkpoint (`status: complete`) but
     stdout is empty (final turn was a tool_use, dropped by `claude --print`),
-    transcribe the checkpoint into the expected return shape so the handler
-    can proceed without a retry.
+    transcribe the checkpoint into the expected return shape.
 
-    Returns the same tuple shape as `_attempt` on success, or None when the
-    checkpoint is absent / incomplete / shape-invalid. On None the caller
-    falls through to the retry path.
+    Checkpoint contract: top-level `{status: complete, predict: {...}}` where
+    the `predict:` payload mirrors the envelope the subagent should have
+    emitted to stdout. Synthesis = parse the embedded envelope through the
+    same parser as stdout, then compose + validate as a normal attempt.
 
-    Contract with the subagent prompt (`agents/predict.md`): the checkpoint
-    must carry `status: complete` and `selected_lead: <slug>`. `hypotheses:
-    [...]` is optional — when present and non-empty, it's transcribed as a
-    `hypothesize:` invlang block. `composite_secondary: [...]` is optional.
+    Returns None when the checkpoint is absent / incomplete / parse-invalid;
+    caller falls through to the retry path.
     """
     ckpt = ctx.run_dir / "subagent_checkpoints" / f"predict-loop-{expected_loop_n}.yaml"
     if not ckpt.exists():
@@ -844,42 +718,24 @@ def _synthesize_from_checkpoint(
         return None
     if not isinstance(data, dict) or data.get("status") != "complete":
         return None
-    selected_lead = data.get("selected_lead")
-    if not isinstance(selected_lead, str) or not selected_lead.strip():
+    if "predict" not in data:
         return None
 
-    trailer: dict = {"selected_lead": selected_lead}
-    # Optional carry-through fields — preserve what the subagent wrote.
-    for opt in ("composite_secondary", "override_data_source", "lead_hint"):
-        if opt in data and data[opt] is not None:
-            trailer[opt] = data[opt]
-    # Re-run trailer validation so the synthesis path enforces the same
-    # contract as the stdout path (catches malformed checkpoint fields).
+    # Re-dump the embedded predict envelope and run it through the parser so
+    # synthesis enforces the same contract as the stdout path.
+    envelope_yaml = yaml.safe_dump({"predict": data["predict"]}, sort_keys=False)
     try:
-        trailer = _validate_trailer(trailer)
-    except OrchestrationError:
+        result = parse_predict_output(envelope_yaml, expected_loop_n=expected_loop_n)
+    except PredictOutputError:
         return None
 
-    hypotheses = data.get("hypotheses")
-    if not isinstance(hypotheses, list) or not hypotheses:
-        # No new hypotheses this loop → no invlang block to synthesize.
-        return "", "unknown", trailer, []
-
-    dumped = yaml.safe_dump(
-        {"hypothesize": {"hypotheses": hypotheses}},
-        sort_keys=False, default_flow_style=False,
-    )
-    section = (
-        f"## PREDICT (loop {expected_loop_n})\n\n"
-        f"```yaml\n{dumped.rstrip()}\n```\n"
-    )
-    errors = _validate_companion_proposed(ctx, section)
+    section = _compose_section(result, expected_loop_n)
+    errors = _validate_companion_proposed(ctx, section) if section else []
     if errors:
-        # Checkpoint is complete but validation fails — do NOT silently pass;
-        # route into the standard retry path so the subagent can correct with
-        # the validator errors as remediation_notes.
-        return "", "hypothesize", trailer, errors
-    return section, "hypothesize", trailer, []
+        # Validator disagrees with the checkpoint — route into the retry
+        # path so the subagent can correct with the errors as remediation.
+        return _AttemptResult(section="", result=result, errors=errors)
+    return _AttemptResult(section=section, result=result, errors=[])
 
 
 # ---------------------------------------------------------------------------
@@ -913,54 +769,64 @@ def handle(ctx: Context) -> PhaseResult:
     expected_loop_n = _compute_loop_n(ctx)
 
     initial_notes = _unresolved_prescribed_notes(ctx)
-    sections, block_type, trailer, errors = _attempt(
+    attempt = _attempt(
         ctx,
         expected_loop_n=expected_loop_n,
         remediation_notes=initial_notes or None,
     )
 
-    # Retry budget is 2. For the `gather:`-block contract violation the
-    # remediation is a deterministic handler-authored directive; for invlang
-    # validator errors the raw errors pass through so the subagent can fix
-    # claim-level semantics against its checkpoint. Disable checkpoint recovery
-    # on retries so a stale checkpoint cannot re-synthesize the same failure.
+    # Retry budget is 2. The parser's PredictOutputError messages pass through
+    # verbatim as remediation notes; the invlang validator's rule-level errors
+    # do too. Disable checkpoint recovery on retries so a stale checkpoint
+    # cannot loop the recovery synthesis indefinitely.
     #
-    # Two retries (vs one) handles the common layered-schema cascade: the
-    # validator reports only errors deep enough to be visible given the current
-    # structural shape. When the agent fixes the outer shape on attempt 2, a
-    # new set of inner errors surfaces — attempt 3 then closes them.
+    # Two retries (vs one) handles the layered-schema cascade: the validator
+    # reports only errors visible given the current structural shape. Fixing
+    # outer shape on attempt 2 may surface inner errors — attempt 3 closes them.
     MAX_RETRIES = 2
     attempts_used = 1
-    while errors and attempts_used <= MAX_RETRIES:
+    while attempt.errors and attempts_used <= MAX_RETRIES:
         attempts_used += 1
-        sections, block_type, trailer, errors = _attempt(
+        attempt = _attempt(
             ctx,
             expected_loop_n=expected_loop_n,
-            remediation_notes=errors,
+            remediation_notes=attempt.errors,
             allow_checkpoint_recovery=False,
         )
-    if errors:
+    if attempt.errors:
         raise OrchestrationError(
             f"PREDICT failed after {attempts_used} attempts:\n"
-            + "\n".join(f"  - {e}" for e in errors)
+            + "\n".join(f"  - {e}" for e in attempt.errors)
         )
 
-    # Only append when there's something to append. A zero-new-hypothesis
-    # loop ("continue stable fork") writes no invlang block; the narrative
-    # is preserved in the subagent output file.
-    if sections:
-        _append_to_investigation(ctx, sections)
+    assert attempt.result is not None  # errors empty + no exception → parsed
 
-    payload = {
-        "selected_lead": trailer["selected_lead"],
+    # Only append when there's something to append. Shape E writes no invlang
+    # hypotheses block; its state (branch_plan predictions) flows through the
+    # PhaseResult payload to GATHER, which stamps them on the gather entry.
+    if attempt.section:
+        _append_to_investigation(ctx, attempt.section)
+
+    routing = attempt.result.routing
+    invlang_delta = attempt.result.invlang_delta
+
+    payload: dict = {
+        "selected_lead": routing["selected_lead"],
         "loop_n": expected_loop_n,
-        "composite_secondary": list(trailer.get("composite_secondary") or []),
+        "composite_secondary": list(routing.get("composite_secondary") or []),
     }
-    # Forward optional overrides when PREDICT authored them. Omitted keys
-    # keep the downstream GATHER payload clean when the subagent didn't use
-    # this channel.
-    if trailer.get("override_data_source") is not None:
-        payload["override_data_source"] = trailer["override_data_source"]
-    if trailer.get("lead_hint") is not None:
-        payload["lead_hint"] = trailer["lead_hint"]
+    if routing.get("override_data_source") is not None:
+        payload["override_data_source"] = routing["override_data_source"]
+    if routing.get("lead_hint") is not None:
+        payload["lead_hint"] = routing["lead_hint"]
+    # Scope override — PREDICT's structured way to override GATHER's default
+    # 1h lookback (window_hours + anchor). GATHER plumbs this into the
+    # subagent prompt's incident_start/incident_end so the query covers the
+    # intended range rather than silently narrowing.
+    if routing.get("scope_override") is not None:
+        payload["scope_override"] = routing["scope_override"]
+    # Shape E carries branch_plan predictions to GATHER. GATHER stamps these
+    # on the gather[] entry's `predictions[]` field (lp* lead-level readings).
+    if "branch_plan" in invlang_delta:
+        payload["branch_plan_predictions"] = invlang_delta["branch_plan"]["predictions"]
     return PhaseResult(next_phase=Phase.GATHER, payload=payload)

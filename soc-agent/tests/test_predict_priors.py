@@ -51,7 +51,7 @@ def _companion(
     body = {
         "prologue": prologue,
         "hypothesize": {"hypotheses": hypotheses},
-        "gather": list(leads or []),
+        "findings": list(leads or []),
         "conclude": {"disposition": "benign"},
     }
     return Companion(case_id=case_id, source_path=Path("."), body=body)

@@ -59,7 +59,7 @@ def _check_impact_prediction_structure(merged: dict[str, Any]) -> list[str]:
       used for hypothesis predictions).
     """
     errors: list[str] = []
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")
@@ -143,7 +143,7 @@ def _check_impact_resolution_backrefs(merged: dict[str, Any]) -> list[str]:
 
     # Build ip → dimension index (qualified → dimension)
     dimension_by_ref: dict[str, str] = {}
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id")
@@ -157,7 +157,7 @@ def _check_impact_resolution_backrefs(merged: dict[str, Any]) -> list[str]:
             if isinstance(ipid, str) and isinstance(dim, str):
                 dimension_by_ref[f"{lid}.{ipid}"] = dim
 
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id", "?")
@@ -234,7 +234,7 @@ def _check_impact_closure(merged: dict[str, Any]) -> list[str]:
         return []
 
     resolved: set[str] = set()
-    for lead in merged.get("gather", []) or []:
+    for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
             continue
         lid = lead.get("id") if isinstance(lead.get("id"), str) else None

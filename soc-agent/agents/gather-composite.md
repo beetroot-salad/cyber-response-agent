@@ -36,7 +36,6 @@ The main agent substitutes these values:
 ## Context to read (in parallel, single turn)
 
 - `{run_dir}/alert.json`
-- `{run_dir}/investigation.md`
 - For each lead in `leads`: `knowledge/common-investigation/leads/{lead_name}/definition.md` and (when present) `knowledge/common-investigation/leads/{lead_name}/templates/{vendor}.md`
 - `knowledge/environment/systems/{vendor}/SKILL.md` for CLI invocation conventions
 - `knowledge/common-investigation/leads/ad-hoc/definition.md` — construction discipline; needed for ad-hoc / redispatch modes AND for any lead whose definition is absent (see §2 fallback)
@@ -212,41 +211,60 @@ Free-text, but tight. The aim is actionable recovery, not a reasoning log. ~2–
 - If you've made **15+ tool calls** without emitting a YAML block, stop gathering and emit what you have *now* with `status: partial` on incomplete leads and a one-line `notes:` explaining what you didn't reach. An incomplete surfaced characterization is recoverable; a silent termination is not.
 - Final action on every run path (success, error, budget-exhaustion): one YAML block on stdout. Never end a turn with prose, thinking, or a tool call before the YAML. A caller may ask for supplementary content AFTER the YAML (test harnesses, debug summaries) — allowed; the YAML must still be there, and first.
 
-## Output
+## Output envelope
 
-Emit exactly one YAML block on stdout.
+Emit exactly one fenced YAML block on stdout, wrapping everything in a top-level `gather:` key. Each prescribed lead gets one entry under `leads[]` with its prescribed `lead_id` echoed verbatim.
 
 ```yaml
-gather_composite:
+gather:
+  loop: {loop_n}
   mode: "{composite | ad-hoc | redispatch}"
   time_range: { start: "{incident_start}", end: "{incident_end}" }
   leads:
-    - lead: "{lead_name}"
+    - id: "{lead_id}"                   # echo the dispatched lead_id for this entry
+      name: "{lead_name}"
       reporting_agent: "{reporting_agent}"
-      query: "{exact query string executed}"
-      query_source: "{template | ad-hoc | refined}"
-      entity_bindings: { ... }
-      refinements_applied: "{empty when no refinement; otherwise a one-line description. Also used to record the missing-definition ad-hoc fallback and/or inline data-source-debug trace per §Procedure 2.}"
-      health_probe: { ... full JSON, or null if skipped }
-      characterization:                    # full map when status is ok/partial; null when dropped_attempt/data_missing
-        {bullet_label}: "{specific values}"
-        ...
-      status: "{ok | probe_broken | siem_error | data_missing | dropped_attempt | partial}"
+      status: "{ok | partial | probe_broken | siem_error | data_missing | dropped_attempt}"
       status_detail: "{free-text, 2-4 lines; see §status_detail}"
-    - # next lead ...
+      query:
+        system: "{vendor or override_data_source}"
+        template: "{template_name or null on ad-hoc}"
+        query: "{exact query string executed}"
+        query_source: "{template | ad-hoc | refined}"
+        time_window: { start: "{incident_start}", end: "{incident_end}" }
+        substitutions: { ... }           # entity_bindings merged in
+        refinements_applied: "{empty when no refinement; otherwise a one-line description}"
+      health_probe: { ... }              # full JSON, or null if skipped
+      characterization:                  # full map when status is ok/partial; null when dropped_attempt/data_missing
+        "{bullet_label}": "{specific values}"
+        ...
+      raw:
+        siem_response: |
+          <verbatim SIEM response — or empty string when the query never ran>
+    - # next lead entry ...
   cross_lead_notes: "{composite only — consistencies / contradictions / refinements applied across the lead set. Empty string for ad-hoc/redispatch single-lead mode.}"
   notes: "{anything the main agent should know that doesn't fit a lead-level field — empty string if none}"
 ```
 
-If the dispatch is unparseable, emit (instead of the above):
+If the dispatch itself is unparseable (missing required substitutions, malformed `leads` list, contradictions you cannot resolve), emit a single-lead envelope with `status: error` instead:
 
 ```yaml
-error: "{one-line reason}"
-partial:
-  # any leads you did execute, in the shape above
+gather:
+  loop: {loop_n}
+  mode: "{mode}"
+  leads:
+    - id: "{first_lead_id_or_derived}"
+      name: "{first_lead_name}"
+      status: error
+      escalate_trigger: "dispatch_unparseable"
+      escalate_context: "{one-line reason}"
+      raw:
+        siem_response: ""
+  cross_lead_notes: ""
+  notes: ""
 ```
 
-An unknown `lead_name` is NOT an `error:` case — fall through to the missing-definition ad-hoc path per §Procedure 2. Only emit `error:` when the subagent cannot proceed with any lead at all.
+An unknown `lead_name` is NOT an error case — fall through to the missing-definition ad-hoc path per §Procedure 2. Only emit `status: error` when the subagent cannot proceed with any lead at all.
 
 ## Rules
 

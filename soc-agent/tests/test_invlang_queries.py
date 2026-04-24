@@ -121,7 +121,7 @@ def make_companion(
     body: dict[str, Any] = {
         "prologue": prologue or {"vertices": [], "edges": []},
         "hypothesize": {"hypotheses": hypotheses},
-        "gather": list(leads),
+        "findings": list(leads),
         "conclude": {
             "termination": {"category": termination_category, "rationale": "test"},
             "disposition": disposition,
@@ -974,7 +974,7 @@ class TestScreenMatchedCompanion:
         """v2.6 SCREEN-matched companions omit hypothesize — corpus loader must accept them."""
         doc = {
             "prologue": {"vertices": [], "edges": []},
-            "gather": [],
+            "findings": [],
             "conclude": {"termination": {"category": "trust-root"}, "disposition": "benign"},
         }
         assert _looks_like_companion(doc) is True
@@ -984,7 +984,7 @@ class TestScreenMatchedCompanion:
         doc = {
             "prologue": {"vertices": [], "edges": []},
             "hypothesize": {"hypotheses": []},
-            "gather": [],
+            "findings": [],
             "conclude": {"termination": {"category": "trust-root"}, "disposition": "benign"},
         }
         assert _looks_like_companion(doc) is True
@@ -993,7 +993,7 @@ class TestScreenMatchedCompanion:
         """SCREEN-matched in-memory Companion (no hypothesize key) yields empty hypotheses list."""
         body = {
             "prologue": {"vertices": [], "edges": []},
-            "gather": [],
+            "findings": [],
             "conclude": {
                 "termination": {"category": "trust-root", "rationale": "screen matched"},
                 "disposition": "benign",
@@ -1009,7 +1009,7 @@ class TestScreenMatchedCompanion:
         """SCREEN-matched companion (no hypothesize) loads into corpus and queries work."""
         body = {
             "prologue": {"vertices": [], "edges": []},
-            "gather": [],
+            "findings": [],
             "conclude": {
                 "termination": {"category": "trust-root", "rationale": "screen matched"},
                 "disposition": "benign",

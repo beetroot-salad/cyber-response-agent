@@ -41,7 +41,7 @@ def _coverage_fixture(
                 "predictions": [{"id": p, "claim": f"claim {p}"} for p in predictions],
             }],
         },
-        "gather": [{
+        "findings": [{
             "id": f"l-00{i+1}", "loop": 1, "name": f"lead-{i+1}", "target": "v-001",
             "query_details": {}, "outcome": {},
             "resolutions": [{
@@ -88,7 +88,7 @@ class TestCheckPredictionCoverage:
 
 def _partial_consultation_fixture(after: str, supporting_edges: list[str]) -> dict:
     return {
-        "gather": [{
+        "findings": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {},
             "outcome": {
@@ -113,7 +113,7 @@ def _partial_consultation_fixture(after: str, supporting_edges: list[str]) -> di
 
 def _partial_impact_resolution_fixture(after: str, supporting_edges: list[str]) -> dict:
     return {
-        "gather": [{
+        "findings": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {},
             "outcome": {
@@ -160,7 +160,7 @@ class TestCheckPartialAuthorityCap:
 
     def test_full_authority_consultation_is_not_capped(self):
         merged = _partial_consultation_fixture("++", [])
-        merged["gather"][0]["outcome"]["anchor_consultations"][0]["authority_for_question"] = "full"
+        merged["findings"][0]["outcome"]["anchor_consultations"][0]["authority_for_question"] = "full"
         assert _check_partial_authority_cap(merged) == []
 
     def test_pp_with_partial_impact_resolution_only_fails(self):
@@ -175,7 +175,7 @@ class TestCheckPartialAuthorityCap:
 
     def test_pp_with_partial_authz_resolution_fails(self):
         merged = {
-            "gather": [{
+            "findings": [{
                 "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
                 "query_details": {},
                 "outcome": {
@@ -217,7 +217,7 @@ class TestCheckPartialAuthorityCap:
         merged = _partial_consultation_fixture("++", [])
         # Add a full-authority impact_resolution alongside the partial
         # anchor_consultation.
-        merged["gather"][0]["outcome"]["impact_resolutions"] = [{
+        merged["findings"][0]["outcome"]["impact_resolutions"] = [{
             "prediction_ref": "l-001.ip1",
             "dimension": "confidentiality",
             "verdict": "within",
@@ -306,7 +306,7 @@ def _hierarchy_fixture(parent_weight: str | None, child_weights: dict[str, str |
         })
     return {
         "hypothesize": {"hypotheses": hypotheses},
-        "gather": [{
+        "findings": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {}, "outcome": {"observations": {"vertices": [], "edges": []}},
             "resolutions": resolutions,
@@ -316,7 +316,7 @@ def _hierarchy_fixture(parent_weight: str | None, child_weights: dict[str, str |
 
 class TestCheckRollupParentWeight:
     def test_no_hierarchy_passes(self):
-        merged = {"hypothesize": {"hypotheses": [{"id": "h-001"}]}, "gather": []}
+        merged = {"hypothesize": {"hypotheses": [{"id": "h-001"}]}, "findings": []}
         assert _check_rollup_parent_weight(merged) == []
 
     def test_parent_le_child_passes(self):

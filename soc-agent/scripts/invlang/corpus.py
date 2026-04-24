@@ -52,9 +52,9 @@ def _corpus_root() -> Path:
 # Constants
 # ---------------------------------------------------------------------------
 
-COMPANION_TOP_LEVEL = {"prologue", "hypothesize", "gather", "conclude"}
+COMPANION_TOP_LEVEL = {"prologue", "hypothesize", "findings", "conclude"}
 # v2.6: hypothesize is optional when screen_result: match short-circuits the loop.
-_COMPANION_REQUIRED_KEYS = {"prologue", "gather", "conclude"}
+_COMPANION_REQUIRED_KEYS = {"prologue", "findings", "conclude"}
 
 YAML_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
 
@@ -92,7 +92,7 @@ class Companion:
 
     @property
     def leads(self) -> list[dict[str, Any]]:
-        return [entry for entry in self.body.get("gather", []) if isinstance(entry, dict)]
+        return [entry for entry in self.body.get("findings", []) if isinstance(entry, dict)]
 
     @property
     def conclude(self) -> dict[str, Any]:
@@ -162,9 +162,9 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
         for key in ("prologue", "hypothesize", "conclude"):
             if key in doc:
                 merged[key] = doc[key]
-        if "gather" in doc and isinstance(doc["gather"], list):
-            merged.setdefault("gather", [])
-            merged["gather"].extend(doc["gather"])
+        if "findings" in doc and isinstance(doc["findings"], list):
+            merged.setdefault("findings", [])
+            merged["findings"].extend(doc["findings"])
     return merged
 
 
@@ -207,7 +207,7 @@ def extract_ids(body: dict[str, Any]) -> dict[str, list[str]]:
     edges      = [e["id"] for e in prologue.get("edges", [])    if "id" in e]
     hypotheses = [h["id"] for h in body.get("hypothesize", {}).get("hypotheses", []) if "id" in h]
     leads: list[str] = []
-    for lead in body.get("gather", []):
+    for lead in body.get("findings", []):
         if not isinstance(lead, dict):
             continue
         if "id" in lead:
