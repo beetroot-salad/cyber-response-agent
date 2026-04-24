@@ -48,7 +48,21 @@ def make_ctx(
     run_dir = tmp_path / "run-test"
     run_dir.mkdir()
     if existing_investigation is None:
-        existing_investigation = "## CONTEXTUALIZE\n\nsome existing content\n"
+        # Default includes a declared hypothesis so ANALYZE is the routing
+        # target. Tests exercising the shape-E short-circuit pass their own
+        # `existing_investigation` without a `hypothesize:` block.
+        existing_investigation = textwrap.dedent("""
+            ## CONTEXTUALIZE
+
+            some existing content
+
+            ```yaml
+            hypothesize:
+              hypotheses:
+                - id: h-001
+                  name: "?default-test-hypothesis"
+            ```
+        """).strip() + "\n"
     (run_dir / "investigation.md").write_text(existing_investigation)
 
     default_alert = {
@@ -560,7 +574,7 @@ class TestHandleOutput:
         # No YAML fence for the gather: block at this phase — ANALYZE owns it.
         assert "```yaml" not in text.split("## GATHER")[-1]
 
-    def test_routes_to_analyze_always(self, tmp_path, monkeypatch):
+    def test_routes_to_analyze_when_hypotheses_declared(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path, selected_lead="authentication-history")
         monkeypatch.setattr(
             gather_handler, "_invoke_gather",
@@ -568,6 +582,44 @@ class TestHandleOutput:
         )
         result = gather_handler.handle(ctx)
         assert result.next_phase == Phase.ANALYZE
+
+    def test_routes_to_predict_when_no_hypotheses_declared(self, tmp_path, monkeypatch):
+        # Shape-E enrichment path: investigation.md has no `hypothesize:`
+        # block with declared hypotheses. GATHER should skip ANALYZE and
+        # route straight to PREDICT N+1 (there's nothing to grade).
+        ctx = make_ctx(
+            tmp_path,
+            selected_lead="authentication-history",
+            existing_investigation="## CONTEXTUALIZE\n\nno hypothesize block yet\n",
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            stub_invoke([], [_SINGLE_FINDING]),
+        )
+        result = gather_handler.handle(ctx)
+        assert result.next_phase == Phase.PREDICT
+
+    def test_routes_to_analyze_when_hypothesize_block_empty(self, tmp_path, monkeypatch):
+        # Edge case: a `hypothesize:` block exists but its `hypotheses[]` is
+        # empty (e.g. shelved-only block). Treat as no-hypotheses — route
+        # to PREDICT.
+        ctx = make_ctx(
+            tmp_path,
+            selected_lead="authentication-history",
+            existing_investigation=textwrap.dedent("""
+                ## CONTEXTUALIZE
+                ```yaml
+                hypothesize:
+                  hypotheses: []
+                ```
+            """).strip() + "\n",
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            stub_invoke([], [_SINGLE_FINDING]),
+        )
+        result = gather_handler.handle(ctx)
+        assert result.next_phase == Phase.PREDICT
 
 
 # ---------------------------------------------------------------------------

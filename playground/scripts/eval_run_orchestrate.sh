@@ -98,10 +98,12 @@ print(json.dumps(a, separators=(',',':')))
 ")
 
 export SOC_AGENT_RUNS_DIR="$EVAL_DIR/runs"
-# Corpus lives in the canonical runs tree, not the per-eval tmpdir. Without
-# this override, invlang.corpus falls back to SOC_AGENT_RUNS_DIR (empty here)
-# and PREDICT priors always come back "0 cases matched".
-export INVLANG_CORPUS_ROOT="${INVLANG_CORPUS_ROOT:-$REPO_ROOT/runs}"
+# Corpus root: point at the orchestrator-eval tree where prior runs write
+# v2.12-shaped companions. /workspace/runs is a frozen pre-refactor snapshot
+# (all pre-v2.12 shape, none load as valid companions). Without this override
+# invlang.corpus falls back to SOC_AGENT_RUNS_DIR (per-run tmpdir, always
+# empty) and PREDICT priors come back "0 cases matched".
+export INVLANG_CORPUS_ROOT="${INVLANG_CORPUS_ROOT:-/tmp/soc-agent-orchestrate-eval}"
 
 SIGNATURE_ID="wazuh-rule-$RULE_ID"
 

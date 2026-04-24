@@ -20,16 +20,19 @@ The handler is strictly mechanical:
     - Silent-termination recovery: on truncated YAML output, read the
       checkpoint under `{run_dir}/subagent_checkpoints/`; if `status: complete`,
       transcribe verbatim, else re-dispatch with `resume_from_checkpoint=true`.
-    - Always routes to Phase.ANALYZE. GATHER → PREDICT re-entry is
-      deliberately not taken from here — ANALYZE owns rollup-driven routing
-      (the orchestrator's transition table still permits both edges so the
-      existing `test_gather_to_predict_reentry` test keeps working).
+    - Routes to Phase.ANALYZE when at least one prior `hypothesize:` block
+      carries declared hypotheses; otherwise (shape-E enrichment path with
+      nothing to grade) routes straight to Phase.PREDICT for the next loop.
+      ANALYZE owns rollup-driven routing on the normal path; the shape-E
+      short-circuit reclaims a subagent spawn and sidesteps the envelope-
+      violation failure mode where a subagent invents an `error:` top-level
+      key the parser can't recognize.
 
 Input (Context):
     ctx.run_dir, ctx.signature_id, ctx.alert, ctx.outputs[Phase.PREDICT]
 
 Output:
-    PhaseResult(next_phase=Phase.ANALYZE, payload={
+    PhaseResult(next_phase=Phase.ANALYZE | Phase.PREDICT, payload={
         "lead_name": str,
         "mode": "single" | "composite",
         "status": "ok" | "partial" | "escalate" | ...,
@@ -54,6 +57,7 @@ Files written:
 from __future__ import annotations
 
 import os
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -1016,4 +1020,37 @@ def handle(ctx: Context) -> PhaseResult:
     section = _compose_markdown(payload, pp.loop_n)
     _append_to_investigation(ctx, section)
 
+    # Skip ANALYZE when no hypotheses have been declared yet (shape-E
+    # enrichment path). ANALYZE grades against `hypothesize.hypotheses[]` —
+    # with no h-ids on the frontier, the only contract-conformant output is
+    # `resolutions: []` + `routing.decision: continue`, which is a no-op.
+    # Routing straight to PREDICT N+1 saves the subagent spawn and removes
+    # the envelope-shape failure mode where the subagent picks an informal
+    # `error:` key the parser can't recognize.
+    if not _any_hypotheses_declared(ctx):
+        return PhaseResult(next_phase=Phase.PREDICT, payload=payload)
+
     return PhaseResult(next_phase=Phase.ANALYZE, payload=payload)
+
+
+_HYP_FENCE_RE = re.compile(r"```yaml\n(?P<body>.*?)\n```", re.DOTALL)
+
+
+def _any_hypotheses_declared(ctx: Context) -> bool:
+    """True when any `hypothesize:` YAML fence in investigation.md carries a
+    non-empty `hypotheses[]` list. Scans every fence (not just the last) so a
+    shape-E block after a prior shape-A/M doesn't falsely look empty."""
+    inv = ctx.run_dir / "investigation.md"
+    if not inv.exists():
+        return False
+    for m in _HYP_FENCE_RE.finditer(inv.read_text()):
+        try:
+            parsed = yaml.safe_load(m.group("body"))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        hyp = parsed.get("hypothesize")
+        if isinstance(hyp, dict) and hyp.get("hypotheses"):
+            return True
+    return False
