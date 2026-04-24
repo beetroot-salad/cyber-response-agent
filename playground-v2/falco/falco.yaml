@@ -1,0 +1,47 @@
+# Falco config for the soc-playground VPS stack.
+#
+# Runs one shared Falco container with the modern_ebpf driver (no kernel
+# module, no userspace driver install — just CO-RE BPF against the host
+# kernel's BTF). It sees syscalls from every container on the daemon, so
+# per-host attribution comes from Falco's built-in container plugin (fields
+# like `container.name`, `container.image.repository`).
+#
+# JSON events are written to /var/log/falco/falco.json, which is bind-mounted
+# to the VPS host's /var/log/falco/ so the existing host-side elastic-agent
+# can ship them via a custom-logs integration on `vps-host-policy`. See
+# playground-v2/CLAUDE.md §Syscall monitoring (Falco) for the attach command.
+
+engine:
+  kind: modern_ebpf
+
+# JSON for SIEM ingestion; stdout too for `docker logs falco` debugging.
+json_output: true
+json_include_output_property: true
+json_include_tags_property: true
+
+stdout_output:
+  enabled: true
+
+file_output:
+  enabled: true
+  # keep_alive: false closes the handle between writes — costs a little
+  # throughput but keeps log-rotation sane (logrotate's `copytruncate` is
+  # fine without it, but newer setups prefer an always-fresh fd).
+  keep_alive: false
+  filename: /var/log/falco/falco.json
+
+# Don't emit priorities below `info` — `debug` is too noisy for a shared
+# stream and drowns real signals.
+priority: info
+
+# Buffering trades a little latency for big throughput gains; fine here —
+# events are for triage, not sub-second alerting.
+buffered_outputs: true
+
+# Rule sources (default ruleset + any local overlays). Matches v1's split:
+# bundled rules from the image, plus anything dropped into /etc/falco/rules.d
+# (currently nothing — playground-specific rules land here later).
+rules_files:
+  - /etc/falco/falco_rules.yaml
+  - /etc/falco/falco_rules.local.yaml
+  - /etc/falco/rules.d

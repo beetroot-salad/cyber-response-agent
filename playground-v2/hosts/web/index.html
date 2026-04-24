@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SOC Playground — Internal Web</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 40rem; margin: 4rem auto; color: #222; }
+    h1 { font-size: 1.3rem; margin-bottom: 0.2rem; }
+    p.lede { color: #555; margin-top: 0; }
+    code { background: #f4f4f4; padding: 0 0.3em; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>Internal Service</h1>
+  <p class="lede">Corporate-shaped landing page. Served by the soc-playground web tier.</p>
+  <p>This page exists so HTTP traffic against the web tier has a real 200 response
+     shape — Zeek's <code>http.log</code>, nginx <code>access.log</code>, and
+     Squid transit records all correlate cleanly against it.</p>
+  <p>Peer: <code>web-1</code> / <code>web-2</code>. App backend: <code>db-1</code>.</p>
+</body>
+</html>

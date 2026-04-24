@@ -1,0 +1,145 @@
+# Host inventory — source of truth for the soc-playground population.
+#
+# Consumed by:
+#   - playground-v2/hosts/base/seed-users.sh (per-container user seeding at build time)
+#   - Batch 7b: fleet-policies-init (one Fleet policy per distinct role)
+#   - Batch 8: baseline activity generators (per-host schedules)
+#   - Batch 9: CMDB stub (this file IS the ground truth; CMDB stub returns a mutable overlay)
+#   - Batch 10: attack scenarios (target hosts by name)
+#
+# Population shape follows docs/playground-environment-v2.md §Environment population:
+#   web tier ×2, db ×1, jump-box ×1, dev-ws ×1, office-ws ×2, canary ×1 = 8 hosts.
+#
+# OS mix must satisfy v2's "at least two OS variants" — this inventory has
+# 22.04 × 5 and 24.04 × 3. Version-sensitive signals (e.g., a bug present in
+# one minor only) can then be exercised against a real split.
+
+schema_version: 1
+
+# Realm role → seeded UNIX shell + sudo on each host type. Used by seed-users.sh
+# to decide which realm users get local accounts on a given host and with what
+# privileges. Identity labels (usernames) come directly from keycloak/realm.yaml
+# — keeping them identical across IdP and hosts is what makes cross-source
+# correlation ("the same sre.alice shows up in Keycloak events and /var/log/auth.log")
+# actually work.
+#
+# Cross-file invariant: the realm users list (keycloak/realm.yaml) and this file's
+# `users` entries must stay in sync. There is no validator; maintained by hand.
+roles:
+  sre-ops:
+    hosts: [web-1, web-2, db-1, jump-box-1, dev-ws-1, office-ws-1, office-ws-2, canary-1]
+    shell: /bin/bash
+    sudo: true
+  developer:
+    hosts: [jump-box-1, dev-ws-1]     # hop + workstation; no direct prod access
+    shell: /bin/bash
+    sudo: false
+  dba:
+    hosts: [db-1, jump-box-1]
+    shell: /bin/bash
+    sudo_hosts: [db-1]                # sudo only on the DB host
+  service-account:
+    # Service accounts vary per account — spelled out in per-host users below
+    # rather than role-wide, since svc.backups ≠ svc.reports ≠ svc.monitoring.
+    hosts: []
+    shell: /usr/sbin/nologin
+    sudo: false
+  contractor:
+    hosts: [office-ws-2]              # time-limited, office-only
+    shell: /bin/bash
+    sudo: false
+
+hosts:
+  - name: web-1
+    role: web
+    criticality: prod
+    owner: team.web
+    change_window: "tue 02:00-04:00 UTC"
+    os: {distro: ubuntu, version: "22.04"}
+    service: {kind: nginx, port: 80}
+    trust_edges_out: [db-1]           # web tier talks to db tier on app traffic
+    users:
+      # Per-host service accounts layered on top of role-wide assignment.
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.reports, shell: /usr/sbin/nologin, sudo: false}
+
+  - name: web-2
+    role: web
+    criticality: prod
+    owner: team.web
+    change_window: "tue 02:00-04:00 UTC"
+    os: {distro: ubuntu, version: "22.04"}
+    service: {kind: nginx, port: 80}
+    trust_edges_out: [db-1]
+    users:
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.reports, shell: /usr/sbin/nologin, sudo: false}
+
+  - name: db-1
+    role: db
+    criticality: prod
+    owner: team.data
+    change_window: "sat 04:00-06:00 UTC"
+    os: {distro: ubuntu, version: "22.04"}
+    service: {kind: postgres, port: 5432}
+    trust_edges_out: []
+    users:
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+      - {username: svc.backups, shell: /bin/bash, sudo: false}  # needs a shell for pg_dump cron
+
+  - name: jump-box-1
+    role: jump-box
+    criticality: prod
+    owner: team.sre
+    change_window: "tue 02:00-04:00 UTC"
+    os: {distro: ubuntu, version: "24.04"}
+    service: null
+    trust_edges_out: [web-1, web-2, db-1, dev-ws-1]  # the bastion — hops anywhere
+    users:
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+
+  - name: dev-ws-1
+    role: dev-ws
+    criticality: dev
+    owner: team.dev
+    change_window: null                # ad-hoc; devs manage themselves
+    os: {distro: ubuntu, version: "24.04"}
+    service: null
+    trust_edges_out: [jump-box-1]
+    users:
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+
+  - name: office-ws-1
+    role: office-ws
+    criticality: preprod              # touches customer data via blob, not pure dev
+    owner: dev.dana                   # personal workstation
+    change_window: null
+    os: {distro: ubuntu, version: "22.04"}
+    service: null
+    trust_edges_out: []               # no infra SSH from office workstations
+    users:
+      - {username: dev.dana, shell: /bin/bash, sudo: true}  # primary user has admin on own laptop
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+
+  - name: office-ws-2
+    role: office-ws
+    criticality: preprod
+    owner: dev.ethan
+    change_window: null
+    os: {distro: ubuntu, version: "24.04"}
+    service: null
+    trust_edges_out: []
+    users:
+      - {username: dev.ethan, shell: /bin/bash, sudo: true}
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}
+
+  - name: canary-1
+    role: canary
+    criticality: sandbox
+    owner: team.sre
+    change_window: null               # anything goes; this host is the experiment surface
+    os: {distro: ubuntu, version: "22.04"}
+    service: null
+    trust_edges_out: []               # deliberately isolated
+    users:
+      - {username: svc.monitoring, shell: /usr/sbin/nologin, sudo: false}

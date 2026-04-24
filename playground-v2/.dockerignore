@@ -1,0 +1,9 @@
+# Applies only to builds whose `context:` is playground-v2/ (the host images —
+# see hosts/Dockerfile). Services with scoped contexts (./keycloak, ./squid,
+# ./unbound, ./zeek) have their own context roots and are unaffected.
+#
+# Host builds only need hosts/ + keycloak/realm.yaml. Everything else is noise.
+*
+!hosts/
+!hosts/**
+!keycloak/realm.yaml
