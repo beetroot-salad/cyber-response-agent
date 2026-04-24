@@ -1,0 +1,50 @@
+# Seed change requests. Windows tied to hosts/inventory.yaml change_window
+# fields so /changes/active queries land on real maintenance slots.
+#
+# Today (plan reference): 2026-04-24 Fri. web + jump-box change_window is
+# "tue 02:00-04:00 UTC"; db-1 is "sat 04:00-06:00 UTC"; office/dev/canary are
+# ad-hoc (no window).
+
+- id: CHG-1042
+  summary: "Patch nginx on web tier (CVE-2026-XXXX)"
+  description: "Roll out nginx security patch across web-1 and web-2 during Tuesday maintenance window."
+  status: approved
+  requester: team.web
+  approver: sre.alice
+  hosts: [web-1, web-2]
+  window_start: "2026-04-28T02:00:00+00:00"
+  window_end:   "2026-04-28T04:00:00+00:00"
+  ticket_ref: OPS-501
+
+- id: CHG-1043
+  summary: "Postgres 15 minor bump on db-1"
+  description: "Upgrade postgres minor version; restart postgres during Saturday window."
+  status: planned
+  requester: team.data
+  approver: null
+  hosts: [db-1]
+  window_start: "2026-05-02T04:00:00+00:00"
+  window_end:   "2026-05-02T06:00:00+00:00"
+  ticket_ref: OPS-507
+
+- id: CHG-1038
+  summary: "Jump-box kernel reboot"
+  description: "Pick up HWE kernel roll; SSH unavailable for ~3min during reboot."
+  status: implemented
+  requester: team.sre
+  approver: sre.alice
+  hosts: [jump-box-1]
+  window_start: "2026-04-21T02:00:00+00:00"
+  window_end:   "2026-04-21T04:00:00+00:00"
+  ticket_ref: OPS-489
+
+- id: CHG-1050
+  summary: "Emergency TLS cert rotation on web-1"
+  description: "Out-of-window CR for expiring cert; approved under incident P2-0044."
+  status: in_progress
+  requester: team.web
+  approver: sre.alice
+  hosts: [web-1]
+  window_start: "2026-04-24T00:00:00+00:00"
+  window_end:   "2026-04-25T00:00:00+00:00"
+  ticket_ref: OPS-512
