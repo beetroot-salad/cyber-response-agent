@@ -337,6 +337,44 @@ def _first_prologue_vertex_id(investigation_md: str) -> str | None:
     return None
 
 
+def _hypothesis_name_to_id_map(investigation_md: str) -> dict[str, str]:
+    """Build a `{name → id}` map from every `hypothesize:` block in the
+    companion.
+
+    The analyze subagent is observed to emit `hypothesis_id: "?name"`
+    (playbook name) when PREDICT did not declare a matching `h-*` entry,
+    and sometimes even when it did — the prose-first bias of the prompt
+    drifts toward names. Resolutions whose `hypothesis_id` is a name
+    get translated to the matching declared ID when one exists; entries
+    that resolve to nothing get dropped from the synthesized findings
+    so the invlang validator doesn't reject the write.
+
+    Both `name` and `id` are keyed — calling `.get(value, value)` falls
+    through cleanly whether the subagent emitted the name or the ID.
+    """
+    mapping: dict[str, str] = {}
+    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
+        try:
+            doc = yaml.safe_load(body)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        hypotheses = doc.get("hypothesize", {}).get("hypotheses") or []
+        for h in hypotheses:
+            if not isinstance(h, dict):
+                continue
+            hid = h.get("id")
+            name = h.get("name")
+            if isinstance(hid, str) and hid:
+                # ID is its own key — lets `.get(value, None)` work whether
+                # the subagent emitted the ID or the name.
+                mapping[hid] = hid
+                if isinstance(name, str) and name:
+                    mapping[name] = hid
+    return mapping
+
+
 def _translate_trust_anchor_to_consultation(
     entry: dict[str, Any],
 ) -> dict[str, Any] | None:
@@ -380,6 +418,7 @@ def _synthesize_findings_block(
     gather_leads: list[dict[str, Any]],
     loop_n: int,
     default_target: str,
+    hypothesis_name_to_id: dict[str, str] | None = None,
 ) -> str:
     """Build the `findings:` invlang YAML block for this loop, combining
     gather's envelope leads with analyze's per-lead interpretation.
@@ -483,12 +522,26 @@ def _synthesize_findings_block(
         # matched_prediction_ids, matched_refutation_ids, reasoning}.
         # Schema expects {hypothesis, before, after, matched_prediction_ids,
         # matched_refutation_ids, reasoning, ...}. Translate.
+        #
+        # `hypothesis_id` translation — the analyze subagent is observed to
+        # emit playbook names (e.g. `?monitoring-probe`) instead of declared
+        # h-ids when PREDICT didn't create a matching record. Resolve via
+        # the companion-derived name→id map; drop resolutions whose
+        # reference doesn't land on any declared hypothesis (silently —
+        # they'd fail rule-#?-id-references at validate time otherwise).
+        id_map = hypothesis_name_to_id or {}
         resolutions: list[dict[str, Any]] = []
         for r in envelope.resolutions_by_lead.get(lead_id, []):
             if not isinstance(r, dict):
                 continue
+            raw_ref = r.get("hypothesis_id", "")
+            resolved_id = id_map.get(raw_ref) if id_map else raw_ref
+            if not resolved_id:
+                # Unknown reference — skip rather than poison the findings
+                # block with an undeclared hypothesis id.
+                continue
             res: dict[str, Any] = {
-                "hypothesis": r.get("hypothesis_id", ""),
+                "hypothesis": resolved_id,
                 "after": r.get("weight", ""),
                 "matched_prediction_ids": r.get(
                     "matched_prediction_ids", [],
@@ -584,11 +637,12 @@ def handle(ctx: Context) -> PhaseResult:
         raw_leads = gather_out.get("leads") or []
         if isinstance(raw_leads, list):
             gather_leads = [x for x in raw_leads if isinstance(x, dict)]
-    default_target = _first_prologue_vertex_id(
-        load_investigation_md(ctx.run_dir)
-    ) or ""
+    investigation_md = load_investigation_md(ctx.run_dir)
+    default_target = _first_prologue_vertex_id(investigation_md) or ""
+    hypothesis_id_map = _hypothesis_name_to_id_map(investigation_md)
     findings_block = _synthesize_findings_block(
         envelope, gather_leads, loop_n, default_target,
+        hypothesis_name_to_id=hypothesis_id_map,
     )
     if findings_block:
         section = section + "\n" + findings_block

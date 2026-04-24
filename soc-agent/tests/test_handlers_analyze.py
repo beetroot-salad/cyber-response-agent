@@ -694,6 +694,100 @@ class TestFindingsSynthesis:
         assert "hypothesis: h-001" in written
         assert "after: +" in written or "after: '+'" in written
 
+    def test_translates_hypothesis_name_to_declared_id(self, tmp_path, monkeypatch):
+        """The subagent often emits `?playbook-name` as `hypothesis_id`
+        when PREDICT has already declared a matching `h-*`. Handler looks
+        up the name in the companion's hypothesize block and substitutes.
+        """
+        ctx = make_ctx(
+            tmp_path,
+            history=[Phase.PREDICT.value],
+            existing_investigation=self._PROLOGUE,
+        )
+        ctx.outputs[Phase.GATHER] = {
+            "leads": [{"id": "l-001", "name": "auth", "status": "ok",
+                       "query": {"system": "wazuh-indexer"}}],
+            "prescribed_leads": ["auth"],
+            "executed_leads": ["auth"],
+            "raw_details_paths": [],
+        }
+        response = textwrap.dedent("""
+        ```yaml
+        analyze:
+          loop: 1
+          resolutions:
+            - lead_ref: "l-001"
+              entries:
+                - hypothesis_id: "?monitoring-probe"
+                  weight: "+"
+                  matched_prediction_ids: [p1]
+                  reasoning: "consistent with p1"
+          routing:
+            decision: continue
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            analyze_handler, "_invoke_subagent",
+            stub_invoke([], response),
+        )
+        analyze_handler.handle(ctx)
+        written = (ctx.run_dir / "investigation.md").read_text()
+        # Name translated to the declared h-id — `?monitoring-probe`
+        # exists as `name` on h-001 per the _PROLOGUE fixture.
+        assert "hypothesis: h-001" in written
+        assert "?monitoring-probe" not in (
+            written.split("findings:")[-1] if "findings:" in written else ""
+        )
+
+    def test_drops_resolutions_that_reference_undeclared_hypotheses(
+        self, tmp_path, monkeypatch,
+    ):
+        """When the subagent cites a hypothesis that was never declared
+        (no `h-*` id, no matching `name`), drop that resolution — keeping
+        it would produce a findings block the validator rejects as a
+        dangling ID reference.
+        """
+        ctx = make_ctx(
+            tmp_path,
+            history=[Phase.PREDICT.value],
+            existing_investigation=self._PROLOGUE,
+        )
+        ctx.outputs[Phase.GATHER] = {
+            "leads": [{"id": "l-001", "name": "auth", "status": "ok",
+                       "query": {"system": "wazuh-indexer"}}],
+            "prescribed_leads": ["auth"],
+            "executed_leads": ["auth"],
+            "raw_details_paths": [],
+        }
+        response = textwrap.dedent("""
+        ```yaml
+        analyze:
+          loop: 1
+          resolutions:
+            - lead_ref: "l-001"
+              entries:
+                - hypothesis_id: "?monitoring-probe"
+                  weight: "+"
+                  matched_prediction_ids: [p1]
+                  reasoning: "declared hypothesis"
+                - hypothesis_id: "?image-entrypoint"
+                  weight: "-"
+                  matched_prediction_ids: [p1]
+                  reasoning: "not declared in prologue"
+          routing:
+            decision: continue
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            analyze_handler, "_invoke_subagent",
+            stub_invoke([], response),
+        )
+        analyze_handler.handle(ctx)
+        written = (ctx.run_dir / "investigation.md").read_text()
+        # Declared hypothesis resolved; undeclared dropped.
+        assert "hypothesis: h-001" in written
+        assert "image-entrypoint" not in written.split("findings:")[-1]
+
     def test_skips_synthesis_when_gather_leads_absent(self, tmp_path, monkeypatch):
         # SCREEN-matched and forced-exhaustion paths reach ANALYZE without
         # a gather envelope — synthesis must silently skip.
