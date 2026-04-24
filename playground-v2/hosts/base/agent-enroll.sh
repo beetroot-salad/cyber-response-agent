@@ -34,8 +34,22 @@ fi
 
 mkdir -p "$STATE_DIR"
 
-if [[ ! -f "$SENTINEL" ]]; then
-  echo "[agent-enroll] first run for role=$HOST_ROLE — enrolling"
+# Anchor /etc/elastic-agent inside the per-host state volume so `fleet.enc`
+# (produced by `elastic-agent enroll`) survives `compose up -d [--build]`.
+# Without this, every container recreate loses enrollment config and the agent
+# re-enrolls with a fresh agent.id — piles up "offline" ghosts in Fleet →
+# Agents. On first run, seed from the image's default /etc/elastic-agent.
+if [[ ! -d "$STATE_DIR/etc" ]]; then
+  cp -a /etc/elastic-agent "$STATE_DIR/etc"
+fi
+rm -rf /etc/elastic-agent
+ln -s "$STATE_DIR/etc" /etc/elastic-agent
+
+if [[ -f "$SENTINEL" && -f /etc/elastic-agent/fleet.enc ]]; then
+  echo "[agent-enroll] sentinel + fleet.enc present — reusing enrolled state"
+else
+  [[ -f "$SENTINEL" ]] && echo "[agent-enroll] sentinel present but fleet.enc missing (post-rebuild?) — re-enrolling"
+  [[ -f "$SENTINEL" ]] || echo "[agent-enroll] first run for role=$HOST_ROLE — enrolling"
   # `|| true` on enroll: post-enrollment the deb tries a service-manager
   # reload that fails in a systemd-less container, but the server-side
   # registration has already completed at that point. Matches v1's pattern
@@ -46,8 +60,6 @@ if [[ ! -f "$SENTINEL" ]]; then
     --certificate-authorities="$CA_CERT" \
     >/var/log/elastic-agent-enroll.log 2>&1 || true
   touch "$SENTINEL"
-else
-  echo "[agent-enroll] sentinel present — reusing enrolled state"
 fi
 
 # Run the agent in the background; logs go where v1 expects them. The host

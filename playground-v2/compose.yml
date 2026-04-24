@@ -32,7 +32,11 @@ x-es-image: &es-image docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERS
 # agent state volume.
 x-host-defaults: &host-defaults
   restart: unless-stopped
-  mem_limit: 256m
+  # elastic-agent 9.3 + default beats + otel collector + sshd needs ~350-450MB
+  # resident once everything is warm. 256m caused flappy "degraded" status and
+  # metricbeat self-stats socket timeouts because beats were being OOM-nudged.
+  # VPS has ~30GB so 512m × 8 hosts (= 4GB) is comfortable headroom.
+  mem_limit: 512m
   depends_on:
     fleet-server:
       condition: service_healthy
@@ -66,6 +70,15 @@ services:
           bin/elasticsearch-certutil cert --silent --pem -out config/certs/certs.zip --in config/certs/instances.yml --ca-cert config/certs/ca/ca.crt --ca-key config/certs/ca/ca.key;
           unzip -q config/certs/certs.zip -d config/certs;
         fi;
+        # Ensure leaf certs ship the CA in the chain so clients using
+        # `ca_trusted_fingerprint` (no CA file) can walk up to the trust root.
+        # Without this, elastic-agent drops data with x509: certificate signed
+        # by unknown authority. Idempotent: only appends if not already chained.
+        for leaf in config/certs/elasticsearch/elasticsearch.crt config/certs/fleet-server/fleet-server.crt; do
+          if [ "$$(grep -c "BEGIN CERTIFICATE" "$$leaf")" = "1" ]; then
+            cat config/certs/ca/ca.crt >> "$$leaf";
+          fi;
+        done;
         echo "-> fixing permissions";
         chown -R 1000:0 config/certs;
         find config/certs -type d -exec chmod 750 {} \;;
