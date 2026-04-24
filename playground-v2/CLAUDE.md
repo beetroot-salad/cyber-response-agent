@@ -211,7 +211,7 @@ Role-specific integrations (nginx on web, postgres on db, endpoint-security, Fal
 
 **Enrollment token distribution.** `fleet-host-policies` runs after `fleet-init`, POSTs a policy per role (409-on-conflict is the success path on re-runs), fetches the policy's enrollment API key via `GET /api/fleet/enrollment_api_keys?kuery=policy_id:<id>`, and atomic-writes the token to `/tokens/<role>.token` on the shared `fleet_tokens` volume. Each host container mounts that volume read-only and reads its role's token from `/fleet-tokens/<role>.token` at entrypoint time — hosts never hold a Kibana credential themselves.
 
-**Sentinel-gated enrollment.** `hosts/base/agent-enroll.sh` enrolls via `elastic-agent enroll --url=https://fleet-server:8220 --certificate-authorities=/fleet-certs/ca/ca.crt --enrollment-token=<cat token>` on first boot, then drops a `.enrolled` sentinel inside the per-host `agent_state_*` volume. Subsequent container recreates skip the enroll step and reuse the persisted `agent.id` + `fleet.enc` — matches v1's target-endpoint pattern, avoids stale "offline" ghosts accumulating in Kibana → Fleet → Agents across lever-down/up cycles.
+**Sentinel-gated enrollment.** `hosts/base/agent-enroll.sh` enrolls via `elastic-agent enroll --url=https://fleet-server:8220 --certificate-authorities=/fleet-certs/ca/ca.crt --enrollment-token=<cat token>` on first boot, then drops a `.enrolled` sentinel inside the per-host `agent_state_*` volume. Subsequent container recreates skip the enroll step and reuse the persisted `agent.id` + `fleet.enc` — matches v1's target-endpoint pattern, avoids stale "offline" ghosts accumulating in Kibana → Fleet → Agents across lever-down/up cycles. The sentinel check also verifies `/etc/elastic-agent/fleet.enc` still exists: `compose up -d --build` wipes `/etc/elastic-agent` (only `/var/lib/elastic-agent` is volume-mounted), so a plain sentinel check would silently leave the agent unenrolled after a rebuild. If `fleet.enc` is gone, the script re-enrolls — this costs one fresh `agent.id` per rebuild but keeps the host reachable.
 
 **Agent runs alongside sshd.** The entrypoint starts `elastic-agent run` in the background; sshd remains the foreground PID-1-child so container-level restart policies still key on sshd health, not on the agent's.
 
@@ -266,21 +266,31 @@ LOG_VER=$(curl -fsSu "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
   http://localhost:5601/api/fleet/epm/packages/log | jq -r '.item.version')
 
 curl -fsS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' -H 'Content-Type: application/json' \
+  -H 'elastic-api-version: 2023-10-31' \
   -X POST http://localhost:5601/api/fleet/package_policies -d "{
     \"policy_id\": \"vps-host-policy\",
     \"package\": {\"name\": \"log\", \"version\": \"${LOG_VER}\"},
     \"name\": \"falco-logs\",
     \"namespace\": \"default\",
-    \"inputs\": [{
-      \"type\": \"logfile\", \"enabled\": true,
-      \"streams\": [{
+    \"inputs\": {
+      \"logs-logfile\": {
         \"enabled\": true,
-        \"data_stream\": {\"type\": \"logs\", \"dataset\": \"falco.alerts\"},
-        \"vars\": {\"paths\": {\"value\": [\"/var/log/falco/falco.json\"], \"type\": \"text\"}}
-      }]
-    }]
+        \"streams\": {
+          \"log.logs\": {
+            \"enabled\": true,
+            \"vars\": {
+              \"paths\": [\"/var/log/falco/falco.json\"],
+              \"data_stream.dataset\": \"falco.alerts\",
+              \"processors\": \"- decode_json_fields:\\n    fields: [message]\\n    target: falco\\n    overwrite_keys: true\\n    add_error_key: true\\n\"
+            }
+          }
+        }
+      }
+    }
   }"
 ```
+
+Without the `decode_json_fields` processor, the Falco JSON line is ingested as a literal `message` string and fields like `container.name`, `rule`, `priority` aren't queryable. With it, they're nested under `falco.*` (e.g. `falco.output_fields.container.name`, `falco.rule`).
 
 **Verify.** In Kibana → Discover, filter `data_stream.dataset: falco.alerts`. Events should show up within a few seconds of an activity trigger. Quick trigger: `docker --context soc-playground exec canary-1 bash -c 'touch /tmp/.falco-test && ls /etc/shadow || true'` — Falco's "Read sensitive file untrusted" or similar rule fires.
 
@@ -368,7 +378,7 @@ docker --context soc-playground compose up -d
 - **The VPS host needs `/etc/hosts` entries for Docker service names.** `127.0.0.1 elasticsearch` + `127.0.0.1 fleet-server` so host-based agents can resolve those names. **Persisted via `infra/cloud-init/bootstrap.yaml`** (runcmd with grep-gated append + `manage_etc_hosts: false` to stop cloud-init from clobbering it on lever-up).
 - **Fleet Server re-enrolls as a new agent on each container restart.** `KIBANA_FLEET_SETUP=1` on the fleet-server container requests a new service token + new enrollment on every start. Across a lever-down/up cycle the old record becomes an `offline` ghost in Kibana → Fleet → Agents. Cleanup: `POST /api/fleet/agents/<old-id>/unenroll -d '{"revoke":true}'` or via UI. The Fleet Server itself keeps working fine — this is a cosmetic bookkeeping issue.
 - **After lever-up, the host elastic-agent may need `systemctl restart elastic-agent`** to shake off cached DNS state and re-resolve `fleet-server` / `elasticsearch` through `/etc/hosts`. Symptom in `elastic-agent status`: fleet checkin `FAILED: lookup fleet-server on 127.0.0.53:53: server misbehaving`. Cure: restart the service. Could script this into the lever-up flow later if it proves recurring.
-- **Beats sub-components in `elastic-agent status` show `x509: certificate signed by unknown authority`** even though `ca_trusted_fingerprint` is in the output config. This is a cosmetic issue in Elastic 9.x's component-status view — data still flows to ES (verified by growing doc counts). Usually settles after a few check-in cycles.
+- **`ca_trusted_fingerprint` needs the CA in the presented chain — `elasticsearch-certutil cert` doesn't emit one.** Without a fix, every bulk POST from elastic-agent drops with `x509: certificate signed by unknown authority` + `Exporting failed. Dropping data.`, and no `metrics-system.*` / `logs-system.*` / `logs-falco.alerts-default` data streams ever form (fleet-server's own telemetry still flows because it's not a client-of-ES). Fix baked into `setup`: after cert gen, append `ca/ca.crt` to both `elasticsearch/elasticsearch.crt` and `fleet-server/fleet-server.crt` so ES / fleet-server present a leaf+CA chain that agents can walk back to the fingerprint pin. Idempotent on existing volumes. ES hot-reloads the cert on the next TLS handshake — no restart needed.
 - **Keycloak `--import-realm` is create-only, not upsert.** Editing `realm.yaml` after the realm exists is a no-op at next `compose up`. See "Re-seed users/roles" above. A consequence: seed passwords are only honored on first import; rotations need kcadm.sh or the UI.
 - **Keycloak image has no `curl`** (UBI-minimal base). Healthcheck uses bash's `/dev/tcp` against the management port 9000. Use the CMD exec form (`["bash", "-c", ...]`) not CMD-SHELL — the default `/bin/sh` in the image doesn't expand `echo -e` escapes, so CRLFs go out as literal `\r\n` and Vert.x rejects the request with "Host header required". `printf` + explicit `bash` sidesteps this.
 - **Keycloak 26 splits HTTP (8080) from management/health (9000).** `/health/ready` is only on 9000 and is enabled by `KC_HEALTH_ENABLED=true`. Only 8080 is published to the host (loopback); 9000 is internal-only and reached from the container's own healthcheck.
