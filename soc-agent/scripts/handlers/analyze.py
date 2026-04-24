@@ -54,6 +54,7 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._context_loader import (
     format_alert_block,
+    format_current_gather_block,
     format_investigation_block,
     load_alert,
     load_investigation_md,
@@ -152,6 +153,11 @@ def _assemble_prompt(ctx: Context) -> str:
         format_alert_block(alert, salt),
         format_investigation_block(investigation_md, mode="analyze"),
     ]
+    gather_out = ctx.outputs.get(Phase.GATHER)
+    if isinstance(gather_out, dict):
+        current_gather = format_current_gather_block(gather_out.get("leads") or [])
+        if current_gather:
+            blocks.append(current_gather)
     raw_details_block = _load_raw_details(ctx)
     if raw_details_block:
         blocks.append(raw_details_block)
@@ -413,12 +419,43 @@ def _translate_trust_anchor_to_consultation(
     return out
 
 
+_STRONG_AUTHORITY_KINDS = {"siem-event", "runtime-audit", "authoritative-source"}
+
+
+def _prologue_authoritative_edges(investigation_md: str) -> list[str]:
+    """Return every edge id in the prologue whose authority.kind is in the
+    strong-authority set. Used as the default `supporting_edges` for
+    `++`/`--` resolutions when the envelope does not name specific edges
+    — invlang structural rule requires at least one authoritative edge on
+    any non-circumstantial grade, and the lead-level evidence is always
+    at least as authoritative as the prologue edges it confirms.
+    """
+    edge_ids: list[str] = []
+    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
+        try:
+            doc = yaml.safe_load(body)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        edges = doc.get("prologue", {}).get("edges") or []
+        for e in edges:
+            if not isinstance(e, dict):
+                continue
+            eid = e.get("id")
+            kind = (e.get("authority") or {}).get("kind", "")
+            if isinstance(eid, str) and kind in _STRONG_AUTHORITY_KINDS:
+                edge_ids.append(eid)
+    return edge_ids
+
+
 def _synthesize_findings_block(
     envelope: AnalyzeEnvelope,
     gather_leads: list[dict[str, Any]],
     loop_n: int,
     default_target: str,
     hypothesis_name_to_id: dict[str, str] | None = None,
+    default_supporting_edges: list[str] | None = None,
 ) -> str:
     """Build the `findings:` invlang YAML block for this loop, combining
     gather's envelope leads with analyze's per-lead interpretation.
@@ -540,9 +577,10 @@ def _synthesize_findings_block(
                 # Unknown reference — skip rather than poison the findings
                 # block with an undeclared hypothesis id.
                 continue
+            weight = r.get("weight", "")
             res: dict[str, Any] = {
                 "hypothesis": resolved_id,
-                "after": r.get("weight", ""),
+                "after": weight,
                 "matched_prediction_ids": r.get(
                     "matched_prediction_ids", [],
                 ),
@@ -551,6 +589,17 @@ def _synthesize_findings_block(
             mrefs = r.get("matched_refutation_ids")
             if mrefs:
                 res["matched_refutation_ids"] = mrefs
+            # invlang structural rule: ++/-- grades require supporting_edges
+            # with at least one authoritative edge. The subagent does not
+            # name specific edges (that's graph-level plumbing, not weighing
+            # evidence), so the handler defaults to the prologue's
+            # authoritative edge list when the grade is committed.
+            if weight in ("++", "--"):
+                supplied = r.get("supporting_edges") or []
+                if not supplied and default_supporting_edges:
+                    res["supporting_edges"] = list(default_supporting_edges)
+                elif supplied:
+                    res["supporting_edges"] = list(supplied)
             resolutions.append(res)
 
         entry: dict[str, Any] = {
@@ -640,9 +689,11 @@ def handle(ctx: Context) -> PhaseResult:
     investigation_md = load_investigation_md(ctx.run_dir)
     default_target = _first_prologue_vertex_id(investigation_md) or ""
     hypothesis_id_map = _hypothesis_name_to_id_map(investigation_md)
+    default_supporting_edges = _prologue_authoritative_edges(investigation_md)
     findings_block = _synthesize_findings_block(
         envelope, gather_leads, loop_n, default_target,
         hypothesis_name_to_id=hypothesis_id_map,
+        default_supporting_edges=default_supporting_edges,
     )
     if findings_block:
         section = section + "\n" + findings_block

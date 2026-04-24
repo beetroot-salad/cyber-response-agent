@@ -292,6 +292,41 @@ def _trim_gather_section(section: dict) -> str:
     return header + "\n" + body
 
 
+def _section_yaml_fences(section: dict) -> str:
+    """Return only the ```yaml ... ``` fenced blocks from a section body,
+    concatenated verbatim (fences included). Markdown prose outside fences
+    is dropped.
+
+    Used by the analyze mode to strip free-form prose surfaces (e.g.
+    `**Playbook hypotheses:** ?foo, ?bar` enumerations in CONTEXTUALIZE,
+    archetype-catalog prose in PREDICT) that analyze must not grade
+    against. The only grading-valid hypothesis set is `hypothesize.hypotheses[]`
+    inside a YAML fence.
+
+    Returns an empty string if the section has no YAML fences.
+    """
+    kept: list[str] = []
+    in_fence = False
+    current: list[str] = []
+    for line in section["body_lines"]:
+        if line.startswith("```"):
+            if not in_fence:
+                # Opening fence — only keep if it's YAML.
+                if line.strip() in {"```yaml", "```yml"}:
+                    in_fence = True
+                    current = [line]
+            else:
+                # Closing fence.
+                current.append(line)
+                kept.extend(current)
+                in_fence = False
+                current = []
+            continue
+        if in_fence:
+            current.append(line)
+    return "\n".join(kept)
+
+
 def _analyze_grade_summary(section: dict) -> str:
     """Render an ANALYZE section keeping only the per-hypothesis grade lines
     and the routing tail (`**Surviving hypotheses:**`, `**Next action:**`).
@@ -398,23 +433,18 @@ def format_investigation_block(
         return f"<investigation mode=\"predict\">\n{body}\n</investigation>"
 
     if mode == "analyze":
-        loops = [s["loop_n"] for s in sections if s["loop_n"] is not None]
-        current_loop = max(loops) if loops else None
+        # YAML-only: drop every markdown-prose surface that could be mistaken
+        # for a grading target. The canonical hypothesis set lives inside
+        # `hypothesize.hypotheses[]` in the PREDICT YAML fence; archetype
+        # catalogs and playbook-hypothesis enumerations that appear in prose
+        # must not be visible to the analyze subagent. Prior-loop grades
+        # live inside prior `findings[]` YAML fences — those are kept.
         parts: list[str] = []
         for s in sections:
-            if s["phase"] == "contextualize":
-                parts.append(_section_text(s))
-            elif s["phase"] in {"predict", "gather"}:
-                if s["loop_n"] == current_loop:
-                    parts.append(_section_text(s))
-                # prior-loop predict/gather: their structured outcome is
-                # rolled into the ANALYZE grade lines we render below.
-            elif s["phase"] == "analyze":
-                # Always summarize — the current loop's ANALYZE doesn't exist
-                # yet (this handler is about to produce it).
-                parts.append(_analyze_grade_summary(s))
-            # self-report dropped for analyze mode (not load-bearing for grading)
-        body = "\n\n".join(p.rstrip() for p in parts if p.strip())
+            fences = _section_yaml_fences(s)
+            if fences.strip():
+                parts.append(s["header"] + "\n" + fences)
+        body = "\n\n".join(parts)
         return f"<investigation mode=\"analyze\">\n{body}\n</investigation>"
 
     # mode == "report-narrative"
@@ -431,6 +461,34 @@ def format_investigation_block(
         # Everything else (GATHER, self-report, prior PREDICT/ANALYZE) dropped.
     body = "\n\n".join(p.rstrip() for p in parts if p.strip())
     return f"<investigation mode=\"report-narrative\">\n{body}\n</investigation>"
+
+
+def format_current_gather_block(leads: list[dict]) -> str:
+    """Render the current loop's gather envelope as a `<current_gather>`
+    YAML block for the analyze prompt.
+
+    Input: the `leads[]` list from `ctx.outputs[Phase.GATHER]["leads"]`
+    (the same shape the gather subagent emitted). Raw SIEM payloads
+    (`lead.raw`) are stripped — those are preloaded verbatim under
+    `<raw_details>` and do not belong in this block.
+
+    Returns an empty string when `leads` is empty.
+    """
+    if not leads:
+        return ""
+    try:
+        import yaml  # Local import: handler-only dependency
+    except ImportError:
+        return ""
+    pruned: list[dict] = []
+    for lead in leads:
+        if not isinstance(lead, dict):
+            continue
+        pruned.append({k: v for k, v in lead.items() if k != "raw"})
+    if not pruned:
+        return ""
+    body = yaml.safe_dump({"leads": pruned}, sort_keys=False).rstrip()
+    return f"<current_gather>\n{body}\n</current_gather>"
 
 
 def format_signature_text_block(texts: dict[str, str]) -> str:

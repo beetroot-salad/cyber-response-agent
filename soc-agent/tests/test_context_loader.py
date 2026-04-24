@@ -255,22 +255,45 @@ class TestFormatInvestigationBlock:
         hyp = format_investigation_block(fx, mode="predict")
         assert len(hyp) < len(full)
 
-    def test_analyze_mode_keeps_current_loop_verbatim(self):
+    def test_analyze_mode_is_yaml_only(self):
+        """Analyze mode strips all markdown prose and keeps only YAML fences.
+        This structurally removes free-form hypothesis-name surfaces
+        (archetype catalogs, playbook-hypothesis enumerations, ANALYZE grade
+        prose) that analyze could otherwise mistake for grading targets.
+        The canonical hypothesis set lives only in `hypothesize.hypotheses[]`
+        inside the PREDICT YAML fence."""
         block = format_investigation_block(
             self._multiloop_fixture(), mode="analyze"
         )
         assert 'mode="analyze"' in block
-        # Current loop (loop 2) H + G present verbatim
+        # YAML fence content from every loop is preserved (prior grades live
+        # in future findings[] fences; this fixture only has hypothesize).
+        assert "prologue:" in block
+        assert "hypothesize:" in block
+        assert "h-001" in block  # current-loop hypothesize payload
+        # Section headers preserved as anchors (so the subagent can locate
+        # which YAML fence belongs to which loop).
+        assert "## CONTEXTUALIZE" in block
+        assert "## PREDICT (loop 1)" in block
         assert "## PREDICT (loop 2)" in block
-        assert "fresh bulky line with current-loop detail" in block
-        # Prior loop H + G dropped (rolled up via ANALYZE summary)
-        assert "## PREDICT (loop 1)" not in block
+        # Every markdown-prose surface is dropped — including:
+        # - "**Alert:**" / "candidate archetype:" CONTEXTUALIZE prose
+        assert "candidate archetype:" not in block
+        # - "**Selected lead:**" / "**Lead:**" / "**Query:**" / "**Raw observation:**"
+        assert "**Selected lead:**" not in block
+        assert "**Lead:** l1" not in block
+        assert "**Raw observation:**" not in block
         assert "bulky line one with lots of detail" not in block
-        # Prior ANALYZE rendered as grade-summary (kept minimal grade line)
-        assert "## ANALYZE (loop 1)" in block
-        assert "**Surviving hypotheses:**" in block
-        # Per-hypothesis grade lines kept but narrative trimmed
-        assert "followup sentence" not in block
+        assert "fresh bulky line with current-loop detail" not in block
+        # - ANALYZE grade prose + Self-report + Surviving/Next-action lines
+        assert "grade narrative first sentence" not in block
+        assert "**Surviving hypotheses:**" not in block
+        assert "anomaly note" not in block
+        # - Sections with no YAML fences are omitted entirely (no dangling
+        #   "## GATHER (loop N)" header left over)
+        assert "## GATHER (loop 1)" not in block
+        assert "## ANALYZE (loop 1)" not in block
+        assert "## Self-report" not in block
 
     def test_full_mode_default_matches_legacy_behavior(self):
         fx = "## A\nraw\n"
