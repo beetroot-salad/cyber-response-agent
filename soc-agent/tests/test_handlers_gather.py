@@ -379,6 +379,9 @@ class TestEscalateFallback:
         self, tmp_path, monkeypatch, trigger,
     ):
         ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        # `health_probe_verdict` is emitted under `status: probe_broken`;
+        # every other fallback trigger is emitted under `status: error`.
+        status = "probe_broken" if trigger == "health_probe_verdict" else "error"
         escalate = textwrap.dedent(f"""
         ```yaml
         gather:
@@ -387,7 +390,7 @@ class TestEscalateFallback:
           leads:
             - id: "l-001"
               name: "authentication-history"
-              status: error
+              status: {status}
               escalate_trigger: {trigger}
               escalate_context: "test-trigger {trigger}"
               health_probe: null

@@ -91,16 +91,16 @@ SUBAGENT_TIMEOUT_SECONDS = int(
 
 # Escalate triggers that the single `gather` subagent returns when the
 # template-driven fast path is insufficient. On any of these, fall back to
-# `gather-composite` in `redispatch` mode.
+# `gather-composite` in `redispatch` mode. Every entry here MUST match a
+# trigger name the subagent actually emits in `escalate_trigger` — see the
+# enum in agents/gather.md §Decision envelope.
 _COMPOSITE_FALLBACK_TRIGGERS = {
     "missing_template",
     "binding_mismatch",
     "follow_up_needed",
     "siem_error",
     "empty_result",
-    "elevated",
-    "low",
-    "broken",
+    "health_probe_verdict",
 }
 
 # Default lookback window when the alert carries no explicit window hint.
@@ -563,17 +563,17 @@ def _dispatch_single(
         envelope = _recover_single(ctx, scope, loop_n)
 
     # Escalate-to-composite fallback. The single-gather envelope has exactly
-    # one lead; if it says status=error with a recoverable trigger, redispatch
-    # via the composite path so the Sonnet worker can run data-source-debug
-    # or multi-query construction.
+    # one lead; if it carries an escalating status (error / probe_broken) with
+    # a recoverable trigger, redispatch via the composite path so the Sonnet
+    # worker can run data-source-debug or multi-query construction.
     first = envelope.leads[0] if envelope.leads else {}
-    if first.get("status") == "error":
+    if first.get("status") in {"error", "probe_broken"}:
         trigger = first.get("escalate_trigger")
         if trigger in _COMPOSITE_FALLBACK_TRIGGERS:
             return _dispatch_composite(
                 ctx, scope, loop_n, mode="redispatch",
             )
-        # Unrecognized trigger → surface single-lead error envelope as-is.
+        # Unrecognized trigger → surface single-lead escalation envelope as-is.
     return envelope
 
 
