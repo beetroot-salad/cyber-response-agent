@@ -47,6 +47,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       less \
       vim-tiny \
       tini \
+      sshpass \
+      postgresql-client \
+      gcc \
     && rm -rf /var/lib/apt/lists/*
 
 # Install elastic-agent. Enrollment + `run` happen at container start (entrypoint
@@ -81,11 +84,13 @@ RUN touch /var/log/auth.log /var/log/syslog \
 COPY hosts/base/seed-users.py     /opt/soc-playground/seed-users.py
 COPY hosts/base/entrypoint.sh     /usr/local/bin/host-entrypoint.sh
 COPY hosts/base/agent-enroll.sh   /usr/local/bin/agent-enroll.sh
+COPY hosts/base/baseline/         /opt/soc-playground/baseline/
 COPY hosts/inventory.yaml         /opt/soc-playground/inventory.yaml
 COPY keycloak/realm.yaml          /opt/soc-playground/realm.yaml
 RUN chmod +x /usr/local/bin/host-entrypoint.sh \
              /usr/local/bin/agent-enroll.sh \
-             /opt/soc-playground/seed-users.py
+             /opt/soc-playground/seed-users.py \
+             /opt/soc-playground/baseline/scheduler.py
 
 # HOST_NAME must be set by compose — entrypoint fails loudly otherwise.
 ENV HOST_NAME=""

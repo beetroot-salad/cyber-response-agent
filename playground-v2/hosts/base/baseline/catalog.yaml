@@ -1,0 +1,110 @@
+# Baseline activity catalog — batch 8 (docs/playground-environment-v2.md §Baseline activity generators).
+#
+# Schema (per action):
+#   id: unique label, also the random-seed axis
+#   host_roles: list of inventory roles this action binds to (matched against
+#               hosts[*].role in inventory.yaml). If empty the action is skipped.
+#   identities: list of realm-user patterns to dispatch as. Shell-glob style
+#               (`sre.*`, `dev.*`) or a literal username (`svc.backups`).
+#               Only identities with an account ON THIS HOST are bound — the
+#               scheduler reuses seed-users.py's expansion.
+#   cmd: shell command. Template placeholders:
+#          ${host}   → this host's name
+#          ${user}   → the bound identity
+#          ${target} → a random element of targets_from (see below)
+#          ${wrong}  → a random element of bad_targets (typo variant of target)
+#   targets_from: "trust_edges_out" | explicit list. Only used if the cmd
+#                 references ${target}.
+#   bad_targets: explicit list of mistyped/invalid target hostnames; used by
+#                the typo-failed-login action to generate realistic wrong-host
+#                noise. Only required when ${wrong} is in cmd.
+#   schedule:
+#     mean_s: mean seconds between dispatches (pre-shape).
+#     shape:  flat | workhours-utc | workhours-us | overnight-peak
+#
+# Rate math: effective_mean = mean_s / shape_multiplier(now). expovariate
+# draws keep a Poisson inter-arrival process — no fixed period, bursts + gaps
+# emerge naturally.
+
+actions:
+  # ── Service-account cron replacements (flat / overnight) ──────────────────
+
+  - id: db-backup
+    host_roles: [db]
+    identities: [svc.backups]
+    cmd: "PGPASSWORD=changeme pg_dump -h 127.0.0.1 -U appuser app > /tmp/app-backup-$(date +%Y%m%dT%H%M%S).sql"
+    schedule: {mean_s: 3600, shape: overnight-peak}
+
+  - id: svc-health-probe
+    host_roles: [web, db, jump-box, dev-ws, office-ws, canary]
+    identities: [svc.monitoring]
+    cmd: "curl -sf -o /dev/null http://127.0.0.1/ 2>/dev/null || nc -z 127.0.0.1 22"
+    schedule: {mean_s: 300, shape: flat}
+
+  - id: reporting-job
+    host_roles: [web]
+    identities: [svc.reports]
+    cmd: "wc -l /var/log/nginx/access.log > /tmp/report-$(date +%s).txt"
+    schedule: {mean_s: 1800, shape: workhours-utc}
+
+  # ── Web ↔ DB app traffic ──────────────────────────────────────────────────
+
+  - id: app-db-query
+    host_roles: [web]
+    identities: [svc.reports]
+    cmd: "PGPASSWORD=changeme psql -h db-1 -U appuser -d app -c 'SELECT count(*) FROM orders' >/dev/null"
+    schedule: {mean_s: 45, shape: workhours-utc}
+
+  - id: app-db-insert
+    host_roles: [web]
+    identities: [svc.reports]
+    cmd: "PGPASSWORD=changeme psql -h db-1 -U appuser -d app -c \"INSERT INTO orders (customer, amount_cents) VALUES ('${host}-' || (EXTRACT(EPOCH FROM now())::int), (random()*50000)::int)\" >/dev/null"
+    schedule: {mean_s: 120, shape: workhours-utc}
+
+  # ── Scripted SSH sessions — SRE multi-hop from jump-box ───────────────────
+
+  - id: sre-multihop-ssh
+    host_roles: [jump-box]
+    identities: ["sre.*"]
+    cmd: "sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ${user}@${target} 'uptime && df -h /' >/dev/null"
+    targets_from: trust_edges_out
+    schedule: {mean_s: 900, shape: workhours-utc}
+
+  - id: sre-sudo-check
+    host_roles: [jump-box]
+    identities: ["sre.*"]
+    cmd: "sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ${user}@${target} 'sudo -n systemctl status elastic-agent' >/dev/null 2>&1 || true"
+    targets_from: trust_edges_out
+    schedule: {mean_s: 3600, shape: workhours-utc}
+
+  # ── Dev workstation activity ──────────────────────────────────────────────
+
+  - id: dev-workstation-edit
+    host_roles: [dev-ws]
+    identities: ["dev.*"]
+    cmd: "f=/tmp/work-${user}-$$.c; echo 'int main(void){return 0;}' > $f && gcc -o /tmp/work-${user}-$$ $f && rm -f $f /tmp/work-${user}-$$"
+    schedule: {mean_s: 400, shape: workhours-us}
+
+  - id: dev-jumpbox-ssh
+    host_roles: [dev-ws]
+    identities: ["dev.*"]
+    cmd: "sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ${user}@${target} 'ls -la ~' >/dev/null"
+    targets_from: trust_edges_out
+    schedule: {mean_s: 1800, shape: workhours-us}
+
+  # ── Office workstation → prod user-facing web (stand-in for blob fetches) ─
+
+  - id: office-user-browse
+    host_roles: [office-ws]
+    identities: ["dev.dana", "dev.ethan"]
+    cmd: "curl -sf -o /dev/null http://web-1/ && curl -sf -o /dev/null http://web-2/"
+    schedule: {mean_s: 300, shape: workhours-utc}
+
+  # ── Benign noise (typo failed logins — NOT attack-shaped) ─────────────────
+
+  - id: typo-failed-login
+    host_roles: [jump-box]
+    identities: ["sre.*"]
+    cmd: "sshpass -p changeme ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ${user}@${wrong} true 2>/dev/null || true"
+    bad_targets: [web-3, web-0, db-2, prod-db, old-jumpbox]
+    schedule: {mean_s: 7200, shape: workhours-utc}

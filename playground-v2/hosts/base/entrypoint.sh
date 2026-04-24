@@ -19,7 +19,10 @@ python3 /opt/soc-playground/seed-users.py
 # looks first.
 /usr/sbin/rsyslogd
 
-# cron — the baseline-activity generators in batch 8 need it running now.
+# cron is still started for any future per-host cron drops (e.g., logrotate),
+# but the batch-8 baseline generators run under a Python scheduler, not crontabs
+# — spec: "one shared scheduler process per identity/host pair, not a pile
+# of crontabs" (docs/playground-environment-v2.md §Baseline activity generators).
 service cron start >/dev/null
 
 # Role hook is installed by the web/db stages; absent on plain hosts.
@@ -31,6 +34,18 @@ fi
 # the role hook so the agent sees a fully-set-up host at first check-in.
 if [[ -n "${HOST_ROLE:-}" ]]; then
   /usr/local/bin/agent-enroll.sh
+fi
+
+# Baseline activity scheduler (batch 8). One Python process per host, spawns a
+# dispatch thread per (action, identity) binding from
+# /opt/soc-playground/baseline/catalog.yaml. Runs as root so it can `runuser`
+# as realm identities; writes a dispatch log to /var/log/baseline.log for
+# debugging (not shipped to ES). Disable by setting BASELINE_ENABLED=false
+# (e.g., for clean attack-scenario runs in batch 10).
+if [[ "${BASELINE_ENABLED:-true}" == "true" ]]; then
+  touch /var/log/baseline.log
+  nohup python3 /opt/soc-playground/baseline/scheduler.py \
+    >> /var/log/baseline.log 2>&1 &
 fi
 
 exec "$@"

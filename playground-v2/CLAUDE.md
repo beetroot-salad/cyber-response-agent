@@ -189,8 +189,7 @@ Full attributes (owner, change window, trust edges out, per-host users) live in 
 **What's deliberately deferred to later batches:**
 
 - **Falco + auditd** — batch 7c.
-- **Baseline activity** (jittered cron, scripted SSH sessions, web↔db traffic) — batch 8.
-- **SSH keys, pgaudit, app DB schema, nginx-as-app-frontend** — batches 8/9.
+- **SSH keys, pgaudit, nginx-as-app-frontend** — later batches (keys replace sshpass for ops realism; pgaudit replaces raw postgres log_statement).
 
 ### Per-role Fleet enrollment (batch 7b)
 
@@ -303,6 +302,48 @@ docker --context soc-playground compose up -d --build web-1 web-2 db-1 jump-box-
 ```
 
 The image rebuild re-bakes the YAML files; the entrypoint re-runs `seed-users.py` and creates/updates accounts. No volume deletion needed.
+
+### Baseline activity generators (batch 8)
+
+Each of the 8 role hosts runs a small Python scheduler (`/opt/soc-playground/baseline/scheduler.py`) that drives synthetic benign activity — web↔DB queries, scheduled service-account jobs, SRE multi-hop SSH sessions, office-user web fetches, occasional typo-failed logins. This is the layer that makes "is this unusual" a non-trivial question (docs/playground-environment-v2.md §Baseline activity generators).
+
+**Not cron.** The spec mandates Poisson-distributed arrivals with time-of-day shape, not fixed-period cron jobs. A single Python process per host binds `(action, identity)` pairs from the catalog, draws exponential inter-arrival times, and dispatches via `runuser -u <user>` so `/var/log/auth.log` and downstream integrations see the right identity.
+
+**Catalog.** `hosts/base/baseline/catalog.yaml` is source of truth. Each action declares `host_roles` (binds to hosts whose inventory role matches), `identities` (realm-user globs — `sre.*`, `svc.backups`), `cmd` (with `${user}`, `${target}`, `${host}`, `${wrong}` placeholders), optional `targets_from: trust_edges_out` for SSH targets, and a `schedule: {mean_s, shape}`. Shape options: `flat` (service accounts), `workhours-utc` (humans, 09–17 UTC peak), `workhours-us` (some devs, 13–21 UTC peak), `overnight-peak` (automation / backups). All shapes have a non-zero off-peak floor — real environments aren't truly idle.
+
+**Reproducibility.** `V2_BASELINE_SEED` (default `42`) is hashed with `host:action:identity` to seed one PRNG per binding. Same seed + same catalog + same inventory → identical arrival sequences across runs. Changing the seed gives a different-but-valid shape — useful for eval harnesses that need multiple draws.
+
+**Kill-switch.** Set `V2_BASELINE_ENABLED=false` in `.env` and `compose up -d` (no rebuild needed — the env is consumed by the entrypoint, not baked in). Used before attack-scenario runs (batch 10) so synthetic benign traffic doesn't contaminate the capture.
+
+**Observing it.**
+
+```bash
+# Is the scheduler alive?
+docker --context soc-playground exec web-1 pgrep -af scheduler.py
+
+# What did it just do?
+docker --context soc-playground exec web-1 tail -30 /var/log/baseline.log
+
+# Did it actually hit the DB?
+docker --context soc-playground exec db-1 tail -30 /var/log/postgresql/postgresql-*.log
+
+# Did it actually hit nginx?
+docker --context soc-playground exec web-1 tail -30 /var/log/nginx/access.log
+
+# In Kibana → Discover: `logs-system.auth` should show `user.name: svc.reports`
+# and friends; `logs-system.syslog` should show cron + baseline.log entries.
+```
+
+**Tuning.** Edit `catalog.yaml` → rebuild the host image → `compose up -d --build <hosts>`. Most common tweaks: dial `mean_s` up/down per action, or flip an action's `shape` to exercise time-of-day peaks differently.
+
+**Prerequisites shipped with this batch.**
+
+- `hosts/db/role-start.sh` now seeds an `app` database + `orders` table + `appuser` role so `app-db-query` / `app-db-insert` actions from web-1/web-2 have something to hit. Postgres's default `listen_addresses=localhost` is widened to `*` so the bridge network can reach it; `pg_hba.conf` gets an `md5` entry for the docker subnet.
+- Base image adds `sshpass` (scripted SSH with the shared `changeme` password — playground-only), `postgresql-client` (psql from web tier), and `gcc` (dev-ws workstation compile activity).
+
+**Gotcha — service accounts have `nologin` shell.** The scheduler uses `runuser -u svc.backups -s /bin/bash -- bash -c '...'` which explicitly overrides the login shell for dispatch. This is how systemd timers dispatch as `nologin` users and is the right pattern for synthetic-activity generation too.
+
+**Gotcha — sshpass + password auth is a playground shortcut.** Production hosts would use SSH keys from a secrets manager. We accept the password-auth shape because PR #122 already set `PasswordAuthentication yes` on the host image and the stack is behind a loopback tunnel. Attack scenarios (batch 10) can still exercise credential-abuse archetypes against this same surface — the synthetic benign side just happens to use the same auth channel.
 
 ## Adding a new agent
 
