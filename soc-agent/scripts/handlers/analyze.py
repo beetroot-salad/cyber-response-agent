@@ -15,7 +15,7 @@ Terminal YAML trailer:
     route: continue | halt
     # halt path:
     termination_category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
-    disposition: benign | false_positive | true_positive | escalated
+    disposition: benign | true_positive | unclear
     confidence: high | medium | low
     matched_archetype: <name> | null
     surviving_hypotheses: [...]
@@ -86,7 +86,7 @@ _VALID_TERMINATION_CATEGORIES = {
     "severity-ceiling",
     "exhaustion-escalation",
 }
-_VALID_DISPOSITIONS = {"benign", "false_positive", "true_positive", "escalated"}
+_VALID_DISPOSITIONS = {"benign", "true_positive", "unclear"}
 _VALID_CONFIDENCES = {"high", "medium", "low"}
 
 

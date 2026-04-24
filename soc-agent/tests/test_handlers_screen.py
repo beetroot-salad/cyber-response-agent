@@ -154,14 +154,13 @@ SCREEN_MATCH_YAML = textwrap.dedent("""\
         query_details:
           system: authority-consult
         outcome:
-          trust_anchor_result:
-            anchor_id: approved-monitoring-sources
-            kind: org-authority
-            asks: authorization
-            verdict: authorized
-            result: confirmed
-            as_of: '2026-04-20T19:25:01Z'
-            authority_for_question: full
+          anchor_consultations:
+            - anchor_id: approved-monitoring-sources
+              anchor_kind: approved-monitoring-sources
+              grounding_kind: org-authority
+              result: confirmed
+              as_of: '2026-04-20T19:25:01Z'
+              authority_for_question: full
         resolutions: []
       - id: l-004
         loop: 0
@@ -659,14 +658,13 @@ class TestRouting:
                 mode: screen
                 query_details: {system: authority-consult}
                 outcome:
-                  trust_anchor_result:
-                    anchor_id: approved-monitoring-sources
-                    kind: org-authority
-                    asks: authorization
-                    verdict: authorized
-                    result: confirmed
-                    as_of: '2026-04-20T19:25:01Z'
-                    authority_for_question: full
+                  anchor_consultations:
+                    - anchor_id: approved-monitoring-sources
+                      anchor_kind: approved-monitoring-sources
+                      grounding_kind: org-authority
+                      result: confirmed
+                      as_of: '2026-04-20T19:25:01Z'
+                      authority_for_question: full
                 resolutions: []
             ```
         """).strip()

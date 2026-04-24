@@ -15,11 +15,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from hooks.scripts.invlang_common import _index_hypothesis_id_field_ids
+from hooks.scripts.invlang_common import (
+    _ACTING_ENTITY_TYPES,
+    _index_hypothesis_id_field_ids,
+)
 from hooks.scripts.invlang_walkers import (
     compute_final_status,
     compute_final_weight,
     iter_hypotheses,
+    iter_siblings,
     parent_hypothesis_id,
 )
 
@@ -228,14 +232,14 @@ _EVALUATION_PREFIXES: tuple[str, ...] = (
 
 
 def _check_classification_evaluation_prefix(merged: dict[str, Any]) -> list[str]:
-    """Rule 27 — mechanism classifications carry no legitimacy/intent prefix.
+    """Rule 27 — mechanism classifications carry no authorization/intent prefix.
 
     A hypothesis classification names an upstream *mechanism* — the kind of
     vertex (process, identity, scheduled-automation, runtime-exec-injection,
     …). Evaluation-packed prefixes (`authorized-`, `malicious-`, `compromised-`,
     `adversarial-`, …) smuggle the verdict into the label, biasing weight
     history before anchors resolve and producing sibling pairs that differ
-    only on authority — a shape the `legitimacy_contract` primitive exists
+    only on authority — a shape the `authorization_contract` primitive exists
     to collapse.
 
     Checked on both `proposed_edge.parent_vertex.classification` and the
@@ -257,8 +261,8 @@ def _check_classification_evaluation_prefix(merged: dict[str, Any]) -> list[str]
                         f"hypothesis {hid}: classification "
                         f"{classification!r} starts with evaluation-packed "
                         f"prefix {prefix!r}. Classifications name a mechanism, "
-                        f"not a verdict — move legitimacy into a "
-                        f"legitimacy_contract on the hypothesis."
+                        f"not a verdict — move authorization into an "
+                        f"authorization_contract on the hypothesis."
                     )
                     break
         name = h.get("name")
@@ -345,6 +349,66 @@ def _check_prediction_subject_scope(merged: dict[str, Any]) -> list[str]:
                     f"any other entity is a lead masquerading as a prediction "
                     f"— move it to GATHER."
                 )
+    return errors
+
+
+def _check_integrity_peer_discipline(merged: dict[str, Any]) -> list[str]:
+    """Rule #32 — acting-entity contracts require a peer or an explicit waiver.
+
+    When a hypothesis carries an `authorization_contract` AND its
+    `proposed_edge.parent_vertex.type` is an acting-entity type
+    (`session`, `identity`, `process`), either:
+
+      (a) a sibling hypothesis (same `attached_to_vertex` and same
+          `parent_hypothesis_id`) whose `name` starts with
+          `?adversary-controlled-` must exist, OR
+      (b) the contract-carrying hypothesis must carry
+          `integrity_waived: <non-empty rationale>`.
+
+    Non-acting-entity types (endpoint, file, storage, database, ...)
+    are exempt — the integrity question doesn't apply.
+    """
+    errors: list[str] = []
+    for h in iter_hypotheses(merged):
+        hid = h.get("id")
+        if not isinstance(hid, str):
+            continue
+        contracts = h.get("authorization_contract") or []
+        if not isinstance(contracts, list) or not contracts:
+            continue
+        proposed = h.get("proposed_edge")
+        if not isinstance(proposed, dict):
+            continue
+        parent_vertex = proposed.get("parent_vertex")
+        if not isinstance(parent_vertex, dict):
+            continue
+        ptype = parent_vertex.get("type")
+        if ptype not in _ACTING_ENTITY_TYPES:
+            continue
+
+        # Check for waiver first — cheapest path to pass.
+        waived = h.get("integrity_waived")
+        if isinstance(waived, str) and waived.strip():
+            continue
+
+        # Look for a sibling `?adversary-controlled-*` hypothesis.
+        has_peer = False
+        for sibling in iter_siblings(merged, hid):
+            name = sibling.get("name")
+            if isinstance(name, str) and name.startswith("?adversary-controlled-"):
+                has_peer = True
+                break
+        if has_peer:
+            continue
+
+        errors.append(
+            f"hypothesis {hid}: carries authorization_contract on an acting-entity "
+            f"parent_vertex.type {ptype!r} but has no peer `?adversary-controlled-*` "
+            f"hypothesis in the same sibling group and no `integrity_waived` "
+            f"rationale. Add a peer integrity hypothesis (predictions testing "
+            f"whether the claimed entity is actually the one acting) or declare "
+            f"`integrity_waived: <rationale>` if integrity is out of scope for this case."
+        )
     return errors
 
 

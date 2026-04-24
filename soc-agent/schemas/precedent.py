@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from schemas.enums import (
-    VALID_ANCHOR_RESULTS,
+    VALID_CONSULTATION_RESULTS,
     VALID_DISPOSITIONS,
 )
 
@@ -80,10 +80,10 @@ class Precedent:
                         f"anchors_at_time[{i}]: anchor name is required"
                     )
                 result = entry.get("result", "")
-                if result not in VALID_ANCHOR_RESULTS:
+                if result not in VALID_CONSULTATION_RESULTS:
                     errors.append(
                         f"anchors_at_time[{i}]: result must be one of "
-                        f"{VALID_ANCHOR_RESULTS}, got '{result}'"
+                        f"{VALID_CONSULTATION_RESULTS}, got '{result}'"
                     )
                 # temporal: bool — marks anchor confirmations that depended
                 # on time-bounded state (on-call windows, change tickets,

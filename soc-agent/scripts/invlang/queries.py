@@ -104,22 +104,23 @@ def _anchor_rows(corpus: list[Companion]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for c in corpus:
         for lead in c.leads:
-            tar = (lead.get("outcome") or {}).get("trust_anchor_result")
-            if not tar:
-                continue
-            rows.append({
-                "case_id": c.case_id,
-                "lead_id": lead.get("id"),
-                "lead_name": lead.get("name"),
-                "loop": lead.get("loop"),
-                "anchor_id": tar.get("anchor_id"),
-                "kind": tar.get("kind"),
-                "result": tar.get("result"),
-                "authority_for_question": tar.get("authority_for_question"),
-                "as_of": tar.get("as_of"),
-                "disposition": c.conclude.get("disposition"),
-                "termination_category": conclude_field(c.conclude, "termination", "category"),
-            })
+            outcome = lead.get("outcome") or {}
+            for cons in outcome.get("anchor_consultations") or []:
+                if not isinstance(cons, dict):
+                    continue
+                rows.append({
+                    "case_id": c.case_id,
+                    "lead_id": lead.get("id"),
+                    "lead_name": lead.get("name"),
+                    "loop": lead.get("loop"),
+                    "anchor_id": cons.get("anchor_id"),
+                    "kind": cons.get("grounding_kind"),
+                    "result": cons.get("result"),
+                    "authority_for_question": cons.get("authority_for_question"),
+                    "as_of": cons.get("as_of"),
+                    "disposition": c.conclude.get("disposition"),
+                    "termination_category": conclude_field(c.conclude, "termination", "category"),
+                })
     return rows
 
 
@@ -236,9 +237,9 @@ def dead_lead_lookup(
 # ---------------------------------------------------------------------------
 
 def _lead_kind(lead: dict[str, Any]) -> str:
-    """Classify a lead by its declared schema shape (v2.7 — tests + predictions drive).
+    """Classify a lead by its declared schema shape.
 
-    trust:       outcome.trust_anchor_result present
+    consult:     outcome.anchor_consultations[] non-empty
     fail:        outcome.failure_reason present
     branching:   lead.tests non-empty (collapses a hypothesis fork)
     interpretive: lead.predictions non-empty (pre-committed reading, non-branching)
@@ -247,8 +248,8 @@ def _lead_kind(lead: dict[str, Any]) -> str:
     outcome = lead.get("outcome") or {}
     if outcome.get("failure_reason"):
         return "fail"
-    if outcome.get("trust_anchor_result"):
-        return "trust"
+    if outcome.get("anchor_consultations"):
+        return "consult"
     if lead.get("tests"):
         return "branching"
     if lead.get("predictions"):
@@ -261,11 +262,17 @@ def _lead_sequence(c: Companion) -> str:
     for lead in c.leads:
         name = lead.get("name", "?")
         outcome = lead.get("outcome") or {}
-        tar = outcome.get("trust_anchor_result") or {}
+        consultations = [
+            cons for cons in (outcome.get("anchor_consultations") or [])
+            if isinstance(cons, dict)
+        ]
         fr = outcome.get("failure_reason")
         kind = _lead_kind(lead)
-        if kind == "trust":
-            parts.append(f"trust({tar.get('anchor_id', name)}:{tar.get('result', '?')})")
+        if kind == "consult" and consultations:
+            first = consultations[0]
+            parts.append(
+                f"consult({first.get('anchor_id', name)}:{first.get('result', '?')})"
+            )
         elif kind == "fail":
             parts.append(f"{name}:FAIL={fr}")
         elif kind == "interpretive":
@@ -1424,9 +1431,9 @@ def enumerate_corpus(corpus: list[Companion], kind: str) -> dict[str, Any]:
                 values.add(lead.get("name", "?"))
         elif kind == "anchors":
             for lead in c.leads:
-                tar = (lead.get("outcome") or {}).get("trust_anchor_result")
-                if tar and tar.get("anchor_id"):
-                    values.add(tar["anchor_id"])
+                for cons in (lead.get("outcome") or {}).get("anchor_consultations") or []:
+                    if isinstance(cons, dict) and cons.get("anchor_id"):
+                        values.add(cons["anchor_id"])
         elif kind == "archetypes":
             a = c.conclude.get("matched_archetype")
             if a:

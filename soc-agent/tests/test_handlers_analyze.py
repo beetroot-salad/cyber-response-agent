@@ -221,9 +221,11 @@ class TestHandleRoutesConclude:
         assert result.next_phase == Phase.REPORT
         assert result.payload["matched_archetype"] is None
 
-    def test_escalated_with_surviving_list_accepted(self, tmp_path, monkeypatch):
+    def test_unclear_with_surviving_list_accepted(self, tmp_path, monkeypatch):
+        # v2.11: `unclear` is the non-benign escalation disposition.
+        # `escalated` is a status, never a disposition.
         response = _HALT_RESPONSE.replace(
-            "disposition: benign", "disposition: escalated"
+            "disposition: benign", "disposition: unclear"
         ).replace(
             "matched_archetype: monitoring-probe",
             "matched_archetype: null",
@@ -241,7 +243,7 @@ class TestHandleRoutesConclude:
         )
         result = analyze_handler.handle(ctx)
         assert result.next_phase == Phase.REPORT
-        assert result.payload["disposition"] == "escalated"
+        assert result.payload["disposition"] == "unclear"
         assert result.payload["surviving_hypotheses"] == ["h-001", "h-002"]
         assert result.payload["termination_category"] == "severity-ceiling"
 

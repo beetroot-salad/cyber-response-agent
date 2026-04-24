@@ -1,8 +1,10 @@
-"""Structural invlang checks (rules 1-9 in the validator docstring).
+"""Structural invlang checks.
 
 Covers: lead required fields, ID formats, ID references, edge authority,
-refutation IDs, trust_anchor_result completeness, screen_result scope,
-lead.predictions structural shape.
+refutation IDs, screen_result scope, lead.predictions structural shape,
+plus rule #11 provenance checks (split by surface):
+- authorization_resolutions[] entries
+- anchor_consultations[] entries
 """
 
 from __future__ import annotations
@@ -10,15 +12,18 @@ from __future__ import annotations
 from typing import Any
 
 from hooks.scripts.invlang_common import (
+    _AUTHZ_GROUNDING_KINDS,
+    _AUTHZ_REQUIRED_FIELDS,
+    _CONSULTATION_GROUNDING_KINDS,
+    _CONSULTATION_REQUIRED_FIELDS,
     _LEAD_PREDICTION_ID_RE,
     _LEAD_PREDICTION_REQUIRED,
     _LEAD_REQUIRED,
     _STRONG_AUTHORITY_KINDS,
-    _TRUST_ANCHOR_FIELDS,
     _collect_declared_ids,
     _is_valid_id,
+    _iter_resolutions,
 )
-from schemas.enums import VALID_ANCHOR_KINDS
 
 
 def _check_lead_required_fields(merged: dict[str, Any]) -> list[str]:
@@ -172,40 +177,6 @@ def _check_refutation_ids(merged: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _check_trust_anchor_completeness(merged: dict[str, Any]) -> list[str]:
-    """trust_anchor_result must have all 5 required fields when present, and
-    `kind` must be drawn from the anchor taxonomy (not the edge-authority
-    taxonomy, which agents commonly conflate)."""
-    errors = []
-    for lead in merged.get("gather", []):
-        if not isinstance(lead, dict):
-            continue
-        lid = lead.get("id", "?")
-        tar = lead.get("outcome", {}).get("trust_anchor_result")
-        if tar is None:
-            continue
-        if not isinstance(tar, dict):
-            errors.append(f"lead {lid}: trust_anchor_result must be a mapping")
-            continue
-        missing = _TRUST_ANCHOR_FIELDS - tar.keys()
-        if missing:
-            errors.append(
-                f"lead {lid}: trust_anchor_result missing required field(s): "
-                f"{sorted(missing)}"
-            )
-        kind = tar.get("kind")
-        if kind is not None and kind not in VALID_ANCHOR_KINDS:
-            errors.append(
-                f"lead {lid}: trust_anchor_result.kind must be one of "
-                f"{list(VALID_ANCHOR_KINDS)}, got {kind!r}. This is the anchor "
-                f"taxonomy — not `edge.authority.kind`. `authoritative-source`, "
-                f"`siem-event`, `runtime-audit` belong on edges; use "
-                f"`org-authority` (curated registry / policy doc) or "
-                f"`telemetry-baseline` (derived from historical telemetry) here."
-            )
-    return errors
-
-
 def _check_screen_result_scope(merged: dict[str, Any]) -> list[str]:
     """screen_result is only valid on leads where mode: screen."""
     errors = []
@@ -272,4 +243,89 @@ def _check_lead_predictions(merged: dict[str, Any]) -> list[str]:
             if "advance_to" in pred and not (isinstance(advance_to, str) and advance_to.strip()):
                 errors.append(f"{ctx}: advance_to must be a non-empty string")
 
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Rule #11 — provenance (split by surface)
+# ---------------------------------------------------------------------------
+
+
+def _check_authorization_resolution_provenance(merged: dict[str, Any]) -> list[str]:
+    """Rule #11 (authz surface): required fields + grounding-kind enum.
+
+    Every `authorization_resolutions[]` entry (whether inline on a new
+    edge or embedded on an attribute_updates target) must carry the
+    required fields listed in `_AUTHZ_REQUIRED_FIELDS`. `grounding_kind`
+    must be `org-authority` or `past-case` — `telemetry-baseline` is
+    forbidden on authorization resolutions (baselines answer expectation,
+    not authorization). When `grounding_kind: past-case`, the entry must
+    also carry `cites_past_case.run_id` and `cites_past_case.contract_ref`.
+    """
+    errors: list[str] = []
+    for location, _target_id, r, _li, _ei in _iter_resolutions(merged):
+        missing = [f for f in _AUTHZ_REQUIRED_FIELDS if f not in r]
+        if missing:
+            errors.append(
+                f"{location}: authorization_resolutions entry missing "
+                f"required field(s): {sorted(missing)}"
+            )
+        grounding = r.get("grounding_kind")
+        if grounding is not None and grounding not in _AUTHZ_GROUNDING_KINDS:
+            errors.append(
+                f"{location}: grounding_kind {grounding!r} not in "
+                f"{sorted(_AUTHZ_GROUNDING_KINDS)} — authorization_resolutions "
+                f"forbid 'telemetry-baseline' (baselines answer expectation, not "
+                f"authorization; baseline lookups belong in anchor_consultations[])"
+            )
+        if grounding == "past-case":
+            cites = r.get("cites_past_case")
+            if not isinstance(cites, dict):
+                errors.append(
+                    f"{location}: grounding_kind 'past-case' requires a "
+                    f"`cites_past_case` mapping with run_id + contract_ref"
+                )
+            else:
+                for sub in ("run_id", "contract_ref"):
+                    if not cites.get(sub):
+                        errors.append(
+                            f"{location}: cites_past_case missing {sub!r} "
+                            f"(required when grounding_kind: past-case)"
+                        )
+    return errors
+
+
+def _check_anchor_consultation_provenance(merged: dict[str, Any]) -> list[str]:
+    """Rule #11 (consultation surface): required fields + grounding-kind enum.
+
+    Every `anchor_consultations[]` entry on a lead outcome must carry the
+    required fields listed in `_CONSULTATION_REQUIRED_FIELDS`.
+    `grounding_kind` must be `org-authority` or `telemetry-baseline` —
+    `past-case` is forbidden on consultations (past-case citations are
+    authz evidence and live in `authorization_resolutions[]`).
+    """
+    errors: list[str] = []
+    for lead in merged.get("gather", []) or []:
+        if not isinstance(lead, dict):
+            continue
+        lid = lead.get("id", "?")
+        outcome = lead.get("outcome") if isinstance(lead.get("outcome"), dict) else {}
+        for i, entry in enumerate(outcome.get("anchor_consultations") or []):
+            ctx = f"lead {lid} outcome.anchor_consultations[{i}]"
+            if not isinstance(entry, dict):
+                errors.append(f"{ctx}: entry must be a mapping")
+                continue
+            missing = [f for f in _CONSULTATION_REQUIRED_FIELDS if f not in entry]
+            if missing:
+                errors.append(
+                    f"{ctx}: missing required field(s): {sorted(missing)}"
+                )
+            grounding = entry.get("grounding_kind")
+            if grounding is not None and grounding not in _CONSULTATION_GROUNDING_KINDS:
+                errors.append(
+                    f"{ctx}: grounding_kind {grounding!r} not in "
+                    f"{sorted(_CONSULTATION_GROUNDING_KINDS)} — anchor_consultations "
+                    f"forbid 'past-case' (past-case citations are authz evidence "
+                    f"and belong in authorization_resolutions[])"
+                )
     return errors

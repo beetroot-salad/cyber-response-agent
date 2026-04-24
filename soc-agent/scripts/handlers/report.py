@@ -244,8 +244,7 @@ def _resolve_matched_archetype(
     if not (analyze_payload and analyze_payload.get("disposition")):
         return None, None
 
-    raw_disposition = analyze_payload.get("disposition")
-    disposition = "inconclusive" if raw_disposition == "escalated" else raw_disposition
+    disposition = analyze_payload.get("disposition")
     confidence = analyze_payload.get("confidence") or "low"
     surviving_hypotheses = analyze_payload.get("surviving_hypotheses") or []
 
@@ -260,7 +259,7 @@ def _resolve_matched_archetype(
         mechanism_summary=_derive_mechanism_summary(
             surviving_hypotheses, analyze_payload,
         ),
-        legitimacy_verdicts=_derive_legitimacy_verdicts(gather),
+        authorization_verdicts=_derive_authorization_verdicts(gather),
         trust_anchors_confirmed=[
             (a.get("anchor") or "") for a in trust_anchors
             if a.get("result") == "confirmed"
@@ -539,45 +538,101 @@ def _load_required_anchors(archetype_dir: Path) -> list[str]:
     return [str(r) for r in required if r]
 
 
-def _derive_trust_anchors(gather: list[dict]) -> list[dict]:
-    """Extract trust_anchors_consulted records from the invlang gather block.
+def _iter_lead_authz_resolutions(outcome: dict) -> list[dict]:
+    """Yield every authorization_resolutions[] entry on one lead outcome.
 
-    Each gather lead whose `outcome.trust_anchor_result` is set becomes one
-    `{anchor, kind, result, citation}` entry. Citation is the lead's
-    observation when the outer SCREEN payload provides it; we synthesize a
-    short description otherwise.
+    v2.11 embeds authz resolutions on the edge:
+      (a) inline on new edges under
+          `outcome.observations.edges[].authorization_resolutions[]`;
+      (b) on already-confirmed edges via attribute_updates —
+          `outcome.attribute_updates[].updates.authorization_resolutions[]`.
     """
     out: list[dict] = []
-    for lead in gather:
-        outcome = (lead or {}).get("outcome") or {}
-        tar = outcome.get("trust_anchor_result")
-        if not tar:
+    obs = outcome.get("observations") if isinstance(outcome.get("observations"), dict) else {}
+    for edge in (obs.get("edges") or []):
+        if not isinstance(edge, dict):
             continue
-        out.append({
-            "anchor": tar.get("anchor_id") or lead.get("name"),
-            "kind": tar.get("kind") or "org-authority",
-            "result": tar.get("result") or "unavailable",
-            "citation": (
-                f"{lead.get('name')}: verdict={tar.get('verdict','?')}, "
-                f"as_of={tar.get('as_of','?')}"
-            ),
-        })
+        for entry in edge.get("authorization_resolutions") or []:
+            if isinstance(entry, dict):
+                out.append(entry)
+    for upd in outcome.get("attribute_updates") or []:
+        if not isinstance(upd, dict):
+            continue
+        updates = upd.get("updates") if isinstance(upd.get("updates"), dict) else {}
+        for entry in updates.get("authorization_resolutions") or []:
+            if isinstance(entry, dict):
+                out.append(entry)
     return out
 
 
-def _derive_legitimacy_verdicts(gather: list[dict]) -> list[dict]:
-    """Pull `legitimacy_resolutions[]` entries from every gather outcome.
+def _derive_trust_anchors(gather: list[dict]) -> list[dict]:
+    """Extract trust_anchors_consulted records from the invlang gather block.
 
-    Each entry becomes `{contract, result}` — the shape archetype-match expects
-    in its `legitimacy_verdicts` input.
+    v2.11 sources two surfaces:
+    - `outcome.anchor_consultations[]` — baseline / registry / reference
+      lookups (non-authz). `grounding_kind` → `kind`, `result` → `result`.
+    - edge-inline `outcome.observations.edges[].authorization_resolutions[]`
+      and `outcome.attribute_updates[].updates.authorization_resolutions[]` —
+      authz-fulfilling verdicts. The authz verdict vocabulary is mapped onto
+      the consultation-result vocabulary used by the report frontmatter:
+      `authorized` → `confirmed`, `unauthorized` → `refuted`,
+      `indeterminate` → `partial`.
+
+    Both shapes collapse to the flat frontmatter record
+    `{anchor, kind, result, citation}`.
     """
     out: list[dict] = []
     for lead in gather:
         outcome = (lead or {}).get("outcome") or {}
-        resolutions = outcome.get("legitimacy_resolutions") or []
-        for r in resolutions:
-            contract = r.get("contract")
-            result = r.get("result")
+
+        # Non-authz consultations (baselines, registries, reference lookups).
+        for cons in outcome.get("anchor_consultations") or []:
+            if not isinstance(cons, dict):
+                continue
+            out.append({
+                "anchor": cons.get("anchor_id") or lead.get("name"),
+                "kind": cons.get("grounding_kind") or "org-authority",
+                "result": cons.get("result") or "no-data",
+                "citation": (
+                    f"{lead.get('name')}: result={cons.get('result','?')}, "
+                    f"as_of={cons.get('as_of','?')}"
+                ),
+            })
+
+        # Authorization resolutions (edge-inline or via attribute_updates).
+        for entry in _iter_lead_authz_resolutions(outcome):
+            verdict = entry.get("verdict")
+            result = {
+                "authorized": "confirmed",
+                "unauthorized": "refuted",
+                "indeterminate": "partial",
+            }.get(verdict, "no-data")
+            out.append({
+                "anchor": entry.get("anchor_id") or lead.get("name"),
+                "kind": entry.get("grounding_kind") or "org-authority",
+                "result": result,
+                "citation": (
+                    f"{lead.get('name')}: verdict={verdict or '?'}, "
+                    f"as_of={entry.get('as_of','?')}"
+                ),
+            })
+    return out
+
+
+def _derive_authorization_verdicts(gather: list[dict]) -> list[dict]:
+    """Pull `authorization_resolutions[]` entries from every gather outcome.
+
+    Each entry becomes `{contract, result}` — the shape archetype-match
+    expects in its `authorization_verdicts` input. `contract` is the
+    `fulfills_contract` back-reference (e.g. `h-001.ac1`); `result` is
+    the `verdict`.
+    """
+    out: list[dict] = []
+    for lead in gather:
+        outcome = (lead or {}).get("outcome") or {}
+        for entry in _iter_lead_authz_resolutions(outcome):
+            contract = entry.get("fulfills_contract")
+            result = entry.get("verdict")
             if contract and result:
                 out.append({"contract": contract, "result": result})
     return out
@@ -619,7 +674,7 @@ def _run_archetype_match(
     disposition: str,
     confidence: str,
     mechanism_summary: str,
-    legitimacy_verdicts: list[dict],
+    authorization_verdicts: list[dict],
     trust_anchors_confirmed: list[str],
 ) -> tuple[str | None, str, bool]:
     """Dispatch archetype-match and parse its terminal YAML.
@@ -651,14 +706,14 @@ def _run_archetype_match(
         f"disposition={disposition}",
         f"confidence={confidence}",
         f"mechanism_summary={mechanism_summary}",
-        "legitimacy_verdicts:",
+        "authorization_verdicts:",
     ]
-    if legitimacy_verdicts:
-        for v in legitimacy_verdicts:
+    if authorization_verdicts:
+        for v in authorization_verdicts:
             prompt_lines.append(f"  - contract: {v['contract']}")
             prompt_lines.append(f"    result: {v['result']}")
     else:
-        prompt_lines[-1] = "legitimacy_verdicts: []"
+        prompt_lines[-1] = "authorization_verdicts: []"
     if trust_anchors_confirmed:
         prompt_lines.append("trust_anchors_confirmed:")
         for a in trust_anchors_confirmed:
@@ -812,7 +867,8 @@ def _extract_gather_blocks(investigation_md: str) -> list[dict]:
 
     Preference order:
       1. Invlang `gather: [...]` YAML fences (structured form — carries
-         full outcome shape including trust_anchor_result, resolutions,
+         full outcome shape including anchor_consultations,
+         authorization_resolutions, resolutions,
          attribute_updates).
       2. Prose-form `## GATHER (loop N)` sections with `**Lead:**` /
          `**Status:**` bold-prefix lines (what ANALYZE currently produces).
@@ -956,11 +1012,12 @@ def _compose_trace_analyze(
     for entry in gather:
         name = entry.get("name") or entry.get("id") or "?"
         outcome_obj = entry.get("outcome") or {}
-        tar = outcome_obj.get("trust_anchor_result")
-        if isinstance(tar, dict) and tar.get("verdict"):
-            summary = str(tar.get("verdict"))
-        elif isinstance(tar, dict) and tar.get("result"):
-            summary = str(tar.get("result"))
+        authz_entries = _iter_lead_authz_resolutions(outcome_obj)
+        cons_entries = outcome_obj.get("anchor_consultations") or []
+        if authz_entries and authz_entries[0].get("verdict"):
+            summary = str(authz_entries[0]["verdict"])
+        elif cons_entries and isinstance(cons_entries[0], dict) and cons_entries[0].get("result"):
+            summary = str(cons_entries[0]["result"])
         elif outcome_obj.get("resolutions"):
             res = outcome_obj["resolutions"]
             if isinstance(res, list) and res:
@@ -992,10 +1049,12 @@ def _derive_termination_category(
     """Decide `conclude.termination.category` from the available signals.
 
     Order of precedence:
-      1. `trust-root` — a gather lead carries `legitimacy_resolutions[]` with
-         at least one entry where `verdict: authorized`, OR a
-         `trust_anchor_result` with `verdict: authorized`. An authority
-         closed the question.
+      1. `trust-root` — a gather lead carries an edge-level
+         `authorization_resolutions[]` entry with `verdict: authorized`
+         (inline on a new edge or via `attribute_updates`), OR
+         `outcome.trust_root_reached` names a confirmed vertex, OR an
+         `anchor_consultations[]` entry resolved `confirmed` with full
+         org-authority. An authority closed the question.
       2. `adversarial-refuted` — the final ANALYZE text grades an
          adversarial-named hypothesis (`?adversary-*`, `?post-exploit-*`,
          or the word "adversarial") at `--`.
@@ -1011,14 +1070,20 @@ def _derive_termination_category(
     """
     for entry in gather:
         outcome = entry.get("outcome") or {}
-        tar = outcome.get("trust_anchor_result")
-        if isinstance(tar, dict) and tar.get("verdict") == "authorized":
+        if outcome.get("trust_root_reached"):
             return "trust-root"
-        resolutions = outcome.get("legitimacy_resolutions")
-        if isinstance(resolutions, list):
-            for r in resolutions:
-                if isinstance(r, dict) and r.get("verdict") == "authorized":
-                    return "trust-root"
+        for authz in _iter_lead_authz_resolutions(outcome):
+            if authz.get("verdict") == "authorized":
+                return "trust-root"
+        for cons in outcome.get("anchor_consultations") or []:
+            if not isinstance(cons, dict):
+                continue
+            if (
+                cons.get("result") == "confirmed"
+                and cons.get("authority_for_question") == "full"
+                and cons.get("grounding_kind") == "org-authority"
+            ):
+                return "trust-root"
 
     lower = final_analyze_text.lower()
     # Adversarial-refuted: look for ?adversary-* / ?post-exploit-* /
@@ -1095,23 +1160,36 @@ def _compose_key_evidence_md(gather: list[dict]) -> str:
     """Render `## Key Evidence` from invlang gather outcomes.
 
     One bullet per lead. Preference order for what to cite:
-      1. trust_anchor_result — anchor verdict + as_of.
-      2. attribute_updates — first updates entry compactly.
-      3. resolutions — count + leads they touch.
-      4. fallback — lead name + status string.
+      1. authorization_resolutions[] — anchor verdict + as_of.
+      2. anchor_consultations[] — consultation result + as_of.
+      3. attribute_updates — first updates entry compactly.
+      4. resolutions — count + leads they touch.
+      5. fallback — lead name + status string.
     """
     lines: list[str] = []
     for entry in gather:
         name = entry.get("name") or entry.get("id") or "?"
         outcome = entry.get("outcome") or {}
         citation: str
-        tar = outcome.get("trust_anchor_result")
-        if isinstance(tar, dict) and (tar.get("verdict") or tar.get("result")):
-            verdict = tar.get("verdict") or tar.get("result")
-            anchor = tar.get("anchor_id") or name
-            as_of = tar.get("as_of")
+        authz_entries = _iter_lead_authz_resolutions(outcome)
+        cons_entries = [
+            c for c in (outcome.get("anchor_consultations") or [])
+            if isinstance(c, dict)
+        ]
+        if authz_entries and authz_entries[0].get("verdict"):
+            first = authz_entries[0]
+            verdict = first.get("verdict")
+            anchor = first.get("anchor_id") or name
+            as_of = first.get("as_of")
             suffix = f" (as of {as_of})" if as_of else ""
             citation = f"anchor `{anchor}` → `{verdict}`{suffix}"
+        elif cons_entries and cons_entries[0].get("result"):
+            first = cons_entries[0]
+            result = first.get("result")
+            anchor = first.get("anchor_id") or name
+            as_of = first.get("as_of")
+            suffix = f" (as of {as_of})" if as_of else ""
+            citation = f"anchor `{anchor}` → `{result}`{suffix}"
         elif outcome.get("attribute_updates"):
             updates = outcome["attribute_updates"]
             if isinstance(updates, list) and updates:
@@ -1331,30 +1409,15 @@ def _compose_analyze_routed(
     raises `_MechanicalFallback` so handle() falls through to the
     full-context subagent.
     """
-    raw_disposition = analyze_payload.get("disposition")
+    disposition = analyze_payload.get("disposition")
     confidence = analyze_payload.get("confidence")
     surviving_hypotheses = analyze_payload.get("surviving_hypotheses") or []
 
-    if not raw_disposition or not confidence:
+    if not disposition or not confidence:
         raise _MechanicalFallback(
             f"ANALYZE payload missing disposition/confidence: "
             f"{list(analyze_payload.keys())}"
         )
-
-    # ANALYZE's routing schema (agents/analyze.md) uses
-    # disposition ∈ {benign, false_positive, true_positive, escalated}
-    # but the report frontmatter schema (schemas/enums.py VALID_DISPOSITIONS)
-    # uses {benign, false_positive, true_positive, inconclusive}. When ANALYZE
-    # routes `escalated`, that maps to report-frontmatter
-    # `disposition: inconclusive` + `status: escalated`. The report
-    # subagent does this remapping implicitly per agents/report.md; the
-    # mechanical path does it explicitly.
-    force_escalated_from_disposition = False
-    if raw_disposition == "escalated":
-        disposition = "inconclusive"
-        force_escalated_from_disposition = True
-    else:
-        disposition = raw_disposition
 
     investigation_md = load_investigation_md(ctx.run_dir)
     gather = _extract_gather_blocks(investigation_md)
@@ -1379,7 +1442,7 @@ def _compose_analyze_routed(
     # (b) a matched_ticket_id pointing at an on-disk precedent.
     matched_ticket_id = analyze_payload.get("matched_ticket_id")
     status = "escalated"
-    if disposition in ("benign", "false_positive") and matched_archetype:
+    if disposition == "benign" and matched_archetype:
         archetype_dir = (
             SOC_AGENT_ROOT
             / "knowledge" / "signatures" / ctx.signature_id
@@ -1407,11 +1470,10 @@ def _compose_analyze_routed(
         # matched_archetype preserved for the report body. Tier-1 will
         # catch this if it's incompatible with status=resolved.
 
-    # If the ANALYZE disposition is adversarial (true_positive / inconclusive
-    # with adversarial termination) we always escalate — matches the
-    # legitimacy-gated-disposition rule in invlang v2.9. Also applies when
-    # ANALYZE explicitly routed `disposition: escalated`.
-    if disposition in ("true_positive", "inconclusive") or force_escalated_from_disposition:
+    # Non-benign dispositions (true_positive, unclear) always escalate —
+    # matches the authorization-gated-disposition rule (invlang v2.11, rule
+    # #21): only `benign` can resolve, and only with archetype grounding.
+    if disposition != "benign":
         status = "escalated"
 
     # Dispatch narrative subagent (BEFORE writing anything — on failure we

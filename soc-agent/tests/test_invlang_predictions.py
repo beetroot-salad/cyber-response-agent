@@ -86,19 +86,46 @@ class TestCheckPredictionCoverage:
 # ---------------------------------------------------------------------------
 
 
-def _partial_authority_fixture(after: str, supporting_edges: list[str]) -> dict:
+def _partial_consultation_fixture(after: str, supporting_edges: list[str]) -> dict:
     return {
         "gather": [{
             "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
             "query_details": {},
             "outcome": {
-                "trust_anchor_result": {
+                "anchor_consultations": [{
                     "anchor_id": "approved-sources",
-                    "kind": "org-authority",
+                    "anchor_kind": "approved-monitoring-sources",
+                    "grounding_kind": "org-authority",
                     "result": "confirmed",
                     "as_of": "2026-04-17T00:00:00Z",
                     "authority_for_question": "partial",
-                },
+                }],
+                "observations": {"vertices": [], "edges": []},
+            },
+            "resolutions": [{
+                "hypothesis": "h-001", "after": after,
+                "matched_prediction_ids": [], "matched_refutation_ids": [],
+                "supporting_edges": supporting_edges,
+            }],
+        }],
+    }
+
+
+def _partial_impact_resolution_fixture(after: str, supporting_edges: list[str]) -> dict:
+    return {
+        "gather": [{
+            "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+            "query_details": {},
+            "outcome": {
+                "impact_resolutions": [{
+                    "prediction_ref": "l-001.ip1",
+                    "dimension": "confidentiality",
+                    "verdict": "exceeds",
+                    "grounding_kind": "telemetry-baseline",
+                    "authority_for_question": "partial",
+                    "as_of": "2026-04-17T00:00:00Z",
+                    "reasoning": "...",
+                }],
                 "observations": {"vertices": [], "edges": []},
             },
             "resolutions": [{
@@ -111,29 +138,94 @@ def _partial_authority_fixture(after: str, supporting_edges: list[str]) -> dict:
 
 
 class TestCheckPartialAuthorityCap:
-    def test_plus_with_partial_anchor_passes(self):
-        merged = _partial_authority_fixture("+", [])
+    def test_plus_with_partial_consultation_passes(self):
+        merged = _partial_consultation_fixture("+", [])
         assert _check_partial_authority_cap(merged) == []
 
-    def test_pp_with_partial_anchor_only_fails(self):
-        merged = _partial_authority_fixture("++", [])
+    def test_pp_with_partial_consultation_only_fails(self):
+        merged = _partial_consultation_fixture("++", [])
         errors = _check_partial_authority_cap(merged)
         assert errors
         assert "partial" in errors[0]
         assert "++" in errors[0]
 
-    def test_mm_with_partial_anchor_only_fails(self):
-        merged = _partial_authority_fixture("--", [])
+    def test_mm_with_partial_consultation_only_fails(self):
+        merged = _partial_consultation_fixture("--", [])
         errors = _check_partial_authority_cap(merged)
         assert errors
 
-    def test_pp_with_partial_anchor_and_supporting_edge_passes(self):
-        merged = _partial_authority_fixture("++", ["e-001"])
+    def test_pp_with_partial_consultation_and_supporting_edge_passes(self):
+        merged = _partial_consultation_fixture("++", ["e-001"])
         assert _check_partial_authority_cap(merged) == []
 
-    def test_full_authority_anchor_is_not_capped(self):
-        merged = _partial_authority_fixture("++", [])
-        merged["gather"][0]["outcome"]["trust_anchor_result"]["authority_for_question"] = "full"
+    def test_full_authority_consultation_is_not_capped(self):
+        merged = _partial_consultation_fixture("++", [])
+        merged["gather"][0]["outcome"]["anchor_consultations"][0]["authority_for_question"] = "full"
+        assert _check_partial_authority_cap(merged) == []
+
+    def test_pp_with_partial_impact_resolution_only_fails(self):
+        merged = _partial_impact_resolution_fixture("++", [])
+        errors = _check_partial_authority_cap(merged)
+        assert errors
+        assert "partial" in errors[0]
+
+    def test_pp_with_partial_impact_resolution_and_supporting_edge_passes(self):
+        merged = _partial_impact_resolution_fixture("++", ["e-001"])
+        assert _check_partial_authority_cap(merged) == []
+
+    def test_pp_with_partial_authz_resolution_fails(self):
+        merged = {
+            "gather": [{
+                "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+                "query_details": {},
+                "outcome": {
+                    "observations": {
+                        "vertices": [],
+                        "edges": [{
+                            "id": "e-001",
+                            "relation": "classified_as",
+                            "source_vertex": "v-001",
+                            "target_vertex": "v-002",
+                            "authority": {"kind": "authoritative-source"},
+                            "authorization_resolutions": [{
+                                "verdict": "authorized",
+                                "authority_for_question": "partial",
+                                "anchor_kind": "iam",
+                                "anchor_id": "x",
+                                "grounding_kind": "org-authority",
+                                "as_of": "2026-04-17",
+                                "resolved_by_lead": "l-001",
+                                "fulfills_contract": "h-001.ac1",
+                            }],
+                        }],
+                    },
+                },
+                "resolutions": [{
+                    "hypothesis": "h-001", "after": "++",
+                    "matched_prediction_ids": [], "matched_refutation_ids": [],
+                    "supporting_edges": [],
+                }],
+            }],
+        }
+        errors = _check_partial_authority_cap(merged)
+        assert errors
+
+    def test_mixed_partial_and_full_on_same_lead_passes(self):
+        # Rule #14: cap applies only when every grounding entry on the lead
+        # is partial. A co-located full-authority resolution is load-bearing
+        # on its own and lifts the cap on `++`/`--`.
+        merged = _partial_consultation_fixture("++", [])
+        # Add a full-authority impact_resolution alongside the partial
+        # anchor_consultation.
+        merged["gather"][0]["outcome"]["impact_resolutions"] = [{
+            "prediction_ref": "l-001.ip1",
+            "dimension": "confidentiality",
+            "verdict": "within",
+            "grounding_kind": "telemetry-baseline",
+            "authority_for_question": "full",
+            "as_of": "2026-04-17T00:00:00Z",
+            "reasoning": "observed value well within baseline",
+        }]
         assert _check_partial_authority_cap(merged) == []
 
 

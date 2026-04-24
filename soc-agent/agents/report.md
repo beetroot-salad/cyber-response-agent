@@ -19,7 +19,7 @@ You do not run leads, re-grade hypotheses, query SIEM, or second-guess the ANALY
 - `identifier` — the alert's `ticket_id` (e.g. `1776663722.6369973`); goes verbatim into the report frontmatter's `ticket_id` field
 - `routing_source` — one of `analyze` | `screen` | `forced_exhaustion`
 - `matched_archetype` — already-resolved archetype label (or `null`). On `analyze` routing, this comes from the `archetype-match` subagent run by the handler; on `screen` routing, it's the archetype from the SCREEN match; on `forced_exhaustion`, always `null`. Use verbatim — do not override based on the investigation log.
-- `forced_exhaustion` (optional, `true` when set) — orchestrator hit `MAX_LOOPS` without ANALYZE routing to REPORT. Emit `status: escalated`, `termination.category: exhaustion-escalation`, `disposition: inconclusive` regardless of what investigation.md's last block says (`matched_archetype` is already `null` from the caller).
+- `forced_exhaustion` (optional, `true` when set) — orchestrator hit `MAX_LOOPS` without ANALYZE routing to REPORT. Emit `status: escalated`, `termination.category: exhaustion-escalation`, `disposition: unclear` regardless of what investigation.md's last block says (`matched_archetype` is already `null` from the caller).
 
 If any substitution is missing, stop and emit a single terminal YAML block with `status: error` naming the missing value. Do not guess. Do not `Read` `alert.json` to recover a missing `identifier`.
 
@@ -43,19 +43,19 @@ If required context is missing from these blocks, emit a terminal
 ## Task
 
 1. **Derive the routing.** `matched_archetype` comes verbatim from the caller input in every case — do not re-derive it.
-   - **If `forced_exhaustion=true`:** set `disposition=inconclusive`, `confidence=low`, `status=escalated`, `termination.category=exhaustion-escalation`. The rationale is "MAX_LOOPS reached without ANALYZE routing to REPORT." Skip archetype reference reads. The caller passes `matched_archetype=null`.
+   - **If `forced_exhaustion=true`:** set `disposition=unclear`, `confidence=low`, `status=escalated`, `termination.category=exhaustion-escalation`. The rationale is "MAX_LOOPS reached without ANALYZE routing to REPORT." Skip archetype reference reads. The caller passes `matched_archetype=null`.
    - **If `routing_source=analyze`:** extract `disposition`, `confidence` from the last ANALYZE block (it does **not** carry `matched_archetype` — use the caller input). Derive `status` per the Grounding discipline below.
    - **If `routing_source=screen`:** extract `matched_pattern`, `matched_ticket_id` from the SCREEN subagent result in investigation.md. `disposition`, `confidence` follow from the screen pattern's declared outcome. `matched_archetype` is the caller input (which matches what SCREEN emitted).
 
 2. **Select `matched_ticket_id`.** If any `<precedent>` on the matched archetype has a `disposition`, `confidence`, and shape matching the current investigation, cite it as `matched_ticket_id`. Prefer the most recent precedent whose (disposition, matched_archetype) tuple matches. For SCREEN-resolved cases, prefer the `matched_ticket_id` named by the screen subagent; verify it appears in the `<precedents>` of the matched archetype — if not, escalate and emit `matched_ticket_id: null`.
 
 3. **Derive `termination.category`** from the investigation's shape:
-   - `trust-root` — a terminal authority (approved-monitoring-sources, change-management ticket, legitimacy contract resolved `authorized`) closed the question
+   - `trust-root` — a terminal authority (approved-monitoring-sources, change-management ticket, authorization contract resolved `authorized`) closed the question
    - `adversarial-refuted` — the adversarial mechanism hypothesis was graded `--` with a named matched refutation
    - `severity-ceiling` — investigation escalated because the signature's structural severity forces escalation regardless of mechanism (e.g., 100002 co-fire composition rule)
    - `exhaustion-escalation` — escalated because further leads weren't runnable (telemetry ceiling, anchor unavailable, deny-list blocked verification, or forced-exhaustion)
 
-4. **Compose `trust_anchors_consulted`** from `trust_anchor_result` records in `gather[]` outcomes. Format: `{anchor, kind, result, citation}`. Citation is a short human-readable description grounded verbatim-matchable against the investigation narrative. No anchors consulted → `trust_anchors_consulted: []`.
+4. **Compose `trust_anchors_consulted`** from the union of `anchor_consultations[]` entries on each lead outcome (baseline / registry / reference lookups) and `authorization_resolutions[]` entries on edges (contract-fulfilling verdicts). Format: `{anchor, kind, result, citation}` — map `anchor_kind` / `grounding_kind` into `kind`, map `verdict` (authz resolutions) or `result` (consultations) into `result`. Citation is a short human-readable description grounded verbatim-matchable against the investigation narrative. No anchors consulted → `trust_anchors_consulted: []`.
 
 5. **Build the trace line** from gather leads: `lead1(outcome) → lead2(outcome) → disposition:{hypothesis-or-category}`. For SCREEN-resolved: `screen({pattern}, [{lead-list}]) → disposition:{archetype}`.
 
@@ -87,17 +87,30 @@ Once you have composed the content:
 
 2. **Write `{run_dir}/report.md`** with the full report body (frontmatter + sections). A PostToolUse gate (`validate_report.py`) fires on this Write.
 
-The `conclude:` YAML shape:
+The `conclude:` YAML shape (v2.11 two-axis disposition — see schema.md §Conclude):
 ```yaml
 conclude:
   termination:
     category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
     rationale: {one-sentence reason the investigation halted}
-  disposition: benign | false_positive | true_positive | inconclusive
+  disposition: benign | true_positive | unclear                                 # authz/mechanism axis
+  impact_verdict: none | within | exceeds | indeterminate                      # impact axis
+  impact_severity: null | low | moderate | high                                # present when impact_verdict ∈ {exceeds, indeterminate}
   confidence: high | medium | low
   matched_archetype: {name} | null
+  surviving_hypotheses: [h-001, ...]
+  deferred_authorizations: []        # required when any authorization_contract is unfulfilled (rule #26)
+  deferred_impact_predictions: []    # required when any impact_predictions entry is unfulfilled (rule #31)
   summary: {1-2 sentence summary}
 ```
+
+**Deriving the impact axis.** `impact_verdict` rolls up across all `impact_resolutions[]` in the companion's `gather[]` outcomes:
+- no `impact_predictions[]` declared anywhere → `impact_verdict: none`, `impact_severity: null`
+- any resolution `verdict: exceeds` → `impact_verdict: exceeds`
+- else any resolution `verdict: indeterminate` → `impact_verdict: indeterminate`
+- else all `within` → `impact_verdict: within`, `impact_severity: null`
+
+`impact_severity` follows the highest severity observed across `exceeds` / `indeterminate` resolutions, **capped at `moderate`** when the fulfilling resolution has `authority_for_question: partial` (schema rule #14). For unfulfilled `impact_predictions[]`, list each in `deferred_impact_predictions[]` with rationale instead of emitting a fulfilling resolution.
 
 Report frontmatter shape:
 ```yaml
@@ -105,7 +118,7 @@ Report frontmatter shape:
 ticket_id: "{identifier — verbatim from the caller's prompt}"
 signature_id: {signature_id}
 status: {resolved|escalated}
-disposition: {benign|false_positive|true_positive|inconclusive}
+disposition: {benign|true_positive|unclear}
 confidence: {high|medium|low}
 matched_archetype: {archetype-name|null}
 matched_ticket_id: {SEC-YYYY-NNN|null}
@@ -150,7 +163,7 @@ After all writes succeed (or a gate_failed terminates you), emit **exactly one**
 ```yaml
 status: written
 report_path: {run_dir}/report.md
-disposition: {benign|false_positive|true_positive|inconclusive}
+disposition: {benign|true_positive|unclear}
 confidence: {high|medium|low}
 matched_archetype: {name|null}
 status_frontmatter: {resolved|escalated}

@@ -12,30 +12,25 @@ Passes immediately if:
 Rule surface is split across companion modules for maintainability:
 - `invlang_common.py` — shared helpers, constants, dataclasses
 - `invlang_checks_structural.py` — structural rules (lead fields, IDs, edge
-  authority, refutation IDs, trust anchor, screen scope, lead predictions)
+  authority, refutation IDs, screen scope, lead predictions, rule #11
+  provenance for authz resolutions and anchor consultations)
 - `invlang_checks_predictions.py` — prediction discipline (coverage, partial
-  authority cap, prediction lifecycle, rollup parent weight)
-- `invlang_checks_legitimacy.py` — legitimacy-as-edge-attribute rules
-  (contract, resolution back-refs, gated disposition, asks/verdict, supersede
-  chain, target shape, consultation requirement)
+  authority cap across authz/consultation/impact surfaces, prediction
+  lifecycle, rollup parent weight)
+- `invlang_checks_authorization.py` — authorization-as-edge-attribute
+  rules (contract edge_ref, resolution back-refs, gated disposition,
+  attribute_updates target shape)
+- `invlang_checks_impact.py` — lead-level impact_predictions /
+  impact_resolutions + CONCLUDE two-axis (impact_verdict /
+  impact_severity / deferred_impact_predictions)
 - `invlang_checks_hypothesis.py` — hypothesis-discipline rules (fork
-  distinctness, persistence, prediction-id scope, compound claims, evaluation-
-  prefixed classifications, leanness, subject scope, refutation link)
+  distinctness, persistence, prediction-id scope, compound claims,
+  evaluation-prefixed classifications, leanness, subject scope, refutation
+  link, integrity-peer discipline)
 
 This file orchestrates them and owns the block-level append-only check plus
 the warning pipeline (route compliance, dedup, silent empty, tool audit
 cross-ref).
-
-Warnings (non-blocking, printed to stderr with exit 0):
-- Route compliance: when a lead with `predictions` is followed by another lead
-  in the same companion, the follower's `name` should match at least one
-  `advance_to`; terminal leads with no follower should have `REPORT` in at
-  least one `advance_to`.
-- Lead dedup: two leads share the same template + query + substitutions.
-- Silent empty result: a discriminating lead returns no observations, no
-  trust_anchor_result, and no failure_reason.
-- Tool-audit cross-ref: a lead's query has no matching entry in tool_audit.jsonl
-  for this session (possible fabrication or subagent dispatch).
 
 Exit codes:
     0 - Passed (or warnings only)
@@ -62,6 +57,8 @@ from hooks.scripts.invlang_common import (
     _merge_blocks,
 )
 from hooks.scripts.invlang_checks_structural import (
+    _check_anchor_consultation_provenance,
+    _check_authorization_resolution_provenance,
     _check_edge_authority,
     _check_id_formats,
     _check_id_references,
@@ -69,7 +66,6 @@ from hooks.scripts.invlang_checks_structural import (
     _check_lead_required_fields,
     _check_refutation_ids,
     _check_screen_result_scope,
-    _check_trust_anchor_completeness,
 )
 from hooks.scripts.invlang_checks_predictions import (
     _check_partial_authority_cap,
@@ -77,22 +73,24 @@ from hooks.scripts.invlang_checks_predictions import (
     _check_prediction_lifecycle,
     _check_rollup_parent_weight,
 )
-from hooks.scripts.invlang_checks_legitimacy import (
-    _check_asks_verdict_shape,
+from hooks.scripts.invlang_checks_authorization import (
     _check_attribute_updates_target_shape,
-    _check_kind_asks_coherence,
-    _check_legitimacy_contract_edge_ref,
-    _check_legitimacy_gated_disposition,
-    _check_legitimacy_resolution_backrefs,
-    _check_legitimacy_resolution_target_shape,
-    _check_legitimacy_supersede_chain,
-    _check_resolution_requires_authorization_asks,
+    _check_authorization_contract_edge_ref,
+    _check_authorization_gated_disposition,
+    _check_authorization_resolution_backrefs,
+)
+from hooks.scripts.invlang_checks_impact import (
+    _check_conclude_two_axis,
+    _check_impact_closure,
+    _check_impact_prediction_structure,
+    _check_impact_resolution_backrefs,
 )
 from hooks.scripts.invlang_checks_hypothesis import (
     _check_classification_evaluation_prefix,
     _check_compound_prediction_claim,
     _check_hypothesis_fork_distinctness,
     _check_hypothesis_persistence,
+    _check_integrity_peer_discipline,
     _check_prediction_id_hypothesis_scope,
     _check_prediction_subject_scope,
     _check_predictions_leanness,
@@ -100,7 +98,7 @@ from hooks.scripts.invlang_checks_hypothesis import (
 )
 
 # Re-exports required by consumers importing from this module path
-# (validate_report_precheck.py, scripts/handlers/*.py, tests/test_invlang_validate.py).
+# (validate_report_precheck.py, scripts/handlers/*.py, tests/*.py).
 __all__ = [
     "YAML_BLOCK_RE",
     "COMPANION_TOP_LEVEL",
@@ -112,7 +110,6 @@ __all__ = [
     "_check_id_references",
     "_check_edge_authority",
     "_check_refutation_ids",
-    "_check_trust_anchor_completeness",
     "_check_screen_result_scope",
     "_check_lead_predictions",
     "_check_route_compliance",
@@ -120,15 +117,17 @@ __all__ = [
     "_check_partial_authority_cap",
     "_check_prediction_lifecycle",
     "_check_rollup_parent_weight",
-    "_check_legitimacy_contract_edge_ref",
-    "_check_legitimacy_resolution_backrefs",
-    "_check_legitimacy_gated_disposition",
+    "_check_authorization_contract_edge_ref",
+    "_check_authorization_resolution_backrefs",
+    "_check_authorization_gated_disposition",
     "_check_attribute_updates_target_shape",
-    "_check_asks_verdict_shape",
-    "_check_kind_asks_coherence",
-    "_check_legitimacy_resolution_target_shape",
-    "_check_legitimacy_supersede_chain",
-    "_check_resolution_requires_authorization_asks",
+    "_check_authorization_resolution_provenance",
+    "_check_anchor_consultation_provenance",
+    "_check_impact_prediction_structure",
+    "_check_impact_resolution_backrefs",
+    "_check_impact_closure",
+    "_check_conclude_two_axis",
+    "_check_integrity_peer_discipline",
     "_check_hypothesis_fork_distinctness",
     "_check_hypothesis_persistence",
     "_check_prediction_id_hypothesis_scope",
@@ -174,10 +173,6 @@ def _check_route_compliance(merged: dict[str, Any]) -> list[str]:
         appear in at least one `advance_to`.
       - if there's no following lead (this is the last lead in `gather`),
         `REPORT` should appear in at least one `advance_to`.
-
-    Returns a list of warning strings (empty if all compliant). Warnings do not
-    block the write; route mismatches are legitimate signals (the fork space
-    was incomplete) rather than structural errors.
     """
     warnings: list[str] = []
     leads = merged.get("gather", []) or []
@@ -202,7 +197,6 @@ def _check_route_compliance(merged: dict[str, Any]) -> list[str]:
         lid = lead.get("id", "?")
         next_lead = leads[idx + 1] if idx + 1 < len(leads) else None
         if next_lead is None:
-            # Terminal lead in this companion — REPORT should be a declared route.
             if "REPORT" not in advance_tos:
                 warnings.append(
                     f"lead {lid}: terminal lead with predictions but no advance_to names "
@@ -224,14 +218,7 @@ def _check_route_compliance(merged: dict[str, Any]) -> list[str]:
 
 
 def _check_lead_dedup_warnings(merged: dict[str, Any]) -> list[str]:
-    """Warn when two leads share the same template + query + substitutions.
-
-    Re-issuing an identical query across loops signals the investigation
-    is stalling — no new information is being collected. The warning is
-    non-blocking because a re-issue can be legitimate (re-running after
-    a transient failure, confirming a result on a fresh time window),
-    but it's worth surfacing so the agent notices.
-    """
+    """Warn when two leads share the same template + query + substitutions."""
     warnings: list[str] = []
     seen: dict[tuple[str, str, tuple[tuple[str, Any], ...]], str] = {}
     for lead in merged.get("gather", []) or []:
@@ -247,7 +234,6 @@ def _check_lead_dedup_warnings(merged: dict[str, Any]) -> list[str]:
             subs = {}
         if not (template or query):
             continue
-        # Hash key: template + query + sorted substitutions (JSON-comparable).
         try:
             subs_key = tuple(sorted(
                 (str(k), json.dumps(v, sort_keys=True, default=str))
@@ -272,13 +258,9 @@ def _check_lead_dedup_warnings(merged: dict[str, Any]) -> list[str]:
 def _check_silent_empty_result_warnings(merged: dict[str, Any]) -> list[str]:
     """Warn when a discriminating lead returns nothing without a positive signal.
 
-    A lead that declares `tests: [h-*, ...]` claims to discriminate
-    between hypotheses. If it returns zero observations AND has no
-    trust_anchor_result AND no failure_reason, the outcome is silently
-    empty — the agent can't tell whether the query was correct but the
-    world has nothing, or whether the query was broken. Proof-of-absence
-    should be recorded explicitly: set `trust_anchor_result.result:
-    unavailable` or `failure_reason`.
+    v2.11: The former `trust_anchor_result` surface is gone. Silent-empty
+    is now fine when the lead produced any of: observations,
+    attribute_updates, anchor_consultations, or failure_reason.
     """
     warnings: list[str] = []
     for lead in merged.get("gather", []) or []:
@@ -296,16 +278,16 @@ def _check_silent_empty_result_warnings(merged: dict[str, Any]) -> list[str]:
         attr_upd = outcome.get("attribute_updates") or []
         if verts or edges or attr_upd:
             continue
-        if outcome.get("trust_anchor_result"):
+        if outcome.get("anchor_consultations"):
             continue
         if outcome.get("failure_reason"):
             continue
         lid = lead.get("id", "?")
         warnings.append(
             f"lead {lid}: declares tests {list(tests)!r} but outcome has no "
-            f"observations, no attribute_updates, no trust_anchor_result, and "
+            f"observations, no attribute_updates, no anchor_consultations, and "
             f"no failure_reason. If the query genuinely returned nothing, "
-            f"record it explicitly via trust_anchor_result.result: unavailable "
+            f"record it explicitly via anchor_consultations (result: no-data) "
             f"or failure_reason — silent empty results are indistinguishable "
             f"from a broken query."
         )
@@ -313,26 +295,7 @@ def _check_silent_empty_result_warnings(merged: dict[str, Any]) -> list[str]:
 
 
 def _load_tool_audit_entries(run_dir: Path) -> list[dict[str, Any]] | None:
-    """Load all tool_audit.jsonl entries from the runs directory.
-
-    `tool_audit.jsonl` lives in the runs root (one global file for all
-    runs), not per-run. No session filter is applied — leads are
-    dispatched to subagents by default, and the subagent's SIEM query
-    lands in the audit log under the subagent's session_id, not the
-    main agent's. Session-based filtering would therefore false-positive
-    on every subagent-dispatched lead.
-
-    The trade-off is FP across concurrent runs of the same signature
-    (same query text appearing in some *other* run's audit entry would
-    satisfy the substring match). Query text is specific enough in
-    practice — signatures parameterize on IP / user / host — that
-    cross-run collisions are rare. The check remains WARN-level to
-    absorb whatever false-positive rate does occur.
-
-    Returns None when the audit file does not exist (audit hook not
-    running — no signal, caller skips silently). Returns an empty list
-    when the file exists but contains no parsable entries.
-    """
+    """Load all tool_audit.jsonl entries from the runs directory."""
     runs_root = run_dir.parent
     audit_path = runs_root / "tool_audit.jsonl"
     if not audit_path.exists():
@@ -368,45 +331,15 @@ def _audit_blob(entry: dict[str, Any]) -> str:
 def _check_tool_audit_cross_ref_warnings(
     merged: dict[str, Any], run_dir: Path | None
 ) -> list[str]:
-    """Warn when a lead's query_details has no corresponding tool_audit entry.
-
-    For each lead's `query_details.query`, scan the global
-    tool_audit.jsonl for any tool call whose `tool_input` (serialized)
-    contains the query as a substring. No session filter: lead queries
-    are executed by gather subagents under their own session_id, so
-    session-based matching would miss every subagent-dispatched query.
-    The trade-off is false-positive risk from concurrent runs of the
-    same signature that happen to issue the same parameterized query —
-    rare in practice because queries parameterize on IPs, users, and
-    hosts.
-
-    `tool_input` is truncated to 2000 chars by the audit hook, so the
-    check matches on a prefix of the query to avoid false negatives on
-    long queries. When no match is found, emit a warning — this is
-    the deterministic signal for fabricated leads (the companion claims
-    a query was run that no tool call evidences).
-
-    Warning-only because:
-    - The audit hook may lag or be disabled.
-    - Truncation at the 2000-char boundary can land in the middle of a
-      query prefix.
-    - Cross-run FP risk described above.
-
-    A future rollout can promote to ERROR once false-positive rate is
-    measured against the case fixtures.
-    """
+    """Warn when a lead's query_details has no corresponding tool_audit entry."""
     if run_dir is None:
         return []
     entries = _load_tool_audit_entries(run_dir)
     if entries is None:
-        # Audit hook not running — no signal available; don't warn.
         return []
     blobs = [_audit_blob(e) for e in entries]
 
-    # Match on the first 500 chars of the query to stay well under the
-    # 2000-char truncation boundary with room for JSON escaping.
     MATCH_PREFIX_LEN = 500
-    # Ignore very short queries — they're too generic to pin down.
     MIN_QUERY_LEN = 12
 
     warnings: list[str] = []
@@ -420,8 +353,6 @@ def _check_tool_audit_cross_ref_warnings(
         if not isinstance(query, str) or len(query.strip()) < MIN_QUERY_LEN:
             continue
         needle = query[:MATCH_PREFIX_LEN]
-        # JSON-serialized tool_input will have quotes around string values;
-        # the substring must appear literally in the serialized form.
         if any(needle in b for b in blobs):
             continue
         lid = lead.get("id", "?")
@@ -468,35 +399,40 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     """
     blocks, errors = _parse_blocks(proposed_text)
 
-    # Append-only check: runs even when proposed has no blocks (removing all is a violation)
     if current_text is not None:
         errors.extend(_check_append_only(proposed_text, current_text))
 
     if not blocks:
-        return errors  # no YAML blocks in proposed — nothing structural to check
+        return errors
 
     merged = _merge_blocks(blocks)
 
+    # Structural
     errors.extend(_check_lead_required_fields(merged))
     errors.extend(_check_id_formats(merged))
     errors.extend(_check_id_references(merged))
     errors.extend(_check_edge_authority(merged))
     errors.extend(_check_refutation_ids(merged))
-    errors.extend(_check_trust_anchor_completeness(merged))
     errors.extend(_check_screen_result_scope(merged))
     errors.extend(_check_lead_predictions(merged))
-    errors.extend(_check_prediction_coverage(merged))
-    errors.extend(_check_partial_authority_cap(merged))
-    errors.extend(_check_rollup_parent_weight(merged))
-    errors.extend(_check_legitimacy_contract_edge_ref(merged))
-    errors.extend(_check_legitimacy_resolution_backrefs(merged))
-    errors.extend(_check_legitimacy_gated_disposition(merged))
+
+    # Rule #11 provenance (split by surface)
+    errors.extend(_check_authorization_resolution_provenance(merged))
+    errors.extend(_check_anchor_consultation_provenance(merged))
+
+    # Authorization (rules #19–#22)
+    errors.extend(_check_authorization_contract_edge_ref(merged))
+    errors.extend(_check_authorization_resolution_backrefs(merged))
+    errors.extend(_check_authorization_gated_disposition(merged))
     errors.extend(_check_attribute_updates_target_shape(merged))
-    errors.extend(_check_asks_verdict_shape(merged))
-    errors.extend(_check_kind_asks_coherence(merged))
-    errors.extend(_check_legitimacy_resolution_target_shape(merged))
-    errors.extend(_check_legitimacy_supersede_chain(merged))
-    errors.extend(_check_resolution_requires_authorization_asks(merged))
+
+    # Impact (rules #29–#31) + CONCLUDE two-axis
+    errors.extend(_check_impact_prediction_structure(merged))
+    errors.extend(_check_impact_resolution_backrefs(merged))
+    errors.extend(_check_impact_closure(merged))
+    errors.extend(_check_conclude_two_axis(merged))
+
+    # Hypothesis (rules #23–#32 minus impact closure)
     errors.extend(_check_hypothesis_fork_distinctness(merged))
     errors.extend(_check_hypothesis_persistence(merged))
     errors.extend(_check_prediction_id_hypothesis_scope(merged))
@@ -505,6 +441,12 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_predictions_leanness(merged))
     errors.extend(_check_prediction_subject_scope(merged))
     errors.extend(_check_refutation_prediction_links(merged))
+    errors.extend(_check_integrity_peer_discipline(merged))
+
+    # Predictions / weight coverage
+    errors.extend(_check_prediction_coverage(merged))
+    errors.extend(_check_partial_authority_cap(merged))
+    errors.extend(_check_rollup_parent_weight(merged))
 
     # Prediction-lifecycle guard needs the on-disk companion as well.
     if current_text is not None:
@@ -520,12 +462,7 @@ def collect_warnings(
     proposed_text: str,
     run_dir: Path | None = None,
 ) -> list[str]:
-    """Non-blocking checks that emit warnings rather than errors.
-
-    Run after `validate_companion` clears structural errors. `run_dir`
-    enables the tool_audit cross-reference check; when missing, that
-    check is skipped silently.
-    """
+    """Non-blocking checks that emit warnings rather than errors."""
     warnings: list[str] = []
     blocks, _ = _parse_blocks(proposed_text)
 
@@ -554,7 +491,6 @@ def main() -> None:
     if run_dir is None or proposed_text is None:
         sys.exit(0)
 
-    # Read on-disk content for append-only comparison
     inv_path = run_dir / "investigation.md"
     current_text: str | None = None
     if inv_path.exists():
