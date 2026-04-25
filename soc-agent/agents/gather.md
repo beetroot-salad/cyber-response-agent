@@ -50,7 +50,15 @@ If the lead has empty `data_tags` (lookup-only, ad-hoc, debug), **skip the probe
 
 Plug `entity_bindings` into the template's base query and execute it against the SIEM CLI for the incident time range. Always pass `--run-dir {run_dir}` so output is wrapped in untrusted-data delimiters.
 
-### 3. Characterize the raw observation
+### 3. Baseline query (when the lead declares one)
+
+If the lead definition's frontmatter has `baseline: required` AND its `## Baseline` section declares a shift-query pattern, run a second SIEM call against the shifted window — same entity scoping, same vendor template, time range shifted per the section. Populate the output envelope's `baseline:` field with characterization extracted from the shift-query result, using the **same keys** as the foreground `characterization:` map plus a `scope:` field naming the shift window (e.g., `same-entity-7d`, `same-image-30d`).
+
+If `baseline: optional` or `not-applicable`, skip — emit `baseline: null`. The main agent's PREDICT step decides via §Deviation predicates whether deviation-shaped refutations need baseline grounding.
+
+The baseline lookup is a *parallel structural map*, not a separate lead. Errors in the baseline query do not abort the foreground characterization — record `baseline: { scope, error: "<one-line reason>" }` and proceed.
+
+### 4. Characterize the raw observation
 
 For every bullet in the lead definition's **What to Characterize** section, report a value — even if it is "not available" or "not observed." Omission is ambiguous. Be specific: exact IPs, exact counts, exact usernames, exact timestamps. Do not interpret.
 
@@ -93,9 +101,19 @@ result:                                   # mirrors the envelope's lead entry EX
   query: { system, template, query, time_window, substitutions }
   health_probe: { ... }                   # full JSON or null
   characterization: { ... }               # full map when status=ok; omit on error
-  raw:                                    # always include the verbatim SIEM response
+  raw:
     siem_response: |
-      <raw rows>
+      <VERBATIM SIEM tool output — paste the CLI's stdout exactly as it
+      printed, including every section header (Summary, Count Breakdown,
+      Sample Events, Raw Sample Events with its JSON block) and the raw
+      _source dicts. Do NOT reword, summarize, drop sections, or replace
+      the raw JSON with prose. The raw JSON block is the only place
+      ANALYZE can read discriminator fields (fd.lport, fd.sip, proc.name,
+      srcport, connection tuples, evt.type, …) that your `characterization`
+      map might compress past their load-bearing signal. Truncation of the
+      tail with an explicit `... (N more raw events truncated)` marker
+      is allowed when output exceeds ~200 lines; include the full Summary
+      + Count Breakdown + the first 3 raw _source dicts at minimum.>
   # when status=error:
   escalate_trigger: "{empty_result | siem_error | follow_up_needed | missing_template | binding_mismatch | health_probe_verdict}"
   escalate_context: "{1-2 sentences}"
@@ -134,6 +152,18 @@ gather:
         # one key per "What to Characterize" bullet from definition.md
         "{bullet_label}": "{specific values — IPs, counts, usernames, timestamps}"
         ...
+      baseline:                     # null when the lead declares baseline:
+                                    # optional | not-applicable, or absent.
+                                    # Populated when frontmatter is
+                                    # baseline: required.
+        scope: "{shift descriptor — e.g. same-entity-7d, same-image-30d}"
+        time_window: { start: "{shift_start}", end: "{shift_end}" }
+        characterization:           # SAME keys as foreground characterization;
+                                    # values from the shift-query result.
+          "{bullet_label}": "{specific values}"
+          ...
+        # On baseline query error:
+        # error: "{one-line reason}"
       notes: "{anything doesn't fit a characterization bullet — empty string if none}"
       raw:
         siem_response: |
@@ -173,5 +203,6 @@ Probe verdicts `normal` / `inconclusive` / `elevated` / `low` all proceed to cha
 - Do NOT skip the checkpoint write cadence. A missing checkpoint is what makes silent termination unrecoverable.
 - Do NOT form hypotheses, grade evidence with `++`/`+`/`-`/`--`, or emit any of `resolutions`, `trust_anchor_result`, `legitimacy_resolutions`, `impact_resolutions` — those belong to the analyze phase.
 - Do NOT skip the characterization bullets — every bullet from `What to Characterize` must appear as a key in `characterization`, even if its value is `"not available"`.
+- When the lead declares `baseline: required`, the `baseline:` field is required. Use the SAME keys as the foreground `characterization:` so ANALYZE can compare dimension-by-dimension. A baseline query that errors records `baseline: { scope, error: "…" }` — this still counts as a populated baseline field; it does NOT abort the foreground characterization.
 - Whenever the probe runs, record the full probe JSON in `health_probe:` — every verdict is audit-trail signal.
-- `raw.siem_response` is the verbatim SIEM response; do not summarize, abridge, or reformat.
+- `raw.siem_response` is the verbatim SIEM tool output — paste every section the CLI printed including the `### Raw Sample Events` JSON block with its `_source` dicts. A prose-rewritten or JSON-dropped `siem_response` is a silent data-loss bug: ANALYZE cannot recover discriminator fields (`fd.lport`, `fd.sip`, `proc.name`, `srcport`, connection tuples, `evt.type`) that your `characterization` map compressed past their load-bearing signal.
