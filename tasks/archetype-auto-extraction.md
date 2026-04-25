@@ -1,6 +1,6 @@
 ---
 title: Archetype auto-extraction pipeline from ticketing system
-status: backlog
+status: deferred
 groups: archetype, knowledge, post-mortem
 ---
 

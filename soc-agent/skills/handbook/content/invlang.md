@@ -25,7 +25,7 @@ The narrative log remains agent-owned; the companion blocks give the plugin a ma
 | PREDICT | `hypothesize:` | end of phase | initial proposed frontier of hypotheses |
 | GATHER | *(no YAML block)* | narrative only | the lead block is written at ANALYZE |
 | ANALYZE | complete `findings:` lead (outcome + resolutions) | end of phase | one entry per lead; entries in the same cycle share `loop:` |
-| CONCLUDE | `conclude:` | after the `## CONCLUDE` header + verdict line, before `report.md` | `termination`, `disposition`, `confidence`, `matched_archetype` |
+| REPORT | `conclude:` | after the `## REPORT` header + verdict line, before `report.md` | `termination`, `disposition`, `confidence`, `matched_archetype`. Block name preserved for corpus backward-compat. |
 
 The schema is **graph-first** (Schema v2.7 as of this writing):
 
@@ -53,7 +53,7 @@ From `hooks/scripts/invlang_validate.py::validate_companion`:
 7. **Refutation IDs.** Every `--` resolution has non-empty `matched_refutation_ids` referencing IDs that exist in the target hypothesis's `refutation_shape`.
 8. **Anchor-consultation completeness (rule #11).** Every `anchor_consultations[]` entry on a lead outcome requires `anchor_id`, `anchor_kind`, `grounding_kind`, `result`, `as_of`, `authority_for_question`. `grounding_kind ∈ {org-authority, telemetry-baseline}` on consultations; `past-case` is authz-only. Authorization resolutions live inline on edges (or via `attribute_updates`) and have their own required-field set (verdict, anchor_id, anchor_kind, grounding_kind, authority_for_question, as_of, resolved_by_lead, fulfills_contract).
 9. **`screen_result` scope.** Only valid on leads with `mode: screen`, and only on the final lead in a SCREEN sequence.
-10. **Lead-level predictions.** When present, each entry has `id` (matches `^lp\d+$`, unique within the lead), `if`, `read_as`, and `advance_to` (another lead name in the same or subsequent loop, or one of `CONCLUDE` / `PREDICT`).
+10. **Lead-level predictions.** When present, each entry has `id` (matches `^lp\d+$`, unique within the lead), `if`, `read_as`, and `advance_to` (another lead name in the same or subsequent loop, or one of `REPORT` / `PREDICT`).
 
 ### Warning checks (do not block)
 
@@ -69,17 +69,17 @@ Not a validator check but a modeling rule: a resolution grounded *solely* by `au
 
 ## How invlang relates to the report
 
-At CONCLUDE the agent writes the companion `conclude:` block and then `report.md`. The report's frontmatter enums (`disposition`, `confidence`, `status`, trust-anchor `result`) mirror the invlang vocabulary — the mapping happens at the invlang→report boundary so the richer companion vocabulary (e.g., `partial|no-data` anchor results) collapses to the report's narrower enum (`unavailable`) without lossy downgrading of the investigation record itself.
+At REPORT the agent writes the companion `conclude:` block (block name preserved for corpus backward-compat) and then `report.md`. The report's frontmatter enums (`disposition`, `confidence`, `status`, trust-anchor `result`) mirror the invlang vocabulary — the mapping happens at the invlang→report boundary so the richer companion vocabulary (e.g., `partial|no-data` anchor results) collapses to the report's narrower enum (`unavailable`) without lossy downgrading of the investigation record itself.
 
 The companion `matched_archetype` names the archetype directory under `knowledge/signatures/{sig}/archetypes/{name}/`, matching the report's `matched_archetype` frontmatter field. Two-leg resolution (see `content/validation.md#tier-1-checks`) — shape via archetype, grounding via anchors or precedent — is enforced on the report side; invlang's job is to make sure the supporting record inside `investigation.md` is internally consistent.
 
 ## Relationship to other validation
 
-invlang validation complements, does not replace, the other CONCLUDE-path checks:
+invlang validation complements, does not replace, the other REPORT-path checks:
 
-- **Layer 0 `validate_conclude.py`** — fires two parallel Haiku judges (log integrity + archetype/grounding) when the `conclude:` YAML block lands, blocking the write on any FLAG.
+- **Layer 0 `validate_report_precheck.py`** — fires two parallel Haiku judges (log integrity + archetype/grounding) when the `## REPORT` write lands the `conclude:` YAML block, blocking the write on any FLAG.
 - **`invlang_validate.py`** — ensures the companion YAML is structurally consistent at every investigation.md write.
 - **Tier 1 `validate_report.py`** — ensures the `report.md` artifact is structurally legal (frontmatter, archetype shape, grounding, temporal re-confirmation).
 - **Tier 2 semantic judge** — slimmed to validating the report↔log delta plus precedent transfer.
 
-See `content/validation.md` for the full CONCLUDE-path story.
+See `content/validation.md` for the full REPORT-path story.

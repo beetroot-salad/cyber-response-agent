@@ -1,6 +1,6 @@
 ---
 title: Update docs, handbook, loop diagrams, golden reference for PREDICT/REPORT rename
-status: todo
+status: doing
 groups: docs, handbook
 ---
 

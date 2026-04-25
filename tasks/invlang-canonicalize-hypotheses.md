@@ -1,6 +1,6 @@
 ---
 title: Canonicalize investigation vocabulary (hypotheses + lead names)
-status: doing
+status: deferred
 groups: reliability, knowledge, invlang
 ---
 

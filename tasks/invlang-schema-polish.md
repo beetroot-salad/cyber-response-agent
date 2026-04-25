@@ -1,6 +1,6 @@
 ---
 title: Invlang schema polish — align schema.md with validator, phase-scoped snippets
-status: todo
+status: done
 groups: invlang, prompt-engineering
 ---
 
