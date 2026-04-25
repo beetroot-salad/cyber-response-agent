@@ -127,6 +127,12 @@ gather:
         distinct_srcports: 1
         total_events: 11
         time_distribution: "periodic, 5min intervals ±3s"
+      baseline:
+        scope: same-entity-7d
+        distinct_users: 1
+        distinct_srcports: 1
+        total_events: 320
+        time_distribution: "periodic, 5min ±3s, continuous"
       notes: ""
       raw:
         siem_response: |
@@ -176,6 +182,10 @@ gather:
       characterization:
         distinct_sources: 3
         total_events: 47
+      baseline:
+        scope: same-entity-7d
+        distinct_sources: 3
+        total_events: 700
       raw:
         siem_response: "(47 rows)"
   cross_lead_notes: ""
@@ -478,6 +488,11 @@ class TestRecovery:
                 "query": {"query": "cached-query"},
                 "health_probe": None,
                 "characterization": {"distinct_users": 5, "total_events": 99},
+                "baseline": {
+                    "scope": "same-entity-7d",
+                    "distinct_users": 5,
+                    "total_events": 700,
+                },
                 "notes": "",
                 "raw": {"siem_response": "(99 rows)"},
             },
@@ -529,6 +544,7 @@ class TestRecovery:
               query: {system: "wazuh-indexer", query: "q"}
               health_probe: null
               characterization: {distinct_users: 1, total_events: 11}
+              baseline: {scope: "same-entity-7d", distinct_users: 1, total_events: 700}
               raw:
                 siem_response: "(11 rows)"
         ```
@@ -681,6 +697,7 @@ gather:
       query: {system: "wazuh-indexer", query: "q1"}
       health_probe: null
       characterization: {events: 10}
+      baseline: {scope: "same-entity-7d", events: 700}
       raw:
         siem_response: "(10 rows)"
     - id: "l-001b"
@@ -713,6 +730,7 @@ gather:
       query: {system: "wazuh-indexer", query: "q1"}
       health_probe: null
       characterization: {events: 10}
+      baseline: {scope: "same-entity-7d", events: 700}
       raw:
         siem_response: "(10 rows)"
   cross_lead_notes: ""
@@ -735,6 +753,7 @@ gather:
       query: {system: "wazuh-indexer", query: "q1"}
       health_probe: null
       characterization: {events: 10}
+      baseline: {scope: "same-entity-7d", events: 700}
       raw:
         siem_response: "(10 rows)"
     - id: "l-001b"
@@ -857,3 +876,232 @@ class TestCompositeScopeCheck:
         assert result.payload["prescribed_leads"] == ["authentication-history"]
         # Escalate didn't produce characterization → empty executed_leads.
         assert result.payload["executed_leads"] == []
+
+
+# ---------------------------------------------------------------------------
+# Definition preload + per-lead contract enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestDefinitionPreload:
+    """The handler inlines `definition.md` into the dispatch prompt so the
+    subagent cannot skip the contract Read. See task
+    `gather-composite-skips-lead-def-lookup`.
+    """
+
+    def test_single_dispatch_inlines_definition_md(self, tmp_path, monkeypatch):
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        captured: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            stub_invoke(captured, [_SINGLE_FINDING]),
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke([], []),
+        )
+
+        gather_handler.handle(ctx)
+
+        assert len(captured) == 1
+        prompt = captured[0]
+        assert "definition_md=|" in prompt
+        # Frontmatter content from authentication-history's def must be inlined.
+        assert "baseline: required" in prompt
+        # And a marker phrase from the body, to confirm full content (not
+        # just frontmatter).
+        assert "What to Characterize" in prompt
+
+    def test_composite_dispatch_inlines_definition_per_lead(
+        self, tmp_path, monkeypatch,
+    ):
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        captured: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke(captured, [_COMPOSITE_MULTI_LEAD_OK]),
+        )
+
+        gather_handler.handle(ctx)
+
+        assert len(captured) == 1
+        prompt = captured[0]
+        # Both leads' definitions must be present in the dispatch prompt.
+        assert "definition_md:" in prompt
+        # Marker from authentication-history's frontmatter.
+        assert "baseline: required" in prompt
+        # Marker from source-reputation's frontmatter.
+        assert "baseline: not-applicable" in prompt
+
+    def test_ad_hoc_lead_omits_definition_md(self, tmp_path, monkeypatch):
+        # `made-up-lead-name` has no on-disk definition → field must be absent.
+        ctx = make_ctx(tmp_path, selected_lead="made-up-lead-name")
+        captured: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke(captured, [textwrap.dedent("""
+            ```yaml
+            gather:
+              loop: 1
+              mode: "ad-hoc"
+              leads:
+                - id: "l-001"
+                  name: "made-up-lead-name"
+                  reporting_agent: "target-endpoint"
+                  status: ok
+                  status_detail: ""
+                  query: {system: "wazuh-indexer", query: "q"}
+                  health_probe: null
+                  characterization: {events: 1}
+                  raw:
+                    siem_response: "(1 row)"
+              cross_lead_notes: ""
+              notes: ""
+            ```
+            """).strip()]),
+        )
+
+        gather_handler.handle(ctx)
+
+        assert len(captured) == 1
+        # No definition.md on disk → no inlined block, no key in the spec.
+        assert "definition_md" not in captured[0]
+
+    def test_predict_lead_hint_attached_to_named_lead(
+        self, tmp_path, monkeypatch,
+    ):
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        ctx.outputs[Phase.PREDICT]["lead_hints"] = {
+            "source-reputation": "cross-check the same IP for known-bad reputation",
+        }
+        captured: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke(captured, [_COMPOSITE_MULTI_LEAD_OK]),
+        )
+
+        gather_handler.handle(ctx)
+
+        prompt = captured[0]
+        # The hint string is attached only to the named lead (source-reputation).
+        # We can't easily parse the YAML inside the prompt, but the hint text
+        # must appear once.
+        assert prompt.count("cross-check the same IP for known-bad reputation") == 1
+
+
+class TestContractValidation:
+    """The handler post-validates the returned envelope against each
+    prescribed lead's on-disk contract. Currently checks: when the
+    definition's frontmatter is `baseline: required`, a resolved entry
+    must carry a non-null `baseline:` field.
+    """
+
+    def test_baseline_required_violation_flips_status(
+        self, tmp_path, monkeypatch,
+    ):
+        # _COMPOSITE_MULTI_LEAD_OK_NO_BASELINE: same shape as the OK fixture
+        # but auth-history's `baseline:` is missing. Resolved status (ok) +
+        # baseline: required + baseline: null → contract_violation.
+        envelope = textwrap.dedent("""
+        ```yaml
+        gather:
+          loop: 1
+          mode: "composite"
+          leads:
+            - id: "l-001"
+              name: "authentication-history"
+              reporting_agent: "target-endpoint"
+              status: ok
+              status_detail: ""
+              query: {system: "wazuh-indexer", query: "q1"}
+              health_probe: null
+              characterization: {events: 10}
+              raw:
+                siem_response: "(10 rows)"
+            - id: "l-001b"
+              name: "source-reputation"
+              reporting_agent: "target-endpoint"
+              status: ok
+              status_detail: ""
+              query: {system: "wazuh-indexer", query: "q2"}
+              health_probe: null
+              characterization: {reputation: clean}
+              raw:
+                siem_response: "(clean)"
+          cross_lead_notes: ""
+          notes: ""
+        ```
+        """).strip()
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke([], [envelope]),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        # auth-history (baseline: required, no baseline emitted) → violation.
+        # source-reputation (baseline: not-applicable) → unaffected.
+        assert "authentication-history" not in result.payload["executed_leads"]
+        # The investigation markdown should record the contract_violation status.
+        inv = (ctx.run_dir / "investigation.md").read_text()
+        assert "contract_violation" in inv
+
+    def test_baseline_required_with_baseline_passes(
+        self, tmp_path, monkeypatch,
+    ):
+        # _COMPOSITE_MULTI_LEAD_OK already has baseline on auth-history → no
+        # violation. Already exercised in TestCompositeScopeCheck, but this
+        # test asserts the post-validation path explicitly.
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke([], [_COMPOSITE_MULTI_LEAD_OK]),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert set(result.payload["executed_leads"]) == {
+            "authentication-history", "source-reputation",
+        }
+
+    def test_baseline_exempt_status_skips_check(self, tmp_path, monkeypatch):
+        # status: data_missing on a baseline-required lead → exempt from
+        # contract check (foreground had no data → shift query has nothing
+        # to compare against).
+        envelope = textwrap.dedent("""
+        ```yaml
+        gather:
+          loop: 1
+          mode: "single"
+          leads:
+            - id: "l-001"
+              name: "authentication-history"
+              reporting_agent: "target-endpoint"
+              status: data_missing
+              status_detail: "no foreground events for entity"
+              query: {system: "wazuh-indexer", query: "q"}
+              health_probe: null
+              characterization: null
+              raw:
+                siem_response: ""
+        ```
+        """).strip()
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            stub_invoke([], [envelope]),
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke([], []),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        # data_missing is preserved, not flipped to contract_violation.
+        assert result.payload["status"] == "data_missing"

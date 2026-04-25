@@ -213,7 +213,9 @@ predict:
     selected_lead: <lead-slug>            # required; non-empty
     composite_secondary: [<lead>, ...]    # [] when not compositing
     override_data_source: null            # optional; emit only with specific signal from prior loop
-    lead_hint: null                       # optional; prose hint for GATHER
+    lead_hints:                           # optional; per-lead prose hint for GATHER
+      <lead-slug>: <prose>                #   keys must name selected_lead or
+      ...                                 #   one of composite_secondary
     scope_override:                       # optional; emit when the lead needs
                                           # a non-default lookback window
       window_hours: <positive int>        #   replaces GATHER's 1h default
@@ -253,8 +255,8 @@ Each PREDICT loop emits its own `hypothesize:` block containing only the hypothe
 ### `composite_secondary` and overrides
 
 - `composite_secondary` — when the investigation needs multiple leads executed against the same entities and window (a composite dispatch). List all secondary leads. The handler builds `prescribed_leads = [selected_lead, *composite_secondary]` and hands off to gather-composite; gather-composite must echo every prescribed slug. Secondary leads share the primary's scope and `scope_override`.
-- `override_data_source` / `lead_hint` — omit on loop 1 or without a specific signal from a prior loop. Overriding without cause trips gather's template-bypass path needlessly.
-- `scope_override` — emit when the lead needs a non-default lookback window. GATHER derives `incident_start = T - 1h` by default (alert-anchored). Override when the lead's semantics are *historical* (24h+ cadence baseline, 72h frequency check, 7d event horizon). `lead_hint` prose is advisory and does NOT override scope — the structured `scope_override` is the authoritative channel. Example: a cadence-baseline check against `authentication-history` typically wants `{window_hours: 24, anchor: alert}`; a "since last known-good baseline" check wants `{window_hours: 168, anchor: now}`.
+- `override_data_source` / `lead_hints` — omit on loop 1 or without a specific signal from a prior loop. Overriding without cause trips gather's template-bypass path needlessly. `lead_hints` is keyed by lead name — every key must appear in `selected_lead` or `composite_secondary`. Composite leads are first-class: a secondary lead can carry its own hint without elevating it to primary.
+- `scope_override` — emit when the lead needs a non-default lookback window. GATHER derives `incident_start = T - 1h` by default (alert-anchored). Override when the lead's semantics are *historical* (24h+ cadence baseline, 72h frequency check, 7d event horizon). `lead_hints` prose is advisory and does NOT override scope — the structured `scope_override` is the authoritative channel. Example: a cadence-baseline check against `authentication-history` typically wants `{window_hours: 24, anchor: alert}`; a "since last known-good baseline" check wants `{window_hours: 168, anchor: now}`.
 
 ### When ANALYZE flagged unresolved prescribed leads
 

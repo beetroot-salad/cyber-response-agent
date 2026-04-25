@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +146,29 @@ def load_signature_text(signature_id: str, soc_agent_root: Path) -> dict[str, st
 # ---------------------------------------------------------------------------
 # Lead catalog (common-investigation leads used by PREDICT)
 # ---------------------------------------------------------------------------
+
+
+def _lead_definition_path(soc_agent_root: Path, lead_name: str) -> Path:
+    return (
+        soc_agent_root
+        / "knowledge"
+        / "common-investigation"
+        / "leads"
+        / lead_name
+        / "definition.md"
+    )
+
+
+def load_lead_definition(soc_agent_root: Path, lead_name: str) -> Optional[str]:
+    """Return the contents of one lead's `definition.md`, or `None` if the
+    file does not exist (lead is ad-hoc / signature-local).
+
+    Same path semantics as `load_lead_definitions` so the two cannot drift.
+    """
+    try:
+        return _lead_definition_path(soc_agent_root, lead_name).read_text()
+    except FileNotFoundError:
+        return None
 
 
 def load_lead_definitions(soc_agent_root: Path) -> dict[str, str]:

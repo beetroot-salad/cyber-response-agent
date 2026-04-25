@@ -18,7 +18,9 @@ followed by a terminal routing YAML:
     selected_lead: <lead-slug>         # required, non-empty
     composite_secondary: [<slug>, ...]  # optional list; second+ prescribed leads
     override_data_source: <str>         # optional; per-lead override for GATHER
-    lead_hint: <str>                    # optional; PREDICT→GATHER prose hint
+    lead_hints:                         # optional; per-lead PREDICT→GATHER prose
+      <lead-slug>: <str>                #   keys must name selected_lead or one
+      ...                               #   of composite_secondary
     ```
 
 No `mode`, no `block_type`, no `loop_n` in the trailer. Cardinality of new
@@ -57,7 +59,7 @@ Output:
           loop_n: int,
           composite_secondary: list[str],  # empty when not prescribed
           override_data_source?: str,
-          lead_hint?: str,
+          lead_hints?: dict[str, str],  # {lead_name: prose}, keys ⊆ prescribed
         }
 
 Files written:
@@ -845,8 +847,8 @@ def handle(ctx: Context) -> PhaseResult:
     }
     if routing.get("override_data_source") is not None:
         payload["override_data_source"] = routing["override_data_source"]
-    if routing.get("lead_hint") is not None:
-        payload["lead_hint"] = routing["lead_hint"]
+    if routing.get("lead_hints") is not None:
+        payload["lead_hints"] = routing["lead_hints"]
     # Scope override — PREDICT's structured way to override GATHER's default
     # 1h lookback (window_hours + anchor). GATHER plumbs this into the
     # subagent prompt's incident_start/incident_end so the query covers the
