@@ -177,6 +177,18 @@ class TestCheckConflict:
         warns = lint._check_conflict_candidates(atoms)
         assert not any("CONFLICT-CANDIDATE" in w for w in warns)
 
+    def test_dedup_when_pair_matches_both_groupings(self):
+        """A pair sharing both mechanic+classification scope AND a signature_id
+        is flagged once (mechanic+classification grouping wins), not twice."""
+        atoms = [
+            self._atom("a1", mechs=["process-exec"], classes=["host-x"], sigs=["100001"]),
+            self._atom("a2", mechs=["process-exec"], classes=["host-x"], sigs=["100001"]),
+        ]
+        warns = lint._check_conflict_candidates(atoms)
+        pair_warnings = [w for w in warns if "a1" in w and "a2" in w]
+        assert len(pair_warnings) == 1
+        assert "mechanic+classification" in pair_warnings[0]
+
 
 # ---------------------------------------------------------------------------
 # _check_triple_coverage

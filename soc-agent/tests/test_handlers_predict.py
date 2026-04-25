@@ -8,6 +8,7 @@ and routing output. They do not spawn a Claude subprocess.
 
 import sys
 import textwrap
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -420,14 +421,13 @@ class TestEnvMemoryIntegration:
         the alert block."""
         ctx = make_ctx(tmp_path, existing_investigation=_INVESTIGATION_WITH_PREDICT)
         from scripts.handlers import env_memory
-        from datetime import date as _date
 
         fake_atom = env_memory.Atom(
             id="test-atom",
             body="this atom should appear in the prompt",
             anchors={"mechanic": ("authentication",)},
-            valid_from=_date(2026, 1, 1),
-            valid_to=_date(2027, 1, 1),
+            valid_from=date(2026, 1, 1),
+            valid_to=date(2027, 1, 1),
             status="live",
             source_file=tmp_path / "fake.md",
         )

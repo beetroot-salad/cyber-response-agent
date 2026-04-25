@@ -24,6 +24,7 @@ Warning-only:
 from __future__ import annotations
 
 import argparse
+import itertools
 import re
 import sys
 from collections import defaultdict
@@ -37,6 +38,7 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from scripts.handlers.env_memory import (  # noqa: E402
     DEFAULT_VALIDITY_DAYS,
+    INV_FENCE_RE,
     MECHANIC_VOCAB,
     TRIPLE_TO_MECHANIC,
     Atom,
@@ -47,7 +49,7 @@ from scripts.handlers.env_memory import (  # noqa: E402
 
 
 _DIGIT_RUN_RE = re.compile(r"\d{4,}")
-_INV_FENCE_RE = re.compile(r"```yaml\s*\n(?P<body>.*?)\n```", re.DOTALL)
+_TRIPLE_COVERAGE_SAMPLE_LIMIT = 200
 
 
 def _check_schema(soc_agent_root: Path) -> tuple[list[Atom], list[str]]:
@@ -107,8 +109,11 @@ def _check_freshness(atoms: list[Atom], today: date) -> list[str]:
 def _check_conflict_candidates(atoms: list[Atom]) -> list[str]:
     """Group live atoms by (mechanic-set, classification-set) and by signature_id.
     Any group with >1 distinct atom is a candidate pool for human review.
+    Tracks already-flagged id-sets so the signature pass doesn't re-emit a pair
+    the mechanic+classification pass already named.
     No body parsing — the user reasons through whether they actually conflict."""
     warnings: list[str] = []
+    flagged_id_sets: set[frozenset[str]] = set()
     by_mech_class: dict[tuple[str, str], list[Atom]] = defaultdict(list)
     by_sig: dict[str, list[Atom]] = defaultdict(list)
     for atom in atoms:
@@ -122,20 +127,25 @@ def _check_conflict_candidates(atoms: list[Atom]) -> list[str]:
             by_sig[str(sig)].append(atom)
     for key, group in sorted(by_mech_class.items()):
         if len(group) > 1:
-            ids = ", ".join(sorted(a.id for a in group))
+            id_set = frozenset(a.id for a in group)
+            flagged_id_sets.add(id_set)
+            ids = ", ".join(sorted(id_set))
             warnings.append(
                 f"CONFLICT-CANDIDATE: mechanic+classification scope ({key[0]}; {key[1]}) "
                 f"shared by atoms [{ids}] — review for true conflicts"
             )
     for sig, group in sorted(by_sig.items()):
-        # De-dupe: only flag if we haven't already flagged this exact set
-        # via the mech+classification grouping above.
-        if len(group) > 1:
-            ids = ", ".join(sorted(a.id for a in group))
-            warnings.append(
-                f"CONFLICT-CANDIDATE: signature_id `{sig}` shared by atoms "
-                f"[{ids}] — review for true conflicts"
-            )
+        if len(group) <= 1:
+            continue
+        id_set = frozenset(a.id for a in group)
+        if id_set in flagged_id_sets:
+            continue
+        flagged_id_sets.add(id_set)
+        ids = ", ".join(sorted(id_set))
+        warnings.append(
+            f"CONFLICT-CANDIDATE: signature_id `{sig}` shared by atoms "
+            f"[{ids}] — review for true conflicts"
+        )
     return warnings
 
 
@@ -148,14 +158,15 @@ def _check_triple_coverage(soc_agent_root: Path, runs_dir: Path | None) -> list[
     if not runs_dir.is_dir():
         return []
     seen: set[tuple[str, str, str]] = set()
-    for inv_file in sorted(runs_dir.rglob("investigation.md"))[:200]:
+    sample = itertools.islice(runs_dir.rglob("investigation.md"), _TRIPLE_COVERAGE_SAMPLE_LIMIT)
+    for inv_file in sample:
         try:
             text = inv_file.read_text()
         except OSError:
             continue
         vertices_by_id: dict[str, dict] = {}
         hypotheses: list[dict] = []
-        for m in _INV_FENCE_RE.finditer(text):
+        for m in INV_FENCE_RE.finditer(text):
             try:
                 parsed = yaml.safe_load(m.group("body"))
             except yaml.YAMLError:

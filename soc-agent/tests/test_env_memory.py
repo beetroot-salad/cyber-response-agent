@@ -451,6 +451,22 @@ class TestRetrieve:
         (tmp_path / "run").mkdir()
         assert retrieve(tmp_path, ctx) == []
 
+    def test_malformed_file_isolated_from_corpus(self, tmp_path: Path, capsys):
+        """A single malformed atom file is skipped (with stderr note) so the
+        rest of the corpus still surfaces. Retrieval must not collapse to
+        empty just because one file is broken."""
+        self._setup_corpus(tmp_path)
+        # Drop a broken atom file alongside the good ones.
+        bad = "## Atoms\n\n```yaml\n- id: bad\n  anchors: {nonsense: [foo]}\n  valid: {from: 2026-01-01, to: 2027-01-01}\n```\n"
+        _write_atom_file(tmp_path / "knowledge" / "environment" / "fleet" / "broken" / "x.md", bad)
+        ctx = self._build_ctx_with_hypothesis(tmp_path / "run", with_process_exec=True)
+        results = retrieve(tmp_path, ctx, today=date(2026, 6, 1))
+        ids = [a.id for a, _ in results]
+        # Good atoms still surface
+        assert "pe-baseline" in ids
+        captured = capsys.readouterr()
+        assert "skipping malformed atom file" in captured.err
+
 
 # ---------------------------------------------------------------------------
 # format_env_memory_block

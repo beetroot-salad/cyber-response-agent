@@ -20,12 +20,26 @@ discipline; env-memory must never block the loop.
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
 import yaml
+
+
+# Hypothesis statuses that mean "not actively proposing an upstream edge".
+# Mirrors invlang spec (`docs/investigation-language.md` §Companion structure):
+# default `active`; non-default values are `confirmed | refuted | shelved`.
+# Confirmed hypotheses still constrain the search — only refuted/shelved are
+# inactive for retrieval purposes.
+INACTIVE_HYPOTHESIS_STATUSES: frozenset[str] = frozenset({"refuted", "shelved"})
+
+
+# Shared regex for extracting fenced YAML blocks from invlang investigation.md
+# files. Lint reuses this via import.
+INV_FENCE_RE = re.compile(r"```yaml\s*\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
@@ -263,11 +277,15 @@ def walk_atom_files(soc_agent_root: Path) -> list[Path]:
 
 def load_all_atoms(soc_agent_root: Path) -> list[Atom]:
     """Walk + parse every atom-bearing file. Files without a `## Atoms` section
-    are silently skipped. Parse errors propagate (caller decides whether to
-    degrade or bubble — retrieval degrades, lint bubbles)."""
+    are silently skipped. Per-file parse errors are isolated: a malformed file
+    is skipped (with a stderr note) so the rest of the corpus still surfaces.
+    Lint runs `parse_atoms_from_file` directly to surface those errors."""
     out: list[Atom] = []
     for path in walk_atom_files(soc_agent_root):
-        out.extend(parse_atoms_from_file(path))
+        try:
+            out.extend(parse_atoms_from_file(path))
+        except AtomParseError as e:
+            print(f"env_memory: skipping malformed atom file: {e}", file=sys.stderr)
     return out
 
 
@@ -290,9 +308,6 @@ def derive_mechanics_for_edge(
 # ---------------------------------------------------------------------------
 # Anchor extraction from investigation state
 # ---------------------------------------------------------------------------
-
-
-_INV_FENCE_RE = re.compile(r"```yaml\s*\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 def extract_anchors(ctx: Any) -> dict[str, set[str]]:
@@ -329,7 +344,7 @@ def extract_anchors(ctx: Any) -> dict[str, set[str]]:
     vertices_by_id: dict[str, dict] = {}
     hypotheses: list[dict] = []
     shelved_ids: set[str] = set()
-    for m in _INV_FENCE_RE.finditer(text):
+    for m in INV_FENCE_RE.finditer(text):
         try:
             parsed = yaml.safe_load(m.group("body"))
         except yaml.YAMLError:
@@ -365,7 +380,7 @@ def extract_anchors(ctx: Any) -> dict[str, set[str]]:
 
     # Derive mechanics from active hypotheses (skip shelved + structurally-refuted).
     for h in hypotheses:
-        if h.get("status") in ("refuted", "shelved"):
+        if h.get("status") in INACTIVE_HYPOTHESIS_STATUSES:
             continue
         if h.get("id") in shelved_ids:
             continue
