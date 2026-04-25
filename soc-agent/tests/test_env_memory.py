@@ -194,8 +194,15 @@ class TestExtractAnchors:
     def test_signature_only_when_no_investigation(self, tmp_path: Path):
         ctx = FakeCtx(run_dir=tmp_path, signature_id="wazuh-rule-100001")
         a = extract_anchors(ctx)
-        assert a["signature_id"] == {"wazuh-rule-100001"}
+        # Both the full string and the embedded digit-run land — atoms can
+        # anchor on either form (vendor-specific or vendor-neutral).
+        assert a["signature_id"] == {"wazuh-rule-100001", "100001"}
         assert a["mechanic"] == set()
+
+    def test_signature_no_digit_run_only_keeps_full_string(self, tmp_path: Path):
+        ctx = FakeCtx(run_dir=tmp_path, signature_id="custom-no-digits")
+        a = extract_anchors(ctx)
+        assert a["signature_id"] == {"custom-no-digits"}
 
     def test_pulls_prologue_vertices(self, tmp_path: Path):
         inv = textwrap.dedent("""\

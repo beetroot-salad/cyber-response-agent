@@ -329,8 +329,14 @@ def extract_anchors(ctx: Any) -> dict[str, set[str]]:
     dict with all anchor keys (possibly empty sets) so callers don't branch
     on presence."""
     anchors: dict[str, set[str]] = {k: set() for k in _ANCHOR_KEYS}
-    if getattr(ctx, "signature_id", None):
-        anchors["signature_id"].add(str(ctx.signature_id))
+    sig = getattr(ctx, "signature_id", None)
+    if sig:
+        # Add the full signature_id string AND any ≥4-digit run inside it.
+        # ctx.signature_id is typically `wazuh-rule-100001`; atom anchors
+        # commonly use the bare numeric `100001` to stay vendor-neutral.
+        # Atoms can match either form.
+        anchors["signature_id"].add(str(sig))
+        anchors["signature_id"].update(re.findall(r"\d{4,}", str(sig)))
 
     inv_path = getattr(ctx, "run_dir", None)
     if inv_path is None:
