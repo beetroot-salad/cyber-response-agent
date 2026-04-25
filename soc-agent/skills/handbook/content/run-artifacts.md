@@ -62,7 +62,7 @@ The salt is generated per run (`secrets.token_hex(8)`) specifically so it cannot
 **Who writes:** the main agent, appending one section per phase.
 **Who reads:** the agent (on later phases, to remember what it's done), the Tier 2 judge (to verify the report's conclusion matches the log).
 
-A markdown document with one `## {PHASE}` section per phase transition. See `content/phases.md` for the per-phase templates. The sections accumulate — the agent never rewrites earlier sections. By CONCLUDE, `investigation.md` is a complete narrative of the investigation: hypotheses formed, leads selected, observations gathered, weights assigned, decisions made.
+A markdown document with one `## {PHASE}` section per phase transition. See `content/phases.md` for the per-phase templates. The sections accumulate — the agent never rewrites earlier sections. By REPORT, `investigation.md` is a complete narrative of the investigation: hypotheses formed, leads selected, observations gathered, weights assigned, decisions made.
 
 This file is the **agent-owned log**. The structural record lives in `state.json`; the narrative lives here. The Tier 2 judge reads `investigation.md` (and only this, not `state.json`) when evaluating `INTERNAL_CONSISTENCY`, `EVIDENCE_SUFFICIENCY`, `COMPLETENESS`, and `AUTHORIZATION_CHECK`.
 
@@ -91,13 +91,13 @@ This file is the **agent-owned log**. The structural record lives in `state.json
 }
 ```
 
-The `history` array is append-only and records every phase the investigation has entered, in order. `infer_state.py` uses it to count cycles (number of `PREDICT` plus `ANALYZE` entries) against `MAX_LOOPS = 12`, and `validate_conclude.py` + `validate_report.py` use `SCREEN in history and PREDICT not in history` to detect screen-resolved investigations that are exempt from the CONCLUDE self-check and that must be backed by a playbook declaring a `## Screen` section.
+The `history` array is append-only and records every phase the investigation has entered, in order. `infer_state.py` uses it to count cycles (number of `PREDICT` plus `ANALYZE` entries) against `MAX_LOOPS = 12`, and `validate_report_precheck.py` + `validate_report.py` use `SCREEN in history and PREDICT not in history` to detect screen-resolved investigations that are exempt from the REPORT self-check and that must be backed by a playbook declaring a `## Screen` section.
 
 This file is **machine-owned**. The agent should never edit it directly — all updates go through the `infer_state.py` hook (triggered by `investigation.md` writes) so the state machine can validate the transition. Attempting to edit `state.json` directly is a way to bypass safety, and it will lose against the PostToolUse audit hook even if it succeeds momentarily.
 
 ### `report.md`
 
-**Who writes:** the main agent at CONCLUDE.
+**Who writes:** the main agent at REPORT (via the report-narrative subagent).
 **Who reads:** the user, downstream ticketing automation, `validate_report.py` (on write).
 
 The final report. YAML frontmatter encodes the machine-readable decision; the markdown body explains it to a human.

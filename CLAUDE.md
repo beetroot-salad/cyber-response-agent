@@ -14,7 +14,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ### Investigation Loop
 
-HYPOTHESIZE is **on-demand**, not a mandatory gate. Between leads the agent runs an ASSESS step: if the next move branches on which explanation is true, enter HYPOTHESIZE and articulate the fork; otherwise go straight to GATHER.
+The common case is **single-iteration**: CONTEXTUALIZE → [SCREEN] → PREDICT → GATHER → ANALYZE → REPORT. Looping back from ANALYZE into PREDICT is the exception (more evidence required), not the default. ASSESS is a PREDICT-internal gate, not a separate phase: PREDICT first checks whether the next move actually branches on a competing explanation; if not, it scaffolds a single mechanism + legitimacy contracts and proceeds to GATHER.
 
 ```
 /investigate $signature_id $alert_json
@@ -26,22 +26,22 @@ HYPOTHESIZE is **on-demand**, not a mandatory gate. Between leads the agent runs
         └── CONTEXTUALIZE → [SCREEN] ──────────────────────────────┐
                 │                                                   │
                 ▼                                                   │
-             ASSESS ◀─────────────────────┐                         │
-              │                           │                         │
-              │  branching?               │                         │
-              ├── yes ─▶ HYPOTHESIZE      │                         │
-              │             │             │                         │
-              └── no ───────┤             │                         │
-                            ▼             │                         │
-                         GATHER ──────────┘                         │
-                            │                                       │
-                            ▼                                       │
-                         ANALYZE ──────────────────────┬────────────┘
-                                                       │
-                                                  CONCLUDE → report.md
+             PREDICT  ◀─────────────────────┐                       │
+                │   (assess → scaffold)     │                       │
+                ▼                           │                       │
+             GATHER  ────────────────────── │                       │
+                │                           │                       │
+                ▼                           │                       │
+             ANALYZE ──── need more ────────┘                       │
+                │                                                   │
+                ▼                                                   │
+             REPORT  ◀───────────────────────────────────────────── ┘
+                │
+                ▼
+            report.md
 ```
 
-The optional SCREEN phase spawns a cheap subagent that attempts fast pattern matching against playbook-defined screen patterns; if matched, the full loop is skipped and evidence flows straight to CONCLUDE. Most phase-level reasoning now runs in dedicated plugin subagents (see below); the main investigate skill orchestrates.
+The optional SCREEN phase spawns a cheap subagent that attempts fast pattern matching against playbook-defined screen patterns; if matched, the full loop is skipped and evidence flows straight to REPORT. Most phase-level reasoning now runs in dedicated plugin subagents (see below); the main investigate skill orchestrates.
 
 ### Core Components
 
@@ -52,13 +52,15 @@ The optional SCREEN phase spawns a cheap subagent that attempts fast pattern mat
 | **Connect Skill** | `soc-agent/skills/connect/SKILL.md` | Onboards a new SIEM/EDR/identity/CMDB system — generates adapter CLI + environment knowledge |
 | **Handbook Skill** | `soc-agent/skills/handbook/SKILL.md` | On-demand plugin reference docs (architecture, loop, validation, retention) |
 | **Screen Subagent** | `soc-agent/agents/screen.md` | Fast pattern matching (SCREEN phase) |
-| **Archetype-scan Subagent** | `soc-agent/agents/archetype-scan.md` | CONTEXTUALIZE archetype ranking (story/trust-anchors split input) |
+| **Contextualize-prologue Subagent** | `soc-agent/agents/contextualize-prologue.md` | CONTEXTUALIZE prologue authoring (vertices + edges from alert) |
+| **Archetype-match Subagent** | `soc-agent/agents/archetype-match.md` | REPORT-time archetype routing (match confirmed picture against archetype catalog) |
 | **Ticket-context Subagent** | `soc-agent/agents/ticket-context.md` | CONTEXTUALIZE 4-hour correlation (backed by `scripts/tools/ticket_context.py`) |
-| **Hypothesize Subagent** | `soc-agent/agents/hypothesize.md` | Lean one-hop seed generation with causal stories |
+| **Predict Subagent** | `soc-agent/agents/predict.md` | Mechanism scaffolding + legitimacy contracts + falsifiable predictions |
 | **Gather Subagent** | `soc-agent/agents/gather.md` | Single-lead execution |
 | **Gather-composite Subagent** | `soc-agent/agents/gather-composite.md` | Multi-lead composite dispatch |
 | **Analyze Subagent** | `soc-agent/agents/analyze.md` | Extraction-contract evidence analysis with shape verification |
-| **Conclude Subagent** | `soc-agent/agents/conclude.md` | Haiku-backed CONCLUDE assembly |
+| **Report Subagent** | `soc-agent/agents/report.md` | Mechanical-compose handler entry point for REPORT |
+| **Report-narrative Subagent** | `soc-agent/agents/report_narrative.md` | Haiku-backed report narrative authoring |
 | **Import Resolver** | `soc-agent/scripts/resolve_imports.py` | `!command` preprocessing: bakes signature knowledge into the prompt |
 | **Run Setup** | `soc-agent/scripts/setup_run.py` | Creates run dir + alert.json, maps session → run |
 | **Preflight** | `soc-agent/scripts/preflight.py` | Binary connectivity check across configured systems |
@@ -73,7 +75,7 @@ All hooks live under `soc-agent/hooks/scripts/` and are registered in `soc-agent
 |-------|---------|------|---------|
 | PreToolUse | `Task\|Agent` | `inject_env_context.py` | Inject environment context into subagent prompts |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `infer_state_pre.py` | Pre-write state transition check |
-| PreToolUse | `Write\|Edit` on `*/investigation.md` | `validate_conclude.py` | Pre-write CONCLUDE self-contradiction guards |
+| PreToolUse | `Write\|Edit` on `*/investigation.md` | `validate_report_precheck.py` | Pre-REPORT self-contradiction guards (parallel Haiku judges) |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `invlang_validate.py` | Pre-write schema validation (33 rules) — blocks writes on schema errors |
 | PostToolUse | `Task\|Agent` | `extract_subagent_yaml.py` | Extract subagent YAML output into the investigation record |
 | PostToolUse | `Write\|Edit\|Bash` | `infer_state.py` | Infer state transitions from `## PHASE` headers |
@@ -83,14 +85,14 @@ All hooks live under `soc-agent/hooks/scripts/` and are registered in `soc-agent
 | PostToolUse | `*` | `budget_enforcer.py` | Enforce per-run budget caps |
 | Stop | `*` | `stop_handler.py` | Sequential entrypoint — calls `investigation_summary.py` then `close_ticket_action.py` |
 
-Shared helpers: `run_context.py` (session→run resolution), `permissions.py` (permissions.yaml loader), `frontmatter.py`, `investigation_parse.py`, `invlang_walkers.py`, `judge_runner.py`, `judge_prompt.md`, `conclude_judge_{A,B}_prompt.md`.
+Shared helpers: `run_context.py` (session→run resolution), `permissions.py` (permissions.yaml loader), `frontmatter.py`, `investigation_parse.py`, `invlang_walkers.py`, `judge_runner.py`, `judge_prompt.md`, `report_judge_{A,B}_prompt.md`.
 
 ### Safety Architecture
 
 - **Two-tier report validation** — `validate_report.py` (PostToolUse Write|Edit) fires when `report.md` is written. Tier 1 enforces structural constraints deterministically. Tier 2 calls Haiku via the claude CLI to validate report consistency, precedent match validity, and evidence sufficiency (full mode = 5 checks for resolved-with-precedent; no-precedent mode = 4 checks for escalated). Untrusted content is wrapped in per-run salted delimiters to block prompt injection.
 - **Invlang schema validation** — `invlang_validate.py` (PreToolUse) blocks any write/edit to `investigation.md` that violates the 33 validator rules (see `docs/investigation-language.md`).
-- **CONCLUDE judges** — pre-CONCLUDE, `validate_conclude.py` runs parallel Haiku judges (prompts A/B) to catch self-contradictions before the CONCLUDE block lands.
-- **State machine** (`infer_state.py` PostToolUse + `infer_state_pre.py` PreToolUse) prevents phase skipping — inferred from `## PHASE` headers in `investigation.md`; agent must follow CONTEXTUALIZE→[SCREEN]→(ASSESS↔HYPOTHESIZE↔GATHER↔ANALYZE loop)→CONCLUDE.
+- **Pre-REPORT judges** — `validate_report_precheck.py` runs parallel Haiku judges (prompts A/B) on the proposed `## REPORT` write to catch self-contradictions before the report-time invlang block lands.
+- **State machine** (`infer_state.py` PostToolUse + `infer_state_pre.py` PreToolUse) prevents phase skipping — inferred from `## PHASE` headers in `investigation.md`; agent must follow CONTEXTUALIZE→[SCREEN]→(PREDICT↔GATHER↔ANALYZE loop)→REPORT.
 - **Two-leg resolution requirement** — `status=resolved` requires `matched_archetype` naming an archetype directory AND grounding: every `required_anchors` entry confirmed OR `matched_ticket_id` citing a valid precedent snapshot inside that archetype directory. Archetypes with no required anchors must be grounded by `matched_ticket_id`.
 - **Legitimacy as edge attribute (invlang v2.8)** — hypotheses whose disposition depends on authorization declare a `legitimacy_contract`; resolving leads write `legitimacy_resolutions` on the edge. `disposition: benign` is structurally gated on every contract resolving `authorized` (validator rule #21); `unauthorized`/`indeterminate` force escalation. Mechanism-level adversarial variants (`?adversary-controlled-*`) remain separate hypotheses — classification carries the claim.
 - **Budget enforcement** — `budget_enforcer.py` caps per-run tool calls / cost per `schemas/budget.py`.
@@ -104,13 +106,15 @@ Shared helpers: `run_context.py` (session→run resolution), `permissions.py` (p
 │   │   └── plugin.json            # Plugin manifest (hooks + skills + agents registration)
 │   ├── agents/                    # Plugin-registered subagents (phase-level workers)
 │   │   ├── screen.md              # Fast pattern matching (SCREEN phase)
-│   │   ├── archetype-scan.md      # Archetype ranking (CONTEXTUALIZE)
+│   │   ├── contextualize-prologue.md  # Prologue authoring (CONTEXTUALIZE)
+│   │   ├── archetype-match.md     # REPORT-time archetype routing
 │   │   ├── ticket-context.md      # 4-hour ticket correlation (CONTEXTUALIZE)
-│   │   ├── hypothesize.md         # Lean one-hop hypothesis seeding
+│   │   ├── predict.md             # Mechanism scaffold + legitimacy contracts (PREDICT)
 │   │   ├── gather.md              # Single-lead GATHER
 │   │   ├── gather-composite.md    # Composite-lead GATHER dispatch
 │   │   ├── analyze.md             # Extraction-contract ANALYZE
-│   │   └── conclude.md            # Haiku-backed CONCLUDE
+│   │   ├── report.md              # REPORT mechanical-compose entry point
+│   │   └── report_narrative.md    # Haiku-backed REPORT narrative
 │   ├── skills/
 │   │   ├── investigate/           # Main loop orchestrator + past-investigations query
 │   │   ├── author/                # Edit knowledge/ + config/signatures/ with validator + probes
@@ -211,8 +215,8 @@ All deps are declared as extras in `soc-agent/pyproject.toml` and installed into
 pytest soc-agent/tests/ -v -m "not llm"
 
 # Common suites
-pytest soc-agent/tests/test_validate_report.py -v     # Report validation
-pytest soc-agent/tests/test_validate_conclude.py -v   # CONCLUDE pre-write guards
+pytest soc-agent/tests/test_validate_report.py -v          # Report validation (Tier 1+2)
+pytest soc-agent/tests/test_validate_report_precheck.py -v # Pre-REPORT self-contradiction guards
 pytest soc-agent/tests/test_invlang_validate.py -v    # Invlang schema rules
 pytest soc-agent/tests/test_invlang_queries.py -v     # Invlang corpus queries
 pytest soc-agent/tests/test_state_transitions.py -v   # State machine
@@ -265,13 +269,13 @@ prologue:       # CONTEXTUALIZE: vertices + edges derived from the alert
   vertices: []
   edges: []
 
-hypothesize:    # HYPOTHESIZE: initial proposed frontier (omit for SCREEN-matched cases)
+hypothesize:    # PREDICT: initial proposed frontier (omit for SCREEN-matched cases). Block name preserved for corpus backward-compat.
   hypotheses: []
 
 findings:       # GATHER + ANALYZE: ordered lead blocks (same id merges across phases)
   - lead: {...}
 
-conclude:       # CONCLUDE: termination category, disposition, confidence, matched_archetype
+conclude:       # REPORT: termination category, disposition, confidence, matched_archetype. Block name preserved for corpus backward-compat.
   termination:
     category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
   disposition: benign | true_positive | unclear

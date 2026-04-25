@@ -1,6 +1,6 @@
 ---
 title: Define ANALYZE contract and relax PREDICT cardinality gate (plus gather-composite scope-check)
-status: doing
+status: done
 groups: invlang, analyze, gather-composite, predict, contracts
 ---
 

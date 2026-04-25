@@ -26,7 +26,7 @@ This is hypothetico-deductive triage. It replaces a linear runbook (`"check fiel
 
 The key rules:
 
-- **Three orthogonal resolution axes (v2.11).** Authorization is anchor-backed and lives on the edge: when a hypothesis's disposition depends on authorization (same mechanism is consistent with benign or adversarial intent depending on who/what ran it), declare an `authorization_contract` on the hypothesis naming the edge(s) and the anchor that resolves them. The resolving lead writes the verdict inline on the materializing edge via `authorization_resolutions[]` (or against an already-confirmed edge through `attribute_updates[].updates.authorization_resolutions[]`), back-referenced by `fulfills_contract: h-*.ac*`. The consultation that answered the policy question is recorded on the lead outcome via `anchor_consultations[]`. `disposition: benign` is structurally gated on every contract having a fulfilling `authorized` verdict OR a deferral in `conclude.deferred_authorizations[]` (rule #26); `unauthorized` / `indeterminate` verdicts force escalation. Integrity is a peer-hypothesis discipline — when the contract-carrying hypothesis sources from an acting-entity type (`session`, `identity`, `process`), a peer `?adversary-controlled-*` hypothesis is expected unless `integrity_waived: <rationale>` is carried (rule #32). Impact is threshold-gated — leads measuring impact-relevant observables declare `impact_predictions[]`, ANALYZE grades them into `impact_resolutions[]`, CONCLUDE rolls up `impact_verdict` and `impact_severity`. See `docs/investigation-language.md` §Authorization / §Integrity / §Impact and `docs/design-v3-authority-consultation.md`.
+- **Three orthogonal resolution axes (v2.11).** Authorization is anchor-backed and lives on the edge: when a hypothesis's disposition depends on authorization (same mechanism is consistent with benign or adversarial intent depending on who/what ran it), declare an `authorization_contract` on the hypothesis naming the edge(s) and the anchor that resolves them. The resolving lead writes the verdict inline on the materializing edge via `authorization_resolutions[]` (or against an already-confirmed edge through `attribute_updates[].updates.authorization_resolutions[]`), back-referenced by `fulfills_contract: h-*.ac*`. The consultation that answered the policy question is recorded on the lead outcome via `anchor_consultations[]`. `disposition: benign` is structurally gated on every contract having a fulfilling `authorized` verdict OR a deferral in `conclude.deferred_authorizations[]` (rule #26); `unauthorized` / `indeterminate` verdicts force escalation. Integrity is a peer-hypothesis discipline — when the contract-carrying hypothesis sources from an acting-entity type (`session`, `identity`, `process`), a peer `?adversary-controlled-*` hypothesis is expected unless `integrity_waived: <rationale>` is carried (rule #32). Impact is threshold-gated — leads measuring impact-relevant observables declare `impact_predictions[]`, ANALYZE grades them into `impact_resolutions[]`, REPORT rolls up `impact_verdict` and `impact_severity`. See `docs/investigation-language.md` §Authorization / §Integrity / §Impact and `docs/design-v3-authority-consultation.md`.
 - **Structured assessments** (`++`, `+`, `-`, `--`) replace subjective confidence wording. Each lead's observations are weighted against each surviving hypothesis explicitly.
 - **Severity of tests.** A lead that would refute a hypothesis if it were wrong is more valuable than one that merely fits. Prefer leads where different hypotheses predict *different* outcomes.
 - **Absence is evidence.** "I queried for X and found zero results" can be just as informative as "I queried for X and found a match" — especially when the hypothesis predicts what should *not* be there.
@@ -44,33 +44,35 @@ The plugin keeps the LLM in charge of *investigative strategy* — which hypothe
 
 The separation is deliberate: **Python code handles what can be verified structurally; the LLM handles what requires judgment.** No safety-critical check relies on LLM self-assessment of its own work — those are done by an independent judge (a separate Claude call, with untrusted content wrapped in per-run salted delimiters).
 
-See `content/validation.md` for the three-layer CONCLUDE validation detail (Layer 0 PreToolUse self-check, Tier 1 deterministic report check, Tier 2 semantic judge), and `content/investigation-loop.md` for the state machine.
+See `content/validation.md` for the three-layer REPORT validation detail (Layer 0 PreToolUse self-check, Tier 1 deterministic report check, Tier 2 semantic judge), and `content/investigation-loop.md` for the state machine.
 
 ## The investigation loop at a glance
 
 ```
-CONTEXTUALIZE ─┬─→ CONCLUDE        (main-agent dedup when ticket-context surfaces a live repeat)
-               ├─→ SCREEN ─┬─→ CONCLUDE  (mechanical pattern match)
+CONTEXTUALIZE ─┬─→ REPORT         (main-agent dedup when ticket-context surfaces a live repeat)
+               ├─→ SCREEN ─┬─→ REPORT  (mechanical pattern match)
                │            └─→ PREDICT
-               └─→ PREDICT → GATHER → ANALYZE ─┬─→ PREDICT (loop)
-                                                    └─→ CONCLUDE
+               └─→ PREDICT → GATHER → ANALYZE ─┬─→ PREDICT (loop — exception)
+                                                    └─→ REPORT
 ```
 
-Three legal paths to CONCLUDE:
+The common case is single-iteration: CONTEXTUALIZE → [SCREEN] → PREDICT → GATHER → ANALYZE → REPORT. Looping back into PREDICT is the exception, not the default.
+
+Three legal paths to REPORT:
 - From CONTEXTUALIZE — ticket-context's `repeats` cluster shows the same alert firing minutes ago on the same entities, and the main agent verifies an open/recent ticket justifies a duplicate disposition.
 - From SCREEN — a cheap subagent matches the alert against the playbook's known benign patterns.
 - From ANALYZE — the full loop converges (mechanism confirmed + verified + scoped, or explicit escalation).
 
 See `content/investigation-loop.md` for the authoritative diagram and legal transitions.
 
-- **CONTEXTUALIZE** — read signature knowledge, parse alert, integrate preloaded ticket-context and archetype-scan context, build a resolution map of available tools.
-- **SCREEN** *(optional, if the playbook defines a `## Screen` section)* — a cheap subagent attempts a mechanical pattern match against known benign outcomes. Match → straight to CONCLUDE. No match → fall through to the full loop with evidence already gathered.
-- **PREDICT** — generate or update candidate explanations, pick the most diagnostic lead.
+- **CONTEXTUALIZE** — read signature knowledge, parse alert, integrate preloaded ticket-context, build a resolution map of available tools. Archetype matching runs at REPORT, not here.
+- **SCREEN** *(optional, if the playbook defines a `## Screen` section)* — a cheap subagent attempts a mechanical pattern match against known benign outcomes. Match → straight to REPORT. No match → fall through to the full loop with evidence already gathered.
+- **PREDICT** — internal ASSESS gate first; if branching, articulate the fork; otherwise scaffold a single mechanism + legitimacy contracts. Select the lead(s).
 - **GATHER** — execute the lead (single or composite dispatch), characterize raw observations.
-- **ANALYZE** — weight evidence against each surviving hypothesis. Loop back, or conclude.
-- **CONCLUDE** — write `report.md` with structured frontmatter and a trace line.
+- **ANALYZE** — weight evidence against each surviving hypothesis. Loop back (exception), or report out.
+- **REPORT** — match confirmed picture against archetype catalog (archetype-match subagent), write `report.md` (report-narrative subagent) with structured frontmatter and a trace line.
 
-A maximum of `MAX_LOOPS = 12` cycles (PREDICT + ANALYZE entries combined) is enforced by the state machine. Most investigations resolve in 2–3.
+A maximum of `MAX_LOOPS = 12` cycles (PREDICT + ANALYZE entries combined) is enforced by the state machine. Most investigations resolve in 1–2.
 
 ## Core separation of concerns
 
@@ -98,9 +100,9 @@ Swapping Wazuh for Splunk is a matter of writing a new `knowledge/environment/sy
 
 When you install the plugin you get:
 
-- The **investigate skill** — entry point, investigation loop, subagent prompts (`archetype-scan`, `screen`, `gather`, `query-past-investigations`, and the legacy `ticket-context` fallback), and the mechanical `scripts/tools/ticket_context.py` correlation script that replaces the ticket-context subagent on the main dispatch path
+- The **investigate skill** — entry point, investigation loop, subagent prompts (`screen`, `contextualize-prologue`, `predict`, `gather`, `gather-composite`, `analyze`, `archetype-match`, `report`, `report_narrative`, `query-past-investigations`, and the legacy `ticket-context` fallback), and the mechanical `scripts/tools/ticket_context.py` correlation script that replaces the ticket-context subagent on the main dispatch path
 - **Python hooks** registered in `plugin.json`:
-  - *PreToolUse* — `infer_state_pre.py` (blocks illegal phase transitions before they land), `validate_conclude.py` (Layer 0 pre-CONCLUDE gate: ticket-context dispatch + two parallel Haiku judges for log integrity and archetype/grounding), `invlang_validate.py` (companion-YAML schema gate)
+  - *PreToolUse* — `infer_state_pre.py` (blocks illegal phase transitions before they land), `validate_report_precheck.py` (Layer 0 pre-REPORT gate: ticket-context dispatch + two parallel Haiku judges for log integrity and archetype/grounding), `invlang_validate.py` (companion-YAML schema gate)
   - *PostToolUse* — `infer_state.py` (state-machine history + cycle counting), `validate_report.py` (Tier 1 structural + slimmed Tier 2 delta judge, including temporal precedent re-confirmation), `audit_tool_calls.py` (audit vs trace JSONL split), `tag_tool_results.py` (salted delimiter wrapping of untrusted data), `budget_enforcer.py` (warning-only tool-call + wall-clock budget tracking)
   - *Stop* — `stop_handler.py` composing `investigation_summary.py` (outcome JSONL + token/cost/timestamps) and `close_ticket_action.py` (act-mode dispatch)
 - **Schemas** — dataclass validators for report frontmatter, state transitions, precedent shape, and the adapter contract

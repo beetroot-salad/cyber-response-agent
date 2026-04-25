@@ -1,6 +1,6 @@
 ---
 title: Rename CONCLUDE → REPORT, move archetypes to first-class at this stage
-status: doing
+status: done
 groups: report, conclude, archetype, state-machine
 ---
 
