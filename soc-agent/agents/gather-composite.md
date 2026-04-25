@@ -251,20 +251,6 @@ gather:
           ...
         # On baseline query error:
         # error: "{one-line reason}"
-      raw:
-        siem_response: |
-          <VERBATIM SIEM tool output — paste the CLI's stdout exactly as it
-          printed, including every section header (Summary, Count Breakdown,
-          Sample Events, Raw Sample Events with its JSON block) and the raw
-          _source dicts. Do NOT reword, summarize, or drop sections. The raw
-          JSON block is load-bearing for ANALYZE's discriminator-field reads
-          (proc.name, fd.lport, fd.sip, srcport, connection tuples, …) that
-          your `characterization` map can compress but not lose. When the
-          CLI output exceeds ~200 lines, include the full Summary + Count
-          Breakdown + the first 3 raw _source dicts; truncation of the
-          remaining raw tail is allowed with an explicit `... (N more raw
-          events truncated)` marker. Empty string only when the query
-          never ran.>
     - # next lead entry ...
   cross_lead_notes: "{composite only — consistencies / contradictions / refinements applied across the lead set. Empty string for ad-hoc/redispatch single-lead mode.}"
   notes: "{anything the main agent should know that doesn't fit a lead-level field — empty string if none}"
@@ -282,8 +268,6 @@ gather:
       status: error
       escalate_trigger: "dispatch_unparseable"
       escalate_context: "{one-line reason}"
-      raw:
-        siem_response: ""
   cross_lead_notes: ""
   notes: ""
 ```
@@ -299,4 +283,3 @@ An unknown `lead_name` is NOT an error case — fall through to the missing-defi
 - Do NOT write to `investigation.md`. You return the YAML on stdout; the main agent persists it. The ONLY file you write to is the progress checkpoint under `{run_dir}/subagent_checkpoints/`.
 - Do NOT cross lead boundaries except in the explicit `cross_lead_notes` field — each lead's output stands alone.
 - Do NOT proceed after a `siem_error` you cannot resolve by re-quoting; emit `status: siem_error` with detail and move on. The main agent decides whether to re-run.
-- Do NOT reword, summarize, or compress the SIEM tool output when populating `raw.siem_response`. Paste it verbatim, including the `### Raw Sample Events` JSON block (or the vendor-equivalent raw-event section). The `characterization` map is where you extract and label the discriminator fields; `raw.siem_response` is the evidence source ANALYZE reads when your characterization is ambiguous. A prose-rewritten `siem_response` that drops raw JSON is a silent data-loss bug — it turns direction-discriminating fields (`fd.lport`, `fd.sip`, `proc.name`, connection tuples) into direction-ambiguous prose, and ANALYZE has no way to recover what you dropped.
