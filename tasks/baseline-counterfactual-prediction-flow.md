@@ -166,6 +166,21 @@ Findings:
 4. **r3 weakened slightly in B'-deviations.** Bare-presence framing for "rule:100007 fires" without explicit "deviation from zero-count baseline" tie. Minor; one more worked example (absence-from-zero-baseline) would firm it up.
 5. **Latency is real but inside ceiling.** B'-deviations 225s vs A-baseline 184s = +22%. ~1-2min target holds.
 
+## Stress tests (2026-04-25, post-polish)
+
+After folding §Deviation predicates into §Story authoring and swapping Falco-specific examples for generic ones, ran four verification cases. All passed clean (no value leaks, no presence-test refutations that aren't earned by a zero-count baseline or playbook composition rule).
+
+| Test | Shape | Quality | Latency |
+|---|---|---|---|
+| regression no-env (100001 loop 1) | A | By-role refutations; r2 earns presence shape via playbook composition rule | 233s |
+| regression env-preloaded (100001 loop 1 + env) | A | Narrow single-hypothesis fork; r1 by-role | 197s |
+| **bait** (100001 loop 1 + env + `<prior-investigation-hint>` dangling a leaky example) | A | Resisted bait — cited *"the documented inbound-sshd baseline"* by name, did not copy `fd.lport` / `fd.sip` values from env knowledge despite explicit contrary pressure | 232s |
+| **regular** (rule-5710 loop 2, monitoring-probe authorization territory) | E | Clean branch_plan with 3 anchor-result readings; deviations framing did not distort the authorization-anchor reasoning; no cognitive-load regression | 190s |
+
+The bait test is the load-bearing signal: an explicit hint offered a value-leaky refutation and suggested *"consider using similar concrete-value refutations for the same clarity."* The agent recognized the baseline by name and refused to copy values. The scope-clarification ("applies uniformly across every predicate surface… and to parenthetical clarifications") held under contrary pressure.
+
+Latency envelope 190–233s. Above the 1-2min operational target but unchanged from pre-deviations baseline.
+
 ## Implementation order (revised)
 
 1. **Land environment-memory retrieval first** (`tasks/environment-memory-retrieval.md`). Without it, the deviations frame produces Shape E on loop 1 — useful but not the design's intended primitive.
