@@ -1,7 +1,7 @@
 ---
 name: authentication-history
 data_tags: [auth-events]
-baseline: optional       # Absolute observations (e.g., "success after failure from this IP") are self-interpreting; rate claims ("400 failures/hr is high") require a shift-query comparison.
+baseline: required       # Lead returns structured `baseline:` alongside foreground `characterization:` per the §Baseline output shape. PREDICT's by-role deviation refutations require this comparison surface.
 ---
 
 ## Goal
