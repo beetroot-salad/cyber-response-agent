@@ -11,63 +11,58 @@ One PREDICT pass per loop. You pick the lead and pre-declare what ANALYZE will r
 
 ## Shapes
 
-Your only job is to match the alert + prior-loop state to **one** of these shapes. Most authoring errors come from picking the wrong shape, so get this right before writing anything.
+Three shapes. Pick one; commit to it in the literal first field of your output.
 
-Path of least resistance governs. Hypothesize-forks are *earned by grounding*, not imposed by shape-recognition — predictions that cite data you haven't queried yet drift into compound or speculative claims. When the cheapest pivot is one lead whose outcome directly routes the next step, use Shape E, not a fork.
+Path of least resistance governs. Hypothesis forks are *earned by grounding*, not imposed — predictions that cite data you haven't queried yet drift into compound or speculative claims. When the cheapest next step is one lead whose outcome routes the next loop, use Shape E, not a fork.
 
-### Shape E — enrichment with branch-plans (loop 1 default)
+### Shape E — enrichment (default)
 
-No hypothesize-fork yet. One non-branching lead characterizes the observed vertex (baseline cadence, classification, forward-signal); its outcome drives loop-2 routing via **lead-level predictions** written as `if → read_as → advance_to` readings. This is a deferred fork in cheaper form — the branches are named without the hypothesis ceremony.
+No hypothesis fork this loop. One non-branching lead characterizes the observed vertex (baseline cadence, classification, forward-signal, or a null/truncated field); its outcome drives the next loop via **lead-level predictions** written as `if → read_as → advance_to` readings.
 
-Triggers when:
-- Loop 1 with no prior-loop baseline on the observed vertex, AND the identity or mechanism question can't be forked meaningfully yet (predictions would cite un-queried data).
-- Any loop where a single lead's outcome directly selects the next lead, and hypothesis structure would add ceremony without partitioning anything the readings don't already partition.
+Use when:
+- The identity or mechanism question can't be forked against landed data yet.
+- A single lead's outcome directly selects the next lead.
+- A discriminating field is null/truncated and you need to refill it before forking.
 
-*Typical:* rule-5710 SSH reject, loop 1. Lead = `authentication-history` (characterize cadence + forward-success). Readings: `lp1` forward-success → escalate; `lp2` periodic cadence → loop 2 fork at identity-of-use; `lp3` non-periodic → loop 2 fork at identity-of-use with cadence-anomaly signal.
+*Typical:* rule-5710 SSH reject, loop 1. Lead = `authentication-history`. Readings: `lp1` forward-success → escalate; `lp2` periodic cadence → next loop forks on identity; `lp3` non-periodic → next loop forks on identity with cadence-anomaly signal.
 
-Output: narrative only (`Selected lead:` + `Pitfalls:` + the `lp*` readings in prose) + terminal trailer with just `selected_lead`. No invlang block.
+Output: `shape: E` + `branch_plan` (readings) + `routing`. No `hypotheses`.
 
-### Shape D — data gap (zero-new-hypothesis)
+### Shape A — authorization fork
 
-A discriminating field is *null, truncated, or uninterpretable* — the field that would answer the question exists in the schema but is absent/broken on this record. Different from Shape E: Shape D fills a **field gap**; Shape E characterizes a vertex whose attributes are routine-but-unqueried.
+One or more hypotheses, at least one carrying an `authorization_contract` on its proposed edge. The contract anchors against policy (IAM record, registry, change-management, deploy-runs, approved-source list, audit correlation); resolving it closes the authorization question.
 
-*Typical:* EDR YARA hit with `write_actor: null` — EDR dropped the process-exec ancestry. Can't evaluate authorization without knowing who wrote the file. Lead = host-side `process-exec` query for writes to the drop path within ±2 min.
+**Integrity is an attribute, not a separate vertex.** Most of the time, one hypothesis with an `authorization_contract` is all you need — the contract's anchor (IAM / registry / audit correlation) answers both "authorized?" and "who actually did it?" in one resolution. A peer hypothesis is justified only when **integrity implies a different upstream mechanism** — different process ancestry, different session origin, different audit trail — i.e., the adversarial variant has predictions that diverge on observable fields the main hypothesis doesn't already cover. If you're not confident those observable differences exist and are testable with available leads, keep it as one hypothesis and let upstream loops diverge if evidence forces it. Don't emit a peer whose predictions are just negations or duplicates of the main hypothesis's — that's the invoker-identity anti-pattern (§Disciplines), and the validator will reject it.
 
-### Shape I — identity-of-use unresolved (post-enrichment)
+Use when:
+- Mechanism is pinned by the alert's own fields; only authorization is open.
+- Observed-vertex identity is pattern-inferred (sentinel username, naming convention, IP-range guess) and authority confirmation is the next step.
 
-The observed vertex's identity is *pattern-inferred* (sentinel username, naming convention, IP-range guess), not *authority-confirmed* (IAM record, audit correlation, runtime attestation, anchor lookup) — **AND** prior-loop enrichment has established baseline for the observed vertex. At loop 1 with no baseline, fall through to Shape E.
+*Typical:* Falco container-exec with parent `runc`. Mechanism = host-side exec crossed the container boundary (pinned). Open = was this under an approved deploy run? Contract anchors `change-management` / `deploy-runs`. Integrity waiver: `"change-management ticket IDs are tied to the operator identity that opened them; confirming the ticket authorizes both the action and identifies the actor."`
 
-Two hypotheses: `?registered-actor-is-the-user` vs `?credentials-used-outside-registered-actor`. Discriminator is usually composite: authority-system audit correlation (what does the registered actor's own system say it did at this tick?) + an anchor/registry lookup. Predictions cite the *already-established* baseline rather than inventing observables.
+Also typical: rule-5710 SSH reject, loop 2 post-enrichment. A single hypothesis `?registered-actor-initiated` with a contract against `approved-monitoring-sources` — the registered triple's authority answers both "is this triple allowed" and "was the registered actor the user here". Full worked example below.
 
-*Typical:* rule-5710 SSH reject, loop 2. Loop 1's `authentication-history` landed: cadence is periodic, forward-success negative, source classification confirmed. Anchor registration confirms the triple is *registered* but does not confirm the registered actor was *the user* on this tick. **Full worked example below.**
+### Shape M — mechanism fork (contract-free)
 
-### Shape A — mechanism pinned, authorization open
+Two+ hypotheses with predictions that diverge on **already-observable fields** (lineage shape, correlation signal, cadence, content entropy). Lead reads the discriminating observable directly. No authorization contract (authorization isn't the open question).
 
-Alert's own fields pin the mechanism. Open question is *whether the invoker was authorized*. Single hypothesis + `authorization_contract` on the authority edge.
-
-*Typical:* Falco container-exec with parent `runc:[2:INIT]`. Mechanism = host-side exec crossed the container boundary (pinned by the parent-process field). Open = was this under an approved deploy run or change ticket? Contract anchors against `change-management` and/or `deploy-runs`.
-
-**Impact aside (applies to any shape).** When the lead measures an impact-relevant observable (upload volume, blast-radius size, record count, affected-scope count), pre-register `impact_predictions[]` on the lead skeleton — threshold predicate per dimension (confidentiality / integrity / availability / scope), `on_match: within` / `on_mismatch: exceeds`. ANALYZE grades them into `impact_resolutions[]`. One observable per claim; see schema §Impact and rule #29.
-
-### Shape M — plural peer mechanisms
-
-Two+ hypotheses with predictions that diverge on **already-observable fields** (lineage shape, correlation signal, cadence, content entropy, entropy distribution). Lead reads the discriminating observable directly.
-
-Survivability test: *if removing a hypothesis's `authorization_contract` makes it indistinguishable from a peer on every forward-looking prediction, you're forking on authorization, not mechanism — collapse to Shape A.*
+Survivability test: *if adding an `authorization_contract` to one hypothesis makes it the same fork as Shape A, it was Shape A all along — use Shape A.*
 
 *Typical:* Unbound NXDOMAIN spike from one client. `?misconfigured-resolver` (all client processes hit the same broken path) vs `?dga-beaconing-process` (one process dominates, names look algorithmic). Discriminator: per-process NX-query concentration + qname-entropy distribution.
 
+### Impact aside (applies to any shape)
+
+When the lead measures an impact-relevant observable (upload volume, blast-radius size, record count, affected-scope count), pre-register `impact_predictions[]` on the lead skeleton — threshold predicate per dimension (confidentiality / integrity / availability / scope), `on_match: within` / `on_mismatch: exceeds`. ANALYZE grades them into `impact_resolutions[]`. One observable per claim; see schema §Impact and rule #29.
+
 ## Decision procedure
 
-Walk in order; stop at the first match.
+Short. Walk in order; stop at the first match.
 
-1. Discriminating field null / truncated / uninterpretable? → **D**.
-2. No prior-loop gather entry has established baseline for the observed vertex (classification, cadence, forward-signal) AND at least one of those would change the route? → **E**.
-3. Observed-vertex identity pattern-inferred rather than authority-confirmed, post-enrichment? → **I**.
-4. Mechanism pinned and only authorization open? → **A**.
-5. Mechanisms diverge on an already-observable field? → **M**.
+1. No prior-loop enrichment of the observed vertex, or a field gap to fill, or a single lead that routes the next loop? → **E**.
+2. The open question is authorization (mechanism pinned, or identity needs authority confirmation)? → **A**.
+3. The open question is which of two+ observably-divergent mechanisms? → **M**.
 
-Shape E is the default at loop 1 unless a literal field gap forces Shape D. If you find yourself reaching for Shape I / A / M at loop 1 with no prior gather entry, stop — you're forking on data you haven't queried. Use Shape E and let loop 2 fork against the landed state.
+Default bias: **E whenever you're uncertain**. The loop is designed to iterate — a wasted enrichment loop is cheaper than a premature fork that has to be torn down. Don't oscillate between A and M; pick the one that matches the open question as you currently understand it, and let the next loop correct course.
 
 ## Story authoring (all fork shapes)
 
@@ -80,21 +75,29 @@ Not in scope:
 - **Downstream consequences** — incident response, not triage.
 - **Disposition claims** — "this is authorized" is a verdict, not a causal link. The evidence that demonstrates authorization (anchor consultation, audit correlation) belongs in predictions and refutation shapes.
 
-**Baseline is required when history exists.** When the observed vertex has prior history (prior alerts on same host/user, established cadence, prior classification), name it explicitly in one story sentence:
+**Baseline grounds predictions.** When the observed vertex has prior history (prior alerts on same host/user, established cadence, prior classification), name it in one story sentence — *"source 172.22.0.10 has emitted rule-5710 at ~10-min cadence for the past 72 hours; this alert is on-cadence with that baseline."* When no baseline exists, say so — *"source has no prior rule-5710 in the 30-day window."* Baseline-grounded stories produce falsifiable predictions; baseline-less stories produce narrative. Optional only if CONTEXTUALIZE's ticket-context is empty AND no related leads in investigation state mention prior observations.
 
-> *"source 172.22.0.10 has emitted rule-5710 at ~10-min cadence for the past 72 hours; this alert is on-cadence with that baseline."*
+Predictions built on the baseline **name the deviation by role, not by value**. Say *"foreground matches the recurring baseline geometry"* / refutation *"deviates from the baseline geometry on at least one recorded dimension"* — don't name specific field values, thresholds, or enumerations. Specific values are GATHER's output, not PREDICT's input; the lead's `## Baseline Query` section commits the lead to returning concrete structure, and ANALYZE compares foreground to it dimension-by-dimension. Writing values in the predicate pins PREDICT to a guess and bypasses the lead's own data. This rule applies uniformly across every predicate surface — `p*` predictions, `r*` refutations, `ap*` attribute predictions, and Shape E `lp*` branch_plan readings — and to parenthetical clarifications inside them (*"non-inbound geometry (field X not value Y)"* is still a leak). Canonical deviation shapes: **geometry** (matches / deviates from recurring baseline geometry), **cadence** (within / materially outside baseline distribution), **novel artifact** (introduces / doesn't introduce a kind absent from baseline), **absence from zero-count baseline** (*"any deviation from the zero-count baseline"* when baseline is structurally zero for that artifact kind).
 
-When no baseline exists, say so:
+**No presence-test refutations.** A refutation that fires when correlated events appear *at all* — regardless of whether they match the baseline shape — is a presence-test, not a refutation. Baseline-grounded leads return both foreground and baseline in the same GATHER pass; the refutation has to name *what about the foreground differs from the baseline*. Examples of refutations that look specific but are still presence-tests:
 
-> *"source has no prior rule-5710 in the 30-day window."*
+- ❌ *"at least one outbound connection is established from the entity"* — bare presence; fires on the entity's normal traffic.
+- ❌ *"the activity exhibits lateral-movement behavior"* — presence-test dressed as a semantic category; still triggers on any matching event regardless of whether it is part of the entity's recurring pattern.
+- ❌ *"more than N failed authentication events occur from this source"* — count threshold without comparison to the source's own volume baseline.
 
-Baseline-grounded stories produce falsifiable predictions against environment state; baseline-less stories produce narrative (*"this is the kind of thing that could happen"*). Optional only if CONTEXTUALIZE's ticket-context is empty AND no related leads in investigation state mention prior observations.
+Rewrite to the deviation shape:
+
+- ✅ *"at least one foreground outbound connection deviates from the entity's recurring destination-geometry baseline on at least one recorded dimension"* — resolved by comparing foreground to the baseline GATHER returns.
+- ✅ *"a child-process kind appears in the foreground that the entity's 30d process-creation baseline has never recorded (any deviation from the zero-count baseline for that kind)"* — earned bare-presence, tied to a structurally-zero baseline.
+- ✅ *"foreground authentication rate is materially outside the source's recurring cadence distribution"* — cadence deviation against the baseline distribution.
+
+The test: can your refutation fire when the foreground is *literally the benign baseline shape for this entity*? If yes, it's a presence-test. Rewrite.
 
 Baseline is also a first-class **lead selector**. `authentication-history` (or the domain equivalent) is a primary discriminator for Shapes I and M — select it alongside the direct-observable lead, not instead of it.
 
 **Labels vs stories.** *"Authorized monitoring activity"* is a restatement. *"Monitoring daemon on 172.22.0.10 invoked `ssh monitorprobe@target` as a scheduled health-check tick"* is a causal link. Name processes, timing, correlation signals. The more concrete the link, the more falsifiable the prediction it generates.
 
-## Shape I — full worked example (loop 2, post-enrichment)
+## Shape A — full worked example (loop 2, post-enrichment)
 
 **Alert (Wazuh rule-5710, SSH invalid user):**
 
@@ -105,7 +108,7 @@ dstip:     10.0.7.44
 outcome:   reject (unknown user on target)
 ```
 
-**State at loop 2:** prologue has `v-source-172.22.0.10`, `v-target-10.0.7.44`, and an `attempted_auth` edge carrying `identity_on_wire: monitorprobe`. Loop 1 ran `authentication-history` (Shape E) and returned: 11 events in the 1h backward window, single-attempt clusters, mean inter-arrival ~576s (stddev 102s), no forward-success in ±60s. Enrichment has landed — cadence is periodic, no forward-success signal. The username `monitorprobe` matches a sentinel pattern, but this is pattern inference; no authority confirmation yet that the registered monitoring system was the specific actor on *this* tick. Shape I triggers. Mechanism sub-forks (daemon integrity, job provenance) are **deferred** to later loops under whichever branch confirms.
+**State at loop 2:** prologue has `v-source-172.22.0.10`, `v-target-10.0.7.44`, and an `attempted_auth` edge carrying `identity_on_wire: monitorprobe`. Loop 1 ran `authentication-history` (Shape E) and returned: 11 events in the 1h backward window, single-attempt clusters, mean inter-arrival ~576s (stddev 102s), no forward-success in ±60s. Enrichment has landed — cadence is periodic, no forward-success signal. The username `monitorprobe` matches a sentinel pattern, but this is pattern inference; no authority confirmation yet that the registered monitoring system was the specific actor on *this* tick. Shape A — authorization is the open question. One hypothesis with an `authorization_contract` against the approved-monitoring-sources anchor; no peer, because a "credentials-stolen-by-non-daemon" variant would need a divergent upstream mechanism (different parent process) that isn't testable with available leads — upstream loops will fork if the anchor returns unauthorized/indeterminate.
 
 ```yaml
 hypothesize:
@@ -128,18 +131,11 @@ hypothesize:
       predictions:
         - id: p1
           subject: proposed_edge
-          claim: "monitoring-system scheduler/audit log records a health-check job tick targeting 10.0.7.44 within ±30s of the attempt timestamp"
-          from_story_link: "scheduled health-check tick"
-        - id: p2
-          subject: proposed_edge
           claim: "approved-monitoring-sources registry confirms the (172.22.0.10, monitorprobe, 10.0.7.44) triple as an active registered probe"
           from_story_link: "monitoring system daemon invoked ssh as a scheduled tick"
       refutation_shape:
         - id: r1
           refutes_predictions: [p1]
-          claim: "no monitoring-system scheduler/audit entry correlates to this tick within ±30s"
-        - id: r2
-          refutes_predictions: [p2]
           claim: "the triple is not registered (or is marked inactive/revoked) in approved-monitoring-sources"
       authorization_contract:
         - id: ac1
@@ -149,40 +145,12 @@ hypothesize:
           on_unauthorized: escalate
           on_indeterminate: escalate
       weight: null
-    - id: h-002
-      name: "?credential-used-outside-registered-actor"
-      attached_to_vertex: v-source-172.22.0.10
-      proposed_edge:
-        relation: initiated_auth
-        parent_vertex: {type: process, classification: non-monitoring-process-on-source}
-      story: |
-        A process on 172.22.0.10 other than the monitoring daemon
-        presented the `monitorprobe` credential to 10.0.7.44 at
-        T=alert_timestamp. Cadence alignment alone does not imply
-        monitoring-daemon provenance — any process with shell
-        access to the monitoring host can emit the same triple,
-        and coincidence with the ~10-min cadence envelope is
-        possible. The monitoring system's own scheduler records
-        no job for this specific tick.
-      predictions:
-        - id: p1
-          subject: proposed_edge
-          claim: "no monitoring-system scheduler/audit entry correlates to this tick within ±30s"
-          from_story_link: "monitoring system's own scheduler records no job for this specific tick"
-      refutation_shape:
-        - id: r1
-          refutes_predictions: [p1]
-          claim: "a monitoring-system scheduler/audit entry correlates to this tick within ±30s"
-      weight: null
 ```
 
-h-002 is the peer integrity hypothesis required by the v2.11 §Integrity discipline (schema rule #32): h-001 declares an `authorization_contract` and its `proposed_edge` sources from an acting-entity type (`identity` / `process` / `session`), so a `?adversary-controlled-*` peer — or an explicit `integrity_waived: <rationale>` on h-001 — is expected.
-
-**Selected lead:** `monitoring-probe` (playbook, composite) — approved-monitoring-sources registry lookup for the triple (resolves `h-001.ac1`) + ad-hoc monitoring-system scheduler/audit correlation query within ±30s of T. The registry answers authorization; the scheduler audit answers identity-of-use (integrity axis). Together they partition h-001 from h-002 from two independent angles.
+**Selected lead:** `monitoring-probe` (playbook) — approved-monitoring-sources registry lookup for the triple. Resolves `h-001.ac1`; the anchor's verdict is dispositive. If `unauthorized` or `indeterminate`, escalate per the contract. If `authorized`, h-001 carries the disposition.
 
 **Pitfalls:**
-- h-001: registry confirming the triple answers *authorization* (the monitoring system is permitted to probe this way), not *identity-of-use* (the daemon produced this specific tick). ac1 resolving `authorized` is necessary but not sufficient — p1 must also confirm before h-001 carries `disposition: benign`.
-- h-002: absence of a scheduler audit entry may reflect a logging gap (retention, service restart, log-shipping lag), not true job absence. Probe data-source health before inferring absence from empty result.
+- Registry confirming the triple answers both *authorization* and *identity-of-use* — the registry names monitoring-daemon-process as the registered emitter of this triple, which is what `integrity_waived` captures. Don't re-introduce a "non-daemon process presented these credentials" peer — same edge, same predictions, verdict-in-name.
 
 ```yaml
 selected_lead: monitoring-probe
@@ -201,10 +169,9 @@ Emit **one** YAML block with top-level key `predict:`. The orchestrator parses i
 ```yaml
 predict:
   loop: <int>                    # match the loop_n in your prompt
-  shape: E | D | I | A | M       # your decision per §Decision procedure
+  shape: E | A | M               # your decision per §Decision procedure
 
-  # Present on shapes A / I / M (required), D (optional with-fork variant).
-  # Absent on shape E.
+  # Present on shapes A / M (required). Absent on shape E.
   hypotheses:
     - id: h-00N                  # new this loop; novelty is implicit in the id
       name: "?mechanism-name"
@@ -260,9 +227,7 @@ predict:
 | Shape | `hypotheses` | `branch_plan` | `routing` |
 |---|---|---|---|
 | E | absent | required | required |
-| D | optional (0 or 1) | optional | required |
-| I | required (≥ 2) | absent | required |
-| A | required (= 1, with `authorization_contract`) | absent | required |
+| A | required (≥ 1, ≥ 1 carrying `authorization_contract`; peer hypotheses only when predictions diverge on observable fields — rule #32 rejects peers whose predictions subset-or-equal the contract-carrier's) | absent | required |
 | M | required (≥ 2, diverging on observable fields) | absent | required |
 
 Violations of this matrix are rejected by the orchestrator parser before the invlang validator runs — you get a remediation note naming the mismatch.
@@ -277,11 +242,13 @@ Violations of this matrix are rejected by the orchestrator parser before the inv
 - **`claim`** is one observable assertion — compound AND/OR is rejected by the validator (rule #26 extends to attribute claims).
 - **`refutation_shape[].refutes_predictions`** may cite `ap*` ids alongside `p*` ids on the same hypothesis.
 
-Use when the classification stereotype is load-bearing for disposition — e.g. `?ci-pipeline-exec` vs `?adversary-controlled-host-exec` both sit on `runc` parent, so the difference lives in `cmdline / user_loginuid / interactive` attribute predictions; without them, the two hypotheses are indistinguishable on forward-looking observables and the fork collapses to Shape A per the invoker-identity anti-pattern. Omit when the classification is self-evidencing (e.g. `?monitoring-host-cron` needs no attribute predictions — the name IS the stereotype).
+Use when the classification stereotype is load-bearing for disposition — e.g. two hypotheses both sitting on a `runc` parent but differing on `cmdline / user_loginuid / interactive` attribute shape. Without explicit `attribute_predictions[]`, the two are indistinguishable on forward-looking observables and collapse to Shape A with a contract. Omit when the classification is self-evidencing (e.g. `?monitoring-host-cron` needs no attribute predictions — the name IS the stereotype).
 
 ### Novelty and IDs
 
-Hypothesis novelty is implicit in the id: a hypothesis whose `id` has not appeared in the accumulated companion is new; `h-{parent}-{ordinal}` refines a confirmed parent. Do not re-author hypotheses that already exist — invlang v2.11 forbids a second top-level `hypothesize:` block, and the validator rejects duplicates.
+Hypothesis novelty is implicit in the id: a hypothesis whose `id` has not appeared in the accumulated companion is new; `h-{parent}-{ordinal}` refines a confirmed parent.
+
+Each PREDICT loop emits its own `hypothesize:` block containing only the hypotheses **authored this loop** — prior-loop hypotheses stay declared through invlang's additive merge (first-wins on duplicate ids). Do not re-emit prior-loop hypotheses verbatim; they are carried across automatically. When you need to refine a confirmed parent, emit a new `h-{parent}-{ordinal}` entry; when you're introducing a fresh mechanism fork, emit new `h-{n}` ids that don't collide with any prior loop.
 
 ### `composite_secondary` and overrides
 
@@ -317,6 +284,9 @@ Do not cite corpus results in `predictions` or `refutation_shape` text — those
 
 Judgment calls the validator doesn't catch:
 
+- **Names and classifications describe mechanism only — never verdict.** Hypothesis `name`, `proposed_edge.parent_vertex.classification`, and `attribute_predictions[].claim` all describe the parent's role or what it DOES — not whether it's good or bad. Evaluation-packed prefixes are rejected by the validator: `?authorized-`, `?legitimate-`, `?benign-`, `?malicious-`, `?adversary-`, `?compromised-`, and their classification analogues (`authorized-X`, `malicious-Y`, `adversary-controlled-Z`, ...). Verdicts live in `authorization_contract` resolutions, `integrity_waived` rationales, and ANALYZE grades — not in vertex names. If you catch yourself writing `?legitimate-foo` vs `?malicious-foo`, stop: these are one mechanism with two verdicts; collapse to one hypothesis with a contract.
+- **Invoker-identity-as-classification is an anti-pattern.** A peer fork whose two hypotheses share `proposed_edge` structure AND whose prediction claims are subsets of one another is one mechanism under two verdicts — collapse to one hypothesis + contract. Rule #32 rejects this shape. A peer hypothesis is valid when its predictions diverge on observable fields the contract-carrier doesn't already cover (e.g., different process ancestry, different session origin, different audit trail). If you're unsure whether the divergence is real and testable with available leads, default to one hypothesis and let upstream loops fork if evidence forces it.
+- **Prior-loop ANALYZE resolutions are settled for their lead scope.** Do not re-evaluate them — cite them if relevant. If loop 1's ANALYZE graded a hypothesis or characterized evidence, build on that in your reasoning; re-litigating it wastes thinking on a question already answered.
 - **Weight is null on hypotheses you author.** ANALYZE grades; you propose.
 - **One observable per claim — always split compound OR/AND.** Each `prediction.claim`, `refutation_shape.claim`, and lead-level `if` clause names exactly one observable condition. Compound claims can't be pivoted on partial evidence and trip validator rule 26. Split instead:
   - ❌ `"no audit entry within ±30s, OR attempt is off the 72h cadence"` (one claim, two observables)
@@ -326,8 +296,7 @@ Judgment calls the validator doesn't catch:
   - ✅ Three separate predictions — or, if the conjunction is actually what matters, pick the single most-discriminating component and drop the rest (typically `max_cluster_size ≤ 3` for cadence questions).
 - **Hypotheses are mechanisms, not verdicts.** If removing an `authorization_contract` makes two hypotheses indistinguishable on every forward-looking prediction, it's an authorization fork — collapse to Shape A.
 - **Downstream-event signals are not hypotheses.** `?post-failure-success` / `?compromise-followup` as peers to mechanism hypotheses are composition-rule checks on subsequent events. Put them in GATHER as unconditional leads; ANALYZE's escalation logic reads them.
-- **Authorization vs integrity (v2.11 three-axis framing).** Authorization contracts answer *policy* — anchor-backed categorical verdict. Integrity is a peer-hypothesis discipline — the `?adversary-controlled-*` peer is expected when an `authorization_contract` sources from an acting-entity edge (`session` / `identity` / `process`, schema rule #32). Use `integrity_waived: <rationale>` on the contract-carrying hypothesis only when integrity is genuinely out of scope for the case.
-- **Invoker-identity-as-classification is an anti-pattern.** A peer fork whose two classifications differ only on *who the actor was* (e.g. `?ci-pipeline-exec` vs `?adversary-controlled-host-exec` on runc; `?legitimate-login` vs `?credential-compromise` on successful auth) is one mechanism under two verdicts — collapse to Shape A with a contract.
+- **Authorization vs integrity.** Authorization contracts answer *policy* — anchor-backed categorical verdict. Integrity is an attribute of the parent vertex, resolved by the same anchor in the common case (IAM / registry / audit-correlation anchors attest to identity-of-use alongside authorization). An optional `integrity_waived: <rationale>` field may document WHY the anchor covers both — useful in escalation reports but not required. A separate peer hypothesis is justified only when integrity implies a testably-different upstream mechanism (see invoker-identity anti-pattern above).
 - **Refinement via hierarchical IDs.** When a confirmed parent forces sub-mechanism distinctions, shelve it and emit children as `h-{parent}-{ordinal}` with independent weights.
 - **Append-only.** Never mutate prior entries. Correct prior grading by adding a new weight with rationale; don't rewrite.
 - **Pitfalls are per-hypothesis and alert-specific.** One or two traps that could make *this* hypothesis look confirmed (or refuted) when it isn't. Not generic lead-level pitfalls.
@@ -335,6 +304,7 @@ Judgment calls the validator doesn't catch:
 - **`authorization_contract` YAML shape.** List, each entry with `id` matching `^ac\d+$` (no hyphen: `ac1`, not `ac-1`), required `edge_ref` = `proposed` or an existing `e-*` id, `anchor_kind`, `predicate` (natural-language "authorized iff …"), `on_unauthorized`, `on_indeterminate`.
 - **`impact_predictions[]` YAML shape (when the lead measures impact observables).** List on the lead, each entry with `id` matching `^ip\d+$`, `dimension` (confidentiality / integrity / availability / scope), `claim` (one observable threshold predicate), `on_match`, `on_mismatch`, `on_indeterminate`, `escalation_on`. Split compound AND/OR across entries — one observable per claim.
 - **Pre-refuted seeds stay shelved.** Don't register a playbook seed as a hypothesis just to `--`-grade it. If the alert + prior loops already collapse the seed-layer, skip to the grandparent-layer fork or emit a single-hypothesis block at the open attribute layer.
+- **No presence-test refutations; no baseline-value leaks.** A refutation that would fire when correlated events appear *in their documented benign shape* is a presence-test — rewrite to name the deviation from baseline. Name the baseline by role (*"deviates from the recurring baseline geometry"*), not by value (*"lport is not 22, fd.sip is not in container-own range"* leaks PREDICT-time guesses at GATHER's output). See §Story authoring — Baseline grounds predictions.
 
 ## Inputs
 

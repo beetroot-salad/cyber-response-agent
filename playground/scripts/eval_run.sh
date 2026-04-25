@@ -145,6 +145,12 @@ print(json.dumps(a, separators=(',',':')))
 
 # soc-agent run dir lives inside the eval dir so it's also isolated
 export SOC_AGENT_RUNS_DIR="$EVAL_DIR/runs"
+# Corpus root: point at the orchestrator-eval tree where prior runs write
+# v2.12-shaped companions. /workspace/runs is a frozen pre-refactor snapshot
+# (all pre-v2.12 shape, none load as valid companions). Without this override
+# invlang.corpus falls back to SOC_AGENT_RUNS_DIR (per-run tmpdir, always
+# empty) and PREDICT priors come back "0 cases matched".
+export INVLANG_CORPUS_ROOT="${INVLANG_CORPUS_ROOT:-/tmp/soc-agent-orchestrate-eval}"
 
 # Point the Stop hook (investigation_summary.py) at the tee'd transcript.
 # --no-session-persistence means the path Claude Code passes into the hook
@@ -167,7 +173,8 @@ fi
 
 echo "[+] Launching claude (isolated, transcript → $EVAL_DIR/transcript.jsonl)..."
 echo "    cwd: $(pwd)"
-echo "    SOC_AGENT_RUNS_DIR: $SOC_AGENT_RUNS_DIR"
+echo "    SOC_AGENT_RUNS_DIR:   $SOC_AGENT_RUNS_DIR"
+echo "    INVLANG_CORPUS_ROOT:  $INVLANG_CORPUS_ROOT"
 echo
 
 # stdbuf to keep the tee buffer flushing in real time

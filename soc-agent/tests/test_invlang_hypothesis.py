@@ -799,12 +799,23 @@ class TestCheckRefutationPredictionLinks:
 
 
 class TestCheckIntegrityPeerDiscipline:
-    """Rule #32 — acting-entity contracts require a peer or an explicit waiver."""
+    """Rule #32 (v2.12 narrowed) — reject invoker-identity anti-pattern.
+
+    Fires only when sibling hypotheses share proposed_edge structure AND
+    have predictions that subset-or-equal one another, where at least one
+    carries an authorization_contract. Does not mandate waivers.
+    """
 
     @staticmethod
-    def _contract_h(hid: str, attached: str, parent_type: str, *, name: str | None = None,
-                    waiver: str | None = None) -> dict:
-        h: dict = {
+    def _contract_h(
+        hid: str,
+        attached: str,
+        parent_type: str,
+        *,
+        name: str | None = None,
+        claims: list[str] | None = None,
+    ) -> dict:
+        return {
             "id": hid,
             "name": name if name is not None else f"?m-{hid}",
             "attached_to_vertex": attached,
@@ -812,7 +823,10 @@ class TestCheckIntegrityPeerDiscipline:
                 "relation": "initiated_by",
                 "parent_vertex": {"type": parent_type, "classification": "some-classification"},
             },
-            "predictions": [{"id": "p1", "claim": "..."}],
+            "predictions": [
+                {"id": f"p{i+1}", "claim": c}
+                for i, c in enumerate(claims or ["p1 default"])
+            ],
             "authorization_contract": [{
                 "id": "ac1",
                 "edge_ref": "proposed",
@@ -822,92 +836,103 @@ class TestCheckIntegrityPeerDiscipline:
                 "on_indeterminate": "escalate",
             }],
         }
-        if waiver is not None:
-            h["integrity_waived"] = waiver
-        return h
 
     @staticmethod
-    def _peer_h(hid: str, attached: str, parent_type: str = "process") -> dict:
+    def _peer_h(
+        hid: str, attached: str, parent_type: str, *, claims: list[str] | None = None,
+    ) -> dict:
         return {
             "id": hid,
-            "name": f"?adversary-controlled-{hid}",
+            "name": f"?m-{hid}",
             "attached_to_vertex": attached,
             "proposed_edge": {
                 "relation": "initiated_by",
-                "parent_vertex": {"type": parent_type, "classification": "impostor"},
+                "parent_vertex": {"type": parent_type, "classification": "other-classification"},
             },
-            "predictions": [{"id": "p1", "claim": "..."}],
+            "predictions": [
+                {"id": f"p{i+1}", "claim": c}
+                for i, c in enumerate(claims or ["p1 default"])
+            ],
         }
 
-    def test_session_contract_with_peer_passes(self):
+    def test_single_hypothesis_with_contract_passes(self):
+        """Solo contract-carrier — no peer, no rule fires."""
         merged = {"hypothesize": {"hypotheses": [
             self._contract_h("h-001", "v-001", "session"),
-            self._peer_h("h-002", "v-001"),
         ]}}
         assert _check_integrity_peer_discipline(merged) == []
 
-    def test_identity_contract_with_peer_passes(self):
+    def test_waiver_optional_not_required(self):
+        """v2.12 drops the waiver mandate — solo contract is fine without it."""
         merged = {"hypothesize": {"hypotheses": [
-            self._contract_h("h-001", "v-001", "identity"),
-            self._peer_h("h-002", "v-001"),
+            self._contract_h("h-001", "v-001", "process"),
         ]}}
         assert _check_integrity_peer_discipline(merged) == []
 
-    def test_process_contract_with_waiver_passes(self):
+    def test_peer_with_identical_predictions_flagged(self):
+        """Anti-pattern: peer shares edge + predictions with contract-carrier."""
         merged = {"hypothesize": {"hypotheses": [
-            self._contract_h("h-001", "v-001", "process",
-                             waiver="integrity tested out-of-band by EDR"),
-        ]}}
-        assert _check_integrity_peer_discipline(merged) == []
-
-    def test_session_contract_without_peer_or_waiver_fails(self):
-        merged = {"hypothesize": {"hypotheses": [
-            self._contract_h("h-001", "v-001", "session"),
+            self._contract_h("h-001", "v-001", "process", claims=["anchor says yes"]),
+            self._peer_h("h-002", "v-001", "process", claims=["anchor says yes"]),
         ]}}
         errors = _check_integrity_peer_discipline(merged)
         assert len(errors) == 1
-        assert "h-001" in errors[0]
-        assert "session" in errors[0]
+        assert "h-001" in errors[0] and "h-002" in errors[0]
+        assert "invoker-identity anti-pattern" in errors[0]
 
-    def test_empty_waiver_does_not_satisfy(self):
+    def test_peer_with_subset_predictions_flagged(self):
+        """Anti-pattern variant: peer's predictions are a strict subset."""
         merged = {"hypothesize": {"hypotheses": [
-            self._contract_h("h-001", "v-001", "session", waiver=""),
+            self._contract_h("h-001", "v-001", "process",
+                             claims=["claim-a", "claim-b"]),
+            self._peer_h("h-002", "v-001", "process", claims=["claim-a"]),
         ]}}
         errors = _check_integrity_peer_discipline(merged)
-        assert errors
+        assert len(errors) == 1
 
-    def test_non_acting_entity_type_exempt(self):
-        # endpoint / file / storage are not acting-entity types; rule #32 ignores them.
+    def test_peer_with_divergent_predictions_passes(self):
+        """Legitimate fork: peer predictions are distinct from contract-carrier's."""
         merged = {"hypothesize": {"hypotheses": [
-            self._contract_h("h-001", "v-001", "endpoint"),
+            self._contract_h("h-001", "v-001", "process",
+                             claims=["approved-source registry confirms triple"]),
+            self._peer_h("h-002", "v-001", "process",
+                         claims=["process ancestry traces to non-daemon parent"]),
         ]}}
         assert _check_integrity_peer_discipline(merged) == []
 
-    def test_peer_on_different_attached_vertex_does_not_count(self):
+    def test_peer_without_contract_on_either_side_ignored(self):
+        """Rule #32 only fires when at least one sibling has an authorization_contract."""
         merged = {"hypothesize": {"hypotheses": [
-            self._contract_h("h-001", "v-001", "session"),
-            # peer attached to different vertex — not in the same sibling group
-            self._peer_h("h-002", "v-777"),
-        ]}}
-        errors = _check_integrity_peer_discipline(merged)
-        assert errors
-        assert "h-001" in errors[0]
-
-    def test_hypothesis_without_contract_exempt(self):
-        # No authorization_contract → integrity-peer discipline doesn't apply.
-        merged = {"hypothesize": {"hypotheses": [
-            {
-                "id": "h-001",
-                "name": "?session-something",
-                "attached_to_vertex": "v-001",
-                "proposed_edge": {
-                    "relation": "initiated_by",
-                    "parent_vertex": {"type": "session", "classification": "x"},
-                },
-                "predictions": [{"id": "p1", "claim": "..."}],
-            },
+            self._peer_h("h-001", "v-001", "process", claims=["same claim"]),
+            self._peer_h("h-002", "v-001", "process", claims=["same claim"]),
         ]}}
         assert _check_integrity_peer_discipline(merged) == []
+
+    def test_different_attached_vertex_not_siblings(self):
+        """Hypotheses on different vertices aren't siblings under this rule."""
+        merged = {"hypothesize": {"hypotheses": [
+            self._contract_h("h-001", "v-001", "process", claims=["same"]),
+            self._peer_h("h-002", "v-777", "process", claims=["same"]),
+        ]}}
+        assert _check_integrity_peer_discipline(merged) == []
+
+    def test_different_parent_vertex_type_not_siblings(self):
+        """Hypotheses with different parent_vertex.type aren't under this rule."""
+        merged = {"hypothesize": {"hypotheses": [
+            self._contract_h("h-001", "v-001", "process", claims=["same"]),
+            self._peer_h("h-002", "v-001", "identity", claims=["same"]),
+        ]}}
+        assert _check_integrity_peer_discipline(merged) == []
+
+    def test_non_acting_entity_type_with_peer_still_flagged(self):
+        """Rule fires on ALL parent types, not just acting-entity — the anti-pattern
+        can occur anywhere siblings share an edge + predictions."""
+        merged = {"hypothesize": {"hypotheses": [
+            self._contract_h("h-001", "v-001", "endpoint", claims=["same"]),
+            self._peer_h("h-002", "v-001", "endpoint", claims=["same"]),
+        ]}}
+        errors = _check_integrity_peer_discipline(merged)
+        assert len(errors) == 1
 
 
 # ---------------------------------------------------------------------------

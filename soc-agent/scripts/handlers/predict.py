@@ -176,7 +176,7 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
         priors_section,
         format_alert_block(alert, salt),
         format_investigation_block(investigation_md, mode="predict"),
-        format_signature_text_block(signature_texts),
+        format_signature_text_block(signature_texts, exclude_archetype_catalog=True),
         format_lead_definitions_summary_block(lead_defs),
     ]
 

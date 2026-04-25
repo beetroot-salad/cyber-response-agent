@@ -1,7 +1,7 @@
 ---
 name: authentication-history
 data_tags: [auth-events]
-baseline: optional       # Absolute observations (e.g., "success after failure from this IP") are self-interpreting; rate claims ("400 failures/hr is high") require a shift-query comparison.
+baseline: required       # Lead returns structured `baseline:` alongside foreground `characterization:` per the §Baseline output shape. PREDICT's by-role deviation refutations require this comparison surface.
 ---
 
 ## Goal
@@ -89,6 +89,13 @@ available" or "not observed." Omission is ambiguous to the main agent.
   shift captures weekly seasonality; for identity patterns (this
   user's typical login hours), extend to 30d if the 7d window is
   sparse. Vendor-specific syntax lives in `templates/{vendor}.md`.
+- **Output shape:** GATHER returns `baseline:` alongside
+  `characterization:` with the same keys (timing pattern, cluster
+  stats, username diversity, success/failure sequence, volume and
+  rate, source-port distribution). `scope:` is one of
+  `same-entity-7d` (default for srcip+srcuser pairs) or
+  `same-entity-30d` (for sparse identity profiles). ANALYZE compares
+  per-key when grading deviation predicates.
 - **Interpretation:** Prefer σ-framing over absolute thresholds.
   `>3σ above this entity's 7-day mean`, `10× the baseline rate`, or
   `top decile across comparable hosts` are environment-agnostic and

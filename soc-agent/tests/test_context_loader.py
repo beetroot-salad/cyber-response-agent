@@ -342,6 +342,32 @@ class TestFormatSignatureTextBlock:
         assert "<playbook/>" in out
         assert "<context/>" in out
 
+    def test_exclude_archetype_catalog_strips_section(self):
+        playbook = (
+            "# Playbook\n\n"
+            "## Hypothesis seeds\n\n- `?foo`\n\n"
+            "## Archetypes\n\n"
+            "| name | seed | story | dir |\n|---|---|---|---|\n"
+            "| foo-archetype | `?foo` | ... | `archetypes/foo/` |\n\n"
+            "## Starter lead order\n\n1. lead-a\n"
+        )
+        out = format_signature_text_block(
+            {"playbook_md": playbook, "context_md": ""},
+            exclude_archetype_catalog=True,
+        )
+        assert "Hypothesis seeds" in out
+        assert "Starter lead order" in out
+        assert "Archetypes" not in out
+        assert "foo-archetype" not in out
+
+    def test_include_archetype_catalog_by_default(self):
+        playbook = "# Playbook\n\n## Archetypes\n\n| name |\n|---|\n| foo |\n"
+        out = format_signature_text_block(
+            {"playbook_md": playbook, "context_md": ""},
+        )
+        assert "Archetypes" in out
+        assert "foo" in out
+
 
 class TestFormatLeadDefinitionsBlock:
     def test_empty_is_self_closing(self):

@@ -17,7 +17,6 @@ import re
 from typing import Any
 
 from hooks.scripts.invlang_common import (
-    _ACTING_ENTITY_TYPES,
     _index_hypothesis_id_field_ids,
 )
 from hooks.scripts.invlang_walkers import (
@@ -463,63 +462,87 @@ def _check_prediction_subject_scope(merged: dict[str, Any]) -> list[str]:
 
 
 def _check_integrity_peer_discipline(merged: dict[str, Any]) -> list[str]:
-    """Rule #32 — acting-entity contracts require a peer or an explicit waiver.
+    """Rule #32 (v2.12 narrowed) — reject the invoker-identity anti-pattern.
 
-    When a hypothesis carries an `authorization_contract` AND its
-    `proposed_edge.parent_vertex.type` is an acting-entity type
-    (`session`, `identity`, `process`), either:
+    Flags sibling hypotheses that share proposed_edge structure AND have
+    predictions that subset-or-equal one another, where at least one of
+    the pair carries an `authorization_contract`.
 
-      (a) a sibling hypothesis (same `attached_to_vertex` and same
-          `parent_hypothesis_id`) whose `name` starts with
-          `?adversary-controlled-` must exist, OR
-      (b) the contract-carrying hypothesis must carry
-          `integrity_waived: <non-empty rationale>`.
+    Rationale:
+      A "peer hypothesis" that shares `attached_to_vertex`,
+      `proposed_edge.relation`, and `proposed_edge.parent_vertex.type`
+      with a contract-carrying sibling — AND whose predictions are
+      contained in (or equal to) the sibling's — adds no observational
+      signal. It's verdict-flipping re-labeled as a mechanism fork, the
+      invoker-identity anti-pattern (see predict.md §Disciplines).
 
-    Non-acting-entity types (endpoint, file, storage, database, ...)
-    are exempt — the integrity question doesn't apply.
+      A peer hypothesis IS valid when its predictions diverge on observable
+      fields the contract-carrying hypothesis doesn't cover — that's
+      Shape M (mechanism fork) not Shape A integrity peer.
+
+    This rule does NOT mandate a waiver on every acting-entity contract.
+    A single hypothesis with a contract and no peer is fine — integrity is
+    implicit in the contract's anchor resolution. An optional
+    `integrity_waived: <rationale>` remains valid as documentation; it is
+    not required.
     """
     errors: list[str] = []
-    for h in iter_hypotheses(merged):
-        hid = h.get("id")
-        if not isinstance(hid, str):
-            continue
-        contracts = h.get("authorization_contract") or []
-        if not isinstance(contracts, list) or not contracts:
-            continue
-        proposed = h.get("proposed_edge")
-        if not isinstance(proposed, dict):
-            continue
-        parent_vertex = proposed.get("parent_vertex")
-        if not isinstance(parent_vertex, dict):
-            continue
-        ptype = parent_vertex.get("type")
-        if ptype not in _ACTING_ENTITY_TYPES:
-            continue
+    hypotheses = list(iter_hypotheses(merged))
 
-        # Check for waiver first — cheapest path to pass.
-        waived = h.get("integrity_waived")
-        if isinstance(waived, str) and waived.strip():
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for h in hypotheses:
+        av = h.get("attached_to_vertex")
+        proposed = h.get("proposed_edge") or {}
+        relation = proposed.get("relation") if isinstance(proposed, dict) else None
+        pv = proposed.get("parent_vertex") if isinstance(proposed, dict) else None
+        ptype = pv.get("type") if isinstance(pv, dict) else None
+        if not (isinstance(av, str) and isinstance(relation, str) and isinstance(ptype, str)):
             continue
+        groups.setdefault((av, relation, ptype), []).append(h)
 
-        # Look for a sibling `?adversary-controlled-*` hypothesis.
-        has_peer = False
-        for sibling in iter_siblings(merged, hid):
-            name = sibling.get("name")
-            if isinstance(name, str) and name.startswith("?adversary-controlled-"):
-                has_peer = True
-                break
-        if has_peer:
+    for group in groups.values():
+        if len(group) < 2:
             continue
-
-        errors.append(
-            f"hypothesis {hid}: carries authorization_contract on an acting-entity "
-            f"parent_vertex.type {ptype!r} but has no peer `?adversary-controlled-*` "
-            f"hypothesis in the same sibling group and no `integrity_waived` "
-            f"rationale. Add a peer integrity hypothesis (predictions testing "
-            f"whether the claimed entity is actually the one acting) or declare "
-            f"`integrity_waived: <rationale>` if integrity is out of scope for this case."
-        )
+        for i in range(len(group)):
+            h1 = group[i]
+            for j in range(i + 1, len(group)):
+                h2 = group[j]
+                has_contract = bool(h1.get("authorization_contract")) or bool(
+                    h2.get("authorization_contract")
+                )
+                if not has_contract:
+                    continue
+                claims_1 = _prediction_claims(h1)
+                claims_2 = _prediction_claims(h2)
+                if not claims_1 or not claims_2:
+                    continue
+                if claims_1 <= claims_2 or claims_2 <= claims_1:
+                    hid1 = h1.get("id") or "?"
+                    hid2 = h2.get("id") or "?"
+                    errors.append(
+                        f"hypotheses {hid1} and {hid2}: share proposed_edge "
+                        f"structure (same attached_to_vertex + relation + "
+                        f"parent_vertex.type) and one hypothesis's prediction "
+                        f"claims are a subset of the other's. This is the "
+                        f"invoker-identity anti-pattern — the peer adds no "
+                        f"observational signal beyond the authorization_contract. "
+                        f"Collapse to one hypothesis, or give the peer predictions "
+                        f"that discriminate on observable fields the "
+                        f"contract-carrying hypothesis doesn't already cover "
+                        f"(Shape M territory)."
+                    )
     return errors
+
+
+def _prediction_claims(h: dict[str, Any]) -> set[str]:
+    """Collect normalized `predictions[].claim` strings for comparison."""
+    claims: set[str] = set()
+    for pred in h.get("predictions") or []:
+        if isinstance(pred, dict):
+            c = pred.get("claim")
+            if isinstance(c, str) and c.strip():
+                claims.add(c.strip().lower())
+    return claims
 
 
 def _check_refutation_prediction_links(merged: dict[str, Any]) -> list[str]:

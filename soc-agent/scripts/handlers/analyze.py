@@ -410,9 +410,10 @@ def _translate_trust_anchor_to_consultation(
     out: dict[str, Any] = {
         "anchor_id": anchor_id or "unspecified",
         "anchor_kind": "policy",
-        "grounding_kind": "org-authority",
+        "grounding_kind": entry.get("grounding_kind") or "org-authority",
         "result": result_map.get(verdict, "partial"),
-        "authority_for_question": "full",
+        "as_of": entry.get("as_of"),
+        "authority_for_question": entry.get("authority_for_question") or anchor_id or "unspecified",
     }
     if entry.get("reasoning"):
         out["reasoning"] = entry["reasoning"]

@@ -75,7 +75,8 @@ class PredictOutputError(ValueError):
 # ---------------------------------------------------------------------------
 
 
-_VALID_SHAPES = frozenset({"D", "E", "I", "A", "M"})
+_VALID_SHAPES = frozenset({"E", "A", "M"})
+_LEGACY_SHAPE_MAP = {"D": "E", "I": "A"}  # D→E (data-gap is enrichment); I→A (identity-of-use is authorization fork)
 _YAML_FENCE_RE = re.compile(r"```(?:yaml)?\s*\n(.*?)\n```", re.DOTALL)
 
 
@@ -132,6 +133,11 @@ def _extract_header(env: dict[str, Any]) -> dict[str, Any]:
         raise PredictOutputError(
             f"predict.loop must be an integer, got {type(loop).__name__}"
         )
+    if shape in _LEGACY_SHAPE_MAP:
+        # Tolerance: map pre-collapse D/I to their new equivalents so a
+        # stray subagent emission doesn't block the handler. The parser
+        # rewrites the header in place.
+        shape = _LEGACY_SHAPE_MAP[shape]
     if shape not in _VALID_SHAPES:
         raise PredictOutputError(
             f"predict.shape must be one of {sorted(_VALID_SHAPES)}, got {shape!r}"
@@ -287,28 +293,33 @@ def _extract_routing(env: dict[str, Any]) -> dict[str, Any]:
 def _check_shape_consistency(
     shape: str, hypotheses: list[dict[str, Any]], branch_plan: dict[str, Any] | None
 ) -> None:
-    """Per the field-presence matrix in tasks-scratch/predict-output-schema.md.
+    """Per the field-presence matrix in agents/predict.md.
 
-    Shape E  → branch_plan required, hypotheses empty.
-    Shape I/A/M → hypotheses required (≥1), branch_plan absent.
-    Shape D  → either shape; hypotheses optional (0 or 1), branch_plan optional.
+    Shape E → branch_plan required, hypotheses empty. (Enrichment; also
+              covers the former "data-gap" case — filling a field gap is
+              enrichment of the gap.)
+    Shape A → hypotheses required (≥1, at least one carrying
+              authorization_contract); branch_plan absent. (Authorization
+              fork; also covers identity-of-use — identity is resolved by
+              an authority/integrity contract.)
+    Shape M → hypotheses required (≥2, diverging on observable fields);
+              branch_plan absent. (Mechanism fork, contract-free.)
     """
     if shape == "E":
         if branch_plan is None:
             raise PredictOutputError(
-                "predict.shape=E requires a branch_plan (loop-1 enrichment "
-                "default has no hypothesis-fork yet; readings drive loop-2 "
-                "routing)"
+                "predict.shape=E requires a branch_plan (enrichment shape "
+                "carries lead-level readings that drive next-loop routing)"
             )
         if hypotheses:
             raise PredictOutputError(
                 "predict.shape=E must have empty hypotheses (shape E is the "
-                "deferred-fork shape — use shape I/A/M instead if you are "
-                "authoring hypotheses this loop)"
+                "deferred-fork shape — use shape A or M if you are authoring "
+                "hypotheses this loop)"
             )
         return
 
-    if shape in ("I", "A", "M"):
+    if shape in ("A", "M"):
         if not hypotheses:
             raise PredictOutputError(
                 f"predict.shape={shape} requires at least one hypothesis"
@@ -319,9 +330,6 @@ def _check_shape_consistency(
                 f"(branch_plan is exclusive to shape E)"
             )
         return
-
-    # Shape D — both optional, either fork-with or zero-new-hypothesis
-    # variants are legal. No cross-section constraint.
 
 
 # ---------------------------------------------------------------------------

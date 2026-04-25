@@ -27,10 +27,11 @@ baseline: optional       # optional | required | not-applicable — whether the 
 
 ## Baseline
 
-<!-- Optional. Fill in when the lead's output is only interpretable in
-     comparison to a typical rate for this entity — i.e., when
-     "observed N events" says nothing until you know whether N is
-     high, low, or normal.
+<!-- Required when frontmatter declares `baseline: required`. The lead
+     commits to returning a structured baseline alongside foreground in
+     GATHER's output envelope, so PREDICT can author by-role deviation
+     refutations (see agents/predict.md §Story authoring) and ANALYZE
+     can compare foreground to baseline dimension-by-dimension.
 
      Skip this section (or set `baseline: not-applicable` in frontmatter)
      for binary checks like file hash reputation, known-bad IP lookups,
@@ -39,6 +40,7 @@ baseline: optional       # optional | required | not-applicable — whether the 
 
 - **When needed:** Which hypotheses or evidence shapes require a baseline before they can be graded. "Is 84 rootcheck events per 4h alarming?" only has an answer relative to this host's typical rate.
 - **Shift query:** The baseline query pattern. Usually the same query executed against a shifted time window (e.g., `--start` shifted `7d` earlier, same `--window` duration). Vendor-specific syntax lives in the lead's `templates/` directory.
+- **Output shape:** The lead returns a `baseline:` field alongside `characterization:` in the gather envelope, with **the same keys** as the foreground `characterization:`. Values are extracted from the shift-query result. A `scope:` field names the shift window descriptor (e.g., `same-entity-7d`, `same-image-30d`). ANALYZE compares `characterization[k]` to `baseline.characterization[k]` per key when grading by-role deviation predicates.
 - **Interpretation:** What counts as "above baseline" (prefer σ-framing — `>3σ deviation`, `15× baseline rate`, `count in top decile for this signature` — over absolute thresholds). Relative framing is environment-agnostic and makes refutation shapes unambiguous.
 
 ## Templates
