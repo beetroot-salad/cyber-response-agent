@@ -55,7 +55,7 @@ directly from `pname` / `aname` in the alert:
 
 Legitimacy (approved operator vs. RCE attacker spawning a shell from
 the same process) is a trust-anchor attribute on the confirmed
-parent, not a separate hypothesis. The `correlated-falco-events`
+parent, not a separate hypothesis. The `correlated-endpoint-events`
 lead runs regardless as evidence, captured in the composition rule
 below.
 
@@ -91,7 +91,7 @@ picture is still ambiguous after lead 2.
    image has a history of shells from this parent (the
    `app-spawned-shell` vs `post-exploit-interactive` discriminator) and
    whether the cadence matches a probe (`k8s-exec-probe`).
-3. **`correlated-falco-events`** — query Falco rules 100000-100099 from
+3. **`correlated-endpoint-events`** — query Falco rules 100000-100099 from
    the same `container.id` in a ±15 minute window, especially 100002,
    100006, 100007, and 100008. Required by the composition rules below.
 
@@ -109,7 +109,7 @@ The composition that matters for this signature:
 
 **Any benign archetype + co-firing of related Falco rules in the same
 `container.id` window is severe regardless of the otherwise-benign
-match.** If the `correlated-falco-events` lead returns any of the
+match.** If the `correlated-endpoint-events` lead returns any of the
 following from the same container within ±15 minutes, escalate
 immediately and cite both the matched benign archetype and the
 co-firing rule(s):
