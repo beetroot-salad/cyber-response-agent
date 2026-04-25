@@ -773,12 +773,11 @@ def _baseline_required(definition_md: str) -> bool:
     """Read the `baseline:` frontmatter key. True iff value is `required`.
 
     The `frontmatter` lib treats `# comment` after a value as comment, so
-    `baseline: required       # ...` parses as `required`.
+    `baseline: required       # ...` parses as `required`. Frontmatter parse
+    errors propagate — a malformed `definition.md` is an authoring bug we
+    want to surface, not silently treat as `not required`.
     """
-    try:
-        post = frontmatter.loads(definition_md)
-    except Exception:
-        return False
+    post = frontmatter.loads(definition_md)
     return str(post.metadata.get("baseline", "")).strip() == "required"
 
 
@@ -797,9 +796,9 @@ _BASELINE_EXEMPT_STATUSES = {
 
 def _check_lead_contracts(
     envelope: GatherEnvelope, prescribed: list[str],
-) -> list[str]:
+) -> list[tuple[str, str]]:
     """Validate each prescribed lead's envelope entry against its on-disk
-    definition contract. Returns a list of human-readable violations.
+    definition contract. Returns `(lead_name, message)` pairs.
 
     Currently enforced:
       - **Baseline**: when frontmatter says `baseline: required`, the entry
@@ -807,10 +806,6 @@ def _check_lead_contracts(
         partial) without a baseline are violations; non-resolution statuses
         (data_missing / probe_broken / etc.) are exempt — they have no
         foreground to compare against.
-
-    Coverage is enforced separately by `_check_composite_scope` (raises
-    rather than returning a violation list, since a missing prescribed
-    entry is a parser-shape failure).
 
     Characterization-shape coverage (every `What to Characterize` bullet
     has a key) is intentionally *not* enforced — bullet labels are prose,
@@ -821,14 +816,14 @@ def _check_lead_contracts(
         lead.get("name"): lead for lead in envelope.leads
         if isinstance(lead.get("name"), str)
     }
-    violations: list[str] = []
+    violations: list[tuple[str, str]] = []
     for name in prescribed:
         entry = by_name.get(name)
         if entry is None:
-            continue  # _check_composite_scope already raised on this case
+            continue
         definition_md = load_lead_definition(SOC_AGENT_ROOT, name)
         if definition_md is None:
-            continue  # ad-hoc / signature-local lead — no contract to check
+            continue
         if not _baseline_required(definition_md):
             continue
         status = entry.get("status")
@@ -836,17 +831,17 @@ def _check_lead_contracts(
             continue
         baseline = entry.get("baseline")
         if baseline is None:
-            violations.append(
-                f"lead {name!r}: definition.md frontmatter is "
-                f"`baseline: required` but envelope entry has "
-                f"`baseline: null` (status={status!r}). Run the shift query "
-                f"per the `## Baseline` section."
-            )
+            violations.append((
+                name,
+                f"definition.md frontmatter is `baseline: required` but "
+                f"envelope entry has `baseline: null` (status={status!r}). "
+                f"Run the shift query per the `## Baseline` section.",
+            ))
     return violations
 
 
 def _apply_contract_violations(
-    envelope: GatherEnvelope, violations: list[str],
+    envelope: GatherEnvelope, violations: list[tuple[str, str]],
 ) -> None:
     """Fold contract violations into the envelope so ANALYZE sees them.
 
@@ -863,18 +858,13 @@ def _apply_contract_violations(
         lead.get("name"): lead for lead in envelope.leads
         if isinstance(lead.get("name"), str)
     }
-    for v in violations:
-        # Extract the lead name from the message; format guaranteed by
-        # _check_lead_contracts.
-        m = re.match(r"lead '([^']+)':", v)
-        if not m:
-            continue
-        entry = by_name.get(m.group(1))
+    for name, message in violations:
+        entry = by_name.get(name)
         if entry is None:
             continue
         entry["status"] = "contract_violation"
         prior = entry.get("status_detail") or ""
-        entry["status_detail"] = (prior + " | " + v).strip(" |")
+        entry["status_detail"] = (prior + " | " + message).strip(" |")
 
 
 def _extract_executed_leads(envelope: GatherEnvelope) -> list[str]:

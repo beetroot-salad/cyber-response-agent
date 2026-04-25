@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ def _lead_definition_path(soc_agent_root: Path, lead_name: str) -> Path:
     )
 
 
-def load_lead_definition(soc_agent_root: Path, lead_name: str) -> Optional[str]:
+def load_lead_definition(soc_agent_root: Path, lead_name: str) -> str | None:
     """Return the contents of one lead's `definition.md`, or `None` if the
     file does not exist (lead is ad-hoc / signature-local).
 

@@ -29,7 +29,7 @@ The main agent substitutes these values:
 - `incident_start`, `incident_end` — ISO 8601 UTC bounds
 - `mode` — one of `composite` | `ad-hoc` | `redispatch`
 - `leads` — an ordered list of lead specs (one for single ad-hoc/redispatch). Each spec: `{lead_name, entity_bindings, reporting_agent}` plus optional PREDICT→GATHER fields:
-  - `definition_md` — the full text of `knowledge/common-investigation/leads/{lead_name}/definition.md`, preloaded by the handler. **Treat this as authoritative**: extract `What to Characterize`, `## Common Pitfalls`, `## Baseline` (when present), and frontmatter (`baseline:`, `data_tags`, etc.) from it. Do not Read the file separately and do not construct the lead ad-hoc when this field is present. Absent only for ad-hoc / signature-local leads (no on-disk definition) — fall through to the ad-hoc path then.
+  - `definition_md` — inlined `definition.md` for the lead. Absent only for ad-hoc / signature-local leads (no on-disk definition) — fall through to the ad-hoc path then.
   - `override_data_source` — when present, PREDICT has determined that the lead's default vendor template targets the wrong data source and that a specific alternative is required. Treat as a directive: construct the query against the named data source (e.g. `host_query`, `playground_ticket`) even if `lead_name` has a populated `{vendor}.md` template. Use the alternative data source's CLI conventions from `environment/systems/{data_source}/SKILL.md`.
   - `lead_hint` — a short free-form prose note from PREDICT explaining *why* this lead execution differs from the default (often paired with `override_data_source`). Treat as authoring context, not an instruction — useful when deciding between multiple sub-queries within the override data source.
 - `cross_lead_hint` (composite only, optional) — the main agent's one-line articulation of *why* these leads are composite (e.g., "session window from auth-history refines data-access query range").
@@ -37,7 +37,7 @@ The main agent substitutes these values:
 ## Context to read (in parallel, single turn)
 
 - `{run_dir}/alert.json`
-- For each lead in `leads`: the inlined `definition_md` on the lead spec is the authoritative contract — do NOT Read `knowledge/common-investigation/leads/{lead_name}/definition.md` separately. Read `knowledge/common-investigation/leads/{lead_name}/templates/{vendor}.md` when present (templates are not preloaded).
+- For each lead in `leads`: read `knowledge/common-investigation/leads/{lead_name}/templates/{vendor}.md` when present (templates are not preloaded).
 - `knowledge/environment/systems/{vendor}/SKILL.md` for CLI invocation conventions
 - `knowledge/common-investigation/leads/ad-hoc/definition.md` — construction discipline; needed for ad-hoc / redispatch modes AND for any lead whose `definition_md` is absent on the spec (see §2 fallback)
 - `knowledge/common-investigation/leads/data-source-debug/definition.md` — protocol for verifying that a suspect-empty result is genuinely absent (see §2 fallback)
@@ -61,8 +61,6 @@ For **template-available** leads: plug `entity_bindings` into the template's bas
 **Exception: `override_data_source` takes precedence over the template.** When a lead spec carries `override_data_source: X`, do NOT execute the `{vendor}.md` template. Instead, construct the query against data source `X` using `environment/systems/X/SKILL.md` conventions — this is explicit PREDICT guidance that the template's data source is wrong for the current discriminator. Record in `refinements_applied` as `"override_data_source={X} per PREDICT directive; bypassed {lead_name}/{vendor}.md template"`. The `What to Characterize` contract from the lead's `definition.md` still applies — override changes *how* the data is fetched, not *what* must be reported.
 
 For **ad-hoc / missing-template** leads, or **missing-definition** leads (the lead spec carries no `definition_md`): construct the query using (a) the field mappings in `knowledge/environment/systems/{vendor}/SKILL.md`, (b) any `{vendor}/field-quirks.md` sibling for non-obvious field semantics, and (c) the `leads/ad-hoc/definition.md` construction discipline. For missing-definition leads, infer intent from the `lead_name` + `entity_bindings` + any caller-supplied tags. Set `query_source: "ad-hoc"` and record the fallback in `refinements_applied` ("no definition for {lead_name}; constructed ad-hoc from intent + entity_bindings"). Do not bounce a missing-definition back to the main agent — that's a subagent respawn for work you can do inline.
-
-**Pitfall:** Never report `no definition for {lead_name}` when `definition_md` is present in the lead spec. The handler preloads `definition.md` for every common-investigation lead; the absence of that field is the only signal that the lead is genuinely ad-hoc. Construct the query against the inlined contract — `What to Characterize`, `## Common Pitfalls`, `## Baseline` (when frontmatter says `baseline: required`).
 
 **Suspect-empty result? Run data-source-debug first — don't short-circuit to `data_missing`.** Triggers: query returns empty, health probe reports `broken` / `baseline_all_zero`, or field values look wrong. Follow `leads/data-source-debug/definition.md` inline:
 

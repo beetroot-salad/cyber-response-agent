@@ -25,7 +25,7 @@ The main agent substitutes these into your invocation prompt:
 - `entity_bindings` — concrete values to substitute into the template's `{entity_field}:{entity_value}` placeholders
 - `vendor` — the SIEM vendor whose template you will use (e.g., `wazuh`)
 - `lead_hint` (optional) — a short prose note from PREDICT explaining intent or why this execution differs from the default. Authoring context, not a directive.
-- `definition_md` (preloaded) — the full text of `knowledge/common-investigation/leads/{lead_name}/definition.md`, inlined by the handler under a `definition_md: |` block. **Treat this as authoritative**: extract `What to Characterize`, `## Common Pitfalls`, `## Baseline` (when present), and frontmatter (`baseline:`, `data_tags`, etc.) from it. Do not Read the file separately.
+- `definition_md` — inlined `definition.md` for the lead.
 
 ## Context
 
@@ -34,8 +34,6 @@ Read these files in parallel:
 - `{run_dir}/alert.json` — the raw alert
 - `knowledge/common-investigation/leads/{lead_name}/templates/{vendor}.md` — base query, entity field mapping, vendor invocation (templates are not preloaded)
 - `knowledge/environment/systems/{vendor}/SKILL.md` — CLI invocation conventions for the SIEM and the data-source health probe
-
-The lead's `definition.md` is preloaded into the prompt as `definition_md` — do NOT Read it again.
 
 Lead frontmatter carries tags on more than one dimension (not just `data_tags`). For the tag vocabulary and how to enumerate what exists, see `knowledge/common-investigation/leads/TAGS.md`.
 
