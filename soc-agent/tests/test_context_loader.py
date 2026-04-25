@@ -24,6 +24,7 @@ from scripts.handlers._context_loader import (  # noqa: E402
     load_alert,
     load_archetype_shapes,
     load_investigation_md,
+    load_lead_definition,
     load_lead_definitions,
     load_run_salt,
     load_signature_text,
@@ -325,6 +326,25 @@ class TestLoadLeadDefinitions:
     def test_empty_definitions_skipped(self, tmp_path):
         (tmp_path / "knowledge" / "common-investigation" / "leads").mkdir(parents=True)
         assert load_lead_definitions(tmp_path) == {}
+
+
+class TestLoadLeadDefinition:
+    def test_returns_text_for_known_lead(self):
+        text = load_lead_definition(SOC_AGENT_ROOT, "authentication-history")
+        assert text is not None
+        assert "What to Characterize" in text
+        # Frontmatter is at the top.
+        assert text.startswith("---")
+
+    def test_returns_none_for_unknown_lead(self):
+        assert load_lead_definition(SOC_AGENT_ROOT, "no-such-lead") is None
+
+    def test_path_matches_load_lead_definitions(self):
+        # The single-lead helper must agree with the bulk loader so the two
+        # cannot drift on path semantics.
+        bulk = load_lead_definitions(SOC_AGENT_ROOT)
+        for name, body in bulk.items():
+            assert load_lead_definition(SOC_AGENT_ROOT, name) == body
 
 
 class TestFormatSignatureTextBlock:

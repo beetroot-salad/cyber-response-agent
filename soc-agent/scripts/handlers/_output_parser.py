@@ -7,7 +7,7 @@ clean buckets:
 1. **invlang_delta** — state additions to append to the companion YAML
    (hypotheses, branch_plan → pending gather entry's predictions, etc.).
 2. **routing** — orchestrator metadata consumed by the next handler, then
-   discarded (selected_lead, composite_secondary, lead_hint, ...).
+   discarded (selected_lead, composite_secondary, lead_hints, ...).
 3. **telemetry** — audit / budget metadata (loop number, shape decision).
 
 Design principles (see tasks-scratch/predict-output-schema.md):
@@ -50,7 +50,8 @@ class PredictParseResult:
       - `selected_lead` (required str)
       - `composite_secondary` (list, default [])
       - `override_data_source` (str | None)
-      - `lead_hint` (str | None)
+      - `lead_hints` (dict[str, str] | None) — keyed by lead name; keys must
+        appear in `selected_lead ∪ composite_secondary`
 
     `telemetry`: `{loop: int, shape: str}`.
 
@@ -229,14 +230,19 @@ def _extract_routing(env: dict[str, Any]) -> dict[str, Any]:
     """Pull `routing` and validate the minimum shape.
 
     `selected_lead` is required. `composite_secondary` defaults to [] when
-    absent. `override_data_source`, `lead_hint`, and `scope_override` are
+    absent. `override_data_source`, `lead_hints`, and `scope_override` are
     optional (absent when not provided). The handler consumes `routing` into
     `ctx.outputs[Phase.PREDICT]`; a missing `selected_lead` means gather has
     nothing to dispatch — fatal.
 
+    `lead_hints` is a `{lead_name: prose}` mapping — every key must name a
+    lead that appears in `selected_lead ∪ composite_secondary`. This keeps
+    composite leads first-class: secondaries can carry intent prose just
+    like the primary.
+
     `scope_override` is the structured way for PREDICT to override gather's
     default 1-hour lookback window (e.g. a 24h cadence check on
-    authentication-history). Prose hints in `lead_hint` are free-form and
+    authentication-history). Prose hints in `lead_hints` are free-form and
     not authoritative on scope.
     """
     r = env.get("routing")
@@ -271,14 +277,31 @@ def _extract_routing(env: dict[str, Any]) -> dict[str, Any]:
                 f"non-empty string, got {ods!r}"
             )
         out["override_data_source"] = ods
-    hint = r.get("lead_hint")
-    if hint is not None:
-        if not isinstance(hint, str) or not hint.strip():
+    hints = r.get("lead_hints")
+    if hints is not None:
+        if not isinstance(hints, dict):
             raise PredictOutputError(
-                "predict.routing.lead_hint must be null or a non-empty string, "
-                f"got {hint!r}"
+                "predict.routing.lead_hints must be a mapping of "
+                f"{{lead_name: prose}}, got {type(hints).__name__}"
             )
-        out["lead_hint"] = hint
+        valid_names = {selected, *composite}
+        for name, prose in hints.items():
+            if not isinstance(name, str) or not name.strip():
+                raise PredictOutputError(
+                    f"predict.routing.lead_hints key must be a non-empty "
+                    f"string, got {name!r}"
+                )
+            if name not in valid_names:
+                raise PredictOutputError(
+                    f"predict.routing.lead_hints[{name!r}] does not name a "
+                    f"prescribed lead (selected_lead or composite_secondary)"
+                )
+            if not isinstance(prose, str) or not prose.strip():
+                raise PredictOutputError(
+                    f"predict.routing.lead_hints[{name!r}] must be a "
+                    f"non-empty string, got {prose!r}"
+                )
+        out["lead_hints"] = dict(hints)
     scope_override = _extract_scope_override(r)
     if scope_override is not None:
         out["scope_override"] = scope_override

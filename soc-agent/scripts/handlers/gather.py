@@ -70,6 +70,7 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._context_loader import load_lead_definition
 from scripts.handlers._output_parser import (
     GatherEnvelope,
     GatherOutputError,
@@ -318,7 +319,12 @@ def _lead_id_for(loop_n: int, index: int) -> str:
 
 
 def _assemble_prompt_single(
-    ctx: Context, scope: Scope, loop_n: int, *, resume: bool = False,
+    ctx: Context,
+    scope: Scope,
+    loop_n: int,
+    *,
+    resume: bool = False,
+    lead_hint: Optional[str] = None,
 ) -> str:
     lines = [
         f"run_dir={ctx.run_dir}",
@@ -332,9 +338,44 @@ def _assemble_prompt_single(
         f"entity_bindings={_format_entity_bindings(scope.entity_bindings)}",
         f"vendor={scope.vendor}",
     ]
+    if lead_hint:
+        lines.append(f"lead_hint={lead_hint}")
+    # Preload the lead's definition.md (when present) so the subagent has the
+    # contract — `What to Characterize`, `## Common Pitfalls`, `## Baseline`
+    # frontmatter — in-prompt rather than relying on a Read it can skip.
+    # Ad-hoc / signature-local leads: definition_md absent → subagent falls
+    # through to ad-hoc construction. See task
+    # gather-composite-skips-lead-def-lookup.
+    definition_md = load_lead_definition(SOC_AGENT_ROOT, scope.lead_name)
+    if definition_md is not None:
+        lines.append(f"definition_md=|\n{_indent_block(definition_md)}")
     if resume:
         lines.append("resume_from_checkpoint=true")
     return "\n".join(lines)
+
+
+def _indent_block(text: str, prefix: str = "  ") -> str:
+    """YAML block-scalar indent. Subagent sees the literal definition under
+    a `definition_md: |` key in the dispatch prompt.
+    """
+    return "\n".join(prefix + line for line in text.splitlines())
+
+
+class _LiteralStr(str):
+    """Marker subclass — `_literal_str_representer` emits these as YAML
+    block scalars (`|`) instead of folded/quoted strings. Used for
+    `definition_md` so the multi-line markdown stays readable in the
+    dispatch prompt rather than being folded into one logical line.
+    """
+
+
+def _literal_str_representer(dumper: yaml.SafeDumper, data: _LiteralStr):
+    return dumper.represent_scalar(
+        "tag:yaml.org,2002:str", str(data), style="|",
+    )
+
+
+yaml.SafeDumper.add_representer(_LiteralStr, _literal_str_representer)
 
 
 def _build_lead_spec(
@@ -354,6 +395,10 @@ def _build_lead_spec(
         spec["override_data_source"] = override_data_source
     if lead_hint:
         spec["lead_hint"] = lead_hint
+    # Preload the lead's definition.md (when present). See _assemble_prompt_single.
+    definition_md = load_lead_definition(SOC_AGENT_ROOT, scope.lead_name)
+    if definition_md is not None:
+        spec["definition_md"] = _LiteralStr(definition_md)
     return spec
 
 
@@ -365,16 +410,19 @@ def _assemble_prompt_composite(
     mode: str,
     resume: bool = False,
     override_data_source: Optional[str] = None,
-    lead_hint: Optional[str] = None,
+    lead_hints: Optional[dict[str, str]] = None,
     secondary_scopes: Optional[list[Scope]] = None,
 ) -> str:
+    hints = lead_hints or {}
     primary_spec = _build_lead_spec(
-        scope, override_data_source=override_data_source, lead_hint=lead_hint,
+        scope,
+        override_data_source=override_data_source,
+        lead_hint=hints.get(scope.lead_name),
     )
     primary_spec["lead_id"] = _lead_id_for(loop_n, 0)
     lead_specs = [primary_spec]
     for idx, sec in enumerate(secondary_scopes or [], start=1):
-        spec = _build_lead_spec(sec)
+        spec = _build_lead_spec(sec, lead_hint=hints.get(sec.lead_name))
         spec["lead_id"] = _lead_id_for(loop_n, idx)
         lead_specs.append(spec)
     lines = [
@@ -385,7 +433,9 @@ def _assemble_prompt_composite(
         f"incident_start={scope.incident_start}",
         f"incident_end={scope.incident_end}",
         f"mode={mode}",
-        "leads=" + yaml.safe_dump(lead_specs, default_flow_style=True).strip(),
+        "leads=" + yaml.safe_dump(
+            lead_specs, default_flow_style=False, allow_unicode=True,
+        ).strip(),
     ]
     if resume:
         lines.append("resume_from_checkpoint=true")
@@ -548,19 +598,26 @@ def _reconstruct_composite_from_checkpoint(
 
 
 def _dispatch_single(
-    ctx: Context, scope: Scope, loop_n: int,
+    ctx: Context,
+    scope: Scope,
+    loop_n: int,
+    *,
+    lead_hints: Optional[dict[str, str]] = None,
 ) -> GatherEnvelope:
     """Invoke the single-gather subagent; on truncation, recover via
     checkpoint; on recoverable escalate triggers, fall back to composite.
     Returns a `GatherEnvelope` (mode="single" or "composite" after fallback).
     """
-    prompt = _assemble_prompt_single(ctx, scope, loop_n)
+    hints = lead_hints or {}
+    prompt = _assemble_prompt_single(
+        ctx, scope, loop_n, lead_hint=hints.get(scope.lead_name),
+    )
     envelope = _parse_envelope_response(
         _invoke_gather(prompt), loop_n=loop_n, mode="single",
     )
 
     if envelope is None:
-        envelope = _recover_single(ctx, scope, loop_n)
+        envelope = _recover_single(ctx, scope, loop_n, lead_hints=lead_hints)
 
     # Escalate-to-composite fallback. The single-gather envelope has exactly
     # one lead; if it carries an escalating status (error / probe_broken) with
@@ -572,12 +629,19 @@ def _dispatch_single(
         if trigger in _COMPOSITE_FALLBACK_TRIGGERS:
             return _dispatch_composite(
                 ctx, scope, loop_n, mode="redispatch",
+                lead_hints=lead_hints,
             )
         # Unrecognized trigger → surface single-lead escalation envelope as-is.
     return envelope
 
 
-def _recover_single(ctx: Context, scope: Scope, loop_n: int) -> GatherEnvelope:
+def _recover_single(
+    ctx: Context,
+    scope: Scope,
+    loop_n: int,
+    *,
+    lead_hints: Optional[dict[str, str]] = None,
+) -> GatherEnvelope:
     ckpt_path = _checkpoint_path_single(ctx, loop_n, scope.lead_name)
     ckpt = _load_checkpoint(ckpt_path)
     if ckpt is None:
@@ -588,7 +652,10 @@ def _recover_single(ctx: Context, scope: Scope, loop_n: int) -> GatherEnvelope:
     if ckpt.get("status") == "complete":
         return _reconstruct_single_from_checkpoint(ckpt, loop_n=loop_n)
     # In-progress or unclear: re-dispatch with resume flag.
-    resume_prompt = _assemble_prompt_single(ctx, scope, loop_n, resume=True)
+    hints = lead_hints or {}
+    resume_prompt = _assemble_prompt_single(
+        ctx, scope, loop_n, resume=True, lead_hint=hints.get(scope.lead_name),
+    )
     envelope = _parse_envelope_response(
         _invoke_gather(resume_prompt), loop_n=loop_n, mode="single",
     )
@@ -602,13 +669,13 @@ def _recover_single(ctx: Context, scope: Scope, loop_n: int) -> GatherEnvelope:
 def _dispatch_composite(
     ctx: Context, scope: Scope, loop_n: int, *, mode: str,
     override_data_source: Optional[str] = None,
-    lead_hint: Optional[str] = None,
+    lead_hints: Optional[dict[str, str]] = None,
     secondary_scopes: Optional[list[Scope]] = None,
 ) -> GatherEnvelope:
     prompt = _assemble_prompt_composite(
         ctx, scope, loop_n, mode=mode,
         override_data_source=override_data_source,
-        lead_hint=lead_hint,
+        lead_hints=lead_hints,
         secondary_scopes=secondary_scopes,
     )
     envelope = _parse_envelope_response(
@@ -618,7 +685,7 @@ def _dispatch_composite(
         return _recover_composite(
             ctx, scope, loop_n, mode,
             override_data_source=override_data_source,
-            lead_hint=lead_hint,
+            lead_hints=lead_hints,
             secondary_scopes=secondary_scopes,
         )
     return envelope
@@ -628,7 +695,7 @@ def _recover_composite(
     ctx: Context, scope: Scope, loop_n: int, mode: str,
     *,
     override_data_source: Optional[str] = None,
-    lead_hint: Optional[str] = None,
+    lead_hints: Optional[dict[str, str]] = None,
     secondary_scopes: Optional[list[Scope]] = None,
 ) -> GatherEnvelope:
     ckpt_path = _checkpoint_path_composite(ctx, loop_n)
@@ -643,7 +710,7 @@ def _recover_composite(
     resume_prompt = _assemble_prompt_composite(
         ctx, scope, loop_n, mode=mode, resume=True,
         override_data_source=override_data_source,
-        lead_hint=lead_hint,
+        lead_hints=lead_hints,
         secondary_scopes=secondary_scopes,
     )
     envelope = _parse_envelope_response(
@@ -700,6 +767,104 @@ def _check_composite_scope(
             f"`status: data_missing` for empty-result confirmations). "
             f"Prescribed={prescribed!r}; listed={sorted(n for n in executed_names if n)!r}."
         )
+
+
+def _baseline_required(definition_md: str) -> bool:
+    """Read the `baseline:` frontmatter key. True iff value is `required`.
+
+    The `frontmatter` lib treats `# comment` after a value as comment, so
+    `baseline: required       # ...` parses as `required`. Frontmatter parse
+    errors propagate — a malformed `definition.md` is an authoring bug we
+    want to surface, not silently treat as `not required`.
+    """
+    post = frontmatter.loads(definition_md)
+    return str(post.metadata.get("baseline", "")).strip() == "required"
+
+
+# Statuses that justify omitting `baseline:` even when frontmatter is
+# `baseline: required`. Each represents a non-resolution where the foreground
+# query itself didn't produce data — so the shift query has nothing to
+# compare against and the subagent is right to skip it.
+_BASELINE_EXEMPT_STATUSES = {
+    "dropped_attempt",
+    "data_missing",
+    "probe_broken",
+    "siem_error",
+    "error",
+}
+
+
+def _check_lead_contracts(
+    envelope: GatherEnvelope, prescribed: list[str],
+) -> list[tuple[str, str]]:
+    """Validate each prescribed lead's envelope entry against its on-disk
+    definition contract. Returns `(lead_name, message)` pairs.
+
+    Currently enforced:
+      - **Baseline**: when frontmatter says `baseline: required`, the entry
+        must carry a non-null `baseline:` field. Resolved statuses (ok /
+        partial) without a baseline are violations; non-resolution statuses
+        (data_missing / probe_broken / etc.) are exempt — they have no
+        foreground to compare against.
+
+    Characterization-shape coverage (every `What to Characterize` bullet
+    has a key) is intentionally *not* enforced — bullet labels are prose,
+    and the agent's keying convention varies. The structural baseline
+    check is the load-bearing one for the deviations chain.
+    """
+    by_name = {
+        lead.get("name"): lead for lead in envelope.leads
+        if isinstance(lead.get("name"), str)
+    }
+    violations: list[tuple[str, str]] = []
+    for name in prescribed:
+        entry = by_name.get(name)
+        if entry is None:
+            continue
+        definition_md = load_lead_definition(SOC_AGENT_ROOT, name)
+        if definition_md is None:
+            continue
+        if not _baseline_required(definition_md):
+            continue
+        status = entry.get("status")
+        if status in _BASELINE_EXEMPT_STATUSES:
+            continue
+        baseline = entry.get("baseline")
+        if baseline is None:
+            violations.append((
+                name,
+                f"definition.md frontmatter is `baseline: required` but "
+                f"envelope entry has `baseline: null` (status={status!r}). "
+                f"Run the shift query per the `## Baseline` section.",
+            ))
+    return violations
+
+
+def _apply_contract_violations(
+    envelope: GatherEnvelope, violations: list[tuple[str, str]],
+) -> None:
+    """Fold contract violations into the envelope so ANALYZE sees them.
+
+    Each violation extends the matching lead's `status_detail` and flips
+    `status` to `contract_violation` (which is NOT in `_RESOLVED_LEAD_STATUSES`,
+    so the lead surfaces as unresolved → PREDICT can re-prescribe). We
+    deliberately do not re-dispatch automatically: a second SIEM query is
+    expensive on the failure path, and the contract_violation surface lets
+    ANALYZE downgrade and the next PREDICT loop decide.
+    """
+    if not violations:
+        return
+    by_name = {
+        lead.get("name"): lead for lead in envelope.leads
+        if isinstance(lead.get("name"), str)
+    }
+    for name, message in violations:
+        entry = by_name.get(name)
+        if entry is None:
+            continue
+        entry["status"] = "contract_violation"
+        prior = entry.get("status_detail") or ""
+        entry["status_detail"] = (prior + " | " + message).strip(" |")
 
 
 def _extract_executed_leads(envelope: GatherEnvelope) -> list[str]:
@@ -887,7 +1052,10 @@ class _PredictPayload:
     selected_lead: str
     loop_n: int
     override_data_source: Optional[str]
-    lead_hint: Optional[str]
+    # Per-lead PREDICT→GATHER prose, keyed by lead name. Keys are a subset of
+    # `{selected_lead, *composite_secondary}` (validated in the predict output
+    # parser). Empty dict when PREDICT supplied no hints.
+    lead_hints: dict[str, str]
     composite_secondary: list[str]
     # Lead-level predictions (`lp*` readings) pre-committed by PREDICT on the
     # Shape E path. Non-empty only when PREDICT emitted a `branch_plan`.
@@ -925,7 +1093,18 @@ def _read_predict_payload(ctx: Context) -> _PredictPayload:
     # dispatch when present, omitted otherwise. PREDICT trailer parser
     # already validated string-ness; we pass through as-is.
     override_data_source = predict_out.get("override_data_source")
-    lead_hint = predict_out.get("lead_hint")
+    raw_hints = predict_out.get("lead_hints")
+    if raw_hints is None:
+        lead_hints: dict[str, str] = {}
+    elif isinstance(raw_hints, dict) and all(
+        isinstance(k, str) and isinstance(v, str) for k, v in raw_hints.items()
+    ):
+        lead_hints = dict(raw_hints)
+    else:
+        raise OrchestrationError(
+            f"GATHER: PREDICT payload lead_hints must be a "
+            f"dict[str, str] when provided, got {raw_hints!r}"
+        )
     # Composite prescription: PREDICT may name additional leads alongside the
     # primary selected_lead. Absent field → empty list (single-lead prescription).
     raw_secondary = predict_out.get("composite_secondary")
@@ -963,7 +1142,7 @@ def _read_predict_payload(ctx: Context) -> _PredictPayload:
         selected_lead=selected_lead,
         loop_n=loop_n,
         override_data_source=override_data_source,
-        lead_hint=lead_hint,
+        lead_hints=lead_hints,
         composite_secondary=composite_secondary,
         branch_plan_predictions=branch_plan_predictions,
         scope_override=raw_so,
@@ -985,7 +1164,9 @@ def handle(ctx: Context) -> PhaseResult:
     )
 
     if scope.template_exists and not force_composite:
-        envelope = _dispatch_single(ctx, scope, pp.loop_n)
+        envelope = _dispatch_single(
+            ctx, scope, pp.loop_n, lead_hints=pp.lead_hints,
+        )
         # _dispatch_single may have fallen back to composite under the
         # escalate-trigger path. Telemetry carries the resolved mode.
         mode = envelope.telemetry.get("mode", "single")
@@ -1001,11 +1182,20 @@ def handle(ctx: Context) -> PhaseResult:
             ctx, scope, pp.loop_n,
             mode="ad-hoc" if not scope.template_exists else "composite",
             override_data_source=pp.override_data_source,
-            lead_hint=pp.lead_hint,
+            lead_hints=pp.lead_hints,
             secondary_scopes=secondary_scopes,
         )
         _check_composite_scope(envelope, prescribed_leads)
         mode = "composite"
+
+    # Per-lead contract check (currently: baseline-required → baseline non-null
+    # for resolved statuses). Violations flip the lead's status to
+    # `contract_violation` so it surfaces as unresolved to ANALYZE → PREDICT
+    # without forcing a redispatch on the failure path. Single-lead dispatch
+    # also passes through this check (the bug applies to single just as much
+    # as composite).
+    contract_violations = _check_lead_contracts(envelope, prescribed_leads)
+    _apply_contract_violations(envelope, contract_violations)
 
     raw_paths = _write_raw_details(ctx, pp.loop_n, envelope.raw_by_lead)
     payload = _build_payload(

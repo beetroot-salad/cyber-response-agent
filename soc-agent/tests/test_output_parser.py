@@ -249,13 +249,33 @@ class TestRouting:
               branch_plan: {primary_lead: x, predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]}
               routing:
                 selected_lead: x
-                composite_secondary: []
+                composite_secondary: [y]
                 override_data_source: host_query
-                lead_hint: "walk ancestry above runc"
+                lead_hints:
+                  x: "walk ancestry above runc"
+                  y: "cross-check session window"
         """))
         result = parse_predict_output(body)
         assert result.routing["override_data_source"] == "host_query"
-        assert result.routing["lead_hint"] == "walk ancestry above runc"
+        assert result.routing["lead_hints"] == {
+            "x": "walk ancestry above runc",
+            "y": "cross-check session window",
+        }
+
+    def test_lead_hints_unknown_lead_rejected(self):
+        body = _y(textwrap.dedent("""
+            predict:
+              loop: 1
+              shape: E
+              branch_plan: {primary_lead: x, predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]}
+              routing:
+                selected_lead: x
+                composite_secondary: []
+                lead_hints:
+                  not-prescribed: "stray hint"
+        """))
+        with pytest.raises(PredictOutputError, match="not-prescribed"):
+            parse_predict_output(body)
 
     def test_bad_composite_secondary_type_fails(self):
         body = _y(textwrap.dedent("""

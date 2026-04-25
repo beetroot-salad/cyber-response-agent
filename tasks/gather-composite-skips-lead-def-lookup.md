@@ -1,8 +1,19 @@
 ---
 title: gather-composite skips reading common-investigation lead definitions when PREDICT supplies a lead_hint
-status: doing
+status: done
 groups: gather, behavior
 ---
+
+## Resolution
+
+Fixed in PR #132 (branch `gather-lead-def-preload`).
+
+- Handler preloads `definition.md` per prescribed lead into the GATHER dispatch prompt (single + composite) via `_context_loader.load_lead_definition`. The contract is in the prompt; the subagent cannot skip it.
+- Ad-hoc / signature-local leads (no on-disk definition) cleanly fall through to the ad-hoc construction path — `definition_md` field absent on the spec is the only signal.
+- Subagent prompts (`agents/gather.md`, `agents/gather-composite.md`) updated to read the inlined `definition_md` instead of doing a separate Read; added a Pitfall: "Never report `no definition for X` when `definition_md` is present in the lead spec."
+- Adjacent fix: promoted `predict.routing.lead_hint: str` → `lead_hints: dict[str, str]` keyed by lead name. Composite secondaries are now first-class and can carry per-lead intent (was misaligned with the baseline/counterfactual refactor).
+- Belt-and-suspenders: post-dispatch contract validator. `baseline: required` leads that return a resolved status without a `baseline:` field flip to `status: contract_violation` so PREDICT can re-prescribe — no automatic redispatch (cost on the failure path).
+- Characterization-shape coverage (every `What to Characterize` bullet has a key) was deferred — bullet labels are prose and the agent's keying convention varies; baseline is the load-bearing check for the deviations chain.
 
 ## Why
 

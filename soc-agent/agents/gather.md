@@ -24,14 +24,15 @@ The main agent substitutes these into your invocation prompt:
 - `incident_start`, `incident_end` — ISO 8601 UTC bounds of the incident window
 - `entity_bindings` — concrete values to substitute into the template's `{entity_field}:{entity_value}` placeholders
 - `vendor` — the SIEM vendor whose template you will use (e.g., `wazuh`)
+- `lead_hint` (optional) — a short prose note from PREDICT explaining intent or why this execution differs from the default. Authoring context, not a directive.
+- `definition_md` — inlined `definition.md` for the lead.
 
 ## Context
 
 Read these files in parallel:
 
 - `{run_dir}/alert.json` — the raw alert
-- `knowledge/common-investigation/leads/{lead_name}/definition.md` — what to characterize, pitfalls
-- `knowledge/common-investigation/leads/{lead_name}/templates/{vendor}.md` — base query, entity field mapping, vendor invocation
+- `knowledge/common-investigation/leads/{lead_name}/templates/{vendor}.md` — base query, entity field mapping, vendor invocation (templates are not preloaded)
 - `knowledge/environment/systems/{vendor}/SKILL.md` — CLI invocation conventions for the SIEM and the data-source health probe
 
 Lead frontmatter carries tags on more than one dimension (not just `data_tags`). For the tag vocabulary and how to enumerate what exists, see `knowledge/common-investigation/leads/TAGS.md`.
@@ -40,7 +41,7 @@ Lead frontmatter carries tags on more than one dimension (not just `data_tags`).
 
 ### 1. Health probe (when applicable)
 
-If the lead's `definition.md` frontmatter has a non-empty `data_tags` list, run the data-source health probe before executing the lead. The probe samples a small set of windows from the recent past and confirms the data source is emitting events at a normal rate for `reporting_agent`. The exact CLI invocation is documented in `environment/systems/{vendor}/SKILL.md` — pass the lead's base query (with `reporting_agent` scoping baked in but **without** any incident-specific entity filters that would narrow the source-rate signal), `--reporting-agent`, `--incident-start`, `--incident-end`.
+If the inlined `definition_md`'s frontmatter has a non-empty `data_tags` list, run the data-source health probe before executing the lead. The probe samples a small set of windows from the recent past and confirms the data source is emitting events at a normal rate for `reporting_agent`. The exact CLI invocation is documented in `environment/systems/{vendor}/SKILL.md` — pass the lead's base query (with `reporting_agent` scoping baked in but **without** any incident-specific entity filters that would narrow the source-rate signal), `--reporting-agent`, `--incident-start`, `--incident-end`.
 
 The probe emits a JSON verdict with one of: `normal | elevated | low | broken`. Broken verdicts carry a trigger distinguishing *why* the probe couldn't characterize the source: `baseline_all_zero` (samples ran, all returned 0, incident also 0), `baseline_no_samples` (no baseline samples succeeded), `count_fn_error` (every SIEM call raised).
 
@@ -52,7 +53,7 @@ Plug `entity_bindings` into the template's base query and execute it against the
 
 ### 3. Baseline query (when the lead declares one)
 
-If the lead definition's frontmatter has `baseline: required` AND its `## Baseline` section declares a shift-query pattern, run a second SIEM call against the shifted window — same entity scoping, same vendor template, time range shifted per the section. Populate the output envelope's `baseline:` field with characterization extracted from the shift-query result, using the **same keys** as the foreground `characterization:` map plus a `scope:` field naming the shift window (e.g., `same-entity-7d`, `same-image-30d`).
+If the inlined `definition_md`'s frontmatter has `baseline: required` AND its `## Baseline` section declares a shift-query pattern, run a second SIEM call against the shifted window — same entity scoping, same vendor template, time range shifted per the section. Populate the output envelope's `baseline:` field with characterization extracted from the shift-query result, using the **same keys** as the foreground `characterization:` map plus a `scope:` field naming the shift window (e.g., `same-entity-7d`, `same-image-30d`).
 
 If `baseline: optional` or `not-applicable`, skip — emit `baseline: null`. The main agent's PREDICT step decides via §Deviation predicates whether deviation-shaped refutations need baseline grounding.
 
@@ -60,7 +61,7 @@ The baseline lookup is a *parallel structural map*, not a separate lead. Errors 
 
 ### 4. Characterize the raw observation
 
-For every bullet in the lead definition's **What to Characterize** section, report a value — even if it is "not available" or "not observed." Omission is ambiguous. Be specific: exact IPs, exact counts, exact usernames, exact timestamps. Do not interpret.
+For every bullet in the inlined `definition_md`'s **What to Characterize** section, report a value — even if it is "not available" or "not observed." Omission is ambiguous. Be specific: exact IPs, exact counts, exact usernames, exact timestamps. Do not interpret.
 
 **Empty result = escalate, don't debug.** If the SIEM CLI returns zero events for the query, do NOT run a data-source-debug protocol (index sanity checks, free-text entity search, field discovery, progressive filtering) — that is the `gather-composite` subagent's job. Escalate with `status: error` + `escalate_trigger: empty_result`.
 
