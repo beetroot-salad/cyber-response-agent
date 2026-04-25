@@ -8,6 +8,7 @@ and routing output. They do not spawn a Claude subprocess.
 
 import sys
 import textwrap
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -406,6 +407,74 @@ class TestPriorsIntegration:
         result = predict_handler.handle(ctx)
         assert result.next_phase == Phase.GATHER
         assert "(priors unavailable" in captured[0]
+
+
+# ---------------------------------------------------------------------------
+# Environment-memory integration
+# ---------------------------------------------------------------------------
+
+
+class TestEnvMemoryIntegration:
+    def test_env_memory_block_appears_when_atoms_match(self, tmp_path, monkeypatch):
+        """When env-memory retrieval returns matched atoms, the rendered block
+        is appended to the assembled prompt — between the priors section and
+        the alert block."""
+        ctx = make_ctx(tmp_path, existing_investigation=_INVESTIGATION_WITH_PREDICT)
+        from scripts.handlers import env_memory
+
+        fake_atom = env_memory.Atom(
+            id="test-atom",
+            body="this atom should appear in the prompt",
+            anchors={"mechanic": ("authentication",)},
+            valid_from=date(2026, 1, 1),
+            valid_to=date(2027, 1, 1),
+            status="live",
+            source_file=tmp_path / "fake.md",
+        )
+        monkeypatch.setattr(
+            env_memory, "retrieve",
+            lambda *a, **k: [(fake_atom, {"stale": False, "pre_window": False})],
+        )
+
+        prompt = predict_handler._assemble_prompt(ctx)
+        assert "## Environment memory" in prompt
+        assert "this atom should appear in the prompt" in prompt
+        assert 'atom_id="test-atom"' in prompt
+
+    def test_no_env_memory_block_when_empty(self, tmp_path, monkeypatch):
+        """Empty match → block omitted entirely (no header, no banner)."""
+        ctx = make_ctx(tmp_path, existing_investigation=_INVESTIGATION_WITH_PREDICT)
+        from scripts.handlers import env_memory
+        monkeypatch.setattr(env_memory, "retrieve", lambda *a, **k: [])
+        prompt = predict_handler._assemble_prompt(ctx)
+        # No env-memory section header, no degraded banner.
+        assert "## Environment memory" not in prompt
+        # Sanity: priors section still present.
+        assert "## Past-investigation priors" in prompt
+
+    def test_env_memory_failure_is_non_fatal(self, tmp_path, monkeypatch):
+        """Broken env_memory.retrieve → degrade-to-banner; prompt assembles,
+        handler still dispatches."""
+        ctx = make_ctx(tmp_path, existing_investigation=_INVESTIGATION_WITH_PREDICT)
+        from scripts.handlers import env_memory
+
+        def _boom(*a, **k):
+            raise RuntimeError("knowledge dir missing")
+
+        monkeypatch.setattr(env_memory, "retrieve", _boom)
+
+        prompt = predict_handler._assemble_prompt(ctx)
+        assert "## Environment memory" in prompt
+        assert "(env-memory unavailable" in prompt
+        # Handler still dispatches cleanly when env-memory fails.
+        captured: list[str] = []
+        monkeypatch.setattr(predict_handler, "_invoke_subagent",
+                            stub_invoke(captured, [_FORK_RESPONSE]))
+        monkeypatch.setattr(predict_handler, "_validate_companion_proposed",
+                            stub_validator([[]]))
+        result = predict_handler.handle(ctx)
+        assert result.next_phase == Phase.GATHER
+        assert "(env-memory unavailable" in captured[0]
 
 
 # ---------------------------------------------------------------------------

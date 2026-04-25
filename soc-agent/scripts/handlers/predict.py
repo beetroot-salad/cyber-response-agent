@@ -167,6 +167,8 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
     signature_texts = load_signature_text(ctx.signature_id, SOC_AGENT_ROOT)
     lead_defs = load_lead_definitions(SOC_AGENT_ROOT)
 
+    env_memory_section = _safe_env_memory_section(ctx)
+
     blocks = [
         (
             f"run_dir={ctx.run_dir}\n"
@@ -174,11 +176,15 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
             f"loop_n={loop_n}"
         ),
         priors_section,
+    ]
+    if env_memory_section:
+        blocks.append(env_memory_section)
+    blocks.extend([
         format_alert_block(alert, salt),
         format_investigation_block(investigation_md, mode="predict"),
         format_signature_text_block(signature_texts, exclude_archetype_catalog=True),
         format_lead_definitions_summary_block(lead_defs),
-    ]
+    ])
 
     if remediation_notes:
         blocks.append(
@@ -192,6 +198,28 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
 # ---------------------------------------------------------------------------
 # Past-investigation priors (topology-conditioned corpus retrieval)
 # ---------------------------------------------------------------------------
+
+
+def _safe_env_memory_section(ctx: Context) -> str:
+    """Produce the environment-memory prompt block.
+
+    Walks `knowledge/environment/{fleet,systems}/**/*.md`, scores atoms
+    against anchors extracted from the live investigation state, returns the
+    formatted block. Empty match → empty string (caller skips the section).
+
+    All exceptions degrade to a banner — env-memory must never block the
+    loop. Same discipline as `_safe_priors_section`.
+    """
+    try:
+        from scripts.handlers import env_memory  # type: ignore
+
+        matched = env_memory.retrieve(SOC_AGENT_ROOT, ctx)
+        return env_memory.format_env_memory_block(matched)
+    except Exception as exc:  # noqa: BLE001 — intentional broad catch
+        return (
+            "## Environment memory\n"
+            f"(env-memory unavailable: {type(exc).__name__}: {exc})"
+        )
 
 
 def _safe_priors_section(ctx: Context) -> str:
