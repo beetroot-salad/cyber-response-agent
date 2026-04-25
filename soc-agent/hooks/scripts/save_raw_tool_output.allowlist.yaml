@@ -1,0 +1,23 @@
+# Allowlist for the save_raw_tool_output PostToolUse hook.
+#
+# Each entry:
+#   kind:    bash | mcp
+#   pattern: regex against tool_input.command (bash) | fnmatch glob against tool_name (mcp)
+#   schema:  short identifier for the response shape (recorded in manifest)
+#   ext:     file extension for the saved payload
+#
+# Add MCP entries here when MCP-backed adapters ship; the hook handles them
+# uniformly via mcp__* tool_name matching.
+entries:
+  - kind: bash
+    pattern: 'wazuh_cli\.py\b'
+    schema: wazuh_cli
+    ext: jsonl
+  - kind: bash
+    pattern: 'host_query\.py\b'
+    schema: host_query
+    ext: json
+  - kind: bash
+    pattern: '\w+_ticket_cli\.py\b'
+    schema: ticket_cli
+    ext: json

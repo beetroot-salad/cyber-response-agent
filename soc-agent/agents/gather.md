@@ -101,19 +101,9 @@ result:                                   # mirrors the envelope's lead entry EX
   query: { system, template, query, time_window, substitutions }
   health_probe: { ... }                   # full JSON or null
   characterization: { ... }               # full map when status=ok; omit on error
-  raw:
-    siem_response: |
-      <VERBATIM SIEM tool output — paste the CLI's stdout exactly as it
-      printed, including every section header (Summary, Count Breakdown,
-      Sample Events, Raw Sample Events with its JSON block) and the raw
-      _source dicts. Do NOT reword, summarize, drop sections, or replace
-      the raw JSON with prose. The raw JSON block is the only place
-      ANALYZE can read discriminator fields (fd.lport, fd.sip, proc.name,
-      srcport, connection tuples, evt.type, …) that your `characterization`
-      map might compress past their load-bearing signal. Truncation of the
-      tail with an explicit `... (N more raw events truncated)` marker
-      is allowed when output exceeds ~200 lines; include the full Summary
-      + Count Breakdown + the first 3 raw _source dicts at minimum.>
+  # raw is omitted entirely — the hook layer mechanically saves CLI output
+  # to disk and merges per-lead paths into the envelope. Do not author a
+  # `raw:` block; do not paste verbatim CLI output.
   # when status=error:
   escalate_trigger: "{empty_result | siem_error | follow_up_needed | missing_template | binding_mismatch | health_probe_verdict}"
   escalate_context: "{1-2 sentences}"
@@ -165,9 +155,6 @@ gather:
         # On baseline query error:
         # error: "{one-line reason}"
       notes: "{anything doesn't fit a characterization bullet — empty string if none}"
-      raw:
-        siem_response: |
-          <verbatim SIEM response — JSON rows, log samples, whatever was returned>
 ```
 
 ## Status discriminator
@@ -205,4 +192,4 @@ Probe verdicts `normal` / `inconclusive` / `elevated` / `low` all proceed to cha
 - Do NOT skip the characterization bullets — every bullet from `What to Characterize` must appear as a key in `characterization`, even if its value is `"not available"`.
 - When the lead declares `baseline: required`, the `baseline:` field is required. Use the SAME keys as the foreground `characterization:` so ANALYZE can compare dimension-by-dimension. A baseline query that errors records `baseline: { scope, error: "…" }` — this still counts as a populated baseline field; it does NOT abort the foreground characterization.
 - Whenever the probe runs, record the full probe JSON in `health_probe:` — every verdict is audit-trail signal.
-- `raw.siem_response` is the verbatim SIEM tool output — paste every section the CLI printed including the `### Raw Sample Events` JSON block with its `_source` dicts. A prose-rewritten or JSON-dropped `siem_response` is a silent data-loss bug: ANALYZE cannot recover discriminator fields (`fd.lport`, `fd.sip`, `proc.name`, `srcport`, connection tuples, `evt.type`) that your `characterization` map compressed past their load-bearing signal.
+- Do NOT author a `raw:` block. The hook layer saves CLI output verbatim to disk and merges paths into the envelope after parse. Anything you paste under `raw:` is dead weight at best and stale-shadow at worst.

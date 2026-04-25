@@ -102,6 +102,15 @@
         ]
       },
       {
+        "matcher": "Bash|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/save_raw_tool_output.py"
+          }
+        ]
+      },
+      {
         "matcher": "Read",
         "hooks": [
           {

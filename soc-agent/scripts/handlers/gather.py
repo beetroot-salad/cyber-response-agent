@@ -75,6 +75,11 @@ from scripts.handlers._output_parser import (
     GatherOutputError,
     parse_gather_envelope,
 )
+from scripts.handlers._raw_manifest import (
+    attach_paths_to_envelope,
+    consume_new_entries,
+    correlate_to_leads,
+)
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
@@ -409,6 +414,28 @@ def _try_extract_terminal_yaml(raw: str) -> Optional[dict]:
         return None
 
 
+def _merge_manifest_into_envelope(
+    ctx: Context, envelope: GatherEnvelope,
+) -> None:
+    """Pull hook-saved raw paths into the envelope's `raw_by_lead`.
+
+    Phase B: purely additive. Manifest entries appended since the last
+    consume are correlated to leads (by command_summary substring against
+    each lead's query) and attached as `paths: [...]` alongside the agent-
+    authored `siem_response`. Downstream consumers may use either field.
+
+    Errors are silenced — manifest enrichment must never block gather.
+    """
+    try:
+        entries = consume_new_entries(ctx.run_dir)
+        if not entries:
+            return
+        grouped = correlate_to_leads(entries, envelope.leads)
+        attach_paths_to_envelope(envelope.raw_by_lead, grouped)
+    except Exception:
+        pass
+
+
 def _parse_envelope_response(
     raw: str, *, loop_n: int, mode: str,
 ) -> Optional[GatherEnvelope]:
@@ -562,6 +589,8 @@ def _dispatch_single(
     if envelope is None:
         envelope = _recover_single(ctx, scope, loop_n)
 
+    _merge_manifest_into_envelope(ctx, envelope)
+
     # Escalate-to-composite fallback. The single-gather envelope has exactly
     # one lead; if it carries an escalating status (error / probe_broken) with
     # a recoverable trigger, redispatch via the composite path so the Sonnet
@@ -615,12 +644,13 @@ def _dispatch_composite(
         _invoke_gather_composite(prompt), loop_n=loop_n, mode="composite",
     )
     if envelope is None:
-        return _recover_composite(
+        envelope = _recover_composite(
             ctx, scope, loop_n, mode,
             override_data_source=override_data_source,
             lead_hint=lead_hint,
             secondary_scopes=secondary_scopes,
         )
+    _merge_manifest_into_envelope(ctx, envelope)
     return envelope
 
 
@@ -723,6 +753,38 @@ def _extract_executed_leads(envelope: GatherEnvelope) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_siem_response_from_paths(paths: list) -> str | None:
+    """Read hook-saved files listed in a lead's `paths[]` and concatenate
+    their contents into a single siem_response string.
+
+    Returns None if `paths` is empty, malformed, or no path resolves to a
+    readable file — caller falls back to agent-authored `siem_response`.
+
+    For multi-call leads, contents are concatenated with a delimiter line
+    so analyze can tell them apart while still reading them as one block.
+    """
+    if not isinstance(paths, list) or not paths:
+        return None
+    chunks: list[str] = []
+    for entry in paths:
+        if not isinstance(entry, dict):
+            continue
+        p = entry.get("path")
+        if not isinstance(p, str) or not p:
+            continue
+        try:
+            body = Path(p).read_text()
+        except (OSError, FileNotFoundError):
+            continue
+        if len(paths) > 1:
+            chunks.append(f"--- saved-output: {Path(p).name} ---\n{body}")
+        else:
+            chunks.append(body)
+    if not chunks:
+        return None
+    return "\n".join(chunks)
+
+
 def _write_raw_details(
     ctx: Context, loop_n: int, raw_by_lead: dict[str, dict],
 ) -> list[str]:
@@ -731,17 +793,27 @@ def _write_raw_details(
     Returns the list of absolute path strings written, in lead-id order.
     Never raises on empty input — composite leads without a `raw` block
     (pure dropped_attempt / data_missing) simply contribute nothing.
+
+    When the lead carries hook-saved `paths[]` (Phase B+C), the file
+    contents replace any agent-authored `siem_response`. The `paths` key
+    is stripped from the persisted YAML so analyze doesn't see hook
+    metadata bleed into the raw block.
     """
     if not raw_by_lead:
         return []
     detail_dir = ctx.run_dir / "raw_details" / f"loop-{loop_n}"
     detail_dir.mkdir(parents=True, exist_ok=True)
-    paths: list[str] = []
+    written_paths: list[str] = []
     for lead_id in sorted(raw_by_lead.keys()):
+        out = dict(raw_by_lead[lead_id])
+        hook_paths = out.pop("paths", None)
+        resolved = _resolve_siem_response_from_paths(hook_paths) if hook_paths else None
+        if resolved is not None:
+            out["siem_response"] = resolved
         path = detail_dir / f"{lead_id}.yaml"
-        path.write_text(yaml.safe_dump(raw_by_lead[lead_id], sort_keys=False))
-        paths.append(str(path))
-    return paths
+        path.write_text(yaml.safe_dump(out, sort_keys=False))
+        written_paths.append(str(path))
+    return written_paths
 
 
 # ---------------------------------------------------------------------------
