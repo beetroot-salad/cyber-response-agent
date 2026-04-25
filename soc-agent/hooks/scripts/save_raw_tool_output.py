@@ -13,7 +13,7 @@ can correlate manifest entries to a spawning subagent invocation.
 The hook returns an additionalContext annotation telling the calling
 subagent the raw was saved — reinforces "don't paste raw into output YAML".
 
-Allowlist lives in save_raw_tool_output.allowlist.yaml next to this file.
+Allowlist lives at .claude-plugin/raw_tool_output.allowlist.yaml (plugin level).
 
 Exit codes:
     0 - Always (must never block the agent).
@@ -36,7 +36,7 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 from hooks.scripts.run_context import get_runs_dir, resolve_run_dir  # noqa: E402
 
 
-ALLOWLIST_PATH = Path(__file__).with_name("save_raw_tool_output.allowlist.yaml")
+ALLOWLIST_PATH = SOC_AGENT_ROOT / ".claude-plugin" / "raw_tool_output.allowlist.yaml"
 MAX_NONCE_RETRIES = 5
 COMMAND_SUMMARY_LEN = 200
 
@@ -56,23 +56,20 @@ def load_allowlist() -> list[dict]:
 
 def match_entry(tool_name: str, tool_input: dict, allowlist: list[dict]) -> dict | None:
     """Return the first allowlist entry matching this tool call, or None."""
-    if tool_name == "Bash":
-        command = (tool_input or {}).get("command", "") or ""
-        for entry in allowlist:
-            if entry.get("kind") != "bash":
-                continue
-            pattern = entry.get("pattern") or ""
-            if pattern and re.search(pattern, command):
-                return entry
+    is_bash = tool_name == "Bash"
+    is_mcp = tool_name.startswith("mcp__")
+    if not (is_bash or is_mcp):
         return None
-    if tool_name.startswith("mcp__"):
-        for entry in allowlist:
-            if entry.get("kind") != "mcp":
-                continue
-            pattern = entry.get("pattern") or ""
-            if pattern and fnmatch(tool_name, pattern):
-                return entry
-        return None
+    command = (tool_input or {}).get("command", "") or "" if is_bash else ""
+    for entry in allowlist:
+        kind = entry.get("kind")
+        pattern = entry.get("pattern") or ""
+        if not pattern:
+            continue
+        if is_bash and kind == "bash" and re.search(pattern, command):
+            return entry
+        if is_mcp and kind == "mcp" and fnmatch(tool_name, pattern):
+            return entry
     return None
 
 
@@ -197,7 +194,8 @@ def main() -> None:
 
     try:
         path = save_payload(run_dir, loop_n, ext, body)
-    except OSError:
+    except OSError as exc:
+        sys.stderr.write(f"[save_raw_tool_output] save_payload failed: {exc}\n")
         sys.exit(0)
 
     entry = {
@@ -215,8 +213,8 @@ def main() -> None:
     }
     try:
         write_manifest_entry(run_dir, entry)
-    except OSError:
-        pass
+    except OSError as exc:
+        sys.stderr.write(f"[save_raw_tool_output] manifest append failed: {exc}\n")
 
     print(json.dumps(context_annotation(path)))
     sys.exit(0)

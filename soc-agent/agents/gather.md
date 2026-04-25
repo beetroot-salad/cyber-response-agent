@@ -101,9 +101,6 @@ result:                                   # mirrors the envelope's lead entry EX
   query: { system, template, query, time_window, substitutions }
   health_probe: { ... }                   # full JSON or null
   characterization: { ... }               # full map when status=ok; omit on error
-  # raw is omitted entirely — the hook layer mechanically saves CLI output
-  # to disk and merges per-lead paths into the envelope. Do not author a
-  # `raw:` block; do not paste verbatim CLI output.
   # when status=error:
   escalate_trigger: "{empty_result | siem_error | follow_up_needed | missing_template | binding_mismatch | health_probe_verdict}"
   escalate_context: "{1-2 sentences}"
@@ -192,4 +189,3 @@ Probe verdicts `normal` / `inconclusive` / `elevated` / `low` all proceed to cha
 - Do NOT skip the characterization bullets — every bullet from `What to Characterize` must appear as a key in `characterization`, even if its value is `"not available"`.
 - When the lead declares `baseline: required`, the `baseline:` field is required. Use the SAME keys as the foreground `characterization:` so ANALYZE can compare dimension-by-dimension. A baseline query that errors records `baseline: { scope, error: "…" }` — this still counts as a populated baseline field; it does NOT abort the foreground characterization.
 - Whenever the probe runs, record the full probe JSON in `health_probe:` — every verdict is audit-trail signal.
-- Do NOT author a `raw:` block. The hook layer saves CLI output verbatim to disk and merges paths into the envelope after parse. Anything you paste under `raw:` is dead weight at best and stale-shadow at worst.

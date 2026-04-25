@@ -250,10 +250,6 @@ gather:
           ...
         # On baseline query error:
         # error: "{one-line reason}"
-      # raw is omitted entirely — the hook layer mechanically saves CLI
-      # output to disk and merges per-lead paths into the envelope after
-      # parse. Do not author a `raw:` block; do not paste verbatim CLI
-      # output for any lead.
     - # next lead entry ...
   cross_lead_notes: "{composite only — consistencies / contradictions / refinements applied across the lead set. Empty string for ad-hoc/redispatch single-lead mode.}"
   notes: "{anything the main agent should know that doesn't fit a lead-level field — empty string if none}"
@@ -286,4 +282,3 @@ An unknown `lead_name` is NOT an error case — fall through to the missing-defi
 - Do NOT write to `investigation.md`. You return the YAML on stdout; the main agent persists it. The ONLY file you write to is the progress checkpoint under `{run_dir}/subagent_checkpoints/`.
 - Do NOT cross lead boundaries except in the explicit `cross_lead_notes` field — each lead's output stands alone.
 - Do NOT proceed after a `siem_error` you cannot resolve by re-quoting; emit `status: siem_error` with detail and move on. The main agent decides whether to re-run.
-- Do NOT author a `raw:` block on any lead. The hook layer saves CLI output verbatim to disk and the gather handler merges per-lead paths into the envelope after parse. Anything you paste under `raw:` is dead weight at best and stale-shadow at worst.

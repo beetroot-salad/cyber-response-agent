@@ -364,6 +364,22 @@ class TestEndToEnd:
         assert rc == 0, stderr
         assert stdout.strip() == ""
 
+    def test_save_failure_emits_stderr_breadcrumb(self, tmp_path, monkeypatch):
+        # Make raw_query_outputs a regular file so mkdir(parents=True) raises.
+        runs_dir = tmp_path / "runs"
+        run_dir = _make_run_dir(runs_dir, "sess-fail")
+        blocker = run_dir / "raw_query_outputs"
+        blocker.write_text("blocked")
+        payload = {
+            "session_id": "sess-fail",
+            "tool_name": "Bash",
+            "tool_input": {"command": "wazuh_cli.py"},
+            "tool_response": {"stdout": "data", "stderr": ""},
+        }
+        rc, _, stderr = _run_hook(payload, runs_dir)
+        assert rc == 0
+        assert "[save_raw_tool_output]" in stderr
+
     def test_two_runs_append_to_manifest(self, tmp_path):
         runs_dir = tmp_path / "runs"
         run_dir = _make_run_dir(runs_dir, "sess-4")

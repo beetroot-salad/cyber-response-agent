@@ -45,6 +45,13 @@ def consume_new_entries(run_dir: Path) -> list[dict[str, Any]]:
     or is empty.
 
     Errors are silenced — manifest reading must never fail the gather flow.
+
+    ASSUMPTION: gather subagents are dispatched sequentially. The cursor
+    scopes "new entries" to the most recent dispatch by relying on no
+    other subagent appending to manifest.jsonl between consumes. If the
+    main loop ever runs gather subagents in parallel, switch correlation
+    to `agent_id` (already recorded in each manifest entry) instead of
+    relying on the cursor window.
     """
     manifest = _manifest_dir(run_dir) / MANIFEST_FILENAME
     cursor = _manifest_dir(run_dir) / CURSOR_FILENAME

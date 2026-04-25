@@ -142,6 +142,24 @@ class TestCorrelateToLeads:
         assert "l-001" in grouped
         assert len(grouped) == 1
 
+    def test_ambiguous_substring_first_match_wins(self):
+        # l-001's query is a prefix of l-002's. An entry whose summary contains
+        # only the shorter substring lands on l-001; an entry containing the
+        # longer string also lands on l-001 because list order is the tiebreak.
+        # This pins the documented "first match wins" behavior so future
+        # changes to correlation can't silently swap winners.
+        leads = [
+            {"id": "l-001", "query": {"query": "evt.type=execve"}},
+            {"id": "l-002", "query": {"query": "evt.type=execve and proc.name=ssh"}},
+        ]
+        entries = [
+            {"command_summary": "wazuh_cli.py --query 'evt.type=execve'"},
+            {"command_summary": "wazuh_cli.py --query 'evt.type=execve and proc.name=ssh'"},
+        ]
+        grouped = correlate_to_leads(entries, leads)
+        assert len(grouped["l-001"]) == 2
+        assert grouped["l-002"] == []
+
 
 # ---------------------------------------------------------------------------
 # attach_paths_to_envelope — additive merge into raw_by_lead
