@@ -181,6 +181,42 @@ The bait test is the load-bearing signal: an explicit hint offered a value-leaky
 
 Latency envelope 190–233s. Above the 1-2min operational target but unchanged from pre-deviations baseline.
 
+## End-to-end run (2026-04-25)
+
+Live orchestrator run on a fresh rule-100001 alert: `20260425-040457-rule100001` (Falco container-shell, runc parent, `bash -c whoami` in `target-endpoint`). 20 min wall, no validator retries.
+
+**Path:** `CONTEXTUALIZE → PREDICT → GATHER → PREDICT → GATHER → ANALYZE → REPORT`. Loop 1 = composite enrichment (`container-baseline` + `correlated-falco-events`); loop 2 = Shape A on `?underlying-host` with a `change-management` authorization contract.
+
+**Outcome: `escalated / unclear / medium`.** Exactly the targeted disposition shift vs run #45's `true_positive/high` failure mode.
+
+**What loop-1 GATHER returned (the test data):**
+- `container-baseline`: 46 similar `bash -c whoami` events over 7 days, all `target-endpoint`/root, runc parent in 65%, multiple per day — recurring not novel.
+- `correlated-falco-events`: 26 rule:100002 events (STDOUT/STDIN→network redirect) co-fire in ±15 min, all with `proc.name=sshd` + `proc.exepath=/usr/share/wazuh-indexer/jdk/bin/java`, parent=bash, 13 distinct TCP connections all from `172.22.0.10` to `172.22.0.13:22` (`fd.lport=22`), each appearing twice — the canonical inbound-sshd dup2 baseline noise that motivated this task.
+
+**Discipline outcomes:**
+
+| Layer | Result |
+|---|---|
+| PREDICT story | Cited 7d baseline by role: *"on-cadence with a pre-existing host-side exec pattern"* |
+| PREDICT predicates | No value leaks — despite `lport=22` / `fd.sip=172.22.0.13` / exepath sitting in the loop-1 raw, predictions/refutations stayed by-role |
+| PREDICT refutations | No presence-test framing on rule:100002 — agent did not author *"rule:100002 fired"*-shaped refutations against the dup2 noise |
+| ANALYZE | Graded `--` via authority refutation (change-management returned 0 tickets) — clean match against `r1` |
+| ANALYZE anomaly report | Independently flagged playground-ticket as possibly non-authoritative: *"Ticket system reports 0 total tickets ever, yet loop 1 baseline recorded 46 similar events"* |
+
+**What this run did NOT exercise:**
+
+- **Structured `baseline:` field path** (the new GATHER envelope). The 100001 leads (`container-baseline`, `correlated-falco-events`) are signature-specific (inline in `wazuh-rule-100001/playbook.md`), not in `common-investigation/leads/`. They run via the ad-hoc resolution path with no `baseline: required` frontmatter, so the new shift-query → `baseline:` field contract didn't trigger. The 7d data ended up *inside* `characterization` (legitimate but not the parallel-map shape the design targets).
+- **By-role deviation grading in ANALYZE.** No deviation-shaped refutation (`r2: deviates from baseline geometry`) was authored this loop — PREDICT picked the simpler authorization fork. The change-management contract resolved the case before the rule:100002 deviation question was forced.
+
+**Read.** The deviations frame *protected* this run from the original failure mode (presence-test refutations on benign dup2 noise) while letting authority refutation drive the disposition. The rule:100002 events were narrated by GATHER and correctly *not* used as a presence-test refutation by PREDICT — but they also weren't actively compared against a baseline geometry. The case resolved before that comparison was needed.
+
+**Open: pilot the full structured-baseline path on a 100001 fixture.** Two options to enable a clean by-role deviation grading test:
+
+1. **Promote `container-baseline` / `correlated-falco-events` to `common-investigation/leads/`** with `baseline: required` frontmatter + `## Baseline` section + wazuh template. Higher surface, but standard.
+2. **Extend the playbook resolver** to honor inline `## Baseline` sections in playbook prose, propagating `baseline: required` semantics to ad-hoc leads. Hackier, less surface change.
+
+Decision deferred to next session. The chain itself is verified end-to-end at every layer that was reachable on this run.
+
 ## Implementation order (revised)
 
 1. **Land environment-memory retrieval first** (`tasks/environment-memory-retrieval.md`). Without it, the deviations frame produces Shape E on loop 1 — useful but not the design's intended primitive.
