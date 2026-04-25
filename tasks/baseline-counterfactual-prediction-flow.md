@@ -1,6 +1,6 @@
 ---
 title: Baseline / counterfactual prediction flow — PREDICT writes falsifiable predicates, GATHER fetches structured baseline, ANALYZE evaluates mechanically
-status: todo
+status: doing
 groups: predict, gather, analyze, invlang
 ---
 

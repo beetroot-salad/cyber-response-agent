@@ -75,60 +75,15 @@ Not in scope:
 - **Downstream consequences** — incident response, not triage.
 - **Disposition claims** — "this is authorized" is a verdict, not a causal link. The evidence that demonstrates authorization (anchor consultation, audit correlation) belongs in predictions and refutation shapes.
 
-**Baseline is required when history exists.** When the observed vertex has prior history (prior alerts on same host/user, established cadence, prior classification), name it explicitly in one story sentence:
+**Baseline grounds predictions.** When the observed vertex has prior history (prior alerts on same host/user, established cadence, prior classification), name it in one story sentence — *"source 172.22.0.10 has emitted rule-5710 at ~10-min cadence for the past 72 hours; this alert is on-cadence with that baseline."* When no baseline exists, say so — *"source has no prior rule-5710 in the 30-day window."* Baseline-grounded stories produce falsifiable predictions; baseline-less stories produce narrative. Optional only if CONTEXTUALIZE's ticket-context is empty AND no related leads in investigation state mention prior observations.
 
-> *"source 172.22.0.10 has emitted rule-5710 at ~10-min cadence for the past 72 hours; this alert is on-cadence with that baseline."*
+Predictions built on the baseline **name the deviation by role, not by value**. Say *"foreground matches the recurring baseline geometry"* / refutation *"deviates from the baseline geometry on at least one recorded dimension"* — don't name specific lport numbers, IP ranges, ancestry chains. Specific values are GATHER's output, not PREDICT's input; the lead's `## Baseline Query` section commits the lead to returning concrete structure, and ANALYZE compares foreground to it dimension-by-dimension. Writing values in the predicate pins PREDICT to a guess and bypasses the lead's own data. Canonical deviation shapes: **geometry** (matches / deviates from recurring baseline geometry), **cadence** (within / materially outside baseline distribution), **novel artifact** (introduces / doesn't introduce a kind absent from baseline), **absence from zero-count baseline** (*"any deviation from the zero-count baseline"* when baseline is structurally zero for that artifact kind). A refutation that would fire on a benign baseline match is a presence-test, not a refutation — rewrite.
 
-When no baseline exists, say so:
-
-> *"source has no prior rule-5710 in the 30-day window."*
-
-Baseline-grounded stories produce falsifiable predictions against environment state; baseline-less stories produce narrative (*"this is the kind of thing that could happen"*). Optional only if CONTEXTUALIZE's ticket-context is empty AND no related leads in investigation state mention prior observations.
+If the loop has no baseline to anchor against — lead's baseline hasn't returned, or no relevant lead has a baseline query — default to Shape E and let the next loop fork once data has landed. ANALYZE caps grade at `+` when no baseline lands; the predicate stays falsifiable for a future loop.
 
 Baseline is also a first-class **lead selector**. `authentication-history` (or the domain equivalent) is a primary discriminator for Shapes I and M — select it alongside the direct-observable lead, not instead of it.
 
 **Labels vs stories.** *"Authorized monitoring activity"* is a restatement. *"Monitoring daemon on 172.22.0.10 invoked `ssh monitorprobe@target` as a scheduled health-check tick"* is a causal link. Name processes, timing, correlation signals. The more concrete the link, the more falsifiable the prediction it generates.
-
-## Deviation predicates (predictions and refutations)
-
-**Predictions name deviations from the lead's baseline — by role, not by value.** A presence-test refutation ("rule:100002 fired in the same window") triggers on benign infrastructure noise that looks identical to the malicious shape at the surface; a deviation predicate names *what dimension of the foreground would have to differ from the baseline GATHER returns* for the hypothesis to fail.
-
-You do **not** name the baseline's specific values. When a lead's `## Baseline Query` section commits the lead to returning concrete baseline structure (recurring geometry, cadence distribution, distinct artifact kinds), PREDICT references that structure by role; GATHER fills it in; ANALYZE compares. Stating specific baseline values in the prediction (specific lport numbers, specific IP ranges, specific ancestry chains) is a leak: it pins PREDICT to a guess about the baseline before GATHER has run, and it bypasses the lead's own data.
-
-Common deviation framings — pick whichever the baseline supports; do not force every prediction into a slot:
-
-- **Geometry**: *"foreground events match the recurring baseline geometry on every dimension the baseline records"* / refutation: *"foreground deviates from the baseline geometry on at least one recorded dimension."*
-- **Cadence / volume**: *"foreground rate falls within the baseline distribution"* / refutation: *"foreground rate is materially outside the baseline distribution (bursty when baseline is periodic, sustained when baseline is one-off)."*
-- **Novel artifact kinds**: *"foreground introduces no artifact kind absent from the baseline"* / refutation: *"foreground introduces an artifact kind the baseline has never recorded for this entity."*
-- **Absence from zero-count baseline**: when the baseline is structurally zero for an artifact kind ("this image has never produced rule:100007 in 7d"), bare-presence of that artifact in foreground is an earned refutation — phrased as *"any deviation from the zero-count baseline"* to keep the dependency explicit.
-
-The discipline: if your refutation could fire on a *benign baseline match* — i.e., the events fire in their known-benign shape — rewrite it to name the deviation by role. The phrase "the baseline geometry" / "the baseline distribution" / "the zero-count baseline" is the placeholder GATHER fills.
-
-When the lead's baseline section is absent or returns empty, predictions degrade gracefully — name what *kind* of deviation would refute, even if the comparison won't land this loop. ANALYZE caps grade at `+` when no baseline lands; the predicate stays falsifiable for a future loop. If the loop has nothing concrete to fork on yet, default to Shape E (enrichment) and let the next loop fork once baseline data has landed.
-
-**Worked example — Falco rule-100001 reverse-shell shape.** Hypothesis `?operator-initiated-exec` proposes a docker-exec parent on a child-shell vertex. The `correlated-falco-events` lead fetches Falco rules in the container's ±15min window AND returns a 7d baseline for the same image (per-rule count, recurring geometry, distinct artifact kinds). Deviation-shaped refutations:
-
-```yaml
-predictions:
-  - id: p2
-    claim: "any rule:100002 foreground events match the recurring
-            baseline geometry on every dimension the baseline records"
-  - id: p3
-    claim: "foreground introduces no Falco rule kind that the 7d
-            baseline has never recorded for this image"
-refutation_shape:
-  - id: r2
-    refutes_predictions: [p2]
-    claim: "at least one rule:100002 foreground event deviates from
-            the baseline geometry on at least one recorded dimension"
-  - id: r3
-    refutes_predictions: [p3]
-    claim: "a Falco rule appears in the foreground that the 7d
-            baseline has never recorded for this image (any deviation
-            from the zero-count baseline for that rule kind)"
-```
-
-PREDICT does not know whether the baseline geometry for rule:100002 on this image is sshd-shaped, empty, or something else. The lead's GATHER pass returns it; ANALYZE compares foreground to it. Both refutations are falsifiable mechanically against the baseline GATHER returns — no PREDICT-time guessing.
 
 ## Shape A — full worked example (loop 2, post-enrichment)
 
@@ -337,7 +292,7 @@ Judgment calls the validator doesn't catch:
 - **`authorization_contract` YAML shape.** List, each entry with `id` matching `^ac\d+$` (no hyphen: `ac1`, not `ac-1`), required `edge_ref` = `proposed` or an existing `e-*` id, `anchor_kind`, `predicate` (natural-language "authorized iff …"), `on_unauthorized`, `on_indeterminate`.
 - **`impact_predictions[]` YAML shape (when the lead measures impact observables).** List on the lead, each entry with `id` matching `^ip\d+$`, `dimension` (confidentiality / integrity / availability / scope), `claim` (one observable threshold predicate), `on_match`, `on_mismatch`, `on_indeterminate`, `escalation_on`. Split compound AND/OR across entries — one observable per claim.
 - **Pre-refuted seeds stay shelved.** Don't register a playbook seed as a hypothesis just to `--`-grade it. If the alert + prior loops already collapse the seed-layer, skip to the grandparent-layer fork or emit a single-hypothesis block at the open attribute layer.
-- **No presence-test refutations; no baseline-value leaks.** A refutation that would fire when correlated events appear *in their documented benign shape* is a presence-test, not a refutation — rewrite to name the deviation from baseline (geometry mismatch, cadence outside distribution, novel artifact kind, or earned bare-presence against a zero-count baseline). And: name the baseline by *role*, not by *value*. *"Foreground deviates from the recurring baseline geometry"* is correct; *"foreground lport is not 22, fd.sip is not in container-own range"* is a leak — PREDICT is guessing at GATHER's output. The lead's `## Baseline Query` returns specific values; PREDICT references the role; ANALYZE compares. See §Deviation predicates.
+- **No presence-test refutations; no baseline-value leaks.** A refutation that would fire when correlated events appear *in their documented benign shape* is a presence-test — rewrite to name the deviation from baseline. Name the baseline by role (*"deviates from the recurring baseline geometry"*), not by value (*"lport is not 22, fd.sip is not in container-own range"* leaks PREDICT-time guesses at GATHER's output). See §Story authoring — Baseline grounds predictions.
 
 ## Inputs
 
