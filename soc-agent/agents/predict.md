@@ -70,7 +70,7 @@ Default bias: **E whenever you're uncertain**. The loop is designed to iterate �
 - Shape A → `soc-agent/agents/predict-examples/shape-A.md`
 - Shape M → `soc-agent/agents/predict-examples/shape-M.md`
 
-Each example is a full case at the relevant loop position (alert → state → output YAML → pitfalls). Read only the one matching your shape decision.
+Each example is a full case at the relevant loop position (alert → state → output YAML → pitfalls). Read only the one matching your shape decision. If the shape decision changes mid-authoring (e.g., after reading shape-A you realize loop N only needs a non-branching lead → shape E), Read the new shape's example before continuing.
 
 ## Story authoring (all fork shapes)
 
