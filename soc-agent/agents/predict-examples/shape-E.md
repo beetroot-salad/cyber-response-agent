@@ -1,22 +1,19 @@
-## Shape E — worked example (loop 1, no prior enrichment)
+## Shape E — worked examples
 
-**Alert (Wazuh rule-5710, SSH invalid user):**
+You've already decided Shape E: one non-branching lead, three (or so) mutually-exclusive readings that route the next loop. The craft questions are **lead selection** (which observable is the cheapest discriminator?) and **reading geometry** (do the readings partition the lead's outcome space without overlap or gap?).
 
-```
-srcuser:   monitorprobe
-srcip:     172.22.0.10
-dstip:     10.0.7.44
-outcome:   reject (unknown user on target)
-```
+### Example 1 — outbound connection from a server, no prior context
 
-**State at loop 1:** prologue has `v-source-172.22.0.10`, `v-target-10.0.7.44`, and an `attempted_auth` edge carrying `identity_on_wire: monitorprobe`. No prior loops. The source has no recorded baseline yet, so any mechanism fork (monitoring-probe vs. credential-stuffing vs. typo) would have to assert cadence shape, ancestry shape, or correlation signal *before* the loop has read any of them — predictions would drift into compound or speculative claims.
+**Alert:** server `host-A` emitted an outbound TCP connection to an unfamiliar destination. Prologue carries `v-source-host-A`, `v-dest-<ip>`, and an `outbound_connection` edge. No prior loops; no baseline yet for `host-A`'s normal egress profile.
 
-The cheapest next step is one lead — `authentication-history` — whose three plausible outcomes route the next loop unambiguously:
-- forward-success in window → escalate (rejected attempt followed by success indicates credential discovery).
-- periodic single-attempt cadence → next loop is Shape A on identity (monitoring-probe-shaped pattern; authority confirmation against `approved-monitoring-sources` is the open question).
-- non-periodic / burst cadence → next loop forks on identity with a cadence-anomaly signal in the story.
+**Lead-selection reasoning.** Three plausible discriminators:
+- `destination-reputation` — fast, but a clean reputation doesn't rule out an authorized internal callout, and a flagged reputation doesn't tell you which process did it. Routes thinly.
+- `peer-host-egress-comparison` — useful for "is this destination unusual for hosts of this role" but assumes role classification, which we don't have yet.
+- `process-attribution` — names the parent process for the connection. Process identity is the strongest single discriminator: a system-update agent, a user-launched browser, and an unknown short-lived binary route the next loop into completely different forks.
 
-Shape E. No `hypotheses` block. `branch_plan` carries the readings; `routing.selected_lead` names the lead.
+`process-attribution` wins because its outcome space *naturally* partitions the next loop's question. The other two would force a Shape M fork with overlapping evidence.
+
+**Reading geometry.** Three readings, mutually exclusive, covering the partition:
 
 ```yaml
 predict:
@@ -24,23 +21,68 @@ predict:
   shape: E
 
   branch_plan:
-    primary_lead: authentication-history
+    primary_lead: process-attribution
     predictions:
       - id: lp1
-        if: "at least one successful authentication from 172.22.0.10 to 10.0.7.44 within ±60s of the rejected attempt"
-        read_as: "forward-success-after-reject"
-        advance_to: escalate
+        if: "the parent process is a system-managed service (package manager, telemetry agent, OS update daemon) running under its expected service identity"
+        read_as: "system-service-egress"
+        advance_to: fork-at-service-authorization
       - id: lp2
-        if: "the source's rule-5710 history over the prior 24h is single-attempt clusters at a recurring inter-arrival cadence (max_cluster_size ≤ 3)"
-        read_as: "periodic-monitoring-shaped"
-        advance_to: fork-at-identity-authority
+        if: "the parent process is a user-launched application running under an interactive user identity"
+        read_as: "user-initiated-egress"
+        advance_to: fork-at-user-intent
       - id: lp3
-        if: "the source's rule-5710 history is non-periodic (bursts, multi-attempt clusters, or no recurrence)"
-        read_as: "non-periodic"
-        advance_to: fork-at-identity-with-cadence-anomaly
+        if: "the parent process is unrecognized, short-lived, or running under an unexpected identity for its kind"
+        read_as: "unknown-or-anomalous-process"
+        advance_to: escalate
 
   routing:
-    selected_lead: authentication-history
+    selected_lead: process-attribution
+    composite_secondary: []
+```
+
+**Pitfalls:**
+- Don't add a `lp4: "destination is on threat-intel feed"` — that's a different lead's signal; mixing it in makes the readings non-disjoint (a system-service hitting a flagged destination matches both lp1 and lp4). Keep one lead per Shape-E branch_plan; if reputation is needed, escalate via lp3 and let the next loop fold it in.
+- Don't write `lp1` as `"system-managed service AND destination is internal"` — that's compound; if the destination turns out to be external, the reading silently fails. The destination check belongs in the next loop, not this one.
+
+---
+
+### Example 2 — failed-login spike on a service account
+
+**Alert:** authentication monitor reports a burst of failed logins against `account-svc-deploy` in the last 5 minutes. Prologue carries `v-account-svc-deploy` and a `failed_auth_burst` edge. No prior loops.
+
+**Lead-selection reasoning.** Candidates:
+- `source-ip-reputation` — tells you about *who*, not about whether this burst is anomalous for *this account*.
+- `geographic-distribution-of-sources` — meaningful only if you already know the account's normal source geography.
+- `authentication-history-for-account` (24h+ cadence + outcome baseline) — returns both the foreground burst and the account's recurring authentication shape in the same query, so the reading can compare.
+
+Authentication baseline wins: **baseline is a first-class discriminator for any "is this burst real?" question.** A service account that normally shows hourly failed-auth clusters from a known set of automation hosts has a different routing path than one with a flat baseline that just spiked.
+
+**Reading geometry.**
+
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history-for-account
+    predictions:
+      - id: lp1
+        if: "the burst's source set, cadence, and failure-mode shape match the account's recurring 24h baseline on at least two recorded dimensions"
+        read_as: "on-baseline-noise"
+        advance_to: halt
+      - id: lp2
+        if: "the burst introduces source identifiers absent from the account's recurring 24h baseline (any deviation from the zero-count baseline for that source set)"
+        read_as: "novel-sources"
+        advance_to: fork-at-source-authority
+      - id: lp3
+        if: "the burst's source set matches baseline but cadence or failure-mode shape deviates from the baseline distribution on at least one recorded dimension"
+        read_as: "known-sources-anomalous-shape"
+        advance_to: fork-at-client-state
+
+  routing:
+    selected_lead: authentication-history-for-account
     composite_secondary: []
     scope_override:
       window_hours: 24
@@ -48,6 +90,6 @@ predict:
 ```
 
 **Pitfalls:**
-- Don't write `lp2` as `"cadence is periodic AND forward-success is absent"` — that's compound. The forward-success check belongs in `lp1`; mutually-exclusive readings keep the routing clean.
-- Don't pin a specific cadence value (*"inter-arrival ≈ 600s"*) in `lp2` — that's a baseline-value leak. Name the deviation by role (*"recurring inter-arrival cadence"*); GATHER returns the concrete distribution.
-- Don't add a fourth reading like *"empty result"* — empty is a GATHER-side trigger (`trigger: empty_result`), not a PREDICT-side reading.
+- Don't write `lp2` as `"novel sources AND high failure rate"` — high failure rate is already implied by the alert; the *novelty* of sources is the load-bearing signal. Compound claims make the reading harder to grade.
+- Don't pin a specific failure-rate threshold (*"> 50 failures/min"*) — that's a baseline-value leak. Name the deviation by role (*"deviates from the baseline distribution"*); the lead returns the concrete distribution.
+- Don't omit `scope_override` — historical baselines need 24h+, GATHER's 1h default would return noise.
