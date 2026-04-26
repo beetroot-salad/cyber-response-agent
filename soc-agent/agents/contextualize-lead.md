@@ -25,6 +25,10 @@ The handler substitutes these in the user message:
 - `target_vertex_kind` — the vertex's `type` (`endpoint`, `identity`, etc.)
 - `target_identifier` — the vertex's `identifier` value, used as the lookup
   key (e.g. `172.22.0.10`, `nagios`)
+- `soc_agent_root` — absolute path to the `soc-agent/` plugin root. All file
+  reads and the lookup CLI invocation must be rooted here.
+- `run_dir` — absolute path to the current investigation run directory; pass
+  to the lookup CLI as `--run-dir`.
 
 If any substitution is missing, emit `status: error` with `reason: "missing
 required substitution: <name>"` and stop.
@@ -35,11 +39,12 @@ required substitution: <name>"` and stop.
 
 Issue a single assistant turn with parallel Reads of:
 
-1. `knowledge/common-investigation/leads/{lead_name}/definition.md` — the
-   lead definition. Its frontmatter declares the lookup CLI and the
+1. `{soc_agent_root}/knowledge/common-investigation/leads/{lead_name}/definition.md`
+   — the lead definition. Its frontmatter declares the lookup CLI and the
    knowledge-base context file (see frontmatter shape below).
-2. The knowledge-base context file the lead's frontmatter names (e.g.
-   `knowledge/environment/context/ip-ranges.md`).
+2. The knowledge-base context file the lead's frontmatter names, joined to
+   `{soc_agent_root}` (e.g.
+   `{soc_agent_root}/knowledge/environment/context/ip-ranges.md`).
 
 If either file is missing, emit `status: error` with `reason: "<which file>
 not found"` and stop.
@@ -48,11 +53,11 @@ not found"` and stop.
 
 The lead's frontmatter declares a `lookup_cli` invocation pattern with a
 `{identifier}` placeholder (and optionally a `key_field` like `ip` / `user`
-/ `host`). Substitute `target_identifier` and execute via Bash. Always
-include `--run-dir {run_dir}` if the lead frontmatter declares
-`wrap_with_run_dir: true` (most do).
+/ `host`). Substitute `target_identifier`, `cd` to `{soc_agent_root}` so
+the CLI's relative path resolves, and append `--run-dir {run_dir}`. The
+handler always supplies `run_dir`; the flag is always passed.
 
-Stub example: `python3 scripts/tools/stub_asset_cli.py lookup ip 172.22.0.10`
+Stub example: `cd {soc_agent_root} && python3 scripts/tools/stub_asset_cli.py lookup ip 172.22.0.10 --run-dir {run_dir}`
 
 Parse stdout as JSON. The shape is the LookupContract result:
 
@@ -121,9 +126,8 @@ fallthrough_classification: unclassified-endpoint
 ---
 ```
 
-Read the frontmatter — substitute `{identifier}` with `target_identifier`
-when invoking the CLI. Append `--run-dir {run_dir}` if the user message
-includes `run_dir`.
+Read the frontmatter — substitute `{identifier}` with `target_identifier`,
+run from `{soc_agent_root}`, and always append `--run-dir {run_dir}`.
 
 ## Hard rules
 

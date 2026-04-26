@@ -432,6 +432,7 @@ def _assemble_contextualize_lead_prompt(
         f"target_vertex_id={vertex.get('id', '')}\n"
         f"target_vertex_kind={vertex.get('type', '')}\n"
         f"target_identifier={vertex.get('identifier', '')}\n"
+        f"soc_agent_root={SOC_AGENT_ROOT}\n"
         f"run_dir={ctx.run_dir}\n"
     )
 
@@ -440,15 +441,17 @@ def _dispatch_contextualize_leads(
     ctx: Context,
     prologue: dict,
     lead_names: list[str],
-) -> list[dict]:
+) -> tuple[list[dict], dict[str, dict]]:
     """Run all contextualize-leads × matching vertices in parallel.
 
-    Returns one envelope per (lead, vertex) invocation. Each envelope is the
-    parsed `contextualize_lead:` block emitted by the subagent. The handler
-    merges envelopes into the prologue downstream (see `_apply_lead_updates`).
+    Returns `(envelopes, lead_fms)`. Each envelope is the parsed
+    `contextualize_lead:` block emitted by the subagent. `lead_fms` maps
+    lead_name → its parsed frontmatter dict, threaded through to
+    `_apply_lead_updates` so the merge knows where each lead's record lands
+    (`record_attr` is the source of truth).
     """
     if not lead_names:
-        return []
+        return [], {}
     vertices = (prologue or {}).get("vertices") or []
 
     # Pre-load every lead's frontmatter once; raise loudly if any is broken.
@@ -464,7 +467,7 @@ def _dispatch_contextualize_leads(
             prompt = _assemble_contextualize_lead_prompt(ctx, lead_name, vertex)
             invocations.append((lead_name, vertex, prompt))
     if not invocations:
-        return []
+        return [], lead_fms
 
     envelopes: list[dict] = []
     with ThreadPoolExecutor(max_workers=min(8, len(invocations))) as ex:
@@ -483,13 +486,20 @@ def _dispatch_contextualize_leads(
                     f"block"
                 )
             envelopes.append(env)
-    return envelopes
+    return envelopes, lead_fms
 
 
-def _apply_lead_updates(prologue: dict, envelopes: list[dict]) -> None:
+def _apply_lead_updates(
+    prologue: dict, envelopes: list[dict], lead_fms: dict[str, dict],
+) -> None:
     """Mutate `prologue['vertices']` in place — for each envelope, find the
-    target vertex and merge `updates` onto it (top-level keys overwrite,
-    `attributes`-style nested dicts deep-merge).
+    target vertex and merge `updates` onto it.
+
+    Routing is driven by the lead's `record_attr` frontmatter (single source
+    of truth): the key matching `record_attr` lands under
+    `vertex.attributes`; everything else lands at the vertex root. An
+    explicit `attributes:` dict in updates deep-merges into the vertex's
+    attributes mapping.
 
     Updates apply at CONTEXTUALIZE authoring time (single-phase write); rule
     #8 (post-write append-only) is satisfied because nothing has been
@@ -510,6 +520,8 @@ def _apply_lead_updates(prologue: dict, envelopes: list[dict]) -> None:
                 f"contextualize-lead {env.get('lead_name')!r} returned target "
                 f"{target!r} but no matching prologue vertex exists"
             )
+        lead_name = env.get("lead_name", "")
+        record_attr = (lead_fms.get(lead_name) or {}).get("record_attr")
         for key, value in (env.get("updates") or {}).items():
             if key == "attributes" and isinstance(value, dict):
                 attrs = vertex.setdefault("attributes", {})
@@ -520,10 +532,7 @@ def _apply_lead_updates(prologue: dict, envelopes: list[dict]) -> None:
                     )
                 attrs.update(value)
                 continue
-            # `cmdb_record` / `idp_record` and similar record-attr keys land
-            # under vertex.attributes by convention — the prologue schema
-            # carries arbitrary records there, not at the vertex root.
-            if key.endswith("_record"):
+            if record_attr and key == record_attr:
                 attrs = vertex.setdefault("attributes", {})
                 if not isinstance(attrs, dict):
                     raise OrchestrationError(
@@ -626,10 +635,14 @@ def handle(ctx: Context) -> PhaseResult:
             f"prologue payload is not a mapping: {prologue_dict!r}"
         )
 
-    contextualize_lead_envelopes = _dispatch_contextualize_leads(
-        ctx, prologue_dict, playbook.contextualize_leads,
+    contextualize_lead_envelopes, contextualize_lead_fms = (
+        _dispatch_contextualize_leads(
+            ctx, prologue_dict, playbook.contextualize_leads,
+        )
     )
-    _apply_lead_updates(prologue_dict, contextualize_lead_envelopes)
+    _apply_lead_updates(
+        prologue_dict, contextualize_lead_envelopes, contextualize_lead_fms,
+    )
 
     prologue_yaml_str = yaml.safe_dump(
         {"prologue": prologue_dict}, sort_keys=False,

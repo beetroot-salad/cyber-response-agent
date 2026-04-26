@@ -97,8 +97,6 @@ Decide `target` from the lead's name + what the `prologue_yaml` contains:
 
 When ambiguous, prefer the vertex the lead's definition.md most directly characterizes.
 
-(Vertex classifications are preloaded by the contextualize-leads at CONTEXTUALIZE; SCREEN does not dispatch `*-classification` leads, so target-selection rules for them no longer apply.)
-
 ## Outcome variant selection
 
 Exactly one of the following per lead:
