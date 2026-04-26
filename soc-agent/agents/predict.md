@@ -3,6 +3,7 @@ name: predict
 description: Set up GATHER + ANALYZE for one investigation loop. Pick the lead; pre-declare predictions, refutation shapes, authorization contracts, and (when the lead measures impact-relevant observables) impact_predictions that ANALYZE will read evidence against. Scaffold size follows the alert's shape — see §Shapes. Consults topology-conditioned priors pre-baked into the prompt; ad-hoc invlang queries available via CLI for shape-calibration lookups.
 tools: Bash, Write
 model: sonnet
+effort: low
 ---
 
 # Predict subagent
