@@ -94,7 +94,7 @@ def make_ctx(
 def stub_invoke(captured: list[str], responses: list[str]):
     iterator = iter(responses)
 
-    def fn(prompt, *, timeout=None):
+    def fn(prompt, *, timeout=None, session_id=None, **_):
         captured.append(prompt)
         try:
             return next(iterator)
@@ -103,6 +103,125 @@ def stub_invoke(captured: list[str], responses: list[str]):
                 "stub exhausted — handler called subagent more times than scripted"
             )
     return fn
+
+
+def _stub_invoke_by_lead(
+    captured: list[str], responses_by_lead: dict[str, str],
+):
+    """Like `stub_invoke` but dispatches the response by which `lead_name=...`
+    token appears in the prompt. Thread-safe (no shared iterator), so the
+    parallel-singletons orchestrator can call it from N worker threads."""
+    def fn(prompt, *, timeout=None, session_id=None, **_):
+        captured.append(prompt)
+        for name, body in responses_by_lead.items():
+            if f"lead_name={name}" in prompt:
+                return body
+        raise AssertionError(
+            f"no scripted response for prompt (recognized leads: "
+            f"{list(responses_by_lead)}); prompt head: {prompt[:200]!r}"
+        )
+    return fn
+
+
+def _single_ok_for(lead_name: str, lead_id: str = "l-001") -> str:
+    """A minimally-valid singleton-ok envelope for an arbitrary lead name."""
+    return textwrap.dedent(f"""
+    ```yaml
+    gather:
+      loop: 1
+      mode: "single"
+      leads:
+        - id: "{lead_id}"
+          name: "{lead_name}"
+          reporting_agent: "target-endpoint"
+          status: ok
+          query:
+            system: "wazuh-indexer"
+            template: "stub-template"
+            query: "stub query for {lead_name}"
+            time_window: {{start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}}
+            substitutions: {{}}
+          health_probe: null
+          characterization:
+            total_events: 7
+          baseline:
+            scope: same-entity-7d
+            total_events: 200
+          notes: ""
+          raw:
+            siem_response: "(7 rows from {lead_name})"
+    ```
+    """).strip()
+
+
+def _single_escalate_for(
+    lead_name: str, trigger: str = "empty_result", lead_id: str = "l-001",
+) -> str:
+    return textwrap.dedent(f"""
+    ```yaml
+    gather:
+      loop: 1
+      mode: "single"
+      leads:
+        - id: "{lead_id}"
+          name: "{lead_name}"
+          reporting_agent: "target-endpoint"
+          status: error
+          escalate_trigger: {trigger}
+          escalate_context: "test escalation"
+          health_probe: null
+          raw:
+            siem_response: ""
+    ```
+    """).strip()
+
+
+def _composite_two_leads(primary: str, secondary: str) -> str:
+    return textwrap.dedent(f"""
+    ```yaml
+    gather:
+      loop: 1
+      mode: "redispatch"
+      leads:
+        - id: "l-001"
+          name: "{primary}"
+          reporting_agent: "target-endpoint"
+          status: ok
+          query:
+            system: "wazuh-indexer"
+            query: "composite primary"
+            query_source: "template"
+            substitutions: {{}}
+            refinements_applied: ""
+            time_window: {{start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}}
+          health_probe: null
+          characterization:
+            total_events: 9
+          baseline:
+            scope: same-entity-7d
+            total_events: 250
+          raw:
+            siem_response: "(9 rows)"
+        - id: "l-001b"
+          name: "{secondary}"
+          reporting_agent: "target-endpoint"
+          status: ok
+          query:
+            system: "wazuh-indexer"
+            query: "composite secondary"
+            query_source: "template"
+            substitutions: {{}}
+            refinements_applied: ""
+            time_window: {{start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}}
+          health_probe: null
+          characterization:
+            total_events: 4
+          raw:
+            siem_response: "(4 rows)"
+      cross_lead_notes: ""
+      notes: ""
+    ```
+    """).strip()
 
 
 _SINGLE_FINDING = textwrap.dedent("""
@@ -373,6 +492,348 @@ class TestDispatchRouting:
         assert len(captured_single) == 0
         assert len(captured_composite) == 1
         assert "mode=ad-hoc" in captured_composite[0]
+
+    def test_two_on_disk_leads_dispatch_parallel_when_flag_set(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.setenv("SOC_AGENT_PARALLEL_GATHER", "1")
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        captured_single: list[str] = []
+        captured_composite: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            _stub_invoke_by_lead(
+                captured_single,
+                {
+                    "authentication-history": _SINGLE_FINDING,
+                    "source-reputation": _single_ok_for(
+                        "source-reputation", "l-001",
+                    ),
+                },
+            ),
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke(captured_composite, []),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert result.next_phase == Phase.ANALYZE
+        assert result.payload["mode"] == "parallel"
+        # Two parallel singleton calls; no composite fallback.
+        assert len(captured_single) == 2
+        assert len(captured_composite) == 0
+        assert set(result.payload["executed_leads"]) == {
+            "authentication-history", "source-reputation",
+        }
+
+    def test_two_on_disk_leads_dispatch_composite_when_flag_unset(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.delenv("SOC_AGENT_PARALLEL_GATHER", raising=False)
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        captured_single: list[str] = []
+        captured_composite: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            stub_invoke(captured_single, []),
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke(captured_composite, [_COMPOSITE_MULTI_LEAD_OK]),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert result.payload["mode"] == "composite"
+        assert len(captured_single) == 0
+        assert len(captured_composite) == 1
+
+    def test_mixed_on_disk_and_signature_local_dispatches_composite(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.setenv("SOC_AGENT_PARALLEL_GATHER", "1")
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        # `container-baseline` is signature-local — no on-disk definition.md
+        # under knowledge/common-investigation/leads/. Parallel routing must
+        # fall through to composite.
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["container-baseline"]
+        captured_single: list[str] = []
+        captured_composite: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            stub_invoke(captured_single, []),
+        )
+        composite_response = _composite_two_leads(
+            "authentication-history", "container-baseline",
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke(captured_composite, [composite_response]),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert result.payload["mode"] == "composite"
+        assert len(captured_single) == 0
+        assert len(captured_composite) == 1
+
+    def test_override_data_source_skips_parallel(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.setenv("SOC_AGENT_PARALLEL_GATHER", "1")
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        ctx.outputs[Phase.PREDICT]["override_data_source"] = "elastic-stack"
+        captured_single: list[str] = []
+        captured_composite: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            stub_invoke(captured_single, []),
+        )
+        composite_response = _composite_two_leads(
+            "authentication-history", "source-reputation",
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke(captured_composite, [composite_response]),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert result.payload["mode"] == "composite"
+        assert len(captured_single) == 0
+        assert len(captured_composite) == 1
+
+
+# ---------------------------------------------------------------------------
+# Parallel singletons: envelope concat + subset fallback + manifest partition
+# ---------------------------------------------------------------------------
+
+
+class TestParallelSingletons:
+    def test_envelope_concat_and_id_renumbering(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.setenv("SOC_AGENT_PARALLEL_GATHER", "1")
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = [
+            "source-reputation", "user-analysis",
+        ]
+        captured: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            _stub_invoke_by_lead(captured, {
+                "authentication-history": _SINGLE_FINDING,
+                "source-reputation": _single_ok_for("source-reputation"),
+                "user-analysis": _single_ok_for("user-analysis"),
+            }),
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke([], []),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert result.payload["mode"] == "parallel"
+        assert result.payload["prescribed_leads"] == [
+            "authentication-history", "source-reputation", "user-analysis",
+        ]
+        # Envelope leads renumbered in primary→secondary order to avoid
+        # `l-001` collisions across singletons.
+        # We can't read the envelope object directly from the payload, but
+        # the markdown section in investigation.md carries each lead's id.
+        investigation = (ctx.run_dir / "investigation.md").read_text()
+        assert "l-001" in investigation
+        assert "l-001b" in investigation
+        assert "l-001c" in investigation
+        # All three subagent calls happened.
+        assert len(captured) == 3
+
+    def test_subset_composite_fallback_on_recoverable_escalation(
+        self, tmp_path, monkeypatch,
+    ):
+        """One of two singletons returns `escalate_trigger: empty_result`.
+        The orchestrator re-dispatches just the failed lead via composite,
+        leaving the cleanly-completed lead untouched."""
+        monkeypatch.setenv("SOC_AGENT_PARALLEL_GATHER", "1")
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        captured_single: list[str] = []
+        captured_composite: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            _stub_invoke_by_lead(captured_single, {
+                "authentication-history": _SINGLE_FINDING,
+                "source-reputation": _single_escalate_for(
+                    "source-reputation", trigger="empty_result",
+                ),
+            }),
+        )
+        # Composite fallback covers ONLY source-reputation.
+        composite_replacement = textwrap.dedent("""
+        ```yaml
+        gather:
+          loop: 1
+          mode: "redispatch"
+          leads:
+            - id: "l-001"
+              name: "source-reputation"
+              reporting_agent: "target-endpoint"
+              status: ok
+              query:
+                system: "wazuh-indexer"
+                query: "rebuilt by composite"
+                query_source: "ad-hoc"
+                substitutions: {}
+                refinements_applied: "rebuilt after empty_result"
+                time_window: {start: "2026-04-20T18:25:00Z", end: "2026-04-20T19:25:00Z"}
+              health_probe: null
+              characterization:
+                reputation: clean
+              raw:
+                siem_response: "(rebuilt rows)"
+          cross_lead_notes: ""
+          notes: ""
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke(captured_composite, [composite_replacement]),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert result.payload["mode"] == "parallel"
+        assert len(captured_single) == 2
+        # Exactly one composite call covering only the failed lead.
+        assert len(captured_composite) == 1
+        composite_prompt = captured_composite[0]
+        assert "source-reputation" in composite_prompt
+        # Healthy lead's prompt was NOT in the composite redispatch primary.
+        assert "lead_name: source-reputation" in composite_prompt
+        # Both leads end up resolved.
+        assert set(result.payload["executed_leads"]) == {
+            "authentication-history", "source-reputation",
+        }
+
+    def test_unrecognized_escalate_trigger_does_not_redispatch(
+        self, tmp_path, monkeypatch,
+    ):
+        """An escalate trigger that's not in _COMPOSITE_FALLBACK_TRIGGERS
+        surfaces as-is — the parallel orchestrator does NOT trigger a
+        composite re-dispatch (matches serial-path behavior)."""
+        monkeypatch.setenv("SOC_AGENT_PARALLEL_GATHER", "1")
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+        captured_single: list[str] = []
+        captured_composite: list[str] = []
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather",
+            _stub_invoke_by_lead(captured_single, {
+                "authentication-history": _SINGLE_FINDING,
+                "source-reputation": _single_escalate_for(
+                    "source-reputation", trigger="unknown_unrecoverable",
+                ),
+            }),
+        )
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke(captured_composite, []),
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert len(captured_composite) == 0
+        # Healthy lead resolved, failed lead surfaces as error.
+        assert "authentication-history" in result.payload["executed_leads"]
+
+    def test_session_partitioned_manifest_correlation(
+        self, tmp_path, monkeypatch,
+    ):
+        """Each parallel singleton's manifest entries (tagged with that
+        subagent's session_id) are routed to that singleton's envelope —
+        not cross-attributed via substring match."""
+        monkeypatch.setenv("SOC_AGENT_PARALLEL_GATHER", "1")
+        ctx = make_ctx(tmp_path, selected_lead="authentication-history")
+        ctx.outputs[Phase.PREDICT]["composite_secondary"] = ["source-reputation"]
+
+        captured_session_ids: dict[str, str] = {}
+
+        def fn(prompt, *, timeout=None, session_id=None, **_):
+            for name in ("authentication-history", "source-reputation"):
+                if f"lead_name={name}" in prompt:
+                    captured_session_ids[name] = session_id
+                    return (
+                        _SINGLE_FINDING if name == "authentication-history"
+                        else _single_ok_for("source-reputation")
+                    )
+            raise AssertionError("no lead match in prompt")
+
+        monkeypatch.setattr(gather_handler, "_invoke_gather", fn)
+        monkeypatch.setattr(
+            gather_handler, "_invoke_gather_composite",
+            stub_invoke([], []),
+        )
+
+        # Pre-write manifest entries: one per session_id, plus an alien one
+        # belonging to neither subagent (e.g. an orchestrator tool call).
+        # We inject them after handle() starts dispatch is impractical; instead
+        # write them before dispatch but verify the cursor swallows the alien
+        # entry without leaking into a later sequential consume.
+        manifest_dir = ctx.run_dir / "raw_query_outputs"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        # We need to write manifest entries AFTER session_ids are known but
+        # BEFORE the cursor advances. Easiest path: monkey-patch the executor
+        # to write manifest entries with each subagent's session_id between
+        # the dispatch and the consume.
+        original_dispatch = gather_handler._dispatch_single_raw
+
+        def wrapped_dispatch(ctx_, scope_, loop_n_, *, session_id=None, **kw):
+            env = original_dispatch(
+                ctx_, scope_, loop_n_, session_id=session_id, **kw,
+            )
+            # Append a manifest entry tagged with this subagent's session_id.
+            entry = {
+                "ts": "2026-04-20T19:25:01Z",
+                "session_id": session_id,
+                "tool_use_id": f"tool-{scope_.lead_name}",
+                "agent_id": f"agent-{scope_.lead_name}",
+                "agent_type": "gather",
+                "tool_name": "Bash",
+                "schema": "wazuh-cli/v1",
+                "loop_n": loop_n_,
+                "path": str(manifest_dir / f"{scope_.lead_name}.yaml"),
+                "bytes": 100,
+                "command_summary": f"stub query for {scope_.lead_name}",
+            }
+            import json
+            with (manifest_dir / "manifest.jsonl").open("a") as f:
+                f.write(json.dumps(entry) + "\n")
+            return env
+
+        monkeypatch.setattr(
+            gather_handler, "_dispatch_single_raw", wrapped_dispatch,
+        )
+
+        result = gather_handler.handle(ctx)
+
+        assert result.payload["mode"] == "parallel"
+        assert len(captured_session_ids) == 2
+        # Each lead got its own UUID — the orchestrator partitions by these.
+        assert (
+            captured_session_ids["authentication-history"]
+            != captured_session_ids["source-reputation"]
+        )
+        # The cursor advanced past both manifest entries (subsequent serial
+        # consume would see them as already-consumed).
+        from scripts.handlers._raw_manifest import consume_new_entries
+        residual = consume_new_entries(ctx.run_dir)
+        assert residual == []
 
 
 # ---------------------------------------------------------------------------

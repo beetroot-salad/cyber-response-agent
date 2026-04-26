@@ -152,6 +152,7 @@ def invoke_subagent(
     *,
     model: Optional[str] = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    session_id: Optional[str] = None,
 ) -> str:
     """Run a subagent by name (e.g. "archetype-match") and return its stdout.
 
@@ -172,6 +173,11 @@ def invoke_subagent(
           record under the run dir. Advisory: these never block the handler.
 
     Model defaults to the subagent's frontmatter `model:` if not overridden.
+
+    `session_id`: when provided, used as the child session id instead of
+    generating a UUID. Required by callers that need to partition manifest
+    entries across concurrent dispatches (each parallel call pre-mints its
+    own UUID so the orchestrator can group hook-saved tool outputs by it).
     """
     body, frontmatter = _load_agent_definition(agent)
     effective_model = model or frontmatter.get("model") or "haiku"
@@ -180,7 +186,8 @@ def invoke_subagent(
 
     # Eagerly establish a session → run mapping so inner hooks resolve run_dir
     # via the fast path instead of the racy mtime-scan fallback.
-    session_id = str(uuid.uuid4())
+    if session_id is None:
+        session_id = str(uuid.uuid4())
     run_dir, signature_id = _resolve_run_context()
     if run_dir is not None and run_dir.exists():
         try:
