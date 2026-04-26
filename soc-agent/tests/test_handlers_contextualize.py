@@ -11,6 +11,7 @@ All three subagent invocations are mocked — these tests exercise:
 import json
 import sys
 import textwrap
+import uuid
 from pathlib import Path
 
 import pytest
@@ -120,70 +121,84 @@ def make_ctx(tmp_path: Path) -> Context:
     )
 
 
-def _default_contextualize_lead(prompt: str) -> str:
-    """Generic mock for `_invoke_contextualize_lead`.
-
-    Parses the prompt's `lead_name=` / `target_vertex_id=` lines and emits a
-    plausible envelope keyed by the lead. Tests that need a specific record
-    or classification override `contextualize_lead` in `_wire_subagents`.
-    """
+def _parse_prompt_fields(prompt: str) -> dict[str, str]:
     fields: dict[str, str] = {}
     for line in prompt.splitlines():
         if "=" in line:
             k, v = line.split("=", 1)
             fields[k.strip()] = v.strip()
+    return fields
+
+
+def _stage_record_file(run_dir_str: str, record: dict | None) -> str:
+    """Simulate the save_raw_tool_output hook: write the LookupContract JSON
+    to a unique file under {run_dir}/raw_query_outputs and return its
+    absolute path.
+    """
+    out_dir = Path(run_dir_str) / "raw_query_outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    nonce = uuid.uuid4().hex[:8]
+    path = out_dir / f"0-{nonce}.json"
+    payload = {
+        "found": record is not None,
+        "record": record,
+        "key_field": "ip",
+        "key_value": "stub",
+        "error": None,
+    }
+    path.write_text(json.dumps(payload))
+    return str(path)
+
+
+def _envelope(lead: str, target: str, target_kind: str, classification: str,
+              record_path: str, observation: str) -> str:
+    return textwrap.dedent(f"""
+    ```yaml
+    contextualize_lead:
+      lead_name: {lead}
+      target: "{target}"
+      target_kind: "{target_kind}"
+      status: ok
+      updates:
+        classification: {classification}
+        record_path: "{record_path}"
+      observation: "{observation}"
+    ```
+    """).strip()
+
+
+def _default_contextualize_lead(prompt: str) -> str:
+    """Generic mock for `_invoke_contextualize_lead`.
+
+    Stages a LookupContract JSON file (mimicking the save_raw_tool_output
+    hook) and emits an envelope referencing it via `record_path`. Tests that
+    need a specific record or classification override `contextualize_lead`
+    in `_wire_subagents`.
+    """
+    fields = _parse_prompt_fields(prompt)
     lead = fields.get("lead_name", "")
     target = fields.get("target_vertex_id", "")
     target_kind = fields.get("target_vertex_kind", "")
+    run_dir = fields.get("run_dir", "")
     if lead == "endpoint-context":
-        body = textwrap.dedent(f"""
-        ```yaml
-        contextualize_lead:
-          lead_name: endpoint-context
-          target: "{target}"
-          target_kind: "{target_kind}"
-          status: ok
-          updates:
-            classification: internal-server
-            cmdb_record:
-              hostname: stub
-              role: workload
-              owner_team: platform-sre
-              env: prod
-          observation: "stub endpoint enrichment for {target}"
-        ```
-        """).strip()
-    elif lead == "identity-context":
-        body = textwrap.dedent(f"""
-        ```yaml
-        contextualize_lead:
-          lead_name: identity-context
-          target: "{target}"
-          target_kind: "{target_kind}"
-          status: ok
-          updates:
-            classification: service-account
-            idp_record:
-              display_name: Stub User
-              type: service
-              owner_team: platform-sre
-              mfa: false
-          observation: "stub identity enrichment for {target}"
-        ```
-        """).strip()
-    else:
-        body = textwrap.dedent(f"""
-        ```yaml
-        contextualize_lead:
-          lead_name: "{lead}"
-          target: "{target}"
-          target_kind: "{target_kind}"
-          status: ok
-          updates: {{}}
-          observation: "noop"
-        ```
-        """).strip()
-    return body
+        record = {"hostname": "stub", "role": "workload",
+                  "owner_team": "platform-sre", "env": "prod"}
+        path = _stage_record_file(run_dir, record)
+        return _envelope(
+            lead, target, target_kind, "internal-server", path,
+            f"stub endpoint enrichment for {target}",
+        )
+    if lead == "identity-context":
+        record = {"display_name": "Stub User", "type": "service",
+                  "owner_team": "platform-sre", "mfa": False}
+        path = _stage_record_file(run_dir, record)
+        return _envelope(
+            lead, target, target_kind, "service-account", path,
+            f"stub identity enrichment for {target}",
+        )
+    # Unknown lead — emit a minimal noop envelope (no record).
+    path = _stage_record_file(run_dir, None)
+    return _envelope(lead, target, target_kind, "unknown", path, "noop")
 
 
 def _wire_subagents(monkeypatch, ticket=TICKET_RESPONSE_NO_DEDUP,
@@ -463,52 +478,31 @@ class TestContextualizeLeads:
         assert len(identity_calls) == 1
 
     def test_lead_updates_merge_into_prologue_vertices(self, tmp_path, monkeypatch):
-        """Lead `updates` (classification + cmdb_record / idp_record) override
-        the prologue subagent's initial classification and land in
-        vertex.attributes.{cmdb,idp}_record."""
+        """Lead `updates` override the prologue subagent's initial
+        classification, and the verbatim record from the saved JSON file
+        lands under vertex.attributes.{cmdb,idp}_record."""
 
         def deterministic_lead(prompt: str) -> str:
-            fields = dict(
-                line.split("=", 1) for line in prompt.splitlines() if "=" in line
-            )
-            lead = fields.get("lead_name", "").strip()
-            target = fields.get("target_vertex_id", "").strip()
-            ident = fields.get("target_identifier", "").strip()
+            fields = _parse_prompt_fields(prompt)
+            lead = fields.get("lead_name", "")
+            target = fields.get("target_vertex_id", "")
+            ident = fields.get("target_identifier", "")
+            run_dir = fields.get("run_dir", "")
             if lead == "endpoint-context":
-                # Mark v-001 (203.0.113.47) as external; v-002 (web-01) as internal.
                 if ident == "203.0.113.47":
                     cls = "external"
                     record = {"hostname": "unknown", "role": "external", "env": "n/a"}
                 else:
                     cls = "internal-server"
                     record = {"hostname": "web-01", "role": "workload", "env": "prod"}
-                return textwrap.dedent(f"""
-                ```yaml
-                contextualize_lead:
-                  lead_name: endpoint-context
-                  target: "{target}"
-                  target_kind: endpoint
-                  status: ok
-                  updates:
-                    classification: {cls}
-                    cmdb_record: {json.dumps(record)}
-                  observation: "{ident} -> {cls}"
-                ```
-                """).strip()
+                path = _stage_record_file(run_dir, record)
+                return _envelope(lead, target, "endpoint", cls, path,
+                                 f"{ident} -> {cls}")
             if lead == "identity-context":
-                return textwrap.dedent(f"""
-                ```yaml
-                contextualize_lead:
-                  lead_name: identity-context
-                  target: "{target}"
-                  target_kind: identity
-                  status: ok
-                  updates:
-                    classification: generic-account
-                    idp_record: null
-                  observation: "{ident} -> generic-account (no IdP record)"
-                ```
-                """).strip()
+                path = _stage_record_file(run_dir, None)
+                return _envelope(lead, target, "identity", "generic-account",
+                                 path,
+                                 f"{ident} -> generic-account (no IdP record)")
             return ""
 
         _wire_subagents(monkeypatch, contextualize_lead=deterministic_lead)
@@ -518,19 +512,17 @@ class TestContextualizeLeads:
         inv = (ctx.run_dir / "investigation.md").read_text()
 
         # Vertex classifications were overridden by the contextualize-leads.
-        # The prologue subagent's initial values (`unclassified-endpoint`,
-        # `internal-server`, `generic-account`) get replaced by the lead's
-        # outputs in the serialized YAML.
-        assert "classification: external" in inv         # v-001 from lead
+        assert "classification: external" in inv          # v-001 from lead
         assert "classification: internal-server" in inv   # v-002 from lead
-        assert "classification: generic-account" in inv   # v-003 unchanged
+        assert "classification: generic-account" in inv   # v-003 from lead
 
-        # CMDB records landed under vertex.attributes.cmdb_record.
+        # CMDB records landed under vertex.attributes.cmdb_record from the
+        # saved JSON file (verbatim, handler-extracted).
         assert "cmdb_record:" in inv
         assert "hostname: web-01" in inv
         assert "role: external" in inv
 
-        # IdP record was null — null gets serialized.
+        # IdP record was null in the saved JSON — null gets serialized.
         assert "idp_record: null" in inv
 
         # Markdown audit summary lists the lead invocations.
@@ -575,6 +567,25 @@ class TestContextualizeLeads:
         _wire_subagents(monkeypatch, contextualize_lead=bad_lead)
         ctx = make_ctx(tmp_path)
         with pytest.raises(OrchestrationError, match="v-999"):
+            ctx_handler.handle(ctx)
+
+    def test_missing_record_path_file_raises(self, tmp_path, monkeypatch):
+        """Handler reads `record_path` from disk and merges the verbatim
+        record. A bogus path is a loud failure — never silently skipped."""
+
+        def lying_lead(prompt: str) -> str:
+            fields = _parse_prompt_fields(prompt)
+            lead = fields.get("lead_name", "")
+            target = fields.get("target_vertex_id", "")
+            target_kind = fields.get("target_vertex_kind", "")
+            return _envelope(
+                lead, target, target_kind, "x",
+                "/tmp/nope-does-not-exist.json", "lying about path",
+            )
+
+        _wire_subagents(monkeypatch, contextualize_lead=lying_lead)
+        ctx = make_ctx(tmp_path)
+        with pytest.raises(OrchestrationError, match="record_path"):
             ctx_handler.handle(ctx)
 
     def test_errored_lead_skipped_without_breaking_handler(

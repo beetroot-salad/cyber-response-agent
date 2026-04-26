@@ -52,21 +52,20 @@ not found"` and stop.
 ### Step 2 — Run the lookup CLI
 
 The lead's frontmatter declares a `lookup_cli` invocation pattern with a
-`{identifier}` placeholder (and optionally a `key_field` like `ip` / `user`
-/ `host`). Substitute `target_identifier`, `cd` to `{soc_agent_root}` so
-the CLI's relative path resolves, and append `--run-dir {run_dir}`. The
-handler always supplies `run_dir`; the flag is always passed.
+`{identifier}` placeholder. Substitute `target_identifier`, `cd` to
+`{soc_agent_root}` so the CLI's relative path resolves, and append
+`--run-dir {run_dir}`.
 
 Stub example: `cd {soc_agent_root} && python3 scripts/tools/stub_asset_cli.py lookup ip 172.22.0.10 --run-dir {run_dir}`
 
-Parse stdout as JSON. The shape is the LookupContract result:
+A PostToolUse hook captures the CLI's stdout to disk and returns an
+`additionalContext` annotation with the saved path
+(`raw_query_outputs/{loop_n}-{nonce}.json`). The saved JSON has the
+LookupContract shape: `{found, record, key_field, key_value, error}`. Do
+not transcribe the record into your output — emit the path; the handler
+reads it.
 
-    {"found": true|false, "record": {...}|null, "key_field": "...",
-     "key_value": "...", "error": null}
-
-Lookup not-found is **not** an error — emit `status: ok` with
-`updates.{record_attr}: null`. Lookup CLI exit code != 0 is an error
-— emit `status: error`.
+Lookup CLI exit code != 0 is an error — emit `status: error`.
 
 ### Step 3 — Derive classification from the KB context file
 
@@ -103,10 +102,8 @@ contextualize_lead:
     # Always present on status: ok. The handler merges these into
     # prologue.vertices[<target>].
     classification: "{label from Step 3}"
-    "{record_attr from lead frontmatter, e.g. cmdb_record}":
-      # Verbatim record from the lookup CLI, or null if not found.
-      ...
-  observation: "{1 line — raw value, derived classification, and record summary}"
+    record_path: "{absolute path from the [raw-saved] annotation}"
+  observation: "{1 line — raw value, derived classification}"
   reason: "{required when status: error}"
 ```
 

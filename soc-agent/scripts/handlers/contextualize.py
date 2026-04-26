@@ -495,11 +495,12 @@ def _apply_lead_updates(
     """Mutate `prologue['vertices']` in place — for each envelope, find the
     target vertex and merge `updates` onto it.
 
-    Routing is driven by the lead's `record_attr` frontmatter (single source
-    of truth): the key matching `record_attr` lands under
-    `vertex.attributes`; everything else lands at the vertex root. An
-    explicit `attributes:` dict in updates deep-merges into the vertex's
-    attributes mapping.
+    `classification` lands at the vertex root. `record_path` points at the
+    LookupContract JSON file the save_raw_tool_output hook wrote during the
+    subagent's CLI invocation; the handler reads it, extracts `record`, and
+    stores the verbatim record under `vertex.attributes[<record_attr>]`
+    (where `record_attr` comes from the lead frontmatter — single source of
+    truth for the attribute name).
 
     Updates apply at CONTEXTUALIZE authoring time (single-phase write); rule
     #8 (post-write append-only) is satisfied because nothing has been
@@ -522,26 +523,50 @@ def _apply_lead_updates(
             )
         lead_name = env.get("lead_name", "")
         record_attr = (lead_fms.get(lead_name) or {}).get("record_attr")
-        for key, value in (env.get("updates") or {}).items():
-            if key == "attributes" and isinstance(value, dict):
-                attrs = vertex.setdefault("attributes", {})
-                if not isinstance(attrs, dict):
-                    raise OrchestrationError(
-                        f"vertex {target!r} has non-dict `attributes`; "
-                        "cannot merge contextualize-lead updates"
-                    )
-                attrs.update(value)
-                continue
-            if record_attr and key == record_attr:
-                attrs = vertex.setdefault("attributes", {})
-                if not isinstance(attrs, dict):
-                    raise OrchestrationError(
-                        f"vertex {target!r} has non-dict `attributes`; "
-                        "cannot merge contextualize-lead record"
-                    )
-                attrs[key] = value
-                continue
+        updates = env.get("updates") or {}
+        for key, value in updates.items():
+            if key == "record_path":
+                continue  # handled below
             vertex[key] = value
+        if "record_path" in updates:
+            if not record_attr:
+                raise OrchestrationError(
+                    f"contextualize-lead {lead_name!r} returned `record_path` "
+                    "but its frontmatter declares no `record_attr`"
+                )
+            record = _load_record_from_path(updates["record_path"], lead_name)
+            attrs = vertex.setdefault("attributes", {})
+            if not isinstance(attrs, dict):
+                raise OrchestrationError(
+                    f"vertex {target!r} has non-dict `attributes`; "
+                    "cannot merge contextualize-lead record"
+                )
+            attrs[record_attr] = record
+
+
+def _load_record_from_path(path_str: str, lead_name: str) -> dict | None:
+    """Read the LookupContract JSON file the save_raw_tool_output hook wrote
+    and return its `record` field (None when the lookup missed).
+    """
+    path = Path(path_str)
+    if not path.is_absolute() or not path.exists():
+        raise OrchestrationError(
+            f"contextualize-lead {lead_name!r} record_path {path_str!r} is "
+            "not an existing absolute path"
+        )
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OrchestrationError(
+            f"contextualize-lead {lead_name!r} record_path {path_str!r} did "
+            f"not parse as JSON: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise OrchestrationError(
+            f"contextualize-lead {lead_name!r} record_path {path_str!r} root "
+            "must be a JSON object"
+        )
+    return payload.get("record")
 
 
 def _summarize_envelopes(envelopes: list[dict]) -> str:

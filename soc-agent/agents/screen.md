@@ -42,9 +42,9 @@ If there is no `## Screen` section → `screen_result: error`, `reason: "playboo
 
 ### Step 3 — Read per-lead dependencies in ONE parallel batch
 
-Vertex classifications (e.g. `source_classification`, `username_classification`) are **preloaded** onto the prologue at CONTEXTUALIZE time by the contextualize-leads (`endpoint-context`, `identity-context`). Read them from `prologue_yaml` — do NOT run a `*-classification` lead, do NOT re-derive from the context files.
+Vertex classifications are preloaded onto `prologue_yaml` at CONTEXTUALIZE time. Read indicators like `source_classification` / `username_classification` directly from the matching vertex.
 
-For every other lead named in the Screen table, read the relevant files in one parallel turn:
+For every lead named in the Screen table, read the relevant files in one parallel turn:
 
 - **Anchor leads** (names matching `approved-*`, or that the playbook calls "anchor") — read the anchor file named by the playbook's "Indicator resolution" section, typically `knowledge/environment/operations/{anchor}.md`.
 - **Common leads** (all others: `authentication-history`, `source-reputation`, etc.) — read `knowledge/common-investigation/leads/{lead}/definition.md`. If a lead named by the Screen table has no definition.md under `common-investigation/leads/`, AND is not an anchor lookup by name, emit `screen_result: error` with `reason: "unknown lead {name}: no anchor mapping and no common-investigation/leads/{name}/definition.md"`.
@@ -54,7 +54,7 @@ For every other lead named in the Screen table, read the relevant files in one p
 
 Execute **exactly** the leads the Screen table names. Nothing more. Batch queries when independent. Use the CLI or MCP tool named by `systems/{vendor}/SKILL.md` for SIEM leads.
 
-Indicators that read a vertex's `classification` (e.g. `source_classification`, `username_classification`) are satisfied by the preloaded prologue — they do NOT produce a `leads_run` entry, because no lead is run for them in SCREEN. Only leads the Screen table actually names get `leads_run` entries.
+Indicators satisfied by reading preloaded vertex attributes (no lead actually runs) do not produce a `leads_run` entry — only leads the Screen table names get entries.
 
 **Anchor lookups count as runs.** An `approved-*` anchor lookup against `environment/operations/*.md` is a run. Every lead named in the matched row's `Leads` column produces one entry in `leads_run`, even when the lead is a file lookup with no SIEM query. Do NOT collapse multiple indicators into a single lead entry.
 
