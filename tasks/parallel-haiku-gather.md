@@ -1,6 +1,6 @@
 ---
 title: Parallel Haiku gather for all-on-disk lead sets
-status: doing
+status: done
 groups: gather, orchestrator, cost-optimization
 ---
 
@@ -10,7 +10,7 @@ groups: gather, orchestrator, cost-optimization
 
 Two stress tests in `tasks-scratch/parallel-gather-experiment-{1,2}.md` (2026-04-25 sessions):
 
-- **Experiment #1 (mixed-set: container-baseline + correlated-endpoint-events on rule 100001).** Container-baseline is signature-local (no on-disk def). Singleton `gather` errored fast on `missing_template`; the production composite-fallback path would re-dispatch via gather-composite, making total wall *worse* than the baseline. Confirmed: parallelize only when all leads are on-disk. Headline number was misleading because the missing-template lead fast-failed in 33s.
+- **Experiment #1 (mixed-set: container-baseline + correlated-endpoint-events on rule 100001).** Container-baseline is signature-local (no on-disk def). Singleton `gather` errored fast on `missing_template`; the production composite-fallback path would re-dispatch via gather-composite, making total wall _worse_ than the baseline. Confirmed: parallelize only when all leads are on-disk. Headline number was misleading because the missing-template lead fast-failed in 33s.
 - **Experiment #2 (all-on-disk: authentication-history + network-analysis on rule 5710 scenario A).** Side-by-side parallel singletons vs serial gather-composite control on the same fixture:
   - Wall **−15%** (159s vs 188s, max parallel vs serial).
   - Σ prompt_chars **−1%**, Σ stdout_chars **−4%** — token-flat.
@@ -30,11 +30,13 @@ Two stress tests in `tasks-scratch/parallel-gather-experiment-{1,2}.md` (2026-04
 ## Validation gate (before merge)
 
 Re-run the experiment harness on at least one fixture where **both** leads return populated data and would normally benefit from cross-lead reasoning, then dispatch ANALYZE against the synthesized envelope and compare to a control composite + ANALYZE on the same fixture. Score:
+
 - Same disposition routing from ANALYZE? (no quality regression)
 - Same hypothesis grades? (cross-lead synthesis recovered from concatenated envelopes)
 - Wall + cost delta within the −15% wall / −5× $ envelope predicted from experiments #1/#2.
 
 Candidate fixtures:
+
 - 5710 scenario B with `authentication-history` (volume signal) + `correlated-endpoint-events` (timing-relationship signal) — both on-disk + wazuh, both populate on a real bait scenario.
 - 100110 DNS stress with two authentication-related leads (TBD — depends on what 100110's playbook prescribes when both lead defs exist).
 
