@@ -13,6 +13,7 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from scripts.handlers._raw_manifest import (
     attach_paths_to_envelope,
+    consume_entries_by_session,
     consume_new_entries,
     correlate_to_leads,
 )
@@ -79,6 +80,60 @@ class TestConsumeNewEntries:
         cursor.write_text("not-a-number")
         entries = consume_new_entries(tmp_path)
         assert len(entries) == 1
+
+
+# ---------------------------------------------------------------------------
+# consume_entries_by_session — partition for concurrent dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestConsumeEntriesBySession:
+    def test_partitions_entries_by_session_id(self, tmp_path):
+        _seed_manifest(tmp_path, [
+            {"session_id": "sid-A", "path": "a.json", "command_summary": "qA"},
+            {"session_id": "sid-B", "path": "b.json", "command_summary": "qB"},
+            {"session_id": "sid-A", "path": "a2.json", "command_summary": "qA2"},
+        ])
+        out = consume_entries_by_session(tmp_path, ["sid-A", "sid-B"])
+        assert {e["path"] for e in out["sid-A"]} == {"a.json", "a2.json"}
+        assert {e["path"] for e in out["sid-B"]} == {"b.json"}
+
+    def test_drops_foreign_session_ids_but_advances_cursor(self, tmp_path):
+        # 'sid-foreign' is an orchestrator tool call interleaved with
+        # parallel-dispatch entries — must not leak into a later sequential
+        # consume_new_entries call.
+        _seed_manifest(tmp_path, [
+            {"session_id": "sid-A", "path": "a.json"},
+            {"session_id": "sid-foreign", "path": "f.json"},
+            {"session_id": "sid-B", "path": "b.json"},
+        ])
+        out = consume_entries_by_session(tmp_path, ["sid-A", "sid-B"])
+        assert [e["path"] for e in out["sid-A"]] == ["a.json"]
+        assert [e["path"] for e in out["sid-B"]] == ["b.json"]
+        # Cursor advanced past all three rows; second consume sees nothing.
+        residual = consume_new_entries(tmp_path)
+        assert residual == []
+
+    def test_idempotent_on_second_call(self, tmp_path):
+        _seed_manifest(tmp_path, [
+            {"session_id": "sid-A", "path": "a.json"},
+        ])
+        first = consume_entries_by_session(tmp_path, ["sid-A"])
+        assert len(first["sid-A"]) == 1
+        second = consume_entries_by_session(tmp_path, ["sid-A"])
+        assert second["sid-A"] == []
+
+    def test_missing_manifest_returns_empty_partitions(self, tmp_path):
+        out = consume_entries_by_session(tmp_path, ["sid-A", "sid-B"])
+        assert out == {"sid-A": [], "sid-B": []}
+
+    def test_requested_sid_with_no_entries_yields_empty_list(self, tmp_path):
+        _seed_manifest(tmp_path, [
+            {"session_id": "sid-A", "path": "a.json"},
+        ])
+        out = consume_entries_by_session(tmp_path, ["sid-A", "sid-missing"])
+        assert [e["path"] for e in out["sid-A"]] == ["a.json"]
+        assert out["sid-missing"] == []
 
 
 # ---------------------------------------------------------------------------

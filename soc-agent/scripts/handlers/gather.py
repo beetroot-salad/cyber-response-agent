@@ -59,6 +59,8 @@ from __future__ import annotations
 import os
 import re
 import sys
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -78,6 +80,7 @@ from scripts.handlers._output_parser import (
 )
 from scripts.handlers._raw_manifest import (
     attach_paths_to_envelope,
+    consume_entries_by_session,
     consume_new_entries,
     correlate_to_leads,
 )
@@ -118,16 +121,26 @@ _DEFAULT_WINDOW = timedelta(hours=1)
 # ---------------------------------------------------------------------------
 
 
-def _invoke_gather(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> str:
+def _invoke_gather(
+    prompt: str,
+    *,
+    timeout: int = SUBAGENT_TIMEOUT_SECONDS,
+    session_id: Optional[str] = None,
+) -> str:
     """Module-level wrapper for the Haiku single-lead subagent."""
-    return _shared_invoke("gather", prompt, timeout=timeout)
+    return _shared_invoke("gather", prompt, timeout=timeout, session_id=session_id)
 
 
 def _invoke_gather_composite(
-    prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS,
+    prompt: str,
+    *,
+    timeout: int = SUBAGENT_TIMEOUT_SECONDS,
+    session_id: Optional[str] = None,
 ) -> str:
     """Module-level wrapper for the Sonnet composite/ad-hoc subagent."""
-    return _shared_invoke("gather-composite", prompt, timeout=timeout)
+    return _shared_invoke(
+        "gather-composite", prompt, timeout=timeout, session_id=session_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +637,38 @@ def _reconstruct_composite_from_checkpoint(
 # ---------------------------------------------------------------------------
 
 
+def _dispatch_single_raw(
+    ctx: Context,
+    scope: Scope,
+    loop_n: int,
+    *,
+    session_id: Optional[str] = None,
+    lead_hints: Optional[dict[str, str]] = None,
+) -> GatherEnvelope:
+    """Invoke the single-gather subagent and parse its envelope, falling
+    back to checkpoint recovery on truncation. **Does not** merge manifest
+    paths and **does not** trigger composite fallback — those are the
+    serial wrapper's job. The parallel orchestrator calls this directly so
+    it can do session-partitioned manifest correlation and single-shot
+    composite fallback across the failed subset of leads.
+    """
+    hints = lead_hints or {}
+    prompt = _assemble_prompt_single(
+        ctx, scope, loop_n, lead_hint=hints.get(scope.lead_name),
+    )
+    envelope = _parse_envelope_response(
+        _invoke_gather(prompt, session_id=session_id),
+        loop_n=loop_n, mode="single",
+    )
+
+    if envelope is None:
+        envelope = _recover_single(
+            ctx, scope, loop_n,
+            session_id=session_id, lead_hints=lead_hints,
+        )
+    return envelope
+
+
 def _dispatch_single(
     ctx: Context,
     scope: Scope,
@@ -631,20 +676,13 @@ def _dispatch_single(
     *,
     lead_hints: Optional[dict[str, str]] = None,
 ) -> GatherEnvelope:
-    """Invoke the single-gather subagent; on truncation, recover via
-    checkpoint; on recoverable escalate triggers, fall back to composite.
+    """Serial single-lead dispatch: subagent invoke + parse + recover, then
+    manifest-merge and composite-fallback on recoverable escalate triggers.
     Returns a `GatherEnvelope` (mode="single" or "composite" after fallback).
     """
-    hints = lead_hints or {}
-    prompt = _assemble_prompt_single(
-        ctx, scope, loop_n, lead_hint=hints.get(scope.lead_name),
+    envelope = _dispatch_single_raw(
+        ctx, scope, loop_n, lead_hints=lead_hints,
     )
-    envelope = _parse_envelope_response(
-        _invoke_gather(prompt), loop_n=loop_n, mode="single",
-    )
-
-    if envelope is None:
-        envelope = _recover_single(ctx, scope, loop_n, lead_hints=lead_hints)
 
     _merge_manifest_into_envelope(ctx, envelope)
 
@@ -669,6 +707,7 @@ def _recover_single(
     scope: Scope,
     loop_n: int,
     *,
+    session_id: Optional[str] = None,
     lead_hints: Optional[dict[str, str]] = None,
 ) -> GatherEnvelope:
     ckpt_path = _checkpoint_path_single(ctx, loop_n, scope.lead_name)
@@ -686,7 +725,8 @@ def _recover_single(
         ctx, scope, loop_n, resume=True, lead_hint=hints.get(scope.lead_name),
     )
     envelope = _parse_envelope_response(
-        _invoke_gather(resume_prompt), loop_n=loop_n, mode="single",
+        _invoke_gather(resume_prompt, session_id=session_id),
+        loop_n=loop_n, mode="single",
     )
     if envelope is None:
         raise OrchestrationError(
@@ -751,6 +791,150 @@ def _recover_composite(
             "gather-composite subagent emitted no YAML after resume re-dispatch"
         )
     return envelope
+
+
+# ---------------------------------------------------------------------------
+# Parallel singleton dispatch (all-on-disk lead sets)
+# ---------------------------------------------------------------------------
+
+
+def _is_recoverable_escalation(lead: dict[str, Any]) -> bool:
+    """True iff a singleton's terminal lead status warrants composite redispatch."""
+    if lead.get("status") not in {"error", "probe_broken"}:
+        return False
+    return lead.get("escalate_trigger") in _COMPOSITE_FALLBACK_TRIGGERS
+
+
+def _dispatch_parallel_singletons(
+    ctx: Context,
+    primary_scope: Scope,
+    secondary_scopes: list[Scope],
+    loop_n: int,
+    *,
+    lead_hints: Optional[dict[str, str]] = None,
+) -> GatherEnvelope:
+    """Dispatch N singleton `gather` (Haiku) calls in parallel and concat
+    their envelopes.
+
+    Precondition (enforced by `handle()`): every prescribed lead has an
+    on-disk `definition.md` and there's no `override_data_source` — both
+    are composite-only conditions.
+
+    Manifest correlation uses `consume_entries_by_session` to partition the
+    cursor window by per-singleton `session_id`. Each future pre-mints its
+    own UUID so the orchestrator can map manifest entries back to the lead
+    that wrote them (substring-match correlation alone mis-attributes when
+    lead-ids collide on `l-001` and entity values overlap across leads on
+    the same incident).
+
+    Composite-fallback symmetry: any singleton that returns a recoverable
+    escalate trigger (`error`/`probe_broken` with `trigger ∈
+    _COMPOSITE_FALLBACK_TRIGGERS`) is re-dispatched as part of a single
+    composite call covering only the failed subset; cleanly-completed
+    leads are preserved as-is.
+    """
+    scopes: list[Scope] = [primary_scope, *secondary_scopes]
+    session_ids: dict[str, str] = {
+        scope.lead_name: str(uuid.uuid4()) for scope in scopes
+    }
+
+    def _run(scope: Scope) -> GatherEnvelope:
+        return _dispatch_single_raw(
+            ctx, scope, loop_n,
+            session_id=session_ids[scope.lead_name],
+            lead_hints=lead_hints,
+        )
+
+    with ThreadPoolExecutor(max_workers=len(scopes)) as ex:
+        futures = {scope.lead_name: ex.submit(_run, scope) for scope in scopes}
+        envelopes: dict[str, GatherEnvelope] = {
+            name: f.result() for name, f in futures.items()
+        }
+
+    # Session-partitioned manifest merge. Each subagent recorded its
+    # session_id in every manifest entry it wrote; partition the new cursor
+    # window by those ids and correlate per envelope.
+    try:
+        partitioned = consume_entries_by_session(
+            ctx.run_dir, session_ids.values(),
+        )
+    except Exception:
+        partitioned = {sid: [] for sid in session_ids.values()}
+
+    for scope in scopes:
+        env = envelopes[scope.lead_name]
+        entries = partitioned.get(session_ids[scope.lead_name], [])
+        if not entries:
+            continue
+        try:
+            grouped = correlate_to_leads(entries, env.leads)
+            attach_paths_to_envelope(env.raw_by_lead, grouped)
+        except Exception:
+            pass  # advisory — manifest enrichment must never fail dispatch
+
+    # Composite-fallback subset re-dispatch.
+    failed_scopes: list[Scope] = []
+    for scope in scopes:
+        env = envelopes[scope.lead_name]
+        first = env.leads[0] if env.leads else {}
+        if _is_recoverable_escalation(first):
+            failed_scopes.append(scope)
+
+    if failed_scopes:
+        primary_failed = failed_scopes[0]
+        other_failed = failed_scopes[1:]
+        # Single composite call covering only the failed subset. Manifest
+        # merge inside `_dispatch_composite` works correctly here because
+        # the parallel cursor advance above already swallowed the parallel
+        # entries — the composite's own consume sees only its own tail.
+        fallback_env = _dispatch_composite(
+            ctx, primary_failed, loop_n, mode="redispatch",
+            lead_hints=lead_hints,
+            secondary_scopes=other_failed if other_failed else None,
+        )
+        # Map fallback's leads back by name so we can replace the failed
+        # entries; preserve cleanly-completed singletons untouched.
+        fallback_by_name: dict[str, dict[str, Any]] = {}
+        for lead in fallback_env.leads:
+            name = lead.get("name")
+            if isinstance(name, str):
+                fallback_by_name[name] = lead
+        for scope in failed_scopes:
+            replacement = fallback_by_name.get(scope.lead_name)
+            if replacement is None:
+                continue
+            replaced_env = envelopes[scope.lead_name]
+            replaced_env.leads = [replacement]
+            # Carry through fallback's raw paths if present. The replacement
+            # lead carries the original singleton's id (preserving id stability);
+            # look up fallback raw_by_lead by the replacement's id.
+            new_id = replacement.get("id")
+            if isinstance(new_id, str) and new_id in fallback_env.raw_by_lead:
+                replaced_env.raw_by_lead = {
+                    new_id: fallback_env.raw_by_lead[new_id]
+                }
+
+    # Concat: renumber lead ids in primary→secondary order so they don't
+    # collide on `l-{loop:03d}` (each singleton emits index=0 in its own
+    # envelope). Update both lead.id and the raw_by_lead key.
+    final_leads: list[dict[str, Any]] = []
+    final_raw_by_lead: dict[str, dict[str, Any]] = {}
+    for index, scope in enumerate(scopes):
+        env = envelopes[scope.lead_name]
+        new_id = _lead_id_for(loop_n, index)
+        for lead in env.leads:
+            old_id = lead.get("id")
+            lead["id"] = new_id
+            final_leads.append(lead)
+            if isinstance(old_id, str) and old_id in env.raw_by_lead:
+                final_raw_by_lead[new_id] = env.raw_by_lead[old_id]
+
+    return GatherEnvelope(
+        leads=final_leads,
+        raw_by_lead=final_raw_by_lead,
+        cross_lead_notes="",
+        telemetry={"loop": loop_n, "mode": "parallel"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1235,7 +1419,27 @@ def handle(ctx: Context) -> PhaseResult:
         or bool(pp.composite_secondary)
     )
 
-    if scope.template_exists and not force_composite:
+    parallel_eligible = (
+        os.environ.get("SOC_AGENT_PARALLEL_GATHER") == "1"
+        and len(prescribed_leads) >= 2
+        and pp.override_data_source is None
+        and all(
+            load_lead_definition(SOC_AGENT_ROOT, name) is not None
+            for name in prescribed_leads
+        )
+    )
+
+    if parallel_eligible:
+        secondary_scopes = [
+            _resolve_scope(ctx, lead, scope_override=pp.scope_override)
+            for lead in pp.composite_secondary
+        ]
+        envelope = _dispatch_parallel_singletons(
+            ctx, scope, secondary_scopes, pp.loop_n,
+            lead_hints=pp.lead_hints,
+        )
+        mode = envelope.telemetry.get("mode", "parallel")
+    elif scope.template_exists and not force_composite:
         envelope = _dispatch_single(
             ctx, scope, pp.loop_n, lead_hints=pp.lead_hints,
         )

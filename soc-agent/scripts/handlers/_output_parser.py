@@ -434,8 +434,9 @@ class GatherEnvelope:
     and stashes the path list on `ctx.outputs[Phase.GATHER]` for analyze's
     preload. Never written into the invlang companion.
 
-    `telemetry`: `{loop: int, mode: "single" | "composite"}` — mode is
-    inferred from the dispatch path, not asserted by the subagent.
+    `telemetry`: `{loop: int, mode: "single" | "composite" | "parallel"}` —
+    mode is inferred from the dispatch path, not asserted by the subagent.
+    `parallel` is set by the parallel-singletons orchestrator after concat.
     """
 
     leads: list[dict[str, Any]] = field(default_factory=list)

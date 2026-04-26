@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 MANIFEST_FILENAME = "manifest.jsonl"
@@ -46,12 +46,9 @@ def consume_new_entries(run_dir: Path) -> list[dict[str, Any]]:
 
     Errors are silenced — manifest reading must never fail the gather flow.
 
-    ASSUMPTION: gather subagents are dispatched sequentially. The cursor
-    scopes "new entries" to the most recent dispatch by relying on no
-    other subagent appending to manifest.jsonl between consumes. If the
-    main loop ever runs gather subagents in parallel, switch correlation
-    to `agent_id` (already recorded in each manifest entry) instead of
-    relying on the cursor window.
+    ASSUMPTION: callers dispatch subagents sequentially. For concurrent
+    dispatches, use `consume_entries_by_session` instead — it partitions
+    the same cursor window by `session_id` (recorded in each entry).
     """
     manifest = _manifest_dir(run_dir) / MANIFEST_FILENAME
     cursor = _manifest_dir(run_dir) / CURSOR_FILENAME
@@ -89,6 +86,67 @@ def consume_new_entries(run_dir: Path) -> list[dict[str, Any]]:
         pass
 
     return entries
+
+
+def consume_entries_by_session(
+    run_dir: Path, session_ids: Iterable[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Like `consume_new_entries`, but partitions the cursor window by
+    `session_id` for the requested set only.
+
+    Returns `{session_id: [entries...]}` for every session_id in the input
+    (empty list if no entries matched). Entries whose `session_id` is not
+    in the requested set are dropped from the output but still consumed —
+    the cursor advances past them so they don't leak into a later
+    sequential consume. This matches the parallel-dispatch invariant: the
+    orchestrator pre-mints UUIDs for the N subagents it spawns, calls them
+    in parallel, and reads back exactly those N partitions; foreign entries
+    in the same window belong to the orchestrator's own tool calls and are
+    not relevant to per-lead correlation.
+
+    Errors are silenced — manifest reading must never fail the gather flow.
+    """
+    requested = set(session_ids)
+    grouped: dict[str, list[dict[str, Any]]] = {sid: [] for sid in requested}
+
+    manifest = _manifest_dir(run_dir) / MANIFEST_FILENAME
+    cursor = _manifest_dir(run_dir) / CURSOR_FILENAME
+    if not manifest.exists():
+        return grouped
+    try:
+        offset = int(cursor.read_text().strip()) if cursor.exists() else 0
+    except (OSError, ValueError):
+        offset = 0
+
+    try:
+        with manifest.open("rb") as f:
+            f.seek(offset)
+            tail = f.read()
+            new_offset = f.tell()
+    except OSError:
+        return grouped
+
+    if not tail:
+        return grouped
+
+    for line in tail.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        sid = entry.get("session_id")
+        if isinstance(sid, str) and sid in requested:
+            grouped[sid].append(entry)
+
+    try:
+        cursor.write_text(str(new_offset))
+    except OSError:
+        pass
+
+    return grouped
 
 
 def _query_string(lead: dict[str, Any]) -> str:
