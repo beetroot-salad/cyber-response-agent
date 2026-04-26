@@ -161,30 +161,38 @@ volume/shape evidence, not from an anchor lookup.
 See `docs/investigation-language.md` §Authorization as edge attribute and
 `docs/design-v3-authority-consultation.md` for the full primitive.
 
+## Contextualize leads
+
+These run in parallel at CONTEXTUALIZE time, before SCREEN/PREDICT —
+mechanically enriching the prologue vertices with classification +
+authoritative-record context that every downstream phase reads.
+
+- `endpoint-context`
+- `identity-context`
+
+`endpoint-context` runs once per endpoint vertex (source IP and target
+host), deriving the classification label from the IP-ranges context file
+and attaching the CMDB record. `identity-context` runs once per identity
+vertex, deriving the identity-pattern classification and attaching the
+IdP record (typically empty for SSH-invalid-user, since the rule fires
+because the attempted user does not exist).
+
 ## Starter lead order
 
-1. **`source-classification`** — classify `data.srcip` against
-   `environment/context/ip-ranges.md`. Internal monitoring host,
-   internal-other, or external determines which half of the archetype
-   space is even applicable. Most investigations discriminate
-   `monitoring-probe` / `service-account-rotation` from
-   `credential-stuffing` / `external-bruteforce` on this lead alone.
-2. **`authentication-history`** — failed logins from same `srcip` in
-   the last 5 minutes, plus successful logins from same `srcip`
+1. **`authentication-history`** — failed logins from same source in
+   the last 5 minutes, plus successful logins from same source
    within 60 seconds after the alert. This lead answers both the
    volume axis (how many attempts?) and the compromise axis (did any
    auth succeed?). The compromise check is non-negotiable — a 5710
    followed by a 5501 from the same source is a different problem
    regardless of which archetype the 5710 itself matched.
-3. **`username-classification`** — classify `data.srcuser` against
-   `environment/context/identity-patterns.md`. Monitoring-pattern
-   (sentinel, anchored by source classification to monitoring-host),
-   service-account pattern, wordlist-common, or real-looking. This
-   lead picks between archetypes once source and volume are known.
 
-Most investigations resolve cleanly after these three leads. When the
-picture is still ambiguous after lead 3, fall through to the full
-investigation loop.
+Source + identity classification are preloaded by the contextualize-leads
+above; PREDICT reads them off the vertex classification attribute rather
+than dispatching a separate lead. Most investigations resolve cleanly
+after one authentication-history pass against the preloaded
+classifications. When the picture is still ambiguous, fall through to
+the full investigation loop.
 
 > **Recent-alert correlation** ("other alerts from this host in last
 > 24h", "is this a repeat", "did 5712/5501/5715 also fire") is
@@ -202,7 +210,7 @@ knowledge base and anchor lookups, not raw alert-field comparisons.
 
 | Pattern | Indicators | Leads | Action | Archetype |
 |---|---|---|---|---|
-| monitoring-probe fast-path | `source_classification: internal-monitoring-host` (via `environment/context/ip-ranges.md`) AND `username_classification: monitoring-pattern` (via `environment/context/identity-patterns.md`) AND `approved-monitoring-sources` anchor confirms the triple AND `cadence_shape: periodic` (see resolution below) AND `successful_login_after_60s: false` | source-classification, username-classification, authentication-history, approved-monitoring-sources anchor | resolve → benign, matched_archetype: monitoring-probe, matched_ticket_id: SEC-2024-001 | `archetypes/monitoring-probe/` |
+| monitoring-probe fast-path | `source_classification: internal-monitoring-host` (preloaded on the source endpoint vertex) AND `username_classification: monitoring-pattern` (preloaded on the identity vertex) AND `approved-monitoring-sources` anchor confirms the triple AND `cadence_shape: periodic` (see resolution below) AND `successful_login_after_60s: false` | authentication-history, approved-monitoring-sources anchor | resolve → benign, matched_archetype: monitoring-probe, matched_ticket_id: SEC-2024-001 | `archetypes/monitoring-probe/` |
 
 **Why a real query, not pure field matching:** `cadence_shape` and
 `successful_login_after_60s` cannot be read from the alert itself.
@@ -216,14 +224,17 @@ success, both of which the anchor's confirmation shape depends on.
 
 **Indicator resolution:**
 
-- **source_classification** — map `data.srcip` to a classification
-  using `environment/context/ip-ranges.md`. Only
-  `internal-monitoring-host` counts. An unclassified internal IP is
-  not a known monitoring source.
-- **username_classification** — map `data.srcuser` to a pattern in
-  `environment/context/identity-patterns.md`. Monitoring-pattern
-  matches the sentinel list (`nagios`, `zabbix`, `prometheus`,
-  `healthcheck`, `monitorprobe`, `sensu`, `testuser`, `probe`).
+- **source_classification** — read from the source endpoint vertex's
+  `classification` attribute (preloaded at CONTEXTUALIZE by
+  `endpoint-context`, sourced from `environment/context/ip-ranges.md`).
+  Only `internal-monitoring-host` counts. An unclassified internal IP
+  is not a known monitoring source.
+- **username_classification** — read from the identity vertex's
+  `classification` attribute (preloaded at CONTEXTUALIZE by
+  `identity-context`, sourced from `environment/context/identity-patterns.md`).
+  Monitoring-pattern matches the sentinel list (`nagios`, `zabbix`,
+  `prometheus`, `healthcheck`, `monitorprobe`, `sensu`, `testuser`,
+  `probe`).
 - **approved-monitoring-sources anchor** — query the sanction anchor
   for the exact `(srcip, srcuser, target)` triple. See
   `environment/operations/approved-monitoring-sources.md`.

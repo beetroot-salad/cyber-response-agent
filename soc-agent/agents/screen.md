@@ -42,18 +42,21 @@ If there is no `## Screen` section → `screen_result: error`, `reason: "playboo
 
 ### Step 3 — Read per-lead dependencies in ONE parallel batch
 
-For every lead named in the Screen table, read the relevant files in one parallel turn:
+Vertex classifications (e.g. `source_classification`, `username_classification`) are **preloaded** onto the prologue at CONTEXTUALIZE time by the contextualize-leads (`endpoint-context`, `identity-context`). Read them from `prologue_yaml` — do NOT run a `*-classification` lead, do NOT re-derive from the context files.
 
-- **Classification leads** (names ending in `-classification`, e.g. `source-classification`, `username-classification`) — read `knowledge/environment/context/*.md` as named by the playbook's "Indicator resolution" section.
+For every other lead named in the Screen table, read the relevant files in one parallel turn:
+
 - **Anchor leads** (names matching `approved-*`, or that the playbook calls "anchor") — read the anchor file named by the playbook's "Indicator resolution" section, typically `knowledge/environment/operations/{anchor}.md`.
-- **Common leads** (all others: `authentication-history`, `source-reputation`, etc.) — read `knowledge/common-investigation/leads/{lead}/definition.md`. If a lead named by the Screen table has no definition.md under `common-investigation/leads/`, AND is not a classification or anchor lookup by name, emit `screen_result: error` with `reason: "unknown lead {name}: no classification/anchor mapping and no common-investigation/leads/{name}/definition.md"`.
+- **Common leads** (all others: `authentication-history`, `source-reputation`, etc.) — read `knowledge/common-investigation/leads/{lead}/definition.md`. If a lead named by the Screen table has no definition.md under `common-investigation/leads/`, AND is not an anchor lookup by name, emit `screen_result: error` with `reason: "unknown lead {name}: no anchor mapping and no common-investigation/leads/{name}/definition.md"`.
 - **SIEM entrypoint** — if any lead routes to the SIEM, also read `knowledge/environment/systems/{vendor}/SKILL.md` to learn the query entrypoint. Infer `{vendor}` from the `signature_id` prefix (`wazuh-rule-*` → `wazuh`). If `{vendor}` cannot be inferred → `screen_result: error` with reason.
 
 ### Step 4 — Run the screen leads
 
 Execute **exactly** the leads the Screen table names. Nothing more. Batch queries when independent. Use the CLI or MCP tool named by `systems/{vendor}/SKILL.md` for SIEM leads.
 
-**Classification and anchor lookups count as runs.** A `*-classification` lead that resolves an identifier against `environment/context/*.md` is a run. An `approved-*` anchor lookup against `environment/operations/*.md` is a run. Every lead named in the matched row's `Leads` column produces one entry in `leads_run`, even when the lead is a file lookup with no SIEM query. Do NOT collapse multiple indicators into a single lead entry.
+Indicators that read a vertex's `classification` (e.g. `source_classification`, `username_classification`) are satisfied by the preloaded prologue — they do NOT produce a `leads_run` entry, because no lead is run for them in SCREEN. Only leads the Screen table actually names get `leads_run` entries.
+
+**Anchor lookups count as runs.** An `approved-*` anchor lookup against `environment/operations/*.md` is a run. Every lead named in the matched row's `Leads` column produces one entry in `leads_run`, even when the lead is a file lookup with no SIEM query. Do NOT collapse multiple indicators into a single lead entry.
 
 If a query errors, a named field is absent from results, or a required environment file is missing → `screen_result: error`, `reason: "<specific failure>"`. Stop. Do not fall through to `no_match`.
 
@@ -88,13 +91,13 @@ Never set `tests`, `observes`, `predictions`, `selection_rationale`, or `new_hyp
 
 Decide `target` from the lead's name + what the `prologue_yaml` contains:
 
-- **`source-classification`** → source endpoint vertex (the `v-*` whose `identifier` equals the alert's `data.srcip` per the prologue).
-- **`username-classification`** → identity vertex (the `v-*` with `type: identity`).
 - **`approved-monitoring-sources`** or any other org-authority anchor → the `attempted_auth` edge (`e-*` whose `relation: attempted_auth`).
 - **`authentication-history`** or any telemetry-history lead → the source endpoint vertex (the subject of the query).
 - **Anything else** → if the lead refines an attribute of an entity, target that entity; if it consults an authority about a relation, target the edge.
 
 When ambiguous, prefer the vertex the lead's definition.md most directly characterizes.
+
+(Vertex classifications are preloaded by the contextualize-leads at CONTEXTUALIZE; SCREEN does not dispatch `*-classification` leads, so target-selection rules for them no longer apply.)
 
 ## Outcome variant selection
 
@@ -156,9 +159,9 @@ matched_ticket_id: "{SEC-YYYY-NNN or null}"
 confidence: "{high or null}"
 leads_run:
   # One entry per lead in the matched row's Leads column. For monitoring-probe
-  # on rule-5710 that is FOUR entries (source-classification,
-  # username-classification, approved-monitoring-sources, authentication-history)
-  # — never one.
+  # on rule-5710 that is TWO entries (authentication-history,
+  # approved-monitoring-sources) — never one. Classification indicators are
+  # satisfied by preloaded `vertex.classification` and do NOT add entries here.
   - lead: "{lead-name}"
     observation: "{specific raw value — exact count, exact IP, exact username}"
   - lead: "{next-lead-name}"

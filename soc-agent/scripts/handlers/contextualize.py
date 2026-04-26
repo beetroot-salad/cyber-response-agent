@@ -71,6 +71,12 @@ def _invoke_prologue(prompt: str) -> str:
     )
 
 
+def _invoke_contextualize_lead(prompt: str) -> str:
+    return _shared_invoke(
+        "contextualize-lead", prompt, timeout=SUBAGENT_TIMEOUT_SECONDS,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Playbook metadata
 # ---------------------------------------------------------------------------
@@ -84,6 +90,7 @@ class PlaybookMetadata:
     has_screen: bool
     hypothesis_seeds: list[str]
     leads: list[str]
+    contextualize_leads: list[str]
 
 
 _ARCHETYPE_NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -132,6 +139,9 @@ def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
 
     hypothesis_seeds = _extract_section_bullet_ids(text, sections, "hypothesis seeds")
     leads = _extract_section_bullet_ids(text, sections, "starter lead order")
+    contextualize_leads = _extract_section_bullet_ids(
+        text, sections, "contextualize leads",
+    )
 
     return PlaybookMetadata(
         signature_id=signature_id,
@@ -140,6 +150,7 @@ def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
         has_screen=has_screen,
         hypothesis_seeds=hypothesis_seeds,
         leads=leads,
+        contextualize_leads=contextualize_leads,
     )
 
 
@@ -178,7 +189,7 @@ def _extract_section_bullet_ids(
     block = text[start:next_start]
     if section_name == "hypothesis seeds":
         pattern = _HYPOTHESIS_TOKEN_RE
-    elif section_name == "starter lead order":
+    elif section_name in ("starter lead order", "contextualize leads"):
         pattern = _LEAD_TOKEN_RE
     else:
         return []
@@ -299,6 +310,7 @@ def _compose_markdown(
     ticket: dict,
     playbook: PlaybookMetadata,
     preflight_summary: str,
+    contextualize_lead_envelopes: list[dict] | None = None,
 ) -> str:
     tc = ticket.get("ticket_context", {})
     entities = tc.get("entities", {}) or {}
@@ -320,7 +332,7 @@ def _compose_markdown(
     elif tc.get("queries_partial"):
         data_env = f"{data_env} | partial correlation: {tc['queries_partial']}"
 
-    return (
+    block = (
         f"## CONTEXTUALIZE\n\n"
         f"**Alert:** {ctx.ticket_id} — {ctx.signature_id}\n"
         f"**Key observables:**\n{entities_lines}\n"
@@ -328,6 +340,12 @@ def _compose_markdown(
         f"**Available leads:** {leads_line}\n"
         f"**Data environment:** {data_env}\n"
     )
+    if contextualize_lead_envelopes is not None:
+        block += (
+            f"**Contextualize leads:**\n"
+            f"{_summarize_envelopes(contextualize_lead_envelopes)}\n"
+        )
+    return block
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +367,189 @@ def _extract_yaml_block(raw: str, key: str) -> str:
             f"subagent output missing top-level `{key}:` — got keys {list(parsed)}"
         )
     return yaml.safe_dump({key: parsed[key]}, sort_keys=False)
+
+
+# ---------------------------------------------------------------------------
+# Contextualize-leads dispatch + merge
+# ---------------------------------------------------------------------------
+
+
+def _load_lead_frontmatter(lead_name: str) -> dict:
+    """Read `knowledge/common-investigation/leads/{lead_name}/definition.md`
+    and return its YAML frontmatter as a dict.
+
+    Raises OrchestrationError when the file is missing or has no
+    frontmatter — that's a playbook-config bug (a signature declared a
+    contextualize-lead that doesn't exist), not something to silently swallow.
+    """
+    path = (
+        SOC_AGENT_ROOT / "knowledge" / "common-investigation" / "leads"
+        / lead_name / "definition.md"
+    )
+    if not path.exists():
+        raise OrchestrationError(
+            f"contextualize-lead {lead_name!r} has no definition at {path}"
+        )
+    text = path.read_text()
+    m = re.match(r"\A---\n(.*?)\n---\n", text, re.DOTALL)
+    if not m:
+        raise OrchestrationError(
+            f"contextualize-lead {lead_name!r} definition.md has no frontmatter"
+        )
+    try:
+        fm = yaml.safe_load(m.group(1)) or {}
+    except yaml.YAMLError as exc:
+        raise OrchestrationError(
+            f"contextualize-lead {lead_name!r} frontmatter did not parse: {exc}"
+        ) from exc
+    return fm
+
+
+def _bind_lead_to_vertices(
+    lead_name: str,
+    fm: dict,
+    vertices: list[dict],
+) -> list[dict]:
+    """Match a contextualize-lead's `target_vertex_kind` against the prologue
+    vertex types. Returns the list of matching vertex dicts. Skipped (empty
+    list) when no vertex matches — the lead was declared but the alert
+    didn't carry that observable, which is a graceful no-op.
+    """
+    target_kind = fm.get("target_vertex_kind")
+    if not target_kind:
+        raise OrchestrationError(
+            f"contextualize-lead {lead_name!r} frontmatter missing required "
+            "`target_vertex_kind`"
+        )
+    return [v for v in vertices if v.get("type") == target_kind]
+
+
+def _assemble_contextualize_lead_prompt(
+    ctx: Context, lead_name: str, vertex: dict,
+) -> str:
+    return (
+        f"lead_name={lead_name}\n"
+        f"target_vertex_id={vertex.get('id', '')}\n"
+        f"target_vertex_kind={vertex.get('type', '')}\n"
+        f"target_identifier={vertex.get('identifier', '')}\n"
+        f"run_dir={ctx.run_dir}\n"
+    )
+
+
+def _dispatch_contextualize_leads(
+    ctx: Context,
+    prologue: dict,
+    lead_names: list[str],
+) -> list[dict]:
+    """Run all contextualize-leads × matching vertices in parallel.
+
+    Returns one envelope per (lead, vertex) invocation. Each envelope is the
+    parsed `contextualize_lead:` block emitted by the subagent. The handler
+    merges envelopes into the prologue downstream (see `_apply_lead_updates`).
+    """
+    if not lead_names:
+        return []
+    vertices = (prologue or {}).get("vertices") or []
+
+    # Pre-load every lead's frontmatter once; raise loudly if any is broken.
+    lead_fms: dict[str, dict] = {n: _load_lead_frontmatter(n) for n in lead_names}
+
+    # Enumerate (lead, vertex) pairs in declaration order; one subagent
+    # invocation per pair. The handler dispatches them via ThreadPoolExecutor
+    # so wall-clock is bounded by the slowest invocation, not the sum.
+    invocations: list[tuple[str, dict, str]] = []  # (lead_name, vertex, prompt)
+    for lead_name in lead_names:
+        fm = lead_fms[lead_name]
+        for vertex in _bind_lead_to_vertices(lead_name, fm, vertices):
+            prompt = _assemble_contextualize_lead_prompt(ctx, lead_name, vertex)
+            invocations.append((lead_name, vertex, prompt))
+    if not invocations:
+        return []
+
+    envelopes: list[dict] = []
+    with ThreadPoolExecutor(max_workers=min(8, len(invocations))) as ex:
+        futures = [
+            (lead_name, vertex, ex.submit(_invoke_contextualize_lead, prompt))
+            for lead_name, vertex, prompt in invocations
+        ]
+        for lead_name, vertex, fut in futures:
+            raw = fut.result()
+            parsed = extract_terminal_yaml(raw)
+            env = parsed.get("contextualize_lead")
+            if not isinstance(env, dict):
+                raise OrchestrationError(
+                    f"contextualize-lead {lead_name!r} for vertex "
+                    f"{vertex.get('id')} returned no `contextualize_lead:` "
+                    f"block"
+                )
+            envelopes.append(env)
+    return envelopes
+
+
+def _apply_lead_updates(prologue: dict, envelopes: list[dict]) -> None:
+    """Mutate `prologue['vertices']` in place — for each envelope, find the
+    target vertex and merge `updates` onto it (top-level keys overwrite,
+    `attributes`-style nested dicts deep-merge).
+
+    Updates apply at CONTEXTUALIZE authoring time (single-phase write); rule
+    #8 (post-write append-only) is satisfied because nothing has been
+    written to investigation.md yet.
+    """
+    by_id: dict[str, dict] = {
+        v["id"]: v for v in prologue.get("vertices", []) if isinstance(v, dict)
+    }
+    for env in envelopes:
+        if env.get("status") != "ok":
+            # Errored leads are recorded in the audit trail (markdown) but
+            # contribute no updates. Surfaces upstream via _summarize_envelopes.
+            continue
+        target = env.get("target")
+        vertex = by_id.get(target)
+        if vertex is None:
+            raise OrchestrationError(
+                f"contextualize-lead {env.get('lead_name')!r} returned target "
+                f"{target!r} but no matching prologue vertex exists"
+            )
+        for key, value in (env.get("updates") or {}).items():
+            if key == "attributes" and isinstance(value, dict):
+                attrs = vertex.setdefault("attributes", {})
+                if not isinstance(attrs, dict):
+                    raise OrchestrationError(
+                        f"vertex {target!r} has non-dict `attributes`; "
+                        "cannot merge contextualize-lead updates"
+                    )
+                attrs.update(value)
+                continue
+            # `cmdb_record` / `idp_record` and similar record-attr keys land
+            # under vertex.attributes by convention — the prologue schema
+            # carries arbitrary records there, not at the vertex root.
+            if key.endswith("_record"):
+                attrs = vertex.setdefault("attributes", {})
+                if not isinstance(attrs, dict):
+                    raise OrchestrationError(
+                        f"vertex {target!r} has non-dict `attributes`; "
+                        "cannot merge contextualize-lead record"
+                    )
+                attrs[key] = value
+                continue
+            vertex[key] = value
+
+
+def _summarize_envelopes(envelopes: list[dict]) -> str:
+    """One bullet per envelope for the markdown audit trail."""
+    if not envelopes:
+        return "- (none)"
+    lines = []
+    for env in envelopes:
+        name = env.get("lead_name", "?")
+        target = env.get("target", "?")
+        if env.get("status") == "ok":
+            obs = env.get("observation") or "(no observation)"
+            lines.append(f"- {name} → {target}: {obs}")
+        else:
+            reason = env.get("reason") or "(no reason)"
+            lines.append(f"- {name} → {target}: error — {reason}")
+    return "\n".join(lines)
 
 
 def _validate_and_write(ctx: Context, new_section: str) -> None:
@@ -407,9 +608,41 @@ def handle(ctx: Context) -> PhaseResult:
 
     ticket_raw, prologue_raw = _dispatch_parallel(ctx, playbook)
     ticket = extract_terminal_yaml(ticket_raw)
-    prologue_yaml_str = _extract_yaml_block(prologue_raw, "prologue")
 
-    markdown = _compose_markdown(ctx, ticket, playbook, preflight_summary)
+    # Parse the prologue dict so we can mutate it before serialization. The
+    # contextualize-leads (when declared by the playbook) run in parallel
+    # against matching prologue vertices and feed their classification +
+    # record updates back onto those vertices in-memory. Validation runs once
+    # at the end on the merged result.
+    prologue_parsed = extract_terminal_yaml(prologue_raw)
+    if "prologue" not in prologue_parsed:
+        raise OrchestrationError(
+            "subagent output missing top-level `prologue:` — got keys "
+            f"{list(prologue_parsed)}"
+        )
+    prologue_dict = prologue_parsed["prologue"]
+    if not isinstance(prologue_dict, dict):
+        raise OrchestrationError(
+            f"prologue payload is not a mapping: {prologue_dict!r}"
+        )
+
+    contextualize_lead_envelopes = _dispatch_contextualize_leads(
+        ctx, prologue_dict, playbook.contextualize_leads,
+    )
+    _apply_lead_updates(prologue_dict, contextualize_lead_envelopes)
+
+    prologue_yaml_str = yaml.safe_dump(
+        {"prologue": prologue_dict}, sort_keys=False,
+    )
+
+    markdown = _compose_markdown(
+        ctx, ticket, playbook, preflight_summary,
+        contextualize_lead_envelopes=(
+            contextualize_lead_envelopes
+            if playbook.contextualize_leads
+            else None
+        ),
+    )
     new_section = (
         markdown
         + "\n"

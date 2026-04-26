@@ -99,7 +99,9 @@ def stub_invoke(captured: list[str], response: str):
 
 
 # Canonical merged screen subagent output — pattern match + invlang gather
-# block in a single terminal YAML.
+# block in a single terminal YAML. Classification indicators are satisfied
+# from preloaded `vertex.classification` and contribute no `leads_run` /
+# `findings` entries — only authentication-history + the anchor lookup do.
 SCREEN_MATCH_YAML = textwrap.dedent("""\
     ```yaml
     screen_result: match
@@ -109,10 +111,6 @@ SCREEN_MATCH_YAML = textwrap.dedent("""\
     matched_ticket_id: SEC-2024-001
     confidence: high
     leads_run:
-      - lead: source-classification
-        observation: "172.22.0.10 -> internal-monitoring-host"
-      - lead: username-classification
-        observation: "nagios -> monitoring-pattern"
       - lead: approved-monitoring-sources
         observation: "(172.22.0.10, nagios, target-endpoint) -> authorized"
       - lead: authentication-history
@@ -121,32 +119,6 @@ SCREEN_MATCH_YAML = textwrap.dedent("""\
     reason: null
     findings:
       - id: l-001
-        loop: 0
-        name: source-classification
-        target: v-001
-        mode: screen
-        query_details:
-          system: classification-lookup
-        outcome:
-          attribute_updates:
-            - target: v-001
-              updates:
-                classification: internal-monitoring-host
-        resolutions: []
-      - id: l-002
-        loop: 0
-        name: username-classification
-        target: v-003
-        mode: screen
-        query_details:
-          system: classification-lookup
-        outcome:
-          attribute_updates:
-            - target: v-003
-              updates:
-                classification: monitoring-pattern
-        resolutions: []
-      - id: l-003
         loop: 0
         name: approved-monitoring-sources
         target: e-001
@@ -162,7 +134,7 @@ SCREEN_MATCH_YAML = textwrap.dedent("""\
               as_of: '2026-04-20T19:25:01Z'
               authority_for_question: full
         resolutions: []
-      - id: l-004
+      - id: l-002
         loop: 0
         name: authentication-history
         target: v-001
@@ -188,39 +160,17 @@ SCREEN_NOMATCH_YAML = textwrap.dedent("""\
     matched_archetype: null
     matched_ticket_id: null
     confidence: null
-    leads_run:
-      - lead: source-classification
-        observation: "172.22.0.10 -> internal-monitoring-host"
-      - lead: username-classification
-        observation: "admin -> unclassified-identity"
-    evidence_summary: "username does not match monitoring-pattern sentinels"
-    reason: "username_classification did not match"
-    findings:
-      - id: l-001
-        loop: 0
-        name: source-classification
-        target: v-001
-        mode: screen
-        query_details: {system: classification-lookup}
-        outcome:
-          attribute_updates:
-            - target: v-001
-              updates:
-                classification: internal-monitoring-host
-        resolutions: []
-      - id: l-002
-        loop: 0
-        name: username-classification
-        target: v-003
-        mode: screen
-        query_details: {system: classification-lookup}
-        outcome:
-          attribute_updates:
-            - target: v-003
-              updates:
-                classification: unclassified-identity
-          screen_result: no_match
-        resolutions: []
+    leads_run: []
+    evaluated_indicators:
+      - indicator: source_classification
+        lead: null
+        passed: true
+      - indicator: username_classification
+        lead: null
+        passed: false
+    evidence_summary: "username vertex classification is unclassified-identity, not monitoring-pattern"
+    reason: "username_classification did not match: identity vertex has classification=unclassified-identity"
+    findings: []
     ```
 """).strip()
 
@@ -251,8 +201,12 @@ class TestPlaybookParsing:
         assert len(rows) == 1
         row = rows[0]
         assert row["pattern"] == "monitoring-probe fast-path"
-        assert "source-classification" in row["leads"]
+        # Classification leads moved to CONTEXTUALIZE — the screen row only
+        # carries authentication-history + the anchor lookup now.
         assert "authentication-history" in row["leads"]
+        assert "approved-monitoring-sources" in row["leads"]
+        assert "source-classification" not in row["leads"]
+        assert "username-classification" not in row["leads"]
 
     @pytest.mark.parametrize(
         "signature_id",
@@ -371,9 +325,11 @@ class TestScreenDispatch:
 
 
 class TestStructuralVerifier:
+    # After classification-leads migrated to CONTEXTUALIZE, the screen row's
+    # Leads column on rule-5710 is just the anchor + authentication-history.
     ROW = {
         "pattern": "monitoring-probe fast-path",
-        "leads": "source-classification, username-classification, approved-monitoring-sources anchor, authentication-history",
+        "leads": "approved-monitoring-sources anchor, authentication-history",
     }
 
     def _parsed_match(self, leads):
@@ -385,8 +341,6 @@ class TestStructuralVerifier:
 
     def test_match_with_all_leads_passes(self):
         parsed = self._parsed_match([
-            {"lead": "source-classification", "observation": "x"},
-            {"lead": "username-classification", "observation": "y"},
             {"lead": "approved-monitoring-sources", "observation": "z"},
             {"lead": "authentication-history", "observation": "w"},
         ])
@@ -402,25 +356,21 @@ class TestStructuralVerifier:
 
     def test_missing_indicator_lead_downgrades(self):
         parsed = self._parsed_match([
-            {"lead": "source-classification", "observation": "x"},
-            # username-classification missing
+            # authentication-history missing
             {"lead": "approved-monitoring-sources", "observation": "z"},
-            {"lead": "authentication-history", "observation": "w"},
         ])
         _, reason = screen_handler._structural_verify(parsed, [self.ROW])
         assert reason is not None
-        assert "username-classification" in reason
+        assert "authentication-history" in reason
 
     def test_empty_observation_treated_as_not_run(self):
         parsed = self._parsed_match([
-            {"lead": "source-classification", "observation": ""},
-            {"lead": "username-classification", "observation": "y"},
-            {"lead": "approved-monitoring-sources", "observation": "z"},
+            {"lead": "approved-monitoring-sources", "observation": ""},
             {"lead": "authentication-history", "observation": "w"},
         ])
         _, reason = screen_handler._structural_verify(parsed, [self.ROW])
         assert reason is not None
-        assert "source-classification" in reason
+        assert "approved-monitoring-sources" in reason
 
     def test_no_match_passes_through_unchecked(self):
         parsed = {"screen_result": "no_match", "leads_run": []}
@@ -512,7 +462,9 @@ class TestInvestigationWrite:
         assert "## SCREEN" in text
         assert "**Result:** match" in text
         assert "monitoring-probe fast-path" in text
-        assert "source-classification" in text
+        # Classification leads moved to CONTEXTUALIZE — SCREEN's leads_run
+        # is just the anchor + auth-history now.
+        assert "approved-monitoring-sources" in text
         assert "authentication-history" in text
         # Final lead carries screen_result.
         assert "screen_result: match" in text
@@ -525,7 +477,7 @@ class TestInvestigationWrite:
         screen_handler.handle(ctx)
         text = (ctx.run_dir / "investigation.md").read_text()
         assert "**Result:** no_match" in text
-        assert "screen_result: no_match" in text
+        assert "username_classification did not match" in text
 
     def test_malformed_invlang_rejected_before_write(self, tmp_path, monkeypatch):
         """A gather block with invalid invlang shape must surface before the
@@ -543,10 +495,6 @@ class TestInvestigationWrite:
             matched_ticket_id: SEC-2024-001
             confidence: high
             leads_run:
-              - lead: source-classification
-                observation: "172.22.0.10 -> internal-monitoring-host"
-              - lead: username-classification
-                observation: "nagios -> monitoring-pattern"
               - lead: approved-monitoring-sources
                 observation: "(triple) -> authorized"
               - lead: authentication-history
@@ -556,16 +504,15 @@ class TestInvestigationWrite:
             findings:
               - id: l-001
                 loop: 0
-                name: source-classification
-                target: v-001
+                name: authentication-history
+                target: v-999
                 mode: screen
                 query_details:
-                  system: classification-lookup
+                  system: wazuh-indexer
                 outcome:
-                  attribute_updates:
-                    - target: v-999
-                      updates:
-                        classification: x
+                  observations:
+                    vertices: []
+                    edges: []
                 resolutions: []
             ```
         """).strip()
@@ -594,7 +541,9 @@ class TestRouting:
         assert result.payload["matched_archetype"] == "monitoring-probe"
         assert result.payload["matched_ticket_id"] == "SEC-2024-001"
         assert result.payload["disposition"] == "benign"
-        assert len(result.payload["leads_run"]) == 4
+        # Anchor + authentication-history. Classification indicators are
+        # satisfied from preloaded vertex.classification, no leads run.
+        assert len(result.payload["leads_run"]) == 2
 
     def test_no_match_routes_to_hypothesize(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path)
@@ -618,40 +567,12 @@ class TestRouting:
             matched_ticket_id: SEC-2024-001
             confidence: high
             leads_run:
-              - lead: source-classification
-                observation: "172.22.0.10 -> internal-monitoring-host"
-              - lead: username-classification
-                observation: "nagios -> monitoring-pattern"
               - lead: approved-monitoring-sources
                 observation: "(triple) -> authorized"
             evidence_summary: "fake match"
             reason: null
             findings:
               - id: l-001
-                loop: 0
-                name: source-classification
-                target: v-001
-                mode: screen
-                query_details: {system: classification-lookup}
-                outcome:
-                  attribute_updates:
-                    - target: v-001
-                      updates:
-                        classification: internal-monitoring-host
-                resolutions: []
-              - id: l-002
-                loop: 0
-                name: username-classification
-                target: v-003
-                mode: screen
-                query_details: {system: classification-lookup}
-                outcome:
-                  attribute_updates:
-                    - target: v-003
-                      updates:
-                        classification: monitoring-pattern
-                resolutions: []
-              - id: l-003
                 loop: 0
                 name: approved-monitoring-sources
                 target: e-001
