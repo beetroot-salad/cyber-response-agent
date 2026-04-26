@@ -304,7 +304,11 @@ def _append_subagent_log(
     post-mortem. One file per call, named by timestamp + agent."""
     out_dir = run_dir / "subagent_outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"{_ts_filename()}-{agent}.txt"
+    # session_id suffix disambiguates concurrent same-agent spawns (the
+    # parallel-singletons orchestrator runs N gather subagents in the same
+    # microsecond window).
+    sid_suffix = session_id.split("-")[0] if session_id else "nosid"
+    path = out_dir / f"{_ts_filename()}-{agent}-{sid_suffix}.txt"
     parts = [
         f"=== agent: {agent} ===",
         f"=== session_id: {session_id} ===",

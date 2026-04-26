@@ -714,8 +714,10 @@ class TestParallelSingletons:
         assert len(captured_composite) == 1
         composite_prompt = captured_composite[0]
         assert "source-reputation" in composite_prompt
-        # Healthy lead's prompt was NOT in the composite redispatch primary.
-        assert "lead_name: source-reputation" in composite_prompt
+        # Healthy lead must NOT be re-dispatched in the composite fallback —
+        # its name should not appear as a lead_name token in the prompt.
+        assert "lead_name=authentication-history" not in composite_prompt
+        assert "lead_name: authentication-history" not in composite_prompt
         # Both leads end up resolved.
         assert set(result.payload["executed_leads"]) == {
             "authentication-history", "source-reputation",
@@ -749,8 +751,18 @@ class TestParallelSingletons:
         result = gather_handler.handle(ctx)
 
         assert len(captured_composite) == 0
-        # Healthy lead resolved, failed lead surfaces as error.
+        # Healthy lead resolved into executed_leads.
         assert "authentication-history" in result.payload["executed_leads"]
+        # Failed lead is preserved in the structured envelope (carried into
+        # ANALYZE via payload.leads) with its original status + trigger intact —
+        # no silent drop, no fallback rewrite.
+        leads_by_name = {l.get("name"): l for l in result.payload["leads"]}
+        assert set(leads_by_name) == {"authentication-history", "source-reputation"}
+        failed = leads_by_name["source-reputation"]
+        assert failed["status"] == "error"
+        assert failed["escalate_trigger"] == "unknown_unrecoverable"
+        # And it's not double-counted as executed.
+        assert "source-reputation" not in result.payload["executed_leads"]
 
     def test_session_partitioned_manifest_correlation(
         self, tmp_path, monkeypatch,

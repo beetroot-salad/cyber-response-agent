@@ -832,6 +832,14 @@ def _dispatch_parallel_singletons(
     _COMPOSITE_FALLBACK_TRIGGERS`) is re-dispatched as part of a single
     composite call covering only the failed subset; cleanly-completed
     leads are preserved as-is.
+
+    Failure semantics: if any singleton raises (subagent crash, timeout,
+    OrchestrationError), the exception propagates and the parallel batch
+    is abandoned — cleanly-completed siblings are lost. This is intentional:
+    the serial path's structured fallback only handles parsed-envelope
+    escalate triggers, not subprocess-level failures, and surfacing crashes
+    to the caller preserves routing safety. The env-var gate keeps this
+    behind opt-in until the validation fixture passes.
     """
     scopes: list[Scope] = [primary_scope, *secondary_scopes]
     session_ids: dict[str, str] = {
@@ -905,9 +913,11 @@ def _dispatch_parallel_singletons(
                 continue
             replaced_env = envelopes[scope.lead_name]
             replaced_env.leads = [replacement]
-            # Carry through fallback's raw paths if present. The replacement
-            # lead carries the original singleton's id (preserving id stability);
-            # look up fallback raw_by_lead by the replacement's id.
+            # Carry through fallback's raw paths if present. If the fallback
+            # didn't record raw paths under the replacement's id (composite
+            # may use its own id scheme), leave the singleton's original
+            # raw_by_lead untouched — the lead replacement still wins, only
+            # the manifest enrichment is preserved as best-effort.
             new_id = replacement.get("id")
             if isinstance(new_id, str) and new_id in fallback_env.raw_by_lead:
                 replaced_env.raw_by_lead = {
