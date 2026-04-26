@@ -1,7 +1,7 @@
 ---
 name: predict
 description: Set up GATHER + ANALYZE for one investigation loop. Pick the lead; pre-declare predictions, refutation shapes, authorization contracts, and (when the lead measures impact-relevant observables) impact_predictions that ANALYZE will read evidence against. Scaffold size follows the alert's shape — see §Shapes. Consults topology-conditioned priors pre-baked into the prompt; ad-hoc invlang queries available via CLI for shape-calibration lookups.
-tools: Bash, Write
+tools: Bash, Read, Write
 model: sonnet
 effort: low
 ---
@@ -65,6 +65,13 @@ Short. Walk in order; stop at the first match.
 
 Default bias: **E whenever you're uncertain**. The loop is designed to iterate — a wasted enrichment loop is cheaper than a premature fork that has to be torn down. Don't oscillate between A and M; pick the one that matches the open question as you currently understand it, and let the next loop correct course.
 
+**After deciding the shape, Read the matching worked example before authoring:**
+- Shape E → `soc-agent/agents/predict-examples/shape-E.md`
+- Shape A → `soc-agent/agents/predict-examples/shape-A.md`
+- Shape M → `soc-agent/agents/predict-examples/shape-M.md`
+
+Each example is a full case at the relevant loop position (alert → state → output YAML → pitfalls). Read only the one matching your shape decision.
+
 ## Story authoring (all fork shapes)
 
 **Story first, predictions second.** Write the story in 2–4 sentences before writing the `predictions` list. Each prediction cites a specific story sentence via `from_story_link`. A hypothesis without a concrete causal story is a label; labels max out at `+` regardless of evidence.
@@ -97,65 +104,6 @@ The test: can your refutation fire when the foreground is *literally the benign 
 Baseline is also a first-class **lead selector**. `authentication-history` (or the domain equivalent) is a primary discriminator for Shapes I and M — select it alongside the direct-observable lead, not instead of it.
 
 **Labels vs stories.** *"Authorized monitoring activity"* is a restatement. *"Monitoring daemon on 172.22.0.10 invoked `ssh monitorprobe@target` as a scheduled health-check tick"* is a causal link. Name processes, timing, correlation signals. The more concrete the link, the more falsifiable the prediction it generates.
-
-## Shape A — full worked example (loop 2, post-enrichment)
-
-**Alert (Wazuh rule-5710, SSH invalid user):**
-
-```
-srcuser:   monitorprobe
-srcip:     172.22.0.10
-dstip:     10.0.7.44
-outcome:   reject (unknown user on target)
-```
-
-**State at loop 2:** prologue has `v-source-172.22.0.10`, `v-target-10.0.7.44`, and an `attempted_auth` edge carrying `identity_on_wire: monitorprobe`. Loop 1 ran `authentication-history` (Shape E) and returned: 11 events in the 1h backward window, single-attempt clusters, mean inter-arrival ~576s (stddev 102s), no forward-success in ±60s. Enrichment has landed — cadence is periodic, no forward-success signal. The username `monitorprobe` matches a sentinel pattern, but this is pattern inference; no authority confirmation yet that the registered monitoring system was the specific actor on *this* tick. Shape A — authorization is the open question. One hypothesis with an `authorization_contract` against the approved-monitoring-sources anchor; no peer, because a "credentials-stolen-by-non-daemon" variant would need a divergent upstream mechanism (different parent process) that isn't testable with available leads — upstream loops will fork if the anchor returns unauthorized/indeterminate.
-
-```yaml
-hypothesize:
-  hypotheses:
-    - id: h-001
-      name: "?registered-actor-initiated"
-      attached_to_vertex: v-source-172.22.0.10
-      proposed_edge:
-        relation: initiated_auth
-        parent_vertex: {type: process, classification: monitoring-daemon-process-on-source}
-      story: |
-        The monitoring system daemon on 172.22.0.10 invoked
-        `ssh monitorprobe@10.0.7.44` as a scheduled health-check
-        tick. Loop 1 established a periodic cadence (11 events,
-        mean interval 576s, single-attempt clusters) consistent
-        with a fixed-schedule monitoring tool; this alert is
-        on-cadence with that baseline. sshd on target rejected
-        the user (expected — monitorprobe is not provisioned on
-        10.0.7.44).
-      predictions:
-        - id: p1
-          subject: proposed_edge
-          claim: "approved-monitoring-sources registry confirms the (172.22.0.10, monitorprobe, 10.0.7.44) triple as an active registered probe"
-          from_story_link: "monitoring system daemon invoked ssh as a scheduled tick"
-      refutation_shape:
-        - id: r1
-          refutes_predictions: [p1]
-          claim: "the triple is not registered (or is marked inactive/revoked) in approved-monitoring-sources"
-      authorization_contract:
-        - id: ac1
-          edge_ref: proposed
-          anchor_kind: approved-monitoring-sources
-          predicate: "(src, user, dst) triple listed as active approved monitoring probe"
-          on_unauthorized: escalate
-          on_indeterminate: escalate
-      weight: null
-```
-
-**Selected lead:** `monitoring-probe` (playbook) — approved-monitoring-sources registry lookup for the triple. Resolves `h-001.ac1`; the anchor's verdict is dispositive. If `unauthorized` or `indeterminate`, escalate per the contract. If `authorized`, h-001 carries the disposition.
-
-**Pitfalls:**
-- Registry confirming the triple answers both *authorization* and *identity-of-use* — the registry names monitoring-daemon-process as the registered emitter of this triple, which is what `integrity_waived` captures. Don't re-introduce a "non-daemon process presented these credentials" peer — same edge, same predictions, verdict-in-name.
-
-```yaml
-selected_lead: monitoring-probe
-```
 
 ## Output format
 
