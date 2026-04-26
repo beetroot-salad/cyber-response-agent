@@ -93,3 +93,58 @@ predict:
 - Don't write `lp2` as `"novel sources AND high failure rate"` — high failure rate is already implied by the alert; the *novelty* of sources is the load-bearing signal. Compound claims make the reading harder to grade.
 - Don't pin a specific failure-rate threshold (*"> 50 failures/min"*) — that's a baseline-value leak. Name the deviation by role (*"deviates from the baseline distribution"*); the lead returns the concrete distribution.
 - Don't omit `scope_override` — historical baselines need 24h+, GATHER's 1h default would return noise.
+
+### Paired-window dispatch — attaching `comparison` blocks
+
+When an `lp*` reading's `if` text contains baseline-deviation vocabulary (*recurring*, *baseline*, *matches/deviates from baseline*, *novel artifact*), attach an optional `comparison` block that names the comparison set, dimension, and selector kind. GATHER reads `comparison` and fetches paired-window observations (alert window + comparison set) in one trip; ANALYZE evaluates each `if` against the paired observations. This eliminates the loop-N-then-loop-N+1 round-trip where loop N fetches baseline and loop N+1 grades against it.
+
+Selector kinds (closed): `historical-self` | `peer-class` | `population` | `cross-rule`. Skip the block when the discriminator is internal to the alert window or when the baseline is structurally zero (any presence is a deviation — no comparison set needed).
+
+Same example as above, re-authored with `comparison` blocks. Note the new `lp4` covering the empty-comparison-set case — without it, an account with no recorded baseline silently drops through:
+
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history-for-account
+    predictions:
+      - id: lp1
+        if: "the burst's source set, cadence, and failure-mode shape match the account's recurring 24h baseline on at least two recorded dimensions"
+        read_as: "on-baseline-noise"
+        advance_to: halt
+        comparison:
+          selector_kind: historical-self
+          selector: "user.name:<account> AND outcome:failure [past 24h]"
+          dimension: source_set_cadence_failure_mode_geometry
+      - id: lp2
+        if: "the burst introduces source identifiers absent from the account's recurring 24h baseline (any deviation from the zero-count baseline for that source set)"
+        read_as: "novel-sources"
+        advance_to: fork-at-source-authority
+        comparison:
+          selector_kind: historical-self
+          selector: "user.name:<account> AND outcome:failure [past 24h]"
+          dimension: source_set
+      - id: lp3
+        if: "the burst's source set matches baseline but cadence or failure-mode shape deviates from the baseline distribution on at least one recorded dimension"
+        read_as: "known-sources-anomalous-shape"
+        advance_to: fork-at-client-state
+        comparison:
+          selector_kind: historical-self
+          selector: "user.name:<account> AND outcome:failure [past 24h]"
+          dimension: cadence_failure_mode_geometry
+      - id: lp4
+        if: "comparison_set is empty (no prior failed-auth events for this account in the 24h window)"
+        read_as: "no-baseline-establishable"
+        advance_to: fork-at-novel-account-context
+
+  routing:
+    selected_lead: authentication-history-for-account
+    composite_secondary: []
+    scope_override:
+      window_hours: 24
+      anchor: alert
+```
+
+Composite-lead variant: when the primary lead returns one comparison set and a secondary lead returns another (different data source, different selector), each lead's readings carry their own `comparison` block. The `dimension` field tells ANALYZE which gather partition to consult.

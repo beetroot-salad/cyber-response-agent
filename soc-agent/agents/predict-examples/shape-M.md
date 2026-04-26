@@ -183,3 +183,91 @@ hypothesize:
 - Don't write either story as just *"backup tool"* / *"scan"* — those are labels, not stories. The story has to name *what the parent does* in causal terms (iterates a list / sweeps a subnet) so that predictions derive from concrete behavior.
 - Don't let the two p1 claims overlap (e.g. one says "≥ 80%", the other says "≤ 50%" — leaving 50–80% in no-man's-land). Mirror the threshold so the predictions partition the observable cleanly.
 - Don't pin specific byte-volume thresholds — name the deviation by role against the workstation's baseline; the lead returns the distribution.
+
+---
+
+### Paired-window dispatch — attaching `comparison` blocks
+
+When two hypotheses' predictions diverge on environment-relative deviation, give each side **mirror predictions sharing the same `comparison` block** — same `selector_kind`, same `selector`, same `dimension`, opposite predicted directions. GATHER returns one paired-window envelope (alert window + comparison set partitioned by dimension); ANALYZE grades both hypotheses against one observation. This is the structural payoff: the loop that today is "fetch baseline, then grade" becomes one loop.
+
+Use the technique whenever predictions contain baseline-deviation vocabulary (*recurring*, *baseline*, *matches/deviates from baseline*, *novel artifact*, *materially outside cadence*). Skip when the discriminator is internal to the alert window. Selector kinds (closed): `historical-self` | `peer-class` | `population` | `cross-rule`.
+
+Multi-dimension example (DNS NXDOMAIN burst from one client). Two hypotheses share TWO comparison blocks, one per dimension. Each hypothesis carries mirror predictions on both:
+
+```yaml
+hypothesize:
+  hypotheses:
+    - id: h-001
+      name: "?misconfigured-resolver-path"
+      attached_to_vertex: v-client-X
+      proposed_edge:
+        relation: emitted_dns_queries
+        parent_vertex: {type: host_config, classification: resolver-config-on-client}
+      story: |
+        A resolver-path or search-domain misconfiguration on
+        `client-X` is rewriting otherwise-valid lookups. Most
+        processes hit the same broken path. Underlying qnames
+        are the host's normal traffic, just rewritten.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "burst-window per-process NX-query share is uniform across processes; matches the recurring multi-process baseline geometry"
+          from_story_link: "most processes hit the same broken path"
+          comparison:
+            selector_kind: historical-self
+            selector: "client.ip:<client-X> AND query.response_code:NXDOMAIN [past 24h]"
+            dimension: per_process_query_share_distribution
+        - id: p2
+          subject: proposed_edge
+          claim: "burst-window qname-entropy distribution matches the client's recurring baseline distribution"
+          from_story_link: "underlying qnames are the host's normal traffic"
+          comparison:
+            selector_kind: historical-self
+            selector: "client.ip:<client-X> [past 24h]"
+            dimension: qname_shannon_entropy_distribution
+      refutation_shape:
+        - {id: r1, refutes_predictions: [p1], claim: "burst-window per-process share concentrates in one process; deviates from the recurring multi-process baseline geometry"}
+        - {id: r2, refutes_predictions: [p2], claim: "burst-window qname-entropy distribution shifts materially higher than the recurring baseline distribution"}
+      weight: null
+
+    - id: h-002
+      name: "?single-process-algorithmic-qnames"
+      attached_to_vertex: v-client-X
+      proposed_edge:
+        relation: emitted_dns_queries
+        parent_vertex: {type: process, classification: dns-emitting-process-on-client}
+      story: |
+        One process on `client-X` is generating qnames at a rate
+        and shape inconsistent with the client's recurring DNS
+        traffic — high concentration in one process, qname-entropy
+        distribution shifted versus baseline.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "burst-window per-process NX-query share concentrates in one process; deviates from the recurring multi-process baseline geometry"
+          from_story_link: "high concentration in one process"
+          comparison:
+            selector_kind: historical-self
+            selector: "client.ip:<client-X> AND query.response_code:NXDOMAIN [past 24h]"
+            dimension: per_process_query_share_distribution
+        - id: p2
+          subject: proposed_edge
+          claim: "burst-window qname-entropy distribution shifts materially higher than the recurring baseline distribution"
+          from_story_link: "qname-entropy distribution shifted versus baseline"
+          comparison:
+            selector_kind: historical-self
+            selector: "client.ip:<client-X> [past 24h]"
+            dimension: qname_shannon_entropy_distribution
+      refutation_shape:
+        - {id: r1, refutes_predictions: [p1], claim: "burst-window per-process share is uniform across processes; matches the recurring multi-process baseline geometry"}
+        - {id: r2, refutes_predictions: [p2], claim: "burst-window qname-entropy distribution matches the client's recurring baseline distribution"}
+      weight: null
+```
+
+Note: the same selector + dimension on h-001.p1 and h-002.p1 (mirror); same on h-001.p2 and h-002.p2. ANALYZE reads two paired-window observations (one per dimension) and grades all four predictions. No loop-2 needed for the deviation grading.
+
+Anti-patterns:
+- ❌ Mirror predictions on different `dimension` values — mirrors must share `selector_kind` + `selector` + `dimension`; only the predicted direction differs.
+- ❌ Compound dimension names (`destination_geometry_AND_volume_per_5min`) — split into two `comparison` blocks.
+- ❌ Comparison blocks on Shape A authorization-anchor predictions — the anchor verdict already decides; comparison is redundant.
+- ❌ Letting the technique change your shape decision — Shape M remains Shape M; the blocks just structure the predictions you would have written anyway.

@@ -131,7 +131,19 @@ predict:
       story: |
         <2–4 sentence one-hop causal link>
       predictions:                   # observational predictions on the edge
-        - {id: p1, subject: proposed_edge, claim: "<one observable>", from_story_link: "<story sentence>"}
+        - id: p1
+          subject: proposed_edge
+          claim: "<one observable>"
+          from_story_link: "<story sentence>"
+          # OPTIONAL `comparison` block — attach when the claim text
+          # contains baseline-deviation vocabulary (recurring /
+          # matches/deviates from baseline / novel artifact). See the
+          # "Paired-window dispatch" tail section in shape-E.md /
+          # shape-M.md for worked examples + when to skip.
+          comparison:
+            selector_kind: historical-self | peer-class | population | cross-rule
+            selector: "<query/spec defining the comparison set>"
+            dimension: <one named attribute of the observation>
       attribute_predictions:         # OPTIONAL — implicit classification
                                      # stereotypes made explicit. Use when the
                                      # parent-vertex classification carries
@@ -154,7 +166,17 @@ predict:
   branch_plan:
     primary_lead: <lead-slug>
     predictions:
-      - {id: lp1, if: "<observable condition>", read_as: "<interpretation token>", advance_to: escalate | fork-at-<question> | halt}
+      - id: lp1
+        if: "<observable condition>"
+        read_as: "<interpretation token>"
+        advance_to: escalate | fork-at-<question> | halt
+        # OPTIONAL `comparison` block — same shape as on `predictions[]`
+        # above; attach when `if` text contains baseline-deviation
+        # vocabulary. See the "Paired-window dispatch" tail in shape-E.md.
+        comparison:
+          selector_kind: historical-self | peer-class | population | cross-rule
+          selector: "<query/spec>"
+          dimension: <one named attribute>
       - {id: lp2, if: "...", read_as: "...", advance_to: ...}
 
   # Always required.
