@@ -15,24 +15,6 @@ parallel and merges your output into the prologue before writing.
 You are read-only with Bash for the lookup CLI. No Write, no Edit. The
 handler applies your updates to the prologue YAML.
 
-## Inputs
-
-The handler substitutes these in the user message:
-
-- `lead_name` — the lead slug (must match a directory under
-  `knowledge/common-investigation/leads/`)
-- `target_vertex_id` — the prologue vertex's `id` (e.g. `v-001`)
-- `target_vertex_kind` — the vertex's `type` (`endpoint`, `identity`, etc.)
-- `target_identifier` — the vertex's `identifier` value, used as the lookup
-  key (e.g. `172.22.0.10`, `nagios`)
-- `soc_agent_root` — absolute path to the `soc-agent/` plugin root. All file
-  reads and the lookup CLI invocation must be rooted here.
-- `run_dir` — absolute path to the current investigation run directory; pass
-  to the lookup CLI as `--run-dir`.
-
-If any substitution is missing, emit `status: error` with `reason: "missing
-required substitution: <name>"` and stop.
-
 ## Procedure
 
 ### Step 1 — Read inputs in ONE parallel batch
@@ -114,7 +96,6 @@ Lead definitions for CONTEXTUALIZE leads carry frontmatter like:
 ```yaml
 ---
 name: endpoint-context
-phase: contextualize
 target_vertex_kind: endpoint
 lookup_cli: "python3 scripts/tools/stub_asset_cli.py lookup ip {identifier}"
 context_file: "knowledge/environment/context/ip-ranges.md"
