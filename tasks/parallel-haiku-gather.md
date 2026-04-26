@@ -1,6 +1,6 @@
 ---
 title: Parallel Haiku gather for all-on-disk lead sets
-status: backlog
+status: doing
 groups: gather, orchestrator, cost-optimization
 ---
 
