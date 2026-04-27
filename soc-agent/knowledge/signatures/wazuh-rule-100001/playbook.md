@@ -145,6 +145,43 @@ window is the strongest possible evidence that operator credentials
 were compromised — the anchor confirmation does not override the
 co-firing.
 
+## Benign action classes
+
+Commands whose body, executed in isolation, cannot damage or exfiltrate
+data. CONCLUDE consults this list at trust-root: when the alert's
+command body is on the list, every adversarial-archetype hypothesis is
+below `++`, and the investigation has reached `termination_category:
+trust-root` (no further upstream authority is reachable), disposition
+routes `inconclusive` rather than escalating to `true_positive` by
+exhaustion alone.
+
+The body is the argument to `bash -c`, `sh -c`, or the direct argv
+when no shell is invoked — strip the shell wrapper before comparing.
+
+- `whoami`
+- `id`
+- `hostname`
+- `uname` (any flags)
+- `pwd`
+- `ls` (any flags, any path)
+- `ps` (any flags)
+- `cat /etc/os-release`
+- `cat /proc/version`
+- `cat /etc/hostname`
+- `cat /etc/resolv.conf`
+- `df` (any flags)
+- `free` (any flags)
+- `uptime`
+- `date`
+- `env` (no arguments — listing env vars only, not setting them)
+
+Exhaustion-by-trust-root with a benign command body is a real failure
+mode: the agent runs out of upstream authority to consult and routes
+`true_positive` because no anchor closed the authorization contract.
+For a non-damaging command, that exhaustion is not evidence of
+compromise — it is the limit of available telemetry. Cite the
+short-circuit explicitly in the report rationale when it fires.
+
 ## Signature quirks
 
 - **Falco only sees containers it watches.** Containers outside Falco's

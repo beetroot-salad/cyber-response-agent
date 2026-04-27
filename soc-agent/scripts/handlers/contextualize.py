@@ -33,7 +33,7 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -92,6 +92,12 @@ class PlaybookMetadata:
     # match to count as "same key-attribute family." Absent / None disables
     # the fast-path for this signature (gate is opt-in per signature).
     discriminating_classifications: dict[str, list[str]] | None = None
+    # CONCLUDE-time benign-action short-circuit list. Command bodies that,
+    # executed in isolation, cannot damage or exfiltrate. Drawn from the
+    # `## Benign action classes` section's bullets. Empty when the section
+    # is absent — the short-circuit only fires when the playbook explicitly
+    # opts in.
+    benign_action_classes: list[str] = field(default_factory=list)
 
 
 _ARCHETYPE_NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -181,6 +187,8 @@ def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
                 )
             disc[k] = list(v)
 
+    benign_action_classes = _extract_benign_action_classes(text, sections)
+
     return PlaybookMetadata(
         signature_id=signature_id,
         archetype_names=archetype_names,
@@ -189,6 +197,7 @@ def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
         hypothesis_seeds=hypothesis_seeds,
         leads=leads,
         discriminating_classifications=disc,
+        benign_action_classes=benign_action_classes,
     )
 
 
@@ -237,6 +246,39 @@ def _extract_section_bullet_ids(
         if token in _LEAD_NAME_BLOCKLIST:
             continue
         if token not in seen:
+            seen.append(token)
+    return seen
+
+
+# Bullet token at the head of a line in a playbook section: ``- `whoami` ``
+# (any trailing prose after the backticks is treated as commentary). When
+# the bullet body is bare prose (no backticks), match the first word.
+_BENIGN_ACTION_BULLET_RE = re.compile(
+    r"^-\s+`([a-z][a-z0-9 _\-/\.]*)`", re.MULTILINE,
+)
+
+
+def _extract_benign_action_classes(
+    text: str, sections: dict[str, int]
+) -> list[str]:
+    """Pull the bullet entries from ``## Benign action classes``.
+
+    Each bullet's first backticked token is the canonical command body that
+    the CONCLUDE short-circuit will compare against (after stripping any
+    `bash -c` / `sh -c` wrapper from the alert's cmdline). Returns [] when
+    the section is absent — short-circuit is opt-in per signature.
+    """
+    start = sections.get("benign action classes")
+    if start is None:
+        return []
+    next_start = min(
+        (s for s in sections.values() if s > start), default=len(text)
+    )
+    block = text[start:next_start]
+    seen: list[str] = []
+    for m in _BENIGN_ACTION_BULLET_RE.finditer(block):
+        token = m.group(1).strip().lower()
+        if token and token not in seen:
             seen.append(token)
     return seen
 

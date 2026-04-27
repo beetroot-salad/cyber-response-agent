@@ -153,6 +153,18 @@ class TestPlaybookMetadata:
         with pytest.raises(OrchestrationError, match="playbook not found"):
             ctx_handler.load_playbook_metadata("wazuh-rule-does-not-exist")
 
+    def test_benign_action_classes_loaded_for_100001(self):
+        meta = ctx_handler.load_playbook_metadata("wazuh-rule-100001")
+        # Spot-check: the playbook lists `whoami`, `id`, `hostname`, etc.
+        assert "whoami" in meta.benign_action_classes
+        assert "id" in meta.benign_action_classes
+        assert "cat /etc/os-release" in meta.benign_action_classes
+
+    def test_benign_action_classes_empty_when_section_absent(self):
+        meta = ctx_handler.load_playbook_metadata("wazuh-rule-5710")
+        # 5710 playbook has no `## Benign action classes` section — list empty.
+        assert meta.benign_action_classes == []
+
 
 # ---------------------------------------------------------------------------
 # Routing

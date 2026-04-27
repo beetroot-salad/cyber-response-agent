@@ -100,6 +100,21 @@ Empty lists are valid and preferred over omission for `resolutions`, `anomalies`
 - `-` — observations somewhat inconsistent; no pre-registered refutation shape matched.
 - `--` — observations match a pre-registered refutation shape. Name the `r{N}` id.
 
+**Load-bearing field rule (decisive grades).** `++` and `--` require evidence on the prediction's *load-bearing field* from an authority that has direct view of that field. Single-source authoritative is sufficient when directness is satisfied — there is no two-source rule.
+
+The prediction's load-bearing field is the noun the prediction's `claim` is about (*parent process class*, *registered actor in approved-monitoring-sources*, *cadence distribution against baseline*). The authority is the system whose record speaks to that noun (Falco's `proc.pname` field for parent-process class; the identity registry for actor registration; the SIEM's historical query for cadence).
+
+For each resolution, write one line in the `reasoning` field that names the triple: **(a)** the prediction's load-bearing field, **(b)** the authority cited, **(c)** whether (b) has direct view of (a). That triple determines the grade tier:
+
+- Direct view + supporting evidence → `++`
+- Direct view + refuting evidence (matched `r{N}`) → `--`
+- No direct view (downstream effect / co-occurrence in different rule family / temporal proximity / population-level baseline match without per-instance check / cross-source observation that does not include the load-bearing field on the subject) → `+` / `-`
+- The authority cannot have observed the load-bearing field (lead queried a different field; registry is scoped to a different question; coverage gap means absence-of-evidence does not refute) → no-change
+
+Absence-of-refutation that *could not have materialized* from the lead just run (because the lead didn't query the refutation's load-bearing field) is **not** evidence — leave the grade where it was.
+
+When a prediction's `claim` smuggles two sub-claims onto different load-bearing fields (e.g., "loginuid=-1 (kernel field) AND matches an approved-account-class entry (registry field)"), grade per sub-claim and report the dominant sub-claim's grade; flag the smuggling in `reasoning` so the next loop's PREDICT can split the prediction.
+
 **Patterns (rule-agnostic):**
 - Prediction `p{N}` matched + refutation `r{N}` materialized on the same lead → grade `+`, not `++`. A matched refutation always caps the grade.
 - Pattern consistency alone (baseline match, shape match) → `+` regardless of volume. `++` requires an authoritative anchor, not a counter count.
