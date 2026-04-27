@@ -114,7 +114,7 @@ def _companion(
         case_id=case_id,
         source_path=src_path,
         body=body,
-        alert_timestamp=iso,
+        created_at=iso,
     )
 
 

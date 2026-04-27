@@ -1158,25 +1158,17 @@ def peer_hypothesis_distribution_for_prologue(
 # effectiveness semantics.
 
 
-def _parse_alert_timestamp(ts: str | None) -> datetime | None:
-    """Best-effort ISO-8601 parse for `Companion.alert_timestamp`.
-
-    Wazuh emits `2026-04-09T18:21:15.709+0000` (no colon in offset).
-    Python ≥3.11 `fromisoformat` handles this; fall back to manual
-    normalization for older versions and for `Z` suffixes.
+def _parse_created_at(ts: str | None) -> datetime | None:
+    """ISO-8601 parse for `Companion.created_at`. The handler writes
+    `datetime.now(timezone.utc).isoformat()` so format is canonical; a parse
+    failure means a hand-edited or corrupted header — treat as absent.
     """
     if not ts:
         return None
     try:
         return datetime.fromisoformat(ts)
     except ValueError:
-        normalized = ts.replace("Z", "+00:00")
-        if len(normalized) >= 5 and normalized[-5] in "+-" and normalized[-3] != ":":
-            normalized = normalized[:-2] + ":" + normalized[-2:]
-        try:
-            return datetime.fromisoformat(normalized)
-        except ValueError:
-            return None
+        return None
 
 
 def key_attribute_signature(
@@ -1267,7 +1259,7 @@ def loop_lead_distribution(
 
     Filters companions by:
       - signature_id exact
-      - alert_timestamp present AND within `max_age_days` of `now`
+      - created_at present AND within `max_age_days` of `now`
       - prologue topology exact (vertex_types / vertex_classifications /
         edge_relations equal)
       - key-attribute family signature exact (per
@@ -1317,7 +1309,7 @@ def loop_lead_distribution(
     scoped_sig = [c for c in corpus if companion_signature_id(c) == signature_id]
     scoped_recent: list[Companion] = []
     for c in scoped_sig:
-        ts = _parse_alert_timestamp(c.alert_timestamp)
+        ts = _parse_created_at(c.created_at)
         if ts is None:
             continue
         # Normalize to UTC if naive.

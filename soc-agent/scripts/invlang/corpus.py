@@ -16,7 +16,6 @@ Two source shapes are supported:
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -82,11 +81,12 @@ class Companion:
     case_id: str
     source_path: Path
     body: dict[str, Any]
-    # ISO-8601 timestamp from the alert (top-level `timestamp` field). None
-    # when the sibling alert.json is missing or malformed; temporal-filtered
-    # queries treat None as "exclude" so missing-timestamp companions can't
-    # silently slip into a recency window.
-    alert_timestamp: str | None = None
+    # ISO-8601 timestamp stamped at the top of investigation.md on initial
+    # write (`<!-- created: ... -->`). None when the header is absent;
+    # temporal-filtered queries treat None as "exclude" so missing-header
+    # companions can't silently slip into a recency window. Hour-level drift
+    # vs. the originating alert is irrelevant at our 180-day granularity.
+    created_at: str | None = None
 
     @property
     def prologue(self) -> dict[str, Any]:
@@ -174,25 +174,30 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
     return merged
 
 
-def _read_sibling_alert_timestamp(path: Path) -> str | None:
-    """Pull the top-level `timestamp` field out of a sibling `alert.json`.
+_CREATED_HEADER_RE = re.compile(
+    r"<!--\s*created:\s*(?P<ts>\S+?)\s*-->"
+)
 
-    Used by `_load_from_path` to populate `Companion.alert_timestamp` for live
-    runs (`runs/<id>/investigation.md` paired with `runs/<id>/alert.json`).
-    Returns None when alert.json is missing, malformed, or carries no
-    timestamp — temporal queries treat None as "exclude."
+
+def _read_created_header(text: str) -> str | None:
+    """Pull the `<!-- created: <iso8601> -->` header out of an
+    investigation.md body. Stamped at initial write by the CONTEXTUALIZE
+    handler; absent on companions that predate the header convention.
+
+    Returns None when the header is missing — temporal queries treat None as
+    "exclude" so missing-header companions can't silently slip into a
+    recency window.
     """
-    alert_path = path.parent / "alert.json"
-    if not alert_path.exists():
-        return None
-    try:
-        data = json.loads(alert_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    ts = data.get("timestamp")
-    return ts if isinstance(ts, str) else None
+    m = _CREATED_HEADER_RE.search(text)
+    return m.group("ts") if m else None
+
+
+def write_created_header(now_iso: str) -> str:
+    """Format the canonical `<!-- created: ... -->` header line, including
+    a trailing blank line. Centralizes the format so the writer (CONTEXTUALIZE
+    handler) and reader (`_read_created_header`) stay in sync.
+    """
+    return f"<!-- created: {now_iso} -->\n\n"
 
 
 def _load_from_path(path: Path) -> list[Companion]:
@@ -211,16 +216,17 @@ def _load_from_path(path: Path) -> list[Companion]:
             results.append(Companion(_case_id_from_path(path), path, doc))
     elif path.suffix == ".md":
         try:
-            merged = _merge_md_blocks(path.read_text())
+            text = path.read_text()
         except OSError:
             return results
+        merged = _merge_md_blocks(text)
         if _looks_like_companion(merged):
             results.append(
                 Companion(
                     case_id=_case_id_from_path(path),
                     source_path=path,
                     body=merged,
-                    alert_timestamp=_read_sibling_alert_timestamp(path),
+                    created_at=_read_created_header(text),
                 )
             )
     return results

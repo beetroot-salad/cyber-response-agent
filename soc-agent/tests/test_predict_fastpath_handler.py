@@ -132,7 +132,7 @@ def _companion(case_id: str, primary_lead: str, *, age_days: int = 30) -> Compan
         case_id=case_id,
         source_path=Path(f"/runs/case-{case_id}-rule5710/investigation.md"),
         body=body,
-        alert_timestamp=iso,
+        created_at=iso,
     )
 
 

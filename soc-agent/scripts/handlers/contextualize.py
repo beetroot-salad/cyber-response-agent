@@ -34,6 +34,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -41,6 +42,7 @@ import frontmatter
 import yaml
 
 from schemas.state import Phase
+from scripts.invlang.corpus import write_created_header
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._markdown import parse_markdown, table_rows_after_heading
@@ -410,6 +412,14 @@ def _validate_and_write(ctx: Context, new_section: str) -> None:
 
     inv_path = ctx.run_dir / "investigation.md"
     current = inv_path.read_text() if inv_path.exists() else ""
+    if not current:
+        # Stamp the file's creation time at the top on first write so the
+        # corpus loader's recency filter has a stable per-file timestamp
+        # without needing to read sibling alert.json or trust file mtime.
+        new_section = (
+            write_created_header(datetime.now(timezone.utc).isoformat())
+            + new_section
+        )
     proposed = current + ("\n" if current and not current.endswith("\n") else "") + new_section
 
     errors = validate_companion(proposed, current if current else None)
