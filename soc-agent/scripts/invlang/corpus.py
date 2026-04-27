@@ -16,6 +16,7 @@ Two source shapes are supported:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -81,6 +82,11 @@ class Companion:
     case_id: str
     source_path: Path
     body: dict[str, Any]
+    # ISO-8601 timestamp from the alert (top-level `timestamp` field). None
+    # when the sibling alert.json is missing or malformed; temporal-filtered
+    # queries treat None as "exclude" so missing-timestamp companions can't
+    # silently slip into a recency window.
+    alert_timestamp: str | None = None
 
     @property
     def prologue(self) -> dict[str, Any]:
@@ -168,6 +174,27 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
     return merged
 
 
+def _read_sibling_alert_timestamp(path: Path) -> str | None:
+    """Pull the top-level `timestamp` field out of a sibling `alert.json`.
+
+    Used by `_load_from_path` to populate `Companion.alert_timestamp` for live
+    runs (`runs/<id>/investigation.md` paired with `runs/<id>/alert.json`).
+    Returns None when alert.json is missing, malformed, or carries no
+    timestamp — temporal queries treat None as "exclude."
+    """
+    alert_path = path.parent / "alert.json"
+    if not alert_path.exists():
+        return None
+    try:
+        data = json.loads(alert_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    ts = data.get("timestamp")
+    return ts if isinstance(ts, str) else None
+
+
 def _load_from_path(path: Path) -> list[Companion]:
     """Parse a file and return every companion it contains (0 or more).
 
@@ -188,7 +215,14 @@ def _load_from_path(path: Path) -> list[Companion]:
         except OSError:
             return results
         if _looks_like_companion(merged):
-            results.append(Companion(_case_id_from_path(path), path, merged))
+            results.append(
+                Companion(
+                    case_id=_case_id_from_path(path),
+                    source_path=path,
+                    body=merged,
+                    alert_timestamp=_read_sibling_alert_timestamp(path),
+                )
+            )
     return results
 
 

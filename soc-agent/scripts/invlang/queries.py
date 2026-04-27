@@ -27,7 +27,9 @@ Handler-facing topology retrieval (separate from the numbered classes):
 from __future__ import annotations
 
 import fnmatch
+import re
 import sys
+from datetime import datetime, timedelta, timezone
 from math import log1p
 from typing import Any, Iterator
 
@@ -1137,6 +1139,225 @@ def peer_hypothesis_distribution_for_prologue(
         "tier_used": tier_used,
         "tier_label": _PROLOGUE_TIER_LABELS[tier_used],
         "cases_matched": len(case_indices),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Class 8c — loop-N lead distribution (PREDICT loop-1 fast-path cache lookup)
+# ---------------------------------------------------------------------------
+# Filters companions by an exact (signature × prologue topology × key-attr
+# family signature × recency) cache key and aggregates the *primary* lead
+# chosen at the queried loop. Designed `loop=1` as a parameter so loop-N
+# expansion is a parameter change, not a function rewrite.
+#
+# Distinct from `lead_effectiveness_*` queries above:
+#   - those score "how well a lead performed" across all loops in matched cases
+#   - this records "what lead was picked" at exactly one loop, in companions
+#     whose cache key matches today's alert
+# Cache-lookup semantics (memoize the past PREDICT decision), not aggregate-
+# effectiveness semantics.
+
+
+def _parse_alert_timestamp(ts: str | None) -> datetime | None:
+    """Best-effort ISO-8601 parse for `Companion.alert_timestamp`.
+
+    Wazuh emits `2026-04-09T18:21:15.709+0000` (no colon in offset).
+    Python ≥3.11 `fromisoformat` handles this; fall back to manual
+    normalization for older versions and for `Z` suffixes.
+    """
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts)
+    except ValueError:
+        normalized = ts.replace("Z", "+00:00")
+        if len(normalized) >= 5 and normalized[-5] in "+-" and normalized[-3] != ":":
+            normalized = normalized[:-2] + ":" + normalized[-2:]
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+
+
+def _key_attribute_signature(
+    prologue: dict[str, Any],
+    discriminating_classifications: dict[str, list[str]],
+) -> frozenset[tuple[str, str]]:
+    """Bucket vertex identifiers into family signatures per playbook policy.
+
+    For each prologue vertex whose `classification` appears in
+    `discriminating_classifications`, emit `(classification, family_bucket)`
+    where `family_bucket` is `"family_<idx>"` for the first matching pattern
+    or `"no-match"` when the identifier matches none. Two prologues with the
+    same topology but identifiers in different family buckets produce
+    different signatures — the adversarial-collision guard.
+
+    A frozenset (not a multiset) since the broader prologue topology
+    signature also drops vertex counts; consistent treatment.
+    """
+    out: set[tuple[str, str]] = set()
+    for v in prologue.get("vertices") or []:
+        if not isinstance(v, dict):
+            continue
+        cls = v.get("classification")
+        if not isinstance(cls, str):
+            continue
+        patterns = discriminating_classifications.get(cls)
+        if not patterns:
+            continue
+        ident = v.get("identifier") or ""
+        if not isinstance(ident, str):
+            ident = str(ident)
+        bucket = "no-match"
+        for idx, pat in enumerate(patterns):
+            try:
+                if re.match(pat, ident):
+                    bucket = f"family_{idx}"
+                    break
+            except re.error:
+                continue
+        out.add((cls, bucket))
+    return frozenset(out)
+
+
+def _exact_prologue_match(
+    case_prologue: dict[str, Any], query_prologue: dict[str, Any]
+) -> bool:
+    """All three frozensets equal: vertex_types, vertex_classifications, edge_relations.
+
+    Stricter than `_prologue_tier_match` tier 0 — that query path tolerates a
+    drift in `vertex_classifications` for retrieval, but the cache lookup
+    needs full equality so a different classification set never produces a
+    hit.
+    """
+    cs = _prologue_signature(case_prologue)
+    qs = _prologue_signature(query_prologue)
+    return (
+        cs["vertex_types"] == qs["vertex_types"]
+        and cs["vertex_classifications"] == qs["vertex_classifications"]
+        and cs["edge_relations"] == qs["edge_relations"]
+    )
+
+
+def _primary_lead_at_loop(c: Companion, loop: int) -> str | None:
+    """The first lead entry stamped with `loop` is the PREDICT-selected lead.
+
+    Composite dispatches emit secondary leads at the same loop, but the
+    primary `selected_lead` lands first by the gather handler's ordering.
+    Returns None when no findings entry carries this loop.
+    """
+    for lead in c.leads:
+        if lead.get("loop") == loop:
+            name = lead.get("name")
+            return name if isinstance(name, str) else None
+    return None
+
+
+def loop_lead_distribution(
+    corpus: list[Companion],
+    *,
+    signature_id: str,
+    prologue: dict[str, Any],
+    discriminating_classifications: dict[str, list[str]] | None,
+    loop: int = 1,
+    max_age_days: int = 180,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Cache-key-shaped lookup over the corpus for past loop-N lead choices.
+
+    Filters companions by:
+      - signature_id exact
+      - alert_timestamp present AND within `max_age_days` of `now`
+      - prologue topology exact (vertex_types / vertex_classifications /
+        edge_relations equal)
+      - key-attribute family signature exact (per
+        `discriminating_classifications`)
+
+    Aggregates the primary lead at `loop` (first findings[] entry stamped
+    with that loop number) per surviving companion.
+
+    `discriminating_classifications=None` → no fast-path opt-in for this
+    signature; returns an empty distribution with telemetry showing
+    `scoped_key_attrs=0`.
+
+    Returns:
+      {
+        distribution:    {lead_name: count, ...},  # sorted desc
+        matched_case_ids: [...],
+        telemetry: {
+          scoped_signature: int,
+          scoped_recent: int,
+          scoped_prologue: int,
+          scoped_key_attrs: int,
+          loop: int,
+          max_age_days: int,
+        },
+      }
+    """
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=max_age_days)
+
+    if discriminating_classifications is None:
+        return {
+            "distribution": {},
+            "matched_case_ids": [],
+            "telemetry": {
+                "scoped_signature": 0,
+                "scoped_recent": 0,
+                "scoped_prologue": 0,
+                "scoped_key_attrs": 0,
+                "loop": loop,
+                "max_age_days": max_age_days,
+            },
+        }
+
+    target_key_attrs = _key_attribute_signature(prologue, discriminating_classifications)
+
+    # Filter pipeline — track per-step counts for telemetry / "why miss".
+    scoped_sig = [c for c in corpus if _companion_signature_id(c) == signature_id]
+    scoped_recent: list[Companion] = []
+    for c in scoped_sig:
+        ts = _parse_alert_timestamp(c.alert_timestamp)
+        if ts is None:
+            continue
+        # Normalize to UTC if naive.
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if ts >= cutoff:
+            scoped_recent.append(c)
+
+    scoped_prologue = [
+        c for c in scoped_recent if _exact_prologue_match(c.prologue, prologue)
+    ]
+    scoped_key_attrs = [
+        c for c in scoped_prologue
+        if _key_attribute_signature(c.prologue, discriminating_classifications)
+        == target_key_attrs
+    ]
+
+    distribution: dict[str, int] = {}
+    matched_ids: list[str] = []
+    for c in scoped_key_attrs:
+        lead_name = _primary_lead_at_loop(c, loop)
+        if lead_name is None:
+            continue
+        distribution[lead_name] = distribution.get(lead_name, 0) + 1
+        matched_ids.append(c.case_id)
+
+    sorted_dist = dict(
+        sorted(distribution.items(), key=lambda kv: (-kv[1], kv[0]))
+    )
+    return {
+        "distribution": sorted_dist,
+        "matched_case_ids": matched_ids,
+        "telemetry": {
+            "scoped_signature": len(scoped_sig),
+            "scoped_recent": len(scoped_recent),
+            "scoped_prologue": len(scoped_prologue),
+            "scoped_key_attrs": len(scoped_key_attrs),
+            "loop": loop,
+            "max_age_days": max_age_days,
+        },
     }
 
 

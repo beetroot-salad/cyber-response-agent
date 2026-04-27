@@ -68,10 +68,12 @@ Files written:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -795,8 +797,189 @@ def _unresolved_prescribed_notes(ctx: Context) -> list[str]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Fast-path (loop-1 cache lookup, signature-opt-in)
+# ---------------------------------------------------------------------------
+
+
+def _log_predict_priors_jsonl(
+    ctx: Context,
+    *,
+    loop_n: int,
+    status: str,
+    cache_key: dict | None = None,
+    fastpath_eligible: bool = False,
+    fastpath_taken: bool = False,
+    selected_lead: str | None = None,
+    selection_method: str | None = None,
+    matched_case_ids: list[str] | None = None,
+    telemetry: dict | None = None,
+    exc_type: str | None = None,
+) -> None:
+    """Append one line to `runs/<run>/predict_priors.jsonl` per loop.
+
+    Replaces the silent banner returned by `_safe_priors_section` on failure
+    so per-run hit-rate + failure-cause is visible without sifting prompts.
+    Best-effort — log failures don't break the loop.
+    """
+    record: dict = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "loop_n": loop_n,
+        "status": status,
+        "fastpath_eligible": fastpath_eligible,
+        "fastpath_taken": fastpath_taken,
+    }
+    if cache_key is not None:
+        record["cache_key"] = cache_key
+    if selected_lead is not None:
+        record["selected_lead"] = selected_lead
+    if selection_method is not None:
+        record["selection_method"] = selection_method
+    if matched_case_ids is not None:
+        record["matched_case_ids"] = matched_case_ids
+    if telemetry is not None:
+        record["telemetry"] = telemetry
+    if exc_type is not None:
+        record["exc_type"] = exc_type
+    log_path = ctx.run_dir / "predict_priors.jsonl"
+    try:
+        with log_path.open("a") as fh:
+            fh.write(json.dumps(record, default=str) + "\n")
+    except OSError:
+        pass
+
+
+def _append_fastpath_marker(
+    ctx: Context, hit, loop_n: int, cache_key
+) -> None:
+    """Write the handler-authored fast-path block to investigation.md.
+
+    Visually distinct from a subagent-authored `## PREDICT` block — ANALYZE
+    sees this loop's lead came from priors, not from a subagent emission.
+    Crucially this is *not* an invlang `hypothesize:` block — no new
+    hypotheses are authored on the fast path.
+    """
+    distribution_yaml = "\n".join(
+        f"    {lead}: {count}"
+        for lead, count in hit.lead_distribution.items()
+    ) or "    (none)"
+    matched = ", ".join(hit.matched_case_ids) or "(none)"
+    section = (
+        f"## PREDICT (loop {loop_n}) — fast-path\n\n"
+        "```yaml\n"
+        "fast_path:\n"
+        f"  selected_lead: {hit.selected_lead}\n"
+        f"  selection_method: {hit.selection_method}\n"
+        f"  signature_id: {cache_key.signature_id}\n"
+        f"  matched_precedents: [{matched}]\n"
+        "  lead_distribution:\n"
+        f"{distribution_yaml}\n"
+        "```\n"
+    )
+    _append_to_investigation(ctx, section)
+
+
+def _try_fast_path(
+    ctx: Context, expected_loop_n: int
+) -> PhaseResult | None:
+    """Attempt the cache lookup. Returns a PhaseResult on hit, None on miss
+    or any error. Always writes one JSONL log line — every loop-1 attempt is
+    visible regardless of outcome.
+
+    All exceptions degrade to a JSONL `status=degraded` line + cache miss.
+    The fast path must never break the loop.
+    """
+    if expected_loop_n != 1:
+        return None
+    try:
+        from invlang.corpus import load_corpus
+        from scripts.handlers import predict_fastpath
+        from scripts.handlers.contextualize import load_playbook_metadata
+
+        playbook = load_playbook_metadata(ctx.signature_id)
+        disc = playbook.discriminating_classifications
+        if disc is None:
+            _log_predict_priors_jsonl(
+                ctx, loop_n=expected_loop_n, status="ok",
+                fastpath_eligible=False,
+                telemetry={"reason": "signature_not_opted_in"},
+            )
+            return None
+
+        inv_path = ctx.run_dir / "investigation.md"
+        text = inv_path.read_text() if inv_path.exists() else ""
+        prologue, _ = _parse_prologue_and_last_hypothesize(text)
+        prologue = prologue or {}
+
+        cache_key = predict_fastpath.build_cache_key(
+            signature_id=ctx.signature_id,
+            prologue=prologue,
+            discriminating_classifications=disc,
+            frontier=None,
+        )
+        if cache_key is None:  # defensive — disc was non-None above
+            return None
+
+        lead_catalog = set(playbook.leads)
+        corpus = load_corpus()
+        hit, telemetry = predict_fastpath.lookup(
+            corpus,
+            cache_key,
+            prologue=prologue,
+            discriminating_classifications=disc,
+            lead_catalog=lead_catalog,
+            loop=1,
+        )
+
+        if hit is None:
+            _log_predict_priors_jsonl(
+                ctx, loop_n=expected_loop_n, status="ok",
+                cache_key=cache_key.to_log_dict(),
+                fastpath_eligible=True, fastpath_taken=False,
+                telemetry=telemetry,
+            )
+            return None
+
+        _append_fastpath_marker(ctx, hit, expected_loop_n, cache_key)
+        _log_predict_priors_jsonl(
+            ctx, loop_n=expected_loop_n, status="ok",
+            cache_key=cache_key.to_log_dict(),
+            fastpath_eligible=True, fastpath_taken=True,
+            selected_lead=hit.selected_lead,
+            selection_method=hit.selection_method,
+            matched_case_ids=hit.matched_case_ids,
+            telemetry=hit.telemetry,
+        )
+        return PhaseResult(
+            next_phase=Phase.GATHER,
+            payload={
+                "selected_lead": hit.selected_lead,
+                "loop_n": expected_loop_n,
+                "composite_secondary": [],
+                "fast_path": {
+                    "selected_lead": hit.selected_lead,
+                    "selection_method": hit.selection_method,
+                    "matched_case_ids": hit.matched_case_ids,
+                    "lead_distribution": hit.lead_distribution,
+                },
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — intentional broad catch
+        _log_predict_priors_jsonl(
+            ctx, loop_n=expected_loop_n, status="degraded",
+            fastpath_eligible=True, fastpath_taken=False,
+            exc_type=type(exc).__name__,
+            telemetry={"error": str(exc)},
+        )
+        return None
+
+
 def handle(ctx: Context) -> PhaseResult:
     expected_loop_n = _compute_loop_n(ctx)
+
+    fast = _try_fast_path(ctx, expected_loop_n)
+    if fast is not None:
+        return fast
 
     initial_notes = _unresolved_prescribed_notes(ctx)
     attempt = _attempt(

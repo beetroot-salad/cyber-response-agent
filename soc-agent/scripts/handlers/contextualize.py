@@ -84,10 +84,32 @@ class PlaybookMetadata:
     has_screen: bool
     hypothesis_seeds: list[str]
     leads: list[str]
+    # PREDICT loop-1 fast-path opt-in. Maps each decision-relevant vertex
+    # `classification` to a list of regex patterns that an `identifier` must
+    # match to count as "same key-attribute family." Absent / None disables
+    # the fast-path for this signature (gate is opt-in per signature).
+    discriminating_classifications: dict[str, list[str]] | None = None
 
 
 _ARCHETYPE_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 _SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+_FRONTMATTER_RE = re.compile(r"\A---\n(?P<body>.*?)\n---\n", re.DOTALL)
+
+
+def _parse_frontmatter(text: str) -> dict:
+    """Return the YAML frontmatter as a dict, or {} when absent / malformed.
+
+    Frontmatter is the leading `---\\n…\\n---\\n` block. Malformed YAML
+    degrades to {} silently — callers fall back to defaults.
+    """
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return {}
+    try:
+        parsed = yaml.safe_load(m.group("body"))
+    except yaml.YAMLError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
@@ -103,6 +125,7 @@ def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
     sections = {
         m.group(1).lower(): m.start() for m in _SECTION_RE.finditer(text)
     }
+    frontmatter = _parse_frontmatter(text)
 
     if "archetypes" not in sections:
         raise OrchestrationError(
@@ -133,6 +156,14 @@ def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
     hypothesis_seeds = _extract_section_bullet_ids(text, sections, "hypothesis seeds")
     leads = _extract_section_bullet_ids(text, sections, "starter lead order")
 
+    raw_disc = frontmatter.get("discriminating_classifications")
+    disc: dict[str, list[str]] | None = None
+    if isinstance(raw_disc, dict):
+        disc = {}
+        for k, v in raw_disc.items():
+            if isinstance(k, str) and isinstance(v, list):
+                disc[k] = [p for p in v if isinstance(p, str)]
+
     return PlaybookMetadata(
         signature_id=signature_id,
         archetype_names=archetype_names,
@@ -140,6 +171,7 @@ def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
         has_screen=has_screen,
         hypothesis_seeds=hypothesis_seeds,
         leads=leads,
+        discriminating_classifications=disc,
     )
 
 
