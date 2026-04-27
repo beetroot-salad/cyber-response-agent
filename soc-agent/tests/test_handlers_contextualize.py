@@ -11,6 +11,7 @@ All three subagent invocations are mocked — these tests exercise:
 import json
 import sys
 import textwrap
+import uuid
 from pathlib import Path
 
 import pytest
@@ -120,10 +121,95 @@ def make_ctx(tmp_path: Path) -> Context:
     )
 
 
+def _parse_prompt_fields(prompt: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for line in prompt.splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            fields[k.strip()] = v.strip()
+    return fields
+
+
+def _stage_record_file(run_dir_str: str, record: dict | None) -> str:
+    """Simulate the save_raw_tool_output hook: write the LookupContract JSON
+    to a unique file under {run_dir}/raw_query_outputs and return its
+    absolute path.
+    """
+    out_dir = Path(run_dir_str) / "raw_query_outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    nonce = uuid.uuid4().hex[:8]
+    path = out_dir / f"0-{nonce}.json"
+    payload = {
+        "found": record is not None,
+        "record": record,
+        "key_field": "ip",
+        "key_value": "stub",
+        "error": None,
+    }
+    path.write_text(json.dumps(payload))
+    return str(path)
+
+
+def _envelope(lead: str, target: str, target_kind: str, classification: str,
+              record_path: str, observation: str) -> str:
+    return textwrap.dedent(f"""
+    ```yaml
+    contextualize_lead:
+      lead_name: {lead}
+      target: "{target}"
+      target_kind: "{target_kind}"
+      status: ok
+      updates:
+        classification: {classification}
+        record_path: "{record_path}"
+      observation: "{observation}"
+    ```
+    """).strip()
+
+
+def _default_contextualize_lead(prompt: str) -> str:
+    """Generic mock for `_invoke_contextualize_lead`.
+
+    Stages a LookupContract JSON file (mimicking the save_raw_tool_output
+    hook) and emits an envelope referencing it via `record_path`. Tests that
+    need a specific record or classification override `contextualize_lead`
+    in `_wire_subagents`.
+    """
+    fields = _parse_prompt_fields(prompt)
+    lead = fields.get("lead_name", "")
+    target = fields.get("target_vertex_id", "")
+    target_kind = fields.get("target_vertex_kind", "")
+    run_dir = fields.get("run_dir", "")
+    if lead == "endpoint-context":
+        record = {"hostname": "stub", "role": "workload",
+                  "owner_team": "platform-sre", "env": "prod"}
+        path = _stage_record_file(run_dir, record)
+        return _envelope(
+            lead, target, target_kind, "internal-server", path,
+            f"stub endpoint enrichment for {target}",
+        )
+    if lead == "identity-context":
+        record = {"display_name": "Stub User", "type": "service",
+                  "owner_team": "platform-sre", "mfa": False}
+        path = _stage_record_file(run_dir, record)
+        return _envelope(
+            lead, target, target_kind, "service-account", path,
+            f"stub identity enrichment for {target}",
+        )
+    # Unknown lead — emit a minimal noop envelope (no record).
+    path = _stage_record_file(run_dir, None)
+    return _envelope(lead, target, target_kind, "unknown", path, "noop")
+
+
 def _wire_subagents(monkeypatch, ticket=TICKET_RESPONSE_NO_DEDUP,
-                    prologue=PROLOGUE_RESPONSE, preflight=None):
+                    prologue=PROLOGUE_RESPONSE, preflight=None,
+                    contextualize_lead=None):
     monkeypatch.setattr(ctx_handler, "_invoke_ticket", lambda _p: ticket)
     monkeypatch.setattr(ctx_handler, "_invoke_prologue", lambda _p: prologue)
+    monkeypatch.setattr(
+        ctx_handler, "_invoke_contextualize_lead",
+        contextualize_lead or _default_contextualize_lead,
+    )
     # Default preflight: one reachable system — tests exercising preflight
     # explicitly override via the `preflight` kwarg.
     default_preflight = preflight or {
@@ -337,8 +423,8 @@ class TestPayloadContract:
 
 class TestValidationFailure:
     def test_invalid_prologue_yaml_raises(self, tmp_path, monkeypatch):
-        # Prologue missing top-level `prologue:` key — our _extract_yaml_block
-        # should raise on that before the validator even sees the text.
+        # Prologue missing top-level `prologue:` key — the handler should
+        # raise on that before the validator even sees the text.
         bad_prologue = textwrap.dedent("""
         ```yaml
         # no `prologue:` wrapper
@@ -350,6 +436,183 @@ class TestValidationFailure:
         ctx = make_ctx(tmp_path)
         with pytest.raises(OrchestrationError, match="prologue"):
             ctx_handler.handle(ctx)
+
+
+# ---------------------------------------------------------------------------
+# Contextualize-leads dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestContextualizeLeads:
+    """The 5710 playbook now declares ## Contextualize leads. Each lead runs
+    once per matching prologue vertex and updates the vertex in-memory before
+    the prologue YAML is serialized to investigation.md."""
+
+    def test_playbook_metadata_carries_contextualize_leads(self):
+        meta = ctx_handler.load_playbook_metadata("wazuh-rule-5710")
+        assert "endpoint-context" in meta.contextualize_leads
+        assert "identity-context" in meta.contextualize_leads
+
+    def test_signature_without_section_has_empty_list(self):
+        meta = ctx_handler.load_playbook_metadata("wazuh-rule-100001")
+        assert meta.contextualize_leads == []
+
+    def test_dispatches_once_per_matching_vertex(self, tmp_path, monkeypatch):
+        """5710's prologue has 2 endpoint vertices + 1 identity vertex →
+        endpoint-context fires twice, identity-context fires once."""
+        captured: list[str] = []
+
+        def capture(prompt: str) -> str:
+            captured.append(prompt)
+            return _default_contextualize_lead(prompt)
+
+        _wire_subagents(monkeypatch, contextualize_lead=capture)
+        ctx = make_ctx(tmp_path)
+        ctx_handler.handle(ctx)
+
+        # 2 endpoints + 1 identity = 3 dispatches.
+        assert len(captured) == 3
+        endpoint_calls = [p for p in captured if "lead_name=endpoint-context" in p]
+        identity_calls = [p for p in captured if "lead_name=identity-context" in p]
+        assert len(endpoint_calls) == 2
+        assert len(identity_calls) == 1
+
+    def test_lead_updates_merge_into_prologue_vertices(self, tmp_path, monkeypatch):
+        """Lead `updates` override the prologue subagent's initial
+        classification, and the verbatim record from the saved JSON file
+        lands under vertex.attributes.{cmdb,idp}_record."""
+
+        def deterministic_lead(prompt: str) -> str:
+            fields = _parse_prompt_fields(prompt)
+            lead = fields.get("lead_name", "")
+            target = fields.get("target_vertex_id", "")
+            ident = fields.get("target_identifier", "")
+            run_dir = fields.get("run_dir", "")
+            if lead == "endpoint-context":
+                if ident == "203.0.113.47":
+                    cls = "external"
+                    record = {"hostname": "unknown", "role": "external", "env": "n/a"}
+                else:
+                    cls = "internal-server"
+                    record = {"hostname": "web-01", "role": "workload", "env": "prod"}
+                path = _stage_record_file(run_dir, record)
+                return _envelope(lead, target, "endpoint", cls, path,
+                                 f"{ident} -> {cls}")
+            if lead == "identity-context":
+                path = _stage_record_file(run_dir, None)
+                return _envelope(lead, target, "identity", "generic-account",
+                                 path,
+                                 f"{ident} -> generic-account (no IdP record)")
+            return ""
+
+        _wire_subagents(monkeypatch, contextualize_lead=deterministic_lead)
+        ctx = make_ctx(tmp_path)
+        ctx_handler.handle(ctx)
+
+        inv = (ctx.run_dir / "investigation.md").read_text()
+
+        # Vertex classifications were overridden by the contextualize-leads.
+        assert "classification: external" in inv          # v-001 from lead
+        assert "classification: internal-server" in inv   # v-002 from lead
+        assert "classification: generic-account" in inv   # v-003 from lead
+
+        # CMDB records landed under vertex.attributes.cmdb_record from the
+        # saved JSON file (verbatim, handler-extracted).
+        assert "cmdb_record:" in inv
+        assert "hostname: web-01" in inv
+        assert "role: external" in inv
+
+        # IdP record was null in the saved JSON — null gets serialized.
+        assert "idp_record: null" in inv
+
+        # Markdown audit summary lists the lead invocations.
+        assert "**Contextualize leads:**" in inv
+        assert "endpoint-context" in inv
+        assert "identity-context" in inv
+
+    def test_signature_without_contextualize_leads_skips_dispatch(
+        self, tmp_path, monkeypatch,
+    ):
+        """wazuh-rule-100001 has no ## Contextualize leads section → no
+        dispatches; the markdown omits the audit bullet."""
+        captured: list[str] = []
+
+        def capture(prompt: str) -> str:
+            captured.append(prompt)
+            return ""  # never reached
+
+        _wire_subagents(monkeypatch, contextualize_lead=capture)
+        ctx = make_ctx(tmp_path)
+        ctx.signature_id = "wazuh-rule-100001"
+        ctx_handler.handle(ctx)
+
+        assert captured == []
+        inv = (ctx.run_dir / "investigation.md").read_text()
+        assert "**Contextualize leads:**" not in inv
+
+    def test_lead_targeting_unknown_vertex_id_raises(self, tmp_path, monkeypatch):
+        def bad_lead(_prompt: str) -> str:
+            return textwrap.dedent("""
+            ```yaml
+            contextualize_lead:
+              lead_name: endpoint-context
+              target: v-999
+              target_kind: endpoint
+              status: ok
+              updates: {classification: x}
+              observation: "lying about the target"
+            ```
+            """).strip()
+
+        _wire_subagents(monkeypatch, contextualize_lead=bad_lead)
+        ctx = make_ctx(tmp_path)
+        with pytest.raises(OrchestrationError, match="v-999"):
+            ctx_handler.handle(ctx)
+
+    def test_missing_record_path_file_raises(self, tmp_path, monkeypatch):
+        """Handler reads `record_path` from disk and merges the verbatim
+        record. A bogus path is a loud failure — never silently skipped."""
+
+        def lying_lead(prompt: str) -> str:
+            fields = _parse_prompt_fields(prompt)
+            lead = fields.get("lead_name", "")
+            target = fields.get("target_vertex_id", "")
+            target_kind = fields.get("target_vertex_kind", "")
+            return _envelope(
+                lead, target, target_kind, "x",
+                "/tmp/nope-does-not-exist.json", "lying about path",
+            )
+
+        _wire_subagents(monkeypatch, contextualize_lead=lying_lead)
+        ctx = make_ctx(tmp_path)
+        with pytest.raises(OrchestrationError, match="record_path"):
+            ctx_handler.handle(ctx)
+
+    def test_errored_lead_skipped_without_breaking_handler(
+        self, tmp_path, monkeypatch,
+    ):
+        def errored_lead(prompt: str) -> str:
+            if "lead_name=endpoint-context" in prompt:
+                return textwrap.dedent("""
+                ```yaml
+                contextualize_lead:
+                  lead_name: endpoint-context
+                  target: v-001
+                  target_kind: endpoint
+                  status: error
+                  reason: "asset CLI not configured"
+                ```
+                """).strip()
+            return _default_contextualize_lead(prompt)
+
+        _wire_subagents(monkeypatch, contextualize_lead=errored_lead)
+        ctx = make_ctx(tmp_path)
+        ctx_handler.handle(ctx)  # must not raise
+
+        inv = (ctx.run_dir / "investigation.md").read_text()
+        # The audit summary surfaces the error; identity-context still ran.
+        assert "endpoint-context → v-001: error — asset CLI not configured" in inv
+        assert "identity-context" in inv
 
     def test_guard_on_empty_ticket_id(self, tmp_path):
         run_dir = tmp_path / "run-test"

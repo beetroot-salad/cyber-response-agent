@@ -1,0 +1,49 @@
+{
+  "_comment": "Playground asset/identity fixture for stub_asset_cli.py. Mirrors the playground deployment described in soc-agent/knowledge/environment/context/{ip-ranges,identity-patterns}.md. Records are deliberately small — a real CMDB/IdP would carry richer fields.",
+  "ips": {
+    "172.22.0.10": {
+      "hostname": "monitoring-host",
+      "role": "monitoring",
+      "owner_team": "platform-sre",
+      "env": "prod"
+    },
+    "172.22.0.20": {
+      "hostname": "target-endpoint",
+      "role": "workload",
+      "owner_team": "platform-sre",
+      "env": "prod"
+    }
+  },
+  "users": {
+    "nagios": {
+      "display_name": "Nagios Probe Account",
+      "type": "service",
+      "owner_team": "platform-sre",
+      "mfa": false
+    },
+    "zabbix": {
+      "display_name": "Zabbix Probe Account",
+      "type": "service",
+      "owner_team": "platform-sre",
+      "mfa": false
+    },
+    "healthcheck": {
+      "display_name": "Generic Healthcheck Account",
+      "type": "service",
+      "owner_team": "platform-sre",
+      "mfa": false
+    }
+  },
+  "hosts": {
+    "target-endpoint": {
+      "role": "workload",
+      "env": "prod",
+      "owner_team": "platform-sre"
+    },
+    "monitoring-host": {
+      "role": "monitoring",
+      "env": "prod",
+      "owner_team": "platform-sre"
+    }
+  }
+}

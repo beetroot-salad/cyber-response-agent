@@ -21,3 +21,7 @@ entries:
     pattern: '\w+_ticket_cli\.py\b'
     schema: ticket_cli
     ext: json
+  - kind: bash
+    pattern: '\w*asset\w*_cli\.py\b'
+    schema: lookup_contract
+    ext: json
