@@ -76,6 +76,26 @@ seeds above.
 | `ci-pipeline-exec` | `?underlying-host` | CI/CD job exec'd into the container to run a scripted, non-interactive command | `archetypes/ci-pipeline-exec/` |
 | `k8s-exec-probe` | `?underlying-host` | Kubernetes liveness/readiness/exec probe runs `sh -c "..."` on a strict cadence | `archetypes/k8s-exec-probe/` |
 
+## Contextualize leads
+
+These run in parallel at CONTEXTUALIZE time, before SCREEN/PREDICT —
+mechanically enriching the prologue vertices with classification +
+authoritative-record context that every downstream phase reads.
+
+- `endpoint-context`
+- `identity-context`
+
+`endpoint-context` runs once per endpoint vertex (the container/host the
+shell spawned in), deriving the classification label from the IP-ranges
+context file and attaching the CMDB record. `identity-context` runs once
+per identity vertex (the in-container user, e.g. `root`); on this rule
+the IdP record is typically empty since the user is a container runtime
+identity, not a directory-managed account, and `loginuid=-1` means no
+upstream login session is present. Classification still resolves (the
+identity-pattern file recognizes `root` as `container-runtime-uid0` or
+similar), which lets PREDICT discriminate operator-issued exec from a
+privilege-escalation chain without dispatching a separate lead.
+
 ## Starter lead order
 
 Most investigations resolve after the first two leads. The third only

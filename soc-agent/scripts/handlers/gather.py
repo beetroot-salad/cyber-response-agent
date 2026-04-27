@@ -477,6 +477,81 @@ def _try_extract_terminal_yaml(raw: str) -> Optional[dict]:
         return None
 
 
+def _hydrate_query_details_from_scopes(
+    envelope: GatherEnvelope,
+    scopes: list[Scope],
+) -> None:
+    """Fill back prompt-known query_details fields onto each lead.
+
+    The gather / gather-composite agents emit a slim `query: { query,
+    query_source, refinements_applied }` block (see `agents/gather-composite.md`
+    §Output envelope). ANALYZE's invlang `findings[*].query_details` shape
+    expects `system, template, query, time_window, substitutions` (per
+    `knowledge/invlang/schema.md` §Lead). The handler already has every
+    field except `query` and `refinements_applied` from the dispatched
+    `Scope`, so reconstruct rather than asking the agent to re-author.
+
+    Match scopes to leads by `lead_name` (envelope leads carry `name:`
+    verbatim). Leads emitted under a name no scope provided (escalation
+    path, dispatch_unparseable error envelopes) are left untouched —
+    the dedup-warning code in `invlang_validate._check_lead_dedup_warnings`
+    is permissive on missing fields, so a partial reconstruction is safe.
+
+    Best-effort: any structural mismatch raises silently and leaves
+    the lead's emit intact.
+    """
+    by_name = {s.lead_name: s for s in scopes}
+    for lead in envelope.leads:
+        if not isinstance(lead, dict):
+            continue
+        scope = by_name.get(lead.get("name"))
+        if scope is None:
+            continue
+        query = lead.get("query")
+        if not isinstance(query, dict):
+            # Slim schema requires a query mapping; if absent, build one
+            # from the scope alone. Keeps invlang's query_details shape.
+            query = {}
+            lead["query"] = query
+        query.setdefault("system", scope.vendor)
+        query.setdefault(
+            "template",
+            scope.lead_name if scope.template_exists else None,
+        )
+        query.setdefault(
+            "time_window",
+            {"start": scope.incident_start, "end": scope.incident_end},
+        )
+        query.setdefault("substitutions", dict(scope.entity_bindings))
+
+
+def _hydrate_health_probe_from_verdict(
+    envelope: GatherEnvelope,
+) -> None:
+    """Promote the slim `health_probe_verdict` token back to a `health_probe`
+    mapping on each lead.
+
+    The agent now emits one of two forms:
+      - `health_probe_verdict: "elevated"` (slim schema, post-trim)
+      - `health_probe: { verdict, ... }` (legacy / explicit emission)
+
+    Downstream callers — including the manifest enrichment path
+    (`_merge_manifest_into_envelope`) and ANALYZE's `query_details`
+    consumer — read `lead.health_probe.verdict`. Normalize so both
+    shapes converge before forwarding.
+    """
+    for lead in envelope.leads:
+        if not isinstance(lead, dict):
+            continue
+        verdict = lead.pop("health_probe_verdict", None)
+        existing = lead.get("health_probe")
+        if isinstance(existing, dict):
+            existing.setdefault("verdict", verdict)
+            continue
+        if verdict is not None:
+            lead["health_probe"] = {"verdict": verdict}
+
+
 def _merge_manifest_into_envelope(
     ctx: Context, envelope: GatherEnvelope,
 ) -> None:
@@ -684,6 +759,8 @@ def _dispatch_single(
         ctx, scope, loop_n, lead_hints=lead_hints,
     )
 
+    _hydrate_query_details_from_scopes(envelope, [scope])
+    _hydrate_health_probe_from_verdict(envelope)
     _merge_manifest_into_envelope(ctx, envelope)
 
     # Escalate-to-composite fallback. The single-gather envelope has exactly
@@ -757,6 +834,9 @@ def _dispatch_composite(
             lead_hints=lead_hints,
             secondary_scopes=secondary_scopes,
         )
+    all_scopes = [scope, *(secondary_scopes or [])]
+    _hydrate_query_details_from_scopes(envelope, all_scopes)
+    _hydrate_health_probe_from_verdict(envelope)
     _merge_manifest_into_envelope(ctx, envelope)
     return envelope
 
@@ -858,6 +938,14 @@ def _dispatch_parallel_singletons(
         envelopes: dict[str, GatherEnvelope] = {
             name: f.result() for name, f in futures.items()
         }
+
+    # Hydrate slim-schema fields on every singleton envelope before manifest
+    # merge / fallback routing reads them. Mirrors the serial path's call
+    # site in `_dispatch_single` and `_dispatch_composite`.
+    for scope in scopes:
+        env = envelopes[scope.lead_name]
+        _hydrate_query_details_from_scopes(env, [scope])
+        _hydrate_health_probe_from_verdict(env)
 
     # Session-partitioned manifest merge. Each subagent recorded its
     # session_id in every manifest entry it wrote; partition the new cursor
@@ -1308,6 +1396,84 @@ def _append_to_investigation(ctx: Context, section: str) -> None:
     inv_path.write_text(proposed)
 
 
+_PROLOGUE_VERTEX_ID_RE = re.compile(r"^\s*-\s+id:\s*(v-[a-z0-9][a-z0-9-]*)", re.MULTILINE)
+
+
+def _first_prologue_vertex_id(investigation_md: str) -> str | None:
+    """First `v-*` id declared in any prologue block. Default `target` for
+    synthesized lead-pick entries when the gather envelope didn't supply one.
+    Mirrors `analyze.py:_first_prologue_vertex_id` to avoid a cross-handler
+    import."""
+    for m in _PROLOGUE_FENCE_RE.finditer(investigation_md):
+        body = m.group("body")
+        try:
+            parsed = yaml.safe_load(body)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(parsed, dict) or "prologue" not in parsed:
+            continue
+        verts = parsed["prologue"].get("vertices") or []
+        for v in verts:
+            if isinstance(v, dict) and isinstance(v.get("id"), str):
+                return v["id"]
+    return None
+
+
+_PROLOGUE_FENCE_RE = re.compile(
+    r"```yaml\s*\n(?P<body>.*?)\n```", re.DOTALL,
+)
+
+
+def _append_lead_pick_findings(
+    ctx: Context, envelope: GatherEnvelope, loop_n: int,
+) -> None:
+    """Write a minimal `findings:` YAML block recording which leads PREDICT
+    picked at loop N. Distinct from ANALYZE's later graded findings entry —
+    this one carries `mode: lead-pick`, empty `query_details/outcome`, and
+    empty `resolutions`.
+
+    Why: the corpus loader's `_primary_lead_at_loop(c, loop=N)` returns the
+    first `findings[*]` entry whose `loop` field equals N. Without this write,
+    GATHER loop-N picks are invisible to the loader (SCREEN stamps `loop: 0`,
+    ANALYZE's first stamp is `loop: 2+`), so the PREDICT loop-1 fast-path can
+    never accumulate cache support from organic runs. With this write, every
+    completed gather contributes one cache-key data point.
+
+    The validator tolerates duplicate ids across blocks; ANALYZE's later
+    write produces a separate entry with the same id and full grading.
+    `_primary_lead_at_loop` returns the first match, which is this one — its
+    `name` field is what the cache lookup needs.
+    """
+    inv_path = ctx.run_dir / "investigation.md"
+    investigation_md = inv_path.read_text() if inv_path.exists() else ""
+    default_target = _first_prologue_vertex_id(investigation_md) or ""
+
+    findings: list[dict[str, Any]] = []
+    for lead in envelope.leads:
+        if not isinstance(lead, dict):
+            continue
+        lid = lead.get("id")
+        name = lead.get("name")
+        if not isinstance(lid, str) or not isinstance(name, str):
+            continue
+        findings.append({
+            "id": lid,
+            "loop": loop_n,
+            "name": name,
+            "target": lead.get("target") or default_target,
+            "mode": "lead-pick",
+            "query_details": {},
+            "outcome": {},
+            "resolutions": [],
+        })
+    if not findings:
+        return
+
+    body = yaml.safe_dump({"findings": findings}, sort_keys=False)
+    section = "```yaml\n" + body + "```\n"
+    _append_to_investigation(ctx, section)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1495,6 +1661,7 @@ def handle(ctx: Context) -> PhaseResult:
 
     section = _compose_markdown(payload, pp.loop_n)
     _append_to_investigation(ctx, section)
+    _append_lead_pick_findings(ctx, envelope, pp.loop_n)
 
     # Skip ANALYZE when no hypotheses have been declared yet (shape-E
     # enrichment path). ANALYZE grades against `hypothesize.hypotheses[]` —

@@ -214,7 +214,11 @@ def test_lookup_adversarial_collision_misses():
     ]
     hit, telemetry = _key_and_lookup(corpus, user_identifier="admin")
     assert hit is None
-    assert telemetry["reason"] == "no_companions_at_cache_key"
+    # No matching companions at this cache key → empty distribution + zero
+    # key-attr scope. The structured counters encode the miss mode without
+    # needing a string reason field.
+    assert telemetry["lead_distribution"] == {}
+    assert telemetry["scoped_key_attrs"] == 0
 
 
 def test_lookup_below_min_support_misses():
@@ -225,7 +229,10 @@ def test_lookup_below_min_support_misses():
     ]
     hit, telemetry = _key_and_lookup(corpus)
     assert hit is None
-    assert telemetry["reason"] == "insufficient_support_or_lead_not_in_catalog"
+    # Distribution populated but no lead clears min_support → empty eligible
+    # set, miss. min_support carried for diagnosability.
+    assert telemetry["lead_distribution"]
+    assert max(telemetry["lead_distribution"].values()) < DEFAULT_MIN_SUPPORT
     assert telemetry["min_support"] == DEFAULT_MIN_SUPPORT
 
 
@@ -252,7 +259,10 @@ def test_lookup_lead_not_in_current_catalog_misses():
     ]
     hit, telemetry = _key_and_lookup(corpus)
     assert hit is None
-    assert telemetry["reason"] == "insufficient_support_or_lead_not_in_catalog"
+    # Distribution populated but the lead isn't in the current catalog →
+    # eligible set empty after the catalog filter.
+    assert telemetry["lead_distribution"] == {"deprecated-lead-name": DEFAULT_MIN_SUPPORT + 1}
+    assert telemetry["min_support"] == DEFAULT_MIN_SUPPORT
 
 
 def test_lookup_different_signature_excluded():
@@ -339,4 +349,4 @@ def test_lookup_with_non_none_frontier_signature_misses():
         lead_catalog=_LEAD_CATALOG,
     )
     assert hit is None
-    assert telemetry["reason"] == "frontier_not_supported"
+    assert telemetry["frontier_not_supported"] is True

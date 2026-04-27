@@ -1,6 +1,6 @@
 ---
 title: Move key-entity enrichment into CONTEXTUALIZE (CMDB-style + mechanical extraction)
-status: todo
+status: doing
 groups: contextualize, cost-optimization, signature-content
 ---
 

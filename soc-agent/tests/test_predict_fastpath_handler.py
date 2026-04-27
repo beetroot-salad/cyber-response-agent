@@ -293,7 +293,7 @@ def test_signature_without_opt_in_skips_lookup(tmp_path, monkeypatch):
     rec = json.loads(log[0])
     assert rec["fastpath_eligible"] is False
     assert rec["fastpath_taken"] is False
-    assert rec["telemetry"]["reason"] == "signature_not_opted_in"
+    assert rec["telemetry"]["signature_opted_in"] is False
 
 
 # ---------------------------------------------------------------------------

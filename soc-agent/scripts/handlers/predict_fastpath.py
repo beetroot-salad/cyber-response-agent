@@ -79,9 +79,10 @@ class CacheKey:
     relations, plug it in, and the lookup naturally narrows to companions
     that faced the same upstream branch.
 
-    The current `lookup()` returns a structured miss (`reason:
-    frontier_not_supported`) when this is non-None, so an accidental loop-N
-    invocation can't fabricate an answer before the corpus query supports it.
+    The current `lookup()` returns a structured miss with
+    `frontier_not_supported: true` in telemetry when this is non-None, so an
+    accidental loop-N invocation can't fabricate an answer before the corpus
+    query supports it.
     """
     signature_id: str
     prologue_signature: dict[str, Any]
@@ -173,20 +174,21 @@ def lookup(
 
     Loop-N support: today this only accepts `cache_key.frontier_signature is
     None` (loop 1). When frontier_signature is non-None, returns a miss with
-    `reason: frontier_not_supported` — placeholder that will become the
-    loop-N entry point once corpus + query support land.
+    `frontier_not_supported: true` in telemetry — placeholder that will
+    become the loop-N entry point once corpus + query support land.
 
     Selection:
       - filter: every lead in current `lead_catalog` AND count ≥ min_support
       - if exactly one survives → single pick
       - if several survive → weighted random pick across top-K by count
-      - if none survive → cache miss with reason `insufficient_support`
+      - if none survive → cache miss
 
-    `telemetry` always carries a `reason` key when no hit is returned, so the
-    JSONL log line can record why.
+    Miss interpretation is read from the structured counters (no `reason`
+    string): `scoped_signature/recent/prologue/key_attrs` + `lead_distribution`
+    + `eligible_leads` together encode every miss mode unambiguously.
     """
     if cache_key.frontier_signature is not None:
-        return None, {"reason": "frontier_not_supported", "loop": loop}
+        return None, {"frontier_not_supported": True, "loop": loop}
 
     dist_result = loop_lead_distribution(
         corpus,
@@ -205,7 +207,6 @@ def lookup(
     }
 
     if not distribution:
-        base_telemetry["reason"] = "no_companions_at_cache_key"
         return None, base_telemetry
 
     eligible = [
@@ -213,7 +214,6 @@ def lookup(
         if lead in lead_catalog and count >= min_support
     ]
     if not eligible:
-        base_telemetry["reason"] = "insufficient_support_or_lead_not_in_catalog"
         base_telemetry["min_support"] = min_support
         return None, base_telemetry
 

@@ -902,7 +902,7 @@ def _try_fast_path(
             _log_predict_priors_jsonl(
                 ctx, loop_n=expected_loop_n, status="ok",
                 fastpath_eligible=False,
-                telemetry={"reason": "signature_not_opted_in"},
+                telemetry={"signature_opted_in": False},
             )
             return None
 
