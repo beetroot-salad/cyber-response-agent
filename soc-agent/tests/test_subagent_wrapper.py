@@ -140,7 +140,7 @@ def test_subagent_output_and_audit_written(run_dir_env):
     with patch.object(_subagent.subprocess, "run", fake):
         _subagent.invoke_subagent("archetype-match", "prompt body")
 
-    outputs = list((run_dir_env / "subagent_outputs").glob("*-archetype-match.txt"))
+    outputs = list((run_dir_env / "subagent_outputs").glob("*-archetype-match-*.txt"))
     assert len(outputs) == 1
     body = outputs[0].read_text()
     assert "=== PROMPT ===" in body
