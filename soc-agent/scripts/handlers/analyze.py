@@ -74,7 +74,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 SUBAGENT_TIMEOUT_SECONDS = int(
-    os.environ.get("SOC_AGENT_ANALYZE_TIMEOUT_SECONDS", "300")
+    os.environ.get("SOC_AGENT_ANALYZE_TIMEOUT_SECONDS", "450")
 )
 
 
