@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import frontmatter
 import yaml
 
 from schemas.state import Phase
@@ -93,23 +94,22 @@ class PlaybookMetadata:
 
 _ARCHETYPE_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 _SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
-_FRONTMATTER_RE = re.compile(r"\A---\n(?P<body>.*?)\n---\n", re.DOTALL)
 
 
-def _parse_frontmatter(text: str) -> dict:
-    """Return the YAML frontmatter as a dict, or {} when absent / malformed.
+def _parse_frontmatter(text: str, *, source: Path) -> dict:
+    """Return the YAML frontmatter as a dict, or {} when absent.
 
-    Frontmatter is the leading `---\\n…\\n---\\n` block. Malformed YAML
-    degrades to {} silently — callers fall back to defaults.
+    Uses `python-frontmatter` (already a project dep) so CRLF / Windows line
+    endings parse identically to LF. Malformed YAML raises OrchestrationError
+    rather than silently disabling downstream features (fail-fast).
     """
-    m = _FRONTMATTER_RE.match(text)
-    if not m:
-        return {}
     try:
-        parsed = yaml.safe_load(m.group("body"))
-    except yaml.YAMLError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+        post = frontmatter.loads(text)
+    except yaml.YAMLError as exc:
+        raise OrchestrationError(
+            f"playbook {source} has malformed YAML frontmatter: {exc}"
+        ) from exc
+    return dict(post.metadata) if post.metadata else {}
 
 
 def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
@@ -125,7 +125,7 @@ def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
     sections = {
         m.group(1).lower(): m.start() for m in _SECTION_RE.finditer(text)
     }
-    frontmatter = _parse_frontmatter(text)
+    fm = _parse_frontmatter(text, source=playbook_path)
 
     if "archetypes" not in sections:
         raise OrchestrationError(
@@ -156,13 +156,28 @@ def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
     hypothesis_seeds = _extract_section_bullet_ids(text, sections, "hypothesis seeds")
     leads = _extract_section_bullet_ids(text, sections, "starter lead order")
 
-    raw_disc = frontmatter.get("discriminating_classifications")
+    raw_disc = fm.get("discriminating_classifications")
     disc: dict[str, list[str]] | None = None
-    if isinstance(raw_disc, dict):
+    if raw_disc is not None:
+        if not isinstance(raw_disc, dict):
+            raise OrchestrationError(
+                f"playbook {playbook_path}: `discriminating_classifications` "
+                f"must be a mapping of classification → [regex, ...]; got "
+                f"{type(raw_disc).__name__}"
+            )
         disc = {}
         for k, v in raw_disc.items():
-            if isinstance(k, str) and isinstance(v, list):
-                disc[k] = [p for p in v if isinstance(p, str)]
+            if not isinstance(k, str):
+                raise OrchestrationError(
+                    f"playbook {playbook_path}: `discriminating_classifications` "
+                    f"keys must be strings; got {type(k).__name__} ({k!r})"
+                )
+            if not isinstance(v, list) or not all(isinstance(p, str) for p in v):
+                raise OrchestrationError(
+                    f"playbook {playbook_path}: `discriminating_classifications` "
+                    f"value for {k!r} must be a list of regex strings"
+                )
+            disc[k] = list(v)
 
     return PlaybookMetadata(
         signature_id=signature_id,

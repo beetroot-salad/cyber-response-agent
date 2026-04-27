@@ -41,9 +41,9 @@ from typing import Any
 
 from invlang.corpus import Companion
 from invlang.queries import (
-    _key_attribute_signature,
-    _prologue_signature,
+    key_attribute_signature,
     loop_lead_distribution,
+    prologue_signature,
 )
 
 
@@ -63,13 +63,33 @@ DEFAULT_MAX_AGE_DAYS = 180     # 6-month recency window
 
 @dataclass(frozen=True)
 class CacheKey:
-    """Tuple-shaped cache key. `frontier_signature=None` today; loop-N
-    expansion later sets it to the hypothesize-frontier topology.
+    """Tuple-shaped cache key for the PREDICT lead-choice cache.
+
+    Loop 1 cache key = (signature_id, prologue topology, key-attribute family).
+    Loop N cache key = loop-1 key PLUS `frontier_signature` — a frozen summary
+    of the *upstream proposed frontier* the agent is choosing a discriminating
+    lead against. Two loop-2 states with the same prologue but different
+    proposed-parent classifications must produce different cache keys, or the
+    fast-path would memoize the wrong decision.
+
+    `frontier_signature` is `None` at loop 1 because the frontier doesn't
+    exist yet (PREDICT loop 1 *creates* it). The placeholder slot exists so
+    loop-N support is a parameter change — derive a signature from the active
+    `hypothesize` block's proposed_edge.parent_vertex classifications + edge
+    relations, plug it in, and the lookup naturally narrows to companions
+    that faced the same upstream branch.
+
+    The current `lookup()` returns a structured miss (`reason:
+    frontier_not_supported`) when this is non-None, so an accidental loop-N
+    invocation can't fabricate an answer before the corpus query supports it.
     """
     signature_id: str
     prologue_signature: dict[str, Any]
     key_attribute_signature: frozenset[tuple[str, str]]
-    frontier_signature: Any | None = None  # placeholder; not derived today
+    # TODO(loop-N): tighten to `frozenset[tuple[str, str]] | None` once the
+    # frontier-signature derivation lands. `Any | None` today reflects that
+    # the shape is not yet pinned.
+    frontier_signature: Any | None = None
 
     def to_log_dict(self) -> dict[str, Any]:
         """JSON-safe shape for the priors JSONL log line."""
@@ -115,7 +135,7 @@ def build_cache_key(
     """
     if discriminating_classifications is None:
         return None
-    sig = _prologue_signature(prologue)
+    sig = prologue_signature(prologue)
     return CacheKey(
         signature_id=signature_id,
         prologue_signature={
@@ -123,7 +143,7 @@ def build_cache_key(
             "vertex_classifications": sig["vertex_classifications"],
             "edge_relations": sig["edge_relations"],
         },
-        key_attribute_signature=_key_attribute_signature(
+        key_attribute_signature=key_attribute_signature(
             prologue, discriminating_classifications
         ),
         frontier_signature=frontier,
@@ -203,6 +223,11 @@ def lookup(
         chosen, _ = top[0]
         method = "single"
     else:
+        # Unseeded `random.Random()` is intentional in production: when several
+        # leads each clear the support threshold, sampling proportionally to
+        # past-pick frequency load-balances across viable choices instead of
+        # always picking the alphabetic-tiebreaker winner. Tests inject a
+        # seeded Random for determinism.
         rng = rng or _random.Random()
         leads = [lead for lead, _ in top]
         weights = [count for _, count in top]

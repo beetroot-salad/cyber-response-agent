@@ -943,7 +943,7 @@ _PROLOGUE_TIER_LABELS = {
 }
 
 
-def _prologue_signature(prologue: dict[str, Any]) -> dict[str, Any]:
+def prologue_signature(prologue: dict[str, Any]) -> dict[str, Any]:
     """Frozen signature for prologue-shape retrieval.
 
     Returns `{vertex_types, vertex_classifications, edge_relations}` — three
@@ -1003,7 +1003,7 @@ def _prologue_tier_match(case_sig: dict[str, Any], query_sig: dict[str, Any], ti
     return False
 
 
-def _companion_signature_id(c: Companion) -> str | None:
+def companion_signature_id(c: Companion) -> str | None:
     from .corpus import signature_id_from_path
     return signature_id_from_path(c.source_path)
 
@@ -1017,12 +1017,12 @@ def _walk_prologue_tiers(
     """Return `(case_indices, tier_used)`. Empty → tier 3."""
     scoped = [
         i for i, c in enumerate(corpus)
-        if signature_id is None or _companion_signature_id(c) == signature_id
+        if signature_id is None or companion_signature_id(c) == signature_id
     ]
     for tier in range(0, 3):
         hits: list[int] = []
         for i in scoped:
-            case_sig = _prologue_signature(corpus[i].prologue)
+            case_sig = prologue_signature(corpus[i].prologue)
             if _prologue_tier_match(case_sig, query_sig, tier):
                 hits.append(i)
         if hits:
@@ -1045,7 +1045,7 @@ def lead_effectiveness_for_prologue(
     Returns `{hits, count, tier_used, tier_label, cases_matched}`. Rows are
     `_lead_effectiveness_rows` ranked identically to the per-hypothesis variant.
     """
-    query_sig = _prologue_signature(prologue)
+    query_sig = prologue_signature(prologue)
     case_indices, tier_used = _walk_prologue_tiers(
         corpus, query_sig, signature_id=signature_id
     )
@@ -1092,7 +1092,7 @@ def peer_hypothesis_distribution_for_prologue(
     carries the final-weight histogram so callers see which hypothesis shapes
     at this topology actually survived.
     """
-    query_sig = _prologue_signature(prologue)
+    query_sig = prologue_signature(prologue)
     case_indices, tier_used = _walk_prologue_tiers(
         corpus, query_sig, signature_id=signature_id
     )
@@ -1179,7 +1179,7 @@ def _parse_alert_timestamp(ts: str | None) -> datetime | None:
             return None
 
 
-def _key_attribute_signature(
+def key_attribute_signature(
     prologue: dict[str, Any],
     discriminating_classifications: dict[str, list[str]],
 ) -> frozenset[tuple[str, str]]:
@@ -1230,8 +1230,8 @@ def _exact_prologue_match(
     needs full equality so a different classification set never produces a
     hit.
     """
-    cs = _prologue_signature(case_prologue)
-    qs = _prologue_signature(query_prologue)
+    cs = prologue_signature(case_prologue)
+    qs = prologue_signature(query_prologue)
     return (
         cs["vertex_types"] == qs["vertex_types"]
         and cs["vertex_classifications"] == qs["vertex_classifications"]
@@ -1311,10 +1311,10 @@ def loop_lead_distribution(
             },
         }
 
-    target_key_attrs = _key_attribute_signature(prologue, discriminating_classifications)
+    target_key_attrs = key_attribute_signature(prologue, discriminating_classifications)
 
     # Filter pipeline — track per-step counts for telemetry / "why miss".
-    scoped_sig = [c for c in corpus if _companion_signature_id(c) == signature_id]
+    scoped_sig = [c for c in corpus if companion_signature_id(c) == signature_id]
     scoped_recent: list[Companion] = []
     for c in scoped_sig:
         ts = _parse_alert_timestamp(c.alert_timestamp)
@@ -1331,7 +1331,7 @@ def loop_lead_distribution(
     ]
     scoped_key_attrs = [
         c for c in scoped_prologue
-        if _key_attribute_signature(c.prologue, discriminating_classifications)
+        if key_attribute_signature(c.prologue, discriminating_classifications)
         == target_key_attrs
     ]
 
