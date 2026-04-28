@@ -16,13 +16,15 @@ entrypoint removes the race.
 Every step is wrapped in try/except so a failure in one does not prevent
 the next from running. The handler always exits 0 — a broken Stop step
 must never crash the agent session.
+
+The post-mortem leads pipeline used to fire from here too, but it now lives
+in the REPORT handler (`scripts/handlers/report.py`) — one explicit trigger
+per run, no race against the orchestrator's per-subagent Stop fan-out.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -30,13 +32,6 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts import close_ticket_action, investigation_summary  # noqa: E402
-from hooks.scripts.run_context import get_runs_dir, resolve_run_dir  # noqa: E402
-from scripts.postmortem.leads.extract import has_ad_hoc_leads  # noqa: E402
-
-# Off by default until the real `_spawn_agent` lands. With the stub, every
-# Stop event would otherwise create a worktree + branch + `failed` marker
-# per investigation. Operators flip this on once the LLM invocation is in.
-POSTMORTEM_ENABLED_ENV = "SOC_AGENT_POSTMORTEM_LEADS_ENABLED"
 
 
 def _run_step(name: str, func, payload: dict) -> None:
@@ -44,83 +39,6 @@ def _run_step(name: str, func, payload: dict) -> None:
         func(payload)
     except Exception as exc:  # noqa: BLE001 — must never raise out of the handler
         print(f"stop_handler: {name} raised: {exc!r}", file=sys.stderr)
-
-
-def _warn(reason: str) -> None:
-    """Log a single-line stderr warning. Reaches the harness log so a
-    human can spot why a run silently skipped post-mortem normalization."""
-    print(f"stop_handler[postmortem]: skipped — {reason}", file=sys.stderr)
-
-
-def _maybe_spawn_postmortem(payload: dict) -> None:
-    """Detached-spawn the post-mortem lead-pool normalizer if the run
-    produced any ad-hoc lead invocations.
-
-    Cheap pre-check (no subprocess) before launching: read
-    `investigation.md` and run `has_ad_hoc_leads` in-process. Skip the
-    spawn entirely if the run produced no ad-hoc findings — the common
-    case for benign / catalog-only investigations.
-
-    The spawn itself is fire-and-forget. Parent must not block on the
-    LLM-driven catalog edits — agent termination is the priority.
-
-    Skips that are NOT the common-case-no-findings path emit a stderr
-    warning. Silent skips on a missing run dir or unparseable meta are
-    a debugging trap — make them visible.
-    """
-    if os.environ.get(POSTMORTEM_ENABLED_ENV, "").lower() not in ("1", "true", "yes"):
-        return
-    session_id = payload.get("session_id", "")
-    if not session_id:
-        # Stop hooks may legitimately fire without a session id (manual
-        # invocations, test harnesses); that's not a debugging trap.
-        return
-    run_dir, _ = resolve_run_dir(session_id, get_runs_dir())
-    if run_dir is None:
-        _warn(f"could not resolve run dir for session_id={session_id!r}")
-        return
-    inv_path = run_dir / "investigation.md"
-    meta_path = run_dir / "meta.json"
-    if not inv_path.exists():
-        _warn(f"investigation.md missing under {run_dir}")
-        return
-    if not meta_path.exists():
-        _warn(f"meta.json missing under {run_dir}")
-        return
-    try:
-        meta = json.loads(meta_path.read_text())
-    except Exception as exc:
-        _warn(f"meta.json under {run_dir} is unparseable: {exc!r}")
-        return
-    signature_id = meta.get("signature_id")
-    if not isinstance(signature_id, str) or "-" not in signature_id:
-        _warn(
-            f"meta.json under {run_dir} has no usable signature_id "
-            f"({signature_id!r})"
-        )
-        return
-    vendor = signature_id.split("-", 1)[0]
-
-    if not has_ad_hoc_leads(inv_path.read_text(), vendor):
-        # Common case — silent skip.
-        return
-
-    out_dir = get_runs_dir() / "postmortem" / run_dir.name / "leads"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    log_handle = open(out_dir / "run.log", "ab")
-    subprocess.Popen(
-        [
-            sys.executable,
-            "-m", "scripts.postmortem.leads.run",
-            "--run-dir", str(run_dir),
-            "--out-dir", str(out_dir),
-        ],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        close_fds=True,
-        cwd=str(SOC_AGENT_ROOT),
-    )
 
 
 def main() -> None:
@@ -142,7 +60,6 @@ def main() -> None:
 
     _run_step("investigation_summary", investigation_summary.main, payload)
     _run_step("close_ticket_action", close_ticket_action.main, payload)
-    _run_step("postmortem_leads", _maybe_spawn_postmortem, payload)
 
 
 if __name__ == "__main__":

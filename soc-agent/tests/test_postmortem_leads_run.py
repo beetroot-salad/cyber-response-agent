@@ -185,6 +185,40 @@ class TestEndToEnd:
         assert "correlated-falco-events" in prompts[0]
         assert "selection_rationale" in prompts[0]
 
+    def test_dry_run_skips_push_and_pr(
+        self,
+        repo_with_run: tuple[Path, Path, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        repo_root, run_dir, out_dir = repo_with_run
+        monkeypatch.delenv(run_module.WORKTREE_DIR_ENV, raising=False)
+        monkeypatch.setenv("SOC_AGENT_POSTMORTEM_DRY_RUN", "1")
+        prs: list[dict[str, Any]] = []
+        monkeypatch.setattr(run_module, "_spawn_agent", _stub_agent_commit([]))
+        # If dry-run leaks past the gate, the test fails loud here.
+        monkeypatch.setattr(
+            run_module, "_push_and_pr",
+            lambda *a, **kw: prs.append({"forbidden": True}) or "",
+        )
+
+        rc = run_module.main(_argv(repo_root, run_dir, out_dir))
+        assert rc == 0
+        assert prs == [], "dry-run must not invoke _push_and_pr"
+
+        status = json.loads((out_dir / "status.json").read_text())
+        assert status["status"] == "ok-dry-run"
+        assert status["branch"] == f"postmortem-leads/{run_dir.name}"
+        assert status["worktree"] == str(out_dir / "worktree")
+        assert "pr_url" not in status
+        # The committed-paths list is the human-inspection target.
+        assert any(
+            p.startswith("soc-agent/knowledge/common-investigation/leads/")
+            for p in status["committed_paths"]
+        )
+        # Worktree stays for inspection.
+        assert (out_dir / "worktree").is_dir()
+        assert not (out_dir / "failed").exists()
+
     def test_no_findings_skips(
         self,
         tmp_path: Path,
@@ -344,3 +378,125 @@ class TestEndToEnd:
         expected = wt_root / f"postmortem-leads-{run_dir.name}"
         assert status["worktree"] == str(expected)
         assert expected.is_dir()
+
+
+class TestSpawnDetached:
+    """Behavior of `spawn_detached(run_dir)` — the public entry point the
+    REPORT handler calls. Mirrors what used to be in
+    `tests/test_stop_handler.py::TestPostmortemSpawn`, retargeted at the
+    new home (no more session-id resolution; caller passes run_dir
+    directly)."""
+
+    @pytest.fixture
+    def run_setup(self, tmp_path, monkeypatch):
+        runs = tmp_path / "runs"
+        runs.mkdir()
+        monkeypatch.setenv("SOC_AGENT_RUNS_DIR", str(runs))
+        monkeypatch.setenv("SOC_AGENT_POSTMORTEM_LEADS_ENABLED", "1")
+        return runs
+
+    def _seed_run(self, runs_dir, name, *, has_adhoc: bool):
+        run_dir = runs_dir / name
+        run_dir.mkdir()
+        (run_dir / "meta.json").write_text(
+            json.dumps({"signature_id": "wazuh-rule-100001", "salt": "x"})
+        )
+        if has_adhoc:
+            fixtures = Path(__file__).parent / "fixtures" / "postmortem_leads"
+            (run_dir / "investigation.md").write_text(
+                (fixtures / "inv_with_adhoc.md").read_text()
+            )
+        else:
+            (run_dir / "investigation.md").write_text("# REPORT\n\n(empty)\n")
+        return run_dir
+
+    def test_spawns_when_run_has_adhoc(self, run_setup, monkeypatch):
+        run_dir = self._seed_run(run_setup, "run-adhoc", has_adhoc=True)
+        captured: list[dict] = []
+
+        def fake_popen(*args, **kwargs):
+            captured.append({"args": args, "kwargs": kwargs})
+
+            class _Proc:
+                pid = 12345
+            return _Proc()
+
+        monkeypatch.setattr(run_module.subprocess, "Popen", fake_popen)
+        run_module.spawn_detached(run_dir)
+
+        assert len(captured) == 1
+        argv = captured[0]["args"][0]
+        import sys as _sys
+        assert argv[0] == _sys.executable
+        assert argv[1:5] == ["-m", "scripts.postmortem.leads.run", "--run-dir", str(run_dir)]
+        out_dir_arg = argv[argv.index("--out-dir") + 1]
+        assert out_dir_arg == str(run_setup / "postmortem" / run_dir.name / "leads")
+        assert captured[0]["kwargs"]["start_new_session"] is True
+        assert (Path(out_dir_arg) / "run.log").exists()
+
+    def test_skips_when_no_adhoc_leads(self, run_setup, monkeypatch):
+        run_dir = self._seed_run(run_setup, "run-clean", has_adhoc=False)
+        called = []
+        monkeypatch.setattr(
+            run_module.subprocess, "Popen",
+            lambda *a, **kw: called.append("popen"),
+        )
+        run_module.spawn_detached(run_dir)
+        assert called == []
+
+    def test_skips_when_meta_json_absent(self, run_setup, monkeypatch):
+        run_dir = self._seed_run(run_setup, "run-no-meta", has_adhoc=True)
+        (run_dir / "meta.json").unlink()
+        called = []
+        monkeypatch.setattr(
+            run_module.subprocess, "Popen",
+            lambda *a, **kw: called.append("popen"),
+        )
+        run_module.spawn_detached(run_dir)
+        assert called == []
+
+    def test_skips_when_investigation_md_absent(self, run_setup, monkeypatch):
+        run_dir = self._seed_run(run_setup, "run-no-inv", has_adhoc=True)
+        (run_dir / "investigation.md").unlink()
+        called = []
+        monkeypatch.setattr(
+            run_module.subprocess, "Popen",
+            lambda *a, **kw: called.append("popen"),
+        )
+        run_module.spawn_detached(run_dir)
+        assert called == []
+
+    def test_gate_off_skips_silently_even_with_adhoc(self, run_setup, monkeypatch):
+        run_dir = self._seed_run(run_setup, "run-gate-off", has_adhoc=True)
+        monkeypatch.delenv("SOC_AGENT_POSTMORTEM_LEADS_ENABLED", raising=False)
+        called = []
+        monkeypatch.setattr(
+            run_module.subprocess, "Popen",
+            lambda *a, **kw: called.append("popen"),
+        )
+        run_module.spawn_detached(run_dir)
+        assert called == []
+
+    def test_gate_accepts_truthy_values(self, run_setup, monkeypatch):
+        run_dir = self._seed_run(run_setup, "run-gate-truthy", has_adhoc=True)
+        for v in ("1", "true", "TRUE", "yes", "Yes"):
+            called = []
+            monkeypatch.setenv("SOC_AGENT_POSTMORTEM_LEADS_ENABLED", v)
+            monkeypatch.setattr(
+                run_module.subprocess, "Popen",
+                lambda *a, **kw: called.append("popen") or type("P", (), {"pid": 1})(),
+            )
+            run_module.spawn_detached(run_dir)
+            assert called == ["popen"], f"value {v!r} should enable the gate"
+
+    def test_gate_rejects_falsey_values(self, run_setup, monkeypatch):
+        run_dir = self._seed_run(run_setup, "run-gate-falsey", has_adhoc=True)
+        for v in ("0", "false", "no", "", "off"):
+            called = []
+            monkeypatch.setenv("SOC_AGENT_POSTMORTEM_LEADS_ENABLED", v)
+            monkeypatch.setattr(
+                run_module.subprocess, "Popen",
+                lambda *a, **kw: called.append("popen"),
+            )
+            run_module.spawn_detached(run_dir)
+            assert called == [], f"value {v!r} should leave the gate closed"

@@ -1456,14 +1456,23 @@ def _append_lead_pick_findings(
         name = lead.get("name")
         if not isinstance(lid, str) or not isinstance(name, str):
             continue
+        # Carry through the envelope's `query` mapping (post-hydration: holds
+        # `query` literal string, system, template, time_window, substitutions).
+        # ANALYZE overlays its own grading later, but only for the *current*
+        # loop's lead — without this carry-through, prior-loop leads keep
+        # `query_details: {}` forever, which breaks downstream consumers
+        # (post-mortem extractor, evidence-citation validation, ANALYZE prompt
+        # rendering of historical leads).
+        query = lead.get("query") if isinstance(lead.get("query"), dict) else {}
+        outcome = lead.get("outcome") if isinstance(lead.get("outcome"), dict) else {}
         findings.append({
             "id": lid,
             "loop": loop_n,
             "name": name,
             "target": lead.get("target") or default_target,
             "mode": "lead-pick",
-            "query_details": {},
-            "outcome": {},
+            "query_details": dict(query),
+            "outcome": dict(outcome),
             "resolutions": [],
         })
     if not findings:

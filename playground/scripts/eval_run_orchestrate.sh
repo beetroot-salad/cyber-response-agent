@@ -109,13 +109,28 @@ export INVLANG_CORPUS_ROOT="${INVLANG_CORPUS_ROOT:-/tmp/soc-agent-orchestrate-ev
 # `gather-composite`. See gather.py:_dispatch_parallel_singletons and
 # tasks/parallel-haiku-gather.md.
 export SOC_AGENT_PARALLEL_GATHER="${SOC_AGENT_PARALLEL_GATHER:-1}"
+# Post-mortem leads pipeline: when an investigation produces ad-hoc lead
+# invocations, fire the catalog-normalization subprocess from
+# stop_handler.py. Subagent Stop events under the orchestrator path resolve
+# to the parent run_dir via the session→run mapping written in
+# _subagent.invoke_subagent. Slice-1 `_spawn_agent` is stubbed → expect
+# `failed` markers under runs/postmortem/<run_id>/leads/ once ad-hoc leads
+# appear; the trigger firing is the signal we want here.
+export SOC_AGENT_POSTMORTEM_LEADS_ENABLED="${SOC_AGENT_POSTMORTEM_LEADS_ENABLED:-1}"
+# Dry-run by default during the slice-2 rollout: agent classifies + edits +
+# commits inside the worktree, but the orchestrator stops before push/PR.
+# Inspect via `git -C <worktree> log` and the committed-paths list in
+# status.json. Unset (or set to 0) to flip to push + open-PR.
+export SOC_AGENT_POSTMORTEM_DRY_RUN="${SOC_AGENT_POSTMORTEM_DRY_RUN:-1}"
 
 SIGNATURE_ID="wazuh-rule-$RULE_ID"
 
 echo "[+] Launching orchestrator (driver log → $EVAL_DIR/driver.log)..."
-echo "    SOC_AGENT_RUNS_DIR:        $SOC_AGENT_RUNS_DIR"
-echo "    INVLANG_CORPUS_ROOT:       $INVLANG_CORPUS_ROOT"
-echo "    SOC_AGENT_PARALLEL_GATHER: $SOC_AGENT_PARALLEL_GATHER"
+echo "    SOC_AGENT_RUNS_DIR:               $SOC_AGENT_RUNS_DIR"
+echo "    INVLANG_CORPUS_ROOT:              $INVLANG_CORPUS_ROOT"
+echo "    SOC_AGENT_PARALLEL_GATHER:        $SOC_AGENT_PARALLEL_GATHER"
+echo "    SOC_AGENT_POSTMORTEM_LEADS_ENABLED: $SOC_AGENT_POSTMORTEM_LEADS_ENABLED"
+echo "    SOC_AGENT_POSTMORTEM_DRY_RUN:       $SOC_AGENT_POSTMORTEM_DRY_RUN"
 echo
 
 set +e

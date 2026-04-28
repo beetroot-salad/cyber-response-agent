@@ -8,12 +8,42 @@ effort: low
 
 # Post-mortem lead-pool normalization
 
-You are running inside a git worktree at `{worktree_path}`, branched
-off `{base_ref}`. Your job is to update the lead catalog under
+You are running inside a git worktree at `{worktree_path}`, branched off
+`{base_ref}`. Your job is to update the lead catalog under
 `soc-agent/knowledge/common-investigation/leads/` in response to ad-hoc
 lead invocations from a recent investigation. The pipeline that
 launched you is mechanical (Python orchestrator); your scope is the
 classify → edit → commit step.
+
+## Use the author skill's discipline
+
+Your working directory is `{worktree_path}` (the worktree root, a full
+checkout of the repo at `{base_ref}`). The plugin's author skill —
+**`{worktree_path}/soc-agent/skills/author/SKILL.md`** — is the single
+source of truth for *how* to edit the knowledge base: KB layout, tag
+vocabulary, consolidation-first rule, validation expectations,
+ripple-file checks, and the "tight knowledge is better knowledge" bar.
+**Read it now via the absolute path above** and follow it for every
+edit you make in this session. This prompt only adds the
+post-mortem-specific framing the author skill does not cover (automated
+mode, classification taxonomy, commit contract). Do not duplicate or
+paraphrase author guidance here — read it directly.
+
+## Automated-mode constraints
+
+You are not in human dialog. The pipeline cannot answer questions or
+clarify intent. Two practical consequences:
+
+- **Halt without committing if any finding is ambiguous.** Better to
+  leave the orchestrator's `failed` marker for human follow-up than to
+  land a low-quality PR. Halt criteria are listed at the bottom of this
+  prompt.
+- **Scope is locked to `soc-agent/knowledge/common-investigation/leads/`.**
+  The orchestrator runs a post-commit scope check and rejects the push
+  if any committed file falls outside this prefix. Do not touch
+  signatures, archetypes, environment knowledge, or anything outside
+  `leads/`. (The author skill's broader scope does not apply in this
+  invocation.)
 
 ## Inputs
 
@@ -36,16 +66,6 @@ Each finding's `catalog_status` is one of:
 
 `selection_rationale` is the per-finding intent prose written by
 PREDICT — use it as the primary signal for the agent's intent.
-
-## Catalog scope
-
-Read `soc-agent/knowledge/common-investigation/leads/`. Each subdir is
-a lead with `definition.md` (frontmatter: `name`, `data_tags`,
-`baseline`) and optional `templates/{{vendor}}.md`. The `ad-hoc` and
-`_template` directories are placeholders — never edit them.
-
-`leads/TAGS.md` documents the tag dimensions in use; consult it before
-inventing new ones.
 
 ## For each finding, classify and act
 
@@ -74,15 +94,12 @@ inventing new ones.
 
 If multiple findings classify together (same lead, same vendor),
 batch the edits into one definition/template rather than editing the
-same file three times.
+same file three times — the author skill's "one logical unit per
+invocation" rule applies per finding-cluster, not per finding.
 
 ## Commit
 
-Stage only catalog files — never `git add -A` in this worktree.
-Stray repo state (other features in flight, generated artifacts) must
-not hitchhike into the post-mortem PR.
-
-When edits are done, run from `{worktree_path}`:
+Stage only catalog files. From `{worktree_path}`:
 
 ```
 git add soc-agent/knowledge/common-investigation/leads/
@@ -105,8 +122,7 @@ Example commit subjects:
 
 - You cannot confidently classify any finding (low signal in
   rationale + query, no plausible catalog match, no plausible novel
-  shape). Better to leave the orchestrator's failure marker for human
-  follow-up than to land a low-quality PR.
+  shape).
 - The catalog is in a state you do not understand (validator-failing
   fixture, missing required dirs, etc.). Surface that as a halt with a
   note in stdout — do NOT auto-repair the catalog.
