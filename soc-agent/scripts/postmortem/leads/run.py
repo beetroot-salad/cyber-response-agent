@@ -24,8 +24,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import traceback
 from dataclasses import asdict
 from pathlib import Path
@@ -42,6 +44,7 @@ from scripts.handlers.gather import _derive_vendor  # noqa: E402
 from scripts.postmortem.leads.extract import (  # noqa: E402
     AdHocLead,
     extract_ad_hoc_leads,
+    has_ad_hoc_leads,
 )
 from scripts.postmortem.worktree import (  # noqa: E402
     WorktreeError,
@@ -127,27 +130,151 @@ class PostmortemError(RuntimeError):
     funnel into `main`'s `except Exception` and mark `failed`."""
 
 
+_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
+
+# Cap the agent at 10 minutes wall — catalog edits are localized; if the model
+# can't classify + edit + commit in that window, the run is wedged and the
+# `failed` marker is preferable to an indefinite background process.
+SPAWN_AGENT_TIMEOUT_SECONDS = int(
+    os.environ.get("SOC_AGENT_POSTMORTEM_LEADS_TIMEOUT", "600")
+)
+
+
 def _spawn_agent(
     worktree_path: Path,
     prompt: str,
 ) -> int:
-    """Spawn a coding agent in the worktree to classify + edit + commit.
+    """Invoke `claude -p` in the worktree to classify + edit + commit.
 
-    SLICE 1: stubbed. Returns 1 unconditionally so the orchestrator
-    falls into its no-commit failure path. The real agent invocation
-    (likely `claude -p` with a tightly-scoped permission profile) is
-    settled in a follow-up commit — see the plan's Open Q §1.
+    The rendered prompt has the agent profile baked in as YAML frontmatter
+    (`name`, `description`, `tools`, `model`, `effort`). We split it: body
+    becomes the system prompt, frontmatter drives CLI flags. The user-message
+    side is a brief "Begin." — all the real instructions live in the body.
 
-    Tests monkeypatch this function to simulate both success
-    (synthesizes a commit in the worktree) and failure (returns
-    non-zero).
+    No `--plugin-dir`: this agent edits the lead catalog, not investigation.md,
+    so the soc-agent plugin's PreToolUse/PostToolUse hooks (invlang_validate,
+    budget_enforcer, ...) would be irrelevant noise here.
+
+    Tests can monkeypatch this function to simulate success or failure.
     """
-    _ = worktree_path, prompt
-    sys.stderr.write(
-        "postmortem.leads.run: _spawn_agent is stubbed; agent invocation "
-        "not yet implemented (see plan Open Q §1).\n"
+    m = _FRONTMATTER_RE.match(prompt)
+    if not m:
+        sys.stderr.write(
+            "postmortem.leads.run: rendered prompt missing YAML frontmatter\n"
+        )
+        return 1
+    try:
+        frontmatter = yaml.safe_load(m.group(1)) or {}
+    except yaml.YAMLError as e:
+        sys.stderr.write(f"postmortem.leads.run: bad frontmatter: {e}\n")
+        return 1
+    body = m.group(2).strip()
+
+    model = str(frontmatter.get("model") or "sonnet")
+    effort = str(frontmatter.get("effort") or "low")
+    tools_raw = frontmatter.get("tools") or ""
+    if isinstance(tools_raw, list):
+        tools = ",".join(str(t).strip() for t in tools_raw if str(t).strip())
+    else:
+        tools = ",".join(t.strip() for t in str(tools_raw).split(",") if t.strip())
+
+    sys_prompt_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, prefix="postmortem-leads-",
+        ) as tmp:
+            tmp.write(body)
+            sys_prompt_path = tmp.name
+
+        argv = [
+            "claude", "-p",
+            "--model", model,
+            "--system-prompt-file", sys_prompt_path,
+            "--output-format", "text",
+            "--effort", effort,
+        ]
+        if tools:
+            argv.extend(["--allowed-tools", tools])
+
+        proc = subprocess.run(
+            argv,
+            input="Begin.",
+            capture_output=True,
+            text=True,
+            timeout=SPAWN_AGENT_TIMEOUT_SECONDS,
+            cwd=str(worktree_path),
+        )
+        if proc.stdout:
+            sys.stdout.write(proc.stdout)
+        if proc.stderr:
+            sys.stderr.write(proc.stderr)
+        return proc.returncode
+    except FileNotFoundError as e:
+        sys.stderr.write(f"postmortem.leads.run: claude CLI not found: {e}\n")
+        return 1
+    except subprocess.TimeoutExpired:
+        sys.stderr.write(
+            f"postmortem.leads.run: agent timed out after "
+            f"{SPAWN_AGENT_TIMEOUT_SECONDS}s\n"
+        )
+        return 1
+    finally:
+        if sys_prompt_path:
+            try:
+                os.unlink(sys_prompt_path)
+            except OSError:
+                pass
+
+
+def spawn_detached(run_dir: Path) -> None:
+    """Public entry point for non-hook callers (the REPORT handler).
+
+    Pre-checks `has_ad_hoc_leads` cheaply in-process (no subprocess if the
+    investigation produced none — the common benign case), then fires this
+    module as a detached subprocess so the parent never blocks on the
+    LLM-driven catalog edits.
+
+    Gated by `SOC_AGENT_POSTMORTEM_LEADS_ENABLED` — caller does not need
+    to re-check the flag.
+    """
+    if os.environ.get("SOC_AGENT_POSTMORTEM_LEADS_ENABLED", "").lower() not in (
+        "1", "true", "yes",
+    ):
+        return
+    meta_path = run_dir / "meta.json"
+    inv_path = run_dir / "investigation.md"
+    if not meta_path.exists() or not inv_path.exists():
+        return
+    try:
+        meta = json.loads(meta_path.read_text())
+    except Exception:
+        return
+    signature_id = meta.get("signature_id")
+    if not isinstance(signature_id, str) or "-" not in signature_id:
+        return
+    try:
+        vendor = _derive_vendor(signature_id)
+    except Exception:
+        return
+    if not has_ad_hoc_leads(inv_path.read_text(), vendor):
+        return
+
+    out_dir = run_dir.parent / "postmortem" / run_dir.name / "leads"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_handle = open(out_dir / "run.log", "ab")
+    subprocess.Popen(
+        [
+            sys.executable,
+            "-m", "scripts.postmortem.leads.run",
+            "--run-dir", str(run_dir),
+            "--out-dir", str(out_dir),
+        ],
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+        cwd=str(SOC_AGENT_ROOT),
     )
-    return 1
 
 
 def _has_new_commit(worktree_path: Path, base_ref: str) -> bool:
@@ -323,6 +450,24 @@ def main(argv: list[str] | None = None) -> int:
                 f"All committed: {committed}.",
             )
             return 1
+
+        # Dry-run: stop after the agent commits. Worktree + branch stay on
+        # disk for inspection; nothing is pushed and no PR is opened. Useful
+        # while iterating on the agent prompt — keeps remote state clean.
+        if os.environ.get("SOC_AGENT_POSTMORTEM_DRY_RUN", "").lower() in (
+            "1", "true", "yes",
+        ):
+            _write_status(
+                out_dir,
+                {
+                    "status": "ok-dry-run",
+                    "branch": branch_name,
+                    "worktree": str(worktree_path),
+                    "committed_paths": committed,
+                    "leads": [asdict(l) for l in leads],
+                },
+            )
+            return 0
 
         pr_url = _push_and_pr(worktree_path, branch_name, base_ref)
         _write_status(

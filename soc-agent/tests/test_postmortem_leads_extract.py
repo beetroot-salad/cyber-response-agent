@@ -80,6 +80,71 @@ class TestExtractAdHocLeads:
         assert l3.lead_name == "ad-hoc"
         assert l3.data_source == "deploy-runs"
 
+    def test_prose_fallback_fills_query_when_invlang_empty(
+        self, tmp_path: Path,
+    ) -> None:
+        """Live-run regression: gather wrote `query_details: {}` for prior-loop
+        leads while ANALYZE prose carried `**Lead:** <name>\n**Query:** \\`...\\``.
+        Extractor must scrape prose so the consolidator agent sees the
+        discriminating context. Synthetic fixture covers the shape directly."""
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        (run_dir / "meta.json").write_text(
+            (FIXTURES / "meta.json").read_text()
+        )
+        (run_dir / "investigation.md").write_text(
+            "## ANALYZE (loop 1)\n\n"
+            "**Lead:** parent-domain-classification\n\n"
+            "**Query:** `data.dns_domain:*example.net* AND agent.name:host`\n\n"
+            "**Selection rationale:** characterize parent-domain reputation\n\n"
+            "```yaml\n"
+            "findings:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: parent-domain-classification\n"
+            "    target: v-001\n"
+            "    mode: lead-pick\n"
+            "    query_details: {}\n"
+            "    outcome: {}\n"
+            "    resolutions: []\n"
+            "```\n"
+        )
+        leads = extract_ad_hoc_leads(run_dir, vendor="wazuh")
+        assert len(leads) == 1
+        assert leads[0].query == "data.dns_domain:*example.net* AND agent.name:host"
+        assert leads[0].selection_rationale == (
+            "characterize parent-domain reputation"
+        )
+
+    def test_invlang_query_wins_over_prose(self, tmp_path: Path) -> None:
+        """When invlang has the data, prose is ignored — invlang is the
+        authoritative source post-fix."""
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        (run_dir / "meta.json").write_text(
+            (FIXTURES / "meta.json").read_text()
+        )
+        (run_dir / "investigation.md").write_text(
+            "**Lead:** parent-domain-classification\n\n"
+            "**Query:** `STALE PROSE QUERY`\n\n"
+            "```yaml\n"
+            "findings:\n"
+            "  - id: l-001\n"
+            "    loop: 1\n"
+            "    name: parent-domain-classification\n"
+            "    target: v-001\n"
+            "    mode: lead-pick\n"
+            "    query_details:\n"
+            "      query: 'authoritative invlang query'\n"
+            "      system: wazuh\n"
+            "    outcome: {}\n"
+            "    resolutions: []\n"
+            "```\n"
+        )
+        leads = extract_ad_hoc_leads(run_dir, vendor="wazuh")
+        assert leads[0].query == "authoritative invlang query"
+        assert leads[0].data_source == "wazuh"
+
     def test_screen_findings_excluded(self, tmp_path: Path) -> None:
         # `inv_no_adhoc.md` includes a SCREEN-mode finding with
         # template: ad-hoc. SCREEN should be filtered before the

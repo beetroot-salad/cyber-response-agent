@@ -270,6 +270,24 @@ def _resolve_matched_archetype(
 
 
 def handle(ctx: Context) -> PhaseResult:
+    """REPORT-phase entry. Wraps `_handle_inner` so the post-mortem leads
+    pipeline fires exactly once per run, after the report subagent (or the
+    mechanical compose path) finishes. Detached subprocess — does not
+    block the orchestrator's exit. Gated on the env var inside
+    `spawn_detached`; safe to call unconditionally."""
+    result = _handle_inner(ctx)
+    # Lazy import — `scripts.postmortem.leads.run` imports
+    # `scripts.handlers.gather._derive_vendor`, and the handlers package
+    # __init__ imports `report`, so a top-level import would cycle.
+    try:
+        from scripts.postmortem.leads.run import spawn_detached
+        spawn_detached(ctx.run_dir)
+    except Exception as exc:  # noqa: BLE001 — must never bubble out of REPORT
+        sys.stderr.write(f"report.handle: postmortem spawn raised: {exc!r}\n")
+    return result
+
+
+def _handle_inner(ctx: Context) -> PhaseResult:
     screen_payload = ctx.outputs.get(Phase.SCREEN) or {}
     analyze_payload = ctx.outputs.get(Phase.ANALYZE) or {}
     fallback_reason: str | None = None

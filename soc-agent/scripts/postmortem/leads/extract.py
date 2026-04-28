@@ -20,6 +20,7 @@ which already knows the canonical companion shape (and accepts both
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -140,7 +141,45 @@ def extract_ad_hoc_leads(
     return _extract_from_text(inv_path.read_text(), vendor)
 
 
+# Markdown-prose sidecar fallback. ANALYZE writes per-lead query/rationale prose
+# under `**Lead:** <name>` sections; gather/handler bugs that leave invlang
+# `query_details.query` empty (see gather.py:_append_lead_pick_findings) used
+# to strand this data in prose-only form. The post-mortem extractor scrapes it
+# back out so the consolidator agent has the discriminating context regardless
+# of which path the run took. Belt-and-suspenders alongside the gather-handler
+# fix — also covers historical runs whose invlang predates the fix.
+_LEAD_PROSE_RE = re.compile(
+    r"\*\*Lead:\*\*\s*([^\n]+?)\s*\n(.*?)(?=^\*\*Lead:\*\*|^##\s|^```|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+_PROSE_FIELD_RE = re.compile(
+    r"^\*\*([A-Za-z][A-Za-z0-9 _-]*?):\*\*\s*(.*?)(?=^\*\*[A-Za-z]|^```|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def _scrape_lead_prose(text: str) -> dict[str, dict[str, str]]:
+    """Build {lead_name: {field_label_lower: value}} from `**Lead:**` blocks.
+
+    Field values are stripped and de-tickified ("`x`" → "x"); only the most
+    recent value per field per lead survives, matching the human reader's
+    expectation that the latest section overrides earlier ones."""
+    by_lead: dict[str, dict[str, str]] = {}
+    for lm in _LEAD_PROSE_RE.finditer(text):
+        name = lm.group(1).strip()
+        body = lm.group(2)
+        fields = by_lead.setdefault(name, {})
+        for fm in _PROSE_FIELD_RE.finditer(body):
+            label = fm.group(1).strip().lower()
+            value = fm.group(2).strip()
+            if value.startswith("`") and value.endswith("`") and len(value) >= 2:
+                value = value[1:-1]
+            fields[label] = value
+    return by_lead
+
+
 def _extract_from_text(text: str, vendor: str) -> list[AdHocLead]:
+    prose_by_lead = _scrape_lead_prose(text)
     out: list[AdHocLead] = []
     for finding in _findings(text):
         if _is_screen_mode(finding):
@@ -160,14 +199,23 @@ def _extract_from_text(text: str, vendor: str) -> list[AdHocLead]:
         substitutions = qd.get("substitutions")
         if not isinstance(substitutions, dict):
             substitutions = {}
+        prose = prose_by_lead.get(name, {})
+        # Prefer invlang values; fall back to prose-scraped fields.
+        query = (qd.get("query") or "") or prose.get("query", "")
+        data_source = (qd.get("system") or "") or prose.get("data source", "")
+        rationale = (
+            finding.get("selection_rationale", "")
+            or prose.get("selection rationale", "")
+            or prose.get("rationale", "")
+        )
         out.append(
             AdHocLead(
                 finding_id=finding_id,
                 lead_name=name,
                 catalog_status=status,
-                data_source=qd.get("system", "") or "",
-                query=qd.get("query", "") or "",
-                selection_rationale=finding.get("selection_rationale", "") or "",
+                data_source=data_source or "",
+                query=query or "",
+                selection_rationale=rationale or "",
                 result_shape=_derive_result_shape(finding),
                 substitutions={str(k): str(v) for k, v in substitutions.items()},
             )
