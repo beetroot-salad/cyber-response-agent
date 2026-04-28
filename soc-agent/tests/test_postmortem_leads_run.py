@@ -289,6 +289,41 @@ class TestEndToEnd:
         # No PR opened — guard fires before the push step.
         assert push_called == []
 
+    def test_git_failure_in_scope_check_marks_failed(
+        self,
+        repo_with_run: tuple[Path, Path, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If `git rev-list` (or `git diff --name-only`) fails, the
+        orchestrator must surface the stderr instead of silently
+        treating it as "no commit" or "all in scope". A swallowed git
+        failure could otherwise mask "git is broken" as either failure
+        mode."""
+        repo_root, run_dir, out_dir = repo_with_run
+        monkeypatch.delenv(run_module.WORKTREE_DIR_ENV, raising=False)
+        monkeypatch.setattr(run_module, "_spawn_agent", _stub_agent_commit([]))
+
+        # Force `_has_new_commit` to fail by making the underlying
+        # subprocess return non-zero. Stub the Popen wrapper.
+        real_run = subprocess.run
+
+        def fake_run(args, **kwargs):  # type: ignore[no-untyped-def]
+            if isinstance(args, list) and "rev-list" in args:
+                class _Proc:
+                    returncode = 128
+                    stdout = ""
+                    stderr = "fatal: bad revision 'main..HEAD'"
+                return _Proc()
+            return real_run(args, **kwargs)
+
+        monkeypatch.setattr(run_module.subprocess, "run", fake_run)
+
+        rc = run_module.main(_argv(repo_root, run_dir, out_dir))
+        assert rc == 1
+        failed_text = (out_dir / "failed").read_text()
+        assert "git rev-list failed" in failed_text
+        assert "bad revision" in failed_text
+
     def test_worktree_dir_env_override(
         self,
         repo_with_run: tuple[Path, Path, Path],

@@ -21,6 +21,7 @@ must never crash the agent session.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,12 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts import close_ticket_action, investigation_summary  # noqa: E402
 from hooks.scripts.run_context import get_runs_dir, resolve_run_dir  # noqa: E402
+from scripts.postmortem.leads.extract import has_ad_hoc_leads  # noqa: E402
+
+# Off by default until the real `_spawn_agent` lands. With the stub, every
+# Stop event would otherwise create a worktree + branch + `failed` marker
+# per investigation. Operators flip this on once the LLM invocation is in.
+POSTMORTEM_ENABLED_ENV = "SOC_AGENT_POSTMORTEM_LEADS_ENABLED"
 
 
 def _run_step(name: str, func, payload: dict) -> None:
@@ -61,6 +68,8 @@ def _maybe_spawn_postmortem(payload: dict) -> None:
     warning. Silent skips on a missing run dir or unparseable meta are
     a debugging trap — make them visible.
     """
+    if os.environ.get(POSTMORTEM_ENABLED_ENV, "").lower() not in ("1", "true", "yes"):
+        return
     session_id = payload.get("session_id", "")
     if not session_id:
         # Stop hooks may legitimately fire without a session id (manual
@@ -92,7 +101,6 @@ def _maybe_spawn_postmortem(payload: dict) -> None:
         return
     vendor = signature_id.split("-", 1)[0]
 
-    from scripts.postmortem.leads.extract import has_ad_hoc_leads
     if not has_ad_hoc_leads(inv_path.read_text(), vendor):
         # Common case — silent skip.
         return

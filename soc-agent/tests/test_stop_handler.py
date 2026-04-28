@@ -127,6 +127,9 @@ class TestPostmortemSpawn:
         sessions = runs / ".sessions"
         sessions.mkdir()
         monkeypatch.setenv("SOC_AGENT_RUNS_DIR", str(runs))
+        # Tests assume the post-mortem path is enabled. Tests that
+        # specifically exercise the gate set / clear this themselves.
+        monkeypatch.setenv(stop_handler.POSTMORTEM_ENABLED_ENV, "1")
         return runs
 
     def _seed_run(self, runs_dir, session_id, *, has_adhoc: bool):
@@ -254,3 +257,43 @@ class TestPostmortemSpawn:
             stop_handler._maybe_spawn_postmortem,
             {"session_id": "sess-popen-fail"},
         )
+
+    def test_gate_off_skips_silently_even_with_adhoc(self, runs_dir, monkeypatch):
+        """With the gate unset, the spawn must not fire even when the
+        run has ad-hoc leads. This is the slice-1 default — `_spawn_agent`
+        is stubbed, so unconditional spawning would litter `failed`
+        markers across every investigation."""
+        self._seed_run(runs_dir, "sess-gate-off", has_adhoc=True)
+        monkeypatch.delenv(stop_handler.POSTMORTEM_ENABLED_ENV, raising=False)
+        called = []
+        monkeypatch.setattr(
+            stop_handler.subprocess, "Popen",
+            lambda *a, **kw: called.append("popen"),
+        )
+        stop_handler._maybe_spawn_postmortem({"session_id": "sess-gate-off"})
+        assert called == []
+
+    def test_gate_accepts_truthy_values(self, runs_dir, monkeypatch):
+        """The gate accepts 1/true/yes (case-insensitive)."""
+        self._seed_run(runs_dir, "sess-gate-truthy", has_adhoc=True)
+        for v in ("1", "true", "TRUE", "yes", "Yes"):
+            called = []
+            monkeypatch.setenv(stop_handler.POSTMORTEM_ENABLED_ENV, v)
+            monkeypatch.setattr(
+                stop_handler.subprocess, "Popen",
+                lambda *a, **kw: called.append("popen") or type("P", (), {"pid": 1})(),
+            )
+            stop_handler._maybe_spawn_postmortem({"session_id": "sess-gate-truthy"})
+            assert called == ["popen"], f"value {v!r} should enable the gate"
+
+    def test_gate_rejects_falsey_values(self, runs_dir, monkeypatch):
+        self._seed_run(runs_dir, "sess-gate-falsey", has_adhoc=True)
+        for v in ("0", "false", "no", "", "off"):
+            called = []
+            monkeypatch.setenv(stop_handler.POSTMORTEM_ENABLED_ENV, v)
+            monkeypatch.setattr(
+                stop_handler.subprocess, "Popen",
+                lambda *a, **kw: called.append("popen"),
+            )
+            stop_handler._maybe_spawn_postmortem({"session_id": "sess-gate-falsey"})
+            assert called == [], f"value {v!r} should leave the gate closed"

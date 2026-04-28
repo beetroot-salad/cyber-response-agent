@@ -125,6 +125,55 @@ class TestExtractAdHocLeads:
         assert l3.result_shape == "errored"
 
 
+class TestFindingsGatherAlias:
+    """`_merge_md_blocks` accepts both `findings:` (current spec) and
+    `gather:` (older on-disk shape) and merges them under one `findings`
+    key. The post-mortem extractor relies on this — real production runs
+    write `gather:`. Covered transitively by the gold fixture, but a
+    direct unit test pins the contract."""
+
+    def test_findings_key_parses(self) -> None:
+        from scripts.invlang.corpus import _merge_md_blocks
+        text = (
+            "```yaml\n"
+            "findings:\n"
+            "  - id: l-1\n"
+            "    name: example\n"
+            "```\n"
+        )
+        merged = _merge_md_blocks(text)
+        assert [f["id"] for f in merged["findings"]] == ["l-1"]
+
+    def test_gather_key_parses_as_alias(self) -> None:
+        from scripts.invlang.corpus import _merge_md_blocks
+        text = (
+            "```yaml\n"
+            "gather:\n"
+            "  - id: l-1\n"
+            "    name: example\n"
+            "```\n"
+        )
+        merged = _merge_md_blocks(text)
+        assert [f["id"] for f in merged["findings"]] == ["l-1"]
+
+    def test_findings_and_gather_merge(self) -> None:
+        from scripts.invlang.corpus import _merge_md_blocks
+        text = (
+            "```yaml\n"
+            "findings:\n"
+            "  - id: l-1\n"
+            "    name: a\n"
+            "```\n\n"
+            "```yaml\n"
+            "gather:\n"
+            "  - id: l-2\n"
+            "    name: b\n"
+            "```\n"
+        )
+        merged = _merge_md_blocks(text)
+        assert [f["id"] for f in merged["findings"]] == ["l-1", "l-2"]
+
+
 class TestHasAdHocLeads:
     def test_true_for_gold_fixture(self, tmp_path: Path) -> None:
         text = (FIXTURES / "inv_with_adhoc.md").read_text()

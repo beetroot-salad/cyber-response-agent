@@ -79,13 +79,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 def _load_signature_id(run_dir: Path) -> str:
     meta_path = run_dir / "meta.json"
     if not meta_path.exists():
-        raise OrchestrationError(
+        raise PostmortemError(
             f"meta.json missing under {run_dir}; cannot derive vendor"
         )
     meta = json.loads(meta_path.read_text())
     sig = meta.get("signature_id")
     if not isinstance(sig, str) or not sig.strip():
-        raise OrchestrationError(
+        raise PostmortemError(
             f"meta.json under {run_dir} has no usable signature_id"
         )
     return sig
@@ -119,8 +119,12 @@ def _render_prompt(
 # Agent spawn — stubbed in slice 1
 # ---------------------------------------------------------------------------
 
-class OrchestrationError(RuntimeError):
-    pass
+class PostmortemError(RuntimeError):
+    """Pipeline-internal failures (missing meta, push/PR errors, scope
+    violations). Renamed from `OrchestrationError` to avoid collision
+    with `scripts.orchestrate.OrchestrationError`, which is what
+    `_derive_vendor` raises when the signature_id is malformed. Both
+    funnel into `main`'s `except Exception` and mark `failed`."""
 
 
 def _spawn_agent(
@@ -147,18 +151,27 @@ def _spawn_agent(
 
 
 def _has_new_commit(worktree_path: Path, base_ref: str) -> bool:
-    """True iff the worktree's HEAD has advanced past `base_ref`."""
+    """True iff the worktree's HEAD has advanced past `base_ref`.
+
+    Raises `PostmortemError` on git failure — silently returning False
+    would let "git is broken" masquerade as "agent did not commit".
+    """
     proc = subprocess.run(
         ["git", "-C", str(worktree_path), "rev-list", "--count", f"{base_ref}..HEAD"],
         capture_output=True,
         text=True,
     )
     if proc.returncode != 0:
-        return False
+        raise PostmortemError(
+            f"git rev-list failed in {worktree_path} (rc={proc.returncode}): "
+            f"{proc.stderr.strip()}"
+        )
     try:
         return int(proc.stdout.strip()) > 0
-    except ValueError:
-        return False
+    except ValueError as e:
+        raise PostmortemError(
+            f"git rev-list returned non-integer count: {proc.stdout!r}"
+        ) from e
 
 
 # The agent must commit only catalog edits. A `git add -A` mistake (or any
@@ -169,13 +182,22 @@ ALLOWED_COMMIT_PREFIX = "soc-agent/knowledge/common-investigation/leads/"
 
 
 def _committed_paths(worktree_path: Path, base_ref: str) -> list[str]:
+    """Return the list of paths committed since `base_ref`.
+
+    Raises `PostmortemError` on git failure — a swallowed failure here
+    would return an empty list, which `_out_of_scope` would treat as
+    "all clean" and let an unverified push proceed.
+    """
     proc = subprocess.run(
         ["git", "-C", str(worktree_path), "diff", "--name-only", f"{base_ref}..HEAD"],
         capture_output=True,
         text=True,
     )
     if proc.returncode != 0:
-        return []
+        raise PostmortemError(
+            f"git diff --name-only failed in {worktree_path} "
+            f"(rc={proc.returncode}): {proc.stderr.strip()}"
+        )
     return [l for l in proc.stdout.splitlines() if l.strip()]
 
 
@@ -199,7 +221,7 @@ def _push_and_pr(
         text=True,
     )
     if push.returncode != 0:
-        raise OrchestrationError(
+        raise PostmortemError(
             f"git push failed (rc={push.returncode}): {push.stderr.strip()}"
         )
     pr = subprocess.run(
@@ -222,7 +244,7 @@ def _push_and_pr(
         text=True,
     )
     if pr.returncode != 0:
-        raise OrchestrationError(
+        raise PostmortemError(
             f"gh pr create failed (rc={pr.returncode}): {pr.stderr.strip()}"
         )
     return pr.stdout.strip()

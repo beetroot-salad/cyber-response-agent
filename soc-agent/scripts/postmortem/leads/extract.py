@@ -8,10 +8,10 @@ catalogued vendor template. Two on-disk markers identify ad-hoc:
   2. `_lead_template_path(name, vendor).exists()` is False (the catalog
      directory or the per-vendor template is missing for this vendor).
 
-These mirror gather's own dispatch rule at `gather.py:1635` — if either
-holds, gather routes to `gather-composite` in `mode=ad-hoc`. The
-post-mortem extractor uses the same bar so it sees exactly the leads
-gather treated as ad-hoc.
+These mirror gather's own dispatch rule (`scripts.handlers.gather`'s
+ad-hoc routing) — if either holds, gather routes to `gather-composite`
+in `mode=ad-hoc`. The post-mortem extractor uses the same bar so it
+sees exactly the leads gather treated as ad-hoc.
 
 Block-walking + YAML parsing reuses `scripts.invlang.corpus._merge_md_blocks`,
 which already knows the canonical companion shape (and accepts both
@@ -37,7 +37,13 @@ _SOC_AGENT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _lead_template_path(lead_name: str, vendor: str) -> Path:
-    """Catalog template path for `(lead, vendor)`. Mirrors gather.py:162."""
+    """Catalog template path for `(lead, vendor)`.
+
+    Mirrors `scripts.handlers.gather._lead_template_path`. Kept as a
+    local copy because the post-mortem extractor must not import gather
+    (heavy dependency tree, including the orchestrator). If the catalog
+    layout changes, both copies move together.
+    """
     return (
         _SOC_AGENT_ROOT
         / "knowledge"
