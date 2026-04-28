@@ -1,7 +1,16 @@
 # Investigation Language
 
-**Status:** Spec v2.14. Implemented.
+**Status:** Spec v2.15. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
+
+**v2.15 delta:** Validator rule consolidation — 36 → 29 active rules. Doc-only refactor; no validator behavior change. Drives:
+- Reference-resolution merge: rules #12, #19, #20, and the resolution clause of #22 fold into rule #7. Single "all references resolve in scope" rule covers `v-*`, `e-*`, `h-*`, `l-*`, hierarchical `h-{parent}-{nonce}`, contract `edge_ref`, `fulfills_contract`, and `attribute_updates.target`.
+- SCREEN structural integrity merge: former #16 (screen_result scope) absorbs into #17.
+- Schema-validity scope expansion: rule #1 absorbs former #15 (sub-vertex `v-{parent}-{nonce}` shape) and the exclusivity clause of former #22 (target shape).
+- Past-case ⇒ partial enum constraint moves from former #27a to rule #11; #27 retains the no-sole-grounding rule for benign.
+- Demotion: former #10 (mechanical leads stay within data source) is now a review-only discipline guideline — semantic, not validator-enforced. Retained in §Conventions.
+- Numbering preserved with redirect notes at the seven gaps (#10, #12, #15, #16, #19, #20, #22) so existing code, prompt, and test references to those rule numbers remain greppable. Rule #36 (v2.14) is unaffected by the consolidation and counts toward the 29 active rules.
+- Per-rule audit: see `docs/invlang-rule-audit.md` (added 2026-04 alongside `docs/dense-investigation-format.md`).
 
 **v2.14 delta:** rule #36 — affirmative `true_positive` disposition. Closes the absence-of-benign-confirmation cascade (4 production runs documented in `tasks/analyze-true-positive-routing.md`) by structurally rejecting `disposition: true_positive` writes whose `surviving_hypotheses[]` carries no hypothesis that is both adversarially-classified AND graded `++`. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Empirically motivated: trap-set evaluation showed prompt-only guidance lets ~50% of false-true-positive cases through; the structural gate raises catch rate to ~100%.
 
@@ -1104,9 +1113,14 @@ coverage.
 
 ## Validator rules
 
+The validator enforces **29 active rules** (rules 1–36 with seven gaps). Seven historical rule numbers (#10, #12, #15, #16, #19, #20, #22) are gaps — their content was either merged into a sibling rule or demoted to review-only discipline. Numbering is preserved for grep-stability of existing code, prompt, and test references; merged rules carry a redirect to their new home. Rule #36 is the most recent addition (v2.14, affirmative true_positive disposition) — included in the 29-active count.
+
 1. **Schema validity.** Required fields present, enums valid, IDs
-   well-formed (including hierarchical patterns for hypotheses and
-   sub-vertices).
+   well-formed (including hierarchical patterns for hypotheses,
+   sub-vertices `v-{parent}-{nonce}`, and the `target: v-{id}` /
+   `target: e-{id}` exclusivity on `attribute_updates`).
+   *(Absorbs former #15 sub-vertex ID shape and the shape clause of
+   former #22 attribute-update target.)*
 
 2. **Classification vocabulary.** Every `classification` is from the
    seed vocabulary (§Types classification lists) or a
@@ -1124,11 +1138,22 @@ coverage.
 
 6. **Prediction completeness for `++`.** `matched_prediction_ids`
    across all resolutions on a hypothesis must equal the full
-   prediction set. Partial coverage caps at `+`.
+   prediction set. Partial coverage caps at `+`. Early gate at
+   write time on `++` resolutions; rule #34 is the late closure
+   gate at CONCLUDE on every weight.
 
-7. **ID references resolve.** Every `v-*`, `e-*`, `h-*`, `l-*`
+7. **Reference resolution.** Every `v-*`, `e-*`, `h-*`, `l-*`
    reference in any field points to a record that exists in the
-   companion.
+   companion. Hierarchical hypothesis IDs `h-{parent}-{nonce}`
+   require the parent hypothesis to be declared. Authorization
+   contract `edge_ref` is the literal `proposed` or an existing
+   `e-*` id. Authorization resolution `fulfills_contract` of shape
+   `h-{id}.ac{n}` points to a hypothesis whose `authorization_contract`
+   declares that `ac{n}`. Attribute-update `target` of shape
+   `v-{id}` or `e-{id}` points to a declared record.
+   *(Absorbs former #12 hierarchical hypothesis IDs, #19 contract
+   edge_ref, #20 fulfills_contract back-ref, and the resolution
+   clause of former #22 attribute-update target.)*
 
 8. **Append-only.** No existing record is mutated.
 
@@ -1136,46 +1161,58 @@ coverage.
    produced by a lead lives inside that lead's `outcome.observations`,
    `new_hypotheses`, or `shelved`.
 
-10. **Mechanical leads stay within their data source.** A lead's
-    `outcome.observations` contains only entities the queried system
-    directly observes by native identity.
+10. **(Demoted to review-only.)** *Mechanical leads stay within their
+    data source* — a lead's `outcome.observations` contains only
+    entities the queried system directly observes by native identity.
+    Semantic discipline that requires per-system knowledge to
+    enforce mechanically; not currently validator-checked. Retained
+    in §Conventions as authoring guidance.
 
-11. **Anchor-query provenance completeness.** Every
+11. **Anchor-query provenance completeness and enums.** Every
     `authorization_resolutions[]` entry requires `verdict`,
     `anchor_kind`, `anchor_id`, `grounding_kind`,
     `authority_for_question`, `as_of`, `resolved_by_lead`, and
     `fulfills_contract`. When `grounding_kind: past-case`,
     `cites_past_case.run_id` and `cites_past_case.contract_ref` are
-    required. Every `anchor_consultations[]` entry requires
-    `anchor_id`, `anchor_kind`, `grounding_kind`, `result`, `as_of`,
-    and `authority_for_question`. Enum constraints per §Anchor
-    consultation: authz resolutions exclude `telemetry-baseline` from
-    `grounding_kind`; consultations exclude `past-case`.
+    required, AND `authority_for_question` must be `partial` (rule
+    #14 then caps weight effect at `+`/`-`). Every
+    `anchor_consultations[]` entry requires `anchor_id`,
+    `anchor_kind`, `grounding_kind`, `result`, `as_of`, and
+    `authority_for_question`. Enum constraints per §Anchor
+    consultation: authz resolutions exclude `telemetry-baseline`
+    from `grounding_kind`; consultations exclude `past-case`.
+    *(Absorbs the past-case ⇒ partial enum clause from former #27a;
+    #27 retains only the no-sole-grounding rule.)*
 
-12. **Hierarchical hypothesis ID consistency.** A hypothesis with ID
-    `h-001-002` requires that `h-001` exists in the same companion.
+12. **(Merged into rule #7.)** Hierarchical hypothesis ID
+    consistency — see rule #7.
 
 13. **`ceiling_test` requires severity-ceiling.** Required when
     `termination.category: severity-ceiling`; forbidden otherwise.
 
 14. **`partial` authority caps weight.** A hypothesis resolution
-    grounded solely by an `authorization_resolutions[]` or
-    `anchor_consultations[]` entry with `authority_for_question:
-    partial` cannot push weight past `+` or `-` regardless of the
-    verdict or result.
+    grounded *solely* by `authorization_resolutions[]`,
+    `anchor_consultations[]`, or `impact_resolutions[]` entries with
+    `authority_for_question: partial` cannot push weight past `+`
+    or `-` regardless of verdict or result. A resolution citing at
+    least one `full`-authority entry alongside partial entries is
+    *not* capped — the cap fires only when every cited grounding
+    entry is partial.
 
-15. **`component_of` sub-vertex ID convention.** Sub-vertices should
-    follow `v-{parent}-{nonce}`. Not mechanically enforced; enforced
-    by review.
+15. **(Merged into rule #1.)** `component_of` sub-vertex
+    ID `v-{parent}-{nonce}` shape — see rule #1 (IDs well-formed).
 
-16. **`screen_result` requires `mode: screen`.** `outcome.screen_result`
-    is only valid on leads where `mode: screen` is set. Only the final
-    lead in a SCREEN sequence carries `screen_result`; intermediate
-    screen leads omit it.
+16. **(Merged into rule #17.)** `screen_result` requires `mode:
+    screen` — see rule #17 (SCREEN structural integrity).
 
-17. **SCREEN-matched companions omit `hypothesize`.** When
-    `outcome.screen_result: match` is present on any lead,
-    the top-level `hypothesize` block must be absent.
+17. **SCREEN structural integrity.** `outcome.screen_result` is only
+    valid on leads where `mode: screen` is set; only the final lead
+    in a SCREEN sequence carries `screen_result` (intermediate screen
+    leads omit it). When any lead carries `outcome.screen_result:
+    match`, the top-level `hypothesize` block must be absent — a
+    SCREEN-matched companion does not enumerate hypotheses.
+    *(Absorbs former #16 — SCREEN scope and SCREEN-match
+    omit-hypothesize collapse into one structural rule.)*
 
 18. **Lead-level predictions structure.** When `lead.predictions` is
     present, each entry has `id` (matching `^lp\d+$`, unique within
@@ -1186,15 +1223,11 @@ coverage.
     at least one `advance_to` value — otherwise a route-compliance
     warning is emitted.
 
-19. **Authorization contract `edge_ref` resolves.** Every
-    `authorization_contract[].edge_ref` is either the literal
-    `proposed` (referring to the hypothesis's own `proposed_edge`) or
-    an `e-*` id that exists in the companion.
+19. **(Merged into rule #7.)** Authorization contract `edge_ref`
+    resolves — see rule #7 (reference resolution).
 
-20. **Authorization back-reference resolves.** Every
-    `authorization_resolutions[].fulfills_contract` of the form
-    `h-{id}.ac{n}` points to an existing hypothesis whose
-    `authorization_contract` contains an entry with that id.
+20. **(Merged into rule #7.)** Authorization back-reference resolves
+    — see rule #7 (reference resolution).
 
 21. **Authorization-gated disposition.** A `conclude.disposition:
     benign` requires every `authorization_contract` across all
@@ -1208,9 +1241,10 @@ coverage.
     disposition ∈ {`unclear`, `true_positive`}. Replaces the former
     "maintain adversarial hypothesis until `--`" bookkeeping rule.
 
-22. **Attribute-update target shape.** Every `attribute_updates` entry
-    has exactly one of `target: v-{id}` or `target: e-{id}`, and the
-    id exists in the companion.
+22. **(Merged into rules #1 and #7.)** Attribute-update target shape
+    — exclusivity check (exactly one of `v-{id}` / `e-{id}`) lives
+    in rule #1 (schema validity); reference resolution lives in
+    rule #7.
 
 23. **Hypothesis fork distinctness.** Within a sibling group —
     hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` —
@@ -1262,17 +1296,15 @@ coverage.
     declared contracts had no resolution; rule #21 gated benign but
     escalation paths silently accepted orphans.
 
-27. **Past-case authority cap and no-sole-grounding.** When an
-    `authorization_resolutions[]` entry has
-    `grounding_kind: past-case`, `authority_for_question` must be
-    `partial` (rule 14 then caps weight effect at `+`/`-`). On any
+27. **Past-case no-sole-grounding for benign.** On any
     `authorization_contract` that is load-bearing for
     `disposition: benign` (i.e., the hypothesis is confirmed-weight at
     CONCLUDE), at least one fulfilling `authorization_resolutions`
     entry must have `grounding_kind: org-authority` — if every
     fulfilling resolution has `grounding_kind: past-case`, the
     contract is treated as unresolved for rule #21 and escalation is
-    forced.
+    forced. *(Former clause (a) — past-case ⇒ partial — moved to
+    rule #11 as an enum constraint.)*
 
 28. **Past-case chain depth cap.** An `authorization_resolutions[]`
     entry with `grounding_kind: past-case` references a source
@@ -1346,17 +1378,16 @@ coverage.
 34. **Prediction closure at CONCLUDE.** When a `conclude:` block is
     written, every declared `predictions[].id` (`p*`) and
     `attribute_predictions[].id` (`ap*`) on a hypothesis whose final
-    status is neither `refuted` nor `shelved` must be either (a) cited
-    in some resolution's `matched_prediction_ids[]` with a non-null
-    `after`, OR (b) listed in `conclude.deferred_predictions[]` with a
-    non-empty `rationale`. Each `deferred_predictions[]` entry has
+    status is neither `refuted` nor `shelved` (i.e. `active` or
+    `confirmed`) must be either (a) cited in some resolution's
+    `matched_prediction_ids[]` with a non-null `after`, OR (b) listed
+    in `conclude.deferred_predictions[]` with a non-empty `rationale`.
+    Each `deferred_predictions[]` entry has
     `prediction_ref: h-{id}.{p|ap}{n}` and `rationale: "<why>"`.
-    Generalises rule #6 (which only fires on `++`) — at REPORT every
-    declared prediction needs either a verdict at any weight or
-    explicit deferral, regardless of the hypothesis's final weight.
-    Closes the contract analyze owes predict: predict pre-commits a
-    prediction set; analyze must address every entry by REPORT or the
-    loop owes a justification.
+    Late closure gate; rule #6 is the early gate at write time on
+    `++` resolutions. Closes the contract analyze owes predict:
+    predict pre-commits a prediction set; analyze must address every
+    entry by REPORT or the loop owes a justification.
 
 35. **Sibling prediction divergence.** Within a sibling group —
     hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` —

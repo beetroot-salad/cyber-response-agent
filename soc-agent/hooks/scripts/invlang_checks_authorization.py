@@ -1,11 +1,19 @@
-"""Authorization-as-edge-attribute checks (spec rules #19–#22, #36).
+"""Authorization-as-edge-attribute checks.
 
-Covers the authorization_contract / authorization_resolutions primitive:
-- contract edge_ref resolution (rule #19)
-- resolution fulfills_contract back-reference (rule #20)
-- benign-disposition gating (rule #21)
-- attribute_updates target shape (rule #22)
-- affirmative true_positive disposition (rule #36)
+Covers the authorization_contract / authorization_resolutions primitive
+plus the affirmative true_positive disposition gate. Rule numbering
+reflects the v2.15 consolidation — several checks formerly numbered
+#19–#22 are now spec-level sub-cases of unified reference-resolution
+rule (#7) or schema-validity rule (#1). Check function names are kept
+stable for grep-friendly cross-references in tests, prompts, and
+external docs:
+
+- contract edge_ref resolution: spec rule #7 (was #19)
+- resolution fulfills_contract back-reference: spec rule #7 (was #20)
+- benign-disposition gating: spec rule #21
+- attribute_updates target shape: spec rules #1 (exclusivity) + #7
+  (resolution); was #22
+- affirmative true_positive disposition: spec rule #36 (v2.14)
 """
 
 from __future__ import annotations
