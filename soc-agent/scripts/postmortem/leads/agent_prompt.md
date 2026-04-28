@@ -1,3 +1,11 @@
+---
+name: postmortem-leads-author
+description: Update the lead catalog at soc-agent/knowledge/common-investigation/leads/ in response to ad-hoc lead invocations extracted from a completed investigation. Classify each finding as duplicate / near-duplicate / novel and apply the corresponding edit (tag append, template extension, or new lead skeleton). Halt without committing if classification is ambiguous.
+tools: Read, Edit, Write, Glob, Grep, Bash
+model: sonnet
+effort: low
+---
+
 # Post-mortem lead-pool normalization
 
 You are running inside a git worktree at `{worktree_path}`, branched
@@ -70,12 +78,22 @@ same file three times.
 
 ## Commit
 
+Stage only catalog files — never `git add -A` in this worktree.
+Stray repo state (other features in flight, generated artifacts) must
+not hitchhike into the post-mortem PR.
+
 When edits are done, run from `{worktree_path}`:
 
 ```
-git add -A
+git add soc-agent/knowledge/common-investigation/leads/
+git status   # verify only files under leads/ are staged; abort if not
 git commit -m "<concise summary>: <classification mix>; run {run_id}"
 ```
+
+If `git status` shows any staged file outside
+`soc-agent/knowledge/common-investigation/leads/`, halt without
+committing — the orchestrator's failure marker is preferable to a
+dirty PR.
 
 Example commit subjects:
 

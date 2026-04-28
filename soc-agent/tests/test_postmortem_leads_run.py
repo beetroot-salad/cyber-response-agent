@@ -124,6 +124,8 @@ class TestEndToEnd:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         repo_root, run_dir, out_dir = repo_with_run
+        # Default placement (no env override) — worktree lands at <out_dir>/worktree
+        monkeypatch.delenv(run_module.WORKTREE_DIR_ENV, raising=False)
         prompts: list[str] = []
         prs: list[dict[str, Any]] = []
         monkeypatch.setattr(run_module, "_spawn_agent", _stub_agent_commit(prompts))
@@ -157,6 +159,7 @@ class TestEndToEnd:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        monkeypatch.delenv(run_module.WORKTREE_DIR_ENV, raising=False)
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         _init_repo(repo_root)
@@ -191,6 +194,7 @@ class TestEndToEnd:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         repo_root, run_dir, out_dir = repo_with_run
+        monkeypatch.delenv(run_module.WORKTREE_DIR_ENV, raising=False)
         monkeypatch.setattr(run_module, "_spawn_agent", _stub_agent_no_commit())
         push_called = []
         monkeypatch.setattr(
@@ -211,6 +215,7 @@ class TestEndToEnd:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         repo_root, run_dir, out_dir = repo_with_run
+        monkeypatch.delenv(run_module.WORKTREE_DIR_ENV, raising=False)
         # Pre-create the collision branch
         subprocess.run(
             ["git", "-C", str(repo_root), "branch",
@@ -223,3 +228,24 @@ class TestEndToEnd:
         assert rc == 1
         assert (out_dir / "failed").exists()
         assert "worktree create failed" in (out_dir / "failed").read_text()
+
+    def test_worktree_dir_env_override(
+        self,
+        repo_with_run: tuple[Path, Path, Path],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        repo_root, run_dir, out_dir = repo_with_run
+        wt_root = tmp_path / "shared-worktrees"
+        monkeypatch.setenv(run_module.WORKTREE_DIR_ENV, str(wt_root))
+        monkeypatch.setattr(run_module, "_spawn_agent", _stub_agent_commit([]))
+        monkeypatch.setattr(run_module, "_push_and_pr", _stub_push_and_pr([]))
+
+        rc = run_module.main(_argv(repo_root, run_dir, out_dir))
+        assert rc == 0
+        status = json.loads((out_dir / "status.json").read_text())
+        # branch_name is `postmortem-leads/<run_id>`; sanitized for path
+        # to avoid the slash creating a subdir.
+        expected = wt_root / f"postmortem-leads-{run_dir.name}"
+        assert status["worktree"] == str(expected)
+        assert expected.is_dir()

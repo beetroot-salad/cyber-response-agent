@@ -156,6 +156,10 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
     hypothesize at PREDICT, gather lead at ANALYZE, conclude at REPORT);
     gather blocks may appear multiple times. This mirrors the merge in cli.py's
     `--ids` handler.
+
+    Both `findings:` (current spec) and `gather:` (older on-disk shape) are
+    accepted as aliases for the lead-block list. They merge into the same
+    `findings` key in the returned dict.
     """
     merged: dict[str, Any] = {}
     for match in YAML_BLOCK_RE.finditer(text):
@@ -168,9 +172,11 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
         for key in ("prologue", "hypothesize", "conclude"):
             if key in doc:
                 merged[key] = doc[key]
-        if "findings" in doc and isinstance(doc["findings"], list):
-            merged.setdefault("findings", [])
-            merged["findings"].extend(doc["findings"])
+        for findings_key in ("findings", "gather"):
+            entries = doc.get(findings_key)
+            if isinstance(entries, list):
+                merged.setdefault("findings", [])
+                merged["findings"].extend(entries)
     return merged
 
 

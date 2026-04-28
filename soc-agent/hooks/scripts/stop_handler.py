@@ -39,6 +39,12 @@ def _run_step(name: str, func, payload: dict) -> None:
         print(f"stop_handler: {name} raised: {exc!r}", file=sys.stderr)
 
 
+def _warn(reason: str) -> None:
+    """Log a single-line stderr warning. Reaches the harness log so a
+    human can spot why a run silently skipped post-mortem normalization."""
+    print(f"stop_handler[postmortem]: skipped — {reason}", file=sys.stderr)
+
+
 def _maybe_spawn_postmortem(payload: dict) -> None:
     """Detached-spawn the post-mortem lead-pool normalizer if the run
     produced any ad-hoc lead invocations.
@@ -50,28 +56,45 @@ def _maybe_spawn_postmortem(payload: dict) -> None:
 
     The spawn itself is fire-and-forget. Parent must not block on the
     LLM-driven catalog edits — agent termination is the priority.
+
+    Skips that are NOT the common-case-no-findings path emit a stderr
+    warning. Silent skips on a missing run dir or unparseable meta are
+    a debugging trap — make them visible.
     """
     session_id = payload.get("session_id", "")
     if not session_id:
+        # Stop hooks may legitimately fire without a session id (manual
+        # invocations, test harnesses); that's not a debugging trap.
         return
     run_dir, _ = resolve_run_dir(session_id, get_runs_dir())
     if run_dir is None:
+        _warn(f"could not resolve run dir for session_id={session_id!r}")
         return
     inv_path = run_dir / "investigation.md"
     meta_path = run_dir / "meta.json"
-    if not (inv_path.exists() and meta_path.exists()):
+    if not inv_path.exists():
+        _warn(f"investigation.md missing under {run_dir}")
+        return
+    if not meta_path.exists():
+        _warn(f"meta.json missing under {run_dir}")
         return
     try:
         meta = json.loads(meta_path.read_text())
-    except Exception:
+    except Exception as exc:
+        _warn(f"meta.json under {run_dir} is unparseable: {exc!r}")
         return
     signature_id = meta.get("signature_id")
     if not isinstance(signature_id, str) or "-" not in signature_id:
+        _warn(
+            f"meta.json under {run_dir} has no usable signature_id "
+            f"({signature_id!r})"
+        )
         return
     vendor = signature_id.split("-", 1)[0]
 
     from scripts.postmortem.leads.extract import has_ad_hoc_leads
     if not has_ad_hoc_leads(inv_path.read_text(), vendor):
+        # Common case — silent skip.
         return
 
     out_dir = get_runs_dir() / "postmortem" / run_dir.name / "leads"

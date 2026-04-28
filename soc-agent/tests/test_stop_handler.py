@@ -196,7 +196,7 @@ class TestPostmortemSpawn:
         stop_handler._maybe_spawn_postmortem({})
         assert called == []
 
-    def test_skips_when_meta_json_absent(self, runs_dir, monkeypatch):
+    def test_skips_when_meta_json_absent(self, runs_dir, monkeypatch, capsys):
         run_dir = self._seed_run(runs_dir, "sess-no-meta", has_adhoc=True)
         (run_dir / "meta.json").unlink()
         called = []
@@ -206,6 +206,40 @@ class TestPostmortemSpawn:
         )
         stop_handler._maybe_spawn_postmortem({"session_id": "sess-no-meta"})
         assert called == []
+        # Loud — log a warning to stderr so a debugger can spot the skip.
+        err = capsys.readouterr().err
+        assert "meta.json missing" in err
+
+    def test_skips_when_run_dir_unresolved(self, runs_dir, monkeypatch, capsys):
+        # No session-mapping file exists — resolve_run_dir returns None.
+        called = []
+        monkeypatch.setattr(
+            stop_handler.subprocess, "Popen",
+            lambda *a, **kw: called.append(("popen", a, kw)),
+        )
+        stop_handler._maybe_spawn_postmortem({"session_id": "sess-unknown"})
+        assert called == []
+        err = capsys.readouterr().err
+        assert "could not resolve run dir" in err
+        assert "sess-unknown" in err
+
+    def test_silent_skip_when_no_session_id(self, runs_dir, monkeypatch, capsys):
+        # No session_id is a legitimate, expected case (manual invocations);
+        # do not warn.
+        stop_handler._maybe_spawn_postmortem({})
+        err = capsys.readouterr().err
+        assert err == ""
+
+    def test_silent_skip_when_no_adhoc_findings(self, runs_dir, monkeypatch, capsys):
+        # The common case — quiet skip.
+        self._seed_run(runs_dir, "sess-clean-quiet", has_adhoc=False)
+        monkeypatch.setattr(
+            stop_handler.subprocess, "Popen",
+            lambda *a, **kw: None,
+        )
+        stop_handler._maybe_spawn_postmortem({"session_id": "sess-clean-quiet"})
+        err = capsys.readouterr().err
+        assert err == ""
 
     def test_popen_failure_does_not_crash_handler(self, runs_dir, monkeypatch):
         self._seed_run(runs_dir, "sess-popen-fail", has_adhoc=True)

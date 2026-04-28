@@ -54,6 +54,14 @@ PROMPT_TEMPLATE_PATH = (
     SOC_AGENT_ROOT / "scripts" / "postmortem" / "leads" / "agent_prompt.md"
 )
 
+# Env override for where the per-run worktree gets created. By default it
+# lands at `<out_dir>/worktree`, sibling to status.json / run.log /
+# failed. Operators who keep their post-mortem worktrees centrally
+# (e.g. under .claude/worktrees/) can point this at a shared root and
+# the orchestrator will materialize each run's worktree as a child:
+# `$SOC_AGENT_POSTMORTEM_WORKTREE_DIR/<branch_name>`.
+WORKTREE_DIR_ENV = "SOC_AGENT_POSTMORTEM_WORKTREE_DIR"
+
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="postmortem.leads.run")
@@ -232,7 +240,11 @@ def main(argv: list[str] | None = None) -> int:
 
         base_ref = current_branch(repo_root)
         branch_name = f"postmortem-leads/{run_id}"
-        worktree_path = out_dir / "worktree"
+        worktree_root_env = os.environ.get(WORKTREE_DIR_ENV)
+        if worktree_root_env:
+            worktree_path = Path(worktree_root_env) / branch_name.replace("/", "-")
+        else:
+            worktree_path = out_dir / "worktree"
 
         try:
             create_worktree(repo_root, worktree_path, branch_name, base_ref)

@@ -13,20 +13,18 @@ holds, gather routes to `gather-composite` in `mode=ad-hoc`. The
 post-mortem extractor uses the same bar so it sees exactly the leads
 gather treated as ad-hoc.
 
-The companion's top-level key is read as either `gather:` (older runs
-and the current production schema as observed on disk) or `findings:`
-(the schema spec target). They are alias keys — both contain the same
-list of finding records.
+Block-walking + YAML parsing reuses `scripts.invlang.corpus._merge_md_blocks`,
+which already knows the canonical companion shape (and accepts both
+`findings:` and `gather:` as aliases).
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
+from scripts.invlang.corpus import _merge_md_blocks
 
 CatalogStatus = Literal["template_explicit_adhoc", "template_missing"]
 ResultShape = Literal["useful", "empty", "errored", "unknown"]
@@ -51,9 +49,6 @@ def _lead_template_path(lead_name: str, vendor: str) -> Path:
     )
 
 
-_YAML_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
-
-
 @dataclass(frozen=True)
 class AdHocLead:
     """A single ad-hoc finding extracted from invlang `gather`/`findings`.
@@ -75,38 +70,10 @@ class AdHocLead:
     substitutions: dict[str, str] = field(default_factory=dict)
 
 
-def _iter_yaml_blocks(text: str) -> list[dict[str, Any]]:
-    """Parse every ```yaml fence in `text` into a dict list. Skip non-dict
-    blocks and unparseable YAML silently — a malformed block in the middle
-    of an investigation.md should not block extraction of the rest."""
-    out: list[dict[str, Any]] = []
-    for match in _YAML_BLOCK_RE.finditer(text):
-        try:
-            doc = yaml.safe_load(match.group(1))
-        except yaml.YAMLError:
-            continue
-        if isinstance(doc, dict):
-            out.append(doc)
-    return out
-
-
-def _collect_findings(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Flatten every `gather:` and `findings:` list across all blocks.
-
-    Both keys are accepted as aliases — `gather:` is the on-disk shape in
-    runs from at least April 17 onward; `findings:` is the schema-spec
-    name and is used by some test fixtures. The extractor treats them as
-    one stream.
-    """
-    out: list[dict[str, Any]] = []
-    for doc in blocks:
-        for key in ("gather", "findings"):
-            entries = doc.get(key)
-            if isinstance(entries, list):
-                for entry in entries:
-                    if isinstance(entry, dict):
-                        out.append(entry)
-    return out
+def _findings(text: str) -> list[dict[str, Any]]:
+    merged = _merge_md_blocks(text)
+    findings = merged.get("findings", [])
+    return [f for f in findings if isinstance(f, dict)]
 
 
 def _classify_status(
@@ -143,23 +110,8 @@ def _derive_result_shape(finding: dict[str, Any]) -> ResultShape:
         attr_updates = outcome.get("attribute_updates") or []
         if verts or edges or attr_updates:
             return "useful"
-        # Some leads only update attributes on an existing vertex; that
-        # already counts as useful above. If everything is empty AND no
-        # failure_reason set, treat as a real empty result.
         return "empty"
     return "unknown"
-
-
-def _safe_str(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value)
-
-
-def _safe_substitutions(value: Any) -> dict[str, str]:
-    if not isinstance(value, dict):
-        return {}
-    return {str(k): str(v) for k, v in value.items()}
 
 
 def extract_ad_hoc_leads(
@@ -183,14 +135,8 @@ def extract_ad_hoc_leads(
 
 
 def _extract_from_text(text: str, vendor: str) -> list[AdHocLead]:
-    blocks = _iter_yaml_blocks(text)
-    if not blocks:
-        return []
-    findings = _collect_findings(blocks)
-    if not findings:
-        return []
     out: list[AdHocLead] = []
-    for finding in findings:
+    for finding in _findings(text):
         if _is_screen_mode(finding):
             continue
         name = finding.get("name")
@@ -205,16 +151,19 @@ def _extract_from_text(text: str, vendor: str) -> list[AdHocLead]:
         status = _classify_status(name, qd.get("template"), vendor)
         if status is None:
             continue
+        substitutions = qd.get("substitutions")
+        if not isinstance(substitutions, dict):
+            substitutions = {}
         out.append(
             AdHocLead(
                 finding_id=finding_id,
                 lead_name=name,
                 catalog_status=status,
-                data_source=_safe_str(qd.get("system")),
-                query=_safe_str(qd.get("query")),
-                selection_rationale=_safe_str(finding.get("selection_rationale")),
+                data_source=qd.get("system", "") or "",
+                query=qd.get("query", "") or "",
+                selection_rationale=finding.get("selection_rationale", "") or "",
                 result_shape=_derive_result_shape(finding),
-                substitutions=_safe_substitutions(qd.get("substitutions")),
+                substitutions={str(k): str(v) for k, v in substitutions.items()},
             )
         )
     return out
@@ -225,10 +174,7 @@ def has_ad_hoc_leads(text: str, vendor: str) -> bool:
     full pipeline. Equivalent to `extract_ad_hoc_leads(...)` returning a
     non-empty list, but skips dataclass construction.
     """
-    blocks = _iter_yaml_blocks(text)
-    if not blocks:
-        return False
-    for finding in _collect_findings(blocks):
+    for finding in _findings(text):
         if _is_screen_mode(finding):
             continue
         name = finding.get("name")
