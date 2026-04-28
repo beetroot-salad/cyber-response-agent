@@ -41,7 +41,6 @@ analyze:
           load_bearing:                              # required for ++/--; optional for +/-
             - field: "<field name on the cited authority — e.g. proc.pname, fd.sip, baseline.cadence_seconds>"
               source: "lead-id | prologue | <e-id>"  # where this observation came from
-              value_summary: "<brief description of the value that swayed the weight — counts, enum, presence/absence>"
               counterfactual: "<one sentence: if this field had instead shown X, my grade would have been Y>"
 
   trust_anchor_result:                  # one entry per lead that consulted an anchor
@@ -113,8 +112,7 @@ The prediction's load-bearing field is the noun the prediction's `claim` is abou
 
 - `field` — the field name on the cited authority (e.g. `proc.pname`, `fd.sip`, `baseline.cadence_seconds`, `iam.role_assignment.principal`). Field-level granularity, not free prose.
 - `source` — where the observation came from. A lead id (`l-002`), the literal `prologue`, or a specific edge id (`e-005`). Must align with `supporting_edges`.
-- `value_summary` — a brief description of the value that mattered: count, enum, presence/absence, dimension that matched/deviated. Concrete: *"4 prior alerts at 60s ± 2s drift"*, not *"matches baseline"*.
-- `counterfactual` — one sentence naming what the grade would have been if this field had shown a different value. *"If `proc.pname` had been populated with a container-internal name, h-002 would have stayed at `+` rather than `--`."* This is the discipline check on yourself — if you can't name a counterfactual, the field probably isn't actually load-bearing for your grade and you're describing rather than reasoning.
+- `counterfactual` — one sentence naming what the grade would have been if this field had shown a different value, *and* what value would have flipped it. *"If `proc.pname` had been populated with a container-internal name like `node`, h-002 would have stayed at `+` rather than `--`."* The counterfactual carries both the falsifier and (by implication) the actual value. This is the discipline check on yourself — if you can't name a counterfactual, the field probably isn't actually load-bearing for your grade and you're describing rather than reasoning.
 
 The `reasoning` field still names the triple ((a) prediction's load-bearing field, (b) authority cited, (c) whether (b) has direct view) in one sentence. `load_bearing[]` enumerates the specific observations that triple was satisfied by.
 
@@ -215,8 +213,7 @@ analyze:
           load_bearing:
             - field: "wazuh.previous_alerts.timestamps"
               source: l-002
-              value_summary: "4 prior rule-5710 alerts from 10.0.1.99 for monitorprobe over the last 4 minutes, inter-arrival gaps 58–62s"
-              counterfactual: "If the gap distribution had been irregular (drift > 10s) or the count < 3, refutation r3 would have materialised and the grade would be `--`."
+              counterfactual: "If the gap distribution had drift > 10s or count < 3, refutation r3 would have materialised and the grade would be `--`."
   anomalies: []
   data_wishes: []
   routing:
@@ -262,7 +259,6 @@ analyze:
           load_bearing:
             - field: "falco.process_ancestry"
               source: l-002
-              value_summary: "ancestry tini→/app/launcher.sh→node→sh→bash, no runc/containerd-shim/docker-exec frame present"
               counterfactual: "If any frame in the ancestry had been runc/containerd-shim/docker-exec, r1 would have failed to materialise and the grade would be `+` not `--`."
         - hypothesis_id: h-001
           weight: "+"

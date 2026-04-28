@@ -940,8 +940,7 @@ class TestFindingsSynthesis:
                   load_bearing:
                     - field: "wazuh.event_count"
                       source: "l-001"
-                      value_summary: "12 events in window matching the predicted shape"
-                      counterfactual: "If event_count had been 0, the grade would be `-` not `+`."
+                      counterfactual: "If event_count had been 0 (no matching events), the grade would be `-` not `+`."
           routing:
             decision: continue
         ```
@@ -956,6 +955,9 @@ class TestFindingsSynthesis:
         assert "load_bearing" in findings_yaml
         assert "wazuh.event_count" in findings_yaml
         assert "counterfactual" in findings_yaml
+        # value_summary intentionally absent — counterfactual carries the value
+        # by implication.
+        assert "value_summary" not in findings_yaml
 
     def test_supporting_edges_not_emitted_on_weak_weights(
         self, tmp_path, monkeypatch,

@@ -336,15 +336,15 @@ resolutions:
     reasoning: "<string>"       # why this evidence moves weight — not a field restatement
     supporting_edges: []
     load_bearing:               # required for ++/--; optional for +/-. Self-declared
-                                # observation salience: the specific fields and values
-                                # that swayed the weight, with a counterfactual naming
-                                # what grade the resolution would have landed at if
-                                # the field had read differently. Validator does not
-                                # cross-check today; the artifact is captured for
-                                # downstream perturbation analysis (see Tier 1).
+                                # observation salience: the specific fields that swayed
+                                # the weight, each with a counterfactual naming what
+                                # grade the resolution would have landed at if the
+                                # field had read differently (the counterfactual
+                                # carries the actual value by implication). Validator
+                                # does not cross-check today; the artifact is captured
+                                # for downstream perturbation analysis (see Tier 1).
       - field: <field-name>     # native field on the cited authority
         source: l-{id} | prologue | e-{id}
-        value_summary: <string> # concrete: counts, enums, presence/absence
         counterfactual: <string>
 ```
 
