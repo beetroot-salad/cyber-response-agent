@@ -69,7 +69,7 @@ from scripts.handlers._output_parser import (
     parse_analyze_envelope,
 )
 from scripts.handlers._subagent import (
-    invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 
 
@@ -98,13 +98,7 @@ INCLUDE_RAW_DETAILS = os.environ.get(
 # ---------------------------------------------------------------------------
 
 
-def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> str:
-    """Module-level wrapper over the shared subagent dispatcher.
-
-    Kept as a module-level function so tests can monkeypatch it with
-    `monkeypatch.setattr(analyze_handler, "_invoke_subagent", stub)`.
-    """
-    return _shared_invoke("analyze", prompt, timeout=timeout)
+_invoke_subagent = make_invoker("analyze", default_timeout=SUBAGENT_TIMEOUT_SECONDS)
 
 
 # ---------------------------------------------------------------------------

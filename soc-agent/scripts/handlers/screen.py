@@ -47,7 +47,7 @@ from scripts.handlers._markdown import (
 )
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
-    invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 
 
@@ -64,13 +64,7 @@ SUBAGENT_TIMEOUT_SECONDS = int(
 # ---------------------------------------------------------------------------
 
 
-def _invoke_screen(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> str:
-    """Module-level wrapper over the shared subagent dispatcher.
-
-    Kept as a module-level function so tests can monkeypatch it with
-    `monkeypatch.setattr(screen_handler, "_invoke_screen", stub)`.
-    """
-    return _shared_invoke("screen", prompt, timeout=timeout)
+_invoke_screen = make_invoker("screen", default_timeout=SUBAGENT_TIMEOUT_SECONDS)
 
 
 # ---------------------------------------------------------------------------

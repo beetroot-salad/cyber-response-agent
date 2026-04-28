@@ -84,6 +84,7 @@ from scripts.handlers._context_loader import (
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 
 
@@ -96,25 +97,15 @@ SUBAGENT_TIMEOUT_SECONDS = int(
 )
 
 
-def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> str:
-    """Thin per-handler binding over the shared wrapper.
-
-    Kept as a module-level function so tests can monkeypatch it with
-    `monkeypatch.setattr(report_handler, "_invoke_subagent", stub)`.
-    """
-    return _shared_invoke("report", prompt, timeout=timeout)
+_invoke_subagent = make_invoker("report", default_timeout=SUBAGENT_TIMEOUT_SECONDS)
 
 
 ARCHETYPE_MATCH_TIMEOUT_SECONDS = int(
     os.environ.get("SOC_AGENT_ARCHETYPE_MATCH_TIMEOUT_SECONDS", "120")
 )
-
-
-def _invoke_archetype_match(prompt: str) -> str:
-    """Module-level binding for archetype-match subagent so tests can stub it."""
-    return _shared_invoke(
-        "archetype-match", prompt, timeout=ARCHETYPE_MATCH_TIMEOUT_SECONDS,
-    )
+_invoke_archetype_match = make_invoker(
+    "archetype-match", default_timeout=ARCHETYPE_MATCH_TIMEOUT_SECONDS,
+)
 
 
 _VALID_STATUSES = {"written", "gate_failed", "error"}

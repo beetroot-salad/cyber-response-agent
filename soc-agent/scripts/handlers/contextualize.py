@@ -48,7 +48,7 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 from scripts.handlers._markdown import parse_markdown, table_rows_after_heading
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
-    invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -64,14 +64,12 @@ SUBAGENT_TIMEOUT_SECONDS = int(
 )
 
 
-def _invoke_ticket(prompt: str) -> str:
-    return _shared_invoke("ticket-context", prompt, timeout=SUBAGENT_TIMEOUT_SECONDS)
-
-
-def _invoke_prologue(prompt: str) -> str:
-    return _shared_invoke(
-        "contextualize-prologue", prompt, timeout=SUBAGENT_TIMEOUT_SECONDS,
-    )
+_invoke_ticket = make_invoker(
+    "ticket-context", default_timeout=SUBAGENT_TIMEOUT_SECONDS,
+)
+_invoke_prologue = make_invoker(
+    "contextualize-prologue", default_timeout=SUBAGENT_TIMEOUT_SECONDS,
+)
 
 
 # ---------------------------------------------------------------------------

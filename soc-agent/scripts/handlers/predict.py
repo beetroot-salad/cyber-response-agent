@@ -93,7 +93,7 @@ from scripts.handlers._context_loader import (
     load_signature_text,
 )
 from scripts.handlers._subagent import (
-    invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 from scripts.handlers._output_parser import (
     PredictOutputError,
@@ -121,13 +121,7 @@ SUBAGENT_TIMEOUT_SECONDS = int(
 # ---------------------------------------------------------------------------
 
 
-def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> str:
-    """Module-level wrapper over the shared subagent dispatcher.
-
-    Kept as a module-level function so tests can monkeypatch it with
-    `monkeypatch.setattr(predict_handler, "_invoke_subagent", stub)`.
-    """
-    return _shared_invoke("predict", prompt, timeout=timeout)
+_invoke_subagent = make_invoker("predict", default_timeout=SUBAGENT_TIMEOUT_SECONDS)
 
 
 # ---------------------------------------------------------------------------

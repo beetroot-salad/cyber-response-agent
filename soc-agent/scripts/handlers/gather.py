@@ -86,7 +86,7 @@ from scripts.handlers._raw_manifest import (
 )
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
-    invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 
 
@@ -121,26 +121,10 @@ _DEFAULT_WINDOW = timedelta(hours=1)
 # ---------------------------------------------------------------------------
 
 
-def _invoke_gather(
-    prompt: str,
-    *,
-    timeout: int = SUBAGENT_TIMEOUT_SECONDS,
-    session_id: Optional[str] = None,
-) -> str:
-    """Module-level wrapper for the Haiku single-lead subagent."""
-    return _shared_invoke("gather", prompt, timeout=timeout, session_id=session_id)
-
-
-def _invoke_gather_composite(
-    prompt: str,
-    *,
-    timeout: int = SUBAGENT_TIMEOUT_SECONDS,
-    session_id: Optional[str] = None,
-) -> str:
-    """Module-level wrapper for the Sonnet composite/ad-hoc subagent."""
-    return _shared_invoke(
-        "gather-composite", prompt, timeout=timeout, session_id=session_id,
-    )
+_invoke_gather = make_invoker("gather", default_timeout=SUBAGENT_TIMEOUT_SECONDS)
+_invoke_gather_composite = make_invoker(
+    "gather-composite", default_timeout=SUBAGENT_TIMEOUT_SECONDS,
+)
 
 
 # ---------------------------------------------------------------------------
