@@ -1,0 +1,24 @@
+{
+  "predecoder": {"hostname": "wazuh-manager", "program_name": "unbound", "timestamp": "Apr 28 14:18:02"},
+  "agent": {"ip": "172.22.0.5", "name": "dns-resolver", "id": "008"},
+  "manager": {"name": "wazuh.manager"},
+  "data": {
+    "client_ip": "172.22.0.42",
+    "nxdomain_count_5min": 4127,
+    "baseline_nxdomain_count_5min": 18,
+    "rule_window_seconds": 300
+  },
+  "rule": {
+    "level": 8,
+    "description": "DNS: NXDOMAIN rate spike from single client (4127 in 5min, baseline 18)",
+    "groups": ["dns", "anomaly", "nxdomain-spike"],
+    "id": "100110",
+    "firedtimes": 1,
+    "mitre": {"id": ["T1071.004"], "tactic": ["Command and Control"]}
+  },
+  "decoder": {"name": "unbound"},
+  "full_log": "Apr 28 14:18:02 dns-resolver unbound: client 172.22.0.42 produced 4127 NXDOMAIN responses in 5min window (baseline=18)",
+  "@timestamp": "2026-04-28T14:18:03.000Z",
+  "id": "1777637883.10000003",
+  "ticket_id": "1777637883.10000003"
+}

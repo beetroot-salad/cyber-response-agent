@@ -1,0 +1,18 @@
+{
+  "predecoder": {"hostname": "target-endpoint", "program_name": "sshd", "timestamp": "Apr 28 14:12:30"},
+  "agent": {"ip": "172.22.0.13", "name": "target-endpoint", "id": "002"},
+  "manager": {"name": "wazuh.manager"},
+  "data": {"srcuser": "nagios", "srcip": "172.22.0.10", "srcport": "44688"},
+  "rule": {
+    "level": 5,
+    "description": "sshd: Attempt to login using a non-existent user",
+    "groups": ["syslog", "sshd", "authentication_failed", "invalid_login"],
+    "id": "5710",
+    "firedtimes": 11
+  },
+  "decoder": {"parent": "sshd", "name": "sshd"},
+  "full_log": "Apr 28 14:12:30 target-endpoint sshd[8065]: Invalid user nagios from 172.22.0.10 port 44688",
+  "@timestamp": "2026-04-28T14:12:31.000Z",
+  "id": "1777637551.10000005",
+  "ticket_id": "1777637551.10000005"
+}

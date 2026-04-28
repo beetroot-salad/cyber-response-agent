@@ -1,0 +1,61 @@
+case_id: case-003
+slice: shape-M-mechanism-fork
+source: synthesized
+signature_id: wazuh-rule-100110
+loop_n: 1
+
+inputs:
+  alert_path: evals/predict/fixtures/case-003/alert.json
+  prior_investigation_md: null
+  notes: |
+    DNS NXDOMAIN spike from one client. Two genuinely competing mechanisms
+    diverge on observable fields the alert window already includes:
+    ?misconfigured-resolver (all client processes hit the same broken
+    upstream path → high process diversity, low qname entropy) vs
+    ?dga-beaconing-process (one process dominates the spike → low process
+    diversity, high qname entropy). Authorization is NOT the open question;
+    a contract on either hypothesis would not change the answer. This is
+    Shape M because the discriminator is process-concentration + qname-
+    entropy distribution, not policy.
+
+expected:
+  shape: M
+  shape_rationale: |
+    Two competing mechanisms with predictions that diverge on already-
+    observable fields (per-process NX-query concentration, qname-entropy
+    distribution). Adding an authorization_contract would not collapse
+    the fork → it's not Shape A.
+
+  branch_plan_must: null
+
+  hypotheses_must:
+    count_min: 2
+    count_max: 3
+    must_include_authorization_contract: false
+    forbidden_names:
+      - "^\\?(legitimate|authorized|benign|malicious|adversary|compromised)-"
+    discriminating_observable: |
+      Per-process distribution of NXDOMAIN queries (concentration) and
+      qname character-class entropy distribution.
+
+  routing_must:
+    selected_lead_oneof: [dns-query-distribution, process-dns-correlation]
+    composite_required: true   # baseline + direct-observable
+
+  prediction_axis:
+    discriminator: |
+      Whether the NX spike is concentrated in one process with high-entropy
+      qnames (DGA shape) or distributed across many client processes with
+      low-entropy qnames (resolver-config shape).
+    acceptable_dimensions: [process-concentration, qname-entropy, geometry]
+    forbidden_dimensions: [authorization, identity, cadence-only]
+    refutation_axis: |
+      For ?misconfigured-resolver: a foreground showing one process
+      dominating the spike refutes. For ?dga-beaconing-process: foreground
+      showing the spike spread across many processes refutes.
+
+  forbidden_patterns:
+    - presence_test_refutation
+    - baseline_value_leak
+    - compound_claim
+    - shape_collapse_to_A  # adding auth contract should not change the fork
