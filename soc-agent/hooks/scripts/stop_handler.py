@@ -21,6 +21,7 @@ must never crash the agent session.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -28,6 +29,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts import close_ticket_action, investigation_summary  # noqa: E402
+from hooks.scripts.run_context import get_runs_dir, resolve_run_dir  # noqa: E402
 
 
 def _run_step(name: str, func, payload: dict) -> None:
@@ -35,6 +37,59 @@ def _run_step(name: str, func, payload: dict) -> None:
         func(payload)
     except Exception as exc:  # noqa: BLE001 — must never raise out of the handler
         print(f"stop_handler: {name} raised: {exc!r}", file=sys.stderr)
+
+
+def _maybe_spawn_postmortem(payload: dict) -> None:
+    """Detached-spawn the post-mortem lead-pool normalizer if the run
+    produced any ad-hoc lead invocations.
+
+    Cheap pre-check (no subprocess) before launching: read
+    `investigation.md` and run `has_ad_hoc_leads` in-process. Skip the
+    spawn entirely if the run produced no ad-hoc findings — the common
+    case for benign / catalog-only investigations.
+
+    The spawn itself is fire-and-forget. Parent must not block on the
+    LLM-driven catalog edits — agent termination is the priority.
+    """
+    session_id = payload.get("session_id", "")
+    if not session_id:
+        return
+    run_dir, _ = resolve_run_dir(session_id, get_runs_dir())
+    if run_dir is None:
+        return
+    inv_path = run_dir / "investigation.md"
+    meta_path = run_dir / "meta.json"
+    if not (inv_path.exists() and meta_path.exists()):
+        return
+    try:
+        meta = json.loads(meta_path.read_text())
+    except Exception:
+        return
+    signature_id = meta.get("signature_id")
+    if not isinstance(signature_id, str) or "-" not in signature_id:
+        return
+    vendor = signature_id.split("-", 1)[0]
+
+    from scripts.postmortem.leads.extract import has_ad_hoc_leads
+    if not has_ad_hoc_leads(inv_path.read_text(), vendor):
+        return
+
+    out_dir = get_runs_dir() / "postmortem" / run_dir.name / "leads"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_handle = open(out_dir / "run.log", "ab")
+    subprocess.Popen(
+        [
+            sys.executable,
+            "-m", "scripts.postmortem.leads.run",
+            "--run-dir", str(run_dir),
+            "--out-dir", str(out_dir),
+        ],
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+        cwd=str(SOC_AGENT_ROOT),
+    )
 
 
 def main() -> None:
@@ -56,6 +111,7 @@ def main() -> None:
 
     _run_step("investigation_summary", investigation_summary.main, payload)
     _run_step("close_ticket_action", close_ticket_action.main, payload)
+    _run_step("postmortem_leads", _maybe_spawn_postmortem, payload)
 
 
 if __name__ == "__main__":
