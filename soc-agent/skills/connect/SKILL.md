@@ -227,7 +227,7 @@ If either test fails, iterate on the adapter or the config and try again. Don't 
 
 The adapter runs. Now record just enough environment knowledge for `/author` to build on later and for `/investigate` to compose its first queries without grepping around. The bar is **lean**, not comprehensive.
 
-At runtime the investigation loop reads per-lead query templates (`knowledge/common-investigation/leads/{lead}/templates/{vendor}.md`) and composes queries from those. Those lead templates are not your job — they're written by `/author` after investigation experience reveals which leads are worth formalizing. Your job is the foundation underneath them: the adapter, the per-system docs, and the data-source registration. Everything you write here will be grown through post-mortem `/author` runs, not polished upfront.
+At runtime the investigation loop reads per-lead query templates (`knowledge/common-investigation/leads/{lead}/templates/{vendor}.md`) and composes queries from those. Those lead templates are not your job — they're either written by `/author` post-mortem (human-driven) or proposed automatically by the post-mortem leads pipeline (`scripts/postmortem/`, fires at Stop and opens a PR — see `/handbook` → `content/postmortem.md`). Your job is the foundation underneath them: the adapter, the per-system docs, and the data-source registration. Everything you write here will be grown through those post-mortem flows, not polished upfront.
 
 Scaffold the following files. Start lean. Expect everything to be revised.
 
@@ -294,7 +294,7 @@ Per-signature opt-in still happens in `config/signatures/{sig}/permissions.yaml`
 #### What you do NOT scaffold
 
 - **Signature knowledge.** `/connect` does not touch `knowledge/signatures/`. That's `/author`'s job.
-- **Lead templates** (`knowledge/common-investigation/leads/{lead}/templates/{system}.md`). These are the runtime readers for the investigation loop — for each lead, a per-vendor query template plus field mapping. They come from investigation experience, not API docs. Pre-building them at connect time is unbounded (which leads? which shape? which fields matter?) and speculative (you don't yet know which leads are worth formalizing for this vendor). The correct path is: connect the system here → run real investigations against it → `/author` takes the post-mortem material and writes lead templates grounded in what actually worked. Friction on the first few investigations is the cost of admission; post-mortem compounds it away.
+- **Lead templates** (`knowledge/common-investigation/leads/{lead}/templates/{system}.md`). These are the runtime readers for the investigation loop — for each lead, a per-vendor query template plus field mapping. They come from investigation experience, not API docs. Pre-building them at connect time is unbounded (which leads? which shape? which fields matter?) and speculative (you don't yet know which leads are worth formalizing for this vendor). The correct path is: connect the system here → run real investigations against it → the post-mortem pipeline (automated, fires at Stop) and/or `/author` (human-driven) take the run material and write lead templates grounded in what actually worked. Friction on the first few investigations is the cost of admission; post-mortem compounds it away.
 - **Permissions.** Adapter access is implicit via `Bash(python3 scripts/tools/{system}_cli.py *)`. Per-signature permissions live in `config/signatures/{id}/permissions.yaml` and are edited by `/author`.
 - **Comprehensive field reference.** Don't write a full schema dictionary. Catch the obvious gotchas, move on.
 
@@ -329,7 +329,7 @@ git add scripts/tools/{system}_cli.py \
 - Sample query result (one line of output)
 - Environment variables the user must have set
 - Open items / TODOs left in the scaffolded knowledge
-- **What to expect next:** the first few `/investigate` runs against this system will likely hit friction on query composition (field names, enum values, sourcetype conventions). That's expected — lead templates for this vendor are written by `/author` after post-mortem, not here. Suggest running `/author` after the first handful of investigations to bake the learnings into `field-notes.md` and the relevant lead templates.
+- **What to expect next:** the first few `/investigate` runs against this system will likely hit friction on query composition (field names, enum values, sourcetype conventions). That's expected — lead templates for this vendor land via the post-mortem leads pipeline (automated PRs from `scripts/postmortem/`) or via a human-driven `/author` run, not here. Suggest reviewing the open post-mortem PRs after the first handful of investigations, and running `/author` to bake any further learnings into `field-notes.md`.
 
 Tell the user: "Review the diff and merge when ready." Then stop.
 
@@ -351,7 +351,7 @@ These exist to keep the skill in its lane, not to block a legitimate request. Wh
 - **One system per invocation.** If the user mentions three systems during the interview, take notes on the others and suggest re-running `/connect` for each. Override if the three systems are truly co-located (e.g., the same vendor's SIEM + EDR sharing an auth flow) and separating them would duplicate most of the work.
 - **Adapter at `scripts/tools/{system}_cli.py`.** This is where the investigation loop and preflight look for adapters. Override only if the user has an existing directory structure you're integrating into, and in that case add a symlink or a note in preflight's discovery path.
 - **Python.** See Phase 2. Override means opening a conversation about why, not picking another language silently.
-- **No lead templates or signature knowledge.** Those come from investigation experience and live under `knowledge/signatures/` owned by `/author`. If the user wants starter lead templates for a well-known system, suggest running `/author` afterwards — don't build them here.
+- **No lead templates or signature knowledge.** Those come from investigation experience — either via the automated post-mortem leads pipeline (`scripts/postmortem/`) or a human-driven `/author` run. Signature knowledge is `/author`-only. If the user wants starter lead templates for a well-known system, point them at those flows — don't build them here.
 - **Don't rewrite the wazuh example.** `scripts/tools/wazuh_cli.py` is the plugin's reference/test example. Note a divergence from the contract if you see one; do not fix it here.
 - **Adapter updates are a deliberate re-run.** If `{system}_cli.py` already exists when `/connect {system}` is invoked, stop and confirm the user wants to update before touching it.
 - **Consult `/handbook` on demand.** When you need KB layout, file shapes, or runtime rules, invoke `/handbook` rather than re-deriving them.

@@ -10,6 +10,8 @@ model: claude-sonnet-4-6
 
 You edit the soc-agent plugin's knowledge base — signatures, archetypes, leads, environment knowledge, permissions. Scope is `knowledge/` and `config/signatures/`. Code directories (`schemas/`, `scripts/`, `hooks/`) are out of scope; if a task requires a code change, stop and tell the user.
 
+You are the human-driven editor. An automated **post-mortem leads pipeline** (`scripts/postmortem/leads/`, fired from the REPORT handler) also edits `knowledge/common-investigation/leads/` after every completed investigation that produced ad-hoc lead invocations, opening a PR. The post-mortem agent reads *this* SKILL.md as its editing-discipline source — keep that contract in mind when changing this file. If the user is asking you to bake a single run's findings into the lead pool, check whether an open post-mortem PR already covers it before doing the work twice — see `/handbook` → `content/postmortem.md`.
+
 A knowledge edit is not just "change some text." It's changing the content the investigation agent reads at runtime in a way that improves its ability to solve tickets **without** information loss, contradiction, or regression. Validation is central, not bolted on.
 
 The design rationale is in `${CLAUDE_SKILL_DIR}/design.md`. Read it when you need to ground a decision about scope or validation philosophy.
@@ -53,7 +55,7 @@ Write tight. Avoid verbose phrasing, avoid padding, avoid restating what the rea
 Specific traps to avoid in archetype `story.md` / `trust-anchors.md`:
 - **Don't repeat routing logic.** If a precedence rule (e.g., "sensitive-file-tampering takes precedence by path") applies to multiple archetypes, state it once in the playbook — not in every archetype that might overlap.
 - **Don't re-describe trust anchor confirmation.** Each archetype's `trust-anchors.md` should state the question the anchor answers and the job-type constraint for this archetype. It should not re-document the anchor's confirmation protocol — that lives in `environment/operations/{anchor}.md`.
-- **Keep story and anchors separated.** `story.md` carries the observable-shape narrative and is what the archetype-scan subagent reads; `trust-anchors.md` carries the grounding contract + precedent pointer. Don't mirror the story into trust-anchors or the anchors into story — each file has one job.
+- **Keep story and anchors separated.** `story.md` carries the observable-shape narrative and is what the REPORT-time `archetype-match` subagent reads; `trust-anchors.md` carries the grounding contract + precedent pointer. Don't mirror the story into trust-anchors or the anchors into story — each file has one job.
 - **Use absolute paths.** FIM alerts surface absolute paths. Tilde notation (`~/.bashrc`) won't match a real alert path and misleads the agent.
 
 ### Validate

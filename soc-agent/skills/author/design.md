@@ -17,7 +17,7 @@ Every knowledge-base change today is hand-edited, and there is no guardrail agai
 - Silently regressing runtime behavior — a screen pattern that now matches cases it shouldn't, a hypothesis space that quietly shrank, a prescriptive rule that got softened.
 - Drifting from the design philosophy ("grounded in real data", conservative, hypothesis-driven) without anyone noticing until the next investigation surfaces the drift.
 
-`/author` is the one workflow that handles all of these — usable by both humans and the investigate agent (post-mortem archetype creation).
+`/author` is the one workflow that handles all of these — the human-driven editor for `knowledge/` and `config/signatures/`. Automated post-mortem learning is a sibling pipeline (`scripts/postmortem/`, see `skills/handbook/content/postmortem.md`) that fires at Stop and proposes lead-pool edits as a PR; it does not invoke `/author` and is scoped to `knowledge/common-investigation/leads/` in slice 1.
 
 ---
 
@@ -149,7 +149,7 @@ The research scratch format is TBD — see open question 1.
 
 Parked for follow-up:
 
-1. **Research scratch format.** The `/investigate` → `/author` handoff needs a defined shape (run dir path? structured draft archetype? free-text intent?). Design in a separate doc once the post-mortem step is built; `/author` currently accepts whatever the caller passes.
+1. **Research scratch format.** The `/investigate` → `/author` handoff (human-driven, when an analyst wants to bake learnings from a recent run) accepts whatever the caller passes — typically a run dir path. The automated post-mortem pipeline (`scripts/postmortem/`) is a separate path: it consumes `investigation.md` directly via `extract.py` and does not need a scratch format. Whether the human-driven `/author` flow ever needs a more structured handoff is open and depends on how often analysts invoke it after the automated pipeline runs.
 
 2. **Probe quality baseline.** Haiku replay and reconstruction are sanity checks, not strong validation. Before relying on them, run an eval: take N past edits with known outcomes, see whether the probe layer would have caught the bad ones. Tracks the suite's true precision/recall.
 

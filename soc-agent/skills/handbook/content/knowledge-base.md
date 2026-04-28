@@ -49,7 +49,7 @@ Each of these plays a different role. The runtime composition is what makes them
 Universal investigation methodology. Nothing in this directory is vendor-specific, org-specific, or signature-specific — it's the parts of "how to investigate a security alert" that don't change when you swap the SIEM or the org.
 
 - **`SKILL.md`** — investigation vocabulary (hypotheses with `?` prefix, assessments `++/+/-/--`, trace format) and the top-level index.
-- **`checklist.md`** — self-check guide the agent reads at CONTEXTUALIZE and verifies at REPORT. Investigation completeness, legitimacy-contract declaration + resolution, report shape, common mistakes.
+- **`checklist.md`** — self-check guide the agent reads at CONTEXTUALIZE and verifies at REPORT. Investigation completeness, authorization-contract declaration + resolution, report shape, common mistakes.
 - **`leads/`** — reusable **lead definitions**. Each lead is a directory:
   ```
   leads/{lead-name}/
@@ -85,7 +85,7 @@ One directory per alert type. Each signature's directory is the domain knowledge
 
 - **`context.md`** — the signature reference. Frontmatter carries `signature_id`, `name`, `severity`, `data_sources`, MITRE mapping, related rules, base rate estimates. The body describes: detection logic (what triggers the rule), alert fields (what's in the payload), threat model (what an attacker would be doing if this is a true positive), known false positives (grounded in real closed tickets), risk indicators that actually discriminated outcomes historically, operational notes, tuning guidance, detection gaps. This is the document the agent reads to understand what kind of alert it's looking at and what the stakes are.
 
-- **`field-quirks.md`** — a tight, scanner-scoped extract of `context.md` holding just the Key Observables table (observable → JSON path → why it matters for shape comparison) plus any field-level gotchas (counterintuitive semantics, NAT-egress caveats). Read by the archetype-scan subagent instead of the full `context.md` — keeps the scanner's context small without depriving it of the field semantics it needs to extract observables from the alert.
+- **`field-quirks.md`** — a tight, scanner-scoped extract of `context.md` holding just the Key Observables table (observable → JSON path → why it matters for shape comparison) plus any field-level gotchas (counterintuitive semantics, NAT-egress caveats). Parsed by `scripts/tools/ticket_context.py` to extract Key Observables for 4-hour correlation, and read by the REPORT-time `archetype-match` subagent — keeps both consumers' contexts small without depriving them of the field semantics they need to extract observables from the alert.
 
 - **`playbook.md`** — the body carries two complementary catalogs plus the operational scaffolding:
   - **Hypothesis seeds** — lean, mechanism-shaped candidate explanations ("legitimate automation", "authentication mistake", "credential guessing", adversarial follow-up). These are *lacking by design*, skeletal prompts for the PREDICT phase that the agent develops from evidence. They map roughly to archetypes when the shape fits, but an investigation can confirm a hypothesis without matching any archetype.

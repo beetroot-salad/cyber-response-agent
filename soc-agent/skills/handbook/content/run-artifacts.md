@@ -11,7 +11,9 @@ runs/
 │   ├── meta.json              # run_id, signature_id, per-run salt
 │   ├── investigation.md       # agent's narrative log (per-phase sections)
 │   ├── state.json             # state machine state (phase, history, timestamps)
-│   └── report.md              # final report — structured frontmatter + body
+│   ├── report.md              # final report — structured frontmatter + body
+│   └── raw_details/           # off-companion SIEM/anchor payloads, per loop
+│       └── loop-{N}/{lead-id}.yaml
 ├── audit.jsonl                # one JSON line per completed investigation
 ├── tool_audit.jsonl           # one JSON line per state-changing tool call
 └── tool_trace.jsonl           # one JSON line per read-only tool call
@@ -24,7 +26,7 @@ The runs directory path is set via `SOC_AGENT_RUNS_DIR` and is **required** — 
 ### `alert.json`
 
 **Who writes:** `scripts/setup_run.py` at the start of every investigation.
-**Who reads:** the main agent (CONTEXTUALIZE), CONTEXTUALIZE preload hook subagents (ticket-context, archetype-scan), screen subagent, Tier 2 judge.
+**Who reads:** the main agent (CONTEXTUALIZE), CONTEXTUALIZE preload subagents (ticket-context, contextualize-prologue), screen subagent, archetype-match (REPORT), Tier 2 judge.
 
 The input alert, passed as a JSON string argument to `/investigate` and parsed at run setup. Before being written, `setup_run.py` recursively sanitizes every string value to:
 
@@ -55,7 +57,7 @@ The `salt` is the injection defense primitive (Layer 2 — see `content/validati
 
 The salt is generated per run (`secrets.token_hex(8)`) specifically so it cannot leak into training data or documentation and become forgeable — static delimiters would eventually.
 
-**Note on CONTEXTUALIZE subagent outputs.** Earlier versions of this plugin preloaded `ticket_context.yaml` and `archetype_scan.yaml` into the run directory via a background `!command` (`scripts/contextualize_preload.py`). That script has been retired — both preloads are now dispatched inline by the main agent during CONTEXTUALIZE and their outputs come back directly in the tool result, not as files on disk. Archetype-scan is an `Agent()` subagent; ticket-context is a `Bash()` call to `scripts/tools/ticket_context.py` on the main path (with the legacy `soc-agent:ticket-context` subagent kept as a fallback for cases where the script environment is unavailable). No run-artifact entry exists for either YAML anymore because they're never written to the filesystem.
+**Note on CONTEXTUALIZE subagent outputs.** Earlier versions of this plugin preloaded `ticket_context.yaml` and `archetype_scan.yaml` into the run directory via a background `!command`. Both preloads are now dispatched inline by the main agent during CONTEXTUALIZE and their outputs come back directly in the tool result, not as files on disk. Ticket-context is a `Bash()` call to `scripts/tools/ticket_context.py` on the main path (with the legacy `soc-agent:ticket-context` subagent kept as a fallback). The prologue (vertices + edges from the alert) is authored by the `contextualize-prologue` subagent and written into `investigation.md`'s `prologue:` companion block. Archetype matching no longer runs at CONTEXTUALIZE — it moved to REPORT (PR #118), where the `archetype-match` subagent picks the disposition label given the final hypothesis weights, contract resolutions, and anchor confirmations.
 
 ### `investigation.md`
 
@@ -136,6 +138,13 @@ Body sections expected by convention (not structurally enforced):
 - **For Analyst** *(escalated reports only)* — What We Know / What We Don't Know / Suggested Next Steps
 
 Writing `report.md` triggers the `validate_report.py` PostToolUse hook. See `content/validation.md`.
+
+### `raw_details/loop-{N}/{lead-id}.yaml`
+
+**Who writes:** the `save_raw_tool_output.py` PostToolUse hook on `Bash` and `mcp__*` calls dispatched from a GATHER subagent.
+**Who reads:** the `analyze` handler/subagent, preloading per-loop raw payloads when grading observations.
+
+Per-loop directory of raw SIEM/anchor responses, written off the invlang companion so the companion stays trim. The hook keys writes by `loop` (from the active GATHER cycle) and `lead-id` so analyze can correlate raw payloads back to the `findings:` entry it merges into. This is the v2.12 "handler-authored synthesis" half of the design — subagents emit plain-YAML envelopes, the orchestrator/skill handler synthesizes the canonical `findings[]`, and the bulky raw evidence lives here instead of in `investigation.md`. The full evidence is preserved under the run; only the structured graph survives in the companion.
 
 ## Cross-run JSONL logs
 

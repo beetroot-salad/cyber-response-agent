@@ -38,7 +38,7 @@ CONTEXTUALIZE is the only legal initial phase, and it has four legal next-hops:
 1. **REPORT** — dedup / duplicate path. If ticket-context's `repeats` cluster shows the same alert firing minutes ago on the same entities (often with an already-open ticket), the main agent can transition straight to REPORT with `status=duplicate` or transfer a recent disposition — after verifying the cited prior ticket/precedent still holds. The subagent does not recommend this; it only surfaces the repeats.
 2. **SCREEN** — if the signature's playbook has a `## Screen` section, try the mechanical fast-path.
 3. **PREDICT** — articulate a fork between explanations, then pick the discriminating lead.
-4. **GATHER** — direct entry when the first lead is purely mechanical or interpretive (no fork has opened yet). Invlang v2.7 made PREDICT on-demand rather than a mandatory gate; a run that opens with a characterization lead may skip PREDICT and enter the loop at GATHER.
+4. **GATHER** — direct entry when the first lead is purely mechanical or interpretive (no fork has opened yet). PREDICT is on-demand rather than a mandatory gate; a run that opens with a characterization lead may skip PREDICT and enter the loop at GATHER.
 
 Paths 1–2 exist to compress work for known patterns. Paths 3–4 are the full-loop entries; the agent picks between them based on whether the very next lead's value depends on which competing story is true.
 
@@ -46,7 +46,7 @@ Paths 1–2 exist to compress work for known patterns. Paths 3–4 are the full-
 
 `PREDICT → GATHER → ANALYZE` is the core cycle. The common case completes in a single iteration; looping back into PREDICT is the exception, not the default. Each iteration picks one lead, runs it, weighs the result. ANALYZE decides whether to loop again (need more evidence) or report out (mechanism confirmed and verified, or escalation triggered).
 
-A **cycle** is counted by the state machine as the number of `PREDICT` plus `ANALYZE` entries in the phase history. Counting both keeps the guardrail meaningful under invlang v2.7's on-demand `PREDICT` — a run that keeps gathering without re-hypothesizing still accumulates cycles.
+A **cycle** is counted by the state machine as the number of `PREDICT` plus `ANALYZE` entries in the phase history. Counting both keeps the guardrail meaningful under on-demand `PREDICT` — a run that keeps gathering without re-hypothesizing still accumulates cycles.
 
 **Maximum cycles: `MAX_LOOPS = 12`** (from `schemas/state.py`). The next transition into `PREDICT` or `ANALYZE` past the cap is rejected with a state machine error directing the agent to `REPORT`. Most investigations resolve in 1–2 cycles; past 8 without convergence, the hypothesis space is probably incomplete and escalation is the right call anyway.
 
