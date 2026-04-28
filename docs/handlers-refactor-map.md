@@ -223,3 +223,25 @@ Pick (a) for the first pass — the seam already works, and (b) is a separate re
 - The hook→handler manifest contract: who writes what under `subagent_outputs/`, `subagent_audit.jsonl`, the manifest_dir consumed by `_raw_manifest`. **Block on:** vertical #8 (gather).
 - The `invlang.queries` / `invlang.corpus` shape — predict and analyze depend on it. **Block on:** verticals #7 (predict priors) and #9 (analyze synthesis).
 - Whether the two `validate_companion`-bypassing handlers (predict, report) intentionally rely on the PreToolUse hook firing on the actual `Write`. **Block on:** vertical #2 (append-validate seam).
+
+---
+
+## 9. Status (2026-04-28)
+
+Verticals shipped in PR #145:
+
+- ✅ #1 — `_subagent.make_invoker` shim factory.
+- ✅ #2 — `_investigation_io.py` (`append_and_validate`, `validate_proposed_companion`, `append_unvalidated`).
+- ✅ #3 — `_output_parser._extract_top_level_envelope` parametric extractor.
+- ✅ #4 — `investigation_views.py` (per-mode trimmers split out of `_context_loader.py`).
+- ✅ #5 — `_playbook.py` (`PlaybookMetadata`, `load_playbook_metadata` lifted out of contextualize; lazy imports in predict/report removed).
+- ✅ #6 — `screen.py` routes Screen-table parse through `_playbook.load_screen_rows`.
+- ✅ #7 — `predict_priors.py` (priors retrieval + rendering lifted out of predict).
+- ✅ #10 (partial) — `report_termination.py` (verdicts + termination derivation/rationale/summary) + `report_benign_action.py`. The mechanical composers (`_compose_screen_match`, `_compose_report_md_screen`, `_compose_report_md_analyze`, `_compose_analyze_routed`) and the narrative-subagent dispatch stay in `report.py`; their interleaving with the main flow is non-obvious and the seam needs more mapping before extraction.
+
+**Deferred from this PR:**
+
+- ⏸ #8 — `gather.py` parallel-singletons path (lines 877–1035) interleaves manifest enrichment, fallback re-dispatch, and lead renumbering in ways that require deeper mapping before extraction. Preserve gather's complexity budget for now; revisit after the parallel-gather default flip lands and we have production traces showing which sub-paths are hot.
+- ⏸ #9 — `analyze.py` `_synthesize_findings_block` (472–642) encodes invlang-schema conventions (verdict-mapping, default supporting_edges, name→id translation) that aren't documented anywhere else. Extract only after those conventions are written down.
+- ⏸ #11 — `env_memory.py` is called only from predict via a try/except wrapper, ~1 commit/6mo. Defer until predict needs touching for an unrelated reason.
+- ⏸ Remainder of #10 — REPORT mechanical composers + narrative dispatch. Need to trace the data-flow between `_compose_report_md_screen` and `_compose_report_md_analyze` to find a clean cut.

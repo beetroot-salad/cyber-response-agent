@@ -83,6 +83,19 @@ from scripts.handlers._context_loader import (
 )
 from scripts.handlers._playbook import load_playbook_metadata
 from scripts.handlers.investigation_views import format_investigation_block
+from scripts.handlers.report_benign_action import (
+    _command_body_matches_benign_list,
+    _maybe_apply_benign_action_shortcircuit,
+    _normalize_command_body,
+)
+from scripts.handlers.report_termination import (
+    _compose_termination_rationale,
+    _derive_authorization_verdicts,
+    _derive_termination_category,
+    _derive_trust_anchors,
+    _iter_lead_authz_resolutions,
+    _truncate_summary,
+)
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
@@ -550,106 +563,6 @@ def _load_required_anchors(archetype_dir: Path) -> list[str]:
     return [str(r) for r in required if r]
 
 
-def _iter_lead_authz_resolutions(outcome: dict) -> list[dict]:
-    """Yield every authorization_resolutions[] entry on one lead outcome.
-
-    v2.11 embeds authz resolutions on the edge:
-      (a) inline on new edges under
-          `outcome.observations.edges[].authorization_resolutions[]`;
-      (b) on already-confirmed edges via attribute_updates —
-          `outcome.attribute_updates[].updates.authorization_resolutions[]`.
-    """
-    out: list[dict] = []
-    obs = outcome.get("observations") if isinstance(outcome.get("observations"), dict) else {}
-    for edge in (obs.get("edges") or []):
-        if not isinstance(edge, dict):
-            continue
-        for entry in edge.get("authorization_resolutions") or []:
-            if isinstance(entry, dict):
-                out.append(entry)
-    for upd in outcome.get("attribute_updates") or []:
-        if not isinstance(upd, dict):
-            continue
-        updates = upd.get("updates") if isinstance(upd.get("updates"), dict) else {}
-        for entry in updates.get("authorization_resolutions") or []:
-            if isinstance(entry, dict):
-                out.append(entry)
-    return out
-
-
-def _derive_trust_anchors(findings: list[dict]) -> list[dict]:
-    """Extract trust_anchors_consulted records from the invlang findings block.
-
-    v2.11 sources two surfaces:
-    - `outcome.anchor_consultations[]` — baseline / registry / reference
-      lookups (non-authz). `grounding_kind` → `kind`, `result` → `result`.
-    - edge-inline `outcome.observations.edges[].authorization_resolutions[]`
-      and `outcome.attribute_updates[].updates.authorization_resolutions[]` —
-      authz-fulfilling verdicts. The authz verdict vocabulary is mapped onto
-      the consultation-result vocabulary used by the report frontmatter:
-      `authorized` → `confirmed`, `unauthorized` → `refuted`,
-      `indeterminate` → `partial`.
-
-    Both shapes collapse to the flat frontmatter record
-    `{anchor, kind, result, citation}`.
-    """
-    out: list[dict] = []
-    for lead in findings:
-        outcome = (lead or {}).get("outcome") or {}
-
-        # Non-authz consultations (baselines, registries, reference lookups).
-        for cons in outcome.get("anchor_consultations") or []:
-            if not isinstance(cons, dict):
-                continue
-            out.append({
-                "anchor": cons.get("anchor_id") or lead.get("name"),
-                "kind": cons.get("grounding_kind") or "org-authority",
-                "result": cons.get("result") or "no-data",
-                "citation": (
-                    f"{lead.get('name')}: result={cons.get('result','?')}, "
-                    f"as_of={cons.get('as_of','?')}"
-                ),
-            })
-
-        # Authorization resolutions (edge-inline or via attribute_updates).
-        for entry in _iter_lead_authz_resolutions(outcome):
-            verdict = entry.get("verdict")
-            result = {
-                "authorized": "confirmed",
-                "unauthorized": "refuted",
-                "indeterminate": "partial",
-            }.get(verdict, "no-data")
-            out.append({
-                "anchor": entry.get("anchor_id") or lead.get("name"),
-                "kind": entry.get("grounding_kind") or "org-authority",
-                "result": result,
-                "citation": (
-                    f"{lead.get('name')}: verdict={verdict or '?'}, "
-                    f"as_of={entry.get('as_of','?')}"
-                ),
-            })
-    return out
-
-
-def _derive_authorization_verdicts(findings: list[dict]) -> list[dict]:
-    """Pull `authorization_resolutions[]` entries from every findings outcome.
-
-    Each entry becomes `{contract, result}` — the shape archetype-match
-    expects in its `authorization_verdicts` input. `contract` is the
-    `fulfills_contract` back-reference (e.g. `h-001.ac1`); `result` is
-    the `verdict`.
-    """
-    out: list[dict] = []
-    for lead in findings:
-        outcome = (lead or {}).get("outcome") or {}
-        for entry in _iter_lead_authz_resolutions(outcome):
-            contract = entry.get("fulfills_contract")
-            result = entry.get("verdict")
-            if contract and result:
-                out.append({"contract": contract, "result": result})
-    return out
-
-
 def _archetype_story_paths(signature_id: str) -> list[Path]:
     """List every `story.md` path under this signature's archetype catalog."""
     base = (
@@ -1050,67 +963,6 @@ def _compose_trace_analyze(
     if parts:
         return " → ".join(parts) + f" → {tail}"
     return tail
-
-
-def _derive_termination_category(
-    analyze_payload: dict,
-    findings: list[dict],
-    final_analyze_text: str,
-) -> str:
-    """Decide `conclude.termination.category` from the available signals.
-
-    Order of precedence:
-      1. `trust-root` — a findings lead carries an edge-level
-         `authorization_resolutions[]` entry with `verdict: authorized`
-         (inline on a new edge or via `attribute_updates`), OR
-         `outcome.trust_root_reached` names a confirmed vertex, OR an
-         `anchor_consultations[]` entry resolved `confirmed` with full
-         org-authority. An authority closed the question.
-      2. `adversarial-refuted` — the final ANALYZE text grades an
-         adversarial-named hypothesis (`?adversary-*`, `?post-exploit-*`,
-         or the word "adversarial") at `--`.
-      3. `severity-ceiling` — the final ANALYZE text or an investigation
-         narrative mentions a composition rule (`composition rule`,
-         `severity ceiling`, `co-fir`), indicating the structural severity
-         forces escalation regardless of mechanism.
-      4. `exhaustion-escalation` — default.
-
-    This mirrors the discipline in agents/report.md §3 without requiring
-    the subagent to author it. Over-triggering `exhaustion-escalation` is
-    the safe fallback — escalated dispositions land there.
-    """
-    for entry in findings:
-        outcome = entry.get("outcome") or {}
-        if outcome.get("trust_root_reached"):
-            return "trust-root"
-        for authz in _iter_lead_authz_resolutions(outcome):
-            if authz.get("verdict") == "authorized":
-                return "trust-root"
-        for cons in outcome.get("anchor_consultations") or []:
-            if not isinstance(cons, dict):
-                continue
-            if (
-                cons.get("result") == "confirmed"
-                and cons.get("authority_for_question") == "full"
-                and cons.get("grounding_kind") == "org-authority"
-            ):
-                return "trust-root"
-
-    lower = final_analyze_text.lower()
-    # Adversarial-refuted: look for ?adversary-* / ?post-exploit-* /
-    # adversarial keyword paired with a `--` grade.
-    adversarial_markers = ("?adversary-", "?post-exploit-", "adversarial")
-    if any(m in lower for m in adversarial_markers) and "`--`" in final_analyze_text:
-        return "adversarial-refuted"
-
-    if (
-        "composition rule" in lower
-        or "severity ceiling" in lower
-        or "co-fir" in lower  # matches "co-fire", "co-firing", "co-fires"
-    ):
-        return "severity-ceiling"
-
-    return "exhaustion-escalation"
 
 
 def _compose_hypothesis_outcomes_md(
@@ -1610,180 +1462,3 @@ def _compose_analyze_routed(
 # strips these prefixes before comparing the alert's command body against the
 # playbook's `## Benign action classes` list — `bash -c whoami` should match
 # `whoami`, not the full wrapped form.
-_SHELL_WRAPPER_PREFIXES = (
-    "bash -c", "sh -c", "zsh -c", "ksh -c", "dash -c", "ash -c",
-    "/bin/bash -c", "/bin/sh -c", "/bin/zsh -c",
-    "/usr/bin/bash -c", "/usr/bin/sh -c",
-)
-
-
-def _normalize_command_body(cmdline: str) -> str:
-    """Strip a `<shell> -c` wrapper and surrounding quotes; lowercase.
-
-    Returns the inner command body for matching against the benign-action
-    list. Idempotent — never strips more than one wrapper, never strips
-    arguments past the first body. Caller compares the result against
-    bullet entries verbatim.
-    """
-    s = cmdline.strip().lower()
-    for prefix in _SHELL_WRAPPER_PREFIXES:
-        if s.startswith(prefix + " "):
-            s = s[len(prefix) + 1 :].strip()
-            break
-    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
-        s = s[1:-1].strip()
-    return s
-
-
-def _command_body_matches_benign_list(
-    cmdline: str, benign_classes: list[str],
-) -> str | None:
-    """Return the matching benign-class entry, or None.
-
-    Match policy: exact equality on the normalized body, OR the body starts
-    with `<class> ` (i.e. the same command with arguments / flags). This
-    handles entries like `ls` (matches `ls -la /tmp`) and `cat /etc/os-release`
-    (matches verbatim). Multi-token classes match only the exact prefix.
-    """
-    if not benign_classes:
-        return None
-    body = _normalize_command_body(cmdline)
-    if not body:
-        return None
-    for entry in benign_classes:
-        ent = entry.strip().lower()
-        if not ent:
-            continue
-        if body == ent:
-            return entry
-        if body.startswith(ent + " "):
-            return entry
-    return None
-
-
-def _maybe_apply_benign_action_shortcircuit(
-    ctx: Context,
-    *,
-    disposition: str,
-    confidence: str,
-    termination_category: str,
-    surviving_hypotheses: list[str],
-) -> tuple[str, str, bool, str | None]:
-    """Override `(disposition, confidence)` to `(inconclusive, medium)` when:
-
-    1. The signature playbook declares a `## Benign action classes` list
-       (opt-in — empty list disables the short-circuit).
-    2. The alert's command body (stripped of any `<shell> -c` wrapper)
-       matches an entry on that list.
-    3. ANALYZE routed `disposition: true_positive` purely by exhaustion of
-       authority — termination_category in {trust-root, exhaustion-escalation}
-       AND no hypothesis on the surviving list reached `++` (we approximate
-       this by gating on `disposition: true_positive` rather than `benign`,
-       which already requires anchor grounding).
-
-    Returns `(disposition, confidence, applied, matched_class)`. When
-    `applied=True`, REPORT downgrades to inconclusive and the rationale
-    composer cites the matched class.
-
-    Cost of a false positive (firing when shouldn't): inconclusive instead
-    of true_positive — analyst still reviews. Cost of a false negative
-    (not firing when should): unchanged from today — analyst reviews a
-    true_positive that was actually inconclusive. Asymmetric in favor
-    of firing when the conditions hold.
-    """
-    if disposition != "true_positive":
-        return disposition, confidence, False, None
-    if termination_category not in ("trust-root", "exhaustion-escalation"):
-        return disposition, confidence, False, None
-
-    try:
-        playbook = load_playbook_metadata(ctx.signature_id)
-    except OrchestrationError:
-        # Signature directory absent or malformed — short-circuit cannot
-        # reason about it; defer to the rest of REPORT.
-        return disposition, confidence, False, None
-    benign_classes = playbook.benign_action_classes
-    if not benign_classes:
-        return disposition, confidence, False, None
-
-    alert_path = ctx.run_dir / "alert.json"
-    if not alert_path.exists():
-        return disposition, confidence, False, None
-    try:
-        alert = json.loads(alert_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return disposition, confidence, False, None
-
-    cmdline = (
-        alert.get("data", {})
-        .get("output_fields", {})
-        .get("proc", {})
-        .get("cmdline", "")
-    )
-    if not isinstance(cmdline, str) or not cmdline:
-        return disposition, confidence, False, None
-
-    matched = _command_body_matches_benign_list(cmdline, benign_classes)
-    if matched is None:
-        return disposition, confidence, False, None
-
-    return "inconclusive", "medium", True, matched
-
-
-def _compose_termination_rationale(
-    category: str,
-    matched_archetype: str | None,
-    matched_ticket_id: str | None,
-    surviving_hypotheses: list[str],
-    *,
-    benign_action_class: str | None = None,
-) -> str:
-    """One-sentence rationale for the `termination.category`. Mechanical —
-    no narrative judgment."""
-    if benign_action_class:
-        return (
-            f"Authority exhausted at trust root; command body matches the "
-            f"playbook's benign-action class `{benign_action_class}` "
-            f"(non-damaging in isolation) — disposition routed inconclusive "
-            f"rather than true_positive by exhaustion alone."
-        )
-    if category == "trust-root":
-        return (
-            f"Authority verdict closed the question"
-            + (f" for archetype {matched_archetype}" if matched_archetype else "")
-            + "."
-        )
-    if category == "adversarial-refuted":
-        return (
-            "Adversarial mechanism hypothesis refuted with a named matched "
-            "refutation shape."
-        )
-    if category == "severity-ceiling":
-        return (
-            "Signature's structural severity forces escalation regardless of "
-            "mechanism (composition rule triggered)."
-        )
-    # exhaustion-escalation
-    if matched_archetype and matched_ticket_id is None:
-        return (
-            f"Archetype {matched_archetype} could not be grounded — required "
-            f"anchor(s) unconfirmed and no matching precedent."
-        )
-    if surviving_hypotheses:
-        return (
-            f"Further leads not runnable; "
-            f"{surviving_hypotheses[0]} held at live weight."
-        )
-    return "Further leads not runnable; investigation escalated for analyst review."
-
-
-def _truncate_summary(summary_md: str, *, max_chars: int = 300) -> str:
-    """Collapse a multi-paragraph narrative summary into a 1-2 sentence
-    summary field for the conclude: YAML block. Takes the first paragraph,
-    strips newlines, clamps to max_chars.
-    """
-    first_para = summary_md.strip().split("\n\n", 1)[0]
-    collapsed = " ".join(first_para.split())
-    if len(collapsed) <= max_chars:
-        return collapsed
-    return collapsed[: max_chars - 1].rstrip() + "…"
