@@ -1,7 +1,8 @@
 """Prediction-discipline checks (rules 11-14 in the validator docstring).
 
 Covers: prediction coverage, partial authority cap, prediction lifecycle
-(append-only at ID granularity), and rollup parent weight.
+(append-only at ID granularity), rollup parent weight, and prediction
+closure at CONCLUDE (rule #34).
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from typing import Any
 from hooks.scripts.invlang_common import _index_hypothesis_id_field_ids
 from hooks.scripts.invlang_walkers import (
     WEIGHT_NUMERIC,
+    compute_final_status,
     compute_final_weight,
     iter_hypotheses,
     parent_hypothesis_id,
@@ -259,6 +261,103 @@ def _check_rollup_parent_weight(merged: dict[str, Any]) -> list[str]:
                 f"(children: {sorted(child_ids)}). This is rollup grading — "
                 f"the parent's grade must rest on evidence bearing on its own "
                 f"mechanism, not on the disjunction of its children."
+            )
+
+    return errors
+
+
+def _check_prediction_closure(merged: dict[str, Any]) -> list[str]:
+    """Rule #34 (prediction closure at CONCLUDE): every declared prediction is addressed.
+
+    At CONCLUDE/REPORT time (signalled by the presence of a top-level
+    ``conclude`` block), every ``p*`` and ``ap*`` declared on a hypothesis
+    whose final status is neither ``refuted`` nor ``shelved`` must be:
+
+    1. Cited in some resolution's ``matched_prediction_ids`` with a non-null
+       ``after`` (i.e., a verdict was rendered at any weight), OR
+    2. Listed in ``conclude.deferred_predictions[]`` with a non-empty rationale.
+
+    A refuted hypothesis (final weight ``--``) is dead — its remaining
+    predictions don't need individual addressing because the hypothesis
+    itself was knocked out. A shelved hypothesis defers its whole
+    prediction set by definition.
+
+    Generalises rule #6 (which only fires when ``++`` was reached) into a
+    coverage check that runs at REPORT regardless of the final weight.
+    Catches the ``+``/``-``/null cases where ANALYZE silently ignores
+    predictions PREDICT pre-committed to.
+    """
+    conclude = merged.get("conclude")
+    if not isinstance(conclude, dict):
+        return []  # mid-investigation; closure is REPORT-time
+
+    errors: list[str] = []
+
+    # Build the set of (hypothesis_id, prediction_id) addressed by some
+    # resolution citing it with a non-null `after`.
+    addressed: set[tuple[str, str]] = set()
+    for lead in merged.get("findings", []) or []:
+        if not isinstance(lead, dict):
+            continue
+        for res in lead.get("resolutions", []) or []:
+            if not isinstance(res, dict):
+                continue
+            hid = res.get("hypothesis")
+            after = res.get("after")
+            if not isinstance(hid, str) or after not in WEIGHT_NUMERIC or after is None:
+                continue
+            for pid in res.get("matched_prediction_ids") or []:
+                if isinstance(pid, str):
+                    addressed.add((hid, pid))
+
+    # Build the set of (hypothesis_id, prediction_id) explicitly deferred.
+    deferred: set[tuple[str, str]] = set()
+    for entry in conclude.get("deferred_predictions") or []:
+        if not isinstance(entry, dict):
+            continue
+        ref = entry.get("prediction_ref")
+        rationale = entry.get("rationale")
+        if not isinstance(ref, str) or not isinstance(rationale, str) or not rationale.strip():
+            continue
+        # `prediction_ref` shape: `h-{id}.{p|ap}{n}`
+        if "." not in ref:
+            continue
+        hid, _, pid = ref.partition(".")
+        if hid and pid:
+            deferred.add((hid, pid))
+
+    # For each hypothesis whose final status is active or confirmed, every
+    # declared p*/ap* id must be addressed-or-deferred.
+    for h in iter_hypotheses(merged):
+        hid = h.get("id")
+        if not isinstance(hid, str):
+            continue
+        status = compute_final_status(merged, hid)
+        if status in ("refuted", "shelved"):
+            continue
+
+        declared_ids: set[str] = set()
+        for p in h.get("predictions") or []:
+            if isinstance(p, dict) and isinstance(p.get("id"), str):
+                declared_ids.add(p["id"])
+        for ap in h.get("attribute_predictions") or []:
+            if isinstance(ap, dict) and isinstance(ap.get("id"), str):
+                declared_ids.add(ap["id"])
+        if not declared_ids:
+            continue
+
+        missing = sorted(
+            pid for pid in declared_ids
+            if (hid, pid) not in addressed and (hid, pid) not in deferred
+        )
+        if missing:
+            errors.append(
+                f"hypothesis {hid}: prediction id(s) {missing} declared but "
+                f"never addressed at CONCLUDE — no resolution cites them in "
+                f"matched_prediction_ids and they are not listed in "
+                f"conclude.deferred_predictions[]. Either grade them in a "
+                f"resolution (any weight), defer them with rationale, or "
+                f"shelve the hypothesis."
             )
 
     return errors

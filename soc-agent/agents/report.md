@@ -101,6 +101,8 @@ conclude:
   surviving_hypotheses: [h-001, ...]
   deferred_authorizations: []        # required when any authorization_contract is unfulfilled (rule #26)
   deferred_impact_predictions: []    # required when any impact_predictions entry is unfulfilled (rule #31)
+  deferred_predictions: []           # required when any p*/ap* on a non-refuted hypothesis is unaddressed (rule #34)
+                                     #   shape: {prediction_ref: h-{id}.{p|ap}{n}, rationale: "<why ungraded>"}
   summary: {1-2 sentence summary}
 ```
 
