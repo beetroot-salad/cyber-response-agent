@@ -109,3 +109,191 @@ class TestStepIsolation:
         stop_handler._run_step("close_ticket_action", close_ticket_action.main, payload)
 
         assert order == ["summary", "action"]
+
+
+# ---------------------------------------------------------------------------
+# Post-mortem detached spawn
+# ---------------------------------------------------------------------------
+
+
+import json  # noqa: E402
+
+
+class TestPostmortemSpawn:
+    @pytest.fixture
+    def runs_dir(self, tmp_path, monkeypatch):
+        runs = tmp_path / "runs"
+        runs.mkdir()
+        sessions = runs / ".sessions"
+        sessions.mkdir()
+        monkeypatch.setenv("SOC_AGENT_RUNS_DIR", str(runs))
+        # Tests assume the post-mortem path is enabled. Tests that
+        # specifically exercise the gate set / clear this themselves.
+        monkeypatch.setenv(stop_handler.POSTMORTEM_ENABLED_ENV, "1")
+        return runs
+
+    def _seed_run(self, runs_dir, session_id, *, has_adhoc: bool):
+        run_id = "run-" + session_id
+        run_dir = runs_dir / run_id
+        run_dir.mkdir()
+        # Map session → run dir via the session-anchored convention.
+        session_path = runs_dir / ".sessions" / f"{session_id}.json"
+        session_path.write_text(json.dumps({"run_dir": str(run_dir)}))
+        (run_dir / "meta.json").write_text(
+            json.dumps({"signature_id": "wazuh-rule-100001", "salt": "x"})
+        )
+        if has_adhoc:
+            fixtures = (
+                Path(__file__).parent / "fixtures" / "postmortem_leads"
+            )
+            (run_dir / "investigation.md").write_text(
+                (fixtures / "inv_with_adhoc.md").read_text()
+            )
+        else:
+            # Empty narrative — has_ad_hoc_leads short-circuits to False.
+            (run_dir / "investigation.md").write_text("# REPORT\n\n(empty)\n")
+        return run_dir
+
+    def test_spawns_when_run_has_adhoc(self, runs_dir, monkeypatch):
+        run_dir = self._seed_run(runs_dir, "sess-adhoc", has_adhoc=True)
+        captured: list[dict] = []
+
+        def fake_popen(*args, **kwargs):
+            captured.append({"args": args, "kwargs": kwargs})
+
+            class _Proc:
+                pid = 12345
+            return _Proc()
+
+        monkeypatch.setattr(stop_handler.subprocess, "Popen", fake_popen)
+        stop_handler._maybe_spawn_postmortem({"session_id": "sess-adhoc"})
+
+        assert len(captured) == 1
+        argv = captured[0]["args"][0]
+        assert argv[0] == sys.executable
+        assert argv[1:5] == ["-m", "scripts.postmortem.leads.run", "--run-dir", str(run_dir)]
+        # Out dir is under runs/postmortem/<run_id>/leads/
+        out_dir_arg = argv[argv.index("--out-dir") + 1]
+        assert out_dir_arg == str(runs_dir / "postmortem" / run_dir.name / "leads")
+        # Detached
+        assert captured[0]["kwargs"]["start_new_session"] is True
+        # run.log gets created
+        assert (Path(out_dir_arg) / "run.log").exists()
+
+    def test_skips_when_no_adhoc_leads(self, runs_dir, monkeypatch):
+        self._seed_run(runs_dir, "sess-clean", has_adhoc=False)
+        called = []
+        monkeypatch.setattr(
+            stop_handler.subprocess, "Popen",
+            lambda *a, **kw: called.append(("popen", a, kw)),
+        )
+        stop_handler._maybe_spawn_postmortem({"session_id": "sess-clean"})
+        assert called == []
+
+    def test_skips_when_session_id_missing(self, runs_dir, monkeypatch):
+        called = []
+        monkeypatch.setattr(
+            stop_handler.subprocess, "Popen",
+            lambda *a, **kw: called.append(("popen", a, kw)),
+        )
+        stop_handler._maybe_spawn_postmortem({})
+        assert called == []
+
+    def test_skips_when_meta_json_absent(self, runs_dir, monkeypatch, capsys):
+        run_dir = self._seed_run(runs_dir, "sess-no-meta", has_adhoc=True)
+        (run_dir / "meta.json").unlink()
+        called = []
+        monkeypatch.setattr(
+            stop_handler.subprocess, "Popen",
+            lambda *a, **kw: called.append(("popen", a, kw)),
+        )
+        stop_handler._maybe_spawn_postmortem({"session_id": "sess-no-meta"})
+        assert called == []
+        # Loud — log a warning to stderr so a debugger can spot the skip.
+        err = capsys.readouterr().err
+        assert "meta.json missing" in err
+
+    def test_skips_when_run_dir_unresolved(self, runs_dir, monkeypatch, capsys):
+        # No session-mapping file exists — resolve_run_dir returns None.
+        called = []
+        monkeypatch.setattr(
+            stop_handler.subprocess, "Popen",
+            lambda *a, **kw: called.append(("popen", a, kw)),
+        )
+        stop_handler._maybe_spawn_postmortem({"session_id": "sess-unknown"})
+        assert called == []
+        err = capsys.readouterr().err
+        assert "could not resolve run dir" in err
+        assert "sess-unknown" in err
+
+    def test_silent_skip_when_no_session_id(self, runs_dir, monkeypatch, capsys):
+        # No session_id is a legitimate, expected case (manual invocations);
+        # do not warn.
+        stop_handler._maybe_spawn_postmortem({})
+        err = capsys.readouterr().err
+        assert err == ""
+
+    def test_silent_skip_when_no_adhoc_findings(self, runs_dir, monkeypatch, capsys):
+        # The common case — quiet skip.
+        self._seed_run(runs_dir, "sess-clean-quiet", has_adhoc=False)
+        monkeypatch.setattr(
+            stop_handler.subprocess, "Popen",
+            lambda *a, **kw: None,
+        )
+        stop_handler._maybe_spawn_postmortem({"session_id": "sess-clean-quiet"})
+        err = capsys.readouterr().err
+        assert err == ""
+
+    def test_popen_failure_does_not_crash_handler(self, runs_dir, monkeypatch):
+        self._seed_run(runs_dir, "sess-popen-fail", has_adhoc=True)
+
+        def boom(*a, **kw):
+            raise OSError("popen unavailable")
+
+        monkeypatch.setattr(stop_handler.subprocess, "Popen", boom)
+        # _run_step wraps it; should not raise, must still log.
+        stop_handler._run_step(
+            "postmortem_leads",
+            stop_handler._maybe_spawn_postmortem,
+            {"session_id": "sess-popen-fail"},
+        )
+
+    def test_gate_off_skips_silently_even_with_adhoc(self, runs_dir, monkeypatch):
+        """With the gate unset, the spawn must not fire even when the
+        run has ad-hoc leads. This is the slice-1 default — `_spawn_agent`
+        is stubbed, so unconditional spawning would litter `failed`
+        markers across every investigation."""
+        self._seed_run(runs_dir, "sess-gate-off", has_adhoc=True)
+        monkeypatch.delenv(stop_handler.POSTMORTEM_ENABLED_ENV, raising=False)
+        called = []
+        monkeypatch.setattr(
+            stop_handler.subprocess, "Popen",
+            lambda *a, **kw: called.append("popen"),
+        )
+        stop_handler._maybe_spawn_postmortem({"session_id": "sess-gate-off"})
+        assert called == []
+
+    def test_gate_accepts_truthy_values(self, runs_dir, monkeypatch):
+        """The gate accepts 1/true/yes (case-insensitive)."""
+        self._seed_run(runs_dir, "sess-gate-truthy", has_adhoc=True)
+        for v in ("1", "true", "TRUE", "yes", "Yes"):
+            called = []
+            monkeypatch.setenv(stop_handler.POSTMORTEM_ENABLED_ENV, v)
+            monkeypatch.setattr(
+                stop_handler.subprocess, "Popen",
+                lambda *a, **kw: called.append("popen") or type("P", (), {"pid": 1})(),
+            )
+            stop_handler._maybe_spawn_postmortem({"session_id": "sess-gate-truthy"})
+            assert called == ["popen"], f"value {v!r} should enable the gate"
+
+    def test_gate_rejects_falsey_values(self, runs_dir, monkeypatch):
+        self._seed_run(runs_dir, "sess-gate-falsey", has_adhoc=True)
+        for v in ("0", "false", "no", "", "off"):
+            called = []
+            monkeypatch.setenv(stop_handler.POSTMORTEM_ENABLED_ENV, v)
+            monkeypatch.setattr(
+                stop_handler.subprocess, "Popen",
+                lambda *a, **kw: called.append("popen"),
+            )
+            stop_handler._maybe_spawn_postmortem({"session_id": "sess-gate-falsey"})
+            assert called == [], f"value {v!r} should leave the gate closed"
