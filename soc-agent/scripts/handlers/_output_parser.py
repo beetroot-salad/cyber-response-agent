@@ -81,44 +81,55 @@ _LEGACY_SHAPE_MAP = {"D": "E", "I": "A"}  # D→E (data-gap is enrichment); I→
 _YAML_FENCE_RE = re.compile(r"```(?:yaml)?\s*\n(.*?)\n```", re.DOTALL)
 
 
-def _extract_envelope(stdout: str) -> dict[str, Any]:
-    """Find and parse the single top-level `predict:` YAML block.
+def _extract_top_level_envelope(
+    stdout: str,
+    *,
+    key: str,
+    error_cls: type[ValueError],
+) -> dict[str, Any]:
+    """Find and parse the single top-level `<key>:` YAML block.
 
     Supports two envelope shapes:
       - Unwrapped YAML (whole stdout is the YAML document).
       - One fenced ```yaml block containing the YAML document.
 
-    Raises PredictOutputError on parse failure, multiple top-level mappings,
-    or missing/wrong top-level key.
+    Raises `error_cls` on parse failure, non-mapping top-level, or
+    missing/wrong-shaped envelope key.
     """
     text = stdout.strip()
     if not text:
-        raise PredictOutputError("predict output is empty")
+        raise error_cls(f"{key} output is empty")
 
-    # Prefer a fenced block if present (most subagent outputs are fenced).
     fence_match = _YAML_FENCE_RE.search(text)
     body = fence_match.group(1) if fence_match else text
 
     try:
         doc = yaml.safe_load(body)
     except yaml.YAMLError as e:
-        raise PredictOutputError(f"predict output is not valid YAML: {e}") from e
+        raise error_cls(f"{key} output is not valid YAML: {e}") from e
 
     if not isinstance(doc, dict):
-        raise PredictOutputError(
-            f"predict output top-level must be a mapping, got {type(doc).__name__}"
+        raise error_cls(
+            f"{key} output top-level must be a mapping, got {type(doc).__name__}"
         )
-    if "predict" not in doc:
+    if key not in doc:
         keys = sorted(doc.keys()) if doc else []
-        raise PredictOutputError(
-            f"predict output must have top-level key `predict:`, got {keys}"
+        raise error_cls(
+            f"{key} output must have top-level key `{key}:`, got {keys}"
         )
-    envelope = doc["predict"]
+    envelope = doc[key]
     if not isinstance(envelope, dict):
-        raise PredictOutputError(
-            f"predict.* must be a mapping, got {type(envelope).__name__}"
+        raise error_cls(
+            f"{key}.* must be a mapping, got {type(envelope).__name__}"
         )
     return envelope
+
+
+def _extract_envelope(stdout: str) -> dict[str, Any]:
+    """Predict-flavored wrapper around `_extract_top_level_envelope`."""
+    return _extract_top_level_envelope(
+        stdout, key="predict", error_cls=PredictOutputError,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -450,38 +461,9 @@ class GatherOutputError(ValueError):
 
 
 def _extract_gather_envelope_doc(stdout: str) -> dict[str, Any]:
-    """Find and parse the single top-level `gather:` YAML block.
-
-    Mirrors `_extract_envelope` for predict: tolerates one fenced YAML block
-    or an unwrapped document; demands a `gather:` top-level mapping.
-    """
-    text = stdout.strip()
-    if not text:
-        raise GatherOutputError("gather output is empty")
-
-    fence_match = _YAML_FENCE_RE.search(text)
-    body = fence_match.group(1) if fence_match else text
-
-    try:
-        doc = yaml.safe_load(body)
-    except yaml.YAMLError as e:
-        raise GatherOutputError(f"gather output is not valid YAML: {e}") from e
-
-    if not isinstance(doc, dict):
-        raise GatherOutputError(
-            f"gather output top-level must be a mapping, got {type(doc).__name__}"
-        )
-    if "gather" not in doc:
-        keys = sorted(doc.keys()) if doc else []
-        raise GatherOutputError(
-            f"gather output must have top-level key `gather:`, got {keys}"
-        )
-    envelope = doc["gather"]
-    if not isinstance(envelope, dict):
-        raise GatherOutputError(
-            f"gather.* must be a mapping, got {type(envelope).__name__}"
-        )
-    return envelope
+    return _extract_top_level_envelope(
+        stdout, key="gather", error_cls=GatherOutputError,
+    )
 
 
 def _extract_gather_leads(
@@ -632,34 +614,9 @@ class AnalyzeOutputError(ValueError):
 
 
 def _extract_analyze_envelope_doc(stdout: str) -> dict[str, Any]:
-    """Find and parse the top-level `analyze:` YAML block."""
-    text = stdout.strip()
-    if not text:
-        raise AnalyzeOutputError("analyze output is empty")
-
-    fence_match = _YAML_FENCE_RE.search(text)
-    body = fence_match.group(1) if fence_match else text
-
-    try:
-        doc = yaml.safe_load(body)
-    except yaml.YAMLError as e:
-        raise AnalyzeOutputError(f"analyze output is not valid YAML: {e}") from e
-
-    if not isinstance(doc, dict):
-        raise AnalyzeOutputError(
-            f"analyze output top-level must be a mapping, got {type(doc).__name__}"
-        )
-    if "analyze" not in doc:
-        keys = sorted(doc.keys()) if doc else []
-        raise AnalyzeOutputError(
-            f"analyze output must have top-level key `analyze:`, got {keys}"
-        )
-    envelope = doc["analyze"]
-    if not isinstance(envelope, dict):
-        raise AnalyzeOutputError(
-            f"analyze.* must be a mapping, got {type(envelope).__name__}"
-        )
-    return envelope
+    return _extract_top_level_envelope(
+        stdout, key="analyze", error_cls=AnalyzeOutputError,
+    )
 
 
 def _bucket_by_lead(
