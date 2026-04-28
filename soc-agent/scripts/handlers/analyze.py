@@ -15,9 +15,12 @@ appends it to investigation.md.
 
 Handler responsibilities:
     - computes `loop_n` from ctx.history (count of PREDICT entries)
-    - preloads per-lead raw SIEM payloads from
-      `ctx.outputs[Phase.GATHER]["raw_details_paths"]` into a
-      `<raw_details>` block alongside `<alert>` + `<investigation>`
+    - preloads `<alert>`, `<investigation>`, and the structured
+      `<current_gather>` block (per-lead characterization + status). Raw
+      SIEM payloads under `runs/<run>/raw_details/loop-<N>/` are NOT
+      inlined by default — `<current_gather>` carries the grade-relevant
+      fields. Set `SOC_AGENT_ANALYZE_INCLUDE_RAW_DETAILS=1` to restore the
+      pre-trim shape (raw payloads inlined under `<raw_details>`).
     - invokes the subagent via the shared `_subagent.invoke_subagent` wrapper
     - parses the `analyze:` envelope via `parse_analyze_envelope`
     - back-fills `unresolved_prescribed_set` from `ctx.outputs[Phase.GATHER]`
@@ -76,6 +79,18 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 SUBAGENT_TIMEOUT_SECONDS = int(
     os.environ.get("SOC_AGENT_ANALYZE_TIMEOUT_SECONDS", "450")
 )
+
+
+# Whether to inline the per-lead raw SIEM payloads into the analyze prompt.
+# Off by default — `<current_gather>` already carries the grade-relevant
+# fields the subagent grades against (per-lead `characterization`, status,
+# query metadata). The raw payloads remain on disk under
+# `runs/<run>/raw_details/loop-<N>/` for forensic inspection. Set to "1" to
+# restore the pre-trim shape if a specific signature/lead requires raw
+# event inspection during ANALYZE.
+INCLUDE_RAW_DETAILS = os.environ.get(
+    "SOC_AGENT_ANALYZE_INCLUDE_RAW_DETAILS", "0"
+).strip() not in {"", "0", "false", "False"}
 
 
 # ---------------------------------------------------------------------------
@@ -138,10 +153,13 @@ def _load_raw_details(ctx: Context) -> str:
 def _assemble_prompt(ctx: Context) -> str:
     """Build the analyze subagent prompt with all deterministic context inline.
 
-    The subagent receives alert.json, investigation.md, and the per-lead
-    raw SIEM payloads (under `<raw_details>`) preloaded — no Read tool
-    calls required. Archetype context is not preloaded; archetype labeling
-    moved to the REPORT phase.
+    The subagent receives alert.json, investigation.md, and the structured
+    `<current_gather>` block (per-lead `characterization`, status, query
+    metadata) preloaded — no Read tool calls required. The raw SIEM
+    payloads stay on disk under `runs/<run>/raw_details/loop-<N>/` and are
+    NOT inlined by default; set `SOC_AGENT_ANALYZE_INCLUDE_RAW_DETAILS=1`
+    to restore the pre-trim shape. Archetype context is not preloaded;
+    archetype labeling moved to the REPORT phase.
     """
     loop_n = _compute_loop_n(ctx)
     alert = load_alert(ctx.run_dir)
@@ -158,9 +176,10 @@ def _assemble_prompt(ctx: Context) -> str:
         current_gather = format_current_gather_block(gather_out.get("leads") or [])
         if current_gather:
             blocks.append(current_gather)
-    raw_details_block = _load_raw_details(ctx)
-    if raw_details_block:
-        blocks.append(raw_details_block)
+    if INCLUDE_RAW_DETAILS:
+        raw_details_block = _load_raw_details(ctx)
+        if raw_details_block:
+            blocks.append(raw_details_block)
     return "\n\n".join(blocks)
 
 

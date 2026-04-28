@@ -148,6 +148,13 @@ When a prediction's `claim` smuggles two sub-claims onto different load-bearing 
   - `severity-ceiling` — live hypotheses remain but critical edges aren't testable with available tools.
   - `exhaustion-escalation` — loop budget exhausted with frontier still open.
 
+**Disposition selection (halt only).** Pick from `benign | true_positive | unclear` per affirmative-evidence rules:
+- `disposition: benign` — at least one mechanism hypothesis is `++` AND every `authorization_contract` on it resolves `authorized`. Refuting other hypotheses to `--` is not enough; benign requires affirmative confirmation of a benign mechanism with authorization.
+- `disposition: true_positive` — at least one *adversarial* mechanism hypothesis is `++` with a named failed refutation, OR an authorization contract resolved `unauthorized` on a live-weight mechanism. Absence of a surviving benign hypothesis is NOT sufficient — refuted-benign does not equal confirmed-malicious. If no adversarial mechanism reached `++` and no authorization contract resolved `unauthorized`, do not pick `true_positive`.
+- `disposition: unclear` — frontier is open (anchors unavailable, contracts indeterminate, mechanisms held at `+`/`-` without affirmative `++`). This is the correct landing for "we used the available data, mechanism is observed/inferred, but identity-of-use or authorization can't be resolved with current tooling." Pair with `termination_category: severity-ceiling` (open critical edges, untestable) or `exhaustion-escalation` (loop budget consumed) as appropriate.
+
+The structural failure mode this rule blocks: only-benign-hypothesis is graded `--` (refuted), `surviving_hypotheses` is `[]`, no adversarial mechanism was scaffolded — and the halt routes `true_positive` by elimination. That is malformed. The honest landing is `unclear` with named anomalies + data wishes pointing at the missing scaffolding (the next loop or the analyst can act on it). `true_positive` requires affirmative `++` evidence, not absence of surviving alternatives.
+
 ## Enrichment-only loops
 
 A loop may complete with zero new hypothesis grades (pure attribute updates, authority consultations, or baseline characterization). Emit an empty `resolutions: []` and populate the relevant `trust_anchor_result` / `legitimacy_resolutions` / `impact_resolutions` blocks. Routing rules still apply — the halt conditions are what matter, not whether you graded this loop.
