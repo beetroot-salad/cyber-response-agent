@@ -161,6 +161,28 @@ def _has_new_commit(worktree_path: Path, base_ref: str) -> bool:
         return False
 
 
+# The agent must commit only catalog edits. A `git add -A` mistake (or any
+# stray file in the worktree) would otherwise hitchhike into the PR. The
+# orchestrator does a post-commit scope check and refuses to push if any
+# committed file falls outside this prefix.
+ALLOWED_COMMIT_PREFIX = "soc-agent/knowledge/common-investigation/leads/"
+
+
+def _committed_paths(worktree_path: Path, base_ref: str) -> list[str]:
+    proc = subprocess.run(
+        ["git", "-C", str(worktree_path), "diff", "--name-only", f"{base_ref}..HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return []
+    return [l for l in proc.stdout.splitlines() if l.strip()]
+
+
+def _out_of_scope(paths: list[str]) -> list[str]:
+    return [p for p in paths if not p.startswith(ALLOWED_COMMIT_PREFIX)]
+
+
 def _push_and_pr(
     worktree_path: Path,
     branch_name: str,
@@ -266,6 +288,17 @@ def main(argv: list[str] | None = None) -> int:
             _mark_failed(
                 out_dir,
                 f"agent did not produce a commit (rc={rc})",
+            )
+            return 1
+
+        committed = _committed_paths(worktree_path, base_ref)
+        out_of_scope = _out_of_scope(committed)
+        if out_of_scope:
+            _mark_failed(
+                out_dir,
+                "agent committed files outside the catalog scope; "
+                f"refusing to push. Out-of-scope: {out_of_scope}. "
+                f"All committed: {committed}.",
             )
             return 1
 

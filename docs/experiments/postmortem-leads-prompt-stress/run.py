@@ -274,7 +274,10 @@ def main(argv: list[str] | None = None) -> int:
                 vendor=vendor,
                 leads=leads,
             )
-            (worktree / "_PROMPT.txt").write_text(prompt)
+            # Persist the rendered prompt as a sibling, NOT inside the
+            # worktree — `git add -A` mishaps in the agent must not pull
+            # it into the commit. Stress run 3 caught exactly that.
+            (per_run_log.parent / f"{run_id[:12]}.prompt.txt").write_text(prompt)
             result = _spawn_claude(prompt, cwd=worktree, timeout=args.timeout)
             commits = _git_log_commits(worktree, base_ref)
             diff_stat = _git_diff(worktree, base_ref)

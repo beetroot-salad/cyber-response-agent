@@ -81,18 +81,49 @@ def _argv(repo_root: Path, run_dir: Path, out_dir: Path) -> list[str]:
 def _stub_agent_commit(prompt_seen: list[str]):
     """Returns a `_spawn_agent` replacement that synthesizes a real
     commit in the worktree (so `_has_new_commit` returns True) and
-    captures the prompt for assertions."""
+    captures the prompt for assertions. The committed file lives under
+    the allowed catalog prefix so the orchestrator's scope guard is a
+    no-op for happy-path tests.
+    """
 
     def stub(worktree_path: Path, prompt: str) -> int:
         prompt_seen.append(prompt)
-        # Touch a file in the worktree, stage and commit so HEAD advances.
-        marker = worktree_path / "AGENT_RAN"
-        marker.write_text("ok\n")
+        target_dir = (
+            worktree_path
+            / "soc-agent" / "knowledge" / "common-investigation"
+            / "leads" / "stub-lead"
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "definition.md").write_text(
+            "---\nname: stub-lead\ndata_tags: []\n---\nstub\n"
+        )
         subprocess.run(
-            ["git", "-C", str(worktree_path), "add", "AGENT_RAN"], check=True
+            ["git", "-C", str(worktree_path), "add",
+             "soc-agent/knowledge/common-investigation/leads/stub-lead/"],
+            check=True,
         )
         subprocess.run(
             ["git", "-C", str(worktree_path), "commit", "-q", "-m", "agent edits"],
+            check=True,
+        )
+        return 0
+
+    return stub
+
+
+def _stub_agent_commit_out_of_scope():
+    """Stub that simulates the failure mode observed in stress run 3 —
+    agent commits a file outside the catalog scope (e.g. via `git add -A`
+    catching a stray file in the worktree)."""
+
+    def stub(worktree_path: Path, prompt: str) -> int:
+        stray = worktree_path / "STRAY.txt"
+        stray.write_text("oops\n")
+        subprocess.run(
+            ["git", "-C", str(worktree_path), "add", "STRAY.txt"], check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree_path), "commit", "-q", "-m", "stray"],
             check=True,
         )
         return 0
@@ -228,6 +259,35 @@ class TestEndToEnd:
         assert rc == 1
         assert (out_dir / "failed").exists()
         assert "worktree create failed" in (out_dir / "failed").read_text()
+
+    def test_out_of_scope_commit_fails_loud(
+        self,
+        repo_with_run: tuple[Path, Path, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If the agent commits files outside `leads/`, the orchestrator
+        must refuse to push and leave a `failed` marker.
+
+        Reproduces the failure mode observed in stress run 3: agent
+        ran `git add -A` and pulled in a stray file.
+        """
+        repo_root, run_dir, out_dir = repo_with_run
+        monkeypatch.delenv(run_module.WORKTREE_DIR_ENV, raising=False)
+        monkeypatch.setattr(run_module, "_spawn_agent", _stub_agent_commit_out_of_scope())
+        push_called = []
+        monkeypatch.setattr(
+            run_module, "_push_and_pr",
+            lambda *a, **kw: push_called.append("pr") or "url",
+        )
+
+        rc = run_module.main(_argv(repo_root, run_dir, out_dir))
+        assert rc == 1
+        assert (out_dir / "failed").exists()
+        failed_text = (out_dir / "failed").read_text()
+        assert "outside the catalog scope" in failed_text
+        assert "STRAY.txt" in failed_text
+        # No PR opened — guard fires before the push step.
+        assert push_called == []
 
     def test_worktree_dir_env_override(
         self,
