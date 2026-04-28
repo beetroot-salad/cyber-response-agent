@@ -1,6 +1,6 @@
 ---
 title: PREDICT `Shape B: comparison-deviation` — explicit comparison-set + dimension + deviation predicate
-status: todo
+status: doing
 groups: predict, gather, analyze, schema
 ---
 

@@ -76,6 +76,26 @@ seeds above.
 | `ci-pipeline-exec` | `?underlying-host` | CI/CD job exec'd into the container to run a scripted, non-interactive command | `archetypes/ci-pipeline-exec/` |
 | `k8s-exec-probe` | `?underlying-host` | Kubernetes liveness/readiness/exec probe runs `sh -c "..."` on a strict cadence | `archetypes/k8s-exec-probe/` |
 
+## Contextualize leads
+
+These run in parallel at CONTEXTUALIZE time, before SCREEN/PREDICT —
+mechanically enriching the prologue vertices with classification +
+authoritative-record context that every downstream phase reads.
+
+- `endpoint-context`
+- `identity-context`
+
+`endpoint-context` runs once per endpoint vertex (the container/host the
+shell spawned in), deriving the classification label from the IP-ranges
+context file and attaching the CMDB record. `identity-context` runs once
+per identity vertex (the in-container user, e.g. `root`); on this rule
+the IdP record is typically empty since the user is a container runtime
+identity, not a directory-managed account, and `loginuid=-1` means no
+upstream login session is present. Classification still resolves (the
+identity-pattern file recognizes `root` as `container-runtime-uid0` or
+similar), which lets PREDICT discriminate authorized-runtime-exec
+from a privilege-escalation chain without dispatching a separate lead.
+
 ## Starter lead order
 
 Most investigations resolve after the first two leads. The third only
@@ -88,31 +108,31 @@ picture is still ambiguous after lead 2.
    refine.
 2. **`container-baseline`** — query other 100001 events from the same
    `container.image` over the last 7-30 days. Surfaces whether this
-   image has a history of shells from this parent (the
-   `app-spawned-shell` vs `post-exploit-interactive` discriminator) and
-   whether the cadence matches a probe (`k8s-exec-probe`).
+   image has a history of shells from this parent (the benign-baseline
+   vs no-baseline discriminator) and whether the cadence matches a
+   recurring scheduled-probe shape.
 3. **`correlated-endpoint-events`** — query Falco rules 100000-100099 from
    the same `container.id` in a ±15 minute window, especially 100002,
    100006, 100007, and 100008. Required by the composition rules below.
 
 **Composite dispatch:** leads 2 and 3 share the same `container.id`
-and overlap in window. If lead 1 alone does not uniquely match an
-archetype, dispatch leads 2 and 3 as a composite — one subagent, one
-expanded base query.
+and overlap in window. If lead 1 alone does not uniquely characterize
+the parent mechanism, dispatch leads 2 and 3 as a composite — one
+subagent, one expanded base query.
 
 ## Composition rules
 
-When evidence matches multiple archetypes, the composition is the
-finding — escalate with all matching archetypes named, do not pick one.
+When evidence matches multiple disposition shapes, the composition is
+the finding — escalate citing each matching shape, do not pick one.
 
 The composition that matters for this signature:
 
-**Any benign archetype + co-firing of related Falco rules in the same
-`container.id` window is severe regardless of the otherwise-benign
-match.** If the `correlated-endpoint-events` lead returns any of the
-following from the same container within ±15 minutes, escalate
-immediately and cite both the matched benign archetype and the
-co-firing rule(s):
+**Any benign-shaped match + co-firing of related Falco rules in the
+same `container.id` window is severe regardless of the
+otherwise-benign shape.** If the `correlated-endpoint-events` lead
+returns any of the following from the same container within ±15
+minutes, escalate immediately and cite both the matched benign shape
+and the co-firing rule(s):
 
 - 100002 — Redirect STDOUT/STDIN to network connection
 - 100006 — Sensitive file read
@@ -120,10 +140,47 @@ co-firing rule(s):
 - 100008 — Log clearing
 
 This applies even when an anchor confirms the benign match. A
-confirmed `operator-runtime-debug` accompanied by 100007 in the same
-window is the strongest possible evidence that operator credentials
-were compromised — the anchor confirmation does not override the
-co-firing.
+confirmed authorized-runtime-exec accompanied by 100007 in the same
+window is the strongest possible evidence that the authorized
+credentials were compromised — the anchor confirmation does not
+override the co-firing.
+
+## Benign action classes
+
+Commands whose body, executed in isolation, cannot damage or exfiltrate
+data. CONCLUDE consults this list at trust-root: when the alert's
+command body is on the list, every adversarial-archetype hypothesis is
+below `++`, and the investigation has reached `termination_category:
+trust-root` (no further upstream authority is reachable), disposition
+routes `inconclusive` rather than escalating to `true_positive` by
+exhaustion alone.
+
+The body is the argument to `bash -c`, `sh -c`, or the direct argv
+when no shell is invoked — strip the shell wrapper before comparing.
+
+- `whoami`
+- `id`
+- `hostname`
+- `uname` (any flags)
+- `pwd`
+- `ls` (any flags, any path)
+- `ps` (any flags)
+- `cat /etc/os-release`
+- `cat /proc/version`
+- `cat /etc/hostname`
+- `cat /etc/resolv.conf`
+- `df` (any flags)
+- `free` (any flags)
+- `uptime`
+- `date`
+- `env` (no arguments — listing env vars only, not setting them)
+
+Exhaustion-by-trust-root with a benign command body is a real failure
+mode: the agent runs out of upstream authority to consult and routes
+`true_positive` because no anchor closed the authorization contract.
+For a non-damaging command, that exhaustion is not evidence of
+compromise — it is the limit of available telemetry. Cite the
+short-circuit explicitly in the report rationale when it fires.
 
 ## Signature quirks
 
@@ -137,15 +194,15 @@ co-firing.
   so absence of an alert is not evidence the activity didn't happen.
 - **Container privileges are scoping evidence, not a discriminator.**
   Privileged containers, Docker-socket mounts, host network, host PID
-  raise severity if the matched archetype escalates, but they do not
-  change which archetype matches. Capture them when escalating for
+  raise severity if the matched shape escalates, but they do not
+  change which shape matches. Capture them when escalating for
   accurate blast-radius reporting.
 - **Apps shelling out is normal.** `pname=<application binary>` is not
   a standalone red flag — `subprocess.run`, build hooks, image
   processing wrappers, log rotation, and many other legitimate things
-  all produce app-spawned shells. The discriminating signal is whether
-  this image has done it *before* (the baseline anchor on
-  `app-spawned-shell`).
+  all produce shells whose parent is the application binary. The
+  discriminating signal is whether this image has done it *before*
+  (the baseline anchor on the runtime-process mechanism).
 
 ## Scope
 

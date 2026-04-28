@@ -1,0 +1,67 @@
+case_id: case-005
+slice: backward-traversal-after-plus-plus
+source: synthesized
+signature_id: wazuh-rule-5710
+loop_n: 3
+
+inputs:
+  alert_path: evals/predict/fixtures/case-005/alert.json
+  prior_investigation_md: evals/predict/fixtures/case-005/investigation.md
+  notes: |
+    Continuation of case-002 lineage. Loop 2 fired approved-source-lookup;
+    landed evidence shows the (172.22.0.10, nagios, target-endpoint) triple
+    IS registered under monitoring-host approved-source registry, with
+    owner=ops-monitoring-team, ticket-of-record=CHG-7421. ANALYZE graded
+    ?registered-actor-initiated as ++. The current edge (alert v-001 ←
+    scheduled-prober from monitoring-host) is now confirmed. Loop 3 PREDICT
+    must NOT propose a competitor for v-001 (sideways pivot) — instead
+    attach upstream: who/what drove the monitoring-host to schedule this
+    prober? Likely Shape E loop probing change-management correlation, or
+    a refinement (`h-002-1`) on the prober's schedule subtype.
+
+expected:
+  shape: E   # primary expectation — upstream authority probe
+  acceptable_alternative_shapes: [A]  # acceptable if Shape A on UPSTREAM vertex
+  shape_rationale: |
+    The current edge is settled (++). Loop 3 attaches to the now-confirmed
+    parent vertex (monitoring-host), not back to v-001. Shape E with one
+    probe lead against change-management / deploy-runs registry is the
+    typical move; a Shape A on the upstream vertex with a contract against
+    change-management is also acceptable. What is NOT acceptable is a
+    competing mechanism for v-001.
+
+  branch_plan_must:
+    primary_lead_oneof: [change-management-correlation, deploy-runs-lookup, prober-schedule-history]
+    readings_min: 2
+    advance_to_includes: [escalate, halt, "fork-at-actor"]
+
+  hypotheses_must: null  # for Shape E path; alt path allows 1 hyp on upstream vertex
+
+  routing_must:
+    selected_lead_oneof: [change-management-correlation, deploy-runs-lookup, prober-schedule-history]
+    composite_required: false
+
+  prediction_axis:
+    discriminator: |
+      Whether the now-confirmed monitoring-host scheduled-prober has an
+      attestable change-management / deploy-runs trail explaining its
+      schedule, OR whether upstream authority is structurally inaccessible
+      (trust-root candidate).
+    acceptable_dimensions: [upstream-authority, schedule-attestation]
+    forbidden_dimensions:
+      - mechanism-of-v-001  # already settled
+      - cadence-of-v-001    # already settled
+      - authorization-of-v-001  # already settled at ++
+    refutation_axis: |
+      A change-management hit naming the prober's schedule attests; a miss
+      with no other accessible upstream authority routes to trust-root and
+      the playbook's benign-action short-circuit.
+
+  forbidden_patterns:
+    - presence_test_refutation
+    - baseline_value_leak
+    - compound_claim
+    - sideways_pivot_after_plus_plus  # PRIMARY catch for this case
+    - relitigate_settled_loop_1_question
+    - relitigate_settled_loop_2_question
+    - attach_hypothesis_to_v_001  # any new hyp must attach upstream

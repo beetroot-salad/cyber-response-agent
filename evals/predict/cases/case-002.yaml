@@ -1,0 +1,61 @@
+case_id: case-002
+slice: shape-A-authorization-fork
+source: synthesized
+signature_id: wazuh-rule-5710
+loop_n: 2
+
+inputs:
+  alert_path: evals/predict/fixtures/case-002/alert.json
+  prior_investigation_md: evals/predict/fixtures/case-002/investigation.md
+  notes: |
+    Loop 1 fired authentication-history; landed evidence shows a recurring
+    ~10-min 5710 cadence from 172.22.0.10 with srcuser=nagios across the
+    last 72h, NO forward-success authentication observed. Cadence-baseline
+    refilled the field gap from loop 1 — mechanism is now pinned (a
+    scheduled prober / health-check), the open question is authorization
+    (is 172.22.0.10/nagios on the approved monitoring sources list?).
+    Canonical Shape A: single hypothesis, contract anchors approved-source
+    registry. Integrity waiver because the registry attests to identity-of-
+    use alongside authorization.
+
+expected:
+  shape: A
+  shape_rationale: |
+    Mechanism (scheduled prober) is pinned by the cadence baseline from
+    loop 1. Authorization is the only remaining question. A peer mechanism
+    fork on the same vertex would re-litigate a settled edge.
+
+  branch_plan_must: null  # not Shape E
+
+  hypotheses_must:
+    count_min: 1
+    count_max: 1
+    must_include_authorization_contract: true
+    forbidden_names:
+      - "^\\?(legitimate|authorized|benign|malicious|adversary|compromised)-"
+    discriminating_observable: |
+      Anchor consultation against approved-monitoring-sources / IAM /
+      change-management for the (172.22.0.10, nagios, target-endpoint)
+      triple.
+
+  routing_must:
+    selected_lead_oneof: [approved-source-lookup, authority-consultation, registry-lookup]
+    composite_required: false
+
+  prediction_axis:
+    discriminator: |
+      Whether the (source IP, sentinel username, target host) triple is
+      registered as an approved monitoring source in the org registry.
+    acceptable_dimensions: [authorization, registry-presence, identity-of-use]
+    forbidden_dimensions: [cadence, forward-success, content]  # already settled
+    refutation_axis: |
+      A registry hit naming the exact triple authorizes; a registry miss,
+      or a registry entry naming a different actor than 'nagios', refutes.
+
+  forbidden_patterns:
+    - presence_test_refutation
+    - baseline_value_leak
+    - compound_claim
+    - invoker_identity_peer_fork  # don't peer ?legitimate-prober vs ?adversary-prober
+    - sideways_pivot_after_plus_plus  # don't re-litigate the cadence edge
+    - relitigate_settled_loop_1_question

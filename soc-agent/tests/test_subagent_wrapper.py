@@ -49,10 +49,11 @@ def _fake_run_factory(stdout: str = "ok\n", returncode: int = 0, stderr: str = "
     """Build a subprocess.run replacement that captures argv and input."""
     captured = {}
 
-    def _fake(argv, input=None, capture_output=False, text=False, timeout=None, env=None):
+    def _fake(argv, input=None, capture_output=False, text=False, timeout=None, env=None, cwd=None):
         captured["argv"] = list(argv)
         captured["input"] = input
         captured["env"] = env
+        captured["cwd"] = cwd
         return subprocess.CompletedProcess(
             args=argv, returncode=returncode, stdout=stdout, stderr=stderr,
         )
@@ -78,6 +79,18 @@ def test_argv_includes_plugin_dir_and_session_id(run_dir_env):
     session_id = argv[argv.index("--session-id") + 1]
     # UUID4 shape
     assert len(session_id) == 36 and session_id.count("-") == 4
+
+
+def test_subagent_cwd_pinned_to_plugin_root(run_dir_env):
+    """Regression: the child's cwd must be the plugin root so the
+    `python3 scripts/tools/wazuh_cli.py`-style invocations the wazuh
+    SKILL.md documents resolve on the first try. Inheriting the
+    orchestrator's cwd (`/workspace` in normal operation) caused the
+    subagent to burn turns retrying with `soc-agent/` prefixes."""
+    fake, captured = _fake_run_factory()
+    with patch.object(_subagent.subprocess, "run", fake):
+        _subagent.invoke_subagent("archetype-match", "hi")
+    assert captured["cwd"] == str(_subagent.SOC_AGENT_ROOT)
 
 
 def test_allowed_tools_passed_from_frontmatter(run_dir_env):

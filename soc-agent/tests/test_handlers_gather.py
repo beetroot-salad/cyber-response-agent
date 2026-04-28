@@ -1063,8 +1063,13 @@ class TestHandleOutput:
         assert "**Lead:** authentication-history" in text
         assert "**Status:** ok" in text
         assert "total_events: 11" in text
-        # No YAML fence for the gather: block at this phase — ANALYZE owns it.
-        assert "```yaml" not in text.split("## GATHER")[-1]
+        # GATHER writes a minimal `findings:` lead-pick block after the
+        # markdown — empty query_details / outcome / resolutions, mode:
+        # lead-pick. Feeds the PREDICT loop-1 fast-path's corpus lookup.
+        # ANALYZE later writes the graded findings entry separately.
+        assert "mode: lead-pick" in text
+        assert "loop: 3" in text
+        assert "name: authentication-history" in text
 
     def test_routes_to_analyze_when_hypotheses_declared(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path, selected_lead="authentication-history")
@@ -1578,3 +1583,150 @@ class TestContractValidation:
 
         # data_missing is preserved, not flipped to contract_violation.
         assert result.payload["status"] == "data_missing"
+
+
+# ---------------------------------------------------------------------------
+# Slim-schema hydration (handler reconstructs prompt-known fields)
+#
+# The agent now emits a slim `query: { query, query_source, refinements_applied }`
+# block plus a one-token `health_probe_verdict`. The handler is expected to
+# fill back `system`, `template`, `time_window`, `substitutions` from the
+# dispatched Scope and promote `health_probe_verdict` into a `health_probe`
+# mapping before forwarding to ANALYZE. These tests poke the helpers directly
+# and assert the canonical post-hydration shape.
+# ---------------------------------------------------------------------------
+
+
+from scripts.handlers._output_parser import GatherEnvelope  # noqa: E402
+
+
+def _make_scope(
+    *,
+    lead_name: str,
+    template_exists: bool,
+    bindings: dict[str, str] | None = None,
+) -> gather_handler.Scope:
+    return gather_handler.Scope(
+        lead_name=lead_name,
+        vendor="wazuh",
+        reporting_agent="wazuh.manager",
+        incident_start="2026-04-27T05:00:00Z",
+        incident_end="2026-04-27T05:15:00Z",
+        entity_bindings=bindings or {"container_id": "abc"},
+        template_exists=template_exists,
+    )
+
+
+class TestHydrateQueryDetailsFromScopes:
+    def test_fills_missing_system_template_window_substitutions(self):
+        """Slim emit (just `query.query`) gets the prompt-known fields back."""
+        env = GatherEnvelope(leads=[
+            {
+                "id": "l-001",
+                "name": "container-baseline",
+                "status": "ok",
+                "query": {"query": "rule.id:100001 AND ...",
+                          "query_source": "ad-hoc",
+                          "refinements_applied": ""},
+            }
+        ])
+        scope = _make_scope(
+            lead_name="container-baseline",
+            template_exists=False,
+            bindings={"container_id": "abc", "container_image": "img"},
+        )
+        gather_handler._hydrate_query_details_from_scopes(env, [scope])
+        q = env.leads[0]["query"]
+        assert q["system"] == "wazuh"
+        assert q["template"] is None  # template_exists=False on ad-hoc
+        assert q["time_window"] == {
+            "start": "2026-04-27T05:00:00Z",
+            "end": "2026-04-27T05:15:00Z",
+        }
+        assert q["substitutions"] == {"container_id": "abc", "container_image": "img"}
+        # Slim fields preserved
+        assert q["query"] == "rule.id:100001 AND ..."
+        assert q["query_source"] == "ad-hoc"
+
+    def test_template_lead_gets_template_name_from_scope(self):
+        env = GatherEnvelope(leads=[
+            {"id": "l-002", "name": "authentication-history", "status": "ok",
+             "query": {"query": "q"}}
+        ])
+        scope = _make_scope(
+            lead_name="authentication-history", template_exists=True,
+        )
+        gather_handler._hydrate_query_details_from_scopes(env, [scope])
+        assert env.leads[0]["query"]["template"] == "authentication-history"
+
+    def test_does_not_overwrite_agent_authored_fields(self):
+        """Hydration is `setdefault` — when the agent did emit a field,
+        keep it. (Defends the upgrade path: legacy verbose envelopes
+        survive unchanged.)"""
+        env = GatherEnvelope(leads=[
+            {"id": "l-001", "name": "container-baseline", "status": "ok",
+             "query": {"query": "q", "system": "elastic-override",
+                       "substitutions": {"override": "yes"}}},
+        ])
+        scope = _make_scope(lead_name="container-baseline", template_exists=False)
+        gather_handler._hydrate_query_details_from_scopes(env, [scope])
+        q = env.leads[0]["query"]
+        assert q["system"] == "elastic-override"
+        assert q["substitutions"] == {"override": "yes"}
+        # But missing fields still get filled.
+        assert "time_window" in q
+
+    def test_lead_with_no_matching_scope_left_untouched(self):
+        env = GatherEnvelope(leads=[
+            {"id": "l-x", "name": "unknown-from-scope", "status": "error",
+             "escalate_trigger": "dispatch_unparseable"}
+        ])
+        scope = _make_scope(lead_name="container-baseline", template_exists=False)
+        gather_handler._hydrate_query_details_from_scopes(env, [scope])
+        # No `query` synthesized when the lead's name wasn't dispatched.
+        assert "query" not in env.leads[0]
+
+    def test_creates_query_dict_when_agent_emitted_none(self):
+        """Slim schema requires `query` mapping; if absent entirely, build one."""
+        env = GatherEnvelope(leads=[
+            {"id": "l-001", "name": "container-baseline", "status": "ok"}
+        ])
+        scope = _make_scope(lead_name="container-baseline", template_exists=False)
+        gather_handler._hydrate_query_details_from_scopes(env, [scope])
+        q = env.leads[0]["query"]
+        assert q["system"] == "wazuh"
+        assert q["substitutions"] == {"container_id": "abc"}
+
+
+class TestHydrateHealthProbeFromVerdict:
+    def test_promotes_verdict_token_to_mapping(self):
+        env = GatherEnvelope(leads=[
+            {"id": "l-001", "name": "x", "status": "ok",
+             "health_probe_verdict": "elevated"}
+        ])
+        gather_handler._hydrate_health_probe_from_verdict(env)
+        assert env.leads[0]["health_probe"] == {"verdict": "elevated"}
+        assert "health_probe_verdict" not in env.leads[0]
+
+    def test_no_verdict_no_mapping_unchanged(self):
+        env = GatherEnvelope(leads=[
+            {"id": "l-001", "name": "x", "status": "ok"}
+        ])
+        gather_handler._hydrate_health_probe_from_verdict(env)
+        assert "health_probe" not in env.leads[0]
+
+    def test_explicit_health_probe_mapping_takes_precedence(self):
+        """Legacy verbose emit: full `health_probe` dict already present.
+        The slim verdict token is folded in via setdefault so the verbose
+        verdict wins."""
+        env = GatherEnvelope(leads=[
+            {"id": "l-001", "name": "x", "status": "ok",
+             "health_probe": {"verdict": "broken", "trigger": "count_fn_error"},
+             "health_probe_verdict": "elevated"}
+        ])
+        gather_handler._hydrate_health_probe_from_verdict(env)
+        assert env.leads[0]["health_probe"] == {
+            "verdict": "broken", "trigger": "count_fn_error",
+        }
+        # Slim token still removed so callers don't see two sources.
+        assert "health_probe_verdict" not in env.leads[0]

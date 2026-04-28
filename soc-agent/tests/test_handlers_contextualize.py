@@ -153,6 +153,18 @@ class TestPlaybookMetadata:
         with pytest.raises(OrchestrationError, match="playbook not found"):
             ctx_handler.load_playbook_metadata("wazuh-rule-does-not-exist")
 
+    def test_benign_action_classes_loaded_for_100001(self):
+        meta = ctx_handler.load_playbook_metadata("wazuh-rule-100001")
+        # Spot-check: the playbook lists `whoami`, `id`, `hostname`, etc.
+        assert "whoami" in meta.benign_action_classes
+        assert "id" in meta.benign_action_classes
+        assert "cat /etc/os-release" in meta.benign_action_classes
+
+    def test_benign_action_classes_empty_when_section_absent(self):
+        meta = ctx_handler.load_playbook_metadata("wazuh-rule-5710")
+        # 5710 playbook has no `## Benign action classes` section — list empty.
+        assert meta.benign_action_classes == []
+
 
 # ---------------------------------------------------------------------------
 # Routing
@@ -216,6 +228,21 @@ class TestInvestigationWrite:
         assert "prologue:" in inv
         assert "v-001" in inv
         assert "attempted_auth" in inv
+
+    def test_initial_write_stamps_created_header(self, tmp_path, monkeypatch):
+        """First write to investigation.md prepends a `<!-- created: ... -->`
+        header. The corpus loader's recency filter reads this back."""
+        from scripts.invlang.corpus import _read_created_header
+        _wire_subagents(monkeypatch)
+        ctx = make_ctx(tmp_path)
+        ctx_handler.handle(ctx)
+        inv = (ctx.run_dir / "investigation.md").read_text()
+        assert inv.startswith("<!-- created: ")
+        ts = _read_created_header(inv)
+        assert ts is not None
+        # Parses cleanly as ISO-8601 with offset.
+        from datetime import datetime
+        datetime.fromisoformat(ts)
 
     def test_markdown_omits_archetype_block(self, tmp_path, monkeypatch):
         """Archetype ranking moved to the REPORT phase. The CONTEXTUALIZE

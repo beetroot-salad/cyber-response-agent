@@ -3,6 +3,17 @@ signature_id: wazuh-rule-5710
 last_updated: 2026-04-11
 total_investigations: 0
 resolution_rate: null
+# Opt-in to the PREDICT loop-1 fast-path. Each entry maps a vertex
+# `classification` to regex patterns an `identifier` must match to count as
+# the same key-attribute family. Two prologues with the same topology but
+# identifiers in different families produce different cache keys, so an
+# adversarial collision (e.g., monitoring-pattern with `admin` instead of
+# `nagios`) cannot reuse a benign precedent's lead choice.
+discriminating_classifications:
+  monitoring-pattern:
+    - "^(nagios|sensu|monitor.*|probe.*|check.*|sentinel.*|testuser)$"
+  service-account:
+    - "^(svc-.*|backup-.*|cron-.*|ansible-.*|deploy-.*)$"
 ---
 
 # Investigation Playbook: SSH Invalid User (5710)

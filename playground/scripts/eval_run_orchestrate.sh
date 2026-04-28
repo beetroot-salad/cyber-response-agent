@@ -104,12 +104,18 @@ export SOC_AGENT_RUNS_DIR="$EVAL_DIR/runs"
 # invlang.corpus falls back to SOC_AGENT_RUNS_DIR (per-run tmpdir, always
 # empty) and PREDICT priors come back "0 cases matched".
 export INVLANG_CORPUS_ROOT="${INVLANG_CORPUS_ROOT:-/tmp/soc-agent-orchestrate-eval}"
+# Parallel-singletons GATHER: when PREDICT prescribes ≥2 templated leads, fan
+# out as parallel Haiku `gather` subagents instead of one Sonnet
+# `gather-composite`. See gather.py:_dispatch_parallel_singletons and
+# tasks/parallel-haiku-gather.md.
+export SOC_AGENT_PARALLEL_GATHER="${SOC_AGENT_PARALLEL_GATHER:-1}"
 
 SIGNATURE_ID="wazuh-rule-$RULE_ID"
 
 echo "[+] Launching orchestrator (driver log → $EVAL_DIR/driver.log)..."
-echo "    SOC_AGENT_RUNS_DIR:   $SOC_AGENT_RUNS_DIR"
-echo "    INVLANG_CORPUS_ROOT:  $INVLANG_CORPUS_ROOT"
+echo "    SOC_AGENT_RUNS_DIR:        $SOC_AGENT_RUNS_DIR"
+echo "    INVLANG_CORPUS_ROOT:       $INVLANG_CORPUS_ROOT"
+echo "    SOC_AGENT_PARALLEL_GATHER: $SOC_AGENT_PARALLEL_GATHER"
 echo
 
 set +e

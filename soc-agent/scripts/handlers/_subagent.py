@@ -237,12 +237,20 @@ def invoke_subagent(
 
     started = time.monotonic()
     try:
+        # Pin cwd to the plugin root so relative tool paths the subagent
+        # constructs from `knowledge/environment/systems/{vendor}/SKILL.md`
+        # (e.g. `python3 scripts/tools/wazuh_cli.py`) resolve on the first
+        # try. Without this the child inherits the orchestrator's cwd —
+        # often `/workspace`, where the same relative paths fail with
+        # `[Errno 2]` and the subagent burns turns recovering with
+        # `soc-agent/` prefixes or `cd ... && ...` rewrites.
         result = subprocess.run(
             argv,
             input=final_prompt,
             capture_output=True, text=True,
             timeout=timeout,
             env=env,
+            cwd=str(SOC_AGENT_ROOT),
         )
     except FileNotFoundError as exc:
         raise OrchestrationError(f"claude CLI not found: {exc}") from exc

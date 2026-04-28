@@ -73,6 +73,28 @@ def match_entry(tool_name: str, tool_input: dict, allowlist: list[dict]) -> dict
     return None
 
 
+def is_terminal_invocation(pattern: str, command: str) -> bool:
+    """Return True iff the matched binary's stdout reaches tool_response.stdout.
+
+    The hook saves stdout verbatim. When the agent pipes the matched binary
+    through another command (e.g. ``wazuh_cli.py ... --raw | python3 -c ...``),
+    the captured stdout is the post-pipe transformation, not the raw output we
+    intended to save — persisting it as if it were raw indexer JSON corrupts
+    downstream readers.
+
+    Conservative rule: split first by sequence operators (``;``, ``&&``,
+    ``||``) and take the last segment, then split that by ``|`` and take the
+    last pipe segment. The matched binary must appear in that final segment
+    for its stdout to dominate the captured tool_response.stdout. ``cd ... &&
+    binary`` is therefore allowed (last seq segment is ``binary``); ``binary
+    | head`` is not (last pipe segment is ``head``).
+    """
+    seq_segments = re.split(r"\|\||&&|;", command)
+    last_seq = seq_segments[-1]
+    last_pipe = last_seq.split("|")[-1]
+    return re.search(pattern, last_pipe) is not None
+
+
 def derive_loop_n(run_dir: Path) -> int:
     """Count GATHER entries in state.json history. Falls back to 0."""
     state_path = run_dir / "state.json"
@@ -174,6 +196,11 @@ def main() -> None:
     matched = match_entry(tool_name, tool_input, allowlist)
     if matched is None:
         sys.exit(0)
+
+    if tool_name == "Bash":
+        command = (tool_input or {}).get("command", "") or ""
+        if not is_terminal_invocation(matched.get("pattern", ""), command):
+            sys.exit(0)
 
     session_id = hook_data.get("session_id") or ""
     try:

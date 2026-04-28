@@ -1,0 +1,52 @@
+case_id: case-001
+slice: shape-E-loop-1-enrichment
+source: synthesized-from-live-test-001
+signature_id: wazuh-rule-5710
+loop_n: 1
+
+inputs:
+  alert_path: evals/predict/fixtures/case-001/alert.json
+  prior_investigation_md: null
+  notes: |
+    Single 5710 invalid-user reject from sentinel-looking username 'nagios'
+    against target-endpoint, source 172.22.0.10 (internal). No prior context.
+    The canonical Shape E case from predict.md examples — identity is pattern-
+    inferred (sentinel name), no fork warranted yet, authentication-history is
+    the path-of-least-resistance lead that routes the next loop.
+
+expected:
+  shape: E
+  shape_rationale: |
+    No prior-loop enrichment of source 172.22.0.10's 5710 history. Identity
+    inference ('nagios' = sentinel-looking) cannot be forked against landed
+    data. authentication-history is one lead whose outcome partitions the
+    next loop's question space.
+
+  branch_plan_must:
+    primary_lead_oneof: [authentication-history]
+    readings_min: 3
+    advance_to_includes: [escalate, fork-at-identity]
+
+  hypotheses_must: null  # Shape E
+
+  routing_must:
+    selected_lead_oneof: [authentication-history]
+    composite_required: false
+
+  prediction_axis:
+    discriminator: |
+      Whether source 172.22.0.10 has a recurring 5710 cadence and forward
+      authentication success to target-endpoint over the lookback window.
+    acceptable_dimensions: [cadence, forward-success, geometry]
+    forbidden_dimensions: [actor-identity, authorization, content-entropy]
+    refutation_axis: |
+      A reading where 172.22.0.10 has produced an isolated 5710 with no prior
+      cadence and no forward auth success would route differently from a
+      reading where 5710 fires on a recurring ~10-min schedule with no
+      forward success.
+
+  forbidden_patterns:
+    - presence_test_refutation
+    - baseline_value_leak
+    - compound_claim
+    - premature_fork  # emitting hypotheses on loop 1 with sentinel-looking identity

@@ -101,7 +101,7 @@ You have the `Write` tool so the main agent can recover if you silently terminat
 
 Never write per-turn — this is a structured recovery record, not a thinking-token stream.
 
-**Lossless vs summarized fields.** Per-lead entries in `leads:` mirror the Output YAML's lead shape exactly — a completed lead in the checkpoint must contain the same `query`, `query_source`, `entity_bindings`, `refinements_applied`, `health_probe` (structured JSON), `characterization`, `status`, `status_detail` that would go in the final YAML. Recovery must be able to transcribe verbatim. The top-level fields `queries_run`, `blockers`, `dropped_attempts`, `data_sources_used` may summarize (one-line per entry) — those are debugging aids, not recovery-critical.
+**Lossless vs summarized fields.** Per-lead entries in `leads:` mirror the Output YAML's lead shape exactly — a completed lead in the checkpoint must contain the same `query` (slim form: literal query string + `query_source` + `refinements_applied`), `entity_bindings`, `health_probe_verdict` (one-token), `characterization`, `status`, `status_detail` that would go in the final YAML. Recovery must be able to transcribe verbatim. The top-level fields `queries_run`, `blockers`, `dropped_attempts`, `data_sources_used` may summarize (one-line per entry) — those are debugging aids, not recovery-critical.
 
 **Checkpoint schema:**
 
@@ -131,11 +131,12 @@ leads:                                  # per-lead entry mirrors the Output-sect
                                         # per-lead entries are lossless for complete leads.
   - lead: authentication-history
     reporting_agent: "target-endpoint"
-    query: "{exact query string executed — same shape as Output YAML's query field}"
-    query_source: template              # template | ad-hoc | refined
+    query:
+      query: "{exact query string executed}"
+      query_source: template            # template | ad-hoc | refined
+      refinements_applied: ""
     entity_bindings: { srcip: "...", srcuser: "...", target: "..." }
-    refinements_applied: ""
-    health_probe: { verdict: "elevated", ... }  # structured JSON (not prose); null if skipped
+    health_probe_verdict: "elevated"    # one-token summary; null if skipped
     characterization: { ... }           # full map when status is ok/partial; null for dropped_attempt/data_missing; omit when pending
     status: ok                          # ok | probe_broken | siem_error | data_missing | dropped_attempt | partial | pending
     status_detail: ""                   # free-text when status != ok
@@ -219,8 +220,6 @@ Emit exactly one fenced YAML block on stdout, wrapping everything in a top-level
 ```yaml
 gather:
   loop: {loop_n}
-  mode: "{composite | ad-hoc | redispatch}"
-  time_range: { start: "{incident_start}", end: "{incident_end}" }
   leads:
     - id: "{lead_id}"                   # echo the dispatched lead_id for this entry
       name: "{lead_name}"
@@ -228,14 +227,10 @@ gather:
       status: "{ok | partial | probe_broken | siem_error | data_missing | dropped_attempt}"
       status_detail: "{free-text, 2-4 lines; see §status_detail}"
       query:
-        system: "{vendor or override_data_source}"
-        template: "{template_name or null on ad-hoc}"
         query: "{exact query string executed}"
         query_source: "{template | ad-hoc | refined}"
-        time_window: { start: "{incident_start}", end: "{incident_end}" }
-        substitutions: { ... }           # entity_bindings merged in
         refinements_applied: "{empty when no refinement; otherwise a one-line description}"
-      health_probe: { ... }              # full JSON, or null if skipped
+      health_probe_verdict: "{normal | elevated | low | broken | inconclusive | null when skipped}"
       characterization:                  # full map when status is ok/partial; null when dropped_attempt/data_missing
         "{bullet_label}": "{specific values}"
         ...
@@ -244,7 +239,6 @@ gather:
                                          # Populated when frontmatter is
                                          # baseline: required.
         scope: "{shift descriptor}"
-        time_window: { start: "{shift_start}", end: "{shift_end}" }
         characterization:                # SAME keys as foreground; values from
                                          # the shift-query result.
           "{bullet_label}": "{specific values}"
@@ -253,15 +247,15 @@ gather:
         # error: "{one-line reason}"
     - # next lead entry ...
   cross_lead_notes: "{composite only — consistencies / contradictions / refinements applied across the lead set. Empty string for ad-hoc/redispatch single-lead mode.}"
-  notes: "{anything the main agent should know that doesn't fit a lead-level field — empty string if none}"
 ```
+
+**Schema is intentionally lean — do not echo prompt-known fields.** The handler already has the dispatched `mode`, `time_range`, per-lead `system`/`template`/`time_window`/`substitutions` from the prompt; it reconstructs `query_details` from those before forwarding to ANALYZE. The full `health_probe` JSON is captured to disk by the data-source-health probe directly — your `health_probe_verdict` is the one-token summary the main agent reads. Anything not listed above does not need to be authored.
 
 If the dispatch itself is unparseable (missing required substitutions, malformed `leads` list, contradictions you cannot resolve), emit a single-lead envelope with `status: error` instead:
 
 ```yaml
 gather:
   loop: {loop_n}
-  mode: "{mode}"
   leads:
     - id: "{first_lead_id_or_derived}"
       name: "{first_lead_name}"
@@ -269,7 +263,6 @@ gather:
       escalate_trigger: "dispatch_unparseable"
       escalate_context: "{one-line reason}"
   cross_lead_notes: ""
-  notes: ""
 ```
 
 An unknown `lead_name` is NOT an error case — fall through to the missing-definition ad-hoc path per §Procedure 2. Only emit `status: error` when the subagent cannot proceed with any lead at all.

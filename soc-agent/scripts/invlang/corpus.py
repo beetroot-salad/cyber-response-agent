@@ -81,6 +81,12 @@ class Companion:
     case_id: str
     source_path: Path
     body: dict[str, Any]
+    # ISO-8601 timestamp stamped at the top of investigation.md on initial
+    # write (`<!-- created: ... -->`). None when the header is absent;
+    # temporal-filtered queries treat None as "exclude" so missing-header
+    # companions can't silently slip into a recency window. Hour-level drift
+    # vs. the originating alert is irrelevant at our 180-day granularity.
+    created_at: str | None = None
 
     @property
     def prologue(self) -> dict[str, Any]:
@@ -168,6 +174,32 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
     return merged
 
 
+_CREATED_HEADER_RE = re.compile(
+    r"<!--\s*created:\s*(?P<ts>\S+?)\s*-->"
+)
+
+
+def _read_created_header(text: str) -> str | None:
+    """Pull the `<!-- created: <iso8601> -->` header out of an
+    investigation.md body. Stamped at initial write by the CONTEXTUALIZE
+    handler; absent on companions that predate the header convention.
+
+    Returns None when the header is missing — temporal queries treat None as
+    "exclude" so missing-header companions can't silently slip into a
+    recency window.
+    """
+    m = _CREATED_HEADER_RE.search(text)
+    return m.group("ts") if m else None
+
+
+def write_created_header(now_iso: str) -> str:
+    """Format the canonical `<!-- created: ... -->` header line, including
+    a trailing blank line. Centralizes the format so the writer (CONTEXTUALIZE
+    handler) and reader (`_read_created_header`) stay in sync.
+    """
+    return f"<!-- created: {now_iso} -->\n\n"
+
+
 def _load_from_path(path: Path) -> list[Companion]:
     """Parse a file and return every companion it contains (0 or more).
 
@@ -184,11 +216,19 @@ def _load_from_path(path: Path) -> list[Companion]:
             results.append(Companion(_case_id_from_path(path), path, doc))
     elif path.suffix == ".md":
         try:
-            merged = _merge_md_blocks(path.read_text())
+            text = path.read_text()
         except OSError:
             return results
+        merged = _merge_md_blocks(text)
         if _looks_like_companion(merged):
-            results.append(Companion(_case_id_from_path(path), path, merged))
+            results.append(
+                Companion(
+                    case_id=_case_id_from_path(path),
+                    source_path=path,
+                    body=merged,
+                    created_at=_read_created_header(text),
+                )
+            )
     return results
 
 

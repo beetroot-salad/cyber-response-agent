@@ -18,6 +18,7 @@ from hooks.scripts.save_raw_tool_output import (
     context_annotation,
     derive_loop_n,
     extract_body,
+    is_terminal_invocation,
     load_allowlist,
     make_nonce,
     match_entry,
@@ -101,6 +102,95 @@ class TestMatchEntry:
     def test_other_tool_names_do_not_match(self):
         assert match_entry("Read", {"command": "wazuh_cli.py"}, self._allowlist()) is None
         assert match_entry("Write", {}, self._allowlist()) is None
+
+
+# ---------------------------------------------------------------------------
+# Terminal-invocation gate (pipe-corruption regression)
+#
+# Regression: gather-composite was running
+#     wazuh_cli.py ... --raw 2>&1 | python3 -c "..."
+# The hook matched on the substring `wazuh_cli.py` and saved the stdout — but
+# tool_response.stdout was the *post-pipe* python output, not raw indexer
+# JSON. Downstream parsers read those files expecting JSON and got the
+# agent's transformed text instead, looping in confusion until the 300s
+# subagent timeout.
+# ---------------------------------------------------------------------------
+
+
+WAZUH_PATTERN = r"wazuh_cli\.py\b"
+
+
+class TestIsTerminalInvocation:
+    def test_direct_invocation(self):
+        assert is_terminal_invocation(
+            WAZUH_PATTERN,
+            "python3 scripts/tools/wazuh_cli.py query --query foo",
+        ) is True
+
+    def test_cd_then_invocation_is_terminal(self):
+        # The canonical clean invocation pattern: cwd fix-up via &&.
+        assert is_terminal_invocation(
+            WAZUH_PATTERN,
+            "cd /workspace/soc-agent && python3 scripts/tools/wazuh_cli.py query -q foo",
+        ) is True
+
+    def test_pipe_to_python_blocks(self):
+        # The exact failure mode from run 20260427-050736-rule100001.
+        cmd = (
+            "python3 scripts/tools/wazuh_cli.py query --query 'rule.id:100001' "
+            "--raw 2>&1 | python3 -c \"import sys, json; print(len(sys.stdin.read()))\""
+        )
+        assert is_terminal_invocation(WAZUH_PATTERN, cmd) is False
+
+    def test_pipe_to_head_blocks(self):
+        assert is_terminal_invocation(
+            WAZUH_PATTERN,
+            "wazuh_cli.py query -q foo | head -50",
+        ) is False
+
+    def test_pipe_to_jq_blocks(self):
+        assert is_terminal_invocation(
+            WAZUH_PATTERN,
+            "wazuh_cli.py query -q foo --raw | jq '.[].rule.id'",
+        ) is False
+
+    def test_redirection_without_pipe_is_terminal(self):
+        # 2>&1 is stdio redirection, not a pipe to another command.
+        assert is_terminal_invocation(
+            WAZUH_PATTERN,
+            "wazuh_cli.py query -q foo 2>&1",
+        ) is True
+
+    def test_or_separator_with_binary_last_is_terminal(self):
+        # `cmdA || cmdB` runs cmdB only if cmdA failed; if cmdB runs, its
+        # stdout is what the hook captures.
+        assert is_terminal_invocation(
+            WAZUH_PATTERN,
+            "echo first || wazuh_cli.py query -q foo",
+        ) is True
+
+    def test_semicolon_with_binary_first_blocks(self):
+        # Sequenced commands concatenate stdouts; saving "wazuh_cli + echo"
+        # output is misleading. Take the last segment only.
+        assert is_terminal_invocation(
+            WAZUH_PATTERN,
+            "wazuh_cli.py query -q foo ; echo done",
+        ) is False
+
+    def test_and_with_binary_last_is_terminal(self):
+        # `cd path && binary` and other "set up then invoke" patterns.
+        assert is_terminal_invocation(
+            WAZUH_PATTERN,
+            "set -e && wazuh_cli.py query -q foo",
+        ) is True
+
+    def test_pipe_after_and_blocks(self):
+        # The full pathology: cwd fix + pipe.
+        cmd = (
+            "cd /workspace/soc-agent && python3 scripts/tools/wazuh_cli.py "
+            "query -q foo --raw | python3 -c 'import sys; print(sys.stdin.read())'"
+        )
+        assert is_terminal_invocation(WAZUH_PATTERN, cmd) is False
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +469,30 @@ class TestEndToEnd:
         rc, _, stderr = _run_hook(payload, runs_dir)
         assert rc == 0
         assert "[save_raw_tool_output]" in stderr
+
+    def test_piped_invocation_skips_save(self, tmp_path):
+        """Regression: agent piping wazuh_cli through python3 must not
+        persist the python's stdout under raw_query_outputs/."""
+        runs_dir = tmp_path / "runs"
+        run_dir = _make_run_dir(runs_dir, "sess-pipe")
+        payload = {
+            "session_id": "sess-pipe",
+            "tool_name": "Bash",
+            "tool_use_id": "tu-pipe",
+            "tool_input": {
+                "command": (
+                    "python3 scripts/tools/wazuh_cli.py query --query 'foo' "
+                    "--raw 2>&1 | python3 -c 'import sys; print(\"transformed\")'"
+                ),
+            },
+            "tool_response": {"stdout": "transformed\n", "stderr": ""},
+        }
+        rc, stdout, stderr = _run_hook(payload, runs_dir)
+        assert rc == 0, stderr
+        # Hook returns no additionalContext envelope
+        assert stdout.strip() == ""
+        # No file written, no manifest created
+        assert not (run_dir / "raw_query_outputs").exists()
 
     def test_two_runs_append_to_manifest(self, tmp_path):
         runs_dir = tmp_path / "runs"
