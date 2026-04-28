@@ -72,6 +72,7 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._investigation_io import append_unvalidated
 from scripts.handlers._context_loader import (
     format_alert_block,
     format_archetype_shapes_block,
@@ -757,10 +758,9 @@ def _compose_trace(matched_pattern: str, leads_run: list[dict], disposition: str
 
 
 def _append_to_investigation(run_dir: Path, new_section: str) -> None:
-    inv_path = run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    sep = "\n" if current and not current.endswith("\n") else ""
-    inv_path.write_text(current + sep + new_section)
+    """Append the conclude block; mechanical composers shape it from already-
+    typed fields and Tier-1-validate the surrounding report.md upstream."""
+    append_unvalidated(run_dir, new_section)
 
 
 def _run_tier1_validation(report_path: Path) -> None:

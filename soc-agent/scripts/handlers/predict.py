@@ -81,6 +81,10 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._investigation_io import (
+    append_unvalidated,
+    validate_proposed_companion,
+)
 from scripts.handlers._context_loader import (
     format_alert_block,
     format_investigation_block,
@@ -560,31 +564,14 @@ _FIRST_FENCE_RE = re.compile(
 
 
 def _validate_companion_proposed(ctx: Context, new_section: str) -> list[str]:
-    """Run `validate_companion` against `investigation.md + new_section`.
-
-    Returns the validator's error list. Used both for pre-write gating and for
-    producing remediation notes on the retry path.
-    """
-    hooks_path = str(SOC_AGENT_ROOT / "hooks")
-    if hooks_path not in sys.path:
-        sys.path.insert(0, hooks_path)
-    from scripts.invlang_validate import validate_companion  # type: ignore
-
-    inv_path = ctx.run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    proposed = (
-        current
-        + ("\n" if current and not current.endswith("\n") else "")
-        + new_section
-    )
-    return validate_companion(proposed, current if current else None)
+    """Validator errors for `investigation.md + new_section`, returned without
+    raising. Used by the retry loop for remediation-note assembly."""
+    return validate_proposed_companion(ctx.run_dir, new_section)
 
 
 def _append_to_investigation(ctx: Context, new_section: str) -> None:
-    inv_path = ctx.run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    separator = "\n" if current and not current.endswith("\n") else ""
-    inv_path.write_text(current + separator + new_section)
+    """Append post-retry; the retry loop has already gated on validation."""
+    append_unvalidated(ctx.run_dir, new_section)
 
 
 # ---------------------------------------------------------------------------

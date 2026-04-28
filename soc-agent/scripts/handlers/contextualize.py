@@ -45,6 +45,7 @@ from schemas.state import Phase
 from scripts.invlang.corpus import write_created_header
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._markdown import parse_markdown, table_rows_after_heading
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
@@ -440,35 +441,19 @@ def _extract_yaml_block(raw: str, key: str) -> str:
     return yaml.safe_dump({key: parsed[key]}, sort_keys=False)
 
 
+def _stamp_created_header() -> str:
+    """First-write prefix: stamp the file's creation time so the corpus
+    loader's recency filter has a stable per-file timestamp without needing
+    to read sibling alert.json or trust file mtime."""
+    return write_created_header(datetime.now(timezone.utc).isoformat())
+
+
 def _validate_and_write(ctx: Context, new_section: str) -> None:
-    """Append `new_section` to investigation.md after running
-    `validate_companion` as a library check."""
-    # Lazy import: invlang_validate is in hooks/scripts which isn't on sys.path
-    # until we put it there.
-    hooks_scripts = str(SOC_AGENT_ROOT / "hooks")
-    if hooks_scripts not in sys.path:
-        sys.path.insert(0, hooks_scripts)
-    from scripts.invlang_validate import validate_companion  # type: ignore
-
-    inv_path = ctx.run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    if not current:
-        # Stamp the file's creation time at the top on first write so the
-        # corpus loader's recency filter has a stable per-file timestamp
-        # without needing to read sibling alert.json or trust file mtime.
-        new_section = (
-            write_created_header(datetime.now(timezone.utc).isoformat())
-            + new_section
-        )
-    proposed = current + ("\n" if current and not current.endswith("\n") else "") + new_section
-
-    errors = validate_companion(proposed, current if current else None)
-    if errors:
-        raise OrchestrationError(
-            "CONTEXTUALIZE invlang validation failed:\n" + "\n".join(errors)
-        )
-
-    inv_path.write_text(proposed)
+    append_and_validate(
+        ctx.run_dir, new_section,
+        phase="CONTEXTUALIZE",
+        first_write_prefix=_stamp_created_header,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,7 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._markdown import (
     iter_yaml_fences,
     parse_markdown,
@@ -292,24 +293,7 @@ def _extract_findings_yaml_from_parsed(parsed: dict) -> str:
 
 
 def _validate_and_write(ctx: Context, new_section: str) -> None:
-    """Append `new_section` to investigation.md after running
-    `validate_companion` as a library check."""
-    hooks_scripts = str(SOC_AGENT_ROOT / "hooks")
-    if hooks_scripts not in sys.path:
-        sys.path.insert(0, hooks_scripts)
-    from scripts.invlang_validate import validate_companion  # type: ignore
-
-    inv_path = ctx.run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    proposed = current + ("\n" if current and not current.endswith("\n") else "") + new_section
-
-    errors = validate_companion(proposed, current if current else None)
-    if errors:
-        raise OrchestrationError(
-            "SCREEN invlang validation failed:\n" + "\n".join(errors)
-        )
-
-    inv_path.write_text(proposed)
+    append_and_validate(ctx.run_dir, new_section, phase="SCREEN")
 
 
 # ---------------------------------------------------------------------------
