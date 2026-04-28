@@ -76,12 +76,13 @@ from scripts.handlers._investigation_io import append_unvalidated
 from scripts.handlers._context_loader import (
     format_alert_block,
     format_archetype_shapes_block,
-    format_investigation_block,
     load_alert,
     load_archetype_shapes,
     load_investigation_md,
     load_run_salt,
 )
+from scripts.handlers._playbook import load_playbook_metadata
+from scripts.handlers.investigation_views import format_investigation_block
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     invoke_subagent as _shared_invoke,
@@ -1695,7 +1696,6 @@ def _maybe_apply_benign_action_shortcircuit(
     if termination_category not in ("trust-root", "exhaustion-escalation"):
         return disposition, confidence, False, None
 
-    from scripts.handlers.contextualize import load_playbook_metadata
     try:
         playbook = load_playbook_metadata(ctx.signature_id)
     except OrchestrationError:

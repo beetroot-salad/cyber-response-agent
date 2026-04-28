@@ -87,7 +87,6 @@ from scripts.handlers._investigation_io import (
 )
 from scripts.handlers._context_loader import (
     format_alert_block,
-    format_investigation_block,
     format_lead_definitions_summary_block,
     format_signature_text_block,
     load_alert,
@@ -96,6 +95,8 @@ from scripts.handlers._context_loader import (
     load_run_salt,
     load_signature_text,
 )
+from scripts.handlers._playbook import load_playbook_metadata
+from scripts.handlers.investigation_views import format_investigation_block
 from scripts.handlers._subagent import (
     make_invoker,
 )
@@ -407,8 +408,6 @@ def _extract_current_frontier(ctx: Context) -> list[dict]:
         ]
 
     # Loop 1 fallback — seeds from the signature playbook.
-    from scripts.handlers.contextualize import load_playbook_metadata
-
     meta = load_playbook_metadata(ctx.signature_id)
     seeds = meta.hypothesis_seeds or []
     peers = tuple(sorted(seeds))
@@ -875,7 +874,6 @@ def _try_fast_path(
     try:
         from invlang.corpus import load_corpus
         from scripts.handlers import predict_fastpath
-        from scripts.handlers.contextualize import load_playbook_metadata
 
         playbook = load_playbook_metadata(ctx.signature_id)
         disc = playbook.discriminating_classifications

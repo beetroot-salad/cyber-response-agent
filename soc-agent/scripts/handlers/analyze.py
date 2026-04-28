@@ -59,11 +59,11 @@ from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._context_loader import (
     format_alert_block,
     format_current_gather_block,
-    format_investigation_block,
     load_alert,
     load_investigation_md,
     load_run_salt,
 )
+from scripts.handlers.investigation_views import format_investigation_block
 from scripts.handlers._output_parser import (
     AnalyzeEnvelope,
     AnalyzeOutputError,

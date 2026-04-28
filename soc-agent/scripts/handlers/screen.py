@@ -41,11 +41,8 @@ from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._investigation_io import append_and_validate
-from scripts.handlers._markdown import (
-    iter_yaml_fences,
-    parse_markdown,
-    table_rows_after_heading,
-)
+from scripts.handlers._markdown import iter_yaml_fences
+from scripts.handlers._playbook import load_screen_rows
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     make_invoker,
@@ -71,35 +68,6 @@ _invoke_screen = make_invoker("screen", default_timeout=SUBAGENT_TIMEOUT_SECONDS
 # ---------------------------------------------------------------------------
 # Playbook Screen table parsing
 # ---------------------------------------------------------------------------
-
-
-def _load_screen_rows(signature_id: str) -> list[dict[str, str]]:
-    """Parse the `## Screen` table of a signature's playbook.
-
-    Returns a list of row dicts keyed by the table's header names, lowercased
-    and stripped. Empty list when the section is absent OR present-but-empty
-    (no data rows after the header separator). Missing playbook file raises
-    OrchestrationError — that's a signature-config bug, not a silent skip.
-    """
-    playbook_path = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "playbook.md"
-    )
-    if not playbook_path.exists():
-        raise OrchestrationError(
-            f"playbook not found for {signature_id}: {playbook_path}"
-        )
-    tokens = parse_markdown(playbook_path.read_text())
-    rows = table_rows_after_heading(tokens, "Screen")
-    if len(rows) < 1:
-        return []
-    header = [c.strip().lower() for c in rows[0]]
-    data_rows: list[dict[str, str]] = []
-    for row in rows[1:]:
-        cells = [c.strip() for c in row]
-        if len(cells) != len(header):
-            continue
-        data_rows.append({header[i]: cells[i] for i in range(len(cells))})
-    return data_rows
 
 
 def _parse_leads_column(leads_cell: str) -> list[str]:
@@ -334,7 +302,7 @@ def _fallthrough_payload(parsed: dict, override_reason: Optional[str] = None) ->
 
 def handle(ctx: Context) -> PhaseResult:
     # Step 0: preflight — empty Screen section short-circuits.
-    screen_rows = _load_screen_rows(ctx.signature_id)
+    screen_rows = load_screen_rows(ctx.signature_id)
     if not screen_rows:
         return PhaseResult(
             next_phase=Phase.PREDICT,
