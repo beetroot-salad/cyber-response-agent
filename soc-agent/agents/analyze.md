@@ -38,6 +38,10 @@ analyze:
           matched_prediction_ids: ["p1", ...]        # required; must be declared on this hypothesis
           matched_refutation_ids: ["r1", ...]        # required iff weight == "--"
           reasoning: "one sentence; cite counts/ids, name the failed or matched refutation"
+          load_bearing:                              # optional; one entry per observation that swayed the weight
+            - field: "<field name on the cited authority — e.g. proc.pname, fd.sip, baseline.cadence_seconds>"
+              source: "lead-id | prologue | <e-id>"  # where this observation came from
+              counterfactual: "<one sentence: if this field had instead shown X, my grade would have been Y>"
 
   trust_anchor_result:                  # one entry per lead that consulted an anchor
     - lead_ref: "{lead-id}"
@@ -132,11 +136,13 @@ When a prediction's `claim` smuggles two sub-claims onto different load-bearing 
 - Two or more hypotheses undifferentiated (all `+` / mixed without decisive `++`).
 - Any live-weight hypothesis carries an `authorization_contract` with no fulfilling `authorization_resolutions[]` entry (or verdict `indeterminate`). Contracts close only on authority answers; "deprioritized" / "outweighed" do not close.
 - A lead declared `impact_predictions[]` with no fulfilling `impact_resolutions[]` entry for each `ip{N}` id, and no rationale to defer at CONCLUDE.
+- A live-weight hypothesis has a declared `p*` / `ap*` prediction that no resolution this loop addresses (and no resolution from prior loops addresses), without a rationale to defer at CONCLUDE.
 - A mechanism hypothesis reached `++` but authorization, integrity, or impact questions are still open.
 
 **Halt iff all of:**
 - Every `authorization_contract` on a live-weight hypothesis has a fulfilling `authorization_resolutions[]` entry, OR is listed in `conclude.deferred_authorizations[]` with rationale. (`verdict: benign` requires `authorized`; `unauthorized` / `indeterminate` force escalation.)
 - Every declared `impact_predictions[]` has a fulfilling `impact_resolutions[]` entry, OR is in `conclude.deferred_impact_predictions[]` with rationale.
+- Every declared `p*` / `ap*` on a non-refuted, non-shelved hypothesis is cited in some resolution's `matched_prediction_ids[]` with a non-null `after`, OR is listed in `conclude.deferred_predictions[]` with rationale (validator rule #34).
 - At least one mechanism hypothesis is `++` with a named failed refutation, OR escalation rationale covers the open mechanism.
 
 **Halt discipline:**

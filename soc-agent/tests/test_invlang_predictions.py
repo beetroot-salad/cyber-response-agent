@@ -1,7 +1,8 @@
 """Unit tests for prediction-discipline invlang checks (rules 11-14).
 
 Covers: prediction coverage, partial authority cap, prediction lifecycle
-(append-only at ID granularity), and rollup parent weight.
+(append-only at ID granularity), rollup parent weight, and prediction
+closure at CONCLUDE (rule #34).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.invlang_validate import (
     _check_partial_authority_cap,
+    _check_prediction_closure,
     _check_prediction_coverage,
     _check_prediction_lifecycle,
     _check_rollup_parent_weight,
@@ -342,3 +344,154 @@ class TestCheckRollupParentWeight:
         merged = _hierarchy_fixture("++", {"h-001-001": "--", "h-001-002": "--"})
         errors = _check_rollup_parent_weight(merged)
         assert errors
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _check_prediction_closure (spec-rule 34)
+# ---------------------------------------------------------------------------
+
+
+def _closure_fixture(
+    *,
+    predictions: list[str] | None = None,
+    attribute_predictions: list[str] | None = None,
+    resolutions: list[tuple[str, list[str]]] | None = None,
+    hypothesis_status: str | None = None,
+    deferred_predictions: list[dict] | None = None,
+    conclude_present: bool = True,
+    extra_hypotheses: list[dict] | None = None,
+) -> dict:
+    """Build a merged companion with one hypothesis and N resolutions touching it.
+
+    `resolutions` is a list of (after_weight, matched_prediction_ids).
+    `conclude_present=False` simulates a mid-investigation companion.
+    """
+    h: dict = {"id": "h-001", "name": "?test"}
+    if predictions:
+        h["predictions"] = [{"id": p, "claim": f"claim {p}"} for p in predictions]
+    if attribute_predictions:
+        h["attribute_predictions"] = [
+            {"id": ap, "target": "proposed_parent", "attribute": "x", "claim": f"ap {ap}"}
+            for ap in attribute_predictions
+        ]
+    if hypothesis_status:
+        h["status"] = hypothesis_status
+
+    leads: list[dict] = []
+    for i, (after, ids) in enumerate(resolutions or []):
+        leads.append({
+            "id": f"l-00{i+1}", "loop": 1, "name": f"lead-{i+1}", "target": "v-001",
+            "query_details": {}, "outcome": {},
+            "resolutions": [{
+                "hypothesis": "h-001", "after": after,
+                "matched_prediction_ids": ids, "supporting_edges": [],
+            }],
+        })
+
+    out: dict = {
+        "hypothesize": {"hypotheses": [h, *(extra_hypotheses or [])]},
+        "findings": leads,
+    }
+    if conclude_present:
+        conclude: dict = {
+            "termination": {"category": "trust-root"},
+            "disposition": "benign",
+            "confidence": "high",
+        }
+        if deferred_predictions:
+            conclude["deferred_predictions"] = deferred_predictions
+        out["conclude"] = conclude
+    return out
+
+
+class TestCheckPredictionClosure:
+    def test_no_conclude_block_passes(self):
+        # Mid-investigation: no conclude block, closure not enforced.
+        merged = _closure_fixture(
+            predictions=["p1"], resolutions=[], conclude_present=False,
+        )
+        assert _check_prediction_closure(merged) == []
+
+    def test_all_predictions_addressed_passes(self):
+        merged = _closure_fixture(
+            predictions=["p1", "p2"],
+            resolutions=[("+", ["p1"]), ("-", ["p2"])],
+        )
+        assert _check_prediction_closure(merged) == []
+
+    def test_unaddressed_prediction_fails(self):
+        merged = _closure_fixture(
+            predictions=["p1", "p2"],
+            resolutions=[("+", ["p1"])],
+        )
+        errors = _check_prediction_closure(merged)
+        assert errors
+        assert "h-001" in errors[0]
+        assert "p2" in errors[0]
+
+    def test_attribute_prediction_unaddressed_fails(self):
+        merged = _closure_fixture(
+            predictions=["p1"],
+            attribute_predictions=["ap1"],
+            resolutions=[("+", ["p1"])],
+        )
+        errors = _check_prediction_closure(merged)
+        assert errors
+        assert "ap1" in errors[0]
+
+    def test_explicit_deferral_passes(self):
+        merged = _closure_fixture(
+            predictions=["p1", "p2"],
+            resolutions=[("+", ["p1"])],
+            deferred_predictions=[
+                {"prediction_ref": "h-001.p2", "rationale": "anchor unavailable in this run"},
+            ],
+        )
+        assert _check_prediction_closure(merged) == []
+
+    def test_deferral_without_rationale_does_not_count(self):
+        merged = _closure_fixture(
+            predictions=["p1"],
+            resolutions=[],
+            deferred_predictions=[{"prediction_ref": "h-001.p1", "rationale": ""}],
+        )
+        errors = _check_prediction_closure(merged)
+        assert errors
+        assert "p1" in errors[0]
+
+    def test_refuted_hypothesis_skipped(self):
+        # `--` weight → refuted; remaining predictions exempt.
+        merged = _closure_fixture(
+            predictions=["p1", "p2"],
+            resolutions=[("--", ["p1"])],
+        )
+        assert _check_prediction_closure(merged) == []
+
+    def test_shelved_hypothesis_skipped(self):
+        merged = _closure_fixture(
+            predictions=["p1"],
+            resolutions=[],
+            hypothesis_status="shelved",
+        )
+        assert _check_prediction_closure(merged) == []
+
+    def test_resolution_with_null_after_does_not_address(self):
+        # A resolution that cites the prediction id but has no `after` weight
+        # is malformed (caught by other rules); it does not satisfy closure.
+        merged = _closure_fixture(predictions=["p1"], resolutions=[])
+        # Inject a malformed resolution referencing p1 with after=None.
+        merged["findings"].append({
+            "id": "l-001", "loop": 1, "name": "x", "target": "v-001",
+            "query_details": {}, "outcome": {},
+            "resolutions": [{
+                "hypothesis": "h-001", "after": None,
+                "matched_prediction_ids": ["p1"], "supporting_edges": [],
+            }],
+        })
+        errors = _check_prediction_closure(merged)
+        assert errors
+        assert "p1" in errors[0]
+
+    def test_hypothesis_with_no_predictions_passes(self):
+        merged = _closure_fixture(predictions=None, resolutions=[])
+        assert _check_prediction_closure(merged) == []

@@ -335,6 +335,21 @@ resolutions:
     matched_refutation_ids: []
     reasoning: "<string>"       # why this evidence moves weight — not a field restatement
     supporting_edges: []
+    load_bearing:               # optional; one entry per observation that swayed
+                                # the weight. Self-declared observation salience:
+                                # the specific field that mattered + a counterfactual
+                                # naming the value that would have flipped the grade.
+                                # No structural validator runs on this today — the
+                                # artifact is captured for downstream perturbation
+                                # analysis (Tier 1). Empirical: forcing this field
+                                # on every ++/-- via prompt-level discipline
+                                # increased false-true-positive rate on
+                                # absence-of-confirmation traps (see /tmp/stress
+                                # trap-set evaluation, 2026-04-28). Field is
+                                # available; do not require it.
+      - field: <field-name>     # native field on the cited authority
+        source: l-{id} | prologue | e-{id}
+        counterfactual: <string>
 ```
 
 ### Impact
@@ -677,3 +692,5 @@ h-002 is the peer integrity hypothesis required by the §Integrity discipline �
 31. **Impact closure at CONCLUDE.** Every declared `impact_predictions[]` entry must either have a fulfilling `impact_resolutions[]` entry OR appear in `conclude.deferred_impact_predictions[]` with a non-empty rationale.
 32. **Integrity peer discipline.** When an `authorization_contract` is declared on a hypothesis whose `proposed_edge.parent_vertex.type` is an acting-entity type (`session`, `identity`, `process`), either a peer integrity hypothesis (`?adversary-controlled-*` sharing `attached_to_vertex`) must exist in the same sibling group, or the contract-carrying hypothesis must carry `integrity_waived: <rationale>` with a non-empty string.
 33. **Attribute-prediction structure.** Each `attribute_predictions[]` entry has `id` (matching `^ap\d+$`, unique within the hypothesis), `target` ∈ {`proposed_parent`, `attached_vertex`, `proposed_edge`}, `attribute` (non-empty string), and `claim` (non-empty string, one observable — compound AND/OR claims split into separate entries). `refutation_shape[].refutes_predictions` may cite `ap*` ids alongside `p*` ids on the same hypothesis. `matched_prediction_ids[]` on a resolution may likewise cite both `p*` and `ap*` ids from the target hypothesis.
+34. **Prediction closure at CONCLUDE.** When a `conclude` block is present, every declared `predictions[].id` (`p*`) and `attribute_predictions[].id` (`ap*`) on a hypothesis whose final status is neither `refuted` nor `shelved` must be either (a) cited in some resolution's `matched_prediction_ids[]` with a non-null `after`, OR (b) listed in `conclude.deferred_predictions[]` with a non-empty `rationale`. Each deferred entry has the shape `{prediction_ref: h-{id}.{p|ap}{n}, rationale: "<why this prediction was not graded>"}`. Generalises rule #6 (which only fires on `++`) into a coverage check at REPORT regardless of weight — closes the contract analyze owes predict.
+35. **Sibling prediction divergence.** Within a sibling group — hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` — no two siblings may declare identical prediction signatures. The signature combines `predictions[]` `(subject, claim)` tuples and `attribute_predictions[]` `(target, attribute, claim)` tuples (case-normalised). Identical signatures mean the two hypotheses propose the same observable expectations and ANALYZE has nothing to discriminate them on. Generalises rule #32 (integrity-peer specific, contract-gated) to all sibling forks; complements rule #23 — that rule blocks shared `parent_vertex.classification`, this one blocks shared prediction text.

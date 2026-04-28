@@ -69,6 +69,7 @@ from hooks.scripts.invlang_checks_structural import (
 )
 from hooks.scripts.invlang_checks_predictions import (
     _check_partial_authority_cap,
+    _check_prediction_closure,
     _check_prediction_coverage,
     _check_prediction_lifecycle,
     _check_rollup_parent_weight,
@@ -96,6 +97,7 @@ from hooks.scripts.invlang_checks_hypothesis import (
     _check_prediction_subject_scope,
     _check_predictions_leanness,
     _check_refutation_prediction_links,
+    _check_sibling_prediction_divergence,
 )
 
 # Re-exports required by consumers importing from this module path
@@ -116,6 +118,7 @@ __all__ = [
     "_check_route_compliance",
     "_check_prediction_coverage",
     "_check_partial_authority_cap",
+    "_check_prediction_closure",
     "_check_prediction_lifecycle",
     "_check_rollup_parent_weight",
     "_check_authorization_contract_edge_ref",
@@ -137,6 +140,7 @@ __all__ = [
     "_check_predictions_leanness",
     "_check_prediction_subject_scope",
     "_check_refutation_prediction_links",
+    "_check_sibling_prediction_divergence",
     "_check_attribute_prediction_structure",
     "_check_lead_dedup_warnings",
     "_check_silent_empty_result_warnings",
@@ -443,6 +447,7 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_predictions_leanness(merged))
     errors.extend(_check_prediction_subject_scope(merged))
     errors.extend(_check_refutation_prediction_links(merged))
+    errors.extend(_check_sibling_prediction_divergence(merged))
     errors.extend(_check_integrity_peer_discipline(merged))
     errors.extend(_check_attribute_prediction_structure(merged))
 
@@ -450,6 +455,7 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_prediction_coverage(merged))
     errors.extend(_check_partial_authority_cap(merged))
     errors.extend(_check_rollup_parent_weight(merged))
+    errors.extend(_check_prediction_closure(merged))
 
     # Prediction-lifecycle guard needs the on-disk companion as well.
     if current_text is not None:

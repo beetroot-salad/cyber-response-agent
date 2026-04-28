@@ -909,6 +909,56 @@ class TestFindingsSynthesis:
         assert "e-001" in findings_yaml
         assert "e-002" in findings_yaml
 
+    def test_load_bearing_passed_through(self, tmp_path, monkeypatch):
+        """The load_bearing[] artifact ANALYZE declares is preserved in the
+        synthesized resolution. No structural validation runs on it today —
+        the field is captured for downstream perturbation analysis (Tier 1).
+        """
+        ctx = make_ctx(
+            tmp_path,
+            history=[Phase.PREDICT.value],
+            existing_investigation=self._PROLOGUE,
+        )
+        ctx.outputs[Phase.GATHER] = {
+            "leads": [{"id": "l-001", "name": "auth", "status": "ok",
+                       "query": {"system": "wazuh"}}],
+            "prescribed_leads": ["auth"],
+            "executed_leads": ["auth"],
+            "raw_details_paths": [],
+        }
+        response = textwrap.dedent("""
+        ```yaml
+        analyze:
+          loop: 1
+          resolutions:
+            - lead_ref: "l-001"
+              entries:
+                - hypothesis_id: "h-001"
+                  weight: "+"
+                  matched_prediction_ids: [p1]
+                  reasoning: "consistent with p1; no decisive authority."
+                  load_bearing:
+                    - field: "wazuh.event_count"
+                      source: "l-001"
+                      counterfactual: "If event_count had been 0 (no matching events), the grade would be `-` not `+`."
+          routing:
+            decision: continue
+        ```
+        """).strip()
+        monkeypatch.setattr(
+            analyze_handler, "_invoke_subagent",
+            stub_invoke([], response),
+        )
+        analyze_handler.handle(ctx)
+        written = (ctx.run_dir / "investigation.md").read_text()
+        findings_yaml = written.split("findings:")[-1]
+        assert "load_bearing" in findings_yaml
+        assert "wazuh.event_count" in findings_yaml
+        assert "counterfactual" in findings_yaml
+        # value_summary intentionally absent — counterfactual carries the value
+        # by implication.
+        assert "value_summary" not in findings_yaml
+
     def test_supporting_edges_not_emitted_on_weak_weights(
         self, tmp_path, monkeypatch,
     ):

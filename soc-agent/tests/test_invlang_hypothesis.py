@@ -26,6 +26,7 @@ from hooks.scripts.invlang_validate import (
     _check_prediction_subject_scope,
     _check_predictions_leanness,
     _check_refutation_prediction_links,
+    _check_sibling_prediction_divergence,
 )
 
 
@@ -1120,3 +1121,158 @@ class TestCompoundAttributePredictionClaim:
         }]}}
         errors = _check_compound_prediction_claim(merged)
         assert errors and "ap1" in errors[0] and "'AND'" in errors[0]
+
+
+class TestSiblingPredictionDivergence:
+    """Rule #35 — siblings must differ on at least one prediction signature."""
+
+    @staticmethod
+    def _h(
+        hid: str,
+        *,
+        attached: str = "v-001",
+        classification: str = "cls-default",
+        predictions: list[tuple[str, str, str]] | None = None,  # (id, subject, claim)
+        attribute_predictions: list[tuple[str, str, str, str]] | None = None,  # (id, target, attribute, claim)
+    ) -> dict:
+        h: dict = {
+            "id": hid, "name": f"?{hid}", "attached_to_vertex": attached,
+            "proposed_edge": {
+                "relation": "spawned",
+                "parent_vertex": {"type": "process", "classification": classification},
+            },
+        }
+        if predictions:
+            h["predictions"] = [
+                {"id": pid, "subject": subj, "claim": claim}
+                for pid, subj, claim in predictions
+            ]
+        if attribute_predictions:
+            h["attribute_predictions"] = [
+                {"id": apid, "target": tgt, "attribute": attr, "claim": claim}
+                for apid, tgt, attr, claim in attribute_predictions
+            ]
+        return h
+
+    def test_distinct_claims_pass(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", classification="cron-driven",
+                    predictions=[("p1", "proposed_parent", "parent is cron")]),
+            self._h("h-002", classification="interactive-shell",
+                    predictions=[("p1", "proposed_parent", "parent is interactive bash")]),
+        ]}, "findings": []}
+        assert _check_sibling_prediction_divergence(merged) == []
+
+    def test_identical_claims_fail(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", classification="cron-driven",
+                    predictions=[("p1", "proposed_parent", "parent ran on a schedule")]),
+            self._h("h-002", classification="systemd-timer",
+                    predictions=[("p1", "proposed_parent", "parent ran on a schedule")]),
+        ]}, "findings": []}
+        errors = _check_sibling_prediction_divergence(merged)
+        assert errors
+        assert "h-001" in errors[0] and "h-002" in errors[0]
+        assert "identical prediction signatures" in errors[0]
+
+    def test_case_insensitive_paraphrase_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", classification="cron-driven",
+                    predictions=[("p1", "proposed_parent", "Parent Ran On A Schedule")]),
+            self._h("h-002", classification="systemd-timer",
+                    predictions=[("p1", "proposed_parent", "parent ran on a schedule")]),
+        ]}, "findings": []}
+        errors = _check_sibling_prediction_divergence(merged)
+        assert errors
+
+    def test_different_subjects_same_claim_fail(self):
+        # Subject differences alone without claim divergence still mean siblings
+        # carry overlapping observable expectations on the prediction text — the
+        # signature comparison treats (kind, subject, claim) as the unit.
+        # Two hypotheses with identical (subject, claim) on every prediction fail.
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", classification="cron-driven",
+                    predictions=[("p1", "proposed_parent", "ran on a schedule")]),
+            self._h("h-002", classification="systemd-timer",
+                    predictions=[("p1", "proposed_parent", "ran on a schedule")]),
+        ]}, "findings": []}
+        errors = _check_sibling_prediction_divergence(merged)
+        assert errors
+
+    def test_different_attached_vertex_passes(self):
+        # Different attached_to_vertex → not in the same sibling group.
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", attached="v-001", classification="x",
+                    predictions=[("p1", "proposed_parent", "same claim")]),
+            self._h("h-002", attached="v-002", classification="x",
+                    predictions=[("p1", "proposed_parent", "same claim")]),
+        ]}, "findings": []}
+        assert _check_sibling_prediction_divergence(merged) == []
+
+    def test_attribute_predictions_diverge_passes(self):
+        # ap* differences let two hypotheses with shared p* signatures still
+        # discriminate via attribute_predictions.
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", classification="x",
+                    predictions=[("p1", "proposed_parent", "same claim")],
+                    attribute_predictions=[("ap1", "proposed_parent", "cmdline", "matches /a/")]),
+            self._h("h-002", classification="y",
+                    predictions=[("p1", "proposed_parent", "same claim")],
+                    attribute_predictions=[("ap1", "proposed_parent", "cmdline", "matches /b/")]),
+        ]}, "findings": []}
+        assert _check_sibling_prediction_divergence(merged) == []
+
+    def test_attribute_predictions_identical_fails(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", classification="x",
+                    predictions=[],
+                    attribute_predictions=[("ap1", "proposed_parent", "cmdline", "matches /a/")]),
+            self._h("h-002", classification="y",
+                    predictions=[],
+                    attribute_predictions=[("ap1", "proposed_parent", "cmdline", "matches /a/")]),
+        ]}, "findings": []}
+        errors = _check_sibling_prediction_divergence(merged)
+        assert errors
+
+    def test_one_sibling_with_extra_prediction_passes(self):
+        # h-002 has p1 in common with h-001 plus an extra p2 that diverges → not
+        # identical signatures → passes (subset cases are handled by rule #32).
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", classification="x",
+                    predictions=[("p1", "proposed_parent", "shared claim")]),
+            self._h("h-002", classification="y",
+                    predictions=[
+                        ("p1", "proposed_parent", "shared claim"),
+                        ("p2", "proposed_edge", "additional discriminator"),
+                    ]),
+        ]}, "findings": []}
+        assert _check_sibling_prediction_divergence(merged) == []
+
+    def test_empty_signature_skipped(self):
+        # A hypothesis with no predictions/attribute_predictions is skipped — other
+        # rules (leanness, refutation linkage) flag empty-prediction hypotheses.
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001", classification="x"),
+            self._h("h-002", classification="y"),
+        ]}, "findings": []}
+        assert _check_sibling_prediction_divergence(merged) == []
+
+    def test_hierarchical_children_pass_when_distinct(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001-001", classification="cron-A",
+                    predictions=[("p1", "proposed_parent", "schedule A")]),
+            self._h("h-001-002", classification="cron-B",
+                    predictions=[("p1", "proposed_parent", "schedule B")]),
+        ]}, "findings": []}
+        assert _check_sibling_prediction_divergence(merged) == []
+
+    def test_hierarchical_children_fail_when_identical(self):
+        merged = {"hypothesize": {"hypotheses": [
+            self._h("h-001-001", classification="cron-A",
+                    predictions=[("p1", "proposed_parent", "shared")]),
+            self._h("h-001-002", classification="cron-B",
+                    predictions=[("p1", "proposed_parent", "shared")]),
+        ]}, "findings": []}
+        errors = _check_sibling_prediction_divergence(merged)
+        assert errors
+        assert "h-001-001" in errors[0] and "h-001-002" in errors[0]

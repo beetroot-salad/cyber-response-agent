@@ -1,7 +1,12 @@
 # Investigation Language
 
-**Status:** Spec v2.12. Implemented.
+**Status:** Spec v2.13. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
+
+**v2.13 delta:** Tier-0 contract-completeness rules between PREDICT and ANALYZE.
+- Rule #34 (prediction closure at CONCLUDE) — at REPORT, every declared `p*` / `ap*` on a non-refuted, non-shelved hypothesis must be cited in some resolution's `matched_prediction_ids[]` with a non-null `after`, OR appear in `conclude.deferred_predictions[]` with rationale. Generalises rule #6 (which only fired on `++`) into a coverage gate at REPORT regardless of weight. New conclude surface: `deferred_predictions[]` (parallel to `deferred_authorizations[]` and `deferred_impact_predictions[]`).
+- Rule #35 (sibling prediction divergence) — within a sibling group (shared `parent_hypothesis_id` + `attached_to_vertex`), no two siblings may declare identical prediction signatures (combining `(subject, claim)` from `predictions[]` and `(target, attribute, claim)` from `attribute_predictions[]`, case-normalised). Generalises rule #32 (integrity-peer-specific, contract-gated) to all sibling forks regardless of contract presence.
+- Companion to spec rule #33 (attribute-prediction structure) — already in schema.md; documented here for completeness.
 
 **v2.12 delta:** top-level block rename `gather:` → `findings:`. Same merge semantics (same-id append; ANALYZE merges outcome.resolutions + verdicts onto the GATHER-populated entry), clearer name for cross-phase state. Handler-authored: subagents emit plain-YAML envelopes; `scripts/handlers/gather.py` + `scripts/handlers/analyze.py` synthesize `findings[]` and merge via the existing validator. Raw SIEM/anchor payloads moved off the companion to `runs/<run-id>/raw_details/loop-<N>/<lead-id>.yaml`; analyze-handler preloads them per-loop.
 
@@ -1324,3 +1329,45 @@ coverage.
     shortcut — authz clears, impact clears, but the integrity premise
     was never tested. Integrity resolves through normal weight
     machinery on the peer, not through a separate contract.
+
+33. **Attribute-prediction structure.** Each `attribute_predictions[]`
+    entry on a hypothesis has `id` matching `^ap\d+$` (unique within the
+    hypothesis), `target` ∈ {`proposed_parent`, `attached_vertex`,
+    `proposed_edge`}, `attribute` (non-empty string — the field name
+    being predicted), and `claim` (non-empty string, one observable per
+    entry — compound `AND` / `OR` predicates split into separate
+    entries). `refutation_shape[].refutes_predictions` may cite `ap*`
+    ids alongside `p*` ids on the same hypothesis.
+    `matched_prediction_ids[]` on a resolution may likewise cite both
+    `p*` and `ap*` ids from the target hypothesis.
+
+34. **Prediction closure at CONCLUDE.** When a `conclude:` block is
+    written, every declared `predictions[].id` (`p*`) and
+    `attribute_predictions[].id` (`ap*`) on a hypothesis whose final
+    status is neither `refuted` nor `shelved` must be either (a) cited
+    in some resolution's `matched_prediction_ids[]` with a non-null
+    `after`, OR (b) listed in `conclude.deferred_predictions[]` with a
+    non-empty `rationale`. Each `deferred_predictions[]` entry has
+    `prediction_ref: h-{id}.{p|ap}{n}` and `rationale: "<why>"`.
+    Generalises rule #6 (which only fires on `++`) — at REPORT every
+    declared prediction needs either a verdict at any weight or
+    explicit deferral, regardless of the hypothesis's final weight.
+    Closes the contract analyze owes predict: predict pre-commits a
+    prediction set; analyze must address every entry by REPORT or the
+    loop owes a justification.
+
+35. **Sibling prediction divergence.** Within a sibling group —
+    hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` —
+    no two siblings may declare identical prediction signatures. A
+    signature is the union of `predictions[]` `(subject, claim)` and
+    `attribute_predictions[]` `(target, attribute, claim)` tuples
+    (case-normalised). Identical signatures mean both hypotheses
+    propose the same observable expectations and ANALYZE has no
+    discriminator to grade them differently — the fork is paraphrase,
+    not mechanism. Generalises rule #32 (integrity-peer specific,
+    requires shared `proposed_edge` structure and at least one
+    `authorization_contract`) to all sibling forks regardless of
+    contract presence; complements rule #23 (which blocks shared
+    `parent_vertex.classification`) by blocking shared *prediction
+    text*. Empty-signature hypotheses are skipped — leanness and
+    refutation-link rules cover that shape.

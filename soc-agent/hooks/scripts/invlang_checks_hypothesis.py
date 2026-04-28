@@ -545,6 +545,107 @@ def _prediction_claims(h: dict[str, Any]) -> set[str]:
     return claims
 
 
+def _prediction_signature(h: dict[str, Any]) -> set[tuple[str, str, str]]:
+    """Collect a normalized prediction signature for sibling-divergence comparison.
+
+    Combines `predictions[]` (subject, claim) and `attribute_predictions[]`
+    (target+attribute, claim) into a single set of (kind-tag, subject, claim)
+    tuples. Used by `_check_sibling_prediction_divergence`. Subjects /
+    targets are normalized to empty string when missing — claim text is the
+    discriminating axis; subject-only differences without claim divergence
+    still count as a paraphrase fork.
+    """
+    sig: set[tuple[str, str, str]] = set()
+    for pred in h.get("predictions") or []:
+        if not isinstance(pred, dict):
+            continue
+        claim = pred.get("claim")
+        if not isinstance(claim, str) or not claim.strip():
+            continue
+        subject = pred.get("subject")
+        subject_s = subject.strip().lower() if isinstance(subject, str) else ""
+        sig.add(("p", subject_s, claim.strip().lower()))
+    for ap in h.get("attribute_predictions") or []:
+        if not isinstance(ap, dict):
+            continue
+        claim = ap.get("claim")
+        if not isinstance(claim, str) or not claim.strip():
+            continue
+        target = ap.get("target")
+        attribute = ap.get("attribute")
+        target_s = target.strip().lower() if isinstance(target, str) else ""
+        attribute_s = attribute.strip().lower() if isinstance(attribute, str) else ""
+        sig.add(("ap", f"{target_s}.{attribute_s}", claim.strip().lower()))
+    return sig
+
+
+def _check_sibling_prediction_divergence(merged: dict[str, Any]) -> list[str]:
+    """Rule #35 (sibling prediction divergence) — paraphrase forks are rejected.
+
+    Within a sibling group — hypotheses sharing
+    `(parent_hypothesis_id, attached_to_vertex)` — no two siblings may
+    declare identical prediction signatures (combining `predictions[]`
+    and `attribute_predictions[]`). Identical signatures mean the two
+    hypotheses propose the same observable expectations; ANALYZE has no
+    discriminator to grade them differently and the fork is cosmetic.
+
+    Generalises rule #32 (which is integrity-peer-specific and only
+    fires on shared `proposed_edge` structure with at least one
+    authorization_contract) to all sibling forks regardless of contract
+    presence. Complements rule #23 — that rule blocks shared
+    *classifications*; this one blocks shared *prediction signatures*.
+
+    A hypothesis with an empty signature (no predictions, no
+    attribute_predictions) is skipped — other rules (e.g. leanness,
+    refutation linkage) flag that shape separately.
+    """
+    errors: list[str] = []
+    # group key -> [(hypothesis_id, signature), ...]
+    groups: dict[tuple[str | None, Any], list[tuple[str, frozenset[tuple[str, str, str]]]]] = {}
+    for h in iter_hypotheses(merged):
+        hid = h.get("id")
+        if not isinstance(hid, str):
+            continue
+        sig = _prediction_signature(h)
+        if not sig:
+            continue
+        attached = h.get("attached_to_vertex")
+        key = (parent_hypothesis_id(hid), attached)
+        groups.setdefault(key, []).append((hid, frozenset(sig)))
+
+    for (parent_id, attached), members in groups.items():
+        if len(members) < 2:
+            continue
+        # O(n^2) over a sibling group is fine — group sizes are 2-3 in practice.
+        seen_pairs: set[tuple[str, str]] = set()
+        for i in range(len(members)):
+            hid_i, sig_i = members[i]
+            for j in range(i + 1, len(members)):
+                hid_j, sig_j = members[j]
+                if sig_i != sig_j:
+                    continue
+                pair = tuple(sorted([hid_i, hid_j]))
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                where = (
+                    f"attached_to_vertex={attached!r}"
+                    if parent_id is None
+                    else f"parent={parent_id!r}, attached_to_vertex={attached!r}"
+                )
+                errors.append(
+                    f"hypotheses {hid_i} and {hid_j}: declare identical "
+                    f"prediction signatures (predictions + attribute_predictions) "
+                    f"within the same sibling group ({where}). Sibling forks must "
+                    f"differ on at least one prediction claim — identical "
+                    f"signatures mean no lead can discriminate between them. "
+                    f"Collapse to one hypothesis (with an authorization_contract "
+                    f"if the open question is authorization), or rewrite one "
+                    f"sibling's predictions on observables that genuinely diverge."
+                )
+    return errors
+
+
 def _check_refutation_prediction_links(merged: dict[str, Any]) -> list[str]:
     """Rule 30 — every refutation_shape entry cites the predictions it refutes.
 
