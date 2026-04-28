@@ -77,13 +77,30 @@ scripts, and (if container privileges allow) escape to the host.
 - Container with the Docker socket mounted → shell → `docker run` a
   privileged container → host root
 
-**Legitimate reasons this fires.** All of these are real and common:
-- Operator debugging via `docker exec` / `kubectl exec` / `oc exec`
-- CI/CD pipelines exec'ing into containers to run scripted commands
-- Healthcheck and readiness probes that invoke `sh -c "..."`
-- Container entrypoints or init scripts that themselves call a shell
-- Application code that calls `os.system()` / `subprocess.run(shell=True)`
-  or otherwise shells out as part of normal operation
+**Legitimate mechanisms this fires on.** All of these are real and common.
+The mechanism (parent process class) is what the alert telemetry directly
+records via `proc.pname`; the invoking actor (operator / pipeline /
+scheduler / probe / admin tooling) is *attribute on the parent vertex*,
+not the discriminator between mechanisms — same mechanism class can be
+driven by any of those actors and resolves through the same authorization
+anchor:
+- **Cross-namespace runtime exec primitive** — host-side client
+  (`docker`, `kubectl`, `crictl`, `oc`, kubelet exec path) crosses the
+  container namespace boundary; parent walks back to `runc` /
+  `containerd-shim` / `docker-exec` / `crio`. Drivers include
+  interactive operator sessions, CI/CD pipeline scripted steps,
+  scheduled probe sweeps, and admin tooling.
+- **Image entrypoint or init wrapper** — the image's own startup wrapper
+  (`tini`, `dumb-init`, `s6`, supervisord, custom launcher) invokes a
+  shell as part of container start.
+- **In-namespace application shell-out** — long-running application
+  process (or one of its descendants) shells out as part of normal work
+  (`subprocess.run(shell=True)`, `os.system()`, build hooks, image
+  processing wrappers, log rotation, scheduled health-check inside the
+  container).
+- **Probe invoked from inside the container** — Kubernetes liveness /
+  readiness / exec probe runs `sh -c "..."` against the container's own
+  pid namespace.
 
 **Blast radius if real.** Equal to the container's effective privileges:
 unprivileged sidecar < typical app container < container with mounted
