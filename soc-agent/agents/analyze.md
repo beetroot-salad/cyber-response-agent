@@ -38,6 +38,11 @@ analyze:
           matched_prediction_ids: ["p1", ...]        # required; must be declared on this hypothesis
           matched_refutation_ids: ["r1", ...]        # required iff weight == "--"
           reasoning: "one sentence; cite counts/ids, name the failed or matched refutation"
+          load_bearing:                              # required for ++/--; optional for +/-
+            - field: "<field name on the cited authority — e.g. proc.pname, fd.sip, baseline.cadence_seconds>"
+              source: "lead-id | prologue | <e-id>"  # where this observation came from
+              value_summary: "<brief description of the value that swayed the weight — counts, enum, presence/absence>"
+              counterfactual: "<one sentence: if this field had instead shown X, my grade would have been Y>"
 
   trust_anchor_result:                  # one entry per lead that consulted an anchor
     - lead_ref: "{lead-id}"
@@ -104,7 +109,16 @@ Empty lists are valid and preferred over omission for `resolutions`, `anomalies`
 
 The prediction's load-bearing field is the noun the prediction's `claim` is about (*parent process class*, *registered actor in approved-monitoring-sources*, *cadence distribution against baseline*). The authority is the system whose record speaks to that noun (Falco's `proc.pname` field for parent-process class; the identity registry for actor registration; the SIEM's historical query for cadence).
 
-For each resolution, write one line in the `reasoning` field that names the triple: **(a)** the prediction's load-bearing field, **(b)** the authority cited, **(c)** whether (b) has direct view of (a). That triple determines the grade tier:
+**Declare your load-bearing observations.** Every `++` and `--` resolution MUST populate `load_bearing[]` — one entry per observation that swayed the weight. `+`/`-` resolutions may populate it when a specific observation tipped the call, but it is optional. Each entry has:
+
+- `field` — the field name on the cited authority (e.g. `proc.pname`, `fd.sip`, `baseline.cadence_seconds`, `iam.role_assignment.principal`). Field-level granularity, not free prose.
+- `source` — where the observation came from. A lead id (`l-002`), the literal `prologue`, or a specific edge id (`e-005`). Must align with `supporting_edges`.
+- `value_summary` — a brief description of the value that mattered: count, enum, presence/absence, dimension that matched/deviated. Concrete: *"4 prior alerts at 60s ± 2s drift"*, not *"matches baseline"*.
+- `counterfactual` — one sentence naming what the grade would have been if this field had shown a different value. *"If `proc.pname` had been populated with a container-internal name, h-002 would have stayed at `+` rather than `--`."* This is the discipline check on yourself — if you can't name a counterfactual, the field probably isn't actually load-bearing for your grade and you're describing rather than reasoning.
+
+The `reasoning` field still names the triple ((a) prediction's load-bearing field, (b) authority cited, (c) whether (b) has direct view) in one sentence. `load_bearing[]` enumerates the specific observations that triple was satisfied by.
+
+That triple determines the grade tier:
 
 - Direct view + supporting evidence → `++`
 - Direct view + refuting evidence (matched `r{N}`) → `--`
@@ -198,6 +212,11 @@ analyze:
           matched_prediction_ids: [p3]
           supporting_edges: [e-005]    # the lead-materialized cadence edge
           reasoning: "cadence-check returned 4 prior rule-5710 alerts from 10.0.1.99 for monitorprobe at 60s intervals (max drift 2s); refutation r3 (off-cadence) failed to materialize."
+          load_bearing:
+            - field: "wazuh.previous_alerts.timestamps"
+              source: l-002
+              value_summary: "4 prior rule-5710 alerts from 10.0.1.99 for monitorprobe over the last 4 minutes, inter-arrival gaps 58–62s"
+              counterfactual: "If the gap distribution had been irregular (drift > 10s) or the count < 3, refutation r3 would have materialised and the grade would be `--`."
   anomalies: []
   data_wishes: []
   routing:
@@ -240,6 +259,11 @@ analyze:
           matched_prediction_ids: [p1]
           matched_refutation_ids: [r1]
           reasoning: "shell-context returned full ancestry tini→/app/launcher.sh→node→sh→bash with no runc/containerd-shim/docker-exec present; matches h-002.r1 (chain continues to container-init wrapper, no exec primitive)."
+          load_bearing:
+            - field: "falco.process_ancestry"
+              source: l-002
+              value_summary: "ancestry tini→/app/launcher.sh→node→sh→bash, no runc/containerd-shim/docker-exec frame present"
+              counterfactual: "If any frame in the ancestry had been runc/containerd-shim/docker-exec, r1 would have failed to materialise and the grade would be `+` not `--`."
         - hypothesis_id: h-001
           weight: "+"
           matched_prediction_ids: [p1]

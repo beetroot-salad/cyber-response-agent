@@ -609,6 +609,11 @@ def _synthesize_findings_block(
             mrefs = r.get("matched_refutation_ids")
             if mrefs:
                 res["matched_refutation_ids"] = mrefs
+            load_bearing = r.get("load_bearing")
+            if isinstance(load_bearing, list) and load_bearing:
+                res["load_bearing"] = [
+                    lb for lb in load_bearing if isinstance(lb, dict)
+                ]
             # invlang structural rule: ++/-- grades require supporting_edges
             # with at least one authoritative edge. The subagent does not
             # name specific edges (that's graph-level plumbing, not weighing
