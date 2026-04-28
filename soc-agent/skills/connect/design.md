@@ -91,7 +91,9 @@ So the lifecycle is:
 
 2. **`/investigate` (existing skill).** Runs against the system. Hits friction on query composition the first few times — Claude composes queries on the fly from whatever field knowledge exists plus its training priors. Some guesses are right; some are wrong. That's the input signal for the next step.
 
-3. **`/author` post-mortem (existing skill).** Reads the investigation run, identifies where Claude got field names wrong or reached for the wrong enum, and bakes those findings into `field-notes.md` and into new/updated lead templates under `knowledge/common-investigation/leads/{lead}/templates/{vendor}.md`. Each post-mortem run compounds on the last.
+3. **Post-mortem flows.** Two of them, complementary:
+   - **Automated post-mortem leads pipeline** (`scripts/postmortem/`, fires at Stop). Extracts ad-hoc lead invocations from `investigation.md`, spawns a coding agent in a worktree, and opens a PR proposing edits under `knowledge/common-investigation/leads/`. See `skills/handbook/content/postmortem.md`. Slice 1 ships extraction + worktree + orchestrator skeleton; agent dispatch is stubbed pending follow-up.
+   - **Human-driven `/author` post-mortem** (existing skill). Reads the investigation run, identifies where Claude got field names wrong or reached for the wrong enum, and bakes those findings into `field-notes.md` and into new/updated lead templates. Useful when the analyst has context the automated pipeline lacks, or for `field-notes.md` edits the pipeline doesn't touch in slice 1.
 
 By investigation N (for small N — maybe 5–10), the system has lead templates grounded in real data and a `field-notes.md` that covers the actually-encountered gotchas. That's the steady-state quality bar. `/connect` doesn't try to hit it upfront because it can't — the required information isn't available at connect time.
 

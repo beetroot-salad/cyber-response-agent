@@ -30,7 +30,7 @@ If the state machine rejects a transition, the hook exits non-zero and the agent
 - `REPORT` only when ticket-context's `repeats` cluster (or an already-open ticket) justifies a duplicate / immediate-dedup disposition — main agent's judgment.
 - `SCREEN` only if the playbook has a `## Screen` section.
 - `PREDICT` when the first lead depends on which competing story is true (fork already open).
-- `GATHER` when the first lead is mechanical or interpretive and does not branch on a hypothesis fork. PREDICT is on-demand (invlang v2.7) — a run may enter the loop at GATHER and only enter PREDICT later if a fork opens.
+- `GATHER` when the first lead is mechanical or interpretive and does not branch on a hypothesis fork. PREDICT is on-demand — a run may enter the loop at GATHER and only enter PREDICT later if a fork opens.
 
 **investigation.md shape:**
 
@@ -210,6 +210,6 @@ hypotheses:
 
 A **cycle** is counted as any `PREDICT` or `ANALYZE` entry in `state.json` history. `MAX_LOOPS = 12` (from `schemas/state.py`). The next transition into `PREDICT` or `ANALYZE` past the cap is rejected with a state machine error directing the agent to `REPORT`. See `content/investigation-loop.md#why-loops-are-capped-instead-of-open-ended`.
 
-Counting ANALYZE alongside PREDICT keeps the guardrail meaningful under invlang v2.7's on-demand PREDICT: a run that keeps gathering without re-hypothesizing still accumulates cycles and will eventually trip the cap.
+Counting ANALYZE alongside PREDICT keeps the guardrail meaningful under on-demand PREDICT: a run that keeps gathering without re-hypothesizing still accumulates cycles and will eventually trip the cap.
 
 Most investigations resolve in 1–2 cycles. If you're past 8 without convergence, the hypothesis space is probably incomplete and escalation is the correct call anyway.

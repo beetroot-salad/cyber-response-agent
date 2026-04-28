@@ -30,7 +30,7 @@ Walk through this before calling a connection done. Anything unchecked goes in t
 
 ## Environment knowledge
 
-The bar here is **lean**, not comprehensive. Everything in this section grows through post-mortem `/author` runs as investigation experience accumulates. Aim to unblock `/author` and `/investigate`, not to produce a finished reference.
+The bar here is **lean**, not comprehensive. Everything in this section grows post-mortem — either through the automated leads pipeline (`scripts/postmortem/`, opens a PR at Stop) or a human-driven `/author` run. Aim to unblock `/author`, the post-mortem pipeline, and `/investigate`, not to produce a finished reference.
 
 - [ ] `knowledge/environment/systems/{system}/config.env.template` exists, is tracked in git, and contains only non-secret keys with comments.
 - [ ] `knowledge/environment/systems/{system}/config.env` exists locally with actual deployment values, is gitignored (verify via `git check-ignore`), and does not contain any secrets.
@@ -49,7 +49,7 @@ The bar here is **lean**, not comprehensive. Everything in this section grows th
 
 - [ ] Only `scripts/tools/` and `knowledge/environment/` have been edited. Hard limit: no touches to `hooks/`, `schemas/`, `skills/`, `knowledge/signatures/`, or `config/signatures/`.
 - [ ] No signature knowledge was created or modified. If the user wants starter signatures for this system, that's a follow-up `/author` run.
-- [ ] No lead templates (`knowledge/common-investigation/leads/{lead}/templates/{system}.md`) were created. Lead templates grow from investigation experience via post-mortem `/author` runs, not from connect-time API-doc reading.
+- [ ] No lead templates (`knowledge/common-investigation/leads/{lead}/templates/{system}.md`) were created. Lead templates grow from investigation experience — via the automated post-mortem pipeline or a human `/author` run — not from connect-time API-doc reading.
 - [ ] `scripts/tools/wazuh_cli.py` (the reference example) was not touched.
 - [ ] If the user's request legitimately falls outside the default flow (unusual upstream, weird access topology, bespoke integration), that divergence is surfaced in the summary to the user for human review — not silently patched over, and not blocked outright.
 
@@ -68,11 +68,11 @@ The bar here is **lean**, not comprehensive. Everything in this section grows th
 
 ## Enough to build on
 
-At runtime the investigation loop composes queries from per-lead templates (`knowledge/common-investigation/leads/{lead}/templates/{system}.md`), which are written by `/author` post-mortem. Your scaffold exists so `/author` has something to build on when that moment comes — and so the first few `/investigate` runs against this system can at least find it. Ask yourself:
+At runtime the investigation loop composes queries from per-lead templates (`knowledge/common-investigation/leads/{lead}/templates/{system}.md`), which land via the automated post-mortem pipeline (`scripts/postmortem/`) or a human-driven `/author` run. Your scaffold exists so those flows have something to build on — and so the first few `/investigate` runs against this system can at least find it. Ask yourself:
 
 - [ ] Does `SKILL.md` name the system, include a real CLI invocation example, and point at `field-notes.md`?
 - [ ] Does `field-notes.md` capture the obvious gotchas (vendor-specific aliases, odd null semantics, enum mismatches) — enough that a reader who'd never touched this vendor wouldn't fall into them blind?
 - [ ] Does the `data-sources/{type}.md` entry name this system alongside its adapter path and query language?
-- [ ] Is there nothing missing that an `/author` post-mortem run would need in order to start extracting a lead template from a real investigation?
+- [ ] Is there nothing missing that the post-mortem pipeline (or an `/author` run) would need in order to start extracting a lead template from a real investigation?
 
 This is a judgment call, not a completeness bar. If you find yourself writing things you aren't sure will matter, stop — post-mortem will catch them.
