@@ -1,21 +1,24 @@
 """Authorization-as-edge-attribute checks.
 
-Covers the authorization_contract / authorization_resolutions primitive.
-Rule numbering reflects the v2.14 consolidation — formerly numbered
-#19–#22, several of these checks are now spec-level sub-cases of the
-unified reference-resolution rule (#7) or schema-validity rule (#1).
-The check function names are kept stable for grep-friendly cross-
-references in tests, prompts, and external docs:
+Covers the authorization_contract / authorization_resolutions primitive
+plus the affirmative true_positive disposition gate. Rule numbering
+reflects the v2.15 consolidation — several checks formerly numbered
+#19–#22 are now spec-level sub-cases of unified reference-resolution
+rule (#7) or schema-validity rule (#1). Check function names are kept
+stable for grep-friendly cross-references in tests, prompts, and
+external docs:
 
 - contract edge_ref resolution: spec rule #7 (was #19)
 - resolution fulfills_contract back-reference: spec rule #7 (was #20)
 - benign-disposition gating: spec rule #21
 - attribute_updates target shape: spec rules #1 (exclusivity) + #7
   (resolution); was #22
+- affirmative true_positive disposition: spec rule #36 (v2.14)
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from hooks.scripts.invlang_common import (
@@ -31,6 +34,67 @@ from hooks.scripts.invlang_walkers import (
     compute_final_weight,
     iter_hypotheses,
 )
+
+
+# Adversarial-classification pattern. A hypothesis name or its
+# `proposed_edge.parent_vertex.classification` matching this regex is
+# treated as adversarial for rule #36 (affirmative true_positive).
+#
+# Tokens chosen from real corpus runs + the `?adversary-controlled-*`
+# pattern documented in `predict.md` §Disciplines. Match is anchored
+# (start-of-string) and case-insensitive; tokens may be part of a
+# longer compound (e.g. `adversary-controlled-process`,
+# `unauthorized-process-credential-reuse`,
+# `malware-implant-dns-covert-channel`). Provisional `{type}:{slug}`
+# classifications are matched on the slug portion.
+_ADVERSARIAL_TOKEN_RE = re.compile(
+    r"""
+    ^\??                            # optional `?` (hypothesis names start with it)
+    (?:[a-z]+:)?                    # optional provisional `{type}:` prefix
+    (?:                             # any of these adversarial tokens at start:
+        adversary(?:-controlled)?
+      | adversarial
+      | attack(?:er)?
+      | malicious
+      | malware
+      | implant
+      | backdoor
+      | rootkit
+      | c2
+      | exfil(?:tration)?
+      | covert
+      | unauthorized
+      | compromise(?:d)?
+      | credential-(?:guess|stuff|reuse|theft|scrape)
+      | brute-force
+      | spray
+      | post-exploit
+      | lateral(?:-movement)?
+      | intrusion
+      | persistence
+      | privilege-escalation
+      | command-injection
+      | payload
+      | exploit
+      | dga
+      | beaconing
+    )
+    (?:[-_].*)?$                    # optional suffix
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _is_adversarial_classification(value: str | None) -> bool:
+    """True iff value matches an adversarial-classification token.
+
+    Returns False for None, empty, or non-adversarial values. Used by
+    rule #36 to decide whether a hypothesis can carry the affirmative
+    `true_positive` claim.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return False
+    return _ADVERSARIAL_TOKEN_RE.match(value.strip()) is not None
 
 
 def _check_authorization_contract_edge_ref(merged: dict[str, Any]) -> list[str]:
@@ -284,4 +348,104 @@ def _check_attribute_updates_target_shape(merged: dict[str, Any]) -> list[str]:
                 errors.append(
                     f"{ctx}: missing or non-mapping `updates` field"
                 )
+    return errors
+
+
+def _check_affirmative_true_positive(merged: dict[str, Any]) -> list[str]:
+    """Spec rule #36: conclude.disposition=true_positive requires affirmative ++.
+
+    `disposition: true_positive` is a *positive* claim about adversarial
+    activity — it must be backed by a hypothesis whose classification or
+    name is adversarial AND whose final weight is `++`. Absence of a
+    surviving benign explanation is NOT evidence of malicious action; it
+    is evidence of unverified authorization, and the honest landing is
+    `disposition: unclear` (with `escalated/unclear` framing in the
+    report).
+
+    The rule fires when `conclude.disposition` is `true_positive`. It
+    walks `conclude.surviving_hypotheses[]` (or, when absent, every
+    declared hypothesis) and requires that at least one hypothesis
+    referenced there has both:
+
+      1. An adversarial token in its `name` OR
+         `proposed_edge.parent_vertex.classification` (matched by
+         `_ADVERSARIAL_TOKEN_RE`), AND
+      2. A final weight of `++` (computed via `compute_final_weight`).
+
+    Empirically motivated: 4 production runs (documented in
+    `tasks/analyze-true-positive-routing.md`) routed `true_positive`
+    from absence-of-benign-anchor-confirmation while their only
+    surviving hypothesis was either non-adversarially-classified or
+    graded `+`/null. The structural rule rejects those envelopes at
+    write time.
+    """
+    errors: list[str] = []
+    conclude = merged.get("conclude")
+    if not isinstance(conclude, dict):
+        return errors
+    if conclude.get("disposition") != "true_positive":
+        return errors
+
+    # Index hypotheses by id.
+    h_by_id: dict[str, dict[str, Any]] = {}
+    for h in iter_hypotheses(merged):
+        hid = h.get("id")
+        if isinstance(hid, str):
+            h_by_id[hid] = h
+
+    # Restrict to surviving_hypotheses[] when present; otherwise scan all
+    # declared. Either way the condition is the same: ≥1 ++ on adversarial.
+    raw_surviving = conclude.get("surviving_hypotheses")
+    if isinstance(raw_surviving, list) and raw_surviving:
+        candidates = [hid for hid in raw_surviving if isinstance(hid, str)]
+    else:
+        candidates = list(h_by_id.keys())
+
+    qualifying: list[str] = []
+    weakly_adversarial: list[str] = []  # adversarial classification but weight < ++
+    non_adversarial: list[str] = []
+    missing: list[str] = []
+
+    for hid in candidates:
+        h = h_by_id.get(hid)
+        if h is None:
+            missing.append(hid)
+            continue
+        name = h.get("name")
+        proposed = h.get("proposed_edge") or {}
+        pv = proposed.get("parent_vertex") if isinstance(proposed, dict) else None
+        classification = pv.get("classification") if isinstance(pv, dict) else None
+        is_adversarial = _is_adversarial_classification(name) or _is_adversarial_classification(classification)
+        weight = compute_final_weight(merged, hid)
+        if is_adversarial and weight == "++":
+            qualifying.append(hid)
+        elif is_adversarial:
+            weakly_adversarial.append(f"{hid}({weight or 'null'})")
+        else:
+            non_adversarial.append(hid)
+
+    if qualifying:
+        return errors  # rule satisfied
+
+    pieces: list[str] = []
+    if missing:
+        pieces.append(f"surviving_hypotheses references undeclared id(s) {missing}")
+    if weakly_adversarial:
+        pieces.append(
+            f"adversarial-classified but weight < ++: {weakly_adversarial}"
+        )
+    if non_adversarial:
+        pieces.append(
+            f"non-adversarial classification: {sorted(non_adversarial)}"
+        )
+    detail = "; ".join(pieces) or "no surviving hypothesis declared"
+    errors.append(
+        f"conclude.disposition is 'true_positive' but no surviving hypothesis "
+        f"has both an adversarial classification (e.g. ?adversary-controlled-*, "
+        f"?attack-*, ?malware-*, ?compromise-*, ?unauthorized-*) AND final "
+        f"weight ++ ({detail}). 'true_positive' requires affirmative evidence "
+        f"of adversarial activity, not absence of benign confirmation. If no "
+        f"adversarial mechanism is graded ++, the honest disposition is "
+        f"'unclear'."
+    )
     return errors

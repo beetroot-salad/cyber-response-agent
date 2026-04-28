@@ -1,16 +1,18 @@
 # Investigation Language
 
-**Status:** Spec v2.14. Implemented.
+**Status:** Spec v2.15. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
 
-**v2.14 delta:** Validator rule consolidation — 35 → 28 active rules. Doc-only refactor; no validator behavior change. Drives:
+**v2.15 delta:** Validator rule consolidation — 36 → 29 active rules. Doc-only refactor; no validator behavior change. Drives:
 - Reference-resolution merge: rules #12, #19, #20, and the resolution clause of #22 fold into rule #7. Single "all references resolve in scope" rule covers `v-*`, `e-*`, `h-*`, `l-*`, hierarchical `h-{parent}-{nonce}`, contract `edge_ref`, `fulfills_contract`, and `attribute_updates.target`.
 - SCREEN structural integrity merge: former #16 (screen_result scope) absorbs into #17.
 - Schema-validity scope expansion: rule #1 absorbs former #15 (sub-vertex `v-{parent}-{nonce}` shape) and the exclusivity clause of former #22 (target shape).
 - Past-case ⇒ partial enum constraint moves from former #27a to rule #11; #27 retains the no-sole-grounding rule for benign.
 - Demotion: former #10 (mechanical leads stay within data source) is now a review-only discipline guideline — semantic, not validator-enforced. Retained in §Conventions.
-- Numbering preserved with redirect notes at the seven gaps (#10, #12, #15, #16, #19, #20, #22) so existing code, prompt, and test references to those rule numbers remain greppable.
+- Numbering preserved with redirect notes at the seven gaps (#10, #12, #15, #16, #19, #20, #22) so existing code, prompt, and test references to those rule numbers remain greppable. Rule #36 (v2.14) is unaffected by the consolidation and counts toward the 29 active rules.
 - Per-rule audit: see `docs/invlang-rule-audit.md` (added 2026-04 alongside `docs/dense-investigation-format.md`).
+
+**v2.14 delta:** rule #36 — affirmative `true_positive` disposition. Closes the absence-of-benign-confirmation cascade (4 production runs documented in `tasks/analyze-true-positive-routing.md`) by structurally rejecting `disposition: true_positive` writes whose `surviving_hypotheses[]` carries no hypothesis that is both adversarially-classified AND graded `++`. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Empirically motivated: trap-set evaluation showed prompt-only guidance lets ~50% of false-true-positive cases through; the structural gate raises catch rate to ~100%.
 
 **v2.13 delta:** Tier-0 contract-completeness rules between PREDICT and ANALYZE.
 - Rule #34 (prediction closure at CONCLUDE) — at REPORT, every declared `p*` / `ap*` on a non-refuted, non-shelved hypothesis must be cited in some resolution's `matched_prediction_ids[]` with a non-null `after`, OR appear in `conclude.deferred_predictions[]` with rationale. Generalises rule #6 (which only fired on `++`) into a coverage gate at REPORT regardless of weight. New conclude surface: `deferred_predictions[]` (parallel to `deferred_authorizations[]` and `deferred_impact_predictions[]`).
@@ -1111,7 +1113,7 @@ coverage.
 
 ## Validator rules
 
-The validator enforces **28 active rules**. Seven historical rule numbers (#10, #12, #15, #16, #19, #20, #22) are gaps — their content was either merged into a sibling rule or demoted to review-only discipline. Numbering is preserved for grep-stability of existing code, prompt, and test references; merged rules carry a redirect to their new home.
+The validator enforces **29 active rules** (rules 1–36 with seven gaps). Seven historical rule numbers (#10, #12, #15, #16, #19, #20, #22) are gaps — their content was either merged into a sibling rule or demoted to review-only discipline. Numbering is preserved for grep-stability of existing code, prompt, and test references; merged rules carry a redirect to their new home. Rule #36 is the most recent addition (v2.14, affirmative true_positive disposition) — included in the 29-active count.
 
 1. **Schema validity.** Required fields present, enums valid, IDs
    well-formed (including hierarchical patterns for hypotheses,
@@ -1402,3 +1404,35 @@ The validator enforces **28 active rules**. Seven historical rule numbers (#10, 
     `parent_vertex.classification`) by blocking shared *prediction
     text*. Empty-signature hypotheses are skipped — leanness and
     refutation-link rules cover that shape.
+
+36. **Affirmative true_positive disposition.** When
+    `conclude.disposition` is `true_positive`, at least one entry in
+    `conclude.surviving_hypotheses[]` must reference a hypothesis
+    that satisfies BOTH:
+
+    - **adversarial classification** — the hypothesis's
+      `proposed_edge.parent_vertex.classification` OR `name`
+      starts with an adversarial token (case-insensitive). Token
+      list: `adversary` / `adversary-controlled` / `adversarial`,
+      `attack` / `attacker`, `malicious`, `malware`, `implant`,
+      `backdoor`, `rootkit`, `c2`, `exfil` / `exfiltration`,
+      `covert`, `unauthorized`, `compromise` / `compromised`,
+      `credential-{guess|stuff|reuse|theft|scrape}`, `brute-force`,
+      `spray`, `post-exploit`, `lateral` / `lateral-movement`,
+      `intrusion`, `persistence`, `privilege-escalation`,
+      `command-injection`, `payload`, `exploit`, `dga`,
+      `beaconing`. Provisional `{type}:{slug}` classifications
+      match on the slug.
+    - **affirmative weight** — the hypothesis's final weight
+      (computed across all resolutions in document order) is
+      `++`.
+
+    When `surviving_hypotheses` is absent or empty, every declared
+    hypothesis is candidate. Empirically motivated by 4 production
+    runs (see `tasks/analyze-true-positive-routing.md`) where
+    ANALYZE routed `true_positive` from absence-of-benign-anchor-
+    confirmation while no surviving hypothesis was both
+    adversarially-classified and graded `++`. The honest landing in
+    that shape is `disposition: unclear` (paired with
+    `termination_category: severity-ceiling` or
+    `exhaustion-escalation`).
