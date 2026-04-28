@@ -12,14 +12,15 @@ Passes immediately if:
 Rule surface is split across companion modules for maintainability:
 - `invlang_common.py` — shared helpers, constants, dataclasses
 - `invlang_checks_structural.py` — structural rules (lead fields, IDs, edge
-  authority, refutation IDs, screen scope, lead predictions, rule #11
-  provenance for authz resolutions and anchor consultations)
+  authority, refutation IDs, screen structural integrity, lead predictions,
+  rule #11 provenance for authz resolutions and anchor consultations)
 - `invlang_checks_predictions.py` — prediction discipline (coverage, partial
   authority cap across authz/consultation/impact surfaces, prediction
   lifecycle, rollup parent weight)
 - `invlang_checks_authorization.py` — authorization-as-edge-attribute
-  rules (contract edge_ref, resolution back-refs, gated disposition,
-  attribute_updates target shape)
+  rules (contract edge_ref and resolution back-refs are sub-cases of
+  spec rule #7 reference resolution post-v2.14; gated disposition is
+  rule #21; attribute_updates target shape is rules #1 + #7)
 - `invlang_checks_impact.py` — lead-level impact_predictions /
   impact_resolutions + CONCLUDE two-axis (impact_verdict /
   impact_severity / deferred_impact_predictions)
@@ -426,7 +427,9 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_authorization_resolution_provenance(merged))
     errors.extend(_check_anchor_consultation_provenance(merged))
 
-    # Authorization (rules #19–#22)
+    # Authorization (post-v2.14: contract edge_ref + back-refs +
+    # attribute_updates target are sub-cases of rule #7; gated
+    # disposition stays as rule #21)
     errors.extend(_check_authorization_contract_edge_ref(merged))
     errors.extend(_check_authorization_resolution_backrefs(merged))
     errors.extend(_check_authorization_gated_disposition(merged))
