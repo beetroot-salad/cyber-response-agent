@@ -76,7 +76,7 @@ All hooks live under `soc-agent/hooks/scripts/` and are registered in `soc-agent
 | PreToolUse | `Task\|Agent` | `inject_env_context.py` | Inject environment context into subagent prompts |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `infer_state_pre.py` | Pre-write state transition check |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `validate_report_precheck.py` | Pre-REPORT self-contradiction guards (parallel Haiku judges) |
-| PreToolUse | `Write\|Edit` on `*/investigation.md` | `invlang_validate.py` | Pre-write schema validation (35 rules) — blocks writes on schema errors |
+| PreToolUse | `Write\|Edit` on `*/investigation.md` | `invlang_validate.py` | Pre-write schema validation (36 rules) — blocks writes on schema errors |
 | PostToolUse | `Task\|Agent` | `extract_subagent_yaml.py` | Extract subagent YAML output into the investigation record |
 | PostToolUse | `Write\|Edit\|Bash` | `infer_state.py` | Infer state transitions from `## PHASE` headers |
 | PostToolUse | `Write\|Edit` | `validate_report.py` | Two-tier report validation (Tier 1 structural + Tier 2 Haiku judge) |
@@ -244,7 +244,7 @@ pytest soc-agent/tests/test_judge_report.py -m llm          # Tier 2 judge
 
 ## Investigation Flow Language
 
-**Full spec:** `docs/investigation-language.md` (v2.13, implemented). Query CLI: invoke via `bash soc-agent/scripts/invlang/run.sh` (see the canonical invocation note — `python -m invlang` and direct `cli.py` calls fail). Schema loaded into the investigate prompt lives at `soc-agent/knowledge/invlang/schema.md`. Validator runs as a PreToolUse hook on `investigation.md` writes (`hooks/scripts/invlang_validate.py`).
+**Full spec:** `docs/investigation-language.md` (v2.14, implemented). Query CLI: invoke via `bash soc-agent/scripts/invlang/run.sh` (see the canonical invocation note — `python -m invlang` and direct `cli.py` calls fail). Schema loaded into the investigate prompt lives at `soc-agent/knowledge/invlang/schema.md`. Validator runs as a PreToolUse hook on `investigation.md` writes (`hooks/scripts/invlang_validate.py`).
 
 ### Purpose
 
@@ -283,7 +283,7 @@ conclude:       # REPORT: termination category, disposition, confidence, matched
   matched_archetype: <name> | null
 ```
 
-The key invariants enforced by the validator (35 rules in total — see spec §Validator rules; rule #23 enforces sibling-hypothesis classification uniqueness so proposed forks are structurally distinct):
+The key invariants enforced by the validator (36 rules in total — see spec §Validator rules; rule #23 enforces sibling-hypothesis classification uniqueness so proposed forks are structurally distinct):
 - **Edge authority** — `++`/`--` resolutions must cite at least one `siem-event`, `runtime-audit`, or `authoritative-source` edge.
 - **Append-only** — no existing record is ever mutated; decomposition adds sub-vertices, attribution adds `identified_as` links.
 - **Mechanical leads stay within their data source** — a lead's observations contain only entities the queried system directly names by native identity.

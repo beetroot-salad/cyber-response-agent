@@ -13,6 +13,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.invlang_validate import (
+    _check_affirmative_true_positive,
     _check_attribute_updates_target_shape,
     _check_authorization_contract_edge_ref,
     _check_authorization_gated_disposition,
@@ -321,3 +322,201 @@ class TestAuthorizationResolutionFromAttributeUpdate:
         # Benign gate should still pass: the verdict is `authorized` on ac1.
         assert _check_authorization_gated_disposition(merged) == []
         assert _check_authorization_resolution_backrefs(merged) == []
+
+
+# ---------------------------------------------------------------------------
+# Rule #36 — affirmative true_positive disposition
+# ---------------------------------------------------------------------------
+
+
+def _tp_fixture(
+    *,
+    disposition: str | None = "true_positive",
+    surviving: list[str] | None = None,
+    hypotheses: list[dict] | None = None,
+    resolutions: list[tuple[str, str]] | None = None,  # (hid, after)
+) -> dict:
+    """Build a merged companion with a CONCLUDE block + named hypotheses + grades.
+
+    `hypotheses` defaults to one adversarial hypothesis (h-001 graded ++).
+    `resolutions` ties a final weight to each hypothesis id.
+    """
+    if hypotheses is None:
+        hypotheses = [{
+            "id": "h-001",
+            "name": "?adversary-controlled-process",
+            "attached_to_vertex": "v-001",
+            "proposed_edge": {
+                "relation": "spawned",
+                "parent_vertex": {"type": "process", "classification": "adversary-controlled-process"},
+            },
+        }]
+    leads: list[dict] = []
+    for i, (hid, after) in enumerate(resolutions or []):
+        leads.append({
+            "id": f"l-00{i+1}", "loop": 1, "name": f"l{i+1}", "target": "v-001",
+            "query_details": {}, "outcome": {},
+            "resolutions": [{"hypothesis": hid, "after": after,
+                              "matched_prediction_ids": [], "supporting_edges": []}],
+        })
+    out: dict = {
+        "hypothesize": {"hypotheses": hypotheses},
+        "findings": leads,
+    }
+    if disposition is not None:
+        conclude: dict = {
+            "termination": {"category": "trust-root"},
+            "disposition": disposition,
+            "confidence": "medium",
+        }
+        if surviving is not None:
+            conclude["surviving_hypotheses"] = surviving
+        out["conclude"] = conclude
+    return out
+
+
+class TestCheckAffirmativeTruePositive:
+    """Rule #36 — true_positive requires ++ on adversarial-classified hypothesis."""
+
+    def test_disposition_other_than_tp_passes(self):
+        # Rule fires only on disposition=true_positive.
+        merged = _tp_fixture(disposition="benign", surviving=["h-001"])
+        assert _check_affirmative_true_positive(merged) == []
+        merged = _tp_fixture(disposition="unclear", surviving=["h-001"])
+        assert _check_affirmative_true_positive(merged) == []
+
+    def test_no_conclude_block_passes(self):
+        merged = _tp_fixture(disposition=None)
+        assert _check_affirmative_true_positive(merged) == []
+
+    def test_adversarial_hypothesis_at_pp_passes(self):
+        merged = _tp_fixture(
+            surviving=["h-001"],
+            resolutions=[("h-001", "++")],
+        )
+        assert _check_affirmative_true_positive(merged) == []
+
+    def test_adversarial_hypothesis_at_plus_fails(self):
+        # Adversarial classification but only graded `+`.
+        merged = _tp_fixture(
+            surviving=["h-001"],
+            resolutions=[("h-001", "+")],
+        )
+        errors = _check_affirmative_true_positive(merged)
+        assert errors and "true_positive" in errors[0] and "h-001" in errors[0]
+
+    def test_adversarial_hypothesis_with_no_resolution_fails(self):
+        # Hypothesis declared but never graded.
+        merged = _tp_fixture(surviving=["h-001"])
+        errors = _check_affirmative_true_positive(merged)
+        assert errors and "++" in errors[0]
+
+    def test_non_adversarial_hypothesis_at_pp_fails(self):
+        merged = _tp_fixture(
+            hypotheses=[{
+                "id": "h-001",
+                "name": "?operator-runtime-exec",  # benign-mechanism name
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "exec",
+                    "parent_vertex": {"type": "process", "classification": "host-side-runtime-exec-primitive"},
+                },
+            }],
+            surviving=["h-001"],
+            resolutions=[("h-001", "++")],
+        )
+        errors = _check_affirmative_true_positive(merged)
+        assert errors
+        assert "non-adversarial" in errors[0].lower()
+
+    def test_one_qualifying_among_many_passes(self):
+        # h-001 benign-mechanism, h-002 adversary-controlled at ++.
+        merged = _tp_fixture(
+            hypotheses=[
+                {"id": "h-001", "name": "?benign-mech", "attached_to_vertex": "v-001",
+                 "proposed_edge": {"relation": "x",
+                                   "parent_vertex": {"type": "process", "classification": "benign-thing"}}},
+                {"id": "h-002", "name": "?adversary-controlled-process", "attached_to_vertex": "v-001",
+                 "proposed_edge": {"relation": "x",
+                                   "parent_vertex": {"type": "process", "classification": "adversary-controlled-process"}}},
+            ],
+            surviving=["h-001", "h-002"],
+            resolutions=[("h-001", "+"), ("h-002", "++")],
+        )
+        assert _check_affirmative_true_positive(merged) == []
+
+    def test_classification_match_alone_qualifies(self):
+        # Hypothesis name benign-looking but classification adversarial.
+        merged = _tp_fixture(
+            hypotheses=[{
+                "id": "h-001",
+                "name": "?process-actor",
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {"relation": "x",
+                                  "parent_vertex": {"type": "process",
+                                                    "classification": "malware-implant-dns-covert-channel"}},
+            }],
+            surviving=["h-001"],
+            resolutions=[("h-001", "++")],
+        )
+        assert _check_affirmative_true_positive(merged) == []
+
+    def test_name_match_alone_qualifies(self):
+        # Classification benign-looking but hypothesis name adversarial.
+        merged = _tp_fixture(
+            hypotheses=[{
+                "id": "h-001",
+                "name": "?credential-guess-spray",
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {"relation": "x",
+                                  "parent_vertex": {"type": "process", "classification": "process-actor"}},
+            }],
+            surviving=["h-001"],
+            resolutions=[("h-001", "++")],
+        )
+        assert _check_affirmative_true_positive(merged) == []
+
+    def test_undeclared_surviving_id_reported(self):
+        merged = _tp_fixture(
+            hypotheses=[{"id": "h-001", "name": "?something", "attached_to_vertex": "v-001",
+                          "proposed_edge": {"relation": "x",
+                                            "parent_vertex": {"type": "process", "classification": "x"}}}],
+            surviving=["h-999"],
+            resolutions=[("h-001", "++")],
+        )
+        errors = _check_affirmative_true_positive(merged)
+        assert errors and "undeclared" in errors[0].lower() and "h-999" in errors[0]
+
+    def test_empty_surviving_falls_back_to_all_hypotheses(self):
+        # surviving_hypotheses absent → scan all declared.
+        merged = _tp_fixture(
+            hypotheses=[{
+                "id": "h-001",
+                "name": "?adversary-controlled-process",
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {"relation": "x",
+                                  "parent_vertex": {"type": "process", "classification": "adversary-controlled-process"}},
+            }],
+            surviving=None,
+            resolutions=[("h-001", "++")],
+        )
+        assert _check_affirmative_true_positive(merged) == []
+
+    def test_real_trap_shape_h001_at_plus_with_benign_classification_fails(self):
+        # Mirrors the documented production trap (run #44 / 20260428-060839):
+        # ?operator-runtime-exec at + with no adversarial peer, disposition=true_positive.
+        merged = _tp_fixture(
+            hypotheses=[{
+                "id": "h-001",
+                "name": "?operator-runtime-exec",
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {"relation": "exec_into",
+                                  "parent_vertex": {"type": "process",
+                                                    "classification": "host-side-runtime-exec-primitive"}},
+            }],
+            surviving=["h-001"],
+            resolutions=[("h-001", "+")],
+        )
+        errors = _check_affirmative_true_positive(merged)
+        assert errors
+        assert "true_positive" in errors[0]

@@ -1,7 +1,9 @@
 # Investigation Language
 
-**Status:** Spec v2.13. Implemented.
+**Status:** Spec v2.14. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
+
+**v2.14 delta:** rule #36 — affirmative `true_positive` disposition. Closes the absence-of-benign-confirmation cascade (4 production runs documented in `tasks/analyze-true-positive-routing.md`) by structurally rejecting `disposition: true_positive` writes whose `surviving_hypotheses[]` carries no hypothesis that is both adversarially-classified AND graded `++`. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Empirically motivated: trap-set evaluation showed prompt-only guidance lets ~50% of false-true-positive cases through; the structural gate raises catch rate to ~100%.
 
 **v2.13 delta:** Tier-0 contract-completeness rules between PREDICT and ANALYZE.
 - Rule #34 (prediction closure at CONCLUDE) — at REPORT, every declared `p*` / `ap*` on a non-refuted, non-shelved hypothesis must be cited in some resolution's `matched_prediction_ids[]` with a non-null `after`, OR appear in `conclude.deferred_predictions[]` with rationale. Generalises rule #6 (which only fired on `++`) into a coverage gate at REPORT regardless of weight. New conclude surface: `deferred_predictions[]` (parallel to `deferred_authorizations[]` and `deferred_impact_predictions[]`).
@@ -1371,3 +1373,35 @@ coverage.
     `parent_vertex.classification`) by blocking shared *prediction
     text*. Empty-signature hypotheses are skipped — leanness and
     refutation-link rules cover that shape.
+
+36. **Affirmative true_positive disposition.** When
+    `conclude.disposition` is `true_positive`, at least one entry in
+    `conclude.surviving_hypotheses[]` must reference a hypothesis
+    that satisfies BOTH:
+
+    - **adversarial classification** — the hypothesis's
+      `proposed_edge.parent_vertex.classification` OR `name`
+      starts with an adversarial token (case-insensitive). Token
+      list: `adversary` / `adversary-controlled` / `adversarial`,
+      `attack` / `attacker`, `malicious`, `malware`, `implant`,
+      `backdoor`, `rootkit`, `c2`, `exfil` / `exfiltration`,
+      `covert`, `unauthorized`, `compromise` / `compromised`,
+      `credential-{guess|stuff|reuse|theft|scrape}`, `brute-force`,
+      `spray`, `post-exploit`, `lateral` / `lateral-movement`,
+      `intrusion`, `persistence`, `privilege-escalation`,
+      `command-injection`, `payload`, `exploit`, `dga`,
+      `beaconing`. Provisional `{type}:{slug}` classifications
+      match on the slug.
+    - **affirmative weight** — the hypothesis's final weight
+      (computed across all resolutions in document order) is
+      `++`.
+
+    When `surviving_hypotheses` is absent or empty, every declared
+    hypothesis is candidate. Empirically motivated by 4 production
+    runs (see `tasks/analyze-true-positive-routing.md`) where
+    ANALYZE routed `true_positive` from absence-of-benign-anchor-
+    confirmation while no surviving hypothesis was both
+    adversarially-classified and graded `++`. The honest landing in
+    that shape is `disposition: unclear` (paired with
+    `termination_category: severity-ceiling` or
+    `exhaustion-escalation`).
