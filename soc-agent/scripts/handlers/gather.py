@@ -73,6 +73,7 @@ from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._context_loader import load_lead_definition
+from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._output_parser import (
     GatherEnvelope,
     GatherOutputError,
@@ -86,7 +87,7 @@ from scripts.handlers._raw_manifest import (
 )
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
-    invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 
 
@@ -121,26 +122,10 @@ _DEFAULT_WINDOW = timedelta(hours=1)
 # ---------------------------------------------------------------------------
 
 
-def _invoke_gather(
-    prompt: str,
-    *,
-    timeout: int = SUBAGENT_TIMEOUT_SECONDS,
-    session_id: Optional[str] = None,
-) -> str:
-    """Module-level wrapper for the Haiku single-lead subagent."""
-    return _shared_invoke("gather", prompt, timeout=timeout, session_id=session_id)
-
-
-def _invoke_gather_composite(
-    prompt: str,
-    *,
-    timeout: int = SUBAGENT_TIMEOUT_SECONDS,
-    session_id: Optional[str] = None,
-) -> str:
-    """Module-level wrapper for the Sonnet composite/ad-hoc subagent."""
-    return _shared_invoke(
-        "gather-composite", prompt, timeout=timeout, session_id=session_id,
-    )
+_invoke_gather = make_invoker("gather", default_timeout=SUBAGENT_TIMEOUT_SECONDS)
+_invoke_gather_composite = make_invoker(
+    "gather-composite", default_timeout=SUBAGENT_TIMEOUT_SECONDS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1371,29 +1356,9 @@ def _append_to_investigation(ctx: Context, section: str) -> None:
 
     Appending prose only leaves the accumulated invlang YAML unchanged, but we
     still invoke `validate_companion` as a belt-and-suspenders check against
-    any accidental YAML-fence contamination in the section. Matches
-    `analyze.py:_validate_and_write`.
+    any accidental YAML-fence contamination in the section.
     """
-    hooks_path = str(SOC_AGENT_ROOT / "hooks")
-    if hooks_path not in sys.path:
-        sys.path.insert(0, hooks_path)
-    from scripts.invlang_validate import validate_companion  # type: ignore
-
-    inv_path = ctx.run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    proposed = (
-        current
-        + ("\n" if current and not current.endswith("\n") else "")
-        + section
-    )
-
-    errors = validate_companion(proposed, current if current else None)
-    if errors:
-        raise OrchestrationError(
-            "GATHER invlang validation failed:\n" + "\n".join(errors)
-        )
-
-    inv_path.write_text(proposed)
+    append_and_validate(ctx.run_dir, section, phase="GATHER")
 
 
 _PROLOGUE_VERTEX_ID_RE = re.compile(r"^\s*-\s+id:\s*(v-[a-z0-9][a-z0-9-]*)", re.MULTILINE)

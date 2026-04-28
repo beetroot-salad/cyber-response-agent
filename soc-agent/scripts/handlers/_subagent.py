@@ -24,7 +24,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import yaml
 
@@ -284,6 +284,43 @@ def invoke_subagent(
             f"subagent {agent} exited {result.returncode}: {result.stderr.strip()}"
         )
     return result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Per-handler invoker factory
+# ---------------------------------------------------------------------------
+
+
+def make_invoker(
+    agent: str,
+    *,
+    default_timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> Callable[..., str]:
+    """Return a callable bound to `agent`, suitable for handler-level export.
+
+    Each handler exposes its subagent dispatch as a module-level attribute
+    (`_invoke_predict`, `_invoke_subagent`, etc.) so tests can stub it via
+    `monkeypatch.setattr(predict_handler, "_invoke_subagent", stub)`. This
+    factory keeps every handler's binding to a single line and centralizes
+    the shim rationale in one place.
+
+    The returned callable accepts `(prompt, *, timeout=None, session_id=None)`;
+    `timeout=None` falls through to `default_timeout`.
+    """
+    def _invoke(
+        prompt: str,
+        *,
+        timeout: Optional[int] = None,
+        session_id: Optional[str] = None,
+    ) -> str:
+        return invoke_subagent(
+            agent, prompt,
+            timeout=default_timeout if timeout is None else timeout,
+            session_id=session_id,
+        )
+    _invoke.__name__ = f"_invoke_{agent.replace('-', '_')}"
+    _invoke.__doc__ = f"Bound invoker for the `{agent}` subagent."
+    return _invoke
 
 
 # ---------------------------------------------------------------------------

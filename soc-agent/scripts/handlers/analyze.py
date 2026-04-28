@@ -55,21 +55,22 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._context_loader import (
     format_alert_block,
     format_current_gather_block,
-    format_investigation_block,
     load_alert,
     load_investigation_md,
     load_run_salt,
 )
+from scripts.handlers.investigation_views import format_investigation_block
 from scripts.handlers._output_parser import (
     AnalyzeEnvelope,
     AnalyzeOutputError,
     parse_analyze_envelope,
 )
 from scripts.handlers._subagent import (
-    invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 
 
@@ -98,13 +99,7 @@ INCLUDE_RAW_DETAILS = os.environ.get(
 # ---------------------------------------------------------------------------
 
 
-def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> str:
-    """Module-level wrapper over the shared subagent dispatcher.
-
-    Kept as a module-level function so tests can monkeypatch it with
-    `monkeypatch.setattr(analyze_handler, "_invoke_subagent", stub)`.
-    """
-    return _shared_invoke("analyze", prompt, timeout=timeout)
+_invoke_subagent = make_invoker("analyze", default_timeout=SUBAGENT_TIMEOUT_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -648,29 +643,7 @@ def _synthesize_findings_block(
 
 
 def _validate_and_write(ctx: Context, new_section: str) -> None:
-    """Append `new_section` to investigation.md after running
-    `validate_companion` as a library check.
-    """
-    hooks_scripts = str(SOC_AGENT_ROOT / "hooks")
-    if hooks_scripts not in sys.path:
-        sys.path.insert(0, hooks_scripts)
-    from scripts.invlang_validate import validate_companion  # type: ignore
-
-    inv_path = ctx.run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    proposed = (
-        current
-        + ("\n" if current and not current.endswith("\n") else "")
-        + new_section
-    )
-
-    errors = validate_companion(proposed, current if current else None)
-    if errors:
-        raise OrchestrationError(
-            "ANALYZE invlang validation failed:\n" + "\n".join(errors)
-        )
-
-    inv_path.write_text(proposed)
+    append_and_validate(ctx.run_dir, new_section, phase="ANALYZE")
 
 
 # ---------------------------------------------------------------------------

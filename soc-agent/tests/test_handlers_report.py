@@ -83,26 +83,26 @@ def stub_invoke(captured: list[str], response: str):
 
 @pytest.fixture(autouse=True)
 def _default_shared_invoke_stub(monkeypatch):
-    """Autouse safety net: `_resolve_matched_archetype` dispatches the
-    `archetype-match` subagent whenever an ANALYZE-routed path is exercised,
-    which would otherwise spawn a real `claude` subprocess in unit tests.
+    """Autouse safety net so unit tests don't spawn real `claude` subprocesses.
 
-    Default: archetype-match returns null, and any other `_shared_invoke`
-    call raises — tests that need a real narrative or a specific archetype
-    override with `monkeypatch.setattr(report_handler, "_shared_invoke", ...)`
-    (the per-test override wins). Stubbing at `_shared_invoke` rather than
-    `_invoke_archetype_match` preserves the existing test pattern of
-    branching on `agent ==` inside a shared stub.
+    Two seams stubbed:
+      - `_invoke_archetype_match` → null match by default; tests that exercise
+        a non-null match or a dispatch failure override this attribute.
+      - `_shared_invoke` (the narrative call site at `report_narrative`)
+        → raises; narrative tests override with a fake that handles the
+        `report_narrative` agent name.
     """
-    def _default(agent, _prompt, *, model=None, timeout=None):
-        if agent == "archetype-match":
-            return "```yaml\nmatched_archetype: null\njustification: default test stub\n```"
+    def _default_archetype(_prompt, *, timeout=None, session_id=None):
+        return "```yaml\nmatched_archetype: null\njustification: default test stub\n```"
+
+    def _default_shared(agent, _prompt, *, model=None, timeout=None):
         raise AssertionError(
             f"_shared_invoke called for agent {agent!r} but no per-test stub "
             f"was installed — add monkeypatch.setattr(report_handler, "
             f"'_shared_invoke', ...) in the test"
         )
-    monkeypatch.setattr(report_handler, "_shared_invoke", _default)
+    monkeypatch.setattr(report_handler, "_invoke_archetype_match", _default_archetype)
+    monkeypatch.setattr(report_handler, "_shared_invoke", _default_shared)
 
 
 # ---------------------------------------------------------------------------
@@ -292,15 +292,13 @@ class TestPromptAssembly:
             analyze={"disposition": "benign"},
         )
 
-        def fake_shared(agent, _prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return (
-                    "```yaml\nmatched_archetype: monitoring-probe\n"
-                    "justification: resolved at REPORT time\n```"
-                )
-            raise AssertionError(f"unexpected subagent: {agent}")
+        def fake_archetype(_prompt, *, timeout=None, session_id=None):
+            return (
+                "```yaml\nmatched_archetype: monitoring-probe\n"
+                "justification: resolved at REPORT time\n```"
+            )
 
-        monkeypatch.setattr(report_handler, "_shared_invoke", fake_shared)
+        monkeypatch.setattr(report_handler, "_invoke_archetype_match", fake_archetype)
 
         captured: list[str] = []
         response = textwrap.dedent("""
@@ -358,12 +356,10 @@ class TestPromptAssembly:
             analyze={"disposition": "benign"},
         )
 
-        def broken_shared(agent, _prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                raise OrchestrationError("claude subprocess timed out")
-            raise AssertionError(f"unexpected subagent: {agent}")
+        def broken_archetype(_prompt, *, timeout=None, session_id=None):
+            raise OrchestrationError("claude subprocess timed out")
 
-        monkeypatch.setattr(report_handler, "_shared_invoke", broken_shared)
+        monkeypatch.setattr(report_handler, "_invoke_archetype_match", broken_archetype)
 
         response = textwrap.dedent("""
         ```yaml
@@ -393,12 +389,10 @@ class TestPromptAssembly:
             analyze={"disposition": "benign"},  # bails mechanical, exercises fallback
         )
 
-        def null_match_shared(agent, _prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return "```yaml\nmatched_archetype: null\njustification: no fit\n```"
-            raise AssertionError(f"unexpected subagent: {agent}")
+        def null_match_archetype(_prompt, *, timeout=None, session_id=None):
+            return "```yaml\nmatched_archetype: null\njustification: no fit\n```"
 
-        monkeypatch.setattr(report_handler, "_shared_invoke", null_match_shared)
+        monkeypatch.setattr(report_handler, "_invoke_archetype_match", null_match_archetype)
 
         response = textwrap.dedent("""
         ```yaml
@@ -1803,15 +1797,17 @@ def _make_ctx_for_shortcircuit(
         )
         archetype_match_prompts: list[str] = []
 
-        def fake_shared(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                archetype_match_prompts.append(prompt)
-                return "```yaml\nmatched_archetype: monitoring-probe\njustification: picked at REPORT time\n```"
+        def fake_archetype(prompt, *, timeout=None, session_id=None):
+            archetype_match_prompts.append(prompt)
+            return "```yaml\nmatched_archetype: monitoring-probe\njustification: picked at REPORT time\n```"
+
+        def fake_narrative(agent, prompt, *, model=None, timeout=None):
             if agent == "report_narrative":
                 return "<summary>\nResolved via anchor.\n</summary>"
             raise AssertionError(f"unexpected subagent: {agent}")
 
-        monkeypatch.setattr(report_handler, "_shared_invoke", fake_shared)
+        monkeypatch.setattr(report_handler, "_invoke_archetype_match", fake_archetype)
+        monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
         monkeypatch.setattr(
             report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
         )
@@ -1848,18 +1844,20 @@ def _make_ctx_for_shortcircuit(
         )
         archetype_match_prompts: list[str] = []
 
-        def fake_shared(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                archetype_match_prompts.append(prompt)
-                return (
-                    "```yaml\nmatched_archetype: monitoring-probe\n"
-                    "justification: stub\n```"
-                )
+        def fake_archetype(prompt, *, timeout=None, session_id=None):
+            archetype_match_prompts.append(prompt)
+            return (
+                "```yaml\nmatched_archetype: monitoring-probe\n"
+                "justification: stub\n```"
+            )
+
+        def fake_narrative(agent, prompt, *, model=None, timeout=None):
             if agent == "report_narrative":
                 return "<summary>\nResolved.\n</summary>"
             raise AssertionError(f"unexpected subagent: {agent}")
 
-        monkeypatch.setattr(report_handler, "_shared_invoke", fake_shared)
+        monkeypatch.setattr(report_handler, "_invoke_archetype_match", fake_archetype)
+        monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
         monkeypatch.setattr(
             report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
         )

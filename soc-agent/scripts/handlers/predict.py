@@ -81,9 +81,12 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._investigation_io import (
+    append_unvalidated,
+    validate_proposed_companion,
+)
 from scripts.handlers._context_loader import (
     format_alert_block,
-    format_investigation_block,
     format_lead_definitions_summary_block,
     format_signature_text_block,
     load_alert,
@@ -92,8 +95,14 @@ from scripts.handlers._context_loader import (
     load_run_salt,
     load_signature_text,
 )
+from scripts.handlers._playbook import load_playbook_metadata
+from scripts.handlers.predict_priors import (
+    parse_prologue_and_last_hypothesize,
+    safe_priors_section,
+)
+from scripts.handlers.investigation_views import format_investigation_block
 from scripts.handlers._subagent import (
-    invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 from scripts.handlers._output_parser import (
     PredictOutputError,
@@ -121,13 +130,7 @@ SUBAGENT_TIMEOUT_SECONDS = int(
 # ---------------------------------------------------------------------------
 
 
-def _invoke_subagent(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> str:
-    """Module-level wrapper over the shared subagent dispatcher.
-
-    Kept as a module-level function so tests can monkeypatch it with
-    `monkeypatch.setattr(predict_handler, "_invoke_subagent", stub)`.
-    """
-    return _shared_invoke("predict", prompt, timeout=timeout)
+_invoke_subagent = make_invoker("predict", default_timeout=SUBAGENT_TIMEOUT_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +166,7 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
     layer, archetypes are a disposition-routing concern that REPORT consumes.
     """
     loop_n = _compute_loop_n(ctx)
-    priors_section = _safe_priors_section(ctx)
+    priors_section = safe_priors_section(ctx)
 
     alert = load_alert(ctx.run_dir)
     salt = load_run_salt(ctx.run_dir)
@@ -200,7 +203,7 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------
-# Past-investigation priors (topology-conditioned corpus retrieval)
+# Optional prompt sections that must never block the loop
 # ---------------------------------------------------------------------------
 
 
@@ -212,7 +215,7 @@ def _safe_env_memory_section(ctx: Context) -> str:
     formatted block. Empty match → empty string (caller skips the section).
 
     All exceptions degrade to a banner — env-memory must never block the
-    loop. Same discipline as `_safe_priors_section`.
+    loop. Same discipline as `predict_priors.safe_priors_section`.
     """
     try:
         from scripts.handlers import env_memory  # type: ignore
@@ -226,371 +229,20 @@ def _safe_env_memory_section(ctx: Context) -> str:
         )
 
 
-def _safe_priors_section(ctx: Context) -> str:
-    """Produce the `## Past-investigation priors` markdown block.
-
-    Loop-aware: at loop 1 (no prior hypothesize block) we key retrieval off the
-    *prologue* shape rather than synthesizing per-seed fingerprints that
-    structurally can't match topology tiers 0–3. At loop 2+ the hypothesis
-    frontier carries real proposed upstream edges, so per-hypothesis topology
-    retrieval works as designed.
-
-    All exceptions degrade to a banner — priors must never block the loop.
-    """
-    try:
-        frontier = _extract_current_frontier(ctx)
-        is_loop_1 = not frontier or all(
-            _fp_get_relation(e["fingerprint"]) is None for e in frontier
-        )
-        if is_loop_1:
-            return _format_prologue_priors(_compute_prologue_priors(ctx))
-        priors = _compute_priors(frontier)
-        return _format_priors(priors)
-    except Exception as exc:  # noqa: BLE001 — intentional broad catch
-        return (
-            "## Past-investigation priors\n"
-            f"(priors unavailable: {type(exc).__name__}: {exc})"
-        )
-
-
-def _fp_get_relation(fp: dict) -> str | None:
-    r = fp.get("relation") if isinstance(fp, dict) else None
-    return r if isinstance(r, str) else None
-
-
-def _compute_prologue_priors(ctx: Context) -> dict:
-    """Loop-1 prologue-keyed retrieval.
-
-    Reads the prologue from the run's `investigation.md`, runs
-    same-signature-scoped prologue retrieval, and falls back to
-    cross-signature when the same-signature pass returns no cases.
-    """
-    from invlang import (  # type: ignore
-        lead_effectiveness_for_prologue,
-        load_corpus,
-        peer_hypothesis_distribution_for_prologue,
-    )
-
-    inv_path = ctx.run_dir / "investigation.md"
-    text = inv_path.read_text() if inv_path.exists() else ""
-    prologue, _ = _parse_prologue_and_last_hypothesize(text)
-    prologue = prologue or {}
-
-    corpus = load_corpus()
-
-    leads_same = lead_effectiveness_for_prologue(
-        corpus, prologue, signature_id=ctx.signature_id
-    )
-    peers_same = peer_hypothesis_distribution_for_prologue(
-        corpus, prologue, signature_id=ctx.signature_id
-    )
-    scope = "same-signature"
-    leads = leads_same
-    peers = peers_same
-    if not leads_same.get("cases_matched"):
-        leads_any = lead_effectiveness_for_prologue(
-            corpus, prologue, signature_id=None
-        )
-        peers_any = peer_hypothesis_distribution_for_prologue(
-            corpus, prologue, signature_id=None
-        )
-        if leads_any.get("cases_matched"):
-            scope = "cross-signature"
-            leads = leads_any
-            peers = peers_any
-
-    return {
-        "prologue_signature": _prologue_signature_summary(prologue),
-        "scope": scope,
-        "leads": leads,
-        "peers": peers,
-    }
-
-
-def _prologue_signature_summary(prologue: dict) -> dict:
-    """Compact self-describing signature — shown in the rendered block so the
-    subagent sees exactly what was matched on."""
-    vertices = prologue.get("vertices") or []
-    edges = prologue.get("edges") or []
-    return {
-        "vertex_types": sorted({v.get("type") for v in vertices if isinstance(v, dict) and v.get("type")}),
-        "vertex_classifications": sorted({v.get("classification") for v in vertices if isinstance(v, dict) and v.get("classification")}),
-        "edge_relations": sorted({e.get("relation") for e in edges if isinstance(e, dict) and e.get("relation")}),
-    }
-
-
-def _format_prologue_priors(payload: dict) -> str:
-    """Render the loop-1 prologue-keyed priors block.
-
-    Baseline-recommendation format: when the corpus carries strong support
-    for a top-lead at this prologue topology, emit a single recommendation
-    line — "use this scaffold unless the alert contradicts it." When
-    support is weak, emit a sparse-prior fallback that tells PREDICT to
-    scaffold from first principles.
-
-    Peer-classification rendering is intentionally absent. A list of
-    historically-proposed classifications drives enumerate-every-mechanism
-    behavior (the FM4/FM5 failure modes); the priors block should nudge
-    scaffold choice, not seed a fork space.
-    """
-    sig = payload["prologue_signature"]
-    scope = payload["scope"]
-    leads = payload["leads"]
-
-    lead_rows = leads.get("hits") or []
-    top = lead_rows[0] if lead_rows else None
-
-    is_strong = (
-        top is not None
-        and (top.get("branching_support") or 0) >= _STRONG_PRIOR_MIN_SUPPORT
-        and (top.get("fidelity_rate") or 0.0) >= _STRONG_PRIOR_MIN_FIDELITY
-    )
-
-    lines = [
-        "## Past-investigation priors",
-        "",
-        f"Prologue topology — {scope} scope, "
-        f"tier {leads['tier_used']}: {leads['tier_label']}, "
-        f"{leads.get('cases_matched', 0)} cases matched. "
-        f"Vertex types: {', '.join(sig['vertex_types']) or '—'}. "
-        f"Edge relations: {', '.join(sig['edge_relations']) or '—'}.",
-        "",
-    ]
-
-    if is_strong:
-        n = top.get("branching_support") or 0
-        total = leads.get("cases_matched") or n
-        fidelity = top.get("fidelity_rate") or 0.0
-        lines.append(
-            f"**Strongest prior at this topology:** `{top['lead_name']}` "
-            f"({n}/{total} cases, {int(fidelity * 100)}% fidelity rate). "
-            "Use this scaffold unless the alert specifically contradicts it."
-        )
-    else:
-        lines.append(
-            "Priors at this topology are sparse — scaffold from first principles "
-            "per PREDICT's ASSESS gate."
-        )
-
-    return "\n".join(lines)
-
-
-def _extract_current_frontier(ctx: Context) -> list[dict]:
-    """Return a list of `{name, fingerprint}` entries describing the frontier.
-
-    Loop N (N ≥ 2): use the *last* `hypothesize:` yaml block in
-    `investigation.md`; resolve each hypothesis's topology against the
-    investigation's own prologue (first yaml block carrying `prologue:`).
-
-    Loop 1 (no prior `hypothesize:`): synthesize one entry per playbook
-    hypothesis seed, with `relation=None` and parent classification = the
-    seed name stripped of the leading `?`. Loop-1 fingerprints never match
-    tiers 0–3 (relation is required); retrieval naturally falls back to the
-    name-glob tier, which is what the subagent expects at loop 1.
-    """
-    inv_path = ctx.run_dir / "investigation.md"
-    text = inv_path.read_text() if inv_path.exists() else ""
-
-    prologue, last_hypothesize = _parse_prologue_and_last_hypothesize(text)
-
-    from invlang import hypothesis_topology  # type: ignore
-
-    if last_hypothesize is not None:
-        hypotheses = last_hypothesize.get("hypotheses") or []
-        shelved = set(last_hypothesize.get("shelved") or [])
-        active = [h for h in hypotheses if h.get("id") not in shelved]
-        return [
-            {
-                "name": _hyp_name(h),
-                "fingerprint": hypothesis_topology(prologue or {}, h, active),
-            }
-            for h in active
-            if _hyp_name(h)
-        ]
-
-    # Loop 1 fallback — seeds from the signature playbook.
-    from scripts.handlers.contextualize import load_playbook_metadata
-
-    meta = load_playbook_metadata(ctx.signature_id)
-    seeds = meta.hypothesis_seeds or []
-    peers = tuple(sorted(seeds))
-    frontier: list[dict] = []
-    for seed in seeds:
-        classification = seed.lstrip("?")
-        frontier.append({
-            "name": seed if seed.startswith("?") else f"?{seed}",
-            "fingerprint": {
-                "attached_vertex": None,
-                "relation": None,
-                "parent_vertex": {"type": None, "classification": classification},
-                "peers": peers,
-            },
-        })
-    return frontier
-
-
-def _parse_prologue_and_last_hypothesize(
-    text: str,
-) -> tuple[dict | None, dict | None]:
-    """Walk all yaml fences once; return (prologue, last_hypothesize)."""
-    prologue: dict | None = None
-    last_hyp: dict | None = None
-    for m in _FIRST_FENCE_RE.finditer(text):
-        try:
-            parsed = yaml.safe_load(m.group("body"))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        if prologue is None and "prologue" in parsed and isinstance(parsed["prologue"], dict):
-            prologue = parsed["prologue"]
-        if "hypothesize" in parsed and isinstance(parsed["hypothesize"], dict):
-            last_hyp = parsed["hypothesize"]
-    return prologue, last_hyp
-
-
-def _hyp_name(h: dict) -> str:
-    return h.get("name") or ""
-
-
-def _compute_priors(frontier: list[dict]) -> list[dict]:
-    """Compute `{name, fingerprint, tier_used, tier_label, leads, peers}` per entry."""
-    from invlang import (  # type: ignore
-        lead_effectiveness_for_topology,
-        load_corpus,
-        peer_hypothesis_distribution_for_topology,
-    )
-
-    corpus = load_corpus()
-    out: list[dict] = []
-    for entry in frontier:
-        fp = entry["fingerprint"]
-        leads = lead_effectiveness_for_topology(corpus, fp)
-        peers = peer_hypothesis_distribution_for_topology(corpus, fp)
-        out.append({
-            "name": entry["name"],
-            "fingerprint": fp,
-            "tier_used": leads.get("tier_used"),
-            "tier_label": leads.get("tier_label"),
-            "leads": leads.get("hits") or [],
-            "peers": peers.get("hits") or [],
-        })
-    return out
-
-
-_PRIORS_LEADS_TOP_N = 5
-_PRIORS_PEERS_TOP_N = 5
-
-# Baseline-recommendation thresholds for _format_prologue_priors. Calibrated
-# against the current corpus depth (~40 companions); revisit as the corpus
-# grows or if eval shows the recommendation missing real patterns.
-#   - support (branching_support): the per-lead case count at this topology.
-#     Below 5 we can't reliably distinguish signal from coincidence.
-#   - fidelity (fidelity_rate): fraction of cases where the lead's
-#     prediction materialized — i.e. the lead actually discriminated when
-#     it was fired. Below 0.5 the prior is a coin flip.
-_STRONG_PRIOR_MIN_SUPPORT = 5
-_STRONG_PRIOR_MIN_FIDELITY = 0.5
-
-
-def _format_priors(priors: list[dict]) -> str:
-    """Render a concise markdown block. Empty frontier or empty retrieval
-    both still emit the section — honesty beats silent omission."""
-    lines = ["## Past-investigation priors"]
-    if not priors:
-        lines.append("(no frontier extracted)")
-        return "\n".join(lines)
-    for entry in priors:
-        lines.append("")
-        lines.append(
-            f"### {entry['name']} (tier {entry['tier_used']} — {entry['tier_label']})"
-        )
-        leads = entry["leads"][:_PRIORS_LEADS_TOP_N]
-        if not leads:
-            lines.append("Leads: (no corpus matches at any tier)")
-        else:
-            lines.append("Leads (per-occurrence effectiveness; n = support):")
-            for row in leads:
-                score = row.get("mean_branching_delta")
-                fidelity = row.get("fidelity_rate")
-                n = row.get("branching_support") or 0
-                lines.append(
-                    f"  - {row['lead_name']}: "
-                    f"score={_fmt_num(score)}, fidelity={_fmt_num(fidelity)}, n={n}"
-                )
-        peers = entry["peers"][:_PRIORS_PEERS_TOP_N]
-        if peers:
-            lines.append("Peer hypotheses co-proposed at this topology:")
-            for p in peers:
-                hist = p.get("final_weight_histogram") or {}
-                hist_str = ", ".join(
-                    f"{k}={v}" for k, v in hist.items() if v
-                ) or "—"
-                lines.append(
-                    f"  - {p['classification']} "
-                    f"({p['peer_count']} cases, weights: {hist_str})"
-                )
-    return "\n".join(lines)
-
-
-def _fmt_num(v: float | None) -> str:
-    if v is None:
-        return "—"
-    return f"{v:.3f}"
-
-
-# ---------------------------------------------------------------------------
-# Block-type detection + error-block handling
-# ---------------------------------------------------------------------------
-
-
-# Detect top-level key of the first fenced ```yaml block that carries one of
-# the expected keys. Tolerates preamble YAML blocks (unlikely, but defensive).
-_FIRST_FENCE_RE = re.compile(
-    r"```yaml\s*\n(?P<body>.*?)\n```",
-    re.DOTALL,
-)
-
-
-# (Removed: _detect_block_type, _extract_error_reason, _validate_trailer,
-# and _strip_terminal_routing — all internal helpers of the pre-unified-
-# envelope contract. Superseded by parse_predict_output in
-# scripts/handlers/_output_parser.py, which handles envelope extraction,
-# shape validation, routing-field validation, and contract-violation
-# messaging in one pass against a single YAML-block envelope.)
-
-
 # ---------------------------------------------------------------------------
 # Validate + append (library invocation of the invlang validator)
 # ---------------------------------------------------------------------------
 
 
 def _validate_companion_proposed(ctx: Context, new_section: str) -> list[str]:
-    """Run `validate_companion` against `investigation.md + new_section`.
-
-    Returns the validator's error list. Used both for pre-write gating and for
-    producing remediation notes on the retry path.
-    """
-    hooks_path = str(SOC_AGENT_ROOT / "hooks")
-    if hooks_path not in sys.path:
-        sys.path.insert(0, hooks_path)
-    from scripts.invlang_validate import validate_companion  # type: ignore
-
-    inv_path = ctx.run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    proposed = (
-        current
-        + ("\n" if current and not current.endswith("\n") else "")
-        + new_section
-    )
-    return validate_companion(proposed, current if current else None)
+    """Validator errors for `investigation.md + new_section`, returned without
+    raising. Used by the retry loop for remediation-note assembly."""
+    return validate_proposed_companion(ctx.run_dir, new_section)
 
 
 def _append_to_investigation(ctx: Context, new_section: str) -> None:
-    inv_path = ctx.run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    separator = "\n" if current and not current.endswith("\n") else ""
-    inv_path.write_text(current + separator + new_section)
+    """Append post-retry; the retry loop has already gated on validation."""
+    append_unvalidated(ctx.run_dir, new_section)
 
 
 # ---------------------------------------------------------------------------
@@ -894,7 +546,6 @@ def _try_fast_path(
     try:
         from invlang.corpus import load_corpus
         from scripts.handlers import predict_fastpath
-        from scripts.handlers.contextualize import load_playbook_metadata
 
         playbook = load_playbook_metadata(ctx.signature_id)
         disc = playbook.discriminating_classifications
@@ -908,7 +559,7 @@ def _try_fast_path(
 
         inv_path = ctx.run_dir / "investigation.md"
         text = inv_path.read_text() if inv_path.exists() else ""
-        prologue, _ = _parse_prologue_and_last_hypothesize(text)
+        prologue, _ = parse_prologue_and_last_hypothesize(text)
         prologue = prologue or {}
 
         cache_key = predict_fastpath.build_cache_key(

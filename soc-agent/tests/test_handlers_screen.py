@@ -247,7 +247,7 @@ SCREEN_ERROR_EMPTY_LEADS = textwrap.dedent("""\
 
 class TestPlaybookParsing:
     def test_rule_5710_has_monitoring_probe_row(self):
-        rows = screen_handler._load_screen_rows("wazuh-rule-5710")
+        rows = screen_handler.load_screen_rows("wazuh-rule-5710")
         assert len(rows) == 1
         row = rows[0]
         assert row["pattern"] == "monitoring-probe fast-path"
@@ -259,12 +259,12 @@ class TestPlaybookParsing:
         ["wazuh-rule-100001", "wazuh-rule-100110"],
     )
     def test_signatures_without_screen_return_empty(self, signature_id):
-        rows = screen_handler._load_screen_rows(signature_id)
+        rows = screen_handler.load_screen_rows(signature_id)
         assert rows == []
 
     def test_missing_playbook_raises(self):
         with pytest.raises(OrchestrationError, match="playbook not found"):
-            screen_handler._load_screen_rows("wazuh-rule-does-not-exist")
+            screen_handler.load_screen_rows("wazuh-rule-does-not-exist")
 
     def test_leads_column_parses_anchor_suffix(self):
         raw = "source-classification, username-classification, approved-monitoring-sources anchor"
@@ -291,7 +291,7 @@ class TestPlaybookEmptyShortCircuit:
         self, tmp_path, monkeypatch,
     ):
         ctx = make_ctx(tmp_path)
-        monkeypatch.setattr(screen_handler, "_load_screen_rows", lambda _sig: [])
+        monkeypatch.setattr(screen_handler, "load_screen_rows", lambda _sig: [])
         screen_calls: list[str] = []
         monkeypatch.setattr(
             screen_handler, "_invoke_screen", stub_invoke(screen_calls, ""),

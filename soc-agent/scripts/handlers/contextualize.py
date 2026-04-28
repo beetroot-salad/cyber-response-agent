@@ -33,22 +33,21 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import frontmatter
 import yaml
 
 from schemas.state import Phase
 from scripts.invlang.corpus import write_created_header
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
-from scripts.handlers._markdown import parse_markdown, table_rows_after_heading
+from scripts.handlers._investigation_io import append_and_validate
+from scripts.handlers._playbook import PlaybookMetadata, load_playbook_metadata
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
-    invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -64,223 +63,12 @@ SUBAGENT_TIMEOUT_SECONDS = int(
 )
 
 
-def _invoke_ticket(prompt: str) -> str:
-    return _shared_invoke("ticket-context", prompt, timeout=SUBAGENT_TIMEOUT_SECONDS)
-
-
-def _invoke_prologue(prompt: str) -> str:
-    return _shared_invoke(
-        "contextualize-prologue", prompt, timeout=SUBAGENT_TIMEOUT_SECONDS,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Playbook metadata
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class PlaybookMetadata:
-    signature_id: str
-    archetype_names: list[str]
-    archetype_story_paths: list[str]
-    has_screen: bool
-    hypothesis_seeds: list[str]
-    leads: list[str]
-    # PREDICT loop-1 fast-path opt-in. Maps each decision-relevant vertex
-    # `classification` to a list of regex patterns that an `identifier` must
-    # match to count as "same key-attribute family." Absent / None disables
-    # the fast-path for this signature (gate is opt-in per signature).
-    discriminating_classifications: dict[str, list[str]] | None = None
-    # CONCLUDE-time benign-action short-circuit list. Command bodies that,
-    # executed in isolation, cannot damage or exfiltrate. Drawn from the
-    # `## Benign action classes` section's bullets. Empty when the section
-    # is absent — the short-circuit only fires when the playbook explicitly
-    # opts in.
-    benign_action_classes: list[str] = field(default_factory=list)
-
-
-_ARCHETYPE_NAME_RE = re.compile(r"^[a-z0-9-]+$")
-_SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
-
-
-def _parse_frontmatter(text: str, *, source: Path) -> dict:
-    """Return the YAML frontmatter as a dict, or {} when absent.
-
-    Uses `python-frontmatter` (already a project dep) so CRLF / Windows line
-    endings parse identically to LF. Malformed YAML raises OrchestrationError
-    rather than silently disabling downstream features (fail-fast).
-    """
-    try:
-        post = frontmatter.loads(text)
-    except yaml.YAMLError as exc:
-        raise OrchestrationError(
-            f"playbook {source} has malformed YAML frontmatter: {exc}"
-        ) from exc
-    return dict(post.metadata) if post.metadata else {}
-
-
-def load_playbook_metadata(signature_id: str) -> PlaybookMetadata:
-    playbook_path = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "playbook.md"
-    )
-    if not playbook_path.exists():
-        raise OrchestrationError(
-            f"playbook not found for {signature_id}: {playbook_path}"
-        )
-    text = playbook_path.read_text()
-    tokens = parse_markdown(text)
-    sections = {
-        m.group(1).lower(): m.start() for m in _SECTION_RE.finditer(text)
-    }
-    fm = _parse_frontmatter(text, source=playbook_path)
-
-    if "archetypes" not in sections:
-        raise OrchestrationError(
-            f"playbook {playbook_path} has no ## Archetypes section"
-        )
-    archetype_rows = table_rows_after_heading(tokens, "Archetypes")
-    archetype_names: list[str] = []
-    for row in archetype_rows[1:]:  # skip header row
-        if not row:
-            continue
-        cell = row[0].strip().strip("`").strip()
-        if _ARCHETYPE_NAME_RE.fullmatch(cell):
-            archetype_names.append(cell)
-    if not archetype_names:
-        raise OrchestrationError(
-            f"playbook {playbook_path} ## Archetypes section has no archetype rows"
-        )
-    archetype_story_paths = [
-        str(
-            SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id
-            / "archetypes" / name / "story.md"
-        )
-        for name in archetype_names
-    ]
-
-    has_screen = "screen" in sections
-
-    hypothesis_seeds = _extract_section_bullet_ids(text, sections, "hypothesis seeds")
-    leads = _extract_section_bullet_ids(text, sections, "starter lead order")
-
-    raw_disc = fm.get("discriminating_classifications")
-    disc: dict[str, list[str]] | None = None
-    if raw_disc is not None:
-        if not isinstance(raw_disc, dict):
-            raise OrchestrationError(
-                f"playbook {playbook_path}: `discriminating_classifications` "
-                f"must be a mapping of classification → [regex, ...]; got "
-                f"{type(raw_disc).__name__}"
-            )
-        disc = {}
-        for k, v in raw_disc.items():
-            if not isinstance(k, str):
-                raise OrchestrationError(
-                    f"playbook {playbook_path}: `discriminating_classifications` "
-                    f"keys must be strings; got {type(k).__name__} ({k!r})"
-                )
-            if not isinstance(v, list) or not all(isinstance(p, str) for p in v):
-                raise OrchestrationError(
-                    f"playbook {playbook_path}: `discriminating_classifications` "
-                    f"value for {k!r} must be a list of regex strings"
-                )
-            disc[k] = list(v)
-
-    benign_action_classes = _extract_benign_action_classes(text, sections)
-
-    return PlaybookMetadata(
-        signature_id=signature_id,
-        archetype_names=archetype_names,
-        archetype_story_paths=archetype_story_paths,
-        has_screen=has_screen,
-        hypothesis_seeds=hypothesis_seeds,
-        leads=leads,
-        discriminating_classifications=disc,
-        benign_action_classes=benign_action_classes,
-    )
-
-
-# Hypotheses are `?`-prefixed; leads are plain kebab-case words. Filter the
-# two section extractors to their expected shapes so we don't pull in vertex
-# IDs, edge IDs, attribute names, or stray YAML tokens from the prose around
-# the bullets.
-_HYPOTHESIS_TOKEN_RE = re.compile(r"`(\?[a-z0-9-]+)`")
-_LEAD_TOKEN_RE = re.compile(r"`([a-z][a-z0-9-]+)`")
-
-# Lead tokens that appear in playbook prose but are not lead names. Leads that
-# ship under knowledge/common-investigation/leads/ are the authoritative set;
-# this allow-list is a coarse sanity filter for names declared inline.
-_LEAD_NAME_BLOCKLIST = {
-    "data", "rule", "agent", "file", "process", "user", "alert",
-    "yes", "no", "true", "false",
-}
-
-
-def _extract_section_bullet_ids(
-    text: str, sections: dict[str, int], section_name: str
-) -> list[str]:
-    """Pull the bullet tokens from a named section.
-
-    For `hypothesis seeds` we match `?foo` patterns; for `starter lead order`
-    we match plain kebab-case names (filtered by a block-list of false
-    positives from inline prose). Unknown sections return [] — the markdown
-    line falls back to `(none)`.
-    """
-    start = sections.get(section_name)
-    if start is None:
-        return []
-    next_start = min(
-        (s for s in sections.values() if s > start), default=len(text)
-    )
-    block = text[start:next_start]
-    if section_name == "hypothesis seeds":
-        pattern = _HYPOTHESIS_TOKEN_RE
-    elif section_name == "starter lead order":
-        pattern = _LEAD_TOKEN_RE
-    else:
-        return []
-    seen: list[str] = []
-    for m in pattern.finditer(block):
-        token = m.group(1)
-        if token in _LEAD_NAME_BLOCKLIST:
-            continue
-        if token not in seen:
-            seen.append(token)
-    return seen
-
-
-# Bullet token at the head of a line in a playbook section: ``- `whoami` ``
-# (any trailing prose after the backticks is treated as commentary). When
-# the bullet body is bare prose (no backticks), match the first word.
-_BENIGN_ACTION_BULLET_RE = re.compile(
-    r"^-\s+`([a-z][a-z0-9 _\-/\.]*)`", re.MULTILINE,
+_invoke_ticket = make_invoker(
+    "ticket-context", default_timeout=SUBAGENT_TIMEOUT_SECONDS,
 )
-
-
-def _extract_benign_action_classes(
-    text: str, sections: dict[str, int]
-) -> list[str]:
-    """Pull the bullet entries from ``## Benign action classes``.
-
-    Each bullet's first backticked token is the canonical command body that
-    the CONCLUDE short-circuit will compare against (after stripping any
-    `bash -c` / `sh -c` wrapper from the alert's cmdline). Returns [] when
-    the section is absent — short-circuit is opt-in per signature.
-    """
-    start = sections.get("benign action classes")
-    if start is None:
-        return []
-    next_start = min(
-        (s for s in sections.values() if s > start), default=len(text)
-    )
-    block = text[start:next_start]
-    seen: list[str] = []
-    for m in _BENIGN_ACTION_BULLET_RE.finditer(block):
-        token = m.group(1).strip().lower()
-        if token and token not in seen:
-            seen.append(token)
-    return seen
+_invoke_prologue = make_invoker(
+    "contextualize-prologue", default_timeout=SUBAGENT_TIMEOUT_SECONDS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -442,35 +230,19 @@ def _extract_yaml_block(raw: str, key: str) -> str:
     return yaml.safe_dump({key: parsed[key]}, sort_keys=False)
 
 
+def _stamp_created_header() -> str:
+    """First-write prefix: stamp the file's creation time so the corpus
+    loader's recency filter has a stable per-file timestamp without needing
+    to read sibling alert.json or trust file mtime."""
+    return write_created_header(datetime.now(timezone.utc).isoformat())
+
+
 def _validate_and_write(ctx: Context, new_section: str) -> None:
-    """Append `new_section` to investigation.md after running
-    `validate_companion` as a library check."""
-    # Lazy import: invlang_validate is in hooks/scripts which isn't on sys.path
-    # until we put it there.
-    hooks_scripts = str(SOC_AGENT_ROOT / "hooks")
-    if hooks_scripts not in sys.path:
-        sys.path.insert(0, hooks_scripts)
-    from scripts.invlang_validate import validate_companion  # type: ignore
-
-    inv_path = ctx.run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    if not current:
-        # Stamp the file's creation time at the top on first write so the
-        # corpus loader's recency filter has a stable per-file timestamp
-        # without needing to read sibling alert.json or trust file mtime.
-        new_section = (
-            write_created_header(datetime.now(timezone.utc).isoformat())
-            + new_section
-        )
-    proposed = current + ("\n" if current and not current.endswith("\n") else "") + new_section
-
-    errors = validate_companion(proposed, current if current else None)
-    if errors:
-        raise OrchestrationError(
-            "CONTEXTUALIZE invlang validation failed:\n" + "\n".join(errors)
-        )
-
-    inv_path.write_text(proposed)
+    append_and_validate(
+        ctx.run_dir, new_section,
+        phase="CONTEXTUALIZE",
+        first_write_prefix=_stamp_created_header,
+    )
 
 
 # ---------------------------------------------------------------------------

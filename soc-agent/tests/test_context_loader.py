@@ -17,7 +17,6 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 from scripts.handlers._context_loader import (  # noqa: E402
     format_alert_block,
     format_archetype_shapes_block,
-    format_investigation_block,
     format_lead_definitions_block,
     format_lead_definitions_summary_block,
     format_signature_text_block,
@@ -28,6 +27,9 @@ from scripts.handlers._context_loader import (  # noqa: E402
     load_lead_definitions,
     load_run_salt,
     load_signature_text,
+)
+from scripts.handlers.investigation_views import (  # noqa: E402
+    format_investigation_block,
 )
 
 

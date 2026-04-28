@@ -40,14 +40,12 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
-from scripts.handlers._markdown import (
-    iter_yaml_fences,
-    parse_markdown,
-    table_rows_after_heading,
-)
+from scripts.handlers._investigation_io import append_and_validate
+from scripts.handlers._markdown import iter_yaml_fences
+from scripts.handlers._playbook import load_screen_rows
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
-    invoke_subagent as _shared_invoke,
+    make_invoker,
 )
 
 
@@ -64,47 +62,12 @@ SUBAGENT_TIMEOUT_SECONDS = int(
 # ---------------------------------------------------------------------------
 
 
-def _invoke_screen(prompt: str, *, timeout: int = SUBAGENT_TIMEOUT_SECONDS) -> str:
-    """Module-level wrapper over the shared subagent dispatcher.
-
-    Kept as a module-level function so tests can monkeypatch it with
-    `monkeypatch.setattr(screen_handler, "_invoke_screen", stub)`.
-    """
-    return _shared_invoke("screen", prompt, timeout=timeout)
+_invoke_screen = make_invoker("screen", default_timeout=SUBAGENT_TIMEOUT_SECONDS)
 
 
 # ---------------------------------------------------------------------------
 # Playbook Screen table parsing
 # ---------------------------------------------------------------------------
-
-
-def _load_screen_rows(signature_id: str) -> list[dict[str, str]]:
-    """Parse the `## Screen` table of a signature's playbook.
-
-    Returns a list of row dicts keyed by the table's header names, lowercased
-    and stripped. Empty list when the section is absent OR present-but-empty
-    (no data rows after the header separator). Missing playbook file raises
-    OrchestrationError — that's a signature-config bug, not a silent skip.
-    """
-    playbook_path = (
-        SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "playbook.md"
-    )
-    if not playbook_path.exists():
-        raise OrchestrationError(
-            f"playbook not found for {signature_id}: {playbook_path}"
-        )
-    tokens = parse_markdown(playbook_path.read_text())
-    rows = table_rows_after_heading(tokens, "Screen")
-    if len(rows) < 1:
-        return []
-    header = [c.strip().lower() for c in rows[0]]
-    data_rows: list[dict[str, str]] = []
-    for row in rows[1:]:
-        cells = [c.strip() for c in row]
-        if len(cells) != len(header):
-            continue
-        data_rows.append({header[i]: cells[i] for i in range(len(cells))})
-    return data_rows
 
 
 def _parse_leads_column(leads_cell: str) -> list[str]:
@@ -298,24 +261,7 @@ def _extract_findings_yaml_from_parsed(parsed: dict) -> str:
 
 
 def _validate_and_write(ctx: Context, new_section: str) -> None:
-    """Append `new_section` to investigation.md after running
-    `validate_companion` as a library check."""
-    hooks_scripts = str(SOC_AGENT_ROOT / "hooks")
-    if hooks_scripts not in sys.path:
-        sys.path.insert(0, hooks_scripts)
-    from scripts.invlang_validate import validate_companion  # type: ignore
-
-    inv_path = ctx.run_dir / "investigation.md"
-    current = inv_path.read_text() if inv_path.exists() else ""
-    proposed = current + ("\n" if current and not current.endswith("\n") else "") + new_section
-
-    errors = validate_companion(proposed, current if current else None)
-    if errors:
-        raise OrchestrationError(
-            "SCREEN invlang validation failed:\n" + "\n".join(errors)
-        )
-
-    inv_path.write_text(proposed)
+    append_and_validate(ctx.run_dir, new_section, phase="SCREEN")
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +302,7 @@ def _fallthrough_payload(parsed: dict, override_reason: Optional[str] = None) ->
 
 def handle(ctx: Context) -> PhaseResult:
     # Step 0: preflight — empty Screen section short-circuits.
-    screen_rows = _load_screen_rows(ctx.signature_id)
+    screen_rows = load_screen_rows(ctx.signature_id)
     if not screen_rows:
         return PhaseResult(
             next_phase=Phase.PREDICT,
