@@ -23,7 +23,7 @@ from invlang.queries import (  # noqa: E402
     lead_effectiveness_for_topology,
     peer_hypothesis_distribution_for_topology,
 )
-from scripts.handlers.predict import (  # noqa: E402
+from scripts.handlers.predict_priors import (  # noqa: E402
     _format_priors,
     _format_prologue_priors,
 )
