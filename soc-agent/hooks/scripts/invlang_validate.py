@@ -75,6 +75,7 @@ from hooks.scripts.invlang_checks_predictions import (
     _check_rollup_parent_weight,
 )
 from hooks.scripts.invlang_checks_authorization import (
+    _check_affirmative_true_positive,
     _check_attribute_updates_target_shape,
     _check_authorization_contract_edge_ref,
     _check_authorization_gated_disposition,
@@ -124,6 +125,7 @@ __all__ = [
     "_check_authorization_contract_edge_ref",
     "_check_authorization_resolution_backrefs",
     "_check_authorization_gated_disposition",
+    "_check_affirmative_true_positive",
     "_check_attribute_updates_target_shape",
     "_check_authorization_resolution_provenance",
     "_check_anchor_consultation_provenance",
@@ -430,6 +432,7 @@ def validate_companion(proposed_text: str, current_text: str | None) -> list[str
     errors.extend(_check_authorization_contract_edge_ref(merged))
     errors.extend(_check_authorization_resolution_backrefs(merged))
     errors.extend(_check_authorization_gated_disposition(merged))
+    errors.extend(_check_affirmative_true_positive(merged))
     errors.extend(_check_attribute_updates_target_shape(merged))
 
     # Impact (rules #29–#31) + CONCLUDE two-axis
