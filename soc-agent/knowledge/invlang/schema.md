@@ -335,14 +335,18 @@ resolutions:
     matched_refutation_ids: []
     reasoning: "<string>"       # why this evidence moves weight — not a field restatement
     supporting_edges: []
-    load_bearing:               # required for ++/--; optional for +/-. Self-declared
-                                # observation salience: the specific fields that swayed
-                                # the weight, each with a counterfactual naming what
-                                # grade the resolution would have landed at if the
-                                # field had read differently (the counterfactual
-                                # carries the actual value by implication). Validator
-                                # does not cross-check today; the artifact is captured
-                                # for downstream perturbation analysis (see Tier 1).
+    load_bearing:               # optional; one entry per observation that swayed
+                                # the weight. Self-declared observation salience:
+                                # the specific field that mattered + a counterfactual
+                                # naming the value that would have flipped the grade.
+                                # No structural validator runs on this today — the
+                                # artifact is captured for downstream perturbation
+                                # analysis (Tier 1). Empirical: forcing this field
+                                # on every ++/-- via prompt-level discipline
+                                # increased false-true-positive rate on
+                                # absence-of-confirmation traps (see /tmp/stress
+                                # trap-set evaluation, 2026-04-28). Field is
+                                # available; do not require it.
       - field: <field-name>     # native field on the cited authority
         source: l-{id} | prologue | e-{id}
         counterfactual: <string>
