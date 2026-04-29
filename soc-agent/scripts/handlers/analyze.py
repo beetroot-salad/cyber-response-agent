@@ -22,7 +22,7 @@ Handler responsibilities:
       fields. Set `SOC_AGENT_ANALYZE_INCLUDE_RAW_DETAILS=1` to restore the
       pre-trim shape (raw payloads inlined under `<raw_details>`).
     - invokes the subagent via the shared `_subagent.invoke_subagent` wrapper
-    - parses the `analyze:` envelope via `parse_analyze_envelope`
+    - parses the analyze dense-block envelope via `parse_analyze_envelope_dense`
     - back-fills `unresolved_prescribed_set` from `ctx.outputs[Phase.GATHER]`
       when the subagent didn't compute it
     - renders a prose `## ANALYZE (loop N)` section from the envelope and
@@ -67,7 +67,7 @@ from scripts.handlers._context_loader import (
 from scripts.handlers._output_parser import (
     AnalyzeEnvelope,
     AnalyzeOutputError,
-    parse_analyze_envelope,
+    parse_analyze_envelope_dense,
 )
 from scripts.handlers._subagent import (
     make_invoker,
@@ -667,17 +667,50 @@ def _validate_and_write(ctx: Context, new_section: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _hypothesis_id_to_name_map(investigation_md: str) -> dict[str, str]:
+    """Build `{id → name}` from every `hypothesize:` block in the companion.
+
+    Used to feed the dense parser's X2/X5 cross-block invariant checks
+    (adversarial-token detection on hypothesis names).
+    """
+    mapping: dict[str, str] = {}
+    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
+        try:
+            doc = yaml.safe_load(body)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        hypotheses = doc.get("hypothesize", {}).get("hypotheses") or []
+        for h in hypotheses:
+            if not isinstance(h, dict):
+                continue
+            hid = h.get("id")
+            name = h.get("name")
+            if isinstance(hid, str) and hid and isinstance(name, str) and name:
+                mapping[hid] = name
+    return mapping
+
+
 def handle(ctx: Context) -> PhaseResult:
     loop_n = _compute_loop_n(ctx)
     prompt = _assemble_prompt(ctx)
     raw = _invoke_subagent(prompt)
 
+    # Read investigation.md once — used both for the parser's X2/X5
+    # cross-block invariant checks (id → name map) and for findings
+    # synthesis below.
+    investigation_md = load_investigation_md(ctx.run_dir)
+    hypothesis_id_to_name = _hypothesis_id_to_name_map(investigation_md)
+
     try:
         # loop_n is computed handler-side from ctx.history; we don't enforce
-        # it against the subagent's emitted `analyze.loop` because retries
+        # it against the subagent's emitted `:A loop` because retries
         # and recovery paths legitimately drift. The envelope's loop field
         # is an audit-trail carry-through.
-        envelope = parse_analyze_envelope(raw)
+        envelope = parse_analyze_envelope_dense(
+            raw, declared_hypothesis_names=hypothesis_id_to_name,
+        )
     except AnalyzeOutputError as exc:
         raise OrchestrationError(
             f"analyze subagent: envelope shape violation — {exc}"
@@ -700,7 +733,6 @@ def handle(ctx: Context) -> PhaseResult:
         raw_leads = gather_out.get("leads") or []
         if isinstance(raw_leads, list):
             gather_leads = [x for x in raw_leads if isinstance(x, dict)]
-    investigation_md = load_investigation_md(ctx.run_dir)
     default_target = _first_prologue_vertex_id(investigation_md) or ""
     hypothesis_id_map = _hypothesis_name_to_id_map(investigation_md)
     default_supporting_edges = _prologue_authoritative_edges(investigation_md)
