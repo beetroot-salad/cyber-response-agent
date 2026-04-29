@@ -27,7 +27,7 @@ from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path("/workspace")
+REPO_ROOT = Path(os.environ.get("PREDICT_EVAL_REPO_ROOT", "/workspace"))
 SOC_AGENT_ROOT = REPO_ROOT / "soc-agent"
 EVALS_ROOT = REPO_ROOT / "evals" / "predict"
 CASES_DIR = EVALS_ROOT / "cases"

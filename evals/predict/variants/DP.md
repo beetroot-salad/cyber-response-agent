@@ -55,6 +55,28 @@ Survivability test: *if adding an `authorization_contract` to one hypothesis mak
 
 When the lead measures an impact-relevant observable (upload volume, blast-radius size, record count, affected-scope count), pre-register `impact_predictions[]` on the lead skeleton — threshold predicate per dimension (confidentiality / integrity / availability / scope), `on_match: within` / `on_mismatch: exceeds`. ANALYZE grades them into `impact_resolutions[]`. One observable per claim; see schema §Impact and rule #29.
 
+## Frontier classification (Step 0)
+
+Before selecting a shape, classify each open question on the confirmed graph as one of:
+
+- **attribute-of-confirmed-vertex (KNOWN value)** — the question is a property of a vertex already in the prologue, AND the field's value is populated in the alert payload (cmdline shape with content, populated `loginuid_state`, populated `parent_pname`, version, started_at, etc.). Resolves via `attribute_predictions[]` on the existing vertex with anchor binding. ID prefix `aN`. → defaults to **Shape A**.
+- **attribute-of-confirmed-vertex (UNKNOWN value)** — the question is the value of a field that is structurally null/missing/truncated in the alert payload (`parent_pname=null`, `loginuid_state=-1` when downstream resolution is required, truncated cmdline, missing image registry, etc.). You cannot predict the value of a field you have not yet fetched — the resolution path is to **refill the gap via a lead**, not to scaffold a hypothesis on the absence. → defaults to **Shape E with a refill lead** whose readings partition the next loop's question space conditional on what value the lead returns. *Worked example:* rule-100001 with `parent_pname=null` → Shape E with `container-baseline` (or analog) lead, readings on `(image-baseline-empty | image-baseline-recurring | image-baseline-anomalous-on-foreground)`.
+- **upstream-edge-extension** — the question is what vertex sits upstream of a confirmed vertex via a specific relation (api-called, located-on, authenticated-as, scheduled-by, exec-invoked, etc.). Resolves via a new hypothesis with `proposed_edge` to a typed-but-unmaterialized `parent_vertex`, plus an `authorization_contract` against the resolving anchor when the question is policy-shaped. ID prefix `hN`. → defaults to **Shape A** (single hypothesis with contract) or **Shape M** (when two+ candidate parent classifications produce observably-divergent predictions on the same edge).
+
+**Sibling upstream-edge-extension questions are not competing stories.** They are different open edges; resolving one does not refute the others. The decision procedure below picks ONE of the classified questions (typically the cheapest discriminator) to scaffold this loop — the others remain open across loops, named in the routing rationale.
+
+**Worked example (rule-100001, loop 1 after CONTEXTUALIZE has inferred the containerd vertex).** The open frontier holds three upstream-edge-extension questions on the inferred `v-006: containerd` vertex:
+1. *What process called the containerd API?* (relation `api-called`, parent classification candidates: dockerd | nerdctl | direct-API-client; anchor: containerd-socket-audit)
+2. *What host is the calling process running on?* (relation `located-on`, anchor: daemon-socket-binding | host-tag-registry)
+3. *What identity is the calling process running as?* (relation `authenticated-as`, anchor: oncall-schedule | change-management-tickets)
+
+Plus one attribute-of-confirmed-vertex on `v-001: root`:
+4. *Is `loginuid_state == has-session`?* (the alert payload already names this as `-1`; this is observed at `++` and informs which anchor in #3 above is plausible.)
+
+Path-of-least-resistance picks the cheapest of #1-#3 to scaffold *first* (typically the auth-context contract — cheapest anchor, settles disposition fastest). The other two stay open across loops.
+
+**Strict slot discipline.** Do not collapse `attribute_predictions[]` and `proposed_edge` into each other. An `aN`-prefixed prediction lives on `attribute_predictions[]`; an `hN` ID belongs on a `proposed_edge`. The validator rejects mismatches.
+
 ## Decision procedure
 
 Short. Walk in order; stop at the first match.
@@ -63,7 +85,17 @@ Short. Walk in order; stop at the first match.
 2. The open question is authorization (mechanism pinned, or identity needs authority confirmation)? → **A**.
 3. The open question is which of two+ observably-divergent mechanisms? → **M**.
 
-Default bias: **E whenever you're uncertain**. The loop is designed to iterate — a wasted enrichment loop is cheaper than a premature fork that has to be torn down. Don't oscillate between A and M; pick the one that matches the open question as you currently understand it, and let the next loop correct course.
+**Default to whichever shape the Step-0 classification identified.** Map directly from the classification of the cheapest open question:
+
+- *attribute-of-confirmed-vertex (KNOWN value)* → **A** with `attribute_predictions[]` on the relevant vertex.
+- *attribute-of-confirmed-vertex (UNKNOWN value — null/missing/truncated)* → **E** with a refill lead (NOT A — you cannot predict the value of a field you have not fetched).
+- *upstream-edge-extension* with anchor contract → **A** with one hypothesis + `authorization_contract`.
+- two+ *upstream-edge-extension* candidates with observably-divergent predictions on the same edge → **M**.
+- single non-branching probe whose outcome routes the next loop → **E** with `branch_plan`.
+
+Do not oscillate between A and M; pick the one that matches the cheapest classified question, and let the next loop correct course. The classification step's verdict is the default — depart from it only when you can name a specific reason (in the routing rationale) why the classification was wrong.
+
+**Forced-scaffold discipline.** Any open question you name (in the routing rationale or in your decision-procedure walk) MUST either be (a) scaffolded this loop as the live hypothesis / attribute_prediction / branch_plan reading, or (b) explicitly justified in the routing rationale as "cheaper to defer," naming what the next loop's lead will resolve about it. Naming a load-bearing question and then picking an unrelated enrichment lead is the procrastination anti-pattern — the validator will not catch it, but the discipline is binding. The cheapest of the classified questions becomes this loop's scaffolded item; you are not free to defer all of them in favor of a generic enrichment lead.
 
 **After deciding the shape, Read the matching worked example before authoring:**
 - Shape E → `soc-agent/agents/predict-examples/shape-E.md`
@@ -109,8 +141,8 @@ Baseline is also a first-class **lead selector**. `authentication-history` (or t
 >
 > *Loop N+1.* The current edge is settled — do not author a competitor for `v-001`. Instead, attach `h-002` to a **new upstream vertex** `pv-B` representing whatever caused the now-confirmed parent vertex's behavior. Two shapes are valid:
 >
-> - **Refinement** when the next question is a sub-mechanism of the *same parent vertex* — its subtype, schedule, or which mechanism-internal variant fired (e.g., parent class is `cron-driven-job` and the open question is which cron entry; parent class is `runtime-exec-primitive` and the open question is which primitive subtype: `runc` vs `containerd-shim` vs `crictl`). Use `h-{parent}-{ordinal}` IDs; predictions discriminate among the subtypes on observable fields specific to the subtype question. **Refinement is NOT for actor-identity, orchestrator, configuration, or session-of-origin questions** — those introduce a *new vertex* and use upstream-fork IDs (next bullet).
-> - **Upstream fork** when the next question is *who or what drove the parent vertex* — any new vertex of type `actor`, `orchestrator`, `session`, `configuration`, or `policy` attached upstream of the now-confirmed parent. **Always uses fresh `h-{n}` IDs (`h-002`, `h-003`), never `h-{parent}-{ordinal}`** — a new upstream vertex is not a child of the parent's grade. Predictions are on the upstream vertex's load-bearing fields — typically a registry, an audit log, or a config-management record — and on its discriminating side-effects.
+> - **Refinement** when the next question is a sub-mechanism of the same parent class (e.g., the parent vertex's class is confirmed but its subtype, schedule, or invocation pattern is open). Use `h-{parent}-{ordinal}` IDs; predictions discriminate among the subtypes on observable fields specific to the subtype question.
+> - **Upstream fork** when the next question is *who or what drove the parent vertex* (the actor, the configuration, the orchestrator). New hypothesis IDs (`h-002`, `h-003`); predictions are on the actor's load-bearing fields — typically a registry, an audit log, or a config-management record — and on the actor's discriminating side-effects.
 >
 > *Trust-root condition.* If every upstream authority for `pv-B` is structurally inaccessible (telemetry doesn't reach the actor's namespace; deny-list blocks the verification path; the relevant registry doesn't scope to this question; external system not integrated), do not invent ad-hoc leads to fish for evidence. Emit a Shape E enrichment block with one probe lead that targets the most accessible authority; if it returns empty, ANALYZE routes `termination_category: trust-root` and CONCLUDE consults the playbook's benign-action short-circuit (when configured) or escalates with the trust-root rationale.
 
@@ -120,151 +152,147 @@ The principle: every `++` answers the question *"where does loop N+1 attach?"* �
 
 ## Output format
 
-Emit **one** YAML block with top-level key `predict:`. The orchestrator parses it mechanically into invlang state (hypotheses, branch-plan predictions), routing for the next phase, and telemetry. No prose sections, no second YAML fence — stdout is the entire output envelope.
+Emit a **dense block-shape envelope** to stdout. No prose framing, no YAML fence — the dense blocks ARE your output. The orchestrator parses block-tagged rows mechanically into invlang state; the field-presence matrix is enforced at parse time (violations come back as remediation notes).
 
-**Shape commitment is the literal first field.** Decide the shape before authoring anything else; `shape:` sits above every other section so the output order mirrors the decision order.
+**Shape commitment is the literal first field.** Decide the shape per §Decision procedure before authoring anything else; the `predict` header line carries it.
 
 **PREDICT always selects a lead.** Halting is ANALYZE's job. There is no halt / null-lead path.
 
-### Envelope
+### Block grammar (shared across shapes)
 
-```yaml
-predict:
-  loop: <int>                    # match the loop_n in your prompt
-  shape: E | A | M               # your decision per §Decision procedure
+Each block is tagged `:<TAG> <name> [col1|col2|...]` (header) followed by `|`-separated rows. Empty trailing optional cells are permitted; required leading cells are not. Annotations inside `[...]` use `\]` to embed a literal `]`. ASCII fallbacks accepted on parse: `=>` for `→`, `<=>` for `⟺`, `&` for `∧`, `~` for `¬`.
 
-  # Present on shapes A / M (required). Absent on shape E.
-  hypotheses:
-    - id: h-00N                  # new this loop; novelty is implicit in the id
-      name: "?mechanism-name"
-      attached_to_vertex: v-00N
-      proposed_edge:
-        relation: <rel>
-        parent_vertex: {type: <t>, classification: "<stereotyped-parent-class>"}
-      story: |
-        <2–4 sentence one-hop causal link>
-      predictions:                   # observational predictions on the edge
-        - id: p1
-          subject: proposed_edge
-          claim: "<one observable>"
-          from_story_link: "<story sentence>"
-          # OPTIONAL `comparison` block — attach when the claim text
-          # contains baseline-deviation vocabulary (recurring /
-          # matches/deviates from baseline / novel artifact). See the
-          # "Paired-window dispatch" tail section in shape-E.md /
-          # shape-M.md for worked examples + when to skip.
-          comparison:
-            selector_kind: historical-self | peer-class | population | cross-rule
-            selector: "<query/spec defining the comparison set>"
-            dimension: <one named attribute of the observation>
-      attribute_predictions:         # OPTIONAL — implicit classification
-                                     # stereotypes made explicit. Use when the
-                                     # parent-vertex classification carries
-                                     # non-trivial assumptions (cmdline shape,
-                                     # running-as user, parent-process genre)
-                                     # AND an observationally-similar peer
-                                     # hypothesis exists that these attributes
-                                     # would discriminate. Omit when the
-                                     # classification is self-evidencing.
-        - {id: ap1, target: proposed_parent, attribute: cmdline, claim: "<one attribute assertion>"}
-      refutation_shape:              # may cite both p* and ap* ids on this hypothesis
-        - {id: r1, refutes_predictions: [p1, ap1], claim: "<negation shape>"}
-      authorization_contract:        # shape A / I when authorization is the open question
-        - {id: ac1, edge_ref: proposed, anchor_kind: <anchor>, asks: authorization}
-      weight: null
+The envelope opens with one bare line:
 
-  # Present on shape E only. Lead-level predictions (lp*) attached to the
-  # pending gather entry. Each reading is a mutually-exclusive branch over
-  # the lead's outcome space.
-  branch_plan:
-    primary_lead: <lead-slug>
-    predictions:
-      - id: lp1
-        if: "<observable condition>"
-        read_as: "<interpretation token>"
-        advance_to: escalate | fork-at-<question> | halt
-        # OPTIONAL `comparison` block — same shape as on `predictions[]`
-        # above; attach when `if` text contains baseline-deviation
-        # vocabulary. See the "Paired-window dispatch" tail in shape-E.md.
-        comparison:
-          selector_kind: historical-self | peer-class | population | cross-rule
-          selector: "<query/spec>"
-          dimension: <one named attribute>
-      - {id: lp2, if: "...", read_as: "...", advance_to: ...}
-
-  # Always required.
-  routing:
-    selected_lead: <lead-slug>            # required; non-empty
-    composite_secondary: [<lead>, ...]    # [] when not compositing
-    override_data_source: null            # optional; emit only with specific signal from prior loop
-    lead_hints:                           # optional; per-lead prose hint for GATHER
-      <lead-slug>: <prose>                #   keys must name selected_lead or
-      ...                                 #   one of composite_secondary
-    scope_override:                       # optional; emit when the lead needs
-                                          # a non-default lookback window
-      window_hours: <positive int>        #   replaces GATHER's 1h default
-      anchor: alert | now                 #   'alert' (default) = window ends at
-                                          #   alert @timestamp; 'now' = window
-                                          #   ends at wall-clock time
+```
+predict loop=<int> shape=E|A|M
 ```
 
-### Field-presence matrix by shape
+### `kind` slot — every prediction-shaped row carries one
 
-| Shape | `hypotheses` | `branch_plan` | `routing` |
-|---|---|---|---|
-| E | absent | required | required |
-| A | required (≥ 1, ≥ 1 carrying `authorization_contract`; peer hypotheses only when predictions diverge on observable fields — rule #32 rejects peers whose predictions subset-or-equal the contract-carrier's) | absent | required |
-| M | required (≥ 2, diverging on observable fields) | absent | required |
+Every `p*`, `ap*`, `r*`, and `lp*` row carries an explicit `kind` from the closed set:
 
-Violations of this matrix are rejected by the orchestrator parser before the invlang validator runs — you get a remediation note naming the mismatch.
+| `kind`            | When to use |
+|---|---|
+| `geometry`        | Foreground matches / deviates from the recurring baseline geometry on a recorded dimension. |
+| `cadence`         | Foreground rate / inter-event distribution falls within / outside the baseline distribution. |
+| `novel-artifact`  | A category of artifact appears in foreground that's absent from baseline of comparable shape. |
+| `absence`         | Foreground deviates from a structurally-zero baseline (any presence is the deviation). |
+| `presence`        | Bare-presence claim NOT tied to a zero baseline. **Disallowed on `r*` refutations** (presence-test refutation anti-pattern). May appear on `p*` only when the prediction is about a directly-fielded value the alert telemetry already names. |
+| `absolute`        | Direct field-read threshold — the field exists in the alert payload or anchor response and the claim is `field op value`. |
 
-### Attribute predictions (new)
+A `kind ∈ {geometry, cadence, novel-artifact, absence}` row **requires** a `comparison` slot (selector_kind + selector + dimension). A `kind ∈ {presence, absolute}` row must not carry one. The parser rejects mismatches.
 
-`attribute_predictions[]` sits alongside `predictions[]` on each hypothesis and makes the parent-vertex classification's implicit stereotype explicit. Each entry pins one observable attribute that the classification should imply.
+### Story prose with sentence IDs
 
-- **`id`** matches `^ap\d+$`, unique within the hypothesis.
-- **`target`** ∈ {`proposed_parent`, `attached_vertex`, `proposed_edge`} — which vertex / edge carries the attribute.
-- **`attribute`** is the field name (e.g. `cmdline`, `user_loginuid`, `parent_pname`, `tty`).
-- **`claim`** is one observable assertion — compound AND/OR is rejected by the validator (rule #26 extends to attribute claims).
-- **`refutation_shape[].refutes_predictions`** may cite `ap*` ids alongside `p*` ids on the same hypothesis.
+For each hypothesis `h-<id>` (Shape A or M), emit a short Markdown story block above (or co-located with) the hypothesis row:
 
-Use when the classification stereotype is load-bearing for disposition — e.g. two hypotheses both sitting on a `runc` parent but differing on `cmdline / user_loginuid / interactive` attribute shape. Without explicit `attribute_predictions[]`, the two are indistinguishable on forward-looking observables and collapse to Shape A with a contract. Omit when the classification is self-evidencing (e.g. `?monitoring-host-cron` needs no attribute predictions — the name IS the stereotype).
+```markdown
+### story h-<id>
+s1. <one sentence>
+s2. <one sentence>
+s3. <one sentence>
+```
 
-### Novelty and IDs
+Each story sentence has an explicit ID (`s1`, `s2`, ...). Predictions cite a sentence ID in their `from_story` cell — not the prose. This makes story-prediction referent-match a parse-time check (`from_story` must name a sentence ID present in the matching story block).
 
-Hypothesis novelty is implicit in the id: a hypothesis whose `id` has not appeared in the accumulated companion is new; `h-{parent}-{ordinal}` refines a confirmed parent.
+Story blocks are NOT inside dense rows. The handler reads them as prose, parses sentence IDs, and includes them in the composed `hypothesize:` invlang block as `story:` field per hypothesis.
 
-Each PREDICT loop emits its own `hypothesize:` block containing only the hypotheses **authored this loop** — prior-loop hypotheses stay declared through invlang's additive merge (first-wins on duplicate ids). Do not re-emit prior-loop hypotheses verbatim; they are carried across automatically. When you need to refine a confirmed parent, emit a new `h-{parent}-{ordinal}` entry; when you're introducing a fresh mechanism fork, emit new `h-{n}` ids that don't collide with any prior loop.
+### Field-presence matrix (parse-time enforced)
 
-### `composite_secondary` and overrides
+| Shape | hypotheses | branch_plan | routing | story blocks |
+|---|---|---|---|---|
+| E | absent     | required (`:L lead_preds`) | required | absent |
+| A | required (≥ 1, ≥ 1 carrying authz; peer hypotheses only when predictions diverge on observable fields) | absent | required | one per hypothesis |
+| M | required (≥ 2, diverging on observable fields) | absent | required | one per hypothesis |
 
-- `composite_secondary` — when the investigation needs multiple leads executed against the same entities and window (a composite dispatch). List all secondary leads. The handler builds `prescribed_leads = [selected_lead, *composite_secondary]` and hands off to gather-composite; gather-composite must echo every prescribed slug. Secondary leads share the primary's scope and `scope_override`.
-- `override_data_source` / `lead_hints` — omit unless a specific signal from a prior loop calls for them. Overriding without cause trips gather's template-bypass path needlessly. `lead_hints` is keyed by lead name — every key must appear in `selected_lead` or `composite_secondary`. Composite leads are first-class: a secondary lead can carry its own hint without elevating it to primary.
-- `scope_override` — emit when the lead needs a non-default lookback window. GATHER derives `incident_start = T - 1h` by default (alert-anchored). Override when the lead's semantics are *historical* (24h+ cadence baseline, 72h frequency check, 7d event horizon). `lead_hints` prose is advisory and does NOT override scope — the structured `scope_override` is the authoritative channel. Example: a cadence-baseline check against `authentication-history` typically wants `{window_hours: 24, anchor: alert}`; a "since last known-good baseline" check wants `{window_hours: 168, anchor: now}`.
+Violations are rejected by the dense parser before invlang validator runs.
 
-### When ANALYZE flagged unresolved prescribed leads
+### Variant DP — packed sub-cells
 
-When the prompt's remediation notes include `UNRESOLVED PRESCRIBED LEADS from prior gather phase: [...]`, it means the previous loop prescribed those leads but gather didn't resolve them. Preferentially re-prescribe them in this loop's `selected_lead` + `composite_secondary` — unless you have specific reasoning that a different lead is now more discriminating. This is guidance, not a gate; your judgment stands.
+Predictions, attribute_predictions, refutations, and authorization_contracts all pack into trailing cells of the `:H` row, separated by `;` between cells in the same column. Comparison blocks pack as trailing positionals on the prediction sub-cell.
 
-### Ad-hoc leads are legal
+**`:H` row shape:**
 
-`selected_lead` does not have to appear in the lead catalog. If your discriminator needs a lead that doesn't exist yet, invent a slug (short, descriptive) — gather-composite will execute it through the ad-hoc construction path. Lead normalization happens downstream (post-mortem loop), not at PREDICT time.
+```
+:H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
+```
 
-## Lead selection
+**Sub-cell grammar (inside the cells):**
 
-1. **Playbook first.** If the signature's playbook names a starter lead that measures your discriminator, use it by its playbook name.
-2. **Catalog search.** Else, search `knowledge/common-investigation/leads/` by the data type your discriminator consumes (process ancestry → `process-events` → `process-lineage`).
-3. **Suggest new.** If nothing fits, name a new lead on the `Selected lead:` line with a one-sentence request (measurement + data type). Don't write the query — `ad-hoc` discipline (query construction, data-source health probe) is GATHER's job.
+- **`preds` cell** — semicolon-separated entries:
+    - `p<n>:<subject>:<kind>:s<m>:"<claim>"` — when `kind ∈ {presence, absolute}`
+    - `p<n>:<subject>:<kind>:s<m>:"<claim>":<selector_kind>:<selector>:<dimension>` — when `kind ∈ {geometry, cadence, novel-artifact, absence}`
+    - `<subject>` ∈ `{proposed_edge, proposed_parent, attached_vertex}`
+    - `s<m>` is the from-story sentence ID; must exist in the matching story block.
 
-For Shapes I and M, selected lead is often **composite** — baseline + direct-observable lead partitioning the fork from two angles. Name the primary on the `selected_lead:` trailer, describe the composite in prose.
+- **`attr_preds?` cell** — semicolon-separated:
+    - `ap<n>:<target>:<attribute>:<kind>:"<claim>"` (no comparison; attribute claims are field-shape claims)
+    - `<target>` ∈ `{proposed_parent, attached_vertex, proposed_edge}`
 
-## Corpus priors
+- **`refuts?` cell** — semicolon-separated:
+    - `r<n>[<refutes-csv>]:<kind>:"<claim>"` — `<refutes-csv>` is a comma list of `p<n>` and/or `ap<n>` IDs on the same hypothesis
+    - For deviation kinds, append `:<selector_kind>:<selector>:<dimension>` as on `p*`.
+    - `kind: presence` is rejected by the parser on refutations.
 
-Lead-effectiveness and peer-hypothesis priors for your current frontier topology are **pre-computed in the `## Past-investigation priors` block** of your input. `tier_used` is the signal: tier 0 (exact) strongest; tier 4 (name-glob fallback) means thin corpus depth — weight lightly.
+- **`authz?` cell** — semicolon-separated:
+    - `ac<n>:<edge_ref>:<anchor_kind>:"<predicate>":<on_unauth>/<on_indet>`
+    - `<edge_ref>` is `proposed` or an existing `e-NN` ID.
+    - `<on_unauth>`, `<on_indet>` ∈ `{esc, downgrade, accept}` (esc = escalate).
 
-Ad-hoc `bash soc-agent/scripts/invlang/run.sh ...` is available for shape-calibration lookups the preload doesn't answer. Rarely needed.
+**Branch plan (Shape E) — `:L` block:**
 
-Do not cite corpus results in `predictions` or `refutation_shape` text — those are forward-facing over the current case.
+```
+:L lead_preds [id|kind|if|read_as|advance_to|selector_kind?|selector?|dimension?]
+lp1|cadence|"foreground falls within the source's 72h authentication-cadence baseline"|periodic-tooling-pattern|fork-at-identity|historical-self|"src=<source_ip> AND rule=5710 OR rule=5715 over 72h"|inter-event-gap-distribution
+lp2|novel-artifact|"foreground introduces a forward-success not present in the source's 30d baseline"|escalating-attempt|escalate|historical-self|"src=<source_ip> 30d"|forward-auth-success
+```
+
+The `selector_kind` / `selector` / `dimension` columns are required when `kind ∈ {geometry, cadence, novel-artifact, absence}`, omitted otherwise.
+
+**Impact predictions — when the lead measures impact observables:**
+
+```
+:R impact_preds [id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]
+ip1|confidentiality|"session_total_bytes within 30d baseline ± 2σ"|within|exceeds|indeterminate|exceeds
+```
+
+**Routing — flat block with two optional sub-blocks:**
+
+```
+:R routing
+selected_lead         <lead-slug>
+composite_secondary   <lead-slug>,<lead-slug>     # or '-' if none
+override_data_source  <slug>                       # or '-'
+rationale             "<one sentence>"
+
+:R routing.lead_hints [lead|hint]                  # OPTIONAL — present only when used
+<lead-slug>|"<prose hint>"
+
+:R routing.scope_override [key|value]              # OPTIONAL — present only when used
+window_hours|24
+anchor|alert
+```
+
+### Worked example — Shape A, single hypothesis (rule-5710 loop 2 post-enrichment)
+
+```
+predict loop=2 shape=A
+
+### story h-001
+s1. Source 172.22.0.10 has emitted rule-5710 at periodic ~10min cadence for 72h, consistent with a registered monitoring probe.
+s2. The approved-monitoring-sources registry is the authoritative source for whether the (src, user, dst) triple is sanctioned.
+s3. If the triple is listed active, both 'is this allowed' and 'who initiated this' resolve to the registered actor.
+
+:H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
+h-001|?registered-actor-initiated|v-001|initiated_by|identity|approved-monitoring-service-account|kind=service-account|p1:proposed_parent:absolute:s2:"triple (172.22.0.10,sensu,target-endpoint) listed in approved-monitoring-sources"||r1[p1]:absolute:"triple absent or revoked"|ac1:proposed:approved-monitoring-sources:"triple listed as active":esc/esc|"registry anchor names the registered actor; resolves both authorization and identity-of-use"|null|active
+
+:R routing
+selected_lead         approved-monitoring-sources-lookup
+composite_secondary   -
+override_data_source  -
+rationale             "registry consult is the cheapest disposition-settling discriminator; identity-of-use rides the same anchor (integrity waived)"
+```
 
 ## Disciplines (reference tail)
 
@@ -283,8 +311,7 @@ Judgment calls the validator doesn't catch:
 - **Hypotheses are mechanisms, not verdicts.** If removing an `authorization_contract` makes two hypotheses indistinguishable on every forward-looking prediction, it's an authorization fork — collapse to Shape A.
 - **Downstream-event signals are not hypotheses.** `?post-failure-success` / `?compromise-followup` as peers to mechanism hypotheses are composition-rule checks on subsequent events. Put them in GATHER as unconditional leads; ANALYZE's escalation logic reads them.
 - **Authorization vs integrity.** Authorization contracts answer *policy* — anchor-backed categorical verdict. Integrity is an attribute of the parent vertex, resolved by the same anchor in the common case (IAM / registry / audit-correlation anchors attest to identity-of-use alongside authorization). An optional `integrity_waived: <rationale>` field may document WHY the anchor covers both — useful in escalation reports but not required. A separate peer hypothesis is justified only when integrity implies a testably-different upstream mechanism (see invoker-identity anti-pattern above).
-- **Refinement via hierarchical IDs.** When a confirmed parent forces sub-mechanism distinctions on the same vertex (subtype, schedule, mechanism-internal variant), shelve the parent and emit children as `h-{parent}-{ordinal}` with independent weights. Sub-mechanism only — actor / orchestrator / configuration / session questions are upstream-fork (next bullet), not refinement.
-- **Upstream-fork IDs are fresh, not hierarchical.** When the next question introduces a new vertex (`actor`, `orchestrator`, `session`, `configuration`, `policy`) attached upstream of a `++` parent, emit a fresh `h-{n}` id — `h-002`, `h-003`, never `h-{parent}-{ordinal}`. The new vertex is not a child of the parent's grade; its weight is independent. Hierarchical IDs on an upstream vertex trip the rollup-grading rule (parent's `++` cannot derive from an unweighted child).
+- **Refinement via hierarchical IDs.** When a confirmed parent forces sub-mechanism distinctions, shelve it and emit children as `h-{parent}-{ordinal}` with independent weights.
 - **Append-only.** Never mutate prior entries. Correct prior grading by adding a new weight with rationale; don't rewrite.
 - **Pitfalls are per-hypothesis and alert-specific.** One or two traps that could make *this* hypothesis look confirmed (or refuted) when it isn't. Not generic lead-level pitfalls.
 - **Lead names must be real.** References point to playbook, common catalog, or are clearly marked `(new)`.
@@ -295,8 +322,6 @@ Judgment calls the validator doesn't catch:
 - **Refutation-shape adequacy.** Each `refutation_shape[i].claim` must, if observed true, materially contradict the hypothesis's story. Before emitting, run the consistency check: *if this refutation were observed tomorrow, would the mechanism in my story be falsified?* If both the story and the refutation could be true at the same time, the refutation does not refute — drop it or rewrite it on the load-bearing field of the story's mechanism. (Anti-pattern: story is "parent class is host-side-exec-primitive (kernel-invisible to Falco's container instrumentation)" and refutation is "actor is human / interactive" — both can be true simultaneously; a human running `docker exec` is *also* host-side-exec-primitive. The valid refutation is on the mechanism field: "alert event has `proc.pname` populated with a container-internal process name (parent IS visible to Falco — not host-side).")
 - **Story-prediction referent match.** Each prediction's `claim` must have its subject (the noun the claim is about) named in the cited `from_story_link` text. If the story discriminates parent-process class, predictions and refutations are about parent-process class — not about actor identity, not about authorization, not about cadence, smuggled in. If a separate question matters (e.g., "who is the actor"), it belongs on a different vertex — propose it as a hypothesis on the upstream vertex once the current edge is `++`, not as a prediction on the current one.
 - **Structural-consistency check on competing mechanisms.** When you consider proposing a new hypothesis with a competing mechanism on the same vertex (different parent class for the same observed edge), verify it against the alert's own field values *before* authoring it. *What would the alert's fields look like under this competing mechanism?* If the alert's actual fields actively contradict the competing mechanism (e.g., the competitor would produce a populated `proc.pname` while the alert shows `pname=null`; or the competitor would emit additional rule families the alert window does not contain), do not propose it — note the structural inconsistency in the routing rationale and continue with the original mechanism. Co-temporal events from a *different* rule family are not evidence of a shared parent edge; only a syscall-level edge or other authoritative join can establish that.
-- **Structurally-open attributes are explicit unknowns.** When the alert pins mechanism class (parent class is named in the alert's own fields) but a load-bearing attribute on the parent is structurally absent from the telemetry — actor identity, orchestrator subtype, session-of-origin, initiating-client class — name it on `parent_vertex.attributes` as `<attribute>: "??? — open; candidate set [...]; narrowed by <evidence-source>"`, emit a matching `ap*` `attribute_prediction` whose claim is "the resolving authority will name a value for this attribute," and carry the disposition-relevant question in `authorization_contract` whose predicate references the resolved attribute (two-step: identify → authorize). The hypothesis `name`, `parent_vertex.classification`, and `story` describe mechanism class only — never bake the most narratively-coherent candidate from the unknown's set into them (`?operator-runtime-exec` with story "An operator on the host issued docker exec..." commits to one candidate when all candidates produce the same wire shape under the same authorization signal). The test: if every candidate in the unknown's set resolves to the same disposition under the same authorization signal, the open question is identity-of-use (instrumental), not mechanism (terminal) — use this scaffold.
-- **Headline predictions discriminate disposition; instrumental observations go in `attribute_predictions[]`.** Reserve `p*` for claims whose direct refutation/confirmation closes disposition. Baseline-deviation observations that narrow an open attribute but don't by themselves discriminate disposition (e.g., cadence-anomaly consistent with both a benign-test variant and an adversary using the same channel) belong in `ap*` so the hypothesis carries through at `+/-` while the load-bearing attribute resolves. A hypothesis whose only `p*` is a deviation claim refutable by the foreground-matches-baseline shape will be `--`'d at loop 1 even when the load-bearing question is still open.
 - **Backward traversal on `++`, not on `+`.** When the prior ANALYZE graded a hypothesis `++` (the load-bearing field of its proposed_edge has direct authoritative confirmation), the next PREDICT proposes hypotheses on the **upstream vertex** of the now-confirmed edge — not competitors for the current vertex. The confirmed graph grows backward toward upstream causes; re-litigating an already-confirmed edge is not progress. If the prior ANALYZE graded `+`, do not traverse upstream; the current edge is not yet confirmed, and the right next move is a lead that promotes `+` to `++` (or refutes it) — not a new vertex. If the upstream vertex's authority is unreachable (telemetry gap, deny-listed source, external system), that is a **trust root** — emit a Shape E enrichment block with a single lead that probes the upstream authority; if the lead returns empty, ANALYZE will route `termination_category: trust-root`.
 
 ## Inputs

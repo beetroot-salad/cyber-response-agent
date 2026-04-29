@@ -5,7 +5,7 @@ zero) new hypotheses, always selects a lead, and hands off to GATHER.
 Continuation planning is PREDICT's job — ANALYZE decided we're continuing;
 PREDICT picks what to investigate next.
 
-The subagent (agents/predict.md, model=sonnet) emits one of:
+The subagent (agents/predict/SKILL.md, model=sonnet) emits one of:
     - `hypothesize:` invlang YAML block — when introducing 1+ new hypotheses
       (initial fork, fork refinement, or single-story declaration).
     - **No invlang YAML block** — when continuing an unchanged fork: the
@@ -405,11 +405,17 @@ def _synthesize_from_checkpoint(
     if "predict" not in data:
         return None
 
-    # Re-dump the embedded predict envelope and run it through the parser so
-    # synthesis enforces the same contract as the stdout path.
-    envelope_yaml = yaml.safe_dump({"predict": data["predict"]}, sort_keys=False)
+    # The embedded predict block is a multi-line dense-form scalar string
+    # (see agents/predict/SKILL.md §Progress checkpoint). Pass it directly to the
+    # parser so synthesis enforces the same contract as the stdout path.
+    # Note: pre-dense (YAML-envelope) checkpoints carried `predict` as a dict;
+    # those fall through here and force a retry. Only relevant if a run is
+    # resumed across the dense-cutover deploy boundary.
+    embedded = data["predict"]
+    if not isinstance(embedded, str):
+        return None
     try:
-        result = parse_predict_output(envelope_yaml, expected_loop_n=expected_loop_n)
+        result = parse_predict_output(embedded, expected_loop_n=expected_loop_n)
     except PredictOutputError:
         return None
 

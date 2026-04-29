@@ -62,14 +62,32 @@ _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 
 
 def _load_agent_definition(name: str) -> tuple[str, dict]:
-    """Read `agents/{name}.md`, split frontmatter from body.
+    """Read the subagent definition, split frontmatter from body.
+
+    Two layouts supported:
+      1. Flat: `agents/{name}.md` — single file with frontmatter + body.
+      2. Skill dir: `agents/{name}/SKILL.md` — main prompt is SKILL.md, with
+         supplementary content (examples/, dense-schema.md, ...) in the same
+         dir, referenced by relative path from inside SKILL.md.
+
+    Skill-dir layout is preferred when the agent's prompt grew enough that
+    examples and edge-case references benefit from sitting next to the main
+    prompt. Loader looks at the dir first (more structured), falls back to
+    the flat file (the original convention).
 
     Returns (body_text, frontmatter_dict). Body is the subagent's system prompt;
     frontmatter carries `model` and `tools`.
     """
-    path = SOC_AGENT_ROOT / "agents" / f"{name}.md"
-    if not path.exists():
-        raise OrchestrationError(f"subagent definition not found: {path}")
+    skill_path = SOC_AGENT_ROOT / "agents" / name / "SKILL.md"
+    flat_path = SOC_AGENT_ROOT / "agents" / f"{name}.md"
+    if skill_path.exists():
+        path = skill_path
+    elif flat_path.exists():
+        path = flat_path
+    else:
+        raise OrchestrationError(
+            f"subagent definition not found: tried {skill_path} and {flat_path}"
+        )
     text = path.read_text()
     m = _FRONTMATTER_RE.match(text)
     if not m:
