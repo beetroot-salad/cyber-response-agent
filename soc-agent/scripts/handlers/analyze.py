@@ -57,13 +57,13 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._context_loader import (
-    format_alert_block,
+    format_alert_summary_block,
     format_current_gather_block,
+    format_run_manifest,
     load_alert,
     load_investigation_md,
     load_run_salt,
 )
-from scripts.handlers.investigation_views import format_investigation_block
 from scripts.handlers._output_parser import (
     AnalyzeEnvelope,
     AnalyzeOutputError,
@@ -146,13 +146,28 @@ def _load_raw_details(ctx: Context) -> str:
 
 
 def _assemble_prompt(ctx: Context) -> str:
-    """Build the analyze subagent prompt with all deterministic context inline.
+    """Build the analyze subagent prompt with load-bearing context inline +
+    a manifest of read-on-demand artifacts.
 
-    The subagent receives alert.json, investigation.md, and the structured
-    `<current_gather>` block (per-lead `characterization`, status, query
-    metadata) preloaded — no Read tool calls required. The raw SIEM
-    payloads stay on disk under `runs/<run>/raw_details/loop-<N>/` and are
-    NOT inlined by default; set `SOC_AGENT_ANALYZE_INCLUDE_RAW_DETAILS=1`
+    What ships inline (irreducible for the comparator):
+      - run identifiers (run_dir, loop_n, signature_id)
+      - `<alert-{salt}>` flat field summary — the ~15 fields predictions'
+        claims typically reference
+      - `<available_context>` manifest — paths and section index for
+        alert.json (full) and investigation.md (per-section line ranges)
+      - `<current_gather>` — this loop's evidence, which IS what's being
+        graded
+
+    What is read-on-demand via the Read tool (declared in agents/analyze.md
+    `tools: [Read]`):
+      - investigation.md prior-phase blocks (PREDICT predictions /
+        refutation_shape — load-bearing on grading; GATHER/ANALYZE prior
+        loops — only when prediction-coverage carry-over needs them)
+      - alert.json full envelope — when a claim references an alert field
+        not in the summary block
+
+    Raw SIEM payloads still stay on disk under `runs/<run>/raw_details/loop-<N>/`
+    and are NOT inlined by default; set `SOC_AGENT_ANALYZE_INCLUDE_RAW_DETAILS=1`
     to restore the pre-trim shape. Archetype context is not preloaded;
     archetype labeling moved to the REPORT phase.
     """
@@ -163,8 +178,8 @@ def _assemble_prompt(ctx: Context) -> str:
 
     blocks = [
         f"run_dir={ctx.run_dir}\nloop_n={loop_n}\nsignature_id={ctx.signature_id}",
-        format_alert_block(alert, salt),
-        format_investigation_block(investigation_md, mode="analyze"),
+        format_alert_summary_block(alert, salt),
+        format_run_manifest(ctx.run_dir, investigation_md),
     ]
     gather_out = ctx.outputs.get(Phase.GATHER)
     if isinstance(gather_out, dict):

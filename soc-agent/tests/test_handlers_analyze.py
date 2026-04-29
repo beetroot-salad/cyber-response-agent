@@ -33,9 +33,13 @@ def make_ctx(
 ) -> Context:
     run_dir = tmp_path / "run-test"
     run_dir.mkdir()
-    # alert.json + meta.json are required — the analyze handler preloads the
-    # alert and the per-run salt into the prompt.
-    alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
+    # alert.json + meta.json are required — the analyze handler preloads a
+    # flat alert summary and the per-run salt into the prompt.
+    alert = {
+        "id": "alert-1",
+        "rule": {"id": "5710", "description": "sshd: invalid user", "level": 5},
+        "data": {"srcip": "10.0.0.1", "srcuser": "root"},
+    }
     import json as _json
     (run_dir / "alert.json").write_text(_json.dumps(alert))
     (run_dir / "meta.json").write_text(_json.dumps({"salt": "test-salt"}))
@@ -127,11 +131,12 @@ class TestPromptAssembly:
         assert f"run_dir={ctx.run_dir}" in captured[0]
         assert "signature_id=wazuh-rule-5710" in captured[0]
 
-    def test_prompt_inlines_alert_investigation_no_archetypes(self, tmp_path, monkeypatch):
-        """Handler preloads alert + investigation (YAML-only) + archetype-free
-        context. Markdown prose is stripped — only YAML fence content reaches
-        the subagent so archetype-catalog / playbook-hypothesis enumerations
-        cannot be mistaken for grading targets."""
+    def test_prompt_ships_alert_summary_manifest_no_inline_investigation(self, tmp_path, monkeypatch):
+        """Handler preloads a flat alert summary + an `<available_context>`
+        manifest pointing at investigation.md (read-on-demand). The full
+        `<investigation>` block is NOT inlined — the subagent Reads
+        targeted line ranges via the Read tool. Archetype context is also
+        absent (REPORT picks archetype, not ANALYZE)."""
         ctx = make_ctx(
             tmp_path,
             history=[Phase.PREDICT.value],
@@ -144,6 +149,14 @@ class TestPromptAssembly:
                 "  - id: v-001\n"
                 "    type: endpoint\n"
                 "```\n"
+                "\n"
+                "## PREDICT (loop 1)\n\n"
+                "```yaml\n"
+                "hypothesize:\n"
+                "  hypotheses:\n"
+                "  - id: h-001\n"
+                "    name: ?monitoring-probe\n"
+                "```\n"
             ),
         )
         captured: list[str] = []
@@ -154,20 +167,32 @@ class TestPromptAssembly:
         analyze_handler.handle(ctx)
         prompt = captured[0]
 
-        # Tagged blocks present (alert tag is salted for injection safety)
+        # Tagged alert summary is present (salted for injection safety).
         assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
-        # analyze handler uses mode="analyze" — tag carries a mode attribute
-        assert "<investigation mode=\"analyze\">" in prompt and "</investigation>" in prompt
+        assert "rule_id: \"5710\"" in prompt  # flat key=value summary, not nested JSON
+        # The full alert JSON should NOT be inlined verbatim.
+        assert '"id": "alert-1"' not in prompt
+
+        # The full <investigation> block is gone; agent Reads it on demand.
+        assert "<investigation" not in prompt
+        # Manifest is present and names investigation.md + section line ranges.
+        assert "<available_context>" in prompt and "</available_context>" in prompt
+        assert "investigation.md" in prompt
+        assert "alert.json" in prompt
+        assert "## CONTEXTUALIZE" in prompt or "CONTEXTUALIZE" in prompt
+        assert "PREDICT (loop 1)" in prompt
+
         # Archetype block explicitly absent — REPORT picks archetype, not ANALYZE
         assert "<archetypes>" not in prompt
         assert 'name="monitoring-probe"' not in prompt
-        # YAML fence content lands, markdown prose is stripped (the
-        # "Playbook hypotheses:" enumeration is the exact bleed surface
-        # d03ac81d tripped on — must not reach the subagent).
-        assert "v-001" in prompt  # from the YAML fence
+        # Markdown prose surfaces (Playbook hypotheses, archetype catalogs)
+        # don't ship inline either — the manifest only exposes paths +
+        # section ranges, not body content.
         assert "?bleed-target" not in prompt
-        assert "Playbook hypotheses" not in prompt
-        assert '"id": "alert-1"' in prompt  # from alert.json
+        assert "Playbook hypotheses:" not in prompt
+        # And the YAML fence body from CONTEXTUALIZE is also not inlined —
+        # the agent Reads the section if it needs the prologue vertices.
+        assert "v-001" not in prompt
 
     def test_loop_n_counts_hypothesize_entries(self, tmp_path, monkeypatch):
         # Three PREDICT entries → loop_n = 3
