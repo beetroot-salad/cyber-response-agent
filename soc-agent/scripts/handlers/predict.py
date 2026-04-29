@@ -408,6 +408,9 @@ def _synthesize_from_checkpoint(
     # The embedded predict block is a multi-line dense-form scalar string
     # (see agents/predict/SKILL.md §Progress checkpoint). Pass it directly to the
     # parser so synthesis enforces the same contract as the stdout path.
+    # Note: pre-dense (YAML-envelope) checkpoints carried `predict` as a dict;
+    # those fall through here and force a retry. Only relevant if a run is
+    # resumed across the dense-cutover deploy boundary.
     embedded = data["predict"]
     if not isinstance(embedded, str):
         return None

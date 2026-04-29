@@ -65,7 +65,7 @@ class _Block:
 _HEADER_RE = re.compile(
     r"^:(?P<tag>[A-Z])\s+(?P<name>[A-Za-z0-9_.\-]+)(?:\s*\[(?P<cols>[^\]]+)\])?\s*$"
 )
-_HEADER_LINE_RE = re.compile(r"^predict\s+loop=(\d+)\s+shape=([EAM])\s*$")
+_HEADER_LINE_RE = re.compile(r"^predict\s+loop=(\d+)\s+shape=([A-Za-z]+)\s*$")
 _STORY_HEADER_RE = re.compile(r"^###\s+story\s+(h-[\w\-]+)\s*$")
 _SENTENCE_ID_RE = re.compile(r"^(s\d+)\.")
 _QUOTED_RE = re.compile(r'^"(.*)"$')
@@ -108,8 +108,13 @@ def _tokenize(
         line = raw.rstrip()
         stripped = line.strip()
 
-        m_h = _HEADER_LINE_RE.match(stripped)
-        if m_h and not header:
+        if not header and stripped.startswith("predict "):
+            m_h = _HEADER_LINE_RE.match(stripped)
+            if not m_h:
+                raise error_cls(
+                    f"predict header line malformed: {stripped!r} "
+                    f"(expected `predict loop=<int> shape=<E|A|M>`)"
+                )
             header["loop"] = int(m_h.group(1))
             header["shape"] = m_h.group(2)
             cur_block = None
@@ -152,10 +157,8 @@ def _tokenize(
             cur_block.rows.append(stripped)
             continue
 
-        # Blank line: close story, keep block open until next header.
-        if not stripped and cur_story is not None:
-            stories[cur_story[0]] = cur_story[1]
-            cur_story = None
+        # Blank line: tolerated inside both story and block — they stay open
+        # until the next `###`/`:` header (or EOF).
 
     if cur_story:
         stories[cur_story[0]] = cur_story[1]
@@ -170,23 +173,6 @@ def _tokenize(
 
 def _split_cells(row: str) -> list[str]:
     return [c.strip() for c in row.split("|")]
-
-
-def _split_colon_preserving_quotes(s: str) -> list[str]:
-    out: list[str] = []
-    buf: list[str] = []
-    in_quote = False
-    for ch in s:
-        if ch == '"':
-            in_quote = not in_quote
-            buf.append(ch)
-        elif ch == ":" and not in_quote:
-            out.append("".join(buf).strip())
-            buf = []
-        else:
-            buf.append(ch)
-    out.append("".join(buf).strip())
-    return out
 
 
 def _parse_kv_attrs(cell: str) -> dict[str, str]:
@@ -545,6 +531,13 @@ def _attach_comparison(
             if entry["id"] == pred_ref:
                 entry["comparison"] = comp
                 return
+    for entry in hyp["attribute_predictions"]:
+        if entry["id"] == pred_ref:
+            raise error_cls(
+                f"{hyp['id']}: :P {hyp['id']}.comparisons references "
+                f"attribute_prediction {pred_ref!r}; attribute_predictions "
+                f"do not carry comparisons (only p*/r* do)"
+            )
     raise error_cls(
         f"{hyp['id']}: :P {hyp['id']}.comparisons row references unknown "
         f"pred_ref {pred_ref!r} (must name a p* or r* on the same hypothesis)"

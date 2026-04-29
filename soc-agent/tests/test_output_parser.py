@@ -208,11 +208,11 @@ class TestShapeA:
         with pytest.raises(PredictOutputError, match="shape=A must not emit a branch_plan"):
             parse_predict_output(_d(body))
 
-    def test_shape_a_missing_authz_fails_at_consistency_check(self):
-        # Shape A requires ≥1 authz contract — _check_shape_consistency
-        # currently checks only presence of hypotheses; the authz requirement
-        # is enforced via the validator on the composed companion. We assert
-        # that this case at least parses (validator catches it downstream).
+    def test_shape_a_missing_authz_passes_parser_validator_catches(self):
+        # Shape A requires ≥1 authz contract, but _check_shape_consistency
+        # checks only presence of hypotheses; the authz requirement is
+        # enforced by the invlang validator on the composed companion. We
+        # assert the parser passes this case through unchanged.
         body = textwrap.dedent("""
             predict loop=1 shape=A
 
@@ -453,14 +453,142 @@ class TestEnvelope:
 
     def test_bad_shape_value_fails(self):
         body = "predict loop=1 shape=Z\n\n:R routing\nselected_lead   x\n"
-        with pytest.raises(PredictOutputError, match="missing header line"):
-            # `shape=Z` doesn't match the [EAM] regex, so the header line
-            # itself is not recognized — fail surface is missing header.
+        # Header is recognized; bad shape produces a focused shape error
+        # downstream (legacy-shape map applied first, then _VALID_SHAPES check).
+        with pytest.raises(PredictOutputError, match="shape must be one of"):
+            parse_predict_output(_d(body))
+
+    def test_legacy_shape_d_remapped_to_e(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=D
+
+            :L lead_preds [id|kind|if|read_as|advance_to]
+            lp1|presence|"a"|b|c
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        result = parse_predict_output(_d(body))
+        assert result.telemetry == {"loop": 1, "shape": "E"}
+
+    def test_malformed_predict_header_diagnoses_specifically(self):
+        # `predict ` prefix present but the form is broken — not "missing
+        # header" but a focused malformation error so the retry prompt
+        # tells the subagent what's actually wrong.
+        body = "predict loop=one shape=E\n\n:R routing\nselected_lead   x\n"
+        with pytest.raises(PredictOutputError, match="header line malformed"):
             parse_predict_output(_d(body))
 
     def test_loop_mismatch_with_expected_fails(self):
         with pytest.raises(PredictOutputError, match="does not match orchestrator"):
             parse_predict_output(_d(SHAPE_E_BODY), expected_loop_n=2)
+
+    def test_missing_routing_block_fails(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=E
+
+            :L lead_preds [id|kind|if|read_as|advance_to]
+            lp1|presence|"a"|b|c
+        """)
+        with pytest.raises(PredictOutputError, match="selected_lead"):
+            parse_predict_output(_d(body))
+
+    def test_missing_hypotheses_block_on_shape_a_fails(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(
+            PredictOutputError, match="shape=A requires at least one hypothesis"
+        ):
+            parse_predict_output(_d(body))
+
+    def test_missing_hypotheses_block_on_shape_m_fails(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=M
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(PredictOutputError, match="shape=M"):
+            parse_predict_output(_d(body))
+
+    def test_story_tolerates_blank_lines_between_sentences(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. first sentence
+
+            s2. second sentence
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s2|"x"
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|some-anchor|"x"|esc|esc
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        # Both s1 and s2 must be retained — s2 is the from_story_link and
+        # parsing it would fail the sentence-ID consistency check if blank
+        # lines closed the story prematurely.
+        result = parse_predict_output(_d(body))
+        story = result.invlang_delta["hypotheses"][0]["story"]
+        assert "s1." in story and "s2." in story
+
+    def test_attr_pred_in_comparisons_diagnoses_specifically(self):
+        # An ap* id in a comparisons row gets a targeted error mentioning
+        # that attribute_predictions don't carry comparisons.
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. story
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s1|"x"
+
+            :P h-001.attr_preds [id|target|attribute|kind|claim]
+            ap1|proposed_parent|cmdline|presence|"x"
+
+            :P h-001.comparisons [pred_ref|selector_kind|selector|dimension]
+            ap1|historical-self|"src=x"|some-dim
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|some-anchor|"x"|esc|esc
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(
+            PredictOutputError, match="attribute_predictions do not carry comparisons"
+        ):
+            parse_predict_output(_d(body))
 
 
 # ---------------------------------------------------------------------------
