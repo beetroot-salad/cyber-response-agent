@@ -46,7 +46,7 @@ if [ -z "$RULE_ID" ]; then
     exit 2
 fi
 
-REPO_ROOT="${REPO_ROOT:-/workspace}"
+REPO_ROOT=/workspace
 SOURCE_PLUGIN_DIR="$REPO_ROOT/soc-agent"
 TOOLS_VENV="$SOURCE_PLUGIN_DIR/.venv/bin/python3"
 FETCH_ALERT="$SOURCE_PLUGIN_DIR/scripts/fetch_alert.py"
