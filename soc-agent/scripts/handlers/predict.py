@@ -405,11 +405,14 @@ def _synthesize_from_checkpoint(
     if "predict" not in data:
         return None
 
-    # Re-dump the embedded predict envelope and run it through the parser so
-    # synthesis enforces the same contract as the stdout path.
-    envelope_yaml = yaml.safe_dump({"predict": data["predict"]}, sort_keys=False)
+    # The embedded predict block is a multi-line dense-form scalar string
+    # (see agents/predict.md §Progress checkpoint). Pass it directly to the
+    # parser so synthesis enforces the same contract as the stdout path.
+    embedded = data["predict"]
+    if not isinstance(embedded, str):
+        return None
     try:
-        result = parse_predict_output(envelope_yaml, expected_loop_n=expected_loop_n)
+        result = parse_predict_output(embedded, expected_loop_n=expected_loop_n)
     except PredictOutputError:
         return None
 

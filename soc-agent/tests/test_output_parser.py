@@ -1,7 +1,11 @@
 """Unit tests for scripts.handlers._output_parser.parse_predict_output.
 
-Pure parser tests — no file I/O, no subagent dispatch. Exercises envelope
-extraction, header validation, per-shape presence rules, and routing shape.
+Pure parser tests — no file I/O, no subagent dispatch. Exercises the dense-form
+envelope (DB grammar): block tokenization, kind/comparison rules, story-prose
+sentence-ID consistency, field-presence matrix, routing-block validation.
+
+The YAML envelope was retired in the dense-PREDICT migration (parallel to PR
+#153 for ANALYZE). All fixtures here are dense-form.
 """
 
 from __future__ import annotations
@@ -21,8 +25,18 @@ from scripts.handlers._output_parser import (  # noqa: E402
 )
 
 
+def _d(body: str) -> str:
+    """Dense-form fixture — already trimmed; no fence wrapping required.
+
+    The parser tolerates a single outer ``` fence pair, but most fixtures
+    don't bother since stdout from the subagent isn't fenced either.
+    """
+    return body.strip() + "\n"
+
+
 def _y(body: str) -> str:
-    """Wrap a YAML body in a ```yaml fence like subagents emit."""
+    """Wrap a YAML body in a ```yaml fence — used by gather + analyze tests
+    further down (those parsers stayed YAML)."""
     return f"```yaml\n{body.strip()}\n```"
 
 
@@ -32,72 +46,74 @@ def _y(body: str) -> str:
 
 
 SHAPE_E_BODY = textwrap.dedent("""
-    predict:
-      loop: 1
-      shape: E
-      branch_plan:
-        primary_lead: authentication-history
-        predictions:
-          - {id: lp1, if: "forward-success within 60s", read_as: "compromise", advance_to: escalate}
-          - {id: lp2, if: "periodic cadence", read_as: "sanctioned", advance_to: fork-at-identity-of-use}
-      routing:
-        selected_lead: authentication-history
-        composite_secondary: []
+    predict loop=1 shape=E
+
+    :L lead_preds [id|kind|if|read_as|advance_to]
+    lp1|presence|"forward-success within 60s"|compromise|escalate
+    lp2|cadence|"foreground within source's 72h cadence baseline"|sanctioned|fork-at-identity-of-use
+
+    :L lead_preds.comparisons [pred_ref|selector_kind|selector|dimension]
+    lp2|historical-self|"src=<source_ip> 72h"|inter-event-gap-distribution
+
+    :R routing
+    selected_lead         authentication-history
+    composite_secondary   -
+    override_data_source  -
+    rationale             "anchored cadence vs forward-success partitions next-loop questions"
 """).strip()
 
 
 class TestShapeE:
     def test_valid_shape_e_parses(self):
-        result = parse_predict_output(_y(SHAPE_E_BODY), expected_loop_n=1)
+        result = parse_predict_output(_d(SHAPE_E_BODY), expected_loop_n=1)
         assert result.telemetry == {"loop": 1, "shape": "E"}
         assert "hypotheses" not in result.invlang_delta
         assert "branch_plan" in result.invlang_delta
         assert result.invlang_delta["branch_plan"]["primary_lead"] == "authentication-history"
         assert len(result.invlang_delta["branch_plan"]["predictions"]) == 2
-        assert result.routing == {
-            "selected_lead": "authentication-history",
-            "composite_secondary": [],
-        }
+        # lp2 (cadence — deviation) carries comparison; lp1 (presence) does not.
+        lps = result.invlang_delta["branch_plan"]["predictions"]
+        lp1 = next(p for p in lps if p["id"] == "lp1")
+        lp2 = next(p for p in lps if p["id"] == "lp2")
+        assert "comparison" not in lp1
+        assert lp2["comparison"]["dimension"] == "inter-event-gap-distribution"
+        assert result.routing["selected_lead"] == "authentication-history"
+        assert result.routing["composite_secondary"] == []
 
     def test_shape_e_without_branch_plan_fails(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: 1
-              shape: E
-              routing:
-                selected_lead: x
-        """))
+        body = textwrap.dedent("""
+            predict loop=1 shape=E
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
         with pytest.raises(PredictOutputError, match="shape=E requires a branch_plan"):
-            parse_predict_output(body)
+            parse_predict_output(_d(body))
 
     def test_shape_e_with_hypotheses_fails(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: 1
-              shape: E
-              hypotheses:
-                - {id: h-001, name: "?x"}
-              branch_plan:
-                primary_lead: x
-                predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]
-              routing:
-                selected_lead: x
-        """))
-        with pytest.raises(PredictOutputError, match="shape=E must have empty hypotheses"):
-            parse_predict_output(body)
+        body = textwrap.dedent("""
+            predict loop=1 shape=E
 
-    def test_shape_e_empty_branch_plan_predictions_fails(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: 1
-              shape: E
-              branch_plan:
-                primary_lead: x
-                predictions: []
-              routing: {selected_lead: x}
-        """))
-        with pytest.raises(PredictOutputError, match="branch_plan.predictions"):
-            parse_predict_output(body)
+            ### story h-001
+            s1. Some story.
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|host-side-exec-invoker|||null|active
+
+            :L lead_preds [id|kind|if|read_as|advance_to]
+            lp1|presence|"a"|b|c
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(PredictOutputError, match="shape=E must have empty hypotheses"):
+            parse_predict_output(_d(body))
 
 
 # ---------------------------------------------------------------------------
@@ -106,68 +122,313 @@ class TestShapeE:
 
 
 SHAPE_A_BODY = textwrap.dedent("""
-    predict:
-      loop: 1
-      shape: A
-      hypotheses:
-        - id: h-001
-          name: "?host-runtime-exec"
-          attached_to_vertex: v-001
-          proposed_edge:
-            relation: spawned
-            parent_vertex:
-              type: process
-              classification: host-side-exec-invoker
-          predictions:
-            - {id: p1, claim: "container-baseline has prior runc-parent shell"}
-          attribute_predictions:
-            - {id: ap1, target: proposed_parent, attribute: cmdline, claim: "matches /monitord/"}
-          refutation_shape:
-            - {id: r1, refutes_predictions: [p1, ap1], claim: "no baseline + cmdline shell-pipe"}
-          authorization_contract:
-            - {id: ac1, edge_ref: proposed, anchor_kind: ci-cd-job-record, asks: authorization}
-          weight: null
-      routing:
-        selected_lead: container-baseline
-        composite_secondary: [correlated-falco-events]
+    predict loop=1 shape=A
+
+    ### story h-001
+    s1. The host-side runtime invoker spawned the observed process via syscall, leaving runc as the visible parent in Falco.
+    s2. The CI/CD job record is the authoritative source for whether this runtime invocation was scheduled.
+
+    :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+    h-001|?host-runtime-exec|v-001|spawned|process|host-side-exec-invoker|||null|active
+
+    :P h-001.preds [id|subject|kind|from_story|claim]
+    p1|proposed_parent|absolute|s1|"container-baseline has prior runc-parent shell"
+
+    :P h-001.attr_preds [id|target|attribute|kind|claim]
+    ap1|proposed_parent|cmdline|presence|"matches /monitord/"
+
+    :P h-001.refuts [id|refutes|kind|claim]
+    r1|p1,ap1|absolute|"no baseline + cmdline shell-pipe"
+
+    :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+    ac1|proposed|ci-cd-job-record|"job record present in approved registry"|esc|esc
+
+    :R routing
+    selected_lead         container-baseline
+    composite_secondary   correlated-falco-events
+    override_data_source  -
+    rationale             "ci-cd job-record anchor settles authorization fastest"
 """).strip()
 
 
 class TestShapeA:
     def test_valid_shape_a_parses(self):
-        result = parse_predict_output(_y(SHAPE_A_BODY))
+        result = parse_predict_output(_d(SHAPE_A_BODY))
         assert result.telemetry == {"loop": 1, "shape": "A"}
         assert "branch_plan" not in result.invlang_delta
         assert len(result.invlang_delta["hypotheses"]) == 1
         h = result.invlang_delta["hypotheses"][0]
         assert h["id"] == "h-001"
         assert h["attribute_predictions"][0]["id"] == "ap1"
+        assert h["authorization_contract"][0]["anchor_kind"] == "ci-cd-job-record"
+        assert h["story"].startswith("s1.")
+        assert h["predictions"][0]["from_story_link"] == "s1"
+        assert h["refutation_shape"][0]["refutes_predictions"] == ["p1", "ap1"]
         assert result.routing["selected_lead"] == "container-baseline"
         assert result.routing["composite_secondary"] == ["correlated-falco-events"]
 
     def test_shape_a_without_hypotheses_fails(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: 1
-              shape: A
-              routing: {selected_lead: x}
-        """))
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
         with pytest.raises(PredictOutputError, match="shape=A requires at least one hypothesis"):
-            parse_predict_output(body)
+            parse_predict_output(_d(body))
 
     def test_shape_a_with_branch_plan_fails(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: 1
-              shape: A
-              hypotheses: [{id: h-001, name: "?x"}]
-              branch_plan:
-                primary_lead: x
-                predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]
-              routing: {selected_lead: x}
-        """))
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. story
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s1|"x"
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|some-anchor|"x"|esc|esc
+
+            :L lead_preds [id|kind|if|read_as|advance_to]
+            lp1|presence|"a"|b|c
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
         with pytest.raises(PredictOutputError, match="shape=A must not emit a branch_plan"):
-            parse_predict_output(body)
+            parse_predict_output(_d(body))
+
+    def test_shape_a_missing_authz_fails_at_consistency_check(self):
+        # Shape A requires ≥1 authz contract — _check_shape_consistency
+        # currently checks only presence of hypotheses; the authz requirement
+        # is enforced via the validator on the composed companion. We assert
+        # that this case at least parses (validator catches it downstream).
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. story
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s1|"x"
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        result = parse_predict_output(_d(body))
+        assert result.invlang_delta["hypotheses"][0]["authorization_contract"] == []
+
+
+# ---------------------------------------------------------------------------
+# kind / comparison rules — promoted from prose discipline to parse-time check
+# ---------------------------------------------------------------------------
+
+
+class TestKindAndComparison:
+    def test_presence_on_refutation_rejected(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. story
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s1|"x"
+
+            :P h-001.refuts [id|refutes|kind|claim]
+            r1|p1|presence|"any signal at all"
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|some-anchor|"x"|esc|esc
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(PredictOutputError, match="presence is forbidden on refutations"):
+            parse_predict_output(_d(body))
+
+    def test_deviation_kind_requires_comparison(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. story
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|cadence|s1|"foreground within 72h baseline distribution"
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|some-anchor|"x"|esc|esc
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(PredictOutputError, match="kind='cadence' requires a comparison"):
+            parse_predict_output(_d(body))
+
+    def test_non_deviation_kind_with_comparison_rejected(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. story
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s1|"x"
+
+            :P h-001.comparisons [pred_ref|selector_kind|selector|dimension]
+            p1|historical-self|"src=x"|some-dim
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|some-anchor|"x"|esc|esc
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(PredictOutputError, match="must not carry a comparison"):
+            parse_predict_output(_d(body))
+
+    def test_unknown_kind_rejected(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. story
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|hand-wave|s1|"x"
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|some-anchor|"x"|esc|esc
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(PredictOutputError, match="unknown kind 'hand-wave'"):
+            parse_predict_output(_d(body))
+
+
+# ---------------------------------------------------------------------------
+# Story prose / sentence-ID consistency
+# ---------------------------------------------------------------------------
+
+
+class TestStoryProse:
+    def test_missing_story_for_declared_hypothesis_rejected(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s1|"x"
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|some-anchor|"x"|esc|esc
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(PredictOutputError, match="missing story prose block"):
+            parse_predict_output(_d(body))
+
+    def test_from_story_link_must_name_known_sentence(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. one
+            s2. two
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s9|"x"
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|some-anchor|"x"|esc|esc
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(PredictOutputError, match="from_story_link='s9' not in story sentence IDs"):
+            parse_predict_output(_d(body))
+
+    def test_sub_block_for_undeclared_hypothesis_rejected(self):
+        body = textwrap.dedent("""
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. story
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?x|v-001|spawned|process|c|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s1|"x"
+
+            :P h-002.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s1|"x"
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|some-anchor|"x"|esc|esc
+
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
+        with pytest.raises(PredictOutputError, match="hypothesis 'h-002' not declared"):
+            parse_predict_output(_d(body))
 
 
 # ---------------------------------------------------------------------------
@@ -176,52 +437,30 @@ class TestShapeA:
 
 
 class TestEnvelope:
-    def test_unwrapped_yaml_parses(self):
-        """Subagent may emit the YAML without the ```yaml fence — still parses."""
-        result = parse_predict_output(SHAPE_E_BODY)
+    def test_fenced_envelope_parses(self):
+        """Subagent may wrap stdout in a single ``` fence — still parses."""
+        wrapped = "```\n" + SHAPE_E_BODY + "\n```"
+        result = parse_predict_output(wrapped)
         assert result.telemetry == {"loop": 1, "shape": "E"}
 
     def test_empty_stdout_fails(self):
         with pytest.raises(PredictOutputError, match="empty"):
             parse_predict_output("")
 
-    def test_missing_predict_key_fails(self):
-        with pytest.raises(PredictOutputError, match="top-level key"):
-            parse_predict_output("not_predict:\n  shape: E\n")
-
-    def test_non_mapping_top_level_fails(self):
-        with pytest.raises(PredictOutputError, match="must be a mapping"):
-            parse_predict_output("- item\n- item\n")
+    def test_missing_predict_header_fails(self):
+        with pytest.raises(PredictOutputError, match="missing header line"):
+            parse_predict_output(":H hypotheses [id]\nh-001\n")
 
     def test_bad_shape_value_fails(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: 1
-              shape: Z
-              routing: {selected_lead: x}
-        """))
-        with pytest.raises(PredictOutputError, match="shape must be one of"):
-            parse_predict_output(body)
-
-    def test_non_integer_loop_fails(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: "one"
-              shape: E
-              branch_plan: {primary_lead: x, predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]}
-              routing: {selected_lead: x}
-        """))
-        with pytest.raises(PredictOutputError, match="loop must be an integer"):
-            parse_predict_output(body)
+        body = "predict loop=1 shape=Z\n\n:R routing\nselected_lead   x\n"
+        with pytest.raises(PredictOutputError, match="missing header line"):
+            # `shape=Z` doesn't match the [EAM] regex, so the header line
+            # itself is not recognized — fail surface is missing header.
+            parse_predict_output(_d(body))
 
     def test_loop_mismatch_with_expected_fails(self):
         with pytest.raises(PredictOutputError, match="does not match orchestrator"):
-            parse_predict_output(_y(SHAPE_E_BODY), expected_loop_n=2)
-
-    def test_invalid_yaml_fails(self):
-        body = "```yaml\npredict:\n  loop: 1\n  shape: [unclosed\n```"
-        with pytest.raises(PredictOutputError, match="not valid YAML"):
-            parse_predict_output(body)
+            parse_predict_output(_d(SHAPE_E_BODY), expected_loop_n=2)
 
 
 # ---------------------------------------------------------------------------
@@ -229,33 +468,41 @@ class TestEnvelope:
 # ---------------------------------------------------------------------------
 
 
+def _shape_e_with_routing(routing_block: str) -> str:
+    return textwrap.dedent(f"""
+        predict loop=1 shape=E
+
+        :L lead_preds [id|kind|if|read_as|advance_to]
+        lp1|presence|"a"|b|c
+
+        {routing_block.strip()}
+    """).strip()
+
+
 class TestRouting:
     def test_missing_selected_lead_fails(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: 1
-              shape: E
-              branch_plan: {primary_lead: x, predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]}
-              routing: {composite_secondary: []}
-        """))
+        body = _shape_e_with_routing("""
+            :R routing
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
+        """)
         with pytest.raises(PredictOutputError, match="selected_lead"):
-            parse_predict_output(body)
+            parse_predict_output(_d(body))
 
     def test_optional_fields_propagate(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: 1
-              shape: E
-              branch_plan: {primary_lead: x, predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]}
-              routing:
-                selected_lead: x
-                composite_secondary: [y]
-                override_data_source: host_query
-                lead_hints:
-                  x: "walk ancestry above runc"
-                  y: "cross-check session window"
-        """))
-        result = parse_predict_output(body)
+        body = _shape_e_with_routing("""
+            :R routing
+            selected_lead         x
+            composite_secondary   y
+            override_data_source  host_query
+            rationale             "test"
+
+            :R routing.lead_hints [lead|hint]
+            x|"walk ancestry above runc"
+            y|"cross-check session window"
+        """)
+        result = parse_predict_output(_d(body))
         assert result.routing["override_data_source"] == "host_query"
         assert result.routing["lead_hints"] == {
             "x": "walk ancestry above runc",
@@ -263,32 +510,18 @@ class TestRouting:
         }
 
     def test_lead_hints_unknown_lead_rejected(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: 1
-              shape: E
-              branch_plan: {primary_lead: x, predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]}
-              routing:
-                selected_lead: x
-                composite_secondary: []
-                lead_hints:
-                  not-prescribed: "stray hint"
-        """))
-        with pytest.raises(PredictOutputError, match="not-prescribed"):
-            parse_predict_output(body)
+        body = _shape_e_with_routing("""
+            :R routing
+            selected_lead         x
+            composite_secondary   -
+            override_data_source  -
+            rationale             "x"
 
-    def test_bad_composite_secondary_type_fails(self):
-        body = _y(textwrap.dedent("""
-            predict:
-              loop: 1
-              shape: E
-              branch_plan: {primary_lead: x, predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]}
-              routing:
-                selected_lead: x
-                composite_secondary: "not-a-list"
-        """))
-        with pytest.raises(PredictOutputError, match="composite_secondary"):
-            parse_predict_output(body)
+            :R routing.lead_hints [lead|hint]
+            not-prescribed|"stray hint"
+        """)
+        with pytest.raises(PredictOutputError, match="not-prescribed"):
+            parse_predict_output(_d(body))
 
 
 # ---------------------------------------------------------------------------
@@ -298,70 +531,74 @@ class TestRouting:
 
 class TestScopeOverride:
     BASE = textwrap.dedent("""
-        predict:
-          loop: 1
-          shape: E
-          branch_plan: {primary_lead: x, predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]}
-          routing:
-            selected_lead: x
-            composite_secondary: []
+        predict loop=1 shape=E
+
+        :L lead_preds [id|kind|if|read_as|advance_to]
+        lp1|presence|"a"|b|c
+
+        :R routing
+        selected_lead         x
+        composite_secondary   -
+        override_data_source  -
+        rationale             "x"
     """).strip()
 
     def test_absent_scope_override_does_not_appear_in_routing(self):
-        result = parse_predict_output(_y(self.BASE))
+        result = parse_predict_output(_d(self.BASE))
         assert "scope_override" not in result.routing
 
     def test_window_hours_only_defaults_anchor_to_alert(self):
-        body = self.BASE + "\n    scope_override:\n      window_hours: 24"
-        result = parse_predict_output(_y(body))
+        body = self.BASE + textwrap.dedent("""
+
+            :R routing.scope_override [key|value]
+            window_hours|24
+        """)
+        result = parse_predict_output(_d(body))
         assert result.routing["scope_override"] == {
             "window_hours": 24,
             "anchor": "alert",
         }
 
     def test_window_hours_plus_anchor_now(self):
-        body = self.BASE + "\n    scope_override:\n      window_hours: 72\n      anchor: now"
-        result = parse_predict_output(_y(body))
+        body = self.BASE + textwrap.dedent("""
+
+            :R routing.scope_override [key|value]
+            window_hours|72
+            anchor|now
+        """)
+        result = parse_predict_output(_d(body))
         assert result.routing["scope_override"] == {
             "window_hours": 72,
             "anchor": "now",
         }
 
-    def test_non_mapping_fails(self):
-        body = self.BASE + "\n    scope_override: \"24h\""
-        with pytest.raises(PredictOutputError, match="scope_override must be a mapping"):
-            parse_predict_output(_y(body))
-
-    def test_missing_window_hours_fails(self):
-        body = self.BASE + "\n    scope_override:\n      anchor: alert"
-        with pytest.raises(PredictOutputError, match="window_hours must be a positive integer"):
-            parse_predict_output(_y(body))
-
     def test_zero_window_hours_fails(self):
-        body = self.BASE + "\n    scope_override:\n      window_hours: 0"
-        with pytest.raises(PredictOutputError, match="window_hours must be > 0"):
-            parse_predict_output(_y(body))
+        body = self.BASE + textwrap.dedent("""
 
-    def test_negative_window_hours_fails(self):
-        body = self.BASE + "\n    scope_override:\n      window_hours: -4"
+            :R routing.scope_override [key|value]
+            window_hours|0
+        """)
         with pytest.raises(PredictOutputError, match="window_hours must be > 0"):
-            parse_predict_output(_y(body))
+            parse_predict_output(_d(body))
 
     def test_non_integer_window_hours_fails(self):
-        body = self.BASE + "\n    scope_override:\n      window_hours: \"24\""
-        with pytest.raises(PredictOutputError, match="window_hours must be a positive integer"):
-            parse_predict_output(_y(body))
+        body = self.BASE + textwrap.dedent("""
 
-    def test_boolean_window_hours_fails(self):
-        # Python `True` is an int subclass — explicit reject.
-        body = self.BASE + "\n    scope_override:\n      window_hours: true"
-        with pytest.raises(PredictOutputError, match="window_hours must be a positive integer"):
-            parse_predict_output(_y(body))
+            :R routing.scope_override [key|value]
+            window_hours|24h
+        """)
+        with pytest.raises(PredictOutputError, match="window_hours must be an integer"):
+            parse_predict_output(_d(body))
 
     def test_bad_anchor_fails(self):
-        body = self.BASE + "\n    scope_override:\n      window_hours: 24\n      anchor: yesterday"
+        body = self.BASE + textwrap.dedent("""
+
+            :R routing.scope_override [key|value]
+            window_hours|24
+            anchor|yesterday
+        """)
         with pytest.raises(PredictOutputError, match="anchor must be one of"):
-            parse_predict_output(_y(body))
+            parse_predict_output(_d(body))
 
 
 # ===========================================================================

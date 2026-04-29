@@ -85,80 +85,80 @@ def stub_validator(results: list[list[str]]):
 # Canned subagent responses. Trailer lives in the last ```yaml fence; invlang
 # block(s) precede it. Handler strips only the last fence before appending.
 
+# Shape M — two hypotheses diverging on observable fields (cadence vs pattern).
 _FORK_RESPONSE = textwrap.dedent("""
-```yaml
-predict:
-  loop: 1
-  shape: M
-  hypotheses:
-    - id: h-001
-      name: "?scheduled-automation-health-check"
-      attached_to_vertex: v-001
-      proposed_edge:
-        relation: initiated_by
-        parent_vertex: {type: identity, classification: scheduled-automation-health-check}
-      predictions:
-        - {id: p1, subject: proposed_parent, claim: "event cadence matches documented probe interval within ±5s"}
-      refutation_shape:
-        - {id: r1, refutes_predictions: [p1], claim: "event cadence is off-documented-interval"}
-      weight: null
-    - id: h-002
-      name: "?adversary-controlled-monitoring-host"
-      attached_to_vertex: v-001
-      proposed_edge:
-        relation: initiated_by
-        parent_vertex: {type: identity, classification: adversary-controlled-monitoring-host}
-      predictions:
-        - {id: p1, subject: proposed_parent, claim: "event pattern deviates from documented probe"}
-      refutation_shape:
-        - {id: r1, refutes_predictions: [p1], claim: "event pattern matches documented probe"}
-      weight: null
-  routing:
-    selected_lead: authentication-history
-    composite_secondary: []
-```
+predict loop=1 shape=M
+
+### story h-001
+s1. The scheduled automation produces rule-5710 events at a documented probe interval.
+s2. The cadence baseline over 72h is the authoritative discriminator for whether this is the probe vs an off-schedule attempt.
+
+### story h-002
+s1. An adversary on a compromised host could reuse the registered probe credential, producing rule-5710 events that deviate from the probe schedule.
+s2. The same cadence baseline that confirms h-001 refutes h-002 — divergence on inter-arrival distribution.
+
+:H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+h-001|?scheduled-automation-health-check|v-001|initiated_by|identity|scheduled-automation-health-check|||null|active
+h-002|?adversary-controlled-monitoring-host|v-001|initiated_by|identity|adversary-controlled-monitoring-host|||null|active
+
+:P h-001.preds [id|subject|kind|from_story|claim]
+p1|proposed_parent|cadence|s1|"event cadence within documented probe interval distribution"
+
+:P h-001.refuts [id|refutes|kind|claim]
+r1|p1|cadence|"event cadence outside documented probe interval distribution"
+
+:P h-001.comparisons [pred_ref|selector_kind|selector|dimension]
+p1|historical-self|"src=<source_ip> rule=5710 72h"|inter-arrival-distribution
+r1|historical-self|"src=<source_ip> rule=5710 72h"|inter-arrival-distribution
+
+:P h-002.preds [id|subject|kind|from_story|claim]
+p1|proposed_parent|cadence|s1|"event pattern deviates from documented probe distribution"
+
+:P h-002.refuts [id|refutes|kind|claim]
+r1|p1|cadence|"event pattern matches documented probe distribution"
+
+:P h-002.comparisons [pred_ref|selector_kind|selector|dimension]
+p1|historical-self|"src=<source_ip> rule=5710 72h"|inter-arrival-distribution
+r1|historical-self|"src=<source_ip> rule=5710 72h"|inter-arrival-distribution
+
+:R routing
+selected_lead         authentication-history
+composite_secondary   -
+override_data_source  -
+rationale             "cadence baseline partitions both hypotheses on a single GATHER pass"
 """).strip()
 
 
-# Shape E — no hypotheses, branch_plan only. Replaces the old "no new
-# hypotheses" / "continue stable fork" shape.
+# Shape E — no hypotheses, branch_plan only.
 _NO_FORK_RESPONSE = textwrap.dedent("""
-```yaml
-predict:
-  loop: 1
-  shape: E
-  branch_plan:
-    primary_lead: source-classification
-    predictions:
-      - {id: lp1, if: "classifies as internal-monitoring-host", read_as: "sanctioned", advance_to: authentication-history}
-      - {id: lp2, if: "classifies as external-origin", read_as: "bruteforce", advance_to: escalate}
-  routing:
-    selected_lead: source-classification
-    composite_secondary: []
-```
+predict loop=1 shape=E
+
+:L lead_preds [id|kind|if|read_as|advance_to]
+lp1|absolute|"172.22.0.10 classifies as internal-monitoring-host in ip-ranges"|sanctioned|authentication-history
+lp2|absolute|"172.22.0.10 classifies as external-origin in ip-ranges"|bruteforce|escalate
+
+:R routing
+selected_lead         source-classification
+composite_secondary   -
+override_data_source  -
+rationale             "source classification is the cheapest discriminator before any higher-cost query"
 """).strip()
 
 
-# Contract violation: subagent emitted an invlang `hypothesize:` block instead
-# of the unified `predict:` envelope. The parser rejects it; the handler
-# passes the error verbatim as a remediation note.
+# Contract violation: subagent emitted a YAML envelope. The parser rejects
+# it (missing dense header line); the handler passes the error verbatim as
+# a remediation note.
 _NO_FORK_WITH_GATHER_BLOCK_RESPONSE = textwrap.dedent("""
-```yaml
 findings:
   - id: l-001
     loop: 1
     name: source-classification
-```
 """).strip()
 
 
-# Malformed envelope: the subagent returned invlang `error:` but not wrapped
-# in the `predict:` envelope. The parser rejects with a missing-top-level-
-# key error which becomes the remediation note.
+# Malformed envelope: not a dense block, not even close.
 _ERROR_RESPONSE = textwrap.dedent("""
-```yaml
 error: "investigation.md missing prologue — cannot form hypotheses"
-```
 """).strip()
 
 
@@ -220,7 +220,7 @@ class TestPromptAssembly:
             Phase.PREDICT.value,
         ]
         ctx = make_ctx(tmp_path, history=history)
-        response = _FORK_RESPONSE.replace("loop: 1", "loop: 2")
+        response = _FORK_RESPONSE.replace("loop=1 ", "loop=2 ")
         captured: list[str] = []
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
                             stub_invoke(captured, [response]))
@@ -536,28 +536,28 @@ class TestHandleHappyPaths:
         """PREDICT can prescribe multiple leads via routing.composite_secondary.
         Handler passes through verbatim to GATHER."""
         response_with_secondary = textwrap.dedent("""
-            ```yaml
-            predict:
-              loop: 1
-              shape: A
-              hypotheses:
-                - id: h-001
-                  name: "?host-runtime-exec"
-                  attached_to_vertex: v-001
-                  proposed_edge:
-                    relation: spawned
-                    parent_vertex: {type: process, classification: host-side-exec-invoker}
-                  predictions:
-                    - {id: p1, claim: "baseline has prior runc-parent shell"}
-                  refutation_shape:
-                    - {id: r1, refutes_predictions: [p1], claim: "no baseline"}
-                  authorization_contract:
-                    - {id: ac1, edge_ref: proposed, anchor_kind: ci-cd-job-record, asks: authorization}
-                  weight: null
-              routing:
-                selected_lead: correlated-falco-events
-                composite_secondary: [source-reputation]
-            ```
+            predict loop=1 shape=A
+
+            ### story h-001
+            s1. The host-side runtime invoker spawned the observed process via syscall.
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-001|?host-runtime-exec|v-001|spawned|process|host-side-exec-invoker|||null|active
+
+            :P h-001.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s1|"baseline has prior runc-parent shell"
+
+            :P h-001.refuts [id|refutes|kind|claim]
+            r1|p1|absolute|"no baseline"
+
+            :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+            ac1|proposed|ci-cd-job-record|"job record present"|esc|esc
+
+            :R routing
+            selected_lead         correlated-falco-events
+            composite_secondary   source-reputation
+            override_data_source  -
+            rationale             "composite dispatch over the falco context plus reputation lookup"
         """).strip()
         ctx = make_ctx(tmp_path)
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
@@ -592,10 +592,10 @@ class TestHandleHappyPaths:
         assert result.payload["selected_lead"] == "authentication-history"
 
     def test_non_predict_envelope_triggers_parse_error_retry(self, tmp_path, monkeypatch):
-        """When the subagent emits a YAML block without the top-level
-        `predict:` key (e.g., an invlang `findings:` block directly), the parser
-        rejects with a PredictOutputError. The handler passes the error
-        verbatim as a remediation note and retries."""
+        """When the subagent emits content without the dense PREDICT header line
+        (e.g., a YAML envelope from a previous version), the parser rejects with
+        PredictOutputError. The handler passes the error verbatim as a remediation
+        note and retries."""
         captured: list[str] = []
         monkeypatch.setattr(
             predict_handler, "_invoke_subagent",
@@ -609,7 +609,7 @@ class TestHandleHappyPaths:
         # Two attempts — the second is the retry.
         assert len(captured) == 2
         # Parser's error message lands in the retry prompt as a remediation.
-        assert "top-level key `predict:`" in captured[1]
+        assert "missing header line" in captured[1]
         assert "resume_from_checkpoint=true" in captured[1]
         # Final routing — Shape E response successfully parsed.
         assert result.next_phase == Phase.GATHER
@@ -627,7 +627,8 @@ class TestHandleHappyPaths:
         assert "## PREDICT (loop 1)" in written
         assert "hypothesize:" in written
         # Terminal trailer must not land in investigation.md.
-        assert "selected_lead: authentication-history" not in written
+        assert ":R routing" not in written
+        assert "selected_lead         authentication-history" not in written
 
     def test_unresolved_prescribed_set_threaded_as_remediation_note(
         self, tmp_path, monkeypatch,
@@ -689,16 +690,15 @@ class TestHandleErrorPaths:
         retries; three failures exhaust the retry budget → OrchestrationError."""
         ctx = make_ctx(tmp_path)
         bad = textwrap.dedent("""
-            ```yaml
-            predict:
-              loop: 1
-              shape: E
-              branch_plan:
-                primary_lead: x
-                predictions: [{id: lp1, if: "a", read_as: "b", advance_to: c}]
-              routing:
-                composite_secondary: []
-            ```
+            predict loop=1 shape=E
+
+            :L lead_preds [id|kind|if|read_as|advance_to]
+            lp1|presence|"a"|b|c
+
+            :R routing
+            composite_secondary   -
+            override_data_source  -
+            rationale             "missing selected_lead"
             """).strip()
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
                             stub_invoke([], [bad, bad, bad]))
@@ -779,20 +779,18 @@ class TestCheckpointRecovery:
         ctx = make_ctx(tmp_path)
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "complete",
-            "predict": {
-                "loop": 1,
-                "shape": "E",
-                "branch_plan": {
-                    "primary_lead": "shell-context",
-                    "predictions": [
-                        {"id": "lp1", "if": "a", "read_as": "b", "advance_to": "c"},
-                    ],
-                },
-                "routing": {
-                    "selected_lead": "shell-context",
-                    "composite_secondary": [],
-                },
-            },
+            "predict": textwrap.dedent("""
+                predict loop=1 shape=E
+
+                :L lead_preds [id|kind|if|read_as|advance_to]
+                lp1|presence|"a"|b|c
+
+                :R routing
+                selected_lead         shell-context
+                composite_secondary   -
+                override_data_source  -
+                rationale             "synthesized from checkpoint"
+            """).strip(),
         })
         captured: list[str] = []
         # Subagent returns empty stdout (the pathology).
@@ -812,37 +810,47 @@ class TestCheckpointRecovery:
         ctx = make_ctx(tmp_path, existing_investigation="## CONTEXTUALIZE\n\nexisting.\n")
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "complete",
-            "predict": {
-                "loop": 1,
-                "shape": "M",
-                "hypotheses": [
-                    {
-                        "id": "h-001",
-                        "name": "?scheduled-automation-health-check",
-                        "attached_to_vertex": "v-001",
-                        "proposed_edge": {
-                            "relation": "initiated_by",
-                            "parent_vertex": {
-                                "type": "identity",
-                                "classification": "scheduled-automation-health-check",
-                            },
-                        },
-                        "predictions": [
-                            {"id": "p1", "subject": "proposed_parent",
-                             "claim": "event cadence matches documented probe interval within ±5s"},
-                        ],
-                        "refutation_shape": [
-                            {"id": "r1", "refutes_predictions": ["p1"],
-                             "claim": "event cadence is off-documented-interval"},
-                        ],
-                        "weight": None,
-                    },
-                ],
-                "routing": {
-                    "selected_lead": "authentication-history",
-                    "composite_secondary": [],
-                },
-            },
+            "predict": textwrap.dedent("""
+                predict loop=1 shape=M
+
+                ### story h-001
+                s1. The scheduled automation produces probe events at a documented cadence.
+                s2. The 72h baseline is the discriminator for off-cadence attempts.
+
+                ### story h-002
+                s1. An adversary on a compromised host could reuse the registered probe credential off-schedule.
+                s2. The same baseline divergence refutes h-002.
+
+                :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+                h-001|?scheduled-automation-health-check|v-001|initiated_by|identity|scheduled-automation-health-check|||null|active
+                h-002|?adversary-controlled-monitoring-host|v-001|initiated_by|identity|adversary-controlled-monitoring-host|||null|active
+
+                :P h-001.preds [id|subject|kind|from_story|claim]
+                p1|proposed_parent|cadence|s1|"event cadence within documented probe distribution"
+
+                :P h-001.refuts [id|refutes|kind|claim]
+                r1|p1|cadence|"event cadence outside documented probe distribution"
+
+                :P h-001.comparisons [pred_ref|selector_kind|selector|dimension]
+                p1|historical-self|"src=<source_ip> 72h"|inter-arrival-distribution
+                r1|historical-self|"src=<source_ip> 72h"|inter-arrival-distribution
+
+                :P h-002.preds [id|subject|kind|from_story|claim]
+                p1|proposed_parent|cadence|s1|"pattern deviates from documented probe distribution"
+
+                :P h-002.refuts [id|refutes|kind|claim]
+                r1|p1|cadence|"pattern matches documented probe distribution"
+
+                :P h-002.comparisons [pred_ref|selector_kind|selector|dimension]
+                p1|historical-self|"src=<source_ip> 72h"|inter-arrival-distribution
+                r1|historical-self|"src=<source_ip> 72h"|inter-arrival-distribution
+
+                :R routing
+                selected_lead         authentication-history
+                composite_secondary   -
+                override_data_source  -
+                rationale             "cadence baseline partitions both hypotheses"
+            """).strip(),
         })
         captured: list[str] = []
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
@@ -864,14 +872,18 @@ class TestCheckpointRecovery:
         ctx = make_ctx(tmp_path)
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "drafting",  # ← not complete
-            "predict": {
-                "loop": 1,
-                "shape": "E",
-                "branch_plan": {"primary_lead": "x", "predictions": [
-                    {"id": "lp1", "if": "a", "read_as": "b", "advance_to": "c"},
-                ]},
-                "routing": {"selected_lead": "x", "composite_secondary": []},
-            },
+            "predict": textwrap.dedent("""
+                predict loop=1 shape=E
+
+                :L lead_preds [id|kind|if|read_as|advance_to]
+                lp1|presence|"a"|b|c
+
+                :R routing
+                selected_lead         x
+                composite_secondary   -
+                override_data_source  -
+                rationale             "x"
+            """).strip(),
         })
         captured: list[str] = []
         monkeypatch.setattr(
@@ -913,44 +925,37 @@ class TestCheckpointRecovery:
         ctx = make_ctx(tmp_path)
         _write_checkpoint(ctx.run_dir, 1, {
             "status": "complete",
-            "predict": {
-                "loop": 1,
-                "shape": "M",
-                "hypotheses": [
-                    {
-                        "id": "h-001",
-                        "name": "?x",
-                        "attached_to_vertex": "v-001",
-                        "proposed_edge": {
-                            "relation": "spawned",
-                            "parent_vertex": {"type": "process", "classification": "x"},
-                        },
-                        "predictions": [{"id": "p1", "claim": "..."}],
-                        "refutation_shape": [
-                            {"id": "r1", "refutes_predictions": ["p1"], "claim": "..."},
-                        ],
-                        "weight": None,
-                    },
-                    {
-                        "id": "h-002",
-                        "name": "?y",
-                        "attached_to_vertex": "v-001",
-                        "proposed_edge": {
-                            "relation": "spawned",
-                            "parent_vertex": {"type": "process", "classification": "y"},
-                        },
-                        "predictions": [{"id": "p1", "claim": "..."}],
-                        "refutation_shape": [
-                            {"id": "r1", "refutes_predictions": ["p1"], "claim": "..."},
-                        ],
-                        "weight": None,
-                    },
-                ],
-                "routing": {
-                    "selected_lead": "authentication-history",
-                    "composite_secondary": [],
-                },
-            },
+            "predict": textwrap.dedent("""
+                predict loop=1 shape=M
+
+                ### story h-001
+                s1. one
+
+                ### story h-002
+                s1. two
+
+                :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+                h-001|?x|v-001|spawned|process|x|||null|active
+                h-002|?y|v-001|spawned|process|y|||null|active
+
+                :P h-001.preds [id|subject|kind|from_story|claim]
+                p1|proposed_parent|absolute|s1|"..."
+
+                :P h-001.refuts [id|refutes|kind|claim]
+                r1|p1|absolute|"..."
+
+                :P h-002.preds [id|subject|kind|from_story|claim]
+                p1|proposed_parent|absolute|s1|"..."
+
+                :P h-002.refuts [id|refutes|kind|claim]
+                r1|p1|absolute|"..."
+
+                :R routing
+                selected_lead         authentication-history
+                composite_secondary   -
+                override_data_source  -
+                rationale             "x"
+            """).strip(),
         })
         captured: list[str] = []
         # All 3 attempts return empty stdout (retry budget = 2 → 3 total).

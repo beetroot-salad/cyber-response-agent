@@ -31,6 +31,8 @@ from typing import Any
 
 import yaml
 
+from . import _predict_dense
+
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -125,74 +127,9 @@ def _extract_top_level_envelope(
     return envelope
 
 
-def _extract_envelope(stdout: str) -> dict[str, Any]:
-    """Predict-flavored wrapper around `_extract_top_level_envelope`."""
-    return _extract_top_level_envelope(
-        stdout, key="predict", error_cls=PredictOutputError,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Section extractors
 # ---------------------------------------------------------------------------
-
-
-def _extract_header(env: dict[str, Any]) -> dict[str, Any]:
-    """Validate and extract the loop + shape header."""
-    loop = env.get("loop")
-    shape = env.get("shape")
-    if not isinstance(loop, int):
-        raise PredictOutputError(
-            f"predict.loop must be an integer, got {type(loop).__name__}"
-        )
-    if shape in _LEGACY_SHAPE_MAP:
-        # Tolerance: map pre-collapse D/I to their new equivalents so a
-        # stray subagent emission doesn't block the handler. The parser
-        # rewrites the header in place.
-        shape = _LEGACY_SHAPE_MAP[shape]
-    if shape not in _VALID_SHAPES:
-        raise PredictOutputError(
-            f"predict.shape must be one of {sorted(_VALID_SHAPES)}, got {shape!r}"
-        )
-    return {"loop": loop, "shape": shape}
-
-
-def _extract_hypotheses(env: dict[str, Any]) -> list[dict[str, Any]]:
-    """Pull `hypotheses[]` if present. Schema validation happens downstream
-    via `validate_companion_proposed()`."""
-    hs = env.get("hypotheses")
-    if hs is None:
-        return []
-    if not isinstance(hs, list):
-        raise PredictOutputError(
-            f"predict.hypotheses must be a list, got {type(hs).__name__}"
-        )
-    return hs
-
-
-def _extract_branch_plan(env: dict[str, Any]) -> dict[str, Any] | None:
-    """Pull `branch_plan` if present. Does not validate the inner predictions
-    shape here — that's enforced at append time against the pending gather
-    entry (rule #18 on the invlang side)."""
-    bp = env.get("branch_plan")
-    if bp is None:
-        return None
-    if not isinstance(bp, dict):
-        raise PredictOutputError(
-            f"predict.branch_plan must be a mapping, got {type(bp).__name__}"
-        )
-    primary = bp.get("primary_lead")
-    predictions = bp.get("predictions")
-    if not isinstance(primary, str) or not primary.strip():
-        raise PredictOutputError(
-            "predict.branch_plan.primary_lead must be a non-empty string"
-        )
-    if not isinstance(predictions, list) or not predictions:
-        raise PredictOutputError(
-            "predict.branch_plan.predictions must be a non-empty list of "
-            "readings (lp* entries with if/read_as/advance_to)"
-        )
-    return bp
 
 
 _VALID_SCOPE_ANCHORS = frozenset({"alert", "now"})
@@ -372,42 +309,63 @@ def _check_shape_consistency(
 
 
 def parse_predict_output(stdout: str, *, expected_loop_n: int | None = None) -> PredictParseResult:
-    """Parse a predict subagent's unified YAML output into the three buckets.
+    """Parse the predict subagent's dense-format envelope into three buckets.
 
-    `expected_loop_n` lets the handler cross-check that the subagent emitted
-    the correct loop number; mismatch is a PredictOutputError (the subagent
-    is asserting a loop the orchestrator didn't authorize).
+    Dense form was selected by the bake-off (branch `predict-dense-bakeoff`)
+    over packed sub-cells (DP) and hybrid (DH) variants — DB hit 100% parse
+    rate vs DP 92% / DH 64% on a 75-cell sweep. Hard cutover from YAML; the
+    YAML envelope helpers were retired alongside this change.
+
+    `expected_loop_n` lets the handler cross-check the subagent emitted the
+    correct loop number; mismatch is a PredictOutputError.
 
     Routes only the structural shape — `validate_companion_proposed()` still
     runs on the companion after the delta is appended, so schema errors on
     hypotheses land in the existing validator-retry flow.
     """
-    env = _extract_envelope(stdout)
+    pred = _predict_dense.parse_predict_dense(stdout, PredictOutputError)
 
-    header = _extract_header(env)
-    if expected_loop_n is not None and header["loop"] != expected_loop_n:
+    loop = pred["loop"]
+    if expected_loop_n is not None and loop != expected_loop_n:
         raise PredictOutputError(
-            f"predict.loop={header['loop']} does not match orchestrator-"
-            f"computed loop_n={expected_loop_n}. The subagent must emit the "
-            f"loop number passed in its prompt."
+            f"predict.loop={loop} does not match orchestrator-computed "
+            f"loop_n={expected_loop_n}. The subagent must emit the loop "
+            f"number passed in its prompt."
         )
 
-    hypotheses = _extract_hypotheses(env)
-    branch_plan = _extract_branch_plan(env)
-    routing = _extract_routing(env)
+    shape = pred["shape"]
+    if shape in _LEGACY_SHAPE_MAP:
+        shape = _LEGACY_SHAPE_MAP[shape]
+    if shape not in _VALID_SHAPES:
+        raise PredictOutputError(
+            f"predict.shape must be one of {sorted(_VALID_SHAPES)}, got {shape!r}"
+        )
+    pred["shape"] = shape
 
-    _check_shape_consistency(header["shape"], hypotheses, branch_plan)
+    hypotheses = pred.get("hypotheses") or []
+    branch_plan = pred.get("branch_plan")
+
+    # Validate routing using the shared helper (lead_hints valid_names check,
+    # scope_override window_hours/anchor enforcement, selected_lead non-empty).
+    routing = _extract_routing(pred)
+
+    _check_shape_consistency(shape, hypotheses, branch_plan)
 
     invlang_delta: dict[str, Any] = {}
     if hypotheses:
         invlang_delta["hypotheses"] = hypotheses
     if branch_plan is not None:
+        # Backfill primary_lead from routing if the subagent omitted it on
+        # the bare `:L lead_preds` block (it's the same value as
+        # routing.selected_lead, structurally).
+        if not branch_plan.get("primary_lead") and routing.get("selected_lead"):
+            branch_plan["primary_lead"] = routing["selected_lead"]
         invlang_delta["branch_plan"] = branch_plan
 
     return PredictParseResult(
         invlang_delta=invlang_delta,
         routing=routing,
-        telemetry=header,
+        telemetry={"loop": loop, "shape": shape},
     )
 
 

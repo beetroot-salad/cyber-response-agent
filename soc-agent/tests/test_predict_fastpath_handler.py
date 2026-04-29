@@ -28,37 +28,45 @@ from scripts.orchestrate import Context  # noqa: E402
 
 
 _FORK_RESPONSE = textwrap.dedent("""
-```yaml
-predict:
-  loop: 1
-  shape: M
-  hypotheses:
-    - id: h-001
-      name: "?scheduled-automation-health-check"
-      attached_to_vertex: v-001
-      proposed_edge:
-        relation: initiated_by
-        parent_vertex: {type: identity, classification: scheduled-automation-health-check}
-      predictions:
-        - {id: p1, subject: proposed_parent, claim: "event cadence matches documented probe interval within ±5s"}
-      refutation_shape:
-        - {id: r1, refutes_predictions: [p1], claim: "event cadence is off-documented-interval"}
-      weight: null
-    - id: h-002
-      name: "?adversary-controlled-monitoring-host"
-      attached_to_vertex: v-001
-      proposed_edge:
-        relation: initiated_by
-        parent_vertex: {type: identity, classification: adversary-controlled-monitoring-host}
-      predictions:
-        - {id: p1, subject: proposed_parent, claim: "event pattern deviates from documented probe"}
-      refutation_shape:
-        - {id: r1, refutes_predictions: [p1], claim: "event pattern matches documented probe"}
-      weight: null
-  routing:
-    selected_lead: authentication-history
-    composite_secondary: []
-```
+predict loop=1 shape=M
+
+### story h-001
+s1. The scheduled automation produces probe events at a documented cadence.
+s2. The 72h baseline is the discriminator for off-cadence attempts.
+
+### story h-002
+s1. An adversary on a compromised host could reuse the registered probe credential off-schedule.
+s2. The same baseline divergence refutes h-002.
+
+:H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+h-001|?scheduled-automation-health-check|v-001|initiated_by|identity|scheduled-automation-health-check|||null|active
+h-002|?adversary-controlled-monitoring-host|v-001|initiated_by|identity|adversary-controlled-monitoring-host|||null|active
+
+:P h-001.preds [id|subject|kind|from_story|claim]
+p1|proposed_parent|cadence|s1|"event cadence within documented probe distribution"
+
+:P h-001.refuts [id|refutes|kind|claim]
+r1|p1|cadence|"event cadence outside documented probe distribution"
+
+:P h-001.comparisons [pred_ref|selector_kind|selector|dimension]
+p1|historical-self|"src=<source_ip> 72h"|inter-arrival-distribution
+r1|historical-self|"src=<source_ip> 72h"|inter-arrival-distribution
+
+:P h-002.preds [id|subject|kind|from_story|claim]
+p1|proposed_parent|cadence|s1|"pattern deviates from documented probe distribution"
+
+:P h-002.refuts [id|refutes|kind|claim]
+r1|p1|cadence|"pattern matches documented probe distribution"
+
+:P h-002.comparisons [pred_ref|selector_kind|selector|dimension]
+p1|historical-self|"src=<source_ip> 72h"|inter-arrival-distribution
+r1|historical-self|"src=<source_ip> 72h"|inter-arrival-distribution
+
+:R routing
+selected_lead         authentication-history
+composite_secondary   -
+override_data_source  -
+rationale             "cadence baseline partitions both hypotheses"
 """).strip()
 
 
@@ -242,7 +250,7 @@ def test_loop_2_skips_fast_path(tmp_path, monkeypatch):
     ]
     monkeypatch.setattr("invlang.corpus.load_corpus", lambda *a, **kw: corpus)
     captured: list[str] = []
-    response = _FORK_RESPONSE.replace("loop: 1", "loop: 2")
+    response = _FORK_RESPONSE.replace("loop=1 ", "loop=2 ")
     monkeypatch.setattr(
         predict_handler, "_invoke_subagent",
         _stub_subagent(captured, [response]),
