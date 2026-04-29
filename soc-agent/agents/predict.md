@@ -145,7 +145,7 @@ Every `p*`, `ap*`, `r*`, and `lp*` row carries an explicit `kind` from the close
 | `geometry`        | Foreground matches / deviates from the recurring baseline geometry on a recorded dimension. |
 | `cadence`         | Foreground rate / inter-event distribution falls within / outside the baseline distribution. |
 | `novel-artifact`  | A category of artifact appears in foreground that's absent from baseline of comparable shape. |
-| `absence`         | Foreground deviates from a structurally-zero baseline (any presence is the deviation). |
+| `absence`         | Foreground deviates from a structurally-zero baseline (any presence is the deviation). The selector still has to be declared in the comparison row — `absence` describes a baseline shape, not the absence of a selector. Use this when a named historical / peer / population selector is expected to return zero and the foreground breaks that. |
 | `presence`        | Bare-presence claim NOT tied to a zero baseline. **Disallowed on `r*` refutations** (presence-test refutation anti-pattern). May appear on `p*` only when the prediction is about a directly-fielded value the alert telemetry already names. |
 | `absolute`        | Direct field-read threshold — the field exists in the alert payload or anchor response and the claim is `field op value`. |
 
@@ -223,11 +223,15 @@ p1|historical-self|"src=172.22.0.10 AND rule=5710 over 72h"|inter-event-gap-dist
 :L lead_preds [id|kind|if|read_as|advance_to]
 lp1|cadence|"foreground within source's 72h cadence baseline"|periodic-tooling-pattern|fork-at-identity
 lp2|novel-artifact|"foreground introduces forward-success not in 30d baseline"|escalating-attempt|escalate
+lp3|absence|"selector returns zero events (no baseline established for this image — first occurrence)"|first-occurrence|escalate
 
 :L lead_preds.comparisons [pred_ref|selector_kind|selector|dimension]
 lp1|historical-self|"src=<source_ip> AND rule=5710 OR rule=5715 over 72h"|inter-event-gap-distribution
 lp2|historical-self|"src=<source_ip> 30d"|forward-auth-success
+lp3|historical-self|"image=<image> AND rule=<this_rule> over 168h"|event-count
 ```
+
+Note `lp3`: `kind=absence` still names a selector. The reading is "this selector is *expected* to return non-zero under benign conditions; if it returns zero, that's the deviation." A `kind=absence` row without a comparison row is rejected — declaring the selector is how the agent commits to *what would have been there* before claiming its absence.
 
 `advance_to` is one of `escalate`, `fork-at-<question>`, or `halt`. `:L lead_preds.comparisons` is required iff at least one `lp*` row has a deviation kind.
 
