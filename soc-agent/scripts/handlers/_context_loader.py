@@ -212,6 +212,118 @@ def format_alert_block(alert: dict, salt: str) -> str:
     return f"<alert-{salt}>\n{json.dumps(alert, indent=2)}\n</alert-{salt}>"
 
 
+_ALERT_SUMMARY_FIELDS = (
+    # (display name, dotted path on alert dict)
+    ("rule_id", "rule.id"),
+    ("rule_description", "rule.description"),
+    ("rule_level", "rule.level"),
+    ("@timestamp", "@timestamp"),
+    ("location", "location"),
+    ("source_ip", "data.srcip"),
+    ("source_user", "data.srcuser"),
+    ("dest_user", "data.dstuser"),
+    ("agent_id", "agent.id"),
+    ("agent_name", "agent.name"),
+    ("proc_name", "data.output_fields.proc.name"),
+    ("proc_pname", "data.output_fields.proc.pname"),
+    ("proc_cmdline", "data.output_fields.proc.cmdline"),
+    ("proc_exepath", "data.output_fields.proc.exepath"),
+    ("user_name", "data.output_fields.user.name"),
+    ("user_loginuid", "data.output_fields.user.loginuid"),
+    ("container_id", "data.output_fields.container.id"),
+    ("container_image", "data.output_fields.container.image.repository"),
+    ("evt_type", "data.output_fields.evt.type"),
+)
+
+
+def _dotted_get(d: dict, path: str) -> object:
+    cur: object = d
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return None
+    return cur
+
+
+def format_alert_summary_block(alert: dict, salt: str) -> str:
+    """Render a flat summary of the alert's load-bearing fields as a salted
+    block.
+
+    The full alert.json is kept on disk; this block surfaces the ~15 fields
+    a hypothesis prediction's `claim` typically references. The agent reads
+    `alert.json` on demand via the Read tool when it needs anything else.
+
+    Salt-tagged for injection safety, same convention as
+    `format_alert_block`. Returns key=value pairs, one per line, omitting
+    fields whose value is None / missing. Values are stringified — any
+    raw embedded markup is JSON-quoted to neutralize.
+    """
+    if not salt:
+        raise ValueError("format_alert_summary_block requires a non-empty salt")
+    lines = [f"<alert-{salt}>"]
+    for label, path in _ALERT_SUMMARY_FIELDS:
+        v = _dotted_get(alert, path)
+        if v is None or v == "":
+            continue
+        # JSON-encode to neutralize any embedded special chars (markdown,
+        # tag-like content, ANSI). For plain ints/floats this still produces
+        # a clean numeric literal.
+        lines.append(f"{label}: {json.dumps(v)}")
+    lines.append(f"</alert-{salt}>")
+    return "\n".join(lines)
+
+
+def format_run_manifest(run_dir: Path, investigation_md: str) -> str:
+    """Render an `<available_context>` manifest naming on-disk artifacts the
+    subagent can Read on demand.
+
+    Replaces the inline `<investigation>` block in analyze prompts with a
+    file path + section index. The agent Reads specific sections (by line
+    range) only when grading needs that prior-phase content. Cuts
+    cache_write per dispatch by ~5-9KB on multi-loop runs because prior
+    PREDICT/GATHER/ANALYZE blocks no longer ship inline.
+
+    For investigation.md, surfaces:
+      - file path + total size
+      - per-section line ranges keyed by `## ...` header text
+
+    Section line ranges are 1-indexed and inclusive on both ends.
+    """
+    lines = ["<available_context>"]
+
+    alert_path = run_dir / "alert.json"
+    if alert_path.exists():
+        size = alert_path.stat().st_size
+        lines.append(f"  alert: {alert_path} ({size} bytes)")
+        lines.append("    Read for full alert JSON when a prediction's claim references a field not in <alert-{salt}>.")
+
+    inv_path = run_dir / "investigation.md"
+    if inv_path.exists():
+        size = inv_path.stat().st_size
+        body_lines = investigation_md.splitlines()
+        lines.append(f"  investigation: {inv_path} ({size} bytes, {len(body_lines)} lines)")
+        if not investigation_md.strip():
+            lines.append("    (empty — no prior phases recorded)")
+        else:
+            # Walk the file to identify ## headers + their line ranges.
+            # Fence-aware — `##` inside ```yaml fences is body, not a header.
+            in_fence = False
+            entries: list[tuple[int, str]] = []  # (1-indexed line, header text)
+            for idx, line in enumerate(body_lines, start=1):
+                if line.startswith("```"):
+                    in_fence = not in_fence
+                    continue
+                if not in_fence and line.startswith("## "):
+                    entries.append((idx, line[3:].rstrip()))
+            for i, (start, header) in enumerate(entries):
+                end = (entries[i + 1][0] - 1) if i + 1 < len(entries) else len(body_lines)
+                lines.append(f"    {header} — lines {start}-{end}")
+            lines.append("    Read targeted line ranges via Read(file_path, offset, limit) when grading needs a specific phase block.")
+    lines.append("</available_context>")
+    return "\n".join(lines)
+
+
 def format_current_gather_block(leads: list[dict]) -> str:
     """Render the current loop's gather envelope as a `<current_gather>`
     YAML block for the analyze prompt.
