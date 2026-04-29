@@ -148,7 +148,7 @@ next_intended_step: "compile final YAML and emit to stdout"    # one line; alway
 
 **Recovery by the main agent (informational):** if your tool_result lacks the final YAML, the main agent reads the checkpoint and respawns with *"Read `{checkpoint_path}`. Continue from `next_intended_step`. Finish the YAML and emit."* Your checkpoint is what makes that recovery work — keep it structured and current.
 
-**Recovery behavior when YOU are the recovery dispatch:** if invoked with `resume_from_checkpoint=true` (or equivalent), read the checkpoint, transcribe per-lead entries verbatim into the final YAML, and emit. Do NOT re-run queries that the checkpoint marks `status: ok`/`partial`/`dropped_attempt`/`data_missing`. Only execute leads the checkpoint marks `pending` or mid-query. Write one final checkpoint with `status: complete` before emitting the YAML — consistent with the primary dispatch's cadence step 4, and protects against a recovery-time termination cascading.
+**Recovery behavior when YOU are the recovery dispatch:** if invoked with `resume_from_checkpoint=true` (or equivalent), read the checkpoint, transcribe per-lead entries verbatim into the final YAML, and emit. Do NOT re-run queries that the checkpoint marks `status: ok`/`partial`/`dropped_attempt`/`data_missing`. Only execute leads the checkpoint marks `pending` or mid-query. **Do NOT write a final `status: complete` checkpoint before emitting** — same rule as primary dispatch (§Write cadence). Go straight from reading the checkpoint (and any pending-lead execution) to emitting the YAML on stdout. A final Write before the YAML risks ending the session on `tool_use(Write)`, which `claude --print` drops — losing the recovery work.
 
 ## Prescribed-lead scope discipline (handler-enforced)
 
@@ -212,6 +212,8 @@ Free-text, but tight. The aim is actionable recovery, not a reasoning log. ~2–
 - Compile the YAML as you go. After each lead's characterization is in hand, update a running output in scratch. Do not defer the entire YAML to the end.
 - If you've made **15+ tool calls** without emitting a YAML block, stop gathering and emit what you have *now* with `status: partial` on incomplete leads and a one-line `notes:` explaining what you didn't reach. An incomplete surfaced characterization is recoverable; a silent termination is not.
 - Final action on every run path (success, error, budget-exhaustion): one YAML block on stdout. Never end a turn with prose, thinking, or a tool call before the YAML. A caller may ask for supplementary content AFTER the YAML (test harnesses, debug summaries) — allowed; the YAML must still be there, and first.
+
+**Final-turn discipline: the LAST assistant turn MUST be the text emission of the YAML envelope, NEVER a tool call.** `claude --print` only emits the final assistant text turn — if your last turn is `tool_use(Write)` (a checkpoint, even one written for safety), stdout comes back empty and the entire run is lost despite all the work. Concretely: after the last Write to your checkpoint, you MUST have at least one more turn that is plain text containing the fenced ```yaml block. If you're tempted to write a "final completion checkpoint" right before emitting, don't — the last in-progress checkpoint is sufficient for recovery, and the Write would shadow your YAML emission. **If a budget-exhaustion forces an early bail, the bail itself is a text turn with the partial YAML — never a Write to the checkpoint as the closing action.**
 
 ## Output envelope
 
