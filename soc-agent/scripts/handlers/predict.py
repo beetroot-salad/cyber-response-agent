@@ -5,7 +5,7 @@ zero) new hypotheses, always selects a lead, and hands off to GATHER.
 Continuation planning is PREDICT's job — ANALYZE decided we're continuing;
 PREDICT picks what to investigate next.
 
-The subagent (agents/predict.md, model=sonnet) emits one of:
+The subagent (agents/predict/SKILL.md, model=sonnet) emits one of:
     - `hypothesize:` invlang YAML block — when introducing 1+ new hypotheses
       (initial fork, fork refinement, or single-story declaration).
     - **No invlang YAML block** — when continuing an unchanged fork: the
@@ -406,7 +406,7 @@ def _synthesize_from_checkpoint(
         return None
 
     # The embedded predict block is a multi-line dense-form scalar string
-    # (see agents/predict.md §Progress checkpoint). Pass it directly to the
+    # (see agents/predict/SKILL.md §Progress checkpoint). Pass it directly to the
     # parser so synthesis enforces the same contract as the stdout path.
     embedded = data["predict"]
     if not isinstance(embedded, str):

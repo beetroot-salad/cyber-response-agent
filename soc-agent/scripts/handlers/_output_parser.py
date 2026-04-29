@@ -264,7 +264,7 @@ def _extract_routing(env: dict[str, Any]) -> dict[str, Any]:
 def _check_shape_consistency(
     shape: str, hypotheses: list[dict[str, Any]], branch_plan: dict[str, Any] | None
 ) -> None:
-    """Per the field-presence matrix in agents/predict.md.
+    """Per the field-presence matrix in agents/predict/SKILL.md.
 
     Shape E → branch_plan required, hypotheses empty. (Enrichment; also
               covers the former "data-gap" case — filling a field gap is

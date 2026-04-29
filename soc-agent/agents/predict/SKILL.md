@@ -66,11 +66,13 @@ Short. Walk in order; stop at the first match.
 Default bias: **E whenever you're uncertain**. The loop is designed to iterate — a wasted enrichment loop is cheaper than a premature fork that has to be torn down. Don't oscillate between A and M; pick the one that matches the open question as you currently understand it, and let the next loop correct course.
 
 **After deciding the shape, Read the matching worked example before authoring:**
-- Shape E → `soc-agent/agents/predict-examples/shape-E.md`
-- Shape A → `soc-agent/agents/predict-examples/shape-A.md`
-- Shape M → `soc-agent/agents/predict-examples/shape-M.md`
+- Shape E → `soc-agent/agents/predict/examples/shape-E.md`
+- Shape A → `soc-agent/agents/predict/examples/shape-A.md`
+- Shape M → `soc-agent/agents/predict/examples/shape-M.md`
 
-Each example is a full case at the relevant loop position (alert → state → output YAML → pitfalls). Read only the one matching your shape decision. If the shape decision changes mid-authoring (e.g., after reading shape-A you realize loop N only needs a non-branching lead → shape E), Read the new shape's example before continuing.
+Each example is a full case at the relevant loop position (alert → state → dense output → pitfalls). Read only the one matching your shape decision. If the shape decision changes mid-authoring (e.g., after reading shape-A you realize loop N only needs a non-branching lead → shape E), Read the new shape's example before continuing.
+
+**Comprehensive reference for edge cases / parser rejections** — `soc-agent/agents/predict/dense-schema.md`. Most runs (≈80%) won't need it: the §Output format guidelines below + the matching worked example carry enough to author cleanly. Reach for it when (a) you hit a parser rejection in `remediation_notes` and want the rule's rationale + correct shape, (b) you're authoring something the worked examples don't cover (multi-hypothesis Shape M with `attribute_predictions`, hierarchical refinement IDs, `scope_override` semantics, `integrity_waived` rationale), or (c) you need to escape a literal `]` inside an annotation or use ASCII fallbacks for unicode operators.
 
 ## Story authoring (all fork shapes)
 
