@@ -37,6 +37,7 @@ The bar here is **lean**, not comprehensive. Everything in this section grows po
 - [ ] Secrets live in env vars (or a gitignored `.env` at the repo root), never in either config file.
 - [ ] `field-notes.md` exists and captures the **obvious gotchas** you spotted during the connection session — vendor-specific field aliases, odd null semantics, names that differ from vendor docs. Three bullets is a good first version. Do **not** write a comprehensive field reference.
 - [ ] `SKILL.md` for the system names it, and includes at least one complete real CLI invocation example plus a pointer to `field-notes.md`.
+- [ ] `schemas.py` declares one `AlertSchema` per alert envelope this system emits, each with `name`, a `matches` predicate over the alert dict, and a `fields` tuple of ~15 load-bearing dotted paths grounded in the Phase 3.2 sample-query output (not API-doc guesses).
 - [ ] `knowledge/environment/data-sources/{data-type}.md` has a short entry naming this system as a source — adapter path, query language, retention if known, one-line coverage note. Four lines per entry is the target.
 
 ## Credential boundary
