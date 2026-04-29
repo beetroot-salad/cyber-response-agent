@@ -185,7 +185,7 @@ Violations are rejected by the dense parser before the invlang validator runs.
 h-001|?registered-actor-initiated|v-001|initiated_by|identity|approved-monitoring-service-account|kind=service-account|"registry anchor names the registered actor"|null|active
 ```
 
-`weight` is always the literal token `null` on hypotheses you author (never blank — emit `null` explicitly so ANALYZE downstream sees a literal, not an empty string). ANALYZE grades; you propose. `parent_attrs` packs `key=value` pairs separated by `;`.
+`weight` is always the literal token `null` on hypotheses you author (ANALYZE grades; you propose). `parent_attrs` packs `key=value` pairs separated by `;`.
 
 ### Per-hypothesis sub-blocks (one set per `:H` id)
 
