@@ -20,7 +20,8 @@ from statistics import mean
 
 import yaml
 
-REPO_ROOT = Path("/workspace")
+import os as _os
+REPO_ROOT = Path(_os.environ.get("PREDICT_EVAL_REPO_ROOT", "/workspace"))
 EVALS_ROOT = REPO_ROOT / "evals" / "predict"
 CASES_DIR = EVALS_ROOT / "cases"
 RUNS_DIR = EVALS_ROOT / "runs"

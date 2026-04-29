@@ -1,0 +1,811 @@
+{
+  "variant": "DP",
+  "cases": {
+    "case-001": {
+      "reps": [
+        {
+          "score": 0.846,
+          "shape": "E",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 1,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": true,
+            "compound_claim": true,
+            "premature_fork": false
+          },
+          "d8a_detail": {
+            "n": 4,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-1"
+        },
+        {
+          "score": 0.846,
+          "shape": "E",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 1,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": true,
+            "compound_claim": true,
+            "premature_fork": false
+          },
+          "d8a_detail": {
+            "n": 4,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-2"
+        },
+        {
+          "score": 0.846,
+          "shape": "E",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 1,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "premature_fork": false
+          },
+          "d8a_detail": {
+            "n": 4,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-3"
+        },
+        {
+          "score": 0.692,
+          "shape": "E",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "premature_fork": false
+          },
+          "d8a_detail": {
+            "n": 3,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-4"
+        },
+        {
+          "score": 0.846,
+          "shape": "E",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 1,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "premature_fork": false
+          },
+          "d8a_detail": {
+            "n": 4,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-5"
+        }
+      ],
+      "rep_count": 5,
+      "valid_reps": 5,
+      "mean_score": 0.815,
+      "shape_consensus": "E",
+      "shape_agreement": 1.0,
+      "dim_means": {
+        "D1_shape": 1,
+        "D2_lead": 0.8,
+        "D3_structural": 1,
+        "D4_count": 1,
+        "D5_forbidden": 0,
+        "D8a_pred_quality": 1.0
+      }
+    },
+    "case-002": {
+      "reps": [
+        {
+          "score": 0.733,
+          "shape": "A",
+          "expected_shape": "A",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": 1,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": true,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "invoker_identity_peer_fork": false,
+            "sideways_pivot_after_plus_plus": false,
+            "relitigate_settled_loop_1_question": false
+          },
+          "d8a_detail": {
+            "n": 2,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-1"
+        },
+        {
+          "score": 0.733,
+          "shape": "A",
+          "expected_shape": "A",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": 1,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": true,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "invoker_identity_peer_fork": false,
+            "sideways_pivot_after_plus_plus": false,
+            "relitigate_settled_loop_1_question": false
+          },
+          "d8a_detail": {
+            "n": 2,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-2"
+        },
+        {
+          "score": 0.733,
+          "shape": "A",
+          "expected_shape": "A",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": 1,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": true,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "invoker_identity_peer_fork": false,
+            "sideways_pivot_after_plus_plus": false,
+            "relitigate_settled_loop_1_question": false
+          },
+          "d8a_detail": {
+            "n": 2,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-3"
+        },
+        {
+          "score": 0.733,
+          "shape": "A",
+          "expected_shape": "A",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": 1,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": true,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "invoker_identity_peer_fork": false,
+            "sideways_pivot_after_plus_plus": false,
+            "relitigate_settled_loop_1_question": false
+          },
+          "d8a_detail": {
+            "n": 2,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-4"
+        },
+        {
+          "score": 0.733,
+          "shape": "A",
+          "expected_shape": "A",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": 1,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": true,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "invoker_identity_peer_fork": false,
+            "sideways_pivot_after_plus_plus": false,
+            "relitigate_settled_loop_1_question": false
+          },
+          "d8a_detail": {
+            "n": 2,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-5"
+        }
+      ],
+      "rep_count": 5,
+      "valid_reps": 5,
+      "mean_score": 0.733,
+      "shape_consensus": "A",
+      "shape_agreement": 1.0,
+      "dim_means": {
+        "D1_shape": 1,
+        "D2_lead": 0,
+        "D3_structural": 1,
+        "D4_count": 1,
+        "D5_forbidden": 0,
+        "D7_auth_contract": 1,
+        "D8a_pred_quality": 1.0
+      }
+    },
+    "case-003": {
+      "reps": [
+        {
+          "score": 0.462,
+          "shape": "E",
+          "expected_shape": "M",
+          "dims": {
+            "D1_shape": 0,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "shape_collapse_to_A": false
+          },
+          "d8a_detail": {
+            "n": 4,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-1"
+        },
+        {
+          "score": 0.462,
+          "shape": "E",
+          "expected_shape": "M",
+          "dims": {
+            "D1_shape": 0,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "shape_collapse_to_A": false
+          },
+          "d8a_detail": {
+            "n": 4,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-2"
+        },
+        {
+          "score": 0.462,
+          "shape": "E",
+          "expected_shape": "M",
+          "dims": {
+            "D1_shape": 0,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "shape_collapse_to_A": false
+          },
+          "d8a_detail": {
+            "n": 4,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-3"
+        },
+        {
+          "score": 0.462,
+          "shape": "E",
+          "expected_shape": "M",
+          "dims": {
+            "D1_shape": 0,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "shape_collapse_to_A": false
+          },
+          "d8a_detail": {
+            "n": 3,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-4"
+        },
+        {
+          "score": 0.462,
+          "shape": "E",
+          "expected_shape": "M",
+          "dims": {
+            "D1_shape": 0,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": true,
+            "compound_claim": false,
+            "shape_collapse_to_A": false
+          },
+          "d8a_detail": {
+            "n": 4,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-5"
+        }
+      ],
+      "rep_count": 5,
+      "valid_reps": 5,
+      "mean_score": 0.462,
+      "shape_consensus": "E",
+      "shape_agreement": 1.0,
+      "dim_means": {
+        "D1_shape": 0,
+        "D2_lead": 0,
+        "D3_structural": 1,
+        "D4_count": 1,
+        "D5_forbidden": 0,
+        "D8a_pred_quality": 1.0
+      }
+    },
+    "case-004": {
+      "reps": [
+        {
+          "score": 1.0,
+          "shape": "E",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 1,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 1,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": false,
+            "compound_claim": false,
+            "mechanism_spiral": false,
+            "speculative_peer_fork": false
+          },
+          "d8a_detail": {
+            "n": 3,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-1"
+        },
+        {
+          "score": 0.846,
+          "shape": "E",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 1,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": false,
+            "compound_claim": false,
+            "mechanism_spiral": false,
+            "speculative_peer_fork": false
+          },
+          "d8a_detail": {
+            "n": 3,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-2"
+        },
+        {
+          "score": 0.615,
+          "shape": "A",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 0,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 1,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": false,
+            "compound_claim": false,
+            "mechanism_spiral": false,
+            "speculative_peer_fork": false
+          },
+          "d8a_detail": {
+            "n": 4,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-3"
+        },
+        {
+          "score": 0.846,
+          "shape": "E",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 1,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": false,
+            "compound_claim": false,
+            "mechanism_spiral": false,
+            "speculative_peer_fork": false
+          },
+          "d8a_detail": {
+            "n": 3,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-4"
+        },
+        {
+          "score": 0.846,
+          "shape": "E",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 1,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": false,
+            "compound_claim": false,
+            "mechanism_spiral": false,
+            "speculative_peer_fork": false
+          },
+          "d8a_detail": {
+            "n": 3,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-5"
+        }
+      ],
+      "rep_count": 5,
+      "valid_reps": 5,
+      "mean_score": 0.831,
+      "shape_consensus": "E",
+      "shape_agreement": 0.8,
+      "dim_means": {
+        "D1_shape": 0.8,
+        "D2_lead": 0.2,
+        "D3_structural": 1,
+        "D4_count": 1,
+        "D5_forbidden": 1,
+        "D8a_pred_quality": 1.0
+      }
+    },
+    "case-005": {
+      "reps": [
+        {
+          "score": 0.462,
+          "shape": "M",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 0,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": true,
+            "baseline_value_leak": false,
+            "compound_claim": false,
+            "sideways_pivot_after_plus_plus": false,
+            "relitigate_settled_loop_1_question": false,
+            "relitigate_settled_loop_2_question": false,
+            "attach_hypothesis_to_v_001": false
+          },
+          "d8a_detail": {
+            "n": 4,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-1"
+        },
+        {
+          "score": 0.846,
+          "shape": "E",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 1,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 1,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": false,
+            "compound_claim": false,
+            "sideways_pivot_after_plus_plus": false,
+            "relitigate_settled_loop_1_question": false,
+            "relitigate_settled_loop_2_question": false,
+            "attach_hypothesis_to_v_001": false
+          },
+          "d8a_detail": {
+            "n": 2,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-2"
+        },
+        {
+          "score": 0.462,
+          "shape": "M",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 0,
+            "D2_lead": 0,
+            "D3_structural": 0,
+            "D4_count": 1,
+            "D5_forbidden": 1,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [
+            "shape M requires \u2265 2 hypotheses"
+          ],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": false,
+            "compound_claim": false,
+            "sideways_pivot_after_plus_plus": false,
+            "relitigate_settled_loop_1_question": false,
+            "relitigate_settled_loop_2_question": false,
+            "attach_hypothesis_to_v_001": false
+          },
+          "d8a_detail": {
+            "n": 0,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-3"
+        },
+        {
+          "score": 0.462,
+          "shape": "M",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 0,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 0,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": true,
+            "baseline_value_leak": false,
+            "compound_claim": false,
+            "sideways_pivot_after_plus_plus": false,
+            "relitigate_settled_loop_1_question": false,
+            "relitigate_settled_loop_2_question": false,
+            "attach_hypothesis_to_v_001": false
+          },
+          "d8a_detail": {
+            "n": 8,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-4"
+        },
+        {
+          "score": 0.615,
+          "shape": "M",
+          "expected_shape": "E",
+          "dims": {
+            "D1_shape": 0,
+            "D2_lead": 0,
+            "D3_structural": 1,
+            "D4_count": 1,
+            "D5_forbidden": 1,
+            "D7_auth_contract": null,
+            "D8a_pred_quality": 1.0
+          },
+          "d3_errors": [],
+          "d5_fired": {
+            "presence_test_refutation": false,
+            "baseline_value_leak": false,
+            "compound_claim": false,
+            "sideways_pivot_after_plus_plus": false,
+            "relitigate_settled_loop_1_question": false,
+            "relitigate_settled_loop_2_question": false,
+            "attach_hypothesis_to_v_001": false
+          },
+          "d8a_detail": {
+            "n": 8,
+            "falsifiable": 1.0,
+            "non_tautological": 1.0
+          },
+          "rep": "rep-5"
+        }
+      ],
+      "rep_count": 5,
+      "valid_reps": 5,
+      "mean_score": 0.569,
+      "shape_consensus": "M",
+      "shape_agreement": 0.8,
+      "dim_means": {
+        "D1_shape": 0.2,
+        "D2_lead": 0,
+        "D3_structural": 0.8,
+        "D4_count": 1,
+        "D5_forbidden": 0.6,
+        "D8a_pred_quality": 1.0
+      }
+    }
+  },
+  "aggregate": {
+    "case_count": 5,
+    "mean_score": 0.682,
+    "dim_means": {
+      "D1_shape": 0.6,
+      "D2_lead": 0.2,
+      "D3_structural": 0.96,
+      "D4_count": 1,
+      "D5_forbidden": 0.32,
+      "D8a_pred_quality": 1.0,
+      "D7_auth_contract": 1
+    }
+  }
+}

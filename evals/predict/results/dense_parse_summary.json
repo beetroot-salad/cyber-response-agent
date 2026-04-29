@@ -1,0 +1,741 @@
+[
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-001/rep-1",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-001",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-001/rep-2",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-001",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-001/rep-3",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-001",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-001/rep-4",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-001",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-001/rep-5",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-001",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-002/rep-1",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 0.8,
+    "variant": "DP",
+    "case": "case-002",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-002/rep-2",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 0.8,
+    "variant": "DP",
+    "case": "case-002",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-002/rep-3",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-002",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-002/rep-4",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-002",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-002/rep-5",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 0.8,
+    "variant": "DP",
+    "case": "case-002",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-003/rep-1",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-003",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-003/rep-2",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-003",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-003/rep-3",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-003",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-003/rep-4",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-003",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-003/rep-5",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-003",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-004/rep-1",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-004",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-004/rep-2",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-004",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-004/rep-3",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-004",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-004/rep-4",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-004",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-004/rep-5",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-004",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-005/rep-1",
+    "n_errors": 8,
+    "shape": "M",
+    "variant": "DP",
+    "case": "case-005",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-005/rep-2",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DP",
+    "case": "case-005",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-005/rep-3",
+    "n_errors": 3,
+    "shape": "M",
+    "variant": "DP",
+    "case": "case-005",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-005/rep-4",
+    "n_errors": 0,
+    "shape": "M",
+    "faithfulness": 0.6,
+    "variant": "DP",
+    "case": "case-005",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DP/case-005/rep-5",
+    "n_errors": 0,
+    "shape": "M",
+    "faithfulness": 0.6,
+    "variant": "DP",
+    "case": "case-005",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-001/rep-1",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-001",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-001/rep-2",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-001",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-001/rep-3",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-001",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-001/rep-4",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-001",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-001/rep-5",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-001",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-002/rep-1",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-002",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-002/rep-2",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 0.8,
+    "variant": "DB",
+    "case": "case-002",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-002/rep-3",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 0.8,
+    "variant": "DB",
+    "case": "case-002",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-002/rep-4",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 0.8,
+    "variant": "DB",
+    "case": "case-002",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-002/rep-5",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-002",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-003/rep-1",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-003",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-003/rep-2",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-003",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-003/rep-3",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-003",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-003/rep-4",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-003",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-003/rep-5",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-003",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-004/rep-1",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-004",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-004/rep-2",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-004",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-004/rep-3",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-004",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-004/rep-4",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-004",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-004/rep-5",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-004",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-005/rep-1",
+    "n_errors": 0,
+    "shape": "M",
+    "faithfulness": 0.8,
+    "variant": "DB",
+    "case": "case-005",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-005/rep-2",
+    "n_errors": 0,
+    "shape": "M",
+    "faithfulness": 0.8,
+    "variant": "DB",
+    "case": "case-005",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-005/rep-3",
+    "n_errors": 0,
+    "shape": "M",
+    "faithfulness": 0.6,
+    "variant": "DB",
+    "case": "case-005",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-005/rep-4",
+    "n_errors": 0,
+    "shape": "M",
+    "faithfulness": 0.6,
+    "variant": "DB",
+    "case": "case-005",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DB/case-005/rep-5",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DB",
+    "case": "case-005",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-001/rep-1",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DH",
+    "case": "case-001",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-001/rep-2",
+    "n_errors": 1,
+    "shape": "E",
+    "variant": "DH",
+    "case": "case-001",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-001/rep-3",
+    "n_errors": 1,
+    "shape": "E",
+    "variant": "DH",
+    "case": "case-001",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-001/rep-4",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DH",
+    "case": "case-001",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-001/rep-5",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DH",
+    "case": "case-001",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-002/rep-1",
+    "n_errors": 1,
+    "shape": "A",
+    "variant": "DH",
+    "case": "case-002",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-002/rep-2",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 0.8,
+    "variant": "DH",
+    "case": "case-002",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-002/rep-3",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 1.0,
+    "variant": "DH",
+    "case": "case-002",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-002/rep-4",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 1.0,
+    "variant": "DH",
+    "case": "case-002",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-002/rep-5",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 0.8,
+    "variant": "DH",
+    "case": "case-002",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-003/rep-1",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DH",
+    "case": "case-003",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-003/rep-2",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DH",
+    "case": "case-003",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-003/rep-3",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 0.8,
+    "variant": "DH",
+    "case": "case-003",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-003/rep-4",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 0.8,
+    "variant": "DH",
+    "case": "case-003",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-003/rep-5",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DH",
+    "case": "case-003",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-004/rep-1",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DH",
+    "case": "case-004",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-004/rep-2",
+    "n_errors": 4,
+    "shape": "A",
+    "variant": "DH",
+    "case": "case-004",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-004/rep-3",
+    "n_errors": 0,
+    "shape": "A",
+    "faithfulness": 0.8,
+    "variant": "DH",
+    "case": "case-004",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-004/rep-4",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 1.0,
+    "variant": "DH",
+    "case": "case-004",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-004/rep-5",
+    "n_errors": 0,
+    "shape": "E",
+    "faithfulness": 0.8,
+    "variant": "DH",
+    "case": "case-004",
+    "rep": "rep-5"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-005/rep-1",
+    "n_errors": 7,
+    "shape": "M",
+    "variant": "DH",
+    "case": "case-005",
+    "rep": "rep-1"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-005/rep-2",
+    "n_errors": 6,
+    "shape": "M",
+    "variant": "DH",
+    "case": "case-005",
+    "rep": "rep-2"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-005/rep-3",
+    "n_errors": 5,
+    "shape": "M",
+    "variant": "DH",
+    "case": "case-005",
+    "rep": "rep-3"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-005/rep-4",
+    "n_errors": 4,
+    "shape": "M",
+    "variant": "DH",
+    "case": "case-005",
+    "rep": "rep-4"
+  },
+  {
+    "status": "parsed_with_errors",
+    "out_dir": "/workspace/.claude/worktrees/predict-dense-bakeoff/evals/predict/runs/DH/case-005/rep-5",
+    "n_errors": 8,
+    "shape": "M",
+    "variant": "DH",
+    "case": "case-005",
+    "rep": "rep-5"
+  }
+]
