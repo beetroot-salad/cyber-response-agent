@@ -79,40 +79,52 @@ Use sequential IDs: `v-001`, `v-002`, ..., `e-001`, `e-002`, ...
 
 ## Output
 
-Your final assistant message is exactly this fenced YAML block — nothing else:
+Your final assistant message is exactly two dense blocks, in order, with no
+envelope, no fences, no commentary. Block-shape grammar:
 
-```yaml
-prologue:
-  vertices:
-    - id: v-001
-      type: endpoint | identity | process | file | ...
-      classification: {from the classification rules above}
-      identifier: "{raw value from alert}"
-      attributes:
-        {optional — only when the alert carries a strongly typed attribute
-         like `kind: user` for identities}
-  edges:
-    - id: e-001
-      relation: attempted_auth | accessed | executed | ...
-      source_vertex: v-NNN
-      target_vertex: v-NNN
-      when:
-        timestamp: "{alert timestamp, ISO 8601}"
-      attributes:
-        {optional — relation-specific payload, e.g. target_user for attempted_auth}
-      authority:
-        kind: siem-event
-        source: "{siem-product} (rule {rule_id})"
+- A header line `:<TAG> <name> [col1|col2|...]` declares the column layout.
+- Each subsequent non-blank line is one row, cells separated by `|`. Empty
+  trailing cells are permitted; required cells must carry a value.
+- `attrs?` cells pack `key=value` pairs separated by `;` (leave the cell empty
+  when no attributes apply).
+- The edge `auth_kind:source` cell packs `<authority.kind>:<authority.source>`
+  with a single literal `:` separator (e.g. `siem-event:wazuh-rule-5710`).
+
 ```
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|endpoint|monitoring-host|172.22.0.10|
+v-002|endpoint|internal-server|target-endpoint|
+v-003|identity|service-account|sensu|kind=user
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|attempted_auth|v-001|v-002|2026-04-20T09:00:00Z|siem-event:wazuh-rule-5710|target_user=sensu;outcome=failed
+```
+
+Column meaning:
+
+- `:V` — `id` (`v-NNN`), `type` (endpoint | identity | process | file | …),
+  `class` (from the classification rules above), `ident` (raw value from the
+  alert), `attrs?` (e.g. `kind=user` for identities — leave empty when not
+  load-bearing).
+- `:E` — `id` (`e-NNN`), `rel` (relation: attempted_auth | accessed | executed
+  | spawned | …), `src` / `tgt` (vertex ids), `when` (alert timestamp, ISO
+  8601 — leave blank for timestampless relations), `auth_kind:source`
+  (typically `siem-event:{siem-product} (rule {rule_id})`), `attrs?` (e.g.
+  `target_user=...;outcome=failed`).
+
+Both block headers are required. Emit the header alone (no rows) when the
+alert produces zero vertices or zero edges.
 
 ## Rules
 
 - **Read-only.** No Write/Edit/Bash. The main handler writes `investigation.md`.
 - **One batched Read turn.** All four input files in parallel.
+- **Dense grammar only.** No `prologue:` YAML wrapper, no fences, no prose
+  outside the two blocks.
 - **Be specific.** Exact values from the alert — no placeholders, no paraphrasing.
-- **Omit rather than invent.** If the alert doesn't carry a value for an observable,
-  skip that vertex. If no edge relation fits, omit the edge (the main agent
-  will build out the graph later in GATHER).
+- **Omit rather than invent.** If the alert doesn't carry a value for an
+  observable, skip that vertex. If no edge relation fits, omit the row (the
+  main agent will build out the graph later in GATHER).
 - **No hypothesis language.** No ++/+/-/-- grades, no predictions, no
   narrative. This is the *observed* graph, not a proposed extension.
 - **Classification is best-effort.** When ip-ranges.md or identity-patterns.md

@@ -64,37 +64,13 @@ ticket_context:
 
 
 PROLOGUE_RESPONSE = textwrap.dedent("""
-```yaml
-prologue:
-  vertices:
-    - id: v-001
-      type: endpoint
-      classification: unclassified-endpoint
-      identifier: "203.0.113.47"
-    - id: v-002
-      type: endpoint
-      classification: internal-server
-      identifier: "web-01.corp.local"
-    - id: v-003
-      type: identity
-      classification: generic-account
-      identifier: "root"
-      attributes:
-        kind: user
-  edges:
-    - id: e-001
-      relation: attempted_auth
-      source_vertex: v-001
-      target_vertex: v-002
-      when:
-        timestamp: "2026-04-19T14:22:08Z"
-      attributes:
-        target_user: "root"
-        outcome: failed
-      authority:
-        kind: siem-event
-        source: "wazuh-indexer (rule 5710)"
-```
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|endpoint|unclassified-endpoint|203.0.113.47|
+v-002|endpoint|internal-server|web-01.corp.local|
+v-003|identity|generic-account|root|kind=user
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|attempted_auth|v-001|v-002|2026-04-19T14:22:08Z|siem-event:wazuh-indexer (rule 5710)|target_user=root;outcome=failed
 """).strip()
 
 
@@ -363,15 +339,12 @@ class TestPayloadContract:
 
 
 class TestValidationFailure:
-    def test_invalid_prologue_yaml_raises(self, tmp_path, monkeypatch):
-        # Prologue missing top-level `prologue:` key — our _extract_yaml_block
+    def test_invalid_prologue_dense_raises(self, tmp_path, monkeypatch):
+        # Prologue missing the `:E prologue.edges` block — the dense parser
         # should raise on that before the validator even sees the text.
         bad_prologue = textwrap.dedent("""
-        ```yaml
-        # no `prologue:` wrapper
-        vertices: []
-        edges: []
-        ```
+        :V prologue.vertices [id|type|class|ident|attrs?]
+        v-001|endpoint|unclassified-endpoint|203.0.113.47|
         """).strip()
         _wire_subagents(monkeypatch, prologue=bad_prologue)
         ctx = make_ctx(tmp_path)
