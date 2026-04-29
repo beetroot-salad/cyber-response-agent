@@ -45,6 +45,10 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._playbook import PlaybookMetadata, load_playbook_metadata
+from scripts.handlers._prologue_dense import (
+    PrologueOutputError,
+    parse_prologue_dense,
+)
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     make_invoker,
@@ -214,20 +218,19 @@ def _compose_markdown(
 # ---------------------------------------------------------------------------
 
 
-def _extract_yaml_block(raw: str, key: str) -> str:
-    """Pull the last ```yaml block containing top-level `key:` out of `raw`
-    and return it as a YAML string (no fences).
+def _serialize_prologue(raw: str) -> str:
+    """Parse the dense prologue envelope emitted by the subagent and re-serialize
+    as YAML for embedding into `investigation.md`.
 
-    Distinct from `extract_terminal_yaml` which returns a parsed dict — here
-    we want the formatted text so we can append it to `investigation.md`
-    verbatim.
+    The subagent emits dense-block grammar (`:V prologue.vertices` /
+    `:E prologue.edges`); the on-disk companion stays YAML so the invlang
+    validator and downstream tooling see the unchanged shape.
     """
-    parsed = extract_terminal_yaml(raw)
-    if key not in parsed:
-        raise OrchestrationError(
-            f"subagent output missing top-level `{key}:` — got keys {list(parsed)}"
-        )
-    return yaml.safe_dump({key: parsed[key]}, sort_keys=False)
+    try:
+        parsed = parse_prologue_dense(raw)
+    except PrologueOutputError as exc:
+        raise OrchestrationError(f"prologue subagent output: {exc}") from exc
+    return yaml.safe_dump(parsed, sort_keys=False)
 
 
 def _stamp_created_header() -> str:
@@ -278,7 +281,7 @@ def handle(ctx: Context) -> PhaseResult:
 
     ticket_raw, prologue_raw = _dispatch_parallel(ctx, playbook)
     ticket = extract_terminal_yaml(ticket_raw)
-    prologue_yaml_str = _extract_yaml_block(prologue_raw, "prologue")
+    prologue_yaml_str = _serialize_prologue(prologue_raw)
 
     markdown = _compose_markdown(ctx, ticket, playbook, preflight_summary)
     new_section = (
