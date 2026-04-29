@@ -176,9 +176,10 @@ def _assemble_prompt(ctx: Context) -> str:
     salt = load_run_salt(ctx.run_dir)
     investigation_md = load_investigation_md(ctx.run_dir)
 
+    vendor = ctx.signature_id.split("-", 1)[0] if "-" in ctx.signature_id else ctx.signature_id
     blocks = [
         f"run_dir={ctx.run_dir}\nloop_n={loop_n}\nsignature_id={ctx.signature_id}",
-        format_alert_summary_block(alert, salt),
+        format_alert_summary_block(alert, vendor, salt, soc_agent_root=SOC_AGENT_ROOT),
         format_run_manifest(ctx.run_dir, investigation_md),
     ]
     gather_out = ctx.outputs.get(Phase.GATHER)

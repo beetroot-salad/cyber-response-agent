@@ -169,9 +169,14 @@ class TestPromptAssembly:
 
         # Tagged alert summary is present (salted for injection safety).
         assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
-        assert "rule_id: \"5710\"" in prompt  # flat key=value summary, not nested JSON
-        # The full alert JSON should NOT be inlined verbatim.
-        assert '"id": "alert-1"' not in prompt
+        # The alert's load-bearing rule id reaches the prompt regardless of
+        # whether a vendor schemas.py is present (schema-selected → key=value
+        # lines; fallback path → full envelope JSON).
+        assert "5710" in prompt
+        # Wazuh's schemas.py declares the `wazuh-rule-alert` envelope, so the
+        # schema-selected path renders a `# schema=...` comment plus key:value
+        # lines for each declared dotted path.
+        assert "# schema=wazuh-rule-alert" in prompt
 
         # The full <investigation> block is gone; agent Reads it on demand.
         assert "<investigation" not in prompt

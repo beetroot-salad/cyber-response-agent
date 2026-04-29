@@ -20,10 +20,13 @@ here.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from pathlib import Path
 from typing import Any
+
+from scripts.handlers._alert_schema import AlertSchema
 
 
 # ---------------------------------------------------------------------------
@@ -212,30 +215,6 @@ def format_alert_block(alert: dict, salt: str) -> str:
     return f"<alert-{salt}>\n{json.dumps(alert, indent=2)}\n</alert-{salt}>"
 
 
-_ALERT_SUMMARY_FIELDS = (
-    # (display name, dotted path on alert dict)
-    ("rule_id", "rule.id"),
-    ("rule_description", "rule.description"),
-    ("rule_level", "rule.level"),
-    ("@timestamp", "@timestamp"),
-    ("location", "location"),
-    ("source_ip", "data.srcip"),
-    ("source_user", "data.srcuser"),
-    ("dest_user", "data.dstuser"),
-    ("agent_id", "agent.id"),
-    ("agent_name", "agent.name"),
-    ("proc_name", "data.output_fields.proc.name"),
-    ("proc_pname", "data.output_fields.proc.pname"),
-    ("proc_cmdline", "data.output_fields.proc.cmdline"),
-    ("proc_exepath", "data.output_fields.proc.exepath"),
-    ("user_name", "data.output_fields.user.name"),
-    ("user_loginuid", "data.output_fields.user.loginuid"),
-    ("container_id", "data.output_fields.container.id"),
-    ("container_image", "data.output_fields.container.image.repository"),
-    ("evt_type", "data.output_fields.evt.type"),
-)
-
-
 def _dotted_get(d: dict, path: str) -> object:
     cur: object = d
     for part in path.split("."):
@@ -246,32 +225,121 @@ def _dotted_get(d: dict, path: str) -> object:
     return cur
 
 
-def format_alert_summary_block(alert: dict, salt: str) -> str:
-    """Render a flat summary of the alert's load-bearing fields as a salted
-    block.
+def load_alert_schemas(
+    vendor: str, soc_agent_root: Path
+) -> tuple[AlertSchema, ...] | None:
+    """Dynamically load `knowledge/environment/systems/{vendor}/schemas.py`
+    and return its `SCHEMAS` tuple. Returns `None` when the file is absent.
 
-    The full alert.json is kept on disk; this block surfaces the ~15 fields
-    a hypothesis prediction's `claim` typically references. The agent reads
-    `alert.json` on demand via the Read tool when it needs anything else.
+    `knowledge/` is not a Python package, so we load by file path via
+    `importlib.util.spec_from_file_location`. The module is given a
+    synthetic name (`_soc_agent_alert_schemas_{vendor}`) to avoid collisions.
+    """
+    path = (
+        soc_agent_root
+        / "knowledge"
+        / "environment"
+        / "systems"
+        / vendor
+        / "schemas.py"
+    )
+    if not path.exists():
+        return None
+    mod_name = f"_soc_agent_alert_schemas_{vendor}"
+    spec = importlib.util.spec_from_file_location(mod_name, path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    schemas = getattr(module, "SCHEMAS", None)
+    if not isinstance(schemas, tuple):
+        raise RuntimeError(
+            f"{path}: module must export `SCHEMAS` as a tuple of AlertSchema"
+        )
+    for s in schemas:
+        if not isinstance(s, AlertSchema):
+            raise RuntimeError(
+                f"{path}: SCHEMAS must contain only AlertSchema instances; "
+                f"got {type(s).__name__}"
+            )
+    return schemas
 
-    Salt-tagged for injection safety, same convention as
-    `format_alert_block`. Returns key=value pairs, one per line, omitting
-    fields whose value is None / missing. Values are stringified — any
-    raw embedded markup is JSON-quoted to neutralize.
+
+def select_schema(
+    alert: dict, schemas: tuple[AlertSchema, ...]
+) -> AlertSchema | None:
+    """Return the first schema whose `matches(alert)` is truthy, else None."""
+    for schema in schemas:
+        try:
+            if schema.matches(alert):
+                return schema
+        except Exception:
+            # A vendor predicate that crashes on a particular alert shape is
+            # treated as a non-match — try the next schema rather than
+            # propagating. The fallback path will surface the no-match case.
+            continue
+    return None
+
+
+def format_alert_summary_block(
+    alert: dict,
+    vendor: str,
+    salt: str,
+    *,
+    soc_agent_root: Path,
+) -> str:
+    """Render the alert's load-bearing fields as a salted block.
+
+    Resolves the vendor's `schemas.py` (declared at `/connect` time) and
+    picks the first `AlertSchema` whose `matches(alert)` is truthy. Emits
+    `path: json.dumps(value)` lines for each declared dotted path, dropping
+    fields whose value is None or empty.
+
+    Two fallback paths render the full envelope (via `format_alert_block`)
+    with a visible comment line so the dispatch is never silent:
+
+    - **No `schemas.py` for vendor** → `# no schemas.py for vendor={vendor}`
+    - **`schemas.py` present but no schema matches** → comment names the
+      schemas that were tried.
+
+    Salt-tagged for injection safety. Values are JSON-encoded to neutralize
+    embedded markdown / tag-like content / ANSI.
     """
     if not salt:
         raise ValueError("format_alert_summary_block requires a non-empty salt")
-    lines = [f"<alert-{salt}>"]
-    for label, path in _ALERT_SUMMARY_FIELDS:
+
+    schemas = load_alert_schemas(vendor, soc_agent_root)
+    if schemas is None:
+        full = format_alert_block(alert, salt)
+        comment = f"# no schemas.py for vendor={vendor}; falling back to full envelope"
+        return _inject_comment(full, salt, comment)
+
+    schema = select_schema(alert, schemas)
+    if schema is None:
+        names = ", ".join(s.name for s in schemas) or "(empty)"
+        full = format_alert_block(alert, salt)
+        comment = (
+            f"# schemas.py present (vendor={vendor}) but none matched: {names}; "
+            "falling back to full envelope"
+        )
+        return _inject_comment(full, salt, comment)
+
+    lines = [f"<alert-{salt}>", f"# schema={schema.name}"]
+    for path in schema.fields:
         v = _dotted_get(alert, path)
         if v is None or v == "":
             continue
-        # JSON-encode to neutralize any embedded special chars (markdown,
-        # tag-like content, ANSI). For plain ints/floats this still produces
-        # a clean numeric literal.
-        lines.append(f"{label}: {json.dumps(v)}")
+        lines.append(f"{path}: {json.dumps(v)}")
     lines.append(f"</alert-{salt}>")
     return "\n".join(lines)
+
+
+def _inject_comment(rendered_alert_block: str, salt: str, comment: str) -> str:
+    """Insert a comment line right after the opening `<alert-{salt}>` tag."""
+    open_tag = f"<alert-{salt}>"
+    return rendered_alert_block.replace(
+        open_tag, f"{open_tag}\n{comment}", 1
+    )
 
 
 def format_run_manifest(run_dir: Path, investigation_md: str) -> str:

@@ -239,6 +239,35 @@ Scaffold the following files. Start lean. Expect everything to be revised.
 - **`config.env`** — **not tracked in git.** Local copy of the template with the deployment-specific values the user gave you in Phase 1. Each deployment has a different copy. Init.sh already adds the `config.env` pattern to `.gitignore`; if it didn't, add it now. *Do not commit a filled-in config.env, even if it "only" contains an endpoint URL* — deployment details are sensitive.
 - **`field-notes.md`** — frontmatter `tags: [{system}, fields, gotchas]`. Body: **obvious gotchas only.** The things Claude is likely to get wrong on first try, that you can spot during the connection session: vendor-specific field aliasing (`customField1` = actual name), odd null semantics, names that collide with common terms, enum values that differ from vendor docs. **Not a comprehensive field reference.** If you catch yourself writing a long field catalog, stop — that level of detail is post-mortem territory, not connect-time. A three-bullet file is a good first version. Leave a `<!-- grown via post-mortem /author runs -->` marker at the bottom.
 - **`SKILL.md`** — frontmatter `name: {system}`, `description: {system} implementation knowledge for this org`. Body: one complete real CLI invocation example, a pointer to `field-notes.md`. That's the minimum. If you learned something concrete about query patterns during the sample query in Phase 3.2, add a short note; otherwise leave room for post-mortem additions.
+- **`schemas.py`** — declares one `AlertSchema` per alert envelope this system emits. The ANALYZE handler reads this at run time to decide which fields to surface inline in the subagent prompt; anything not declared here stays in `alert.json` on disk for the agent to Read on demand.
+
+  Shape: import `AlertSchema` from `scripts.handlers._alert_schema` and export a module-level `SCHEMAS` tuple. Each entry has three fields:
+
+  ```python
+  # knowledge/environment/systems/{system}/schemas.py
+  from scripts.handlers._alert_schema import AlertSchema
+
+  SCHEMAS = (
+      AlertSchema(
+          name="{system}-rule-alert",                                   # human-readable label
+          matches=lambda a: "rule" in a and "id" in a.get("rule", {}),  # discriminator predicate
+          fields=(                                                      # ~15 dotted paths into the alert
+              "rule.id",
+              "rule.description",
+              # ...
+          ),
+      ),
+      # ...one entry per envelope shape this system emits...
+  )
+  ```
+
+  Multi-shape vendors declare one entry per envelope (e.g., a SIEM that emits both rule-engine alerts and vulnerability events; a security platform with separate "incident" and "alert" payloads). The loader picks the first schema whose `matches(alert)` returns truthy. Single-shape systems use one entry with `matches=lambda a: True`.
+
+  `fields` is a flat tuple of dotted paths — no relabeling. The LLM reads `data.srcuser: "alice"` directly. Pick paths that are load-bearing for *that* envelope: file alerts surface path/hash/owner; auth alerts surface user/source-ip/auth-result; process alerts surface cmdline/parent/exepath. There is no universal field set; don't invent one.
+
+  Aim for ~15 paths per schema. Fill them by skimming the real sample-query output from Phase 3.2 — these are the fields that actually appear, not API-doc guesses. A short list per schema is fine for v1; it grows post-mortem when investigations reveal which extra fields kept getting Read from disk.
+
+  When the loader can't resolve a schema (no `schemas.py`, or none of the predicates match a given alert), it falls back to inlining the full alert envelope with a visible comment explaining why — loud, not silent — so absence shows up in transcripts as a known dispatch failure rather than a silently-thinned summary.
 
 #### Where secrets actually live
 
