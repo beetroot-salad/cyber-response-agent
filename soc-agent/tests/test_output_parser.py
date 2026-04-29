@@ -997,6 +997,28 @@ class TestAnalyzeDenseX5:
         assert env.routing["disposition"] == "true_positive"
 
 
+class TestAnalyzeDenseTrailingProseRejected:
+    def test_trailing_prose_after_routing_rejected(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → +    [l-001 weak ⟂ no-authority :: x ⟺ p1]
+
+        :A routing
+        decision               halt
+        termination_category   trust-root
+        disposition            benign
+        confidence             high
+        surviving              h-001
+        matched_archetype      null
+
+        Some trailing prose forgotten by the agent.
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match="unknown key"):
+            parse_analyze_envelope_dense(body)
+
+
 class TestAnalyzeDenseDecisiveGradeOrdering:
     def test_double_plus_outranks_plus_for_x1(self):
         # Same hypothesis graded `+` on l-001 (weak) and `++` on l-002

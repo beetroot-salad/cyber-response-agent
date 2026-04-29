@@ -1357,6 +1357,18 @@ def _parse_routing_block(body: list[str]) -> dict[str, Any]:
                 )
         fields[key] = value
 
+    valid_routing_keys = {
+        "decision", "termination_category", "disposition", "confidence",
+        "surviving", "matched_archetype",
+    }
+    unknown = sorted(set(fields) - valid_routing_keys)
+    if unknown:
+        raise AnalyzeOutputError(
+            f"analyze :A routing: unknown key(s) {unknown} — likely "
+            f"trailing prose after the routing block. Valid keys: "
+            f"{sorted(valid_routing_keys)}"
+        )
+
     decision = fields.get("decision")
     if decision != "halt":
         raise AnalyzeOutputError(
