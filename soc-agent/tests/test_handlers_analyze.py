@@ -61,56 +61,32 @@ def stub_invoke(captured: list[str], response: str):
     return fn
 
 
-# Canned valid response fragments used across several tests.
+# Canned valid dense-format response fragments used across several tests.
 _HALT_RESPONSE = textwrap.dedent("""
-```yaml
-analyze:
-  loop: 2
-  resolutions:
-    - lead_ref: "l-002"
-      entries:
-        - hypothesis_id: "h-001"
-          weight: "++"
-          matched_prediction_ids: [p2]
-          reasoning: "matched prediction p2; refutation r2 failed"
-        - hypothesis_id: "h-002"
-          weight: "--"
-          matched_prediction_ids: [p1]
-          matched_refutation_ids: [r1]
-          reasoning: "matched refutation r1"
-  anomalies: []
-  data_wishes: []
-  routing:
-    decision: halt
-    termination_category: trust-root
-    disposition: benign
-    confidence: high
-    matched_archetype: monitoring-probe
-    surviving_hypotheses: [h-001]
-```
+:A loop  2
+
+:T resolutions
+h-001  +  → ++   [l-002 severe ⟂ e-001 :: cadence-check returned 4 prior alerts at 60s intervals ⟺ p2 ∧ ¬r2]
+h-002  ∅  → --   [l-002 severe ⟂ e-002 :: shell-context returned no exec primitive ⟺ ¬p1 ∧ r1]
+
+:A routing
+decision               halt
+termination_category   trust-root
+disposition            benign
+confidence             high
+surviving              h-001
+matched_archetype      null
 """).strip()
 
 _CONTINUE_RESPONSE = textwrap.dedent("""
-```yaml
-analyze:
-  loop: 1
-  resolutions:
-    - lead_ref: "l-001"
-      entries:
-        - hypothesis_id: "h-001"
-          weight: "+"
-          matched_prediction_ids: [p1]
-          reasoning: "consistent with registry"
-        - hypothesis_id: "h-002"
-          weight: "+"
-          matched_prediction_ids: [p1]
-          reasoning: "no differentiating evidence yet"
-  anomalies: []
-  data_wishes:
-    - "cadence data would sharpen grading"
-  routing:
-    decision: continue
-```
+:A loop  1
+
+:T resolutions
+h-001  ∅  → +    [l-001 weak ⟂ no-authority :: registry-style match circumstantial ⟺ p1]
+h-002  ∅  → +    [l-001 weak ⟂ no-authority :: same observation circumstantial ⟺ p1]
+
+:A data_wishes
+cadence data would sharpen grading
 """).strip()
 
 
@@ -232,7 +208,7 @@ class TestPromptAssembly:
 
 
 class TestHandleRoutesConclude:
-    def test_routes_to_conclude_on_valid_yaml(self, tmp_path, monkeypatch):
+    def test_routes_to_conclude_on_valid_envelope(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
@@ -242,38 +218,30 @@ class TestHandleRoutesConclude:
         assert result.next_phase == Phase.REPORT
         assert result.payload["disposition"] == "benign"
         assert result.payload["confidence"] == "high"
-        assert result.payload["matched_archetype"] == "monitoring-probe"
+        # Per dense legend: matched_archetype is null at ANALYZE time
+        # (REPORT does archetype labeling).
+        assert result.payload["matched_archetype"] is None
         assert result.payload["surviving_hypotheses"] == ["h-001"]
 
-    def test_matched_archetype_null_accepted(self, tmp_path, monkeypatch):
-        response = _HALT_RESPONSE.replace(
-            "matched_archetype: monitoring-probe",
-            "matched_archetype: null",
-        )
-        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
-        monkeypatch.setattr(
-            analyze_handler, "_invoke_subagent",
-            stub_invoke([], response),
-        )
-        result = analyze_handler.handle(ctx)
-        assert result.next_phase == Phase.REPORT
-        assert result.payload["matched_archetype"] is None
-
     def test_unclear_with_surviving_list_accepted(self, tmp_path, monkeypatch):
-        # v2.11: `unclear` is the non-benign escalation disposition.
-        # `escalated` is a status, never a disposition.
-        response = _HALT_RESPONSE.replace(
-            "disposition: benign", "disposition: unclear"
-        ).replace(
-            "matched_archetype: monitoring-probe",
-            "matched_archetype: null",
-        ).replace(
-            "surviving_hypotheses: [h-001]",
-            "surviving_hypotheses: [h-001, h-002]",
-        ).replace(
-            "termination_category: trust-root",
-            "termination_category: severity-ceiling",
-        )
+        # `unclear` is the non-benign escalation disposition. Custom dense
+        # fixture: both hypotheses survive at +, unclear pairs with
+        # severity-ceiling.
+        response = textwrap.dedent("""
+        :A loop  2
+
+        :T resolutions
+        h-001  +  → +    [l-002 weak ⟂ no-authority :: registry-style match circumstantial ⟺ p1]
+        h-002  +  → +    [l-002 weak ⟂ no-authority :: same observation circumstantial ⟺ p1]
+
+        :A routing
+        decision               halt
+        termination_category   severity-ceiling
+        disposition            unclear
+        confidence             low
+        surviving              h-001,h-002
+        matched_archetype      null
+        """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
@@ -299,10 +267,10 @@ class TestHandleRoutesConclude:
         written = (ctx.run_dir / "investigation.md").read_text()
         assert "## ANALYZE (loop 1)" in written
         assert "**Assessment:**" in written
-        # Per-resolution reasoning rendered.
-        assert "matched refutation r1" in written
-        # The envelope's routing fields — handler does NOT echo the raw YAML.
-        assert "analyze:" not in written
+        # Per-resolution reasoning (the iff annotation) rendered.
+        assert "shell-context returned no exec primitive" in written
+        # The envelope's routing fields — handler does NOT echo the raw block.
+        assert ":A routing" not in written
         assert "surviving_hypotheses: [h-001]" not in written
 
 
@@ -388,13 +356,12 @@ class TestUnresolvedPrescribedSetBackfill:
         # Subagent emits its own unresolved_prescribed_set — handler does not
         # overwrite from GATHER payload.
         response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          routing:
-            decision: continue
-            unresolved_prescribed_set: [custom-lead]
-        ```
+        :A loop  1
+
+        :T resolutions
+
+        :A unresolved_prescribed
+        custom-lead
         """).strip()
         ctx = self._ctx_with_gather(
             tmp_path,
@@ -430,7 +397,7 @@ class TestUnresolvedPrescribedSetBackfill:
 
 class TestHandleMalformedOutput:
     def test_missing_envelope_raises(self, tmp_path, monkeypatch):
-        response = "## ANALYZE (loop 1)\n\nSome markdown but no YAML.\n"
+        response = "## ANALYZE (loop 1)\n\nSome markdown but no dense block.\n"
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
@@ -439,35 +406,42 @@ class TestHandleMalformedOutput:
         with pytest.raises(OrchestrationError, match="envelope shape violation"):
             analyze_handler.handle(ctx)
 
-    def test_invalid_route_raises(self, tmp_path, monkeypatch):
+    def test_invalid_routing_decision_raises(self, tmp_path, monkeypatch):
+        # `:A routing` block with decision != halt is malformed (continue
+        # is encoded by absence of the routing block).
         response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          routing:
-            decision: BOGUS
-        ```
+        :A loop  1
+
+        :T resolutions
+
+        :A routing
+        decision               BOGUS
+        termination_category   trust-root
+        disposition            benign
+        confidence             high
+        surviving
+        matched_archetype      null
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
             stub_invoke([], response),
         )
-        with pytest.raises(OrchestrationError, match="decision must be one of"):
+        with pytest.raises(OrchestrationError, match="decision must be `halt`"):
             analyze_handler.handle(ctx)
 
     def test_halt_without_termination_category_raises(self, tmp_path, monkeypatch):
         response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          routing:
-            decision: halt
-            disposition: benign
-            confidence: high
-            matched_archetype: null
-            surviving_hypotheses: []
-        ```
+        :A loop  1
+
+        :T resolutions
+
+        :A routing
+        decision               halt
+        disposition            benign
+        confidence             high
+        surviving
+        matched_archetype      null
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
@@ -479,16 +453,16 @@ class TestHandleMalformedOutput:
 
     def test_halt_without_disposition_raises(self, tmp_path, monkeypatch):
         response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          routing:
-            decision: halt
-            termination_category: trust-root
-            confidence: high
-            matched_archetype: null
-            surviving_hypotheses: []
-        ```
+        :A loop  1
+
+        :T resolutions
+
+        :A routing
+        decision               halt
+        termination_category   trust-root
+        confidence             high
+        surviving
+        matched_archetype      null
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
@@ -498,20 +472,21 @@ class TestHandleMalformedOutput:
         with pytest.raises(OrchestrationError, match="disposition"):
             analyze_handler.handle(ctx)
 
-    def test_halt_without_surviving_hypotheses_accepted(self, tmp_path, monkeypatch):
-        # surviving_hypotheses is optional in the envelope — defaults to []
-        # when the subagent omits it (every hypothesis refuted).
+    def test_halt_with_empty_surviving_accepted(self, tmp_path, monkeypatch):
+        # `surviving` may be empty when every hypothesis was refuted — the
+        # column is required but accepts an empty value.
         response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          routing:
-            decision: halt
-            termination_category: trust-root
-            disposition: benign
-            confidence: high
-            matched_archetype: null
-        ```
+        :A loop  1
+
+        :T resolutions
+
+        :A routing
+        decision               halt
+        termination_category   adversarial-refuted
+        disposition            unclear
+        confidence             low
+        surviving
+        matched_archetype      null
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
@@ -522,14 +497,12 @@ class TestHandleMalformedOutput:
         assert result.payload["surviving_hypotheses"] == []
 
     def test_continue_accepts_minimal_envelope(self, tmp_path, monkeypatch):
-        # Continue has no required fields beyond decision itself.
+        # Continue is encoded as absence of `:A routing`. Minimal envelope
+        # is `:A loop` + empty `:T resolutions`.
         response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          routing:
-            decision: continue
-        ```
+        :A loop  1
+
+        :T resolutions
         """).strip()
         ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
         monkeypatch.setattr(
@@ -538,26 +511,6 @@ class TestHandleMalformedOutput:
         )
         result = analyze_handler.handle(ctx)
         assert result.next_phase == Phase.PREDICT
-
-    def test_continue_with_malformed_unresolved_prescribed_set_raises(
-        self, tmp_path, monkeypatch,
-    ):
-        response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          routing:
-            decision: continue
-            unresolved_prescribed_set: "source-reputation"
-        ```
-        """).strip()
-        ctx = make_ctx(tmp_path, history=[Phase.PREDICT.value])
-        monkeypatch.setattr(
-            analyze_handler, "_invoke_subagent",
-            stub_invoke([], response),
-        )
-        with pytest.raises(OrchestrationError, match="unresolved_prescribed_set"):
-            analyze_handler.handle(ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -661,26 +614,18 @@ class TestFindingsSynthesis:
         # rule on edge authority). The test asserts on the synthesis
         # mechanics, not the grading discipline.
         return textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          resolutions:
-            - lead_ref: "l-001"
-              entries:
-                - hypothesis_id: "h-001"
-                  weight: "+"
-                  matched_prediction_ids: [p1]
-                  reasoning: "consistent with p1"
-          anomalies: []
-          data_wishes: []
-          routing:
-            decision: halt
-            termination_category: severity-ceiling
-            disposition: unclear
-            confidence: medium
-            matched_archetype: null
-            surviving_hypotheses: [h-001]
-        ```
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅  → +    [l-001 weak ⟂ no-authority :: consistent with p1 ⟺ p1]
+
+        :A routing
+        decision               halt
+        termination_category   severity-ceiling
+        disposition            unclear
+        confidence             medium
+        surviving              h-001
+        matched_archetype      null
         """).strip()
 
     def test_synthesizes_findings_from_envelopes(self, tmp_path, monkeypatch):
@@ -734,10 +679,12 @@ class TestFindingsSynthesis:
         assert "hypothesis: h-001" in written
         assert "after: +" in written or "after: '+'" in written
 
-    def test_translates_hypothesis_name_to_declared_id(self, tmp_path, monkeypatch):
-        """The subagent often emits `?playbook-name` as `hypothesis_id`
-        when PREDICT has already declared a matching `h-*`. Handler looks
-        up the name in the companion's hypothesize block and substitutes.
+    def test_uses_declared_hypothesis_id_directly(self, tmp_path, monkeypatch):
+        """Dense form requires `h-NNN` ids on every `:T resolutions` row
+        (the parser regex rejects `?name` shape). The handler's name → id
+        translation map is still consulted by `_synthesize_findings_block`
+        for legacy compat, but the dense parser ensures the subagent emits
+        ids directly.
         """
         ctx = make_ctx(
             tmp_path,
@@ -752,19 +699,10 @@ class TestFindingsSynthesis:
             "raw_details_paths": [],
         }
         response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          resolutions:
-            - lead_ref: "l-001"
-              entries:
-                - hypothesis_id: "?monitoring-probe"
-                  weight: "+"
-                  matched_prediction_ids: [p1]
-                  reasoning: "consistent with p1"
-          routing:
-            decision: continue
-        ```
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅  → +    [l-001 weak ⟂ no-authority :: consistent with p1 ⟺ p1]
         """).strip()
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
@@ -772,20 +710,18 @@ class TestFindingsSynthesis:
         )
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
-        # Name translated to the declared h-id — `?monitoring-probe`
-        # exists as `name` on h-001 per the _PROLOGUE fixture.
         assert "hypothesis: h-001" in written
-        assert "?monitoring-probe" not in (
-            written.split("findings:")[-1] if "findings:" in written else ""
-        )
 
     def test_drops_resolutions_that_reference_undeclared_hypotheses(
         self, tmp_path, monkeypatch,
     ):
-        """When the subagent cites a hypothesis that was never declared
-        (no `h-*` id, no matching `name`), drop that resolution — keeping
-        it would produce a findings block the validator rejects as a
-        dangling ID reference.
+        """When the subagent cites a hypothesis id that was never declared
+        in PREDICT, the handler drops that resolution at findings-synthesis
+        time — keeping it would produce a findings block the validator
+        rejects as a dangling ID reference.
+
+        Dense parser accepts any `h-\\S+` shape at row level; the
+        declared-vs-undeclared filtering is a handler-level concern.
         """
         ctx = make_ctx(
             tmp_path,
@@ -800,23 +736,11 @@ class TestFindingsSynthesis:
             "raw_details_paths": [],
         }
         response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          resolutions:
-            - lead_ref: "l-001"
-              entries:
-                - hypothesis_id: "?monitoring-probe"
-                  weight: "+"
-                  matched_prediction_ids: [p1]
-                  reasoning: "declared hypothesis"
-                - hypothesis_id: "?image-entrypoint"
-                  weight: "-"
-                  matched_prediction_ids: [p1]
-                  reasoning: "not declared in prologue"
-          routing:
-            decision: continue
-        ```
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅  → +    [l-001 weak ⟂ no-authority :: declared hypothesis ⟺ p1]
+        h-099  ∅  → -    [l-001 weak ⟂ no-authority :: not declared in prologue ⟺ p1]
         """).strip()
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
@@ -824,9 +748,10 @@ class TestFindingsSynthesis:
         )
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
+        findings_yaml = written.split("findings:")[-1] if "findings:" in written else ""
         # Declared hypothesis resolved; undeclared dropped.
         assert "hypothesis: h-001" in written
-        assert "image-entrypoint" not in written.split("findings:")[-1]
+        assert "h-099" not in findings_yaml
 
     def test_supporting_edges_defaulted_on_confirmed_weights(
         self, tmp_path, monkeypatch,
@@ -908,19 +833,10 @@ class TestFindingsSynthesis:
             "raw_details_paths": [],
         }
         response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          resolutions:
-            - lead_ref: "l-001"
-              entries:
-                - hypothesis_id: "h-001"
-                  weight: "++"
-                  matched_prediction_ids: [p1]
-                  reasoning: "36 prior events; r1 failed to materialize."
-          routing:
-            decision: continue
-        ```
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅  → ++   [l-001 severe ⟂ no-authority :: 36 prior events; r1 failed to materialize ⟺ p1 ∧ ¬r1]
         """).strip()
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
@@ -929,15 +845,20 @@ class TestFindingsSynthesis:
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
         findings_yaml = written.split("findings:")[-1]
-        # Both authoritative prologue edges land as supporting_edges defaults.
+        # Both authoritative prologue edges land as supporting_edges defaults
+        # (the row's `no-authority` marker triggers the prologue fallback).
         assert "supporting_edges" in findings_yaml
         assert "e-001" in findings_yaml
         assert "e-002" in findings_yaml
 
-    def test_load_bearing_passed_through(self, tmp_path, monkeypatch):
-        """The load_bearing[] artifact ANALYZE declares is preserved in the
-        synthesized resolution. No structural validation runs on it today —
-        the field is captured for downstream perturbation analysis (Tier 1).
+    def test_iff_annotation_carried_into_reasoning(self, tmp_path, monkeypatch):
+        """The dense iff annotation captures the load-bearing observation
+        directly (LHS = field+value, RHS = matched-literal expression).
+        The handler preserves the full annotation as the resolution's
+        `reasoning` field for downstream consumers.
+
+        This replaces the YAML-era `load_bearing[]` structured field —
+        same load-bearing-field semantics, expressed inline in the iff.
         """
         ctx = make_ctx(
             tmp_path,
@@ -952,23 +873,10 @@ class TestFindingsSynthesis:
             "raw_details_paths": [],
         }
         response = textwrap.dedent("""
-        ```yaml
-        analyze:
-          loop: 1
-          resolutions:
-            - lead_ref: "l-001"
-              entries:
-                - hypothesis_id: "h-001"
-                  weight: "+"
-                  matched_prediction_ids: [p1]
-                  reasoning: "consistent with p1; no decisive authority."
-                  load_bearing:
-                    - field: "wazuh.event_count"
-                      source: "l-001"
-                      counterfactual: "If event_count had been 0 (no matching events), the grade would be `-` not `+`."
-          routing:
-            decision: continue
-        ```
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅  → +    [l-001 weak ⟂ no-authority :: wazuh.event_count > 0 ⟺ p1]
         """).strip()
         monkeypatch.setattr(
             analyze_handler, "_invoke_subagent",
@@ -977,12 +885,10 @@ class TestFindingsSynthesis:
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
         findings_yaml = written.split("findings:")[-1]
-        assert "load_bearing" in findings_yaml
+        # The iff annotation is preserved in the resolution's reasoning,
+        # carrying the load-bearing field name + value.
         assert "wazuh.event_count" in findings_yaml
-        assert "counterfactual" in findings_yaml
-        # value_summary intentionally absent — counterfactual carries the value
-        # by implication.
-        assert "value_summary" not in findings_yaml
+        assert "⟺ p1" in findings_yaml or "p1" in findings_yaml
 
     def test_supporting_edges_not_emitted_on_weak_weights(
         self, tmp_path, monkeypatch,

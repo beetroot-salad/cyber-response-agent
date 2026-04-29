@@ -617,3 +617,341 @@ class TestAnalyzeShape:
         """).strip()
         with pytest.raises(AnalyzeOutputError, match="does not match orchestrator"):
             parse_analyze_envelope(_y(body), expected_loop_n=2)
+
+
+# ===========================================================================
+# Analyze envelope tests — DENSE block format
+# ===========================================================================
+
+
+from scripts.handlers._output_parser import (  # noqa: E402
+    parse_analyze_envelope_dense,
+)
+
+
+_DENSE_HALT = textwrap.dedent("""
+:A loop  2
+
+:T resolutions
+h-001  ∅ → ++   [l-002 severe ⟂ e-005 :: cadence-check returned 4 prior alerts at 60s intervals ⟺ p3 ∧ ¬r3]
+
+:A routing
+decision               halt
+termination_category   trust-root
+disposition            benign
+confidence             high
+surviving              h-001
+matched_archetype      null
+""").strip()
+
+
+_DENSE_CONTINUE = textwrap.dedent("""
+:A loop  1
+
+:T resolutions
+h-001  ∅ → +    [l-001 weak ⟂ no-authority :: volume-profile shows monotonic upload ⟺ p1]
+
+:A data_wishes
+backup-service job-log query
+""").strip()
+
+
+_DENSE_HALT_FULL = textwrap.dedent("""
+:A loop  2
+
+:T resolutions
+h-003  + → ++   [l-005 severe ⟂ e-019,e-020 :: dest=s3://prod ∧ CHG-3782.covers(window)=true ⟺ p1 ∧ p2 ∧ ¬r1]
+
+:R authz [lead|edge|verdict|anchor_kind|anchor_id|grounding|authority|as_of|fulfills|reasoning]
+l-005|e-019|authorized|change-management|CHG-3782|org-authority|full|2026-04-23T03:42Z|h-003.ac1|backup-window covered
+
+:R impact [lead|pred_ref|dim|observed|verdict|matched_pred|grounding|anchor_id|anchor_kind|authority|as_of|reasoning]
+l-005|l-005.ip1|confidentiality|51GB|within|within ±2σ|telemetry-baseline|backup-30d|session-volume-baseline|partial|2026-04-23T03:42Z|observed 51GB; within μ+2σ=54
+
+:A routing
+decision               halt
+termination_category   trust-root
+disposition            benign
+confidence             high
+surviving              h-003
+matched_archetype      null
+""").strip()
+
+
+class TestAnalyzeDenseHalt:
+    def test_valid_halt_parses(self):
+        env = parse_analyze_envelope_dense(_DENSE_HALT, expected_loop_n=2)
+        assert env.telemetry == {"loop": 2}
+        assert env.routing["decision"] == "halt"
+        assert env.routing["disposition"] == "benign"
+        assert env.routing["surviving_hypotheses"] == ["h-001"]
+        assert env.routing["matched_archetype"] is None
+        assert "l-002" in env.resolutions_by_lead
+        entries = env.resolutions_by_lead["l-002"]
+        assert len(entries) == 1
+        e = entries[0]
+        assert e["hypothesis_id"] == "h-001"
+        assert e["weight"] == "++"
+        assert e["before_weight"] == "∅"
+        assert e["severity"] == "severe"
+        assert e["matched_prediction_ids"] == ["p3"]
+        # r3 appears negated on iff RHS — derived as "tested but failed to materialize".
+        assert e["matched_refutation_ids"] == ["r3"]
+        assert e["supporting_edges"] == ["e-005"]
+
+    def test_full_halt_with_authz_and_impact(self):
+        env = parse_analyze_envelope_dense(_DENSE_HALT_FULL)
+        # Resolutions
+        e = env.resolutions_by_lead["l-005"][0]
+        assert e["weight"] == "++"
+        assert sorted(e["matched_prediction_ids"]) == ["p1", "p2"]
+        assert e["matched_refutation_ids"] == ["r1"]
+        assert e["supporting_edges"] == ["e-019", "e-020"]
+        # Authz row
+        authz = env.legitimacy_by_lead["l-005"][0]
+        assert authz["edge_id"] == "e-019"
+        assert authz["contract_id"] == "h-003.ac1"
+        assert authz["verdict"] == "authorized"
+        assert authz["grounding_kind"] == "org-authority"
+        # Impact row
+        impact = env.impact_by_lead["l-005"][0]
+        assert impact["prediction_ref"] == "l-005.ip1"
+        assert impact["dimension"] == "confidentiality"
+        assert impact["verdict"] == "within"
+        assert impact["grounding_kind"] == "telemetry-baseline"
+
+
+class TestAnalyzeDenseContinue:
+    def test_valid_continue_parses(self):
+        env = parse_analyze_envelope_dense(_DENSE_CONTINUE)
+        # Continue is encoded as absence of `:A routing`.
+        assert env.routing["decision"] == "continue"
+        assert "l-001" in env.resolutions_by_lead
+        assert env.data_wishes == ["backup-service job-log query"]
+
+
+class TestAnalyzeDenseRowRules:
+    def test_s1_decisive_grade_requires_severe(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → ++   [l-001 weak ⟂ e-001 :: rep flag=scanner ⟺ p1]
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match=r"severity=severe \(S1\)"):
+            parse_analyze_envelope_dense(body)
+
+    def test_s2_double_minus_requires_r_literal(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → --   [l-001 severe ⟂ e-001 :: anchor refutes ⟺ ¬p1]
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match=r"requires at least one r\* literal"):
+            parse_analyze_envelope_dense(body)
+
+    def test_s3_iff_rhs_must_have_literal(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → +    [l-001 weak ⟂ no-authority :: nothing observable ⟺ true]
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match=r"no `p\*`"):
+            parse_analyze_envelope_dense(body)
+
+    def test_ascii_fallback_iff_operators(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → +    [l-001 weak ⟂ no-authority :: rate=47/h <=> p1 & ~r1]
+        """).strip()
+        env = parse_analyze_envelope_dense(body)
+        e = env.resolutions_by_lead["l-001"][0]
+        assert "p1" in e["matched_prediction_ids"]
+        assert "r1" in e["matched_refutation_ids"]
+
+    def test_invalid_severity_rejected(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → +    [l-001 vague ⟂ no-authority :: obs ⟺ p1]
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match="invalid severity"):
+            parse_analyze_envelope_dense(body)
+
+    def test_invalid_after_weight_rejected(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → ?    [l-001 weak ⟂ no-authority :: obs ⟺ p1]
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match="invalid <after>"):
+            parse_analyze_envelope_dense(body)
+
+
+class TestAnalyzeDenseCrossBlockInvariants:
+    def test_x1_surviving_completeness_omitted(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → ++   [l-001 severe ⟂ e-001 :: confirms ⟺ p1]
+        h-002  ∅ → +    [l-001 weak ⟂ no-authority :: weak match ⟺ p1]
+
+        :A routing
+        decision               halt
+        termination_category   trust-root
+        disposition            benign
+        confidence             high
+        surviving              h-001
+        matched_archetype      null
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match=r"surviving completeness"):
+            parse_analyze_envelope_dense(body)
+
+    def test_x1_refuted_in_surviving_rejected(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → --   [l-001 severe ⟂ e-001 :: refutes ⟺ ¬p1 ∧ r1]
+
+        :A routing
+        decision               halt
+        termination_category   adversarial-refuted
+        disposition            unclear
+        confidence             low
+        surviving              h-001
+        matched_archetype      null
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match=r"refuted but listed in surviving"):
+            parse_analyze_envelope_dense(body)
+
+    def test_x4_benign_with_indeterminate_authz_rejected(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → ++   [l-001 severe ⟂ e-010 :: registry confirms ⟺ p1]
+
+        :R authz [lead|edge|verdict|anchor_kind|anchor_id|grounding|authority|as_of|fulfills|reasoning]
+        l-001|e-010|indeterminate|registry|reg-1|org-authority|partial|2026-04-23T12:00Z|h-001.ac1|baseline timed out
+
+        :A routing
+        decision               halt
+        termination_category   trust-root
+        disposition            benign
+        confidence             high
+        surviving              h-001
+        matched_archetype      null
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match=r"benign requires"):
+            parse_analyze_envelope_dense(body)
+
+    def test_x6_authz_fulfills_must_be_survivor(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → --   [l-001 severe ⟂ e-001 :: refuted ⟺ ¬p1 ∧ r1]
+
+        :R authz [lead|edge|verdict|anchor_kind|anchor_id|grounding|authority|as_of|fulfills|reasoning]
+        l-001|e-001|authorized|registry|reg-1|org-authority|full|2026-04-23T12:00Z|h-001.ac1|registered
+
+        :A routing
+        decision               halt
+        termination_category   adversarial-refuted
+        disposition            unclear
+        confidence             low
+        surviving
+        matched_archetype      null
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match=r"contract owner"):
+            parse_analyze_envelope_dense(body)
+
+    def test_x2_adversarial_refuted_with_alive_adversarial_rejected(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → ++   [l-001 severe ⟂ e-001 :: confirms ⟺ p1]
+        h-002  ∅ → -    [l-001 weak ⟂ no-authority :: weak match ⟺ p1]
+
+        :A routing
+        decision               halt
+        termination_category   adversarial-refuted
+        disposition            benign
+        confidence             high
+        surviving              h-001,h-002
+        matched_archetype      null
+        """).strip()
+        names = {"h-001": "?monitoring-probe", "h-002": "?credential-stuffing"}
+        with pytest.raises(AnalyzeOutputError, match=r"adversarial hypothesis at --"):
+            parse_analyze_envelope_dense(body, declared_hypothesis_names=names)
+
+
+class TestAnalyzeDenseAuthzGrounding:
+    def test_telemetry_baseline_rejected_on_authz(self):
+        # Validator rule #11 — :R authz must use org-authority or past-case.
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → ++   [l-001 severe ⟂ e-001 :: confirms ⟺ p1]
+
+        :R authz [lead|edge|verdict|anchor_kind|anchor_id|grounding|authority|as_of|fulfills|reasoning]
+        l-001|e-001|authorized|baseline|baseline-30d|telemetry-baseline|partial|2026-04-23T12:00Z|h-001.ac1|partial baseline
+
+        :A routing
+        decision               halt
+        termination_category   trust-root
+        disposition            benign
+        confidence             high
+        surviving              h-001
+        matched_archetype      null
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match=r"telemetry-baseline is\s+rejected"):
+            parse_analyze_envelope_dense(body)
+
+
+class TestAnalyzeDenseUnknownBlocks:
+    def test_unknown_block_tag_rejected(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → +    [l-001 weak ⟂ no-authority :: obs ⟺ p1]
+
+        :T bogus
+        whatever
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match="unknown block tag"):
+            parse_analyze_envelope_dense(body)
+
+    def test_missing_resolutions_block_rejected(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :A anomalies
+        sparse coverage
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match=r"missing required `:T resolutions`"):
+            parse_analyze_envelope_dense(body)
+
+    def test_loop_mismatch_rejected(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        """).strip()
+        with pytest.raises(AnalyzeOutputError, match="does not match orchestrator"):
+            parse_analyze_envelope_dense(body, expected_loop_n=2)
+
+    def test_empty_envelope_rejected(self):
+        with pytest.raises(AnalyzeOutputError, match="empty"):
+            parse_analyze_envelope_dense("")
