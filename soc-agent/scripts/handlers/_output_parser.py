@@ -936,23 +936,16 @@ def _split_dense_blocks(text: str) -> list[tuple[str, list[str]]]:
 
 
 def _parse_loop_block(body: list[str], header: str) -> int:
-    """Parse `:A loop  <int>` body."""
-    # Header like ":A loop  2" — the int may be on the header line OR on a body line.
-    # Convention from analyze.md: ":A loop  <int>" (single line).
+    """Parse `:A loop  <int>` (single line — int on the header)."""
     parts = header.split(maxsplit=2)
     if len(parts) >= 3 and parts[1] == "loop":
         try:
             return int(parts[2])
         except ValueError:
             pass
-    # Fallback: int on first body line.
-    if body:
-        try:
-            return int(body[0].strip())
-        except ValueError:
-            pass
     raise AnalyzeOutputError(
-        f"analyze.:A loop must carry an integer, got header={header!r} body={body!r}"
+        f"analyze :A loop must be a single line `:A loop <int>`, got "
+        f"header={header!r} body={body!r}"
     )
 
 
@@ -1437,14 +1430,19 @@ def _validate_cross_block_invariants(
         return
 
     # Build (h-id → after-weight) map from this loop's resolutions.
+    # Multiple leads can grade the same hypothesis in one loop; pick the
+    # most-decisive grade deterministically (`--` and `++` outrank `-`/`+`,
+    # which outrank no entry). This avoids dict-iteration-order surprises
+    # when X1's surviving check evaluates the hypothesis's effective weight.
+    _decisiveness = {"--": 3, "++": 3, "-": 2, "+": 2}
     final_after: dict[str, str] = {}
     for entries in resolutions_by_lead.values():
         for e in entries:
             hid = e["hypothesis_id"]
-            # Last-write-wins within a single envelope (multiple leads grading
-            # the same hypothesis: handler assumes one terminal weight per
-            # hypothesis per loop).
-            final_after[hid] = e["weight"]
+            new_w = e["weight"]
+            cur = final_after.get(hid)
+            if cur is None or _decisiveness.get(new_w, 0) > _decisiveness.get(cur, 0):
+                final_after[hid] = new_w
 
     surviving = set(routing.get("surviving_hypotheses") or [])
 

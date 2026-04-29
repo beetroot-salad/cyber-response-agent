@@ -955,3 +955,73 @@ class TestAnalyzeDenseUnknownBlocks:
     def test_empty_envelope_rejected(self):
         with pytest.raises(AnalyzeOutputError, match="empty"):
             parse_analyze_envelope_dense("")
+
+
+class TestAnalyzeDenseX5:
+    def test_true_positive_without_adversarial_double_plus_rejected(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → +    [l-001 weak ⟂ no-authority :: weak match ⟺ p1]
+
+        :A routing
+        decision               halt
+        termination_category   exhaustion-escalation
+        disposition            true_positive
+        confidence             low
+        surviving              h-001
+        matched_archetype      null
+        """).strip()
+        names = {"h-001": "?adversary-controlled-source"}
+        with pytest.raises(AnalyzeOutputError, match=r"true_positive requires"):
+            parse_analyze_envelope_dense(body, declared_hypothesis_names=names)
+
+    def test_true_positive_with_adversarial_double_plus_accepted(self):
+        body = textwrap.dedent("""
+        :A loop  1
+
+        :T resolutions
+        h-001  ∅ → ++   [l-001 severe ⟂ e-001 :: anchor confirms attack ⟺ p1 ∧ ¬r1]
+
+        :A routing
+        decision               halt
+        termination_category   trust-root
+        disposition            true_positive
+        confidence             high
+        surviving              h-001
+        matched_archetype      null
+        """).strip()
+        names = {"h-001": "?adversary-controlled-source"}
+        env = parse_analyze_envelope_dense(body, declared_hypothesis_names=names)
+        assert env.routing["disposition"] == "true_positive"
+
+
+class TestAnalyzeDenseDecisiveGradeOrdering:
+    def test_double_plus_outranks_plus_for_x1(self):
+        # Same hypothesis graded `+` on l-001 (weak) and `++` on l-002
+        # (decisive). Effective weight is `++` regardless of row order;
+        # X1 must accept h-001 in surviving on both row orderings.
+        for ordering in (
+            ("h-001  ∅ → +    [l-001 weak ⟂ no-authority :: weak ⟺ p1]",
+             "h-001  +  → ++   [l-002 severe ⟂ e-001 :: confirmed ⟺ p1 ∧ ¬r1]"),
+            ("h-001  ∅ → ++   [l-002 severe ⟂ e-001 :: confirmed ⟺ p1 ∧ ¬r1]",
+             "h-001  ++ → +    [l-001 weak ⟂ no-authority :: weak ⟺ p1]"),
+        ):
+            body = textwrap.dedent(f"""
+            :A loop  1
+
+            :T resolutions
+            {ordering[0]}
+            {ordering[1]}
+
+            :A routing
+            decision               halt
+            termination_category   trust-root
+            disposition            benign
+            confidence             high
+            surviving              h-001
+            matched_archetype      null
+            """).strip()
+            env = parse_analyze_envelope_dense(body)
+            assert env.routing["surviving_hypotheses"] == ["h-001"]

@@ -36,7 +36,7 @@ The handler does **not** ship prior-phase content inline. Read it on demand from
 
 **Before any `:T resolutions` row**, walk the current loop's PREDICT YAML in your **thinking trail only** and note, for each hypothesis, the declared `predictions[]` ids and `refutation_shape[]` ids you'll be citing from. This is purely a mental check — its output goes into your reasoning, never into the envelope. **Per Hard rule 1, the envelope is the dense block format with nothing before or after it.**
 
-**Coverage rule for `++` / `--`:** the union of `p*`/`ap*` literals on the iff RHS (any polarity) across **all this-loop resolutions** for a given hypothesis must equal the hypothesis's full declared `predictions[]` set, OR you must cap the grade at `+` / `-`. The validator rejects writes where this union is incomplete and weight is `++`/`--`.
+**Coverage rule for `++` / `--`:** the union of `p*`/`ap*` literals on the iff RHS (any polarity) across **all this-loop resolutions** for a given hypothesis must equal the hypothesis's full declared `predictions[]` set, OR you must cap the grade at `+` / `-`. The invlang validator (post-synthesis) rejects writes where this union is incomplete and weight is `++`/`--`. Self-catch before emitting — recovery from a validator rejection costs a full retry.
 
 **Forbidden output shape:** an empty `:T resolutions` block as a placeholder for "I had no data for this lead/hypothesis". That is silent partial-coverage and the validator catches it. The only valid choices for a (lead, hypothesis) pair you cannot grade fully:
 
@@ -116,7 +116,6 @@ LHS ⟺ RHS
 
 - **(S2)** `<after>=--` ⇒ at least one iff RHS contains an `r*` literal (any polarity). The `--` grade requires a refutation to have been tested.
 - **(S3)** Every iff RHS MUST contain at least one literal. An iff with empty RHS is malformed.
-- **(S4)** Bracket-escape: embedded `]` inside the annotation must be written as `\]`. The annotation runs from `::` to the **last unescaped `]`** on the row.
 
 ### `:R authz` row grammar
 
@@ -178,11 +177,11 @@ matched_archetype      <name> | null
 
 ### Cross-block invariants (validator rules)
 
-These rules connect fields across blocks. They MUST hold simultaneously. **Self-catch before emitting** — validator-error recovery is expensive.
+These rules connect fields across blocks. They MUST hold simultaneously. **Self-catch before emitting** — recovery is expensive. (X1, X2, X4, X5, X6) are enforced at parse time; (X3) is a discipline check the agent must make against PREDICT.
 
 - **(X1)** `routing.surviving` MUST contain every hypothesis with `<after> ≠ --`. Hypotheses at `++`, `+`, or `-` are survivors. Hypotheses at `--` MUST NOT be in `surviving`.
 - **(X2)** `termination_category=adversarial-refuted` ⇒ every hypothesis whose name carries an adversarial token (`?adversary-*`, `?attack-*`, `?credential-*`, `?bruteforce*`, `?compromise-*`, `?malware-*`, `?exfiltration-*`, `?lateral-*`, `?post-exploit-*`, `?dga-*`, `?beaconing-*`) has `<after>=--`.
-- **(X3)** `termination_category=trust-root` ⇒ no `surviving` hypothesis carries an unfulfilled `authorization_contract` declared in PREDICT.
+- **(X3, agent-discipline)** `termination_category=trust-root` ⇒ no `surviving` hypothesis carries an unfulfilled `authorization_contract` declared in PREDICT. (Not parser-enforced — PREDICT contracts aren't visible to the dense parser. Self-catch by walking PREDICT in your thinking trail.)
 - **(X4)** `disposition=benign` ⇒ every authorization_contract on a `surviving` hypothesis has a fulfilling `:R authz` row with `verdict=authorized`. Any unfulfilled or `unauthorized`/`indeterminate` contract on a survivor forces `disposition` to `unclear` or `true_positive`.
 - **(X5)** `disposition=true_positive` ⇒ at least one `surviving` hypothesis whose name carries an adversarial token AND `<after>=++` (validator rule #36 — affirmative true_positive).
 - **(X6)** Every `:R authz fulfills` MUST name a contract on a `surviving` hypothesis (you cannot fulfill a contract on a refuted hypothesis).
