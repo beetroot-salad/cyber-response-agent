@@ -126,6 +126,17 @@ analyze:
           contract_id: "h-001.ac1"      # dotted form: h-{hypothesis-id}.ac{n}
           verdict: "authorized" | "unauthorized" | "indeterminate"
           grounding_kind: "org-authority" | "past-case"
+                                         # `telemetry-baseline` is REJECTED HERE by the validator
+                                         # (rule #11). Baselines answer expectation, not authorization
+                                         # — they live in `trust_anchor_result` /
+                                         # `anchor_consultations[]`. When a contract's verdict is
+                                         # `indeterminate` because a baseline lookup is missing or
+                                         # null, do NOT emit a legitimacy_resolutions entry — omit
+                                         # it (the contract carries over) and emit a
+                                         # `trust_anchor_result` with `grounding_kind:
+                                         # telemetry-baseline` describing the consultation outcome.
+                                         # CONCLUDE can defer the contract via
+                                         # `deferred_authorizations[]`.
           authority_for_question: "{anchor-id or past-case ticket}"
           as_of: "{ISO-8601 or null}"
           reasoning: "brief"
@@ -249,7 +260,34 @@ Failure modes seen in prior runs. Each is a hard rule in context; check your dra
 - **Grading `++`/`--` without naming `supporting_edges`.** Decisive grades require at least one authoritative edge backing them. The handler auto-fills `supporting_edges` from the prologue's strong-authority edges when you omit the field, but for alert classes whose prologue edges aren't strong-authority (e.g., DNS attempted-resolve edges, low-trust correlation edges) the fallback is empty and the validator rejects. When you grade `++` or `--`, name the lead's `e-*` edges that materialized the predicate explicitly in `supporting_edges:[…]` — the lead's GATHER pass typically materializes one or more `e-*` edges into the confirmed graph, and those are the right ids. If you can't point at a specific edge, the grade isn't decisive — cap at `+` / `-`.
 - **Citing `h-{id}.proposed_edge` or `h-{id}:proposed_edge` as an `edge_id`.** `legitimacy_resolutions[].entries[].edge_id` must be an `e-*` id declared in `<investigation>`. A hypothesis's `proposed_edge` object is not an id — it's an embedded description until the handler materializes it into an `e-*` edge (typically when a GATHER lead confirms the hop). If the hypothesis you want to resolve has no materialized edge yet, omit the `legitimacy_resolutions` entry and let the contract carry over; CONCLUDE can list it under `deferred_authorizations[]` with rationale.
 - **`contract_id` format.** Always dotted: `h-001.ac1`, never `h-001ac1`. The validator matches `^h-[^.]+\.ac\d+$`.
-- **`grounding_kind` enum.** `authorization_resolutions` take `org-authority` or `past-case` only — `anchor-consultation` is not a value (anchor consultation is the *mechanism*, not a grounding kind). Baseline lookups belong in `trust_anchor_result` with `grounding_kind: telemetry-baseline`, which the handler synthesizes into `anchor_consultations[]` rather than into a contract resolution.
+- **`grounding_kind` enum.** `authorization_resolutions` (and the `legitimacy_resolutions[].entries[]` envelope shape that synthesizes them) take `org-authority` or `past-case` only — `anchor-consultation` is not a value (anchor consultation is the *mechanism*, not a grounding kind). Baseline lookups belong in `trust_anchor_result` with `grounding_kind: telemetry-baseline`, which the handler synthesizes into `anchor_consultations[]` rather than into a contract resolution. **The validator rejects writes that mix these surfaces** (rule #11): `authorization_resolutions[].grounding_kind: telemetry-baseline` aborts the orchestrator with no recovery path.
+
+- **Indeterminate-via-missing-baseline.** When a `lc{n}` / `ac{n}` authorization contract has a predicate that requires a structured baseline (e.g., "matches the on-cadence distribution") and the resolving lead's baseline is `null` or errored, the verdict is `indeterminate` — but the *grounding* is not `telemetry-baseline`. The honest shape is to **omit the `legitimacy_resolutions` entry entirely** so the contract carries over, and emit a `trust_anchor_result` block recording what the anchor consultation actually returned. CONCLUDE will list the contract under `deferred_authorizations[]` with rationale. Example:
+
+  ```yaml
+  # WRONG — validator rule #11 rejection, orchestrator exit 1
+  legitimacy_resolutions:
+    - lead_ref: l-001
+      entries:
+        - edge_id: e-001
+          contract_id: h-001.ac1
+          verdict: indeterminate
+          grounding_kind: telemetry-baseline       # REJECTED — not in {org-authority, past-case}
+          authority_for_question: ac1
+          reasoning: "p1 confirmed but p2 cadence unresolvable — l-001 baseline null"
+
+  # RIGHT — omit the resolution; record the consultation in trust_anchor_result
+  legitimacy_resolutions: []                       # contract h-001.ac1 carries over
+  trust_anchor_result:
+    - lead_ref: l-001
+      asks: [ac1]
+      verdict: indeterminate
+      grounding_kind: telemetry-baseline           # OK here — anchor_consultations[] admits this
+      authority_for_question: ac1
+      reasoning: "ac1 cadence-containment predicate cannot be evaluated mechanically — l-001 baseline returned null; needs a structured inter-event interval query"
+  anomalies:
+    - "ac1 (cadence containment on h-001) unresolvable this loop: l-001 baseline null; structured cadence baseline query needed"
+  ```
 
 ## Examples
 
