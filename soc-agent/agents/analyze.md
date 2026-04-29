@@ -34,15 +34,9 @@ The handler does **not** ship prior-phase content inline. Read it on demand from
 
 ## Prediction-coverage protocol (mandatory pre-draft step)
 
-**Before any `resolutions[]` entry**, walk the current loop's PREDICT YAML and enumerate per hypothesis:
+**Before any `resolutions[]` entry**, walk the current loop's PREDICT YAML in your **thinking trail only** and note, for each hypothesis, the declared `predictions[]` ids and `refutation_shape[]` ids you'll be citing from. This is purely a mental check — its output goes into your reasoning, never into the envelope. **Per Hard rule 1, the envelope is one fenced YAML block with nothing before or after it.** If your response begins with anything other than ```` ```yaml ````, it's malformed.
 
-```
-h-001 → predictions: [p1, p2, p3]   refutation_shape: [r1, r2]
-h-002 → predictions: [p1]           refutation_shape: [r1]
-...
-```
-
-This enumeration is what `matched_prediction_ids[]` and `matched_refutation_ids[]` get cited from. Do this in your thinking trail, not in the envelope output (the envelope is YAML-only per Hard rule 1).
+The walk's purpose: `matched_prediction_ids[]` and `matched_refutation_ids[]` in your envelope must cite ids actually declared on each hypothesis in PREDICT. The walk surfaces those id sets so you can check coverage before authoring.
 
 **Coverage rule for `++` / `--`:** the union of `matched_prediction_ids[]` across **all this-loop resolutions** for a given `hypothesis_id` must equal the hypothesis's full declared `predictions[]` set, OR you must cap the grade at `+` / `-`. The validator rejects writes where this union is incomplete and weight is `++`/`--`.
 
