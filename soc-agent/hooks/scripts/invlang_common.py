@@ -28,8 +28,14 @@ from hooks.scripts.invlang_walkers import iter_hypotheses  # noqa: E402
 # Block extraction + merge
 # ---------------------------------------------------------------------------
 
-# Same regex used by corpus.py — extract ```yaml ... ``` spans from markdown
+# Same regex used by corpus.py — extract ```yaml ... ``` spans from markdown.
 YAML_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
+
+# Dense surface uses ```invlang fences. The Foundation extension keeps the
+# YAML fence walker intact and adds a parallel walker that produces the same
+# canonical companion dict via `scripts/handlers/_dense_parser`. Phase
+# migration PRs progressively swap emissions from ```yaml to ```invlang.
+INVLANG_BLOCK_RE = re.compile(r"```invlang\n(.*?)\n```", re.DOTALL)
 
 COMPANION_TOP_LEVEL = {"prologue", "hypothesize", "findings", "conclude"}
 

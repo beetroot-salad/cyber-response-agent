@@ -513,6 +513,27 @@ class TestFormatInvestigationBlock:
         explicit_full = format_investigation_block(fx, mode="full")
         assert legacy == explicit_full
 
+    def test_analyze_mode_keeps_invlang_fences_alongside_yaml(self):
+        """Analyze mode treats ```invlang fences as structured grading
+        surfaces alongside ```yaml fences, so the dense on-disk migration
+        does not silently drop content the analyze subagent needs to see.
+        """
+        fx = (
+            "## CONTEXTUALIZE\n"
+            "**Alert:** test\n"
+            "```invlang\n:V prologue.vertices [id|type|class|ident]\nv-001|endpoint|host|h1\n```\n"
+            "## PREDICT (loop 1)\n"
+            "**Selected lead:** l1\n"
+            "```yaml\nhypothesize:\n  hypotheses: []\n```\n"
+        )
+        block = format_investigation_block(fx, mode="analyze")
+        assert ":V prologue.vertices" in block
+        assert "v-001|endpoint|host|h1" in block
+        # Hypothesize YAML fence still preserved
+        assert "hypothesize:" in block
+        # Markdown prose still stripped
+        assert "**Alert:**" not in block
+
 
 class TestLoadSignatureText:
     def test_loads_rule_5710_playbook_and_context(self):

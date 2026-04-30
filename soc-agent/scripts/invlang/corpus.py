@@ -184,12 +184,27 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
                 merged.setdefault("findings", [])
                 merged["findings"].extend(entries)
 
-    # Dense `:T conclude` block (handler-authored at REPORT). Last-wins
-    # parity with YAML-form conclude: dense overrides any earlier yaml
-    # fence, matching the on-disk write order (handler emits dense once).
-    dense_conclude = _parse_dense_conclude(text)
-    if dense_conclude is not None:
-        merged["conclude"] = dense_conclude
+    # ```invlang fenced blocks (Foundation-onward dense surface). Walked
+    # via the unified parser, projected to the canonical companion dict,
+    # and merged in last-wins order (matches the on-disk write convention:
+    # newer dense emissions override older YAML fences for the same key).
+    # Old corpus files without invlang fences are unaffected — this path
+    # is a no-op when no fence is present.
+    dense_doc = _parse_dense_companion(text)
+    if dense_doc:
+        for key in ("prologue", "hypothesize", "conclude"):
+            if key in dense_doc:
+                merged[key] = dense_doc[key]
+        if isinstance(dense_doc.get("findings"), list):
+            merged.setdefault("findings", [])
+            merged["findings"].extend(dense_doc["findings"])
+
+    # Legacy bare `:T conclude` (no fence) — pre-Foundation on-disk shape.
+    # Skip if a ```invlang fence already produced a conclude.
+    if "conclude" not in merged:
+        dense_conclude = _parse_dense_conclude(text)
+        if dense_conclude is not None:
+            merged["conclude"] = dense_conclude
 
     return merged
 
@@ -219,6 +234,29 @@ def _parse_dense_conclude(text: str) -> dict[str, Any] | None:
         print(
             f"[invlang.corpus] warning: malformed dense :T conclude block "
             f"during corpus walk — skipping conclude. Error: {e}",
+            file=sys.stderr,
+        )
+        return None
+
+
+def _parse_dense_companion(text: str) -> dict[str, Any] | None:
+    """Walk ```invlang fences in `text` via the unified dense parser.
+
+    Returns the canonical companion dict (matches the YAML-fence dict
+    shape) or None if no fences are present. Malformed dense content
+    emits a stderr warning and returns None — corpus walks should not
+    crash on a single bad investigation.
+    """
+    from scripts.handlers._dense_parser import (  # type: ignore
+        DenseParseError,
+        parse_dense_companion,
+    )
+    try:
+        return parse_dense_companion(text)
+    except DenseParseError as e:
+        print(
+            f"[invlang.corpus] warning: malformed ```invlang block "
+            f"during corpus walk — skipping dense surface. Error: {e}",
             file=sys.stderr,
         )
         return None

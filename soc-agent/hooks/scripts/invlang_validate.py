@@ -54,6 +54,7 @@ if str(SOC_AGENT_ROOT) not in sys.path:
 from hooks.scripts.investigation_parse import resolve_proposed_text
 from hooks.scripts.invlang_common import (
     COMPANION_TOP_LEVEL,
+    INVLANG_BLOCK_RE,
     YAML_BLOCK_RE,
     _merge_blocks,
 )
@@ -382,17 +383,20 @@ def _check_tool_audit_cross_ref_warnings(
 def _parse_blocks(text: str) -> tuple[list[dict[str, Any]], list[str]]:
     """Extract and parse all companion blocks from `text`.
 
-    Two surfaces are walked:
-      1. Every ```yaml fenced block (legacy + non-REPORT phases).
-      2. The dense `:T conclude` block authored by REPORT (via
-         `scripts/handlers/_conclude_dense.py`). The dense block lives
-         outside any yaml fence; we surface it as a synthesized
-         `{"conclude": <dict>}` document so the downstream merge +
-         validators are unchanged.
+    Three surfaces are walked, in this order:
+      1. Every ```yaml fenced block (legacy + non-cutover phases).
+      2. Every ```invlang fenced block (dense surface; Foundation-onward).
+         Parsed via `scripts/handlers/_dense_parser` and projected to the
+         canonical companion dict shape so `_merge_blocks` and the 29
+         validator rules remain untouched.
+      3. The legacy bare `:T conclude` block (no fence) authored by REPORT
+         pre-Foundation. Synthesized as a `{"conclude": <dict>}` document
+         and appended last so it wins over any conflicting YAML/dense
+         conclude (mirrors the on-disk write order).
 
     Returns (parsed_dicts, parse_errors). Non-dict YAML documents,
-    malformed YAML, and malformed dense conclude blocks are surfaced
-    via the error list.
+    malformed YAML, and malformed dense blocks are surfaced via the error
+    list.
     """
     blocks: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -406,16 +410,29 @@ def _parse_blocks(text: str) -> tuple[list[dict[str, Any]], list[str]]:
         if isinstance(doc, dict):
             blocks.append(doc)
 
-    # Dense `:T conclude` wins over any legacy `conclude:` YAML fence
-    # (matches corpus.py last-wins parity and the on-disk write order:
-    # the handler emits dense once, never both). Drop only the conclude
-    # key from existing blocks — siblings inside the same yaml fence
-    # (e.g. prologue) are preserved.
-    dense_conclude = _parse_dense_conclude(text, errors)
-    if dense_conclude is not None:
-        for b in blocks:
-            b.pop("conclude", None)
-        blocks.append({"conclude": dense_conclude})
+    # ```invlang fences — walk via the unified dense parser.
+    if INVLANG_BLOCK_RE.search(text):
+        try:
+            from scripts.handlers._dense_parser import (  # type: ignore
+                parse_dense_companion,
+                DenseParseError,
+            )
+            dense_doc = parse_dense_companion(text)
+            if dense_doc:
+                blocks.append(dense_doc)
+        except DenseParseError as e:
+            errors.append(f"dense ```invlang block malformed: {e}")
+
+    # Legacy bare `:T conclude` (pre-Foundation; old on-disk files only).
+    # Skipped if a ```invlang fence already produced a conclude — the new
+    # surface is canonical for new writes.
+    has_dense_conclude_in_blocks = any("conclude" in b for b in blocks)
+    if not has_dense_conclude_in_blocks:
+        dense_conclude = _parse_dense_conclude(text, errors)
+        if dense_conclude is not None:
+            for b in blocks:
+                b.pop("conclude", None)
+            blocks.append({"conclude": dense_conclude})
 
     return blocks, errors
 

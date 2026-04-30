@@ -118,18 +118,22 @@ def _trim_gather_section(section: dict) -> str:
     return header + "\n" + body
 
 
+_INVLANG_OPEN_FENCES = {"```yaml", "```yml", "```invlang"}
+
+
 def _section_yaml_fences(section: dict) -> str:
-    """Return only the ```yaml ... ``` fenced blocks from a section body,
+    """Return only the structured fenced blocks from a section body,
     concatenated verbatim (fences included). Markdown prose outside fences
     is dropped.
 
-    Used by the analyze mode to strip free-form prose surfaces (e.g.
-    `**Playbook hypotheses:** ?foo, ?bar` enumerations in CONTEXTUALIZE,
-    archetype-catalog prose in PREDICT) that analyze must not grade
-    against. The only grading-valid hypothesis set is `hypothesize.hypotheses[]`
-    inside a YAML fence.
+    Accepts both ```` ```yaml ```` (legacy on-disk surface) and
+    ```` ```invlang ```` (dense surface). Used by the analyze mode to strip
+    free-form prose surfaces (e.g. `**Playbook hypotheses:** ?foo, ?bar`
+    enumerations in CONTEXTUALIZE, archetype-catalog prose in PREDICT) that
+    analyze must not grade against. The only grading-valid hypothesis set
+    lives inside a structured fence.
 
-    Returns an empty string if the section has no YAML fences.
+    Returns an empty string if the section has no structured fences.
     """
     kept: list[str] = []
     in_fence = False
@@ -137,12 +141,10 @@ def _section_yaml_fences(section: dict) -> str:
     for line in section["body_lines"]:
         if line.startswith("```"):
             if not in_fence:
-                # Opening fence — only keep if it's YAML.
-                if line.strip() in {"```yaml", "```yml"}:
+                if line.strip() in _INVLANG_OPEN_FENCES:
                     in_fence = True
                     current = [line]
             else:
-                # Closing fence.
                 current.append(line)
                 kept.extend(current)
                 in_fence = False
