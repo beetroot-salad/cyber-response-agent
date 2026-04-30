@@ -804,7 +804,7 @@ _RESOLUTION_ROW_RE = re.compile(
 )
 # RHS literal extraction: p1, ap2, r3 — order-independent on the RHS.
 _PRED_LITERAL_RE = re.compile(r"\b(?:a?p\d+|r\d+)\b")
-# Adversarial-token detection (X2, X5).
+# Adversarial-token detection (X2 only — X5 is weight-only as of v2.16).
 _ADVERSARIAL_TOKENS = (
     "?adversary-",
     "?attack-",
@@ -1389,9 +1389,10 @@ def _validate_cross_block_invariants(
 ) -> None:
     """Enforce X1–X6 from agents/analyze.md.
 
-    `declared_hypothesis_names` maps `h-id` → hypothesis name for X2/X5
-    adversarial-token detection. When None, those checks are skipped at
-    the parser level (the handler can re-check after composing findings).
+    `declared_hypothesis_names` maps `h-id` → hypothesis name for X2
+    adversarial-token detection on `termination_category=adversarial-refuted`.
+    When None, X2 is skipped at the parser level (the handler can re-check
+    after composing findings). X5 is weight-only and runs unconditionally.
     """
     decision = routing.get("decision")
     if decision != "halt":
@@ -1464,7 +1465,22 @@ def _validate_cross_block_invariants(
                         f"{row.get('verdict')!r}"
                     )
 
-    # X2 and X5 require the hypothesis-name map. Skip when not provided.
+    # X5: disposition=true_positive requires at least one surviving hypothesis
+    # at final weight ++ (affirmative-grading evidence). Name/classification
+    # is intentionally NOT checked here — see validator rule #36 (v2.16) for
+    # the rationale; the lexical token list was brittle and desynced from
+    # playbook-canonical hypothesis names.
+    if routing.get("disposition") == "true_positive":
+        if not any(final_after.get(hid) == "++" for hid in surviving):
+            raise AnalyzeOutputError(
+                f"analyze :A routing disposition=true_positive requires at "
+                f"least one surviving hypothesis whose final weight is ++ "
+                f"(X5, validator rule #36); "
+                f"surviving={sorted(surviving)} weights="
+                f"{ {hid: final_after.get(hid) for hid in sorted(surviving)} }"
+            )
+
+    # X2 requires the hypothesis-name map. Skip when not provided.
     if declared_hypothesis_names is None:
         return
 
@@ -1482,20 +1498,6 @@ def _validate_cross_block_invariants(
                     f"hypothesis at -- (X2); {hid} (adversarial) is at {w}"
                 )
 
-    # X5: disposition=true_positive requires at least one adversarial ++ in
-    # surviving.
-    if routing.get("disposition") == "true_positive":
-        if not any(
-            _is_adversarial(hid) and final_after.get(hid) == "++"
-            for hid in surviving
-        ):
-            raise AnalyzeOutputError(
-                f"analyze :A routing disposition=true_positive requires at "
-                f"least one surviving hypothesis whose name carries an "
-                f"adversarial token AND whose final weight is ++ (X5, "
-                f"validator rule #36); surviving={sorted(surviving)}"
-            )
-
 
 def parse_analyze_envelope_dense(
     stdout: str,
@@ -1509,9 +1511,9 @@ def parse_analyze_envelope_dense(
     `parse_analyze_envelope` (the YAML form) so the handler is unchanged.
 
     `declared_hypothesis_names` maps declared `h-id` → hypothesis name
-    (e.g. `?adversary-controlled-source`). When provided, enables the X2/X5
-    adversarial-token cross-block invariant checks. When None, those checks
-    are skipped at the parser level.
+    (e.g. `?adversary-controlled-source`). When provided, enables the X2
+    adversarial-token check on `adversarial-refuted` termination. When None,
+    X2 is skipped at the parser level. X5 is weight-only and unaffected.
 
     Raises `AnalyzeOutputError` on any structural rule violation (S1–S4 row
     rules + X1–X6 cross-block invariants).

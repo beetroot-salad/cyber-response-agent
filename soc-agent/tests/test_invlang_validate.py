@@ -514,10 +514,10 @@ class TestValidateCompanion:
             "```\n"
         )
         errors = validate_companion(text, None)
-        # Rule #36 fires.
+        # Rule #36 fires — survivor at `+`, no `++` anywhere.
         tp_errors = [e for e in errors if "true_positive" in e]
         assert tp_errors, f"expected a rule-#36 error, got: {errors}"
-        assert "h-001" in tp_errors[0] or "non-adversarial" in tp_errors[0]
+        assert "h-001" in tp_errors[0] or "++" in tp_errors[0]
 
     def test_trap_shape_passes_when_adversarial_pp_added(self):
         """Same shape as the trap, plus an adversarial peer at ++ — should
@@ -600,8 +600,11 @@ class TestValidateCompanion:
             "```\n"
         )
         errors = validate_companion(text, None)
-        # No rule-#36 error.
-        tp_errors = [e for e in errors if "true_positive" in e and "adversarial" in e.lower()]
+        # No rule-#36 error — h-002 graded ++ satisfies the weight check.
+        tp_errors = [
+            e for e in errors
+            if "true_positive" in e and "++" in e and "no surviving" in e
+        ]
         assert not tp_errors, f"unexpected rule-#36 error: {tp_errors}"
 
 

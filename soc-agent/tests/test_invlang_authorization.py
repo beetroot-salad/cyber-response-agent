@@ -376,7 +376,7 @@ def _tp_fixture(
 
 
 class TestCheckAffirmativeTruePositive:
-    """Rule #36 — true_positive requires ++ on adversarial-classified hypothesis."""
+    """Rule #36 (v2.16) — true_positive requires ++ on a surviving hypothesis."""
 
     def test_disposition_other_than_tp_passes(self):
         # Rule fires only on disposition=true_positive.
@@ -389,15 +389,15 @@ class TestCheckAffirmativeTruePositive:
         merged = _tp_fixture(disposition=None)
         assert _check_affirmative_true_positive(merged) == []
 
-    def test_adversarial_hypothesis_at_pp_passes(self):
+    def test_survivor_at_pp_passes(self):
         merged = _tp_fixture(
             surviving=["h-001"],
             resolutions=[("h-001", "++")],
         )
         assert _check_affirmative_true_positive(merged) == []
 
-    def test_adversarial_hypothesis_at_plus_fails(self):
-        # Adversarial classification but only graded `+`.
+    def test_survivor_at_plus_fails(self):
+        # Survivor graded `+`, not `++` — the original 4-production-run bug.
         merged = _tp_fixture(
             surviving=["h-001"],
             resolutions=[("h-001", "+")],
@@ -405,17 +405,21 @@ class TestCheckAffirmativeTruePositive:
         errors = _check_affirmative_true_positive(merged)
         assert errors and "true_positive" in errors[0] and "h-001" in errors[0]
 
-    def test_adversarial_hypothesis_with_no_resolution_fails(self):
+    def test_survivor_with_no_resolution_fails(self):
         # Hypothesis declared but never graded.
         merged = _tp_fixture(surviving=["h-001"])
         errors = _check_affirmative_true_positive(merged)
         assert errors and "++" in errors[0]
 
-    def test_non_adversarial_hypothesis_at_pp_fails(self):
+    def test_benign_named_survivor_at_pp_passes(self):
+        # v2.16: classification/name no longer matter; ++ is sufficient.
+        # The "wrong-named survivor routed true_positive" failure mode is
+        # caught downstream by Tier-2 judges and rule #21 (when contracts
+        # exist), not by rule #36.
         merged = _tp_fixture(
             hypotheses=[{
                 "id": "h-001",
-                "name": "?operator-runtime-exec",  # benign-mechanism name
+                "name": "?operator-runtime-exec",
                 "attached_to_vertex": "v-001",
                 "proposed_edge": {
                     "relation": "exec",
@@ -425,54 +429,41 @@ class TestCheckAffirmativeTruePositive:
             surviving=["h-001"],
             resolutions=[("h-001", "++")],
         )
-        errors = _check_affirmative_true_positive(merged)
-        assert errors
-        assert "non-adversarial" in errors[0].lower()
+        assert _check_affirmative_true_positive(merged) == []
 
     def test_one_qualifying_among_many_passes(self):
-        # h-001 benign-mechanism, h-002 adversary-controlled at ++.
+        # h-001 graded `+`, h-002 graded `++` — survivor set has a ++.
         merged = _tp_fixture(
             hypotheses=[
                 {"id": "h-001", "name": "?benign-mech", "attached_to_vertex": "v-001",
                  "proposed_edge": {"relation": "x",
                                    "parent_vertex": {"type": "process", "classification": "benign-thing"}}},
-                {"id": "h-002", "name": "?adversary-controlled-process", "attached_to_vertex": "v-001",
+                {"id": "h-002", "name": "?credentials-used-outside-registered-actor",
+                 "attached_to_vertex": "v-001",
                  "proposed_edge": {"relation": "x",
-                                   "parent_vertex": {"type": "process", "classification": "adversary-controlled-process"}}},
+                                   "parent_vertex": {"type": "process", "classification": "non-daemon-actor"}}},
             ],
             surviving=["h-001", "h-002"],
             resolutions=[("h-001", "+"), ("h-002", "++")],
         )
         assert _check_affirmative_true_positive(merged) == []
 
-    def test_classification_match_alone_qualifies(self):
-        # Hypothesis name benign-looking but classification adversarial.
+    def test_playbook_canonical_adversarial_name_passes(self):
+        # The 5710 playbook-canonical adversarial fork name was rejected by
+        # the v2.14 lexical token list. v2.16 accepts it on ++ alone.
         merged = _tp_fixture(
             hypotheses=[{
-                "id": "h-001",
-                "name": "?process-actor",
-                "attached_to_vertex": "v-001",
-                "proposed_edge": {"relation": "x",
-                                  "parent_vertex": {"type": "process",
-                                                    "classification": "malware-implant-dns-covert-channel"}},
+                "id": "h-002",
+                "name": "?credentials-used-outside-registered-actor",
+                "attached_to_vertex": "v-002",
+                "proposed_edge": {
+                    "relation": "initiated_by",
+                    "parent_vertex": {"type": "process",
+                                      "classification": "non-daemon-actor-on-monitoring-host"},
+                },
             }],
-            surviving=["h-001"],
-            resolutions=[("h-001", "++")],
-        )
-        assert _check_affirmative_true_positive(merged) == []
-
-    def test_name_match_alone_qualifies(self):
-        # Classification benign-looking but hypothesis name adversarial.
-        merged = _tp_fixture(
-            hypotheses=[{
-                "id": "h-001",
-                "name": "?credential-guess-spray",
-                "attached_to_vertex": "v-001",
-                "proposed_edge": {"relation": "x",
-                                  "parent_vertex": {"type": "process", "classification": "process-actor"}},
-            }],
-            surviving=["h-001"],
-            resolutions=[("h-001", "++")],
+            surviving=["h-002"],
+            resolutions=[("h-002", "++")],
         )
         assert _check_affirmative_true_positive(merged) == []
 
@@ -488,7 +479,7 @@ class TestCheckAffirmativeTruePositive:
         assert errors and "undeclared" in errors[0].lower() and "h-999" in errors[0]
 
     def test_empty_surviving_falls_back_to_all_hypotheses(self):
-        # surviving_hypotheses absent → scan all declared.
+        # surviving_hypotheses absent → scan all declared; ++ on any passes.
         merged = _tp_fixture(
             hypotheses=[{
                 "id": "h-001",
@@ -502,9 +493,10 @@ class TestCheckAffirmativeTruePositive:
         )
         assert _check_affirmative_true_positive(merged) == []
 
-    def test_real_trap_shape_h001_at_plus_with_benign_classification_fails(self):
+    def test_real_trap_shape_survivor_at_plus_fails(self):
         # Mirrors the documented production trap (run #44 / 20260428-060839):
-        # ?operator-runtime-exec at + with no adversarial peer, disposition=true_positive.
+        # survivor graded `+`, disposition=true_positive. v2.16 still rejects
+        # this — the affirmative-grading signal (++) is the load-bearing check.
         merged = _tp_fixture(
             hypotheses=[{
                 "id": "h-001",

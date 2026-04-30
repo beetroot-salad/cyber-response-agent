@@ -1323,7 +1323,13 @@ class TestAnalyzeDenseUnknownBlocks:
 
 
 class TestAnalyzeDenseX5:
-    def test_true_positive_without_adversarial_double_plus_rejected(self):
+    """X5 (v2.16): disposition=true_positive requires ++ on a survivor.
+
+    Weight-only — hypothesis-name token is no longer consulted (see
+    validator rule #36 v2.16 rationale).
+    """
+
+    def test_true_positive_without_double_plus_rejected(self):
         body = textwrap.dedent("""
         :A loop  1
 
@@ -1338,11 +1344,10 @@ class TestAnalyzeDenseX5:
         surviving              h-001
         matched_archetype      null
         """).strip()
-        names = {"h-001": "?adversary-controlled-source"}
         with pytest.raises(AnalyzeOutputError, match=r"true_positive requires"):
-            parse_analyze_envelope_dense(body, declared_hypothesis_names=names)
+            parse_analyze_envelope_dense(body)
 
-    def test_true_positive_with_adversarial_double_plus_accepted(self):
+    def test_true_positive_with_double_plus_accepted(self):
         body = textwrap.dedent("""
         :A loop  1
 
@@ -1357,9 +1362,37 @@ class TestAnalyzeDenseX5:
         surviving              h-001
         matched_archetype      null
         """).strip()
-        names = {"h-001": "?adversary-controlled-source"}
-        env = parse_analyze_envelope_dense(body, declared_hypothesis_names=names)
+        env = parse_analyze_envelope_dense(body)
         assert env.routing["disposition"] == "true_positive"
+
+    def test_true_positive_with_non_adversarial_named_survivor_at_pp_accepted(self):
+        # The 202152-rule5710 case: playbook-canonical adversarial fork name
+        # `?credentials-used-outside-registered-actor` lacked the v2.14 token
+        # whitelist; v2.16 accepts on weight alone.
+        body = textwrap.dedent("""
+        :A loop  2
+
+        :T resolutions
+        h-001  ∅ → --   [l-002b severe ⟂ e-001 :: cadence violates approved shape ⟺ ¬p1 ∧ r1]
+        h-002  ∅ → ++   [l-002b severe ⟂ e-001 :: burst geometry confirms non-daemon actor ⟺ p1 ∧ ¬r1]
+
+        :A routing
+        decision               halt
+        termination_category   trust-root
+        disposition            true_positive
+        confidence             medium
+        surviving              h-002
+        matched_archetype      null
+        """).strip()
+        names = {
+            "h-001": "?monitoring-system-is-the-actor",
+            "h-002": "?credentials-used-outside-registered-actor",
+        }
+        env = parse_analyze_envelope_dense(
+            body, declared_hypothesis_names=names, expected_loop_n=2,
+        )
+        assert env.routing["disposition"] == "true_positive"
+        assert env.routing["surviving_hypotheses"] == ["h-002"]
 
 
 class TestAnalyzeDenseTrailingProseRejected:
