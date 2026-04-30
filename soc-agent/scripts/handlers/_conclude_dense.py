@@ -71,6 +71,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from scripts.handlers import _dense_primitives as _prim
+
 
 class ConcludeOutputError(ValueError):
     """Raised on malformed dense conclude blocks."""
@@ -473,25 +475,10 @@ def _absorb_sub(
 
 
 def _split_row(row: str, cols: list[str], sub: str) -> list[str]:
-    # Honor `\|` as an escaped pipe inside cells; otherwise split on `|`.
-    parts: list[str] = []
-    cur = []
-    i = 0
-    while i < len(row):
-        ch = row[i]
-        if ch == "\\" and i + 1 < len(row) and row[i + 1] == "|":
-            cur.append("|")
-            i += 2
-            continue
-        if ch == "|":
-            parts.append("".join(cur).strip())
-            cur = []
-            i += 1
-            continue
-        cur.append(ch)
-        i += 1
-    parts.append("".join(cur).strip())
-
+    """Pipe-split a sub-table row against `cols`. Honors `\\|` escapes via
+    the shared primitive and emits a phase-tagged error on overlong rows.
+    """
+    parts = _prim.split_cells(row)
     if len(parts) < len(cols):
         parts = parts + [""] * (len(cols) - len(parts))
     elif len(parts) > len(cols):

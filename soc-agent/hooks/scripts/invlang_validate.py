@@ -410,7 +410,10 @@ def _parse_blocks(text: str) -> tuple[list[dict[str, Any]], list[str]]:
         if isinstance(doc, dict):
             blocks.append(doc)
 
-    # ```invlang fences — walk via the unified dense parser.
+    # ```invlang fences — walk via the unified dense parser. Track whether
+    # the dense surface emitted a `conclude` so the legacy bare-conclude
+    # fallback (next step) only fires for pre-Foundation files.
+    dense_emitted_conclude = False
     if INVLANG_BLOCK_RE.search(text):
         try:
             from scripts.handlers._dense_parser import (  # type: ignore
@@ -420,14 +423,16 @@ def _parse_blocks(text: str) -> tuple[list[dict[str, Any]], list[str]]:
             dense_doc = parse_dense_companion(text)
             if dense_doc:
                 blocks.append(dense_doc)
+                if "conclude" in dense_doc:
+                    dense_emitted_conclude = True
         except DenseParseError as e:
             errors.append(f"dense ```invlang block malformed: {e}")
 
     # Legacy bare `:T conclude` (pre-Foundation; old on-disk files only).
-    # Skipped if a ```invlang fence already produced a conclude — the new
-    # surface is canonical for new writes.
-    has_dense_conclude_in_blocks = any("conclude" in b for b in blocks)
-    if not has_dense_conclude_in_blocks:
+    # Skipped only if a ```invlang fence already produced a conclude — a
+    # YAML-fence conclude is intentionally still overridden by the legacy
+    # bare block so behavior matches the pre-Foundation last-wins order.
+    if not dense_emitted_conclude:
         dense_conclude = _parse_dense_conclude(text, errors)
         if dense_conclude is not None:
             for b in blocks:

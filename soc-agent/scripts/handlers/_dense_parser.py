@@ -1,34 +1,25 @@
-"""Unified dense-block tokenizer for on-disk `investigation.md`.
+"""On-disk dense-block parser for `investigation.md`.
 
-Reads ```` ```invlang ```` fenced blocks containing the line-shape grammar
-specified in `docs/dense-investigation-format.md`. The on-disk format wraps
-every dense block in its own ```` ```invlang ```` fence — mirroring the
-existing ```` ```yaml ```` convention — so detection is regex-cheap and
-phase-section trimming machinery (`investigation_views._section_yaml_fences`)
-generalizes uniformly.
+Reads ```` ```invlang ```` fenced blocks and projects them onto the
+canonical companion dict shape (matches `schema.md`). Consumed by:
 
-This module is the **tokenizer + projection** layer. The five existing
-per-phase parsers (`_prologue_dense`, `_predict_dense`, `_conclude_dense`,
-the analyze trailer parser inside `_output_parser`, the gather row-identity
-parser) are subagent-output parsers — they ingest raw subagent stdout and
-enforce phase-specific shape rules with phase-specific error classes (so
-agent-retry prompts can quote the error verbatim).
+  - `hooks/scripts/invlang_validate.py` (PreToolUse validator)
+  - `scripts/invlang/corpus.py`         (corpus loader)
 
-`_dense_parser.py` serves a different consumer: the validator
-(`hooks/scripts/invlang_validate.py`) and the corpus loader
-(`scripts/invlang/corpus.py`) read `investigation.md` from disk and need a
-single-pass walker that produces the canonical companion dict regardless of
-which phase emitted the block. The dict shape matches `schema.md` exactly,
-so the 29 invlang validator rules and `invlang_walkers.py` traversals are
-untouched.
+This module owns the **schema-mapping projection**. The line-grammar
+primitives (cell helpers, block tokenizer, fence regex) live in
+`_dense_primitives.py` — the single source of truth shared with the
+subagent-output parsers (`_prologue_dense`, `_predict_dense`,
+`_conclude_dense`).
 
 Public surface:
 
     INVLANG_BLOCK_RE              regex matching ```invlang fences
-    DenseBlock                    tokenized block (tag, name, columns, rows)
-    DenseParseError               raised on first structural violation
-    parse_dense_blocks_in_text    walk all fences in a markdown text → blocks
+    DenseBlock                    tokenized block (re-exported from primitives)
+    DenseParseError               raised on first projection violation
+    parse_dense_blocks_in_text    walk all fences in markdown text → blocks
     companion_dict_from_blocks    project blocks onto canonical dict shape
+    parse_dense_companion         convenience: text → companion dict
 
 Schema-mapping table (per `docs/dense-investigation-format.md` §Schema mapping):
 
@@ -58,15 +49,19 @@ allow malformed dense content to escape validation.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from typing import Any
 
-
-# ---------------------------------------------------------------------------
-# Public surface
-# ---------------------------------------------------------------------------
-
-INVLANG_BLOCK_RE = re.compile(r"```invlang\n(.*?)\n```", re.DOTALL)
+from scripts.handlers import _dense_primitives as _prim
+from scripts.handlers._dense_primitives import (
+    DenseBlock,
+    INVLANG_FENCE_RE as INVLANG_BLOCK_RE,
+    split_csv as _split_csv,
+    split_csv_or_semi as _split_csv_or_semi,
+    split_subcells as _split_subcells,
+    split_cells as _split_cells,
+    tokenize_blocks,
+    unquote as _unquote,
+)
 
 
 class DenseParseError(ValueError):
@@ -75,24 +70,15 @@ class DenseParseError(ValueError):
     surfaced to the writer (validator hook output)."""
 
 
-@dataclass
-class DenseBlock:
-    tag: str                    # one letter: V|E|H|L|R|T|G
-    name: str                   # e.g. "prologue.vertices", "conclude.surviving"
-    columns: list[str] | None   # column names with `?` stripped; None if header had no [..]
-    rows: list[str]             # raw row lines, no header, no blanks
-    fence_index: int = 0        # which fence this block came from (debug aid)
-
-
-# ---------------------------------------------------------------------------
-# Tokenization
-# ---------------------------------------------------------------------------
-
 _VALID_TAGS = frozenset("VEHLRTG")
-_HEADER_RE = re.compile(
-    r"^:(?P<tag>[A-Z])\s+(?P<name>[A-Za-z0-9_.\-]+)"
-    r"(?:\s*\[(?P<cols>[^\]]*)\])?\s*$"
-)
+
+
+def _parse_attrs(cell: str) -> dict[str, str]:
+    return _prim.parse_attrs(cell, error_cls=DenseParseError)
+
+
+def _parse_auth(cell: str) -> dict[str, str]:
+    return _prim.parse_auth(cell, error_cls=DenseParseError)
 
 
 def parse_dense_blocks_in_text(text: str) -> list[DenseBlock]:
@@ -105,161 +91,23 @@ def parse_dense_blocks_in_text(text: str) -> list[DenseBlock]:
     blocks: list[DenseBlock] = []
     for fence_idx, match in enumerate(INVLANG_BLOCK_RE.finditer(text)):
         body = match.group(1)
-        blocks.extend(_tokenize_body(body, fence_idx))
+        blocks.extend(
+            tokenize_blocks(
+                body,
+                valid_tags=_VALID_TAGS,
+                error_cls=DenseParseError,
+                fence_index=fence_idx,
+            )
+        )
     return blocks
 
 
-def _tokenize_body(body: str, fence_idx: int) -> list[DenseBlock]:
-    out: list[DenseBlock] = []
-    cur: DenseBlock | None = None
-
-    for raw in body.splitlines():
-        line = raw.rstrip()
-        stripped = line.strip()
-        if not stripped:
-            continue
-
-        m = _HEADER_RE.match(stripped)
-        if m:
-            tag = m.group("tag")
-            if tag not in _VALID_TAGS:
-                raise DenseParseError(
-                    f"unknown dense block tag :{tag} in {stripped!r} "
-                    f"(valid: {sorted(_VALID_TAGS)})"
-                )
-            cols_raw = m.group("cols")
-            cols = (
-                [c.strip().rstrip("?") for c in cols_raw.split("|")]
-                if cols_raw is not None
-                else None
-            )
-            cur = DenseBlock(
-                tag=tag,
-                name=m.group("name"),
-                columns=cols,
-                rows=[],
-                fence_index=fence_idx,
-            )
-            out.append(cur)
-            continue
-
-        # Reject `:X ...` looking lines that didn't match the header regex —
-        # catches typos like `:foo` (lowercase) or `:V[no-space]name`.
-        if stripped.startswith(":") and re.match(r"^:[A-Za-z]", stripped):
-            raise DenseParseError(
-                f"malformed dense block header: {stripped!r} "
-                f"(expected `:<TAG> <name> [col1|col2|...]`)"
-            )
-
-        if cur is None:
-            raise DenseParseError(
-                f"dense row appears before any block header: {stripped!r}"
-            )
-        cur.rows.append(stripped)
-
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Cell-level helpers (shared with per-phase parsers, intentionally duplicated
-# here to keep this module independent — collapsing the per-phase modules
-# into adapters is a follow-up).
-# ---------------------------------------------------------------------------
-
-
-def _split_cells(row: str) -> list[str]:
-    """Split a row on `|`, honoring `\\|` as an escaped pipe inside a cell."""
-    parts: list[str] = []
-    cur: list[str] = []
-    i = 0
-    while i < len(row):
-        ch = row[i]
-        if ch == "\\" and i + 1 < len(row) and row[i + 1] == "|":
-            cur.append("|")
-            i += 2
-            continue
-        if ch == "|":
-            parts.append("".join(cur).strip())
-            cur = []
-            i += 1
-            continue
-        cur.append(ch)
-        i += 1
-    parts.append("".join(cur).strip())
-    return parts
-
-
 def _row_cells(block: DenseBlock, row: str) -> list[str]:
-    cells = _split_cells(row)
-    cols = block.columns or []
-    if len(cells) < len(cols):
-        cells = cells + [""] * (len(cols) - len(cells))
-    elif len(cells) > len(cols):
-        raise DenseParseError(
-            f":{block.tag} {block.name}: row has more cells than columns "
-            f"(expected {len(cols)}, got {len(cells)}): {row!r}"
-        )
-    return cells
+    return _prim.row_cells(block, row, error_cls=DenseParseError)
 
 
 def _row_record(block: DenseBlock, row: str) -> dict[str, str]:
-    """Return `{column: cell}` for a row. `?`-suffixed columns may be empty."""
-    cells = _row_cells(block, row)
-    return dict(zip(block.columns or [], cells))
-
-
-def _parse_attrs(cell: str) -> dict[str, str]:
-    """Parse a `key=value;key=value` attrs cell.
-
-    Empty cell → empty dict. Bare token without `=` raises.
-    """
-    out: dict[str, str] = {}
-    if not cell:
-        return out
-    for kv in cell.split(";"):
-        kv = kv.strip()
-        if not kv:
-            continue
-        if "=" not in kv:
-            raise DenseParseError(
-                f"attrs cell has bare token without `=`: {kv!r}"
-            )
-        k, v = kv.split("=", 1)
-        k = k.strip()
-        if not k:
-            raise DenseParseError(f"attrs cell has empty key: {kv!r}")
-        out[k] = v.strip()
-    return out
-
-
-def _parse_auth(cell: str) -> dict[str, str]:
-    """Parse an `auth_kind:source` cell — colon-split, both sides required."""
-    if ":" not in cell:
-        raise DenseParseError(
-            f"auth_kind:source cell missing `:`: {cell!r}"
-        )
-    kind, source = cell.split(":", 1)
-    kind = kind.strip()
-    source = source.strip()
-    if not kind or not source:
-        raise DenseParseError(
-            f"auth_kind:source cell has empty kind or source: {cell!r}"
-        )
-    return {"kind": kind, "source": source}
-
-
-def _unquote(s: str) -> str:
-    """Strip surrounding double quotes if present, unescape `\\\"`."""
-    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
-        return s[1:-1].replace('\\"', '"')
-    return s
-
-
-def _split_csv(s: str) -> list[str]:
-    """Split a comma-separated cell, dropping empties and trimming."""
-    if not s:
-        return []
-    return [tok.strip() for tok in s.split(",") if tok.strip()]
+    return _prim.row_record(block, row, error_cls=DenseParseError)
 
 
 # ---------------------------------------------------------------------------
@@ -444,12 +292,6 @@ def _edge_record(block: DenseBlock, row: str) -> dict[str, Any]:
     return out
 
 
-def _split_csv_or_semi(s: str) -> list[str]:
-    """Concerns/lists may be `;` or `,` separated; accept either."""
-    sep = ";" if ";" in s else ","
-    return [tok.strip() for tok in s.split(sep) if tok.strip()]
-
-
 def _find_col(cols: list[str], wanted: str) -> str:
     """Return `wanted` if present, else the first column starting with the
     same prefix (handles `auth_kind:source` columns that we strip `?` from)."""
@@ -519,42 +361,6 @@ def _hypothesis_record(block: DenseBlock, row: str) -> dict[str, Any]:
         out["weight"] = None if rec["weight"] == "null" else rec["weight"]
     if rec.get("status"):
         out["status"] = rec["status"]
-    return out
-
-
-def _split_subcells(cell: str) -> list[str]:
-    """Sub-cells inside a packed cell are separated by `;` at top level.
-
-    We honor `;` only outside of double quotes so claims with embedded
-    semicolons stay intact.
-    """
-    out: list[str] = []
-    cur: list[str] = []
-    in_q = False
-    i = 0
-    while i < len(cell):
-        ch = cell[i]
-        if ch == "\\" and i + 1 < len(cell):
-            cur.append(cell[i:i + 2])
-            i += 2
-            continue
-        if ch == '"':
-            in_q = not in_q
-            cur.append(ch)
-            i += 1
-            continue
-        if ch == ";" and not in_q:
-            tok = "".join(cur).strip()
-            if tok:
-                out.append(tok)
-            cur = []
-            i += 1
-            continue
-        cur.append(ch)
-        i += 1
-    tok = "".join(cur).strip()
-    if tok:
-        out.append(tok)
     return out
 
 
@@ -738,7 +544,20 @@ def _project_resolution(
 
     for row in block.rows:
         rec = _row_record(block, row)
-        lead_id = rec.get("lead") or rec.get("resolved_by") or ctx["current_lead"]
+        explicit_lead = rec.get("lead")
+        explicit_resolved_by = rec.get("resolved_by")
+        if explicit_lead and explicit_resolved_by and explicit_lead != explicit_resolved_by:
+            raise DenseParseError(
+                f":R {name}: row has both `lead` and `resolved_by` cells "
+                f"with conflicting values ({explicit_lead!r} vs "
+                f"{explicit_resolved_by!r}). Use one column or set both to "
+                f"the same lead id: {row!r}"
+            )
+        # Precedence (deterministic): `resolved_by` is the canonical column
+        # name for authz rows, `lead` is an alias accepted for ergonomics,
+        # then fall back to lexical context. Both map onto `resolved_by_lead`
+        # via `_canonical_resolution_key`.
+        lead_id = explicit_resolved_by or explicit_lead or ctx["current_lead"]
         if not lead_id:
             raise DenseParseError(
                 f":R {name}: row has no lead attribution. Provide a `lead` "
@@ -840,10 +659,15 @@ _RESOLUTION_LINE_RE = re.compile(
 def _parse_resolution_line(row: str) -> dict[str, Any]:
     m = _RESOLUTION_LINE_RE.match(row)
     if not m:
+        hint = ""
+        if "→" not in row and ("->" in row or "=>" in row):
+            hint = " (note: weight transition uses unicode `→`, not `->` or `=>`)"
+        elif "→" in row and "⟂" not in row and ("|_|" in row or "_|_" in row or "|-|" in row):
+            hint = " (note: supporting-edges separator uses unicode `⟂`, not ASCII look-alikes)"
         raise DenseParseError(
             f":T resolutions row malformed "
             f"(expected `<hyp> <before> → <after> [<lead> <preds> <severity> ⟂ <edges> :: <ann>]`): "
-            f"{row!r}"
+            f"{row!r}{hint}"
         )
     inner = m.group("inner")
     annotation = ""
@@ -872,10 +696,14 @@ def _parse_resolution_line(row: str) -> dict[str, Any]:
         "after": m.group("after"),
         "severity_of_test": severity,
         "supporting_edges": [t for t in re.findall(r"e-[A-Za-z0-9]+", supp_text)],
-        "supporting_marker": supp_text if not supp_text.startswith("e-") else None,
         "matched_prediction_ids": [t for t in pred_tokens if t.startswith("p")],
         "matched_refutation_ids": [t for t in pred_tokens if t.startswith("r")],
     }
+    # `supporting_marker` is only present when supp is a non-edge marker
+    # (e.g. `no-authority`). When supp lists edge ids, the edges live in
+    # `supporting_edges` and the marker field is omitted entirely.
+    if supp_text and not supp_text.startswith("e-"):
+        record["supporting_marker"] = supp_text
     if annotation:
         record["reasoning"] = annotation
     return {"lead_id": lead_id, "record": record}

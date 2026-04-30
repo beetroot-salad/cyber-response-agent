@@ -164,7 +164,7 @@ class TestNegative:
 
         :R bogus [a|b]
         """).strip()
-        with pytest.raises(PrologueOutputError, match="unrecognized block header"):
+        with pytest.raises(PrologueOutputError, match="unknown dense block tag"):
             parse_prologue_dense(text)
 
     def test_wrong_block_name(self):
@@ -259,7 +259,7 @@ class TestNegative:
 
         :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
         """).strip()
-        with pytest.raises(PrologueOutputError, match="row before any block header"):
+        with pytest.raises(PrologueOutputError, match="row appears before any block header"):
             parse_prologue_dense(text)
 
     def test_duplicate_vertices_block(self):
