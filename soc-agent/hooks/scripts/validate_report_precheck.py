@@ -132,9 +132,35 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
 # ---------------------------------------------------------------------------
 
 def extract_conclude_yaml(text: str) -> dict | None:
-    """Find the first ```yaml fenced block whose top-level key is `conclude`
-    and return the parsed dict. Returns None if no such block is found or
-    parsing fails."""
+    """Return the parsed conclude block (or None).
+
+    REPORT now emits the conclude block in **dense format** (see
+    `scripts/handlers/_conclude_dense.py`). Fall back to a legacy
+    ```yaml conclude: ...``` fence for archived corpora that predate
+    the migration.
+
+    The function name is preserved for back-compat — callers don't care
+    which surface produced the dict.
+    """
+    soc_root = str(SOC_AGENT_ROOT)
+    if soc_root not in sys.path:
+        sys.path.insert(0, soc_root)
+    try:
+        from scripts.handlers._conclude_dense import (  # type: ignore
+            ConcludeOutputError,
+            parse_conclude_dense,
+        )
+        try:
+            dense = parse_conclude_dense(text)
+            if isinstance(dense, dict):
+                return dense
+        except ConcludeOutputError:
+            # Fall through to YAML — a malformed dense block surfaces
+            # via the invlang validator with a precise error message.
+            pass
+    except ImportError:
+        pass
+
     for raw in YAML_BLOCK_RE.findall(text):
         try:
             doc = yaml.safe_load(raw)
@@ -409,6 +435,12 @@ def check_frontier_closure(proposed_text: str) -> str | None:
             continue
         if isinstance(doc, dict):
             blocks.append(doc)
+    # Pick up the dense `:T conclude` block (REPORT phase). The
+    # frontier-closure check needs `merged["conclude"]["termination"]
+    # ["category"]` to gate.
+    dense_conclude = extract_conclude_yaml(proposed_text)
+    if dense_conclude is not None and not any("conclude" in b for b in blocks):
+        blocks.append({"conclude": dense_conclude})
     if not blocks:
         return None
     merged = _merge_blocks(blocks)

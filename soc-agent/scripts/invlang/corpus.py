@@ -160,6 +160,12 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
     Both `findings:` (current spec) and `gather:` (older on-disk shape) are
     accepted as aliases for the lead-block list. They merge into the same
     `findings` key in the returned dict.
+
+    REPORT phase emits its `conclude` block in **dense format** (see
+    `scripts/handlers/_conclude_dense.py`). The dense block sits outside
+    any ```yaml fence; we parse it separately and merge into `conclude`.
+    The YAML branch is preserved as a fallback for archived corpora that
+    predate the migration.
     """
     merged: dict[str, Any] = {}
     for match in YAML_BLOCK_RE.finditer(text):
@@ -177,7 +183,56 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
             if isinstance(entries, list):
                 merged.setdefault("findings", [])
                 merged["findings"].extend(entries)
+
+    # Dense `:T conclude` block (handler-authored at REPORT). Last-wins
+    # parity with YAML-form conclude: dense overrides any earlier yaml
+    # fence, matching the on-disk write order (handler emits dense once).
+    dense_conclude = _parse_dense_conclude(text)
+    if dense_conclude is not None:
+        merged["conclude"] = dense_conclude
+
     return merged
+
+
+_SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _parse_dense_conclude(text: str) -> dict[str, Any] | None:
+    """Lazy import to avoid a hard dep cycle: corpus.py is reachable from
+    several sys.path setups (the invlang CLI adds `scripts/`; the validator
+    adds `soc-agent/`; tests add `soc-agent/`). Try the import paths each
+    of those expose, and fall back to inserting the soc-agent root."""
+    parse_conclude_dense = None
+    try:
+        from scripts.handlers._conclude_dense import (  # type: ignore
+            parse_conclude_dense as _p,
+        )
+        parse_conclude_dense = _p
+    except ImportError:
+        try:
+            from handlers._conclude_dense import (  # type: ignore
+                parse_conclude_dense as _p,
+            )
+            parse_conclude_dense = _p
+        except ImportError:
+            soc_root = str(_SOC_AGENT_ROOT)
+            if soc_root not in sys.path:
+                sys.path.insert(0, soc_root)
+            try:
+                from scripts.handlers._conclude_dense import (  # type: ignore
+                    parse_conclude_dense as _p,
+                )
+                parse_conclude_dense = _p
+            except ImportError:
+                return None
+
+    try:
+        return parse_conclude_dense(text)
+    except Exception:
+        # Fail-soft at corpus-load time: a malformed dense block is the
+        # invlang validator's problem (it surfaces a precise error at
+        # write time). Don't crash a corpus walk on one bad file.
+        return None
 
 
 _CREATED_HEADER_RE = re.compile(

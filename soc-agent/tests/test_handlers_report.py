@@ -773,11 +773,11 @@ class TestMechanicalScreenCompose:
         # No For Analyst section on resolved.
         assert "## For Analyst" not in report
 
-        # investigation.md carries the REPORT markdown + fenced conclude YAML.
+        # investigation.md carries the REPORT markdown + dense :T conclude block.
         inv = (ctx.run_dir / "investigation.md").read_text()
         assert "## REPORT" in inv
-        assert "conclude:" in inv
-        assert "category: trust-root" in inv
+        assert ":T conclude" in inv
+        assert "termination.category" in inv and "trust-root" in inv
 
     def test_mechanical_path_falls_back_to_anchor_leg_when_precedent_missing(
         self, tmp_path, monkeypatch,

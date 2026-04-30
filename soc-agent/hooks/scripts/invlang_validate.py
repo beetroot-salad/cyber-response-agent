@@ -380,10 +380,19 @@ def _check_tool_audit_cross_ref_warnings(
 # ---------------------------------------------------------------------------
 
 def _parse_blocks(text: str) -> tuple[list[dict[str, Any]], list[str]]:
-    """Extract and parse all ```yaml blocks from `text`.
+    """Extract and parse all companion blocks from `text`.
 
-    Returns (parsed_dicts, parse_errors). Non-dict YAML documents and
-    malformed blocks are surfaced via the error list.
+    Two surfaces are walked:
+      1. Every ```yaml fenced block (legacy + non-REPORT phases).
+      2. The dense `:T conclude` block authored by REPORT (via
+         `scripts/handlers/_conclude_dense.py`). The dense block lives
+         outside any yaml fence; we surface it as a synthesized
+         `{"conclude": <dict>}` document so the downstream merge +
+         validators are unchanged.
+
+    Returns (parsed_dicts, parse_errors). Non-dict YAML documents,
+    malformed YAML, and malformed dense conclude blocks are surfaced
+    via the error list.
     """
     blocks: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -396,7 +405,39 @@ def _parse_blocks(text: str) -> tuple[list[dict[str, Any]], list[str]]:
             continue
         if isinstance(doc, dict):
             blocks.append(doc)
+
+    dense_conclude = _parse_dense_conclude(text, errors)
+    if dense_conclude is not None:
+        blocks.append({"conclude": dense_conclude})
+
     return blocks, errors
+
+
+def _parse_dense_conclude(
+    text: str, errors: list[str]
+) -> dict[str, Any] | None:
+    """Parse the REPORT-phase dense `:T conclude` block (if present) into
+    the canonical conclude dict shape.
+
+    Malformed dense blocks append a parse error and return None so the
+    validator surfaces a precise message rather than silently falling back.
+    """
+    soc_root = str(SOC_AGENT_ROOT)
+    if soc_root not in sys.path:
+        sys.path.insert(0, soc_root)
+    try:
+        from scripts.handlers._conclude_dense import (  # type: ignore
+            ConcludeOutputError,
+            parse_conclude_dense,
+        )
+    except ImportError as e:
+        errors.append(f"failed to import dense conclude parser: {e}")
+        return None
+    try:
+        return parse_conclude_dense(text)
+    except ConcludeOutputError as e:
+        errors.append(f"dense :T conclude block malformed: {e}")
+        return None
 
 
 def validate_companion(proposed_text: str, current_text: str | None) -> list[str]:

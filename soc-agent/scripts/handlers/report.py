@@ -18,7 +18,7 @@ SCREEN path:
 
 ANALYZE path:
   **Mechanical + narrative subagent.** Handler composes every structured
-    field (frontmatter, conclude: YAML, Hypothesis Outcomes, Key Evidence,
+    field (frontmatter, dense :T conclude block, Hypothesis Outcomes, Key Evidence,
     Verdict, trace) from the ANALYZE payload + invlang `findings:` blocks in
     investigation.md. A narrow `report_narrative` subagent (Haiku, no
     tools) authors only `## Summary` and optionally `## For Analyst`. Its
@@ -101,6 +101,7 @@ from scripts.handlers._subagent import (
     invoke_subagent as _shared_invoke,
     make_invoker,
 )
+from scripts.handlers._conclude_dense import emit_conclude_dense
 
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -385,7 +386,7 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
                             the mechanical output (indicates a schema bug).
 
     Writes to disk (only after all invariants decided):
-      - {run_dir}/investigation.md — appends ## REPORT + conclude: YAML
+      - {run_dir}/investigation.md — appends ## REPORT + dense :T conclude
       - {run_dir}/report.md        — full frontmatter + body
     Runs `validate_tier1(report_path)` post-write. On validation failure,
     rolls both writes back and raises `_MechanicalFallback`.
@@ -473,19 +474,17 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
         f"grounded by {len(trust_anchors)} anchor(s)."
     )
 
-    conclude_yaml_block = {
-        "conclude": {
-            "termination": {
-                "category": termination_category,
-                "rationale": "; ".join(rationale_parts) + ".",
-            },
-            "disposition": disposition,
-            "confidence": confidence,
-            "matched_archetype": archetype,
-            "summary": summary,
-        }
+    conclude_dict = {
+        "termination": {
+            "category": termination_category,
+            "rationale": "; ".join(rationale_parts) + ".",
+        },
+        "disposition": disposition,
+        "confidence": confidence,
+        "matched_archetype": archetype,
+        "summary": summary,
     }
-    conclude_yaml_text = yaml.safe_dump(conclude_yaml_block, sort_keys=False).rstrip()
+    conclude_dense_text = emit_conclude_dense(conclude_dict)
 
     md_lines = [
         "## REPORT",
@@ -494,9 +493,7 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
         f"**Confirmed hypothesis:** ?{archetype} via SCREEN fast-path",
         f"**Trace:** {trace}",
         "",
-        "```yaml",
-        conclude_yaml_text,
-        "```",
+        conclude_dense_text,
         "",
     ]
 
@@ -1367,27 +1364,23 @@ def _compose_analyze_routed(
         matched_archetype=matched_archetype,
     )
 
-    conclude_yaml_block = {
-        "conclude": {
-            "termination": {
-                "category": termination_category,
-                "rationale": _compose_termination_rationale(
-                    termination_category, matched_archetype,
-                    matched_ticket_id, surviving_hypotheses,
-                    benign_action_class=(
-                        benign_class if benign_shortcircuit_applied else None
-                    ),
+    conclude_dict = {
+        "termination": {
+            "category": termination_category,
+            "rationale": _compose_termination_rationale(
+                termination_category, matched_archetype,
+                matched_ticket_id, surviving_hypotheses,
+                benign_action_class=(
+                    benign_class if benign_shortcircuit_applied else None
                 ),
-            },
-            "disposition": disposition,
-            "confidence": confidence,
-            "matched_archetype": matched_archetype,
-            "summary": _truncate_summary(summary_md),
-        }
+            ),
+        },
+        "disposition": disposition,
+        "confidence": confidence,
+        "matched_archetype": matched_archetype,
+        "summary": _truncate_summary(summary_md),
     }
-    conclude_yaml_text = yaml.safe_dump(
-        conclude_yaml_block, sort_keys=False,
-    ).rstrip()
+    conclude_dense_text = emit_conclude_dense(conclude_dict)
 
     verdict_line = (
         f"**Verdict:** {status} / {disposition} / {confidence}"
@@ -1404,9 +1397,7 @@ def _compose_analyze_routed(
         f"**Confirmed hypothesis:** {confirmed_hyp}",
         f"**Trace:** {trace}",
         "",
-        "```yaml",
-        conclude_yaml_text,
-        "```",
+        conclude_dense_text,
         "",
     ]
 
