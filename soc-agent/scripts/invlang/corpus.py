@@ -160,6 +160,12 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
     Both `findings:` (current spec) and `gather:` (older on-disk shape) are
     accepted as aliases for the lead-block list. They merge into the same
     `findings` key in the returned dict.
+
+    REPORT phase emits its `conclude` block in **dense format** (see
+    `scripts/handlers/_conclude_dense.py`). The dense block sits outside
+    any ```yaml fence; we parse it separately and merge into `conclude`.
+    The YAML branch is preserved as a fallback for archived corpora that
+    predate the migration.
     """
     merged: dict[str, Any] = {}
     for match in YAML_BLOCK_RE.finditer(text):
@@ -177,7 +183,45 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
             if isinstance(entries, list):
                 merged.setdefault("findings", [])
                 merged["findings"].extend(entries)
+
+    # Dense `:T conclude` block (handler-authored at REPORT). Last-wins
+    # parity with YAML-form conclude: dense overrides any earlier yaml
+    # fence, matching the on-disk write order (handler emits dense once).
+    dense_conclude = _parse_dense_conclude(text)
+    if dense_conclude is not None:
+        merged["conclude"] = dense_conclude
+
     return merged
+
+
+_SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_SOC_AGENT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOC_AGENT_ROOT))
+
+
+def _parse_dense_conclude(text: str) -> dict[str, Any] | None:
+    """Parse the REPORT-phase dense `:T conclude` block from `text`.
+
+    SOC_AGENT_ROOT is added to sys.path at module top so the import
+    resolves under every entrypoint that reaches corpus.py.
+
+    A malformed dense block emits a stderr warning and returns None —
+    the precise error surfaces from the invlang validator at write time,
+    but we shouldn't swallow it silently during a corpus walk.
+    """
+    from scripts.handlers._conclude_dense import (  # type: ignore
+        ConcludeOutputError,
+        parse_conclude_dense,
+    )
+    try:
+        return parse_conclude_dense(text)
+    except ConcludeOutputError as e:
+        print(
+            f"[invlang.corpus] warning: malformed dense :T conclude block "
+            f"during corpus walk — skipping conclude. Error: {e}",
+            file=sys.stderr,
+        )
+        return None
 
 
 _CREATED_HEADER_RE = re.compile(

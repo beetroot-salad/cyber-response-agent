@@ -367,34 +367,61 @@ Per-signature impact knowledge lives in playbook prose (no new schema artifact i
 
 ## Conclude
 
-```yaml
-conclude:
-  termination:
-    category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
-    rationale: <string>
-  disposition: benign | true_positive | unclear              # authz/mechanism axis
-  impact_verdict: none | within | exceeds | indeterminate    # impact axis
-  impact_severity: null | low | moderate | high              # present when impact_verdict ∈ {exceeds, indeterminate}
-  confidence: high | medium | low
-  matched_archetype: <name> | null   # archetype directory name from
-                                     # knowledge/signatures/{sig}/archetypes/{name}/
-  surviving_hypotheses: [h-001, ...] # IDs of declared hypotheses whose final weight
-                                     # is not `--` — validator rule #24 rejects
-                                     # silent drops at REPORT write time
-  deferred_authorizations:           # required when any declared authorization_contract
-                                     # has no fulfilling resolution (rule #26)
-    - contract_ref: h-{id}.ac{n}
-      rationale: "<why this contract was not resolved>"
-  deferred_impact_predictions:       # required when any declared impact_predictions[]
-                                     # entry has no fulfilling resolution
-    - prediction_ref: l-{id}.ip{n}
-      rationale: "<why this impact prediction was not resolved>"
-  ceiling_test:                      # required when category = severity-ceiling
-    kind: out-of-band-human-contact | tool-unavailable | legal-authorization | other
-    subject: <string>
-  ceiling_rationale: <string>        # required when category = severity-ceiling
-  summary: <string>
+REPORT writes the conclude block in **dense format** — a `:T conclude`
+table with optional sub-tables. Fields and validator rules (#13, #21,
+#24, #26, #31, #34, #36) are unchanged from the prior YAML form.
+
 ```
+:T conclude
+termination.category   trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
+termination.rationale  "<sentence>"
+disposition            benign | true_positive | unclear              # authz/mechanism axis
+impact_verdict         none | within | exceeds | indeterminate       # impact axis
+impact_severity        null | low | moderate | high                  # present when impact_verdict ∈ {exceeds, indeterminate}
+confidence             high | medium | low
+matched_archetype      <name> | null                                 # archetype directory name from
+                                                                     # knowledge/signatures/{sig}/archetypes/{name}/
+ceiling_rationale      <string>                                      # required when category = severity-ceiling
+summary                "<one sentence>"
+
+:T conclude.surviving [hyp_id|final_weight]
+h-001|+
+# IDs of declared hypotheses whose final weight is not `--`.
+# Validator rule #24 rejects silent drops at REPORT write time.
+
+:T conclude.deferred_authz [contract_ref|rationale]
+none
+# Required (one row per entry, else single `none`) when any declared
+# authorization_contract has no fulfilling resolution (rule #26).
+# Row shape: contract_ref=h-{id}.ac{n}, rationale="<why unresolved>"
+
+:T conclude.deferred_impact [prediction_ref|rationale]
+none
+# Required (one row per entry, else single `none`) when any declared
+# impact_predictions[] entry has no fulfilling resolution (rule #31).
+# Row shape: prediction_ref=l-{id}.ip{n}, rationale="<why unresolved>"
+
+:T conclude.deferred_preds [prediction_ref|rationale]
+none
+# Required (one row per entry, else single `none`) for every p*/ap* on
+# a non-refuted hypothesis without a graded resolution (rule #34).
+# Row shape: prediction_ref=h-{id}.{p|ap}{n}, rationale="<why ungraded>"
+
+:T conclude.ceiling_test [kind|subject]
+none
+# Required (single row, not `none`) when category = severity-ceiling.
+# kind ∈ {out-of-band-human-contact, tool-unavailable,
+#         legal-authorization, other}; subject = <string>
+```
+
+**Empty-array convention.** A sub-table with no entries renders as a
+single `none` row. The handler omits a sub-table entirely when the
+underlying field is absent (preserves the missing-vs-empty distinction
+inherited from the YAML form).
+
+**Legacy YAML.** Archived runs may still carry the equivalent
+```yaml conclude: ...``` fence. Both surfaces parse to the same
+companion dict shape; validators and corpus queries are surface-agnostic.
 
 **Two-axis disposition.** `disposition` and `impact_verdict` combine orthogonally:
 
