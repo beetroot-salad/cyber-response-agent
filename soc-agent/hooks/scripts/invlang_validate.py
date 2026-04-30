@@ -406,8 +406,15 @@ def _parse_blocks(text: str) -> tuple[list[dict[str, Any]], list[str]]:
         if isinstance(doc, dict):
             blocks.append(doc)
 
+    # Dense `:T conclude` wins over any legacy `conclude:` YAML fence
+    # (matches corpus.py last-wins parity and the on-disk write order:
+    # the handler emits dense once, never both). Drop only the conclude
+    # key from existing blocks — siblings inside the same yaml fence
+    # (e.g. prologue) are preserved.
     dense_conclude = _parse_dense_conclude(text, errors)
     if dense_conclude is not None:
+        for b in blocks:
+            b.pop("conclude", None)
         blocks.append({"conclude": dense_conclude})
 
     return blocks, errors
@@ -421,18 +428,14 @@ def _parse_dense_conclude(
 
     Malformed dense blocks append a parse error and return None so the
     validator surfaces a precise message rather than silently falling back.
+
+    SOC_AGENT_ROOT is on sys.path from this module's top — no local
+    sys.path manipulation needed.
     """
-    soc_root = str(SOC_AGENT_ROOT)
-    if soc_root not in sys.path:
-        sys.path.insert(0, soc_root)
-    try:
-        from scripts.handlers._conclude_dense import (  # type: ignore
-            ConcludeOutputError,
-            parse_conclude_dense,
-        )
-    except ImportError as e:
-        errors.append(f"failed to import dense conclude parser: {e}")
-        return None
+    from scripts.handlers._conclude_dense import (  # type: ignore
+        ConcludeOutputError,
+        parse_conclude_dense,
+    )
     try:
         return parse_conclude_dense(text)
     except ConcludeOutputError as e:

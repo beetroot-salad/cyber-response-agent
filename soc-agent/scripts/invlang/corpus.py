@@ -195,43 +195,32 @@ def _merge_md_blocks(text: str) -> dict[str, Any]:
 
 
 _SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_SOC_AGENT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOC_AGENT_ROOT))
 
 
 def _parse_dense_conclude(text: str) -> dict[str, Any] | None:
-    """Lazy import to avoid a hard dep cycle: corpus.py is reachable from
-    several sys.path setups (the invlang CLI adds `scripts/`; the validator
-    adds `soc-agent/`; tests add `soc-agent/`). Try the import paths each
-    of those expose, and fall back to inserting the soc-agent root."""
-    parse_conclude_dense = None
-    try:
-        from scripts.handlers._conclude_dense import (  # type: ignore
-            parse_conclude_dense as _p,
-        )
-        parse_conclude_dense = _p
-    except ImportError:
-        try:
-            from handlers._conclude_dense import (  # type: ignore
-                parse_conclude_dense as _p,
-            )
-            parse_conclude_dense = _p
-        except ImportError:
-            soc_root = str(_SOC_AGENT_ROOT)
-            if soc_root not in sys.path:
-                sys.path.insert(0, soc_root)
-            try:
-                from scripts.handlers._conclude_dense import (  # type: ignore
-                    parse_conclude_dense as _p,
-                )
-                parse_conclude_dense = _p
-            except ImportError:
-                return None
+    """Parse the REPORT-phase dense `:T conclude` block from `text`.
 
+    SOC_AGENT_ROOT is added to sys.path at module top so the import
+    resolves under every entrypoint that reaches corpus.py.
+
+    A malformed dense block emits a stderr warning and returns None —
+    the precise error surfaces from the invlang validator at write time,
+    but we shouldn't swallow it silently during a corpus walk.
+    """
+    from scripts.handlers._conclude_dense import (  # type: ignore
+        ConcludeOutputError,
+        parse_conclude_dense,
+    )
     try:
         return parse_conclude_dense(text)
-    except Exception:
-        # Fail-soft at corpus-load time: a malformed dense block is the
-        # invlang validator's problem (it surfaces a precise error at
-        # write time). Don't crash a corpus walk on one bad file.
+    except ConcludeOutputError as e:
+        print(
+            f"[invlang.corpus] warning: malformed dense :T conclude block "
+            f"during corpus walk — skipping conclude. Error: {e}",
+            file=sys.stderr,
+        )
         return None
 
 

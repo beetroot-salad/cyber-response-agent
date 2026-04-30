@@ -405,8 +405,6 @@ def _absorb_scalars(out: dict[str, Any], rows: list[str]) -> None:
 def _parse_scalar_value(raw: str) -> Any:
     if raw == "null":
         return None
-    if raw == "n/a":
-        return "n/a"
     if len(raw) >= 2 and raw[0] == '"' and raw[-1] == '"':
         return raw[1:-1].replace('\\"', '"')
     return raw

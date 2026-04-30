@@ -178,6 +178,16 @@ class TestParser:
         out = parse_conclude_dense(text)
         assert out["summary"] == 'she said "go"'
 
+    def test_no_special_handling_for_na_token(self):
+        """`n/a` is a regular string token — no longer special-cased.
+        ceiling_rationale carries it as plain text; round-trip is identity."""
+        text = textwrap.dedent("""
+        :T conclude
+        ceiling_rationale      n/a
+        """).strip()
+        out = parse_conclude_dense(text)
+        assert out["ceiling_rationale"] == "n/a"
+
     def test_escaped_pipe_in_cell(self):
         text = textwrap.dedent("""
         :T conclude
@@ -293,3 +303,26 @@ class TestEmitter:
     def test_rejects_non_dict_input(self):
         with pytest.raises(ConcludeOutputError):
             emit_conclude_dense([])  # type: ignore[arg-type]
+
+    def test_surviving_hypotheses_dict_shape_emits_both_cells(self):
+        """The emitter accepts `[{hyp_id, final_weight}, ...]` (the
+        full sub-table shape) in addition to the legacy `[hyp_id, ...]`
+        bare-string form. Round-trip preserves the bare-id list shape
+        because parse normalizes to list[str]."""
+        d = {
+            "termination": {"category": "trust-root", "rationale": "ok"},
+            "disposition": "benign",
+            "confidence": "high",
+            "summary": "ok",
+            "surviving_hypotheses": [
+                {"hyp_id": "h-001", "final_weight": "++"},
+                {"hyp_id": "h-002", "final_weight": "+"},
+            ],
+        }
+        out = emit_conclude_dense(d)
+        assert "h-001|++" in out
+        assert "h-002|+" in out
+        parsed = parse_conclude_dense(out)
+        # Parser normalizes back to bare-id list (the legacy YAML shape
+        # validator rules walk).
+        assert parsed["surviving_hypotheses"] == ["h-001", "h-002"]

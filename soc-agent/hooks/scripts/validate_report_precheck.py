@@ -141,25 +141,27 @@ def extract_conclude_yaml(text: str) -> dict | None:
 
     The function name is preserved for back-compat — callers don't care
     which surface produced the dict.
+
+    A malformed dense block emits a stderr warning before falling back
+    to the YAML branch — the precise error still surfaces from the
+    sibling `invlang_validate.py` PreToolUse hook, but we shouldn't
+    swallow it silently here.
     """
-    soc_root = str(SOC_AGENT_ROOT)
-    if soc_root not in sys.path:
-        sys.path.insert(0, soc_root)
+    from scripts.handlers._conclude_dense import (  # type: ignore
+        ConcludeOutputError,
+        parse_conclude_dense,
+    )
     try:
-        from scripts.handlers._conclude_dense import (  # type: ignore
-            ConcludeOutputError,
-            parse_conclude_dense,
+        dense = parse_conclude_dense(text)
+        if isinstance(dense, dict):
+            return dense
+    except ConcludeOutputError as e:
+        print(
+            f"[validate_report_precheck] warning: malformed dense :T "
+            f"conclude block — falling back to YAML extraction. "
+            f"Error: {e}",
+            file=sys.stderr,
         )
-        try:
-            dense = parse_conclude_dense(text)
-            if isinstance(dense, dict):
-                return dense
-        except ConcludeOutputError:
-            # Fall through to YAML — a malformed dense block surfaces
-            # via the invlang validator with a precise error message.
-            pass
-    except ImportError:
-        pass
 
     for raw in YAML_BLOCK_RE.findall(text):
         try:
