@@ -108,7 +108,7 @@ result:                                   # mirrors the envelope's lead entry EX
 next_intended_step: "emit envelope to stdout"
 ```
 
-**Recovery behavior when YOU are the recovery dispatch:** if invoked with `resume_from_checkpoint=true`, read the checkpoint, transcribe the `result` block verbatim into the lead entry of the envelope, and emit. Do NOT re-run the probe or query if the checkpoint's `result.status` is already terminal. Write one final checkpoint with `status: complete` before emitting.
+**Recovery behavior when YOU are the recovery dispatch:** if invoked with `resume_from_checkpoint=true`, read the checkpoint, transcribe the `result` block verbatim into the lead entry of the envelope, and emit. Do NOT re-run the probe or query if the checkpoint's `result.status` is already terminal. Reconstruct the dense `:L findings` row from `result.id` / `result.name` (or `lead_name`) / `result.status`. Write one final checkpoint with `status: complete` before emitting.
 
 ## Finish discipline (load-bearing)
 
@@ -120,15 +120,17 @@ next_intended_step: "emit envelope to stdout"
 
 ## Output envelope
 
-Emit **exactly one** fenced YAML block wrapping everything in a top-level `gather:` key:
+Emit **two surfaces** as your final action: a dense `:L findings` block carrying the lead's row identity + outcome, immediately followed by a fenced YAML envelope under `gather:`. The dense `name` and `status` cells are canonical — do **not** echo them inside the YAML lead body. Everything else (per-lead `query`, `characterization`, `baseline`, `health_probe`, `notes`) lives in the YAML envelope; row keys differ per lead and resist tabulation.
+
+```
+:L findings [id|name|status]
+{lead_id}|{lead_name}|{ok | data_missing | error | dropped_attempt | partial | probe_broken | siem_error}
 
 ```yaml
 gather:
   loop: {loop_n}
   leads:
     - id: "{lead_id}"
-      name: "{lead_name}"
-      status: ok | data_missing | error | dropped_attempt
       query:
         system: "{vendor}"
         template: "{template_name or null on ad-hoc}"
@@ -154,6 +156,9 @@ gather:
         # error: "{one-line reason}"
       notes: "{anything doesn't fit a characterization bullet — empty string if none}"
 ```
+```
+
+The dense `:L findings` block is mandatory. The handler joins its rows to the YAML `leads[*]` by `id`; both must list the same set of ids. `name` and `status` keys in the YAML lead body are an authoring error — the handler rejects them.
 
 ## Status discriminator
 

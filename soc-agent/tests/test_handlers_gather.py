@@ -126,15 +126,16 @@ def _stub_invoke_by_lead(
 def _single_ok_for(lead_name: str, lead_id: str = "l-001") -> str:
     """A minimally-valid singleton-ok envelope for an arbitrary lead name."""
     return textwrap.dedent(f"""
+    :L findings [id|name|status]
+    {lead_id}|{lead_name}|ok
+
     ```yaml
     gather:
       loop: 1
       mode: "single"
       leads:
         - id: "{lead_id}"
-          name: "{lead_name}"
           reporting_agent: "target-endpoint"
-          status: ok
           query:
             system: "wazuh-indexer"
             template: "stub-template"
@@ -158,15 +159,16 @@ def _single_escalate_for(
     lead_name: str, trigger: str = "empty_result", lead_id: str = "l-001",
 ) -> str:
     return textwrap.dedent(f"""
+    :L findings [id|name|status]
+    {lead_id}|{lead_name}|error
+
     ```yaml
     gather:
       loop: 1
       mode: "single"
       leads:
         - id: "{lead_id}"
-          name: "{lead_name}"
           reporting_agent: "target-endpoint"
-          status: error
           escalate_trigger: {trigger}
           escalate_context: "test escalation"
           health_probe: null
@@ -178,15 +180,17 @@ def _single_escalate_for(
 
 def _composite_two_leads(primary: str, secondary: str) -> str:
     return textwrap.dedent(f"""
+    :L findings [id|name|status]
+    l-001|{primary}|ok
+    l-001b|{secondary}|ok
+
     ```yaml
     gather:
       loop: 1
       mode: "redispatch"
       leads:
         - id: "l-001"
-          name: "{primary}"
           reporting_agent: "target-endpoint"
-          status: ok
           query:
             system: "wazuh-indexer"
             query: "composite primary"
@@ -203,9 +207,7 @@ def _composite_two_leads(primary: str, secondary: str) -> str:
           raw:
             siem_response: "(9 rows)"
         - id: "l-001b"
-          name: "{secondary}"
           reporting_agent: "target-endpoint"
-          status: ok
           query:
             system: "wazuh-indexer"
             query: "composite secondary"
@@ -225,15 +227,16 @@ def _composite_two_leads(primary: str, secondary: str) -> str:
 
 
 _SINGLE_FINDING = textwrap.dedent("""
+:L findings [id|name|status]
+l-001|authentication-history|ok
+
 ```yaml
 gather:
   loop: 1
   mode: "single"
   leads:
     - id: "l-001"
-      name: "authentication-history"
       reporting_agent: "target-endpoint"
-      status: ok
       query:
         system: "wazuh-indexer"
         template: "source-ip-lookup"
@@ -261,15 +264,16 @@ gather:
 
 
 _SINGLE_ESCALATE_EMPTY = textwrap.dedent("""
+:L findings [id|name|status]
+l-001|authentication-history|error
+
 ```yaml
 gather:
   loop: 1
   mode: "single"
   leads:
     - id: "l-001"
-      name: "authentication-history"
       reporting_agent: "target-endpoint"
-      status: error
       escalate_trigger: empty_result
       escalate_context: "rule.groups:sshd AND data.srcip:172.22.0.10 returned 0 events"
       health_probe: null
@@ -280,15 +284,16 @@ gather:
 
 
 _COMPOSITE_OK = textwrap.dedent("""
+:L findings [id|name|status]
+l-001|authentication-history|ok
+
 ```yaml
 gather:
   loop: 1
   mode: "redispatch"
   leads:
     - id: "l-001"
-      name: "authentication-history"
       reporting_agent: "target-endpoint"
-      status: ok
       status_detail: ""
       query:
         system: "wazuh-indexer"
@@ -314,15 +319,16 @@ gather:
 
 
 _COMPOSITE_AD_HOC = textwrap.dedent("""
+:L findings [id|name|status]
+l-001|nonexistent-lead|ok
+
 ```yaml
 gather:
   loop: 1
   mode: "ad-hoc"
   leads:
     - id: "l-001"
-      name: "nonexistent-lead"
       reporting_agent: "target-endpoint"
-      status: ok
       status_detail: ""
       query:
         system: "wazuh-indexer"
@@ -676,15 +682,16 @@ class TestParallelSingletons:
         )
         # Composite fallback covers ONLY source-reputation.
         composite_replacement = textwrap.dedent("""
+        :L findings [id|name|status]
+        l-001|source-reputation|ok
+
         ```yaml
         gather:
           loop: 1
           mode: "redispatch"
           leads:
             - id: "l-001"
-              name: "source-reputation"
               reporting_agent: "target-endpoint"
-              status: ok
               query:
                 system: "wazuh-indexer"
                 query: "rebuilt by composite"
@@ -866,14 +873,15 @@ class TestEscalateFallback:
         # every other fallback trigger is emitted under `status: error`.
         status = "probe_broken" if trigger == "health_probe_verdict" else "error"
         escalate = textwrap.dedent(f"""
+        :L findings [id|name|status]
+        l-001|authentication-history|{status}
+
         ```yaml
         gather:
           loop: 1
           mode: "single"
           leads:
             - id: "l-001"
-              name: "authentication-history"
-              status: {status}
               escalate_trigger: {trigger}
               escalate_context: "test-trigger {trigger}"
               health_probe: null
@@ -906,14 +914,15 @@ class TestEscalateFallback:
     ):
         ctx = make_ctx(tmp_path, selected_lead="authentication-history")
         escalate = textwrap.dedent("""
+        :L findings [id|name|status]
+        l-001|authentication-history|error
+
         ```yaml
         gather:
           loop: 1
           mode: "single"
           leads:
             - id: "l-001"
-              name: "authentication-history"
-              status: error
               escalate_trigger: some_unknown_trigger
               escalate_context: "unknown"
               raw:
@@ -1006,14 +1015,15 @@ class TestRecovery:
         # The resume re-dispatch receives the envelope emitted after the
         # subagent finishes — loop 2, lead id l-002.
         resume_envelope = textwrap.dedent("""
+        :L findings [id|name|status]
+        l-002|authentication-history|ok
+
         ```yaml
         gather:
           loop: 2
           mode: "single"
           leads:
             - id: "l-002"
-              name: "authentication-history"
-              status: ok
               query: {system: "wazuh-indexer", query: "q"}
               health_probe: null
               characterization: {distinct_users: 1, total_events: 11}
@@ -1162,15 +1172,17 @@ class TestPreconditions:
 
 
 _COMPOSITE_MULTI_LEAD_OK = textwrap.dedent("""
+:L findings [id|name|status]
+l-001|authentication-history|ok
+l-001b|source-reputation|ok
+
 ```yaml
 gather:
   loop: 1
   mode: "composite"
   leads:
     - id: "l-001"
-      name: "authentication-history"
       reporting_agent: "target-endpoint"
-      status: ok
       status_detail: ""
       query: {system: "wazuh-indexer", query: "q1"}
       health_probe: null
@@ -1179,9 +1191,7 @@ gather:
       raw:
         siem_response: "(10 rows)"
     - id: "l-001b"
-      name: "source-reputation"
       reporting_agent: "target-endpoint"
-      status: ok
       status_detail: ""
       query: {system: "wazuh-indexer", query: "q2"}
       health_probe: null
@@ -1195,15 +1205,16 @@ gather:
 
 
 _COMPOSITE_SILENT_DROP = textwrap.dedent("""
+:L findings [id|name|status]
+l-001|authentication-history|ok
+
 ```yaml
 gather:
   loop: 1
   mode: "composite"
   leads:
     - id: "l-001"
-      name: "authentication-history"
       reporting_agent: "target-endpoint"
-      status: ok
       status_detail: ""
       query: {system: "wazuh-indexer", query: "q1"}
       health_probe: null
@@ -1218,15 +1229,17 @@ gather:
 
 
 _COMPOSITE_EXPLICIT_DROP = textwrap.dedent("""
+:L findings [id|name|status]
+l-001|authentication-history|ok
+l-001b|source-reputation|dropped_attempt
+
 ```yaml
 gather:
   loop: 1
   mode: "composite"
   leads:
     - id: "l-001"
-      name: "authentication-history"
       reporting_agent: "target-endpoint"
-      status: ok
       status_detail: ""
       query: {system: "wazuh-indexer", query: "q1"}
       health_probe: null
@@ -1235,9 +1248,7 @@ gather:
       raw:
         siem_response: "(10 rows)"
     - id: "l-001b"
-      name: "source-reputation"
       reporting_agent: "target-endpoint"
-      status: dropped_attempt
       status_detail: "budget exhausted after first lead"
       query: {system: "wazuh-indexer", query: ""}
       health_probe: null
@@ -1326,14 +1337,15 @@ class TestCompositeScopeCheck:
         ctx = make_ctx(tmp_path, selected_lead="authentication-history")
         # Unknown trigger → error payload surfaced as-is, no composite fallback
         escalate = textwrap.dedent("""
+        :L findings [id|name|status]
+        l-001|authentication-history|error
+
         ```yaml
         gather:
           loop: 1
           mode: "single"
           leads:
             - id: "l-001"
-              name: "authentication-history"
-              status: error
               escalate_trigger: some_unknown_trigger
               escalate_context: "unknown"
               raw:
@@ -1419,15 +1431,16 @@ class TestDefinitionPreload:
         monkeypatch.setattr(
             gather_handler, "_invoke_gather_composite",
             stub_invoke(captured, [textwrap.dedent("""
+            :L findings [id|name|status]
+            l-001|made-up-lead-name|ok
+
             ```yaml
             gather:
               loop: 1
               mode: "ad-hoc"
               leads:
                 - id: "l-001"
-                  name: "made-up-lead-name"
                   reporting_agent: "target-endpoint"
-                  status: ok
                   status_detail: ""
                   query: {system: "wazuh-indexer", query: "q"}
                   health_probe: null
@@ -1483,15 +1496,17 @@ class TestContractValidation:
         # but auth-history's `baseline:` is missing. Resolved status (ok) +
         # baseline: required + baseline: null → contract_violation.
         envelope = textwrap.dedent("""
+        :L findings [id|name|status]
+        l-001|authentication-history|ok
+        l-001b|source-reputation|ok
+
         ```yaml
         gather:
           loop: 1
           mode: "composite"
           leads:
             - id: "l-001"
-              name: "authentication-history"
               reporting_agent: "target-endpoint"
-              status: ok
               status_detail: ""
               query: {system: "wazuh-indexer", query: "q1"}
               health_probe: null
@@ -1499,9 +1514,7 @@ class TestContractValidation:
               raw:
                 siem_response: "(10 rows)"
             - id: "l-001b"
-              name: "source-reputation"
               reporting_agent: "target-endpoint"
-              status: ok
               status_detail: ""
               query: {system: "wazuh-indexer", query: "q2"}
               health_probe: null
@@ -1552,15 +1565,16 @@ class TestContractValidation:
         # contract check (foreground had no data → shift query has nothing
         # to compare against).
         envelope = textwrap.dedent("""
+        :L findings [id|name|status]
+        l-001|authentication-history|data_missing
+
         ```yaml
         gather:
           loop: 1
           mode: "single"
           leads:
             - id: "l-001"
-              name: "authentication-history"
               reporting_agent: "target-endpoint"
-              status: data_missing
               status_detail: "no foreground events for entity"
               query: {system: "wazuh-indexer", query: "q"}
               health_probe: null

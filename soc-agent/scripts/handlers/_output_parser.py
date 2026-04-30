@@ -31,7 +31,13 @@ from typing import Any
 
 import yaml
 
-from . import _predict_dense
+from . import _gather_dense, _predict_dense
+from ._gather_dense import (
+    GatherDenseError,
+    VALID_LEAD_STATUSES as _VALID_LEAD_STATUSES,
+    parse_gather_dense,
+    split_dense_and_yaml,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -374,17 +380,6 @@ def parse_predict_output(stdout: str, *, expected_loop_n: int | None = None) -> 
 # ---------------------------------------------------------------------------
 
 
-_VALID_LEAD_STATUSES = frozenset({
-    "ok",               # lead executed, full characterization
-    "partial",          # lead executed, some bullets "not available"
-    "data_missing",     # source answered, empty result (verified)
-    "dropped_attempt",  # structural refusal / skipped
-    "probe_broken",     # health probe returned count_fn_error / baseline_no_samples
-    "siem_error",       # SIEM CLI returned an error that couldn't be resolved
-    "error",            # single-gather generic error (escalate_trigger carries the specific reason)
-})
-
-
 @dataclass
 class GatherEnvelope:
     """Structured result of parsing a gather / gather-composite envelope.
@@ -430,9 +425,10 @@ def _extract_gather_leads(
     """Split `leads[]` into invlang-bound fields (returned as the leads list)
     and raw payloads (returned keyed by lead id).
 
-    Each lead is expected to have `id` + `status`. The handler enforces
-    downstream invlang shape via `validate_companion()`; this parser only
-    asserts the outer shape + the `raw` extraction.
+    Each YAML lead is expected to carry only `id` (plus opaque per-lead
+    payload like `query`, `characterization`, `baseline`, `raw`); `name` and
+    `status` migrate to the dense `:L findings` block and are forbidden in
+    the YAML body. The dense rows merge in via `_merge_dense_into_yaml_leads`.
     """
     raw_leads = env.get("leads")
     if not isinstance(raw_leads, list) or not raw_leads:
@@ -460,11 +456,15 @@ def _extract_gather_leads(
             )
         seen_ids.add(lead_id)
 
-        status = lead.get("status")
-        if status not in _VALID_LEAD_STATUSES:
+        if "status" in lead:
             raise GatherOutputError(
-                f"gather.leads[{i}].status must be one of "
-                f"{sorted(_VALID_LEAD_STATUSES)}, got {status!r}"
+                f"gather.leads[{i}].status must not be set in the YAML envelope; "
+                f"status is canonical in the `:L findings` dense block (id={lead_id!r})"
+            )
+        if "name" in lead:
+            raise GatherOutputError(
+                f"gather.leads[{i}].name must not be set in the YAML envelope; "
+                f"name is canonical in the `:L findings` dense block (id={lead_id!r})"
             )
 
         # Split raw off the lead dict. We copy so the envelope caller sees a
@@ -485,19 +485,70 @@ def _extract_gather_leads(
     return cleaned, raw_by_lead
 
 
+def _merge_dense_into_yaml_leads(
+    dense_rows: list[dict[str, str]],
+    yaml_leads: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Inject dense-block `name` and `status` onto YAML leads, joined by `id`.
+
+    Two-way join: every dense id has a yaml match and vice versa; length
+    must match. Dense is canonical for `name` and `status` (the YAML body
+    no longer carries them).
+    """
+    if len(dense_rows) != len(yaml_leads):
+        raise GatherOutputError(
+            f"gather: dense `:L findings` block has {len(dense_rows)} rows "
+            f"but YAML envelope has {len(yaml_leads)} leads"
+        )
+
+    dense_by_id = {row["id"]: row for row in dense_rows}
+    yaml_ids = {lead.get("id") for lead in yaml_leads if isinstance(lead.get("id"), str)}
+
+    missing_in_yaml = sorted(set(dense_by_id) - yaml_ids)
+    if missing_in_yaml:
+        raise GatherOutputError(
+            f"gather: dense `:L findings` ids {missing_in_yaml!r} have no "
+            f"matching YAML lead"
+        )
+    missing_in_dense = sorted(yaml_ids - set(dense_by_id))
+    if missing_in_dense:
+        raise GatherOutputError(
+            f"gather: YAML lead ids {missing_in_dense!r} have no matching "
+            f"`:L findings` dense row"
+        )
+
+    for lead in yaml_leads:
+        row = dense_by_id[lead["id"]]
+        lead["name"] = row["name"]
+        lead["status"] = row["status"]
+    return yaml_leads
+
+
 def parse_gather_envelope(
     stdout: str,
     *,
     expected_loop_n: int | None = None,
     mode: str | None = None,
 ) -> GatherEnvelope:
-    """Parse a gather / gather-composite subagent envelope into the two buckets.
+    """Parse a gather / gather-composite subagent trailer into the two buckets.
+
+    Trailer surface (post-dense migration): a `:L findings [id|name|status]`
+    dense block followed by a ``` ```yaml gather: ... ``` envelope. `name`
+    and `status` are canonical on the dense rows; the YAML envelope carries
+    everything else (per-lead `query`, `characterization`, `baseline`,
+    `raw`, etc., plus the top-level `loop` and `cross_lead_notes`).
 
     `expected_loop_n` enforces the orchestrator's loop counter against the
     subagent-asserted `loop`. `mode` is injected into telemetry (dispatch
     path is the source of truth; subagent does not assert mode).
     """
-    env = _extract_gather_envelope_doc(stdout)
+    try:
+        dense_text, yaml_text = split_dense_and_yaml(stdout)
+        dense_rows = parse_gather_dense(dense_text)
+    except GatherDenseError as e:
+        raise GatherOutputError(str(e)) from e
+
+    env = _extract_gather_envelope_doc(yaml_text)
 
     loop = env.get("loop")
     if not isinstance(loop, int) or isinstance(loop, bool):
@@ -511,6 +562,7 @@ def parse_gather_envelope(
         )
 
     leads, raw_by_lead = _extract_gather_leads(env)
+    leads = _merge_dense_into_yaml_leads(dense_rows, leads)
 
     cross_lead_notes = env.get("cross_lead_notes") or ""
     if not isinstance(cross_lead_notes, str):

@@ -148,7 +148,7 @@ next_intended_step: "compile final YAML and emit to stdout"    # one line; alway
 
 **Recovery by the main agent (informational):** if your tool_result lacks the final YAML, the main agent reads the checkpoint and respawns with *"Read `{checkpoint_path}`. Continue from `next_intended_step`. Finish the YAML and emit."* Your checkpoint is what makes that recovery work — keep it structured and current.
 
-**Recovery behavior when YOU are the recovery dispatch:** if invoked with `resume_from_checkpoint=true` (or equivalent), read the checkpoint, transcribe per-lead entries verbatim into the final YAML, and emit. Do NOT re-run queries that the checkpoint marks `status: ok`/`partial`/`dropped_attempt`/`data_missing`. Only execute leads the checkpoint marks `pending` or mid-query. **Do NOT write a final `status: complete` checkpoint before emitting** — same rule as primary dispatch (§Write cadence). Go straight from reading the checkpoint (and any pending-lead execution) to emitting the YAML on stdout. A final Write before the YAML risks ending the session on `tool_use(Write)`, which `claude --print` drops — losing the recovery work.
+**Recovery behavior when YOU are the recovery dispatch:** if invoked with `resume_from_checkpoint=true` (or equivalent), read the checkpoint, transcribe per-lead entries verbatim into the final YAML, and emit. Do NOT re-run queries that the checkpoint marks `status: ok`/`partial`/`dropped_attempt`/`data_missing`. Only execute leads the checkpoint marks `pending` or mid-query. Reconstruct the dense `:L findings` block from each checkpoint lead's `lead`/`status` (the row is `<lead_id>|<lead_name>|<status>`); both surfaces are required at the recovery emission. **Do NOT write a final `status: complete` checkpoint before emitting** — same rule as primary dispatch (§Write cadence). Go straight from reading the checkpoint (and any pending-lead execution) to emitting the YAML on stdout. A final Write before the YAML risks ending the session on `tool_use(Write)`, which `claude --print` drops — losing the recovery work.
 
 ## Prescribed-lead scope discipline (handler-enforced)
 
@@ -217,16 +217,19 @@ Free-text, but tight. The aim is actionable recovery, not a reasoning log. ~2–
 
 ## Output envelope
 
-Emit exactly one fenced YAML block on stdout, wrapping everything in a top-level `gather:` key. Each prescribed lead gets one entry under `leads[]` with its prescribed `lead_id` echoed verbatim.
+Emit **two surfaces** as your final action: a dense `:L findings` block listing every prescribed lead with its outcome, immediately followed by a fenced YAML envelope under `gather:`. The dense `name` and `status` cells are canonical — do **not** echo them inside the YAML lead body. The YAML envelope carries everything that resists tabulation: per-lead `query` / `characterization` / `baseline` / `health_probe_verdict` / `status_detail` / `escalate_*`, plus the top-level `loop` and `cross_lead_notes`.
+
+```
+:L findings [id|name|status]
+{lead_id_1}|{lead_name_1}|{ok | partial | probe_broken | siem_error | data_missing | dropped_attempt | error}
+{lead_id_2}|{lead_name_2}|{...}
 
 ```yaml
 gather:
   loop: {loop_n}
   leads:
     - id: "{lead_id}"                   # echo the dispatched lead_id for this entry
-      name: "{lead_name}"
       reporting_agent: "{reporting_agent}"
-      status: "{ok | partial | probe_broken | siem_error | data_missing | dropped_attempt}"
       status_detail: "{free-text, 2-4 lines; see §status_detail}"
       query:
         query: "{exact query string executed}"
@@ -250,21 +253,27 @@ gather:
     - # next lead entry ...
   cross_lead_notes: "{composite only — consistencies / contradictions / refinements applied across the lead set. Empty string for ad-hoc/redispatch single-lead mode.}"
 ```
+```
 
 **Schema is intentionally lean — do not echo prompt-known fields.** The handler already has the dispatched `mode`, `time_range`, per-lead `system`/`template`/`time_window`/`substitutions` from the prompt; it reconstructs `query_details` from those before forwarding to ANALYZE. The full `health_probe` JSON is captured to disk by the data-source-health probe directly — your `health_probe_verdict` is the one-token summary the main agent reads. Anything not listed above does not need to be authored.
 
-If the dispatch itself is unparseable (missing required substitutions, malformed `leads` list, contradictions you cannot resolve), emit a single-lead envelope with `status: error` instead:
+The dense `:L findings` block is **mandatory**. Every prescribed lead gets one row + one matching YAML lead entry — same `id`, same set of ids on both sides. `name` and `status` keys in the YAML lead body are an authoring error and the handler rejects them.
+
+If the dispatch itself is unparseable (missing required substitutions, malformed `leads` list, contradictions you cannot resolve), emit a single-lead envelope with `status: error` — the dense block still lists the row, with `error` in the status cell:
+
+```
+:L findings [id|name|status]
+{first_lead_id_or_derived}|{first_lead_name}|error
 
 ```yaml
 gather:
   loop: {loop_n}
   leads:
     - id: "{first_lead_id_or_derived}"
-      name: "{first_lead_name}"
-      status: error
       escalate_trigger: "dispatch_unparseable"
       escalate_context: "{one-line reason}"
   cross_lead_notes: ""
+```
 ```
 
 An unknown `lead_name` is NOT an error case — fall through to the missing-definition ad-hoc path per §Procedure 2. Only emit `status: error` when the subagent cannot proceed with any lead at all.

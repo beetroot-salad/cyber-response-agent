@@ -740,13 +740,23 @@ from scripts.handlers._output_parser import (  # noqa: E402
 )
 
 
-GATHER_SINGLE_BODY = textwrap.dedent("""
+def _gather_trailer(dense_rows: str, yaml_body: str) -> str:
+    """Compose a gather subagent trailer: dense `:L findings` block prefix +
+    fenced `gather:` YAML envelope. Mirrors the post-migration wire format.
+    """
+    return f"{dense_rows.strip()}\n\n```yaml\n{yaml_body.strip()}\n```\n"
+
+
+GATHER_SINGLE_DENSE = textwrap.dedent("""
+    :L findings [id|name|status]
+    l-001|source-classification|ok
+""").strip()
+
+GATHER_SINGLE_YAML = textwrap.dedent("""
     gather:
       loop: 1
       leads:
         - id: l-001
-          name: source-classification
-          status: ok
           query:
             system: wazuh-indexer
             template: source-ip-lookup
@@ -767,10 +777,12 @@ GATHER_SINGLE_BODY = textwrap.dedent("""
 
 class TestGatherSingle:
     def test_valid_single_lead_parses(self):
-        result = parse_gather_envelope(_y(GATHER_SINGLE_BODY), expected_loop_n=1, mode="single")
+        trailer = _gather_trailer(GATHER_SINGLE_DENSE, GATHER_SINGLE_YAML)
+        result = parse_gather_envelope(trailer, expected_loop_n=1, mode="single")
         assert result.telemetry == {"loop": 1, "mode": "single"}
         assert len(result.leads) == 1
         assert result.leads[0]["id"] == "l-001"
+        assert result.leads[0]["name"] == "source-classification"
         assert result.leads[0]["status"] == "ok"
         # `raw` must be stripped from the lead record (goes to raw_by_lead).
         assert "raw" not in result.leads[0]
@@ -778,22 +790,25 @@ class TestGatherSingle:
         assert "siem_response" in result.raw_by_lead["l-001"]
 
     def test_loop_mismatch_fails(self):
+        trailer = _gather_trailer(GATHER_SINGLE_DENSE, GATHER_SINGLE_YAML)
         with pytest.raises(GatherOutputError, match="does not match orchestrator"):
-            parse_gather_envelope(_y(GATHER_SINGLE_BODY), expected_loop_n=2, mode="single")
+            parse_gather_envelope(trailer, expected_loop_n=2, mode="single")
 
 
-GATHER_COMPOSITE_BODY = textwrap.dedent("""
+GATHER_COMPOSITE_DENSE = textwrap.dedent("""
+    :L findings [id|name|status]
+    l-010|primary|ok
+    l-011|secondary|data_missing
+""").strip()
+
+GATHER_COMPOSITE_YAML = textwrap.dedent("""
     gather:
       loop: 2
       leads:
         - id: l-010
-          name: primary
-          status: ok
           query: {system: wazuh-indexer}
           observations: {vertices: [], edges: []}
         - id: l-011
-          name: secondary
-          status: data_missing
           query: {system: host-query}
           observations: {vertices: [], edges: []}
 """).strip()
@@ -801,56 +816,134 @@ GATHER_COMPOSITE_BODY = textwrap.dedent("""
 
 class TestGatherComposite:
     def test_valid_multi_lead_parses(self):
-        result = parse_gather_envelope(_y(GATHER_COMPOSITE_BODY), mode="composite")
+        trailer = _gather_trailer(GATHER_COMPOSITE_DENSE, GATHER_COMPOSITE_YAML)
+        result = parse_gather_envelope(trailer, mode="composite")
         assert len(result.leads) == 2
         assert {lead["id"] for lead in result.leads} == {"l-010", "l-011"}
         statuses = {lead["id"]: lead["status"] for lead in result.leads}
         assert statuses == {"l-010": "ok", "l-011": "data_missing"}
+        names = {lead["id"]: lead["name"] for lead in result.leads}
+        assert names == {"l-010": "primary", "l-011": "secondary"}
         # No `raw` on these leads — raw_by_lead stays empty.
         assert result.raw_by_lead == {}
 
     def test_duplicate_lead_id_fails(self):
-        body = GATHER_COMPOSITE_BODY.replace("l-011", "l-010")
-        with pytest.raises(GatherOutputError, match="duplicates a prior lead"):
-            parse_gather_envelope(_y(body))
+        # Duplicating in the dense block surfaces first.
+        dense = GATHER_COMPOSITE_DENSE.replace("l-011", "l-010")
+        yaml_body = GATHER_COMPOSITE_YAML.replace("l-011", "l-010")
+        trailer = _gather_trailer(dense, yaml_body)
+        with pytest.raises(GatherOutputError, match="duplicates a prior row"):
+            parse_gather_envelope(trailer)
 
 
 class TestGatherShape:
     def test_missing_top_level_key_fails(self):
+        # YAML envelope present but wrong top-level key. Need a dense block
+        # so the split succeeds; then the YAML extractor surfaces the error.
+        trailer = _gather_trailer(
+            ":L findings [id|name|status]\nl-001|foo|ok",
+            "other:\n  loop: 1",
+        )
         with pytest.raises(GatherOutputError, match="must have top-level key"):
-            parse_gather_envelope(_y("other:\n  loop: 1"))
+            parse_gather_envelope(trailer)
 
     def test_empty_leads_fails(self):
-        body = "gather:\n  loop: 1\n  leads: []"
+        trailer = _gather_trailer(
+            ":L findings [id|name|status]\nl-001|foo|ok",
+            "gather:\n  loop: 1\n  leads: []",
+        )
         with pytest.raises(GatherOutputError, match="non-empty list"):
-            parse_gather_envelope(_y(body))
+            parse_gather_envelope(trailer)
 
-    def test_bad_status_fails(self):
-        body = textwrap.dedent("""
-            gather:
-              loop: 1
-              leads:
-                - id: l-001
-                  name: foo
-                  status: bogus
-                  query: {}
-                  observations: {vertices: [], edges: []}
-        """).strip()
-        with pytest.raises(GatherOutputError, match="status must be one of"):
-            parse_gather_envelope(_y(body))
+    def test_bad_dense_status_fails(self):
+        # Status enum is enforced on the dense block now.
+        trailer = _gather_trailer(
+            ":L findings [id|name|status]\nl-001|foo|bogus",
+            GATHER_SINGLE_YAML,
+        )
+        with pytest.raises(GatherOutputError, match="status='bogus' not in"):
+            parse_gather_envelope(trailer)
 
     def test_missing_lead_id_fails(self):
         body = textwrap.dedent("""
             gather:
               loop: 1
               leads:
-                - name: foo
-                  status: ok
-                  query: {}
+                - query: {}
                   observations: {vertices: [], edges: []}
         """).strip()
+        trailer = _gather_trailer(
+            ":L findings [id|name|status]\nl-001|foo|ok",
+            body,
+        )
         with pytest.raises(GatherOutputError, match="id must be a non-empty string"):
-            parse_gather_envelope(_y(body))
+            parse_gather_envelope(trailer)
+
+    def test_yaml_status_is_rejected(self):
+        # YAML body that still carries `status:` is now an authoring error.
+        body = textwrap.dedent("""
+            gather:
+              loop: 1
+              leads:
+                - id: l-001
+                  status: ok
+                  query: {}
+        """).strip()
+        trailer = _gather_trailer(
+            ":L findings [id|name|status]\nl-001|foo|ok",
+            body,
+        )
+        with pytest.raises(GatherOutputError, match=r"status must not be set"):
+            parse_gather_envelope(trailer)
+
+    def test_yaml_name_is_rejected(self):
+        body = textwrap.dedent("""
+            gather:
+              loop: 1
+              leads:
+                - id: l-001
+                  name: foo
+                  query: {}
+        """).strip()
+        trailer = _gather_trailer(
+            ":L findings [id|name|status]\nl-001|foo|ok",
+            body,
+        )
+        with pytest.raises(GatherOutputError, match=r"name must not be set"):
+            parse_gather_envelope(trailer)
+
+    def test_dense_yaml_id_mismatch_fails(self):
+        body = textwrap.dedent("""
+            gather:
+              loop: 1
+              leads:
+                - id: l-002
+                  query: {}
+        """).strip()
+        trailer = _gather_trailer(
+            ":L findings [id|name|status]\nl-001|foo|ok",
+            body,
+        )
+        with pytest.raises(GatherOutputError, match=r"have no matching"):
+            parse_gather_envelope(trailer)
+
+    def test_dense_yaml_length_mismatch_fails(self):
+        # Two dense rows, one yaml lead.
+        dense = textwrap.dedent("""
+            :L findings [id|name|status]
+            l-001|foo|ok
+            l-002|bar|ok
+        """).strip()
+        body = textwrap.dedent("""
+            gather:
+              loop: 1
+              leads:
+                - id: l-001
+                  query: {}
+        """).strip()
+        trailer = _gather_trailer(dense, body)
+        with pytest.raises(GatherOutputError, match=r"has 2 rows but YAML envelope has 1"):
+            parse_gather_envelope(trailer)
 
 
 # ===========================================================================
