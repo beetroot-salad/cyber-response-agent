@@ -3,6 +3,8 @@
 **Status:** Spec v2.15. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
 
+**v2.16 delta:** rule #36 simplified — `disposition: true_positive` now requires only `++` on a surviving hypothesis (weight-only). The v2.14 adversarial-classification token check is removed; the lexical token list desynced from playbook-canonical fork names (e.g. `?credentials-used-outside-registered-actor`) and produced false rejections of legitimately-graded `true_positive` routings. The affirmative-evidence signal is captured by the `++` requirement; the "wrong-named survivor" failure mode is caught by Tier-2 judges and rule #21. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Parser-side X5 (`scripts/handlers/_output_parser.py:_validate_cross_block_invariants`) similarly weight-only.
+
 **v2.15 delta:** Validator rule consolidation — 36 → 29 active rules. Doc-only refactor; no validator behavior change. Drives:
 - Reference-resolution merge: rules #12, #19, #20, and the resolution clause of #22 fold into rule #7. Single "all references resolve in scope" rule covers `v-*`, `e-*`, `h-*`, `l-*`, hierarchical `h-{parent}-{nonce}`, contract `edge_ref`, `fulfills_contract`, and `attribute_updates.target`.
 - SCREEN structural integrity merge: former #16 (screen_result scope) absorbs into #17.
@@ -1408,31 +1410,36 @@ The validator enforces **29 active rules** (rules 1–36 with seven gaps). Seven
 36. **Affirmative true_positive disposition.** When
     `conclude.disposition` is `true_positive`, at least one entry in
     `conclude.surviving_hypotheses[]` must reference a hypothesis
-    that satisfies BOTH:
+    whose final weight (computed across all resolutions in document
+    order) is `++`. When `surviving_hypotheses` is absent or empty,
+    every declared hypothesis is candidate.
 
-    - **adversarial classification** — the hypothesis's
-      `proposed_edge.parent_vertex.classification` OR `name`
-      starts with an adversarial token (case-insensitive). Token
-      list: `adversary` / `adversary-controlled` / `adversarial`,
-      `attack` / `attacker`, `malicious`, `malware`, `implant`,
-      `backdoor`, `rootkit`, `c2`, `exfil` / `exfiltration`,
-      `covert`, `unauthorized`, `compromise` / `compromised`,
-      `credential-{guess|stuff|reuse|theft|scrape}`, `brute-force`,
-      `spray`, `post-exploit`, `lateral` / `lateral-movement`,
-      `intrusion`, `persistence`, `privilege-escalation`,
-      `command-injection`, `payload`, `exploit`, `dga`,
-      `beaconing`. Provisional `{type}:{slug}` classifications
-      match on the slug.
-    - **affirmative weight** — the hypothesis's final weight
-      (computed across all resolutions in document order) is
-      `++`.
-
-    When `surviving_hypotheses` is absent or empty, every declared
-    hypothesis is candidate. Empirically motivated by 4 production
-    runs (see `tasks/analyze-true-positive-routing.md`) where
-    ANALYZE routed `true_positive` from absence-of-benign-anchor-
-    confirmation while no surviving hypothesis was both
-    adversarially-classified and graded `++`. The honest landing in
-    that shape is `disposition: unclear` (paired with
+    The `++` weight is the structural signal of *affirmative grading
+    evidence*: per rule #6 + edge-authority discipline, a `++`
+    resolution must cite a severe lead resolving against an
+    authoritative edge, so the grading is bound to concrete
+    observation rather than to absence-of-benign-confirmation. Empirically
+    motivated by 4 production runs (see `tasks/analyze-true-positive-
+    routing.md`) where ANALYZE routed `true_positive` while no surviving
+    hypothesis was graded `++` — every survivor was at `+` or null,
+    i.e. no severe-lead refutation/confirmation had landed. The honest
+    landing in that shape is `disposition: unclear` (paired with
     `termination_category: severity-ceiling` or
     `exhaustion-escalation`).
+
+    **History.** v2.14 introduced this rule as a two-part check
+    (adversarial-classification token + ++). The lexical token list
+    desynced from playbook-canonical adversarial fork names — e.g. the
+    5710 playbook's `?credentials-used-outside-registered-actor` is
+    semantically adversarial (it captures the case where a third party
+    used a registered credential string outside the registered actor's
+    process), but lacked an allowlisted prefix and produced false
+    rejections on legitimately-graded `true_positive` routings (run
+    `20260429-202152-rule5710` was the first observed case). v2.16
+    drops the classification check; the affirmative-evidence signal is
+    fully captured by the `++` weight requirement, and the "wrong-named
+    survivor routed true_positive" failure mode is caught by Tier-2
+    report judges plus rule #21 (which forces `benign` on every
+    `legitimacy_contract: authorized` survivor — a survivor whose
+    contracts all resolve `authorized` cannot reach `true_positive`
+    without contradicting #21).

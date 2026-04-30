@@ -670,8 +670,10 @@ def _validate_and_write(ctx: Context, new_section: str) -> None:
 def _hypothesis_id_to_name_map(investigation_md: str) -> dict[str, str]:
     """Build `{id → name}` from every `hypothesize:` block in the companion.
 
-    Used to feed the dense parser's X2/X5 cross-block invariant checks
-    (adversarial-token detection on hypothesis names).
+    Used to feed the dense parser's X2 cross-block invariant check
+    (adversarial-token detection on hypothesis names for the
+    `adversarial-refuted` termination category). X5 is weight-only as
+    of v2.16 and does not consume this map.
     """
     mapping: dict[str, str] = {}
     for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
@@ -697,8 +699,8 @@ def handle(ctx: Context) -> PhaseResult:
     prompt = _assemble_prompt(ctx)
     raw = _invoke_subagent(prompt)
 
-    # Read investigation.md once — used both for the parser's X2/X5
-    # cross-block invariant checks (id → name map) and for findings
+    # Read investigation.md once — used both for the parser's X2
+    # cross-block invariant check (id → name map) and for findings
     # synthesis below.
     investigation_md = load_investigation_md(ctx.run_dir)
     hypothesis_id_to_name = _hypothesis_id_to_name_map(investigation_md)
