@@ -1,7 +1,7 @@
 ---
 name: analyze
 description: Reconcile this loop's observations with prior predictions, contracts, and hypothesis grades. Emit per-lead resolutions and a halt/continue decision. Comparator over declared predictions — not free-form reasoning.
-tools: [Read]
+tools: [Read, Bash(bash soc-agent/scripts/invlang/run.sh:*)]
 model: sonnet
 ---
 
@@ -19,6 +19,7 @@ Your job is to compare this loop's observations against the predictions and cont
 - `<available_context>` — file paths + section index for on-disk artifacts you Read on demand.
 - `<current_gather>` — this loop's gather envelope (`leads[]` with `characterization`, `consultations`, etc.) as YAML. This IS the evidence to grade against — irreducible.
 - `<raw_details>` (optional, opt-in via `SOC_AGENT_ANALYZE_INCLUDE_RAW_DETAILS=1`) — verbatim SIEM/anchor payloads for this loop's leads.
+- `<prior-recall-{salt}>` (optional, present when corpus has hits) — one-line digests of past investigations for this loop's leads (class 13) and open `authorization_contract`s on live hypotheses (class 14), optionally scoped to past cases sharing the prologue endpoint classification. **Advisory only** — recall is *what graders did before*, not evidence about *this* alert. The load-bearing-field rule, severity tiers (S1), and refutation-literal requirement (S2) are unchanged. Recall cannot upgrade `+` → `++`; only a severe field-read on an authoritative edge can.
 
 ## Read-on-demand context (use the `Read` tool)
 
@@ -31,6 +32,17 @@ The handler does **not** ship prior-phase content inline. Read it on demand from
 - **`alert.json` (full)** — Read when a prediction's `claim` references an alert field not surfaced in the inline `<alert-{salt}>` summary.
 
 **Read discipline:** prefer targeted reads (`Read(file_path, offset, limit)`) over whole-file reads. The `<available_context>` manifest gives you exact line ranges per `## ...` section.
+
+## Drill-down on prior recall (optional)
+
+When a `<prior-recall>` digest line looks load-bearing for grading the current loop (e.g. `surprises=4` on a lead you'd otherwise grade `++`, or an authz contract whose past verdicts skew `unauthorized`), drill in:
+
+```
+bash soc-agent/scripts/invlang/run.sh --class 13 --lead-pattern <name> --top 5
+bash soc-agent/scripts/invlang/run.sh --class 14 --contract-pattern <hyp_name> --top 5
+```
+
+Read the exemplar prose, then keep grading by this loop's evidence. Drill-down is context for your iff-annotation reasoning — it does not substitute for the authoritative edge that backs a decisive grade. Do not cite recall in `<supp-edges>`.
 
 ## Prediction-coverage protocol (mandatory pre-draft step)
 
@@ -300,6 +312,7 @@ Failure modes seen in prior runs. Each is a hard rule in context; check your dra
 - **Empty iff RHS (S3).** Every iff annotation must have at least one literal on the RHS — `... ⟺ ` or `... ⟺ true` is malformed. The literals are how the parser derives `matched_prediction_ids` / `matched_refutation_ids`; an empty RHS means the resolution makes no claim.
 - **Severity vs grade coupling (S1).** `++` and `--` rows MUST have `severity=severe`. `+` and `-` rows accept any severity. The validator catches mismatches; the agent should self-catch.
 - **Surviving completeness (X1).** A hypothesis at `+` or `-` (NOT just `++`) is a survivor and MUST appear in `surviving`. Only `--` hypotheses are excluded. Forgetting this drops live-weight hypotheses silently.
+- **Citing prior-recall as supporting evidence.** `<supp-edges>` must name `e-*` edges materialized in *this* investigation. "Past 8/12 cases resolved benign" is not a `++` license; it's a prior on what to look for. If this loop's evidence doesn't reach the load-bearing field on an authoritative edge, the grade caps at `+` regardless of recall consensus.
 
 ## Examples
 

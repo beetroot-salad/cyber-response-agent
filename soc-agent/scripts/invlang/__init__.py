@@ -20,6 +20,7 @@ from .corpus import (
 from .queries import (
     ENUM_CHOICES,
     anchor_calibration,
+    authorization_calibration,
     coarse_case_lookup,
     dead_lead_lookup,
     enumerate_corpus,
@@ -31,8 +32,11 @@ from .queries import (
     lead_effectiveness_for_hypothesis,
     lead_effectiveness_for_prologue,
     lead_effectiveness_for_topology,
+    lead_exemplars,
     lead_pair_synergy,
     lead_sequence_pattern,
+    loop_lead_distribution,
+    parse_vertex_where_spec,
     peer_hypothesis_distribution_for_prologue,
     peer_hypothesis_distribution_for_topology,
     post_failure_recovery,
@@ -74,4 +78,9 @@ __all__ = [
     # prologue-conditioned retrieval (loop-1 priors, no hypothesis yet)
     "lead_effectiveness_for_prologue",
     "peer_hypothesis_distribution_for_prologue",
+    # ANALYZE recall (classes 13/14/15)
+    "lead_exemplars",
+    "authorization_calibration",
+    "loop_lead_distribution",
+    "parse_vertex_where_spec",
 ]
