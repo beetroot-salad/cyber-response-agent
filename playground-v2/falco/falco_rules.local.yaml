@@ -1,0 +1,49 @@
+# Playground-specific Falco rule overrides.
+#
+# These suppress signals from known-benign infrastructure activity that
+# would otherwise drown the alert stream — agent-internal probes, Docker
+# healthchecks, and DNS lookups from healthcheck curl commands. Each
+# override appends a `not <pattern>` clause to the upstream rule's
+# condition rather than redefining the rule, so any future tightening
+# in falco-sandbox / falco-incubating still applies.
+#
+# Scoping principle: match against `proc.exepath` (absolute binary path)
+# rather than `proc.name`, so an attacker dropping a binary named "curl"
+# at a non-system path doesn't inherit the suppression.
+
+# elastic-agent runs as elastic-otel-collector and routinely probes
+# 169.254.169.254 for EC2/cloud metadata + reads /proc/<pid>/environ for
+# its supervised child processes. Both of these are non-suspicious agent
+# behavior and account for the bulk of residual noise after the
+# healthcheck-driven sshd accept events were cut.
+- rule: Contact EC2 Instance Metadata Service From Container
+  override:
+    condition: append
+  condition: and not proc.exepath endswith /components/elastic-otel-collector
+
+- rule: Read environment variable from /proc files
+  override:
+    condition: append
+  condition: and not proc.exepath endswith /components/elastic-otel-collector
+
+# Keycloak's container healthcheck opens /dev/tcp/127.0.0.1/9000 from a
+# bash subshell — fires `Redirect STDOUT/STDIN to Network Connection in
+# Container` on every probe (10s interval). Replacing the healthcheck
+# upstream would require rewriting it to not use bash's /dev/tcp magic
+# (see playground-v2/CLAUDE.md "Keycloak healthcheck needs CMD exec +
+# bash + printf"). Suppressing here is simpler and keeps the rule firing
+# on any other bash-driven /dev/tcp redirect, which is still suspicious.
+- rule: Redirect STDOUT/STDIN to Network Connection in Container
+  override:
+    condition: append
+  condition: and not (proc.name = bash and fd.lport = 9000 and fd.sip = 127.0.0.1)
+
+# Container healthchecks issue `curl http://kibana:5601/...`,
+# `curl https://elasticsearch:9200/...`, etc., which trigger UDP DNS
+# lookups. Falco fires `Unexpected UDP Traffic` on every such lookup.
+# Curl run from a system path is benign here; an attacker-dropped curl
+# at a non-system path would still trip the rule.
+- rule: Unexpected UDP Traffic
+  override:
+    condition: append
+  condition: and not proc.exepath = /usr/bin/curl

@@ -313,7 +313,7 @@ Each of the 8 role hosts runs a small Python scheduler (`/opt/soc-playground/bas
 
 **Reproducibility.** `V2_BASELINE_SEED` (default `42`) is hashed with `host:action:identity` to seed one PRNG per binding. Same seed + same catalog + same inventory → identical arrival sequences across runs. Changing the seed gives a different-but-valid shape — useful for eval harnesses that need multiple draws.
 
-**Kill-switch.** Set `V2_BASELINE_ENABLED=false` in `.env` and `compose up -d` (no rebuild needed — the env is consumed by the entrypoint, not baked in). Used before attack-scenario runs (batch 10) so synthetic benign traffic doesn't contaminate the capture.
+**Kill-switch.** Set `V2_BASELINE_ENABLED=false` in `.env` and `compose up -d --force-recreate <hosts>` (no rebuild needed — the env is consumed by the entrypoint, not baked in). Reserved for emergencies (e.g., baseline misbehaving and drowning a debugging session); attack-scenario runs deliberately leave baseline on so the agent investigates against realistic noise.
 
 **Observing it.**
 
@@ -408,7 +408,7 @@ docker --context soc-playground exec web-1 bash -c '
 
 ### Attack scenarios (batch 10)
 
-Parameterized, seed-reproducible attack scenarios that generate realistic telemetry across auth/metadata, execution, and data-access signal categories (docs/playground-environment-v2.md §Attack-simulation surface). Runner + catalog live in `playground-v2/attacks/`. Dispatches happen from the devcontainer against compose-network containers via `docker --context soc-playground exec`. Each run writes `attacks/runs/<run_id>/meta.json` with start/end timestamps + per-step exit codes — the time-window raw material that batch 10b's fixture-capture pass will use to bound Elasticsearch queries.
+Parameterized attack scenarios that generate realistic telemetry across auth/metadata, execution, and data-access signal categories (docs/playground-environment-v2.md §Attack-simulation surface). Runner + catalog live in `playground-v2/attacks/`. Dispatches happen from the devcontainer against compose-network containers via `docker --context soc-playground exec`. Attacks fire into the live environment with baseline activity left on — signal-vs-noise discrimination is the agent's job. Each run writes `attacks/runs/<run_id>/meta.json` (start/end timestamps + per-step rc) as an investigation-context hint. Specific-run post-mortem reproduction comes from the soc-agent's `tool_audit.jsonl` (the PostToolUse `audit_tool_calls.py` hook records `tool_input` + `tool_response` per call) — that's what the agent actually saw. Historical query reproducibility for arbitrary later replays relies on Elastic ILM retention.
 
 Catalog (4 starter scenarios):
 
@@ -424,28 +424,25 @@ Run workflow:
 ```bash
 cd /workspace/playground-v2/attacks
 ./runner.py list
-# Quiesce baseline so synthetic benign traffic doesn't pollute the capture window:
-sed -i 's/^V2_BASELINE_ENABLED=.*/V2_BASELINE_ENABLED=false/' ../.env
-docker --context soc-playground compose -f ../compose.yml up -d \
-  --force-recreate web-1 web-2 db-1 jump-box-1 dev-ws-1 office-ws-1 office-ws-2 canary-1
-# Run:
+# Run (baseline stays on — fire into live noise):
 ./runner.py run ssh-brute-force-canary --seed 42 --intensity 8
 # Review:
 cat runs/<run_id>/meta.json
-# Re-enable baseline (reverse the sed + re-recreate) for steady state.
+# Post-mortem of the agent's investigation (after it runs against the alert):
+#   soc-agent/runs/<session>/tool_audit.jsonl
 ```
 
 **Design notes:**
 
-- **Reproducibility.** Per-iteration PRNG seeded as `sha256(scenario_id:seed:step_index:iteration)` — same seed + same catalog → same dispatches. The runner itself is deterministic; any non-determinism must come from inside the dispatched shell commands (e.g., `$(date +%s)` in `persistence-authorized-keys`), which is fine because fixture capture keys by time window rather than byte-identical re-runs.
-- **Baseline is a sibling concern.** The runner deliberately does NOT toggle `V2_BASELINE_ENABLED` — that lever already exists from batch 8 and bundling it here would muddy the separation. Operators flip it + `compose up -d --force-recreate` around a capture.
+- **Live environment, no quiesce.** Baseline activity stays on for attack runs. Recreating hosts to flip `V2_BASELINE_ENABLED` would itself inject a synthetic boundary (sshd restart, fresh agent check-in, possibly fresh `agent.id` per the rebuild quirk) the agent could latch onto as a tell.
+- **Reproducibility at the pattern layer, not the dispatch layer.** Per-iteration PRNG seeded as `sha256(scenario_id:seed:step_index:iteration)` keeps dispatches stable for debugging, but the agent's tool surface is broader than any time-windowed Elastic replay — host state (processes, FDs, FIM) is non-replayable. Recurring patterns at scale + Elastic ILM retention are what make investigations reproducible at the eval layer; specific-run reproducibility comes from the soc-agent's `tool_audit.jsonl` capturing each `tool_input` + `tool_response`.
 - **Source/target realism.** Source hosts and identities are real compose containers + realm users, so Keycloak events, Zeek conns, sshd/auth.log, and Falco syscall events all carry the right labels. `office-ws-1` + `dev.dana` reaching `db-1` is telemetry-wise a compromised-workstation signal because neither the role mapping nor the `trust_edges_out` in `hosts/inventory.yaml` permits that path.
 - **Per-step templating.** `${host}`, `${target}`, `${user}`, `${iteration}`, `${intensity}` substitute in each step's `cmd`. Repeat counts can be literal ints or the string `"${intensity}"`; `delay_s_between` sleeps between repeats; `allow_fail` lets a step's non-zero rc proceed to the next step (ssh brute force is expected to fail, so it uses `allow_fail: true`).
-- **Run artifacts.** `runs/` is gitignored except for its `.gitignore` — run manifests are ephemeral until batch 10b packages them into fixture bundles.
+- **Run artifacts.** `runs/` is gitignored except for its `.gitignore`. meta.json is an investigation-context hint; the durable record of what the agent saw lives in the soc-agent run dir's `tool_audit.jsonl`.
 
-**Deferred to batch 10b / 11:**
+**Deferred to later batches:**
 
-- `wazuh_cli.py --replay` and the fixture bundle schema (docs/evaluation-and-chaos-design.md §Tool intercept, §Fixture structure).
+- ILM retention pinning so the data streams the agent would query (`logs-system.*`, `logs-zeek.*`, `falco.alerts`, etc.) stay queryable for the fixture lifetime. Today the stack runs on default policies — replace with explicit retention before treating any run as a stable reference.
 - Chaos control plane that drives the CMDB overlay, toxiproxy-style service outages, schema drift, and data drops (docs/playground-environment-v2.md §Phased build Phase 4).
 - MinIO-dependent data-access archetypes (blob enumeration, staged exfil) — MinIO is a Tier-2 dependency.
 
