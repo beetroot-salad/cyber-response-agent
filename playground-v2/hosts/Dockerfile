@@ -98,7 +98,7 @@ ENV HOST_NAME=""
 # tini reaps zombies from background services (rsyslog/cron/role daemons) so
 # sshd's short-lived session children don't turn into zombies either.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/host-entrypoint.sh"]
-CMD ["/usr/sbin/sshd", "-D", "-e"]
+CMD ["/usr/sbin/sshd", "-D"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage: plain — alias for base, used by role-less hosts

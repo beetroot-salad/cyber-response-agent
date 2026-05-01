@@ -3,7 +3,7 @@
 #   1. Seed UNIX users from inventory.yaml (HOST_NAME-scoped).
 #   2. Start rsyslog + cron in the background.
 #   3. If the image installed a role start hook, run it (starts nginx/postgres/etc.).
-#   4. Exec whatever CMD compose passes (default: sshd -D -e).
+#   4. Exec whatever CMD compose passes (default: sshd -D).
 set -euo pipefail
 
 if [[ -z "${HOST_NAME:-}" ]]; then

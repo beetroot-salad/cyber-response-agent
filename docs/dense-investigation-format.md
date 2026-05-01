@@ -326,6 +326,214 @@ Each rule re-expressed against a line-shape parser. Examples:
 
 The full 35-rule rewrite is mechanical. Estimated parser size: ~150 LOC Python (one regex per block tag, one tokenizer per row shape).
 
+## ANALYZE trailer dense form (v0)
+
+Companion proposal: extend the dense surface from the on-disk `investigation.md` (the section above) to the **subagent output trailer** that ANALYZE emits and the handler composes from. Status: design experiment, narrowest viable extension. Full design discussion in this section's commentary; the on-disk grammar above is reused verbatim where it fits.
+
+### Why ANALYZE first (not PREDICT, not GATHER)
+
+- **ANALYZE's `resolutions[].entries[]` is uniform-row shape.** Every entry has the same columns: hypothesis_id, weight, matched_prediction_ids, matched_refutation_ids (when `--`), supporting_edges, reasoning. Maps 1:1 onto the on-disk `:T resolutions` row already specified above.
+- **PREDICT's `:H` row is the riskiest surface** — packed sub-cells for predictions/refutations/contracts. Defer until ANALYZE proves the dense trailer carries.
+- **GATHER's `characterization` is structurally per-lead** — keys differ per "What to Characterize" bullet, no shared row schema. Forcing tabulation creates a fake-schema downstream phases must reverse-engineer. Skip.
+
+### Trailer surface
+
+Today's YAML `analyze:` envelope (per `soc-agent/agents/analyze.md`) is reshaped onto five row-blocks. All grammar reuses the on-disk format above; no new tags introduced (`:A` is the analyze-trailer-only namespace prefix; `:T` and `:R` are reused verbatim from the on-disk grammar).
+
+```
+:A loop  <int>
+
+:T resolutions
+<hyp-id>  <before> → <after>   [<lead-id> <pred-tokens> <severity> ⟂ <supp-edges> :: <annotation>]
+...
+
+:R authz | consultations | impact | attr_updates                # reuse on-disk :R rows verbatim
+
+:A routing                                                       # PRESENT iff decision=halt
+decision               halt
+termination_category   trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
+disposition            benign | true_positive | unclear
+confidence             high | medium | low
+surviving              <hyp-id>[,<hyp-id>...]
+matched_archetype      null
+
+:A unresolved_prescribed                                         # PRESENT iff decision=continue (optional)
+<lead-slug>
+...
+
+:A anomalies
+<short string> | none
+...
+
+:A data_wishes
+<short string> | none
+...
+```
+
+### Worked translation
+
+Source: `runs/conclude-test-3/investigation.md` upgraded to today's envelope schema. wazuh-rule-550 single-loop, three hypotheses (one ++, two -- with matched refutations), halt → adversarial-refuted/benign.
+
+YAML trailer (~28 non-blank lines, ~1.4 kB):
+
+```yaml
+analyze:
+  loop: 1
+  resolutions:
+    - lead_ref: l-001
+      entries:
+        - hypothesis_id: h-001
+          weight: "++"
+          matched_prediction_ids: [p1, p2, p3]
+          supporting_edges: [e-010]
+          reasoning: "rule-502 server-restart edge at 13:01:54Z confirms p1 (causal trigger); 9 ev/20min across 6+ files confirms p2 (bulk pattern); mtime 2025-11-19 confirms p3 (file unchanged 5mo); refutation r1 (no restart event) failed to materialize."
+        - hypothesis_id: h-002
+          weight: "--"
+          matched_prediction_ids: [p1]
+          matched_refutation_ids: [r1]
+          supporting_edges: [e-010]
+          reasoning: "p1 (one-time burst) refuted by 4h 5-min repeat locked to syscheck cadence; matched r1 (persistent repeat)."
+        - hypothesis_id: h-003
+          weight: "--"
+          matched_prediction_ids: [p1, p2, p4]
+          matched_refutation_ids: [r1]
+          supporting_edges: [e-010]
+          reasoning: "bulk pattern across 9+ unrelated files refutes p1 (targeted-one-file); unchanged hashes refute p2; mtime 2025-11-19 refutes p4; matched r1 (bulk-across-unrelated-files)."
+  anomalies: []
+  data_wishes: []
+  routing:
+    decision: halt
+    termination_category: adversarial-refuted
+    disposition: benign
+    confidence: high
+    surviving_hypotheses: [h-001]
+    matched_archetype: null
+```
+
+Dense trailer (~14 non-blank lines, ~750 B — **45% reduction** on this case):
+
+```
+:A loop  1
+
+:T resolutions
+h-001  ∅ → ++   [l-001 p1,p2,p3 severe ⟂ e-010 :: restart@13:01:54Z confirms p1; 9ev/20min ≥6 files confirms p2; mtime 2025-11-19 confirms p3; r1 not-materialized]
+h-002  ∅ → --   [l-001 p1 r1 severe ⟂ e-010 :: 4h 5-min repeat locked to syscheck cadence refutes one-time burst; matched r1]
+h-003  ∅ → --   [l-001 p1,p2,p4 r1 severe ⟂ e-010 :: bulk across 9+ unrelated files; unchanged hashes; mtime 5mo old; matched r1]
+
+:A routing
+decision               halt
+termination_category   adversarial-refuted
+disposition            benign
+confidence             high
+surviving              h-001
+matched_archetype      null
+```
+
+`anomalies`/`data_wishes` blocks omitted (both empty); `:A unresolved_prescribed` absent (decision=halt).
+
+### `severity_of_test` — new explicit field
+
+The on-disk `:T resolutions` row introduces a slot the YAML envelope did not have: `severity_of_test ∈ {severe | moderate | weak}`. Adopting it on the trailer surfaces a rule that today is *implicit* in the load-bearing-field paragraph (`agents/analyze.md:107-117`).
+
+**Reading**: pre-result test power, not post-result evidence strength.
+
+- `severe` — direct field-read on an authoritative source for the prediction's load-bearing field.
+- `moderate` — direct observation but the source has known coverage gaps for this question.
+- `weak` — downstream effect, co-occurrence in a different rule family, temporal proximity, population baseline match without per-instance check.
+
+**Why this reading**: the grade tier (`++`, `+`, `-`, `--`) already encodes how decisive the *result* was. A separate severity slot is only useful if it captures something the grade doesn't — which is the test's *a priori* discriminating power. This makes the load-bearing-field rule structural: the validator can enforce "`++` or `--` ⇒ severity=severe", which is exactly what `agents/analyze.md` says today in prose.
+
+Trailer authoring cost: one additional judgment per resolution. ANALYZE already makes this judgment when picking the grade tier — surfacing it is mostly mechanical.
+
+### `load_bearing[]` as iff conditions (proposal)
+
+YAML today (`agents/analyze.md:42-46`) carries an optional `load_bearing[]` per resolution:
+
+```yaml
+load_bearing:
+  - field: "<field name>"
+    source: "<lead-id | prologue | e-id>"
+    counterfactual: "<if this had shown X, grade would have been Y>"
+```
+
+Dense form: render the resolution as a mathematical-style biconditional where the LHS *is* the load-bearing observation and the RHS *is* the matched/refuted prediction set:
+
+```
+:T resolutions
+h-001  ∅ → ++   [l-001 severe ⟂ e-010 :: rule-502.event_type=server-started @ 13:01:54Z ⟺ p1 ∧ ¬r1]
+h-002  ∅ → --   [l-001 severe ⟂ e-010 :: cadence(syscheck) = 5min × 4h ≢ one-time-burst ⟺ ¬p1 ∧ r1]
+h-003  ∅ → --   [l-001 severe ⟂ e-010 :: |files_affected| ≥ 9 ∧ hashes_unchanged ∧ mtime=2025-11-19 ⟺ ¬p1 ∧ ¬p2 ∧ ¬p4 ∧ r1]
+```
+
+What it gets us:
+- The `⟺` line *is* the load-bearing observation. The RHS *is* the matched/refuted prediction set — `matched_prediction_ids`/`matched_refutation_ids` aren't separate columns, they're the literals on the right.
+- The counterfactual is implicit: flip any LHS literal, the RHS flips with it. That's what the YAML `counterfactual` field tries to capture in prose.
+- Severity gets a clean structural meaning: the LHS is *either* a direct field-read on an authoritative source (severe) or it's not.
+
+Frictions (open):
+- LLM authoring tier — `⟺ p1 ∧ ¬r1` is harder to write than two YAML lists. Sonnet probably handles; Haiku unproven. Worth the same n≥10 write test PR #146 scoped for the on-disk surface.
+- ASCII fallback (`<=>`, `&`, `~`, `!`) for environments where unicode round-trips badly. Adopt unicode as canonical; accept ASCII on parse.
+- Validator rewrite — rules #5 (refutation IDs) and #6 (prediction completeness) currently scan list fields. Under this form they scan literals on the RHS of `⟺`. Mechanical but a real rewrite.
+
+### Annotation bracket-escape rule
+
+Inside `[...] :: <annotation>` the annotation runs from `::` to the *last unescaped `]`* on the row. Embedded `]` must be written as `\]`. Cheap to define, cheap to author.
+
+### `anomalies` / `data_wishes` — defer densification
+
+Empirical scan of the run corpus (83 investigations across `/workspace/runs/` and `/workspace/soc-agent/runs/`, 57 with an `## ANALYZE` phase) found **zero populated `anomalies[]` or `data_wishes[]` entries**. The new envelope schema is recent (handlers refactor `fbf8e61`, `359d919`); most corpus runs predate it.
+
+Without usage data we cannot judge whether these fields hold their intended retrospective/forward split or collapse into a free-form ANALYZE→PREDICT chat channel. Don't densify a schema we may want to redesign.
+
+**Action**: in the dense trailer v0, allow `:A anomalies` / `:A data_wishes` blocks but do not introduce new structure. Re-evaluate after ≥15–20 runs on the new envelope. Likely redesigns to consider then: collapse to one field; structure as `{lead_ref, prediction_ref, kind: gap|inconsistency, note}`; or merge `data_wishes` into `routing.unresolved_prescribed_set`.
+
+### Omit `:A routing` on continue
+
+On `decision: continue` the only routing field is `decision` itself + optional `unresolved_prescribed_set`. Make `:A routing` block *absent* ⇒ `decision: continue` implied; *present* ⇒ halt with the four required fields. Saves ~6 lines on every continuing loop (which is most loops). No information loss; structural and parser-cheap.
+
+### Searchability
+
+The invlang query CLI (`scripts/invlang/run.sh`, 12 query classes in `scripts/invlang/queries.py`) walks parsed in-memory structure, not text. Searchability survives if we maintain a single canonical parser that emits the same dataclasses for both YAML and dense surfaces. Two real costs:
+
+1. Parser parity is a silent-failure surface. Mitigation: dual-write fixtures during migration + diff parsed structures.
+2. Trailer dense form alone introduces no packed sub-cells (those live in `:H` on the on-disk surface). Each `:T resolutions` row has a flat schema. So the trailer extension does not worsen searchability.
+
+### Empirical findings on cross-block invariant detection
+
+Two-round empirical probe (n=3 Sonnet agents per cohort, audit-for-inconsistency task on planted-error trailers) tested whether the dense form has an attention-budget weakness on cross-block invariants vs YAML.
+
+**Round 1** (probe with row-local + cross-block errors mixed, *implicit* cross-block invariants):
+- Dense cohort caught all 3 row-local errors, missed a `routing.surviving` ↔ `termination_category` polarity inconsistency that 2/3 YAML agents caught.
+- Read as: dense form's iconic row-locality biases attention toward in-row checks, away from cross-block coherence.
+
+**Round 2** (probe with cross-block errors only, *explicit* invariants enumerated in the legend, four cohorts: vanilla dense / chained re-read / inline survival marker / YAML):
+- All four cohorts: 12/12 detection at 100%. Vanilla dense matched YAML matched both interventions.
+- Round 1's "dense miss" was a legend-coverage gap, not a format weakness.
+
+**The actual lever is legend coverage, not the format.** When the cross-block invariants are *named* in the legend the subagent reads, dense form catches them as reliably as YAML. When the legend leaves them implicit, every cohort degrades.
+
+Implications:
+
+1. **Dense ANALYZE trailer ships with explicit cross-block invariants in the legend.** The four invariants (surviving completeness, termination polarity, disposition gating, authz fulfillment) appear as a numbered list with the rule they enforce. Don't rely on the agent inferring them from row grammar alone.
+2. **Reject the chained re-read intervention.** Duplicating the trailer block before the task instruction (the technique from Xu et al. 2023, "Re-reading improves reasoning in language models") gives no detection lift on Sonnet for this task. All three chained-cohort agents explicitly reported the second pass surfaced nothing new ("the duplicate block is byte-for-byte identical so no delta existed to catch"). Cost: ~1.4× tokens for zero gain. The Xu paper's gains were observed on smaller models with longer-context multi-hop tasks; for a ~700-byte trailer with 4 explicit rules, frontier-model headroom absorbs the lift.
+3. **Inline survival markers (option B1) are optional polish, not a safety lever.** Per-row `<survival> ∈ {survives, refuted}` cells (mirroring the `routing.surviving` set) didn't change detection rate but did produce shorter, crisper reasoning artifacts: agents cited the inline cell directly ("h-003 is marked `survives` but is absent from `routing.surviving`") rather than deriving survival status from `<after>`. May matter for downstream parseability of the trailer's rationale (audit trail, post-mortem queries); does not matter for self-catch reliability. Adopt only if the reasoning-clarity benefit outweighs the redundancy cost.
+4. **Happy-path self-catch works** when the legend names the invariants. The validator hook still has to enforce as a safety net, but the agent will catch cross-block errors at write time before the validator fires — meaning ANALYZE doesn't pay the validator-error-recovery tax (significant time + thinking) on cross-block violations. This is the load-bearing property; surface compression is secondary.
+
+Caveats:
+
+- n=3 per cohort is small; differences ≤1 catch are noise.
+- Single trailer per cohort within each round — no within-cohort variance on the trailer side. To call format effects with confidence, want ≥5 different trailers per cohort with errors of varied placement/type.
+- Round 1 vs round 2 differed on both planted-error placement and legend coverage. Cleanly retiring "dense has an attention weakness" hypothesis would require re-running round 1's planted errors with round 2's explicit-invariant legend.
+
+### Migration suggestion
+
+1. Write the dense parser for the trailer surface (`:A`, `:T resolutions`, `:R *` reuse). Smaller scope than the on-disk parser — flat row schemas only, no `:H` sub-cells.
+2. Dual-emit on ANALYZE: subagent emits YAML envelope; handler composes invlang and *also* writes dense trailer to `subagent_checkpoints/analyze-loop-{n}.dense` for diff.
+3. Run the n≥10 Haiku-tier write test on the dense form directly (skip the YAML envelope) on rule-5710 fixtures.
+4. If parse rate ≥ 95% and `routing` field set matches the YAML form, cut over.
+
+Higher blast radius than the on-disk dual-write because the orchestrator's compose step parses the trailer on every loop — a mis-parse breaks the run. Mitigation: dense parser is fail-soft; on parse error, fall back to YAML envelope written alongside.
+
 ## Tradeoffs
 
 - **Save**: ~50% tokens (estimated, not measured); weight-and-citation lines collocated; iconic graph at a glance.

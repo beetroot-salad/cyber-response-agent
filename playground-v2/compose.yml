@@ -48,8 +48,14 @@ x-host-defaults: &host-defaults
       condition: service_healthy
     fleet-host-policies:
       condition: service_completed_successfully
+  # Process-existence check, not `nc -z 127.0.0.1 22`. Every nc connection
+  # to port 22 makes sshd dup2(fd, 0/1) on accept, which Falco's
+  # "Redirect STDOUT/STDIN to Network Connection in Container" rule fires on
+  # — 8 hosts × every 10s drowned the falco.alerts stream in healthcheck
+  # noise (~99% of all events). Process check has the same operational
+  # intent (sshd is alive) without opening a socket.
   healthcheck:
-    test: ["CMD", "nc", "-z", "127.0.0.1", "22"]
+    test: ["CMD-SHELL", "pgrep -x sshd >/dev/null"]
     interval: 10s
     timeout: 5s
     retries: 5
@@ -433,8 +439,10 @@ services:
       - /lib/modules:/host/lib/modules:ro
       - /usr:/host/usr:ro
       - /etc:/host/etc:ro
-      # Container metadata for the container plugin.
-      - /var/run/docker.sock:/host/var/run/docker.sock:ro
+      # Container metadata for the container plugin. Falco 0.43+'s plugin
+      # needs RW because some name/image lookups go through write endpoints;
+      # :ro yields container.id populated but container.name=<NA>.
+      - /var/run/docker.sock:/host/var/run/docker.sock
       # Output — bind-mounted to the VPS host so the host agent can tail it
       # without going through a docker volume.
       - /var/log/falco:/var/log/falco
@@ -509,7 +517,7 @@ services:
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_web_1:/var/lib/elastic-agent
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 22 && nc -z 127.0.0.1 80"]
+      test: ["CMD-SHELL", "pgrep -x sshd >/dev/null && pgrep -x nginx >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -537,7 +545,7 @@ services:
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_web_2:/var/lib/elastic-agent
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 22 && nc -z 127.0.0.1 80"]
+      test: ["CMD-SHELL", "pgrep -x sshd >/dev/null && pgrep -x nginx >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -567,7 +575,7 @@ services:
     # Postgres's default cluster + elastic-agent add a bit over the bare base.
     mem_limit: 768m
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 22 && nc -z 127.0.0.1 5432"]
+      test: ["CMD-SHELL", "pgrep -x sshd >/dev/null && pgrep -x postgres >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5

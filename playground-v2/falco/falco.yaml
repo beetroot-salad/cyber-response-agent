@@ -14,10 +14,66 @@
 engine:
   kind: modern_ebpf
 
+# Falco 0.43 extracted container metadata enrichment into an external
+# plugin. Rules in falco-sandbox / falco-incubating that reference
+# `container.*` fields require this plugin loaded with init_config.
+load_plugins:
+  - container
+
+plugins:
+  - name: container
+    library_path: libcontainer.so
+    # Docker socket is bind-mounted under /host (see compose.yml volumes).
+    # Without this override the plugin probes /var/run/docker.sock and finds
+    # nothing, so container.* fields stay empty on every event.
+    init_config:
+      engines:
+        docker:
+          enabled: true
+          sockets: ["/host/var/run/docker.sock"]
+        podman:
+          enabled: false
+          sockets: ["/run/podman/podman.sock"]
+        containerd:
+          enabled: false
+          sockets: ["/run/containerd/containerd.sock"]
+        cri:
+          enabled: false
+          sockets: ["/run/crio/crio.sock"]
+        lxc:
+          enabled: false
+        libvirt_lxc:
+          enabled: false
+        bpm:
+          enabled: false
+
 # JSON for SIEM ingestion; stdout too for `docker logs falco` debugging.
 json_output: true
 json_include_output_property: true
 json_include_tags_property: true
+
+# Force every rule's output to include container.id + container.name so
+# per-host attribution is always present, even on rules whose authored
+# output template omits container fields. The `append_output` mechanism
+# (Falco 0.41+) injects extra format fields into every matching rule's
+# output and output_fields without requiring per-rule overrides.
+# https://falco.org/docs/concepts/rules/append-output/
+#
+# We deliberately do NOT inject `container.image` here. Falco's own rule
+# output already exposes `container.image.repository` (an ECS-aligned
+# object path). Adding a flat `container.image` string alongside it
+# produces both `falco.output_fields.container.image: "<NA>"` (string)
+# and `falco.output_fields.container.image.repository: ...` (object) in
+# the same document — ES rejects the second with
+# "can't merge a non object mapping [container.image] with an object
+# mapping" and sends every Falco event to the failure store.
+append_output:
+  - match:
+      source: syscall
+    extra_output: "container=%container.name (id=%container.id image=%container.image.repository)"
+    extra_fields:
+      - container.name: "%container.name"
+      - container.id: "%container.id"
 
 stdout_output:
   enabled: true

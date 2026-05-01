@@ -69,6 +69,16 @@ def main():
         "tool_use_id": hook_data.get("tool_use_id"),
     }
 
+    response = hook_data.get("tool_response")
+    if response is not None:
+        if isinstance(response, str):
+            entry["tool_response"] = truncate(response)
+        else:
+            serialized = json.dumps(response, ensure_ascii=False)
+            entry["tool_response"] = (
+                response if len(serialized) <= MAX_FIELD_LEN else truncate(serialized)
+            )
+
     # Include subagent context if present.
     if hook_data.get("agent_id"):
         entry["agent_id"] = hook_data["agent_id"]

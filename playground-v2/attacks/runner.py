@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Attack scenario runner — batch 10.
+"""Attack scenario runner.
 
 Dispatches a single attack scenario from the devcontainer against the
-remote compose stack via `docker --context soc-playground exec`. Designed
-to be rerun against the same seed + catalog for fixture-capture
-reproducibility (batch 10b will wrap this runner to harvest the resulting
-telemetry window).
+remote compose stack via `docker --context soc-playground exec`. Attacks
+fire into the live environment with baseline activity left on — the
+agent's job is signal-vs-noise discrimination.
 
 Usage:
 
@@ -13,13 +12,17 @@ Usage:
     ./runner.py run ssh-brute-force-canary --seed 42 --intensity 8
     ./runner.py run living-off-the-land --dry-run
 
-A run writes attacks/runs/<run_id>/meta.json with start/end timestamps,
-resolved parameters, and per-step exit codes — the raw material the
-fixture-capture pass needs to bound its Elasticsearch query windows.
+A run writes attacks/runs/<run_id>/meta.json — start/end timestamps,
+resolved parameters, per-step exit codes — as an investigation-context
+hint, not a hard query window.
 
-Does NOT touch baseline activity. The caller is expected to quiesce it
-first (V2_BASELINE_ENABLED=false + compose up -d --force-recreate HOSTS)
-so synthetic benign traffic doesn't contaminate the capture.
+Reproducing a specific investigation post-mortem is the audit log's job:
+the soc-agent's `audit_tool_calls.py` PostToolUse hook records each
+tool_input + tool_response pair under runs/<session>/tool_audit.jsonl,
+which is the durable record of what the agent saw. Historical query
+reproducibility for arbitrary later replays relies on Elastic ILM
+retention. Per-iteration PRNG seeding is kept only for dispatch
+debugging stability.
 """
 from __future__ import annotations
 
