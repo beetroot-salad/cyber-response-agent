@@ -598,9 +598,41 @@ def _project_resolution(
                 f"`l-{{id}}.*` block): {row!r}"
             )
         lead = lead_bucket(lead_id)
-        lead.setdefault("outcome", {}).setdefault(bucket_key, []).append(
-            _resolution_row(name, rec)
+        if name == "attr_updates":
+            _append_attr_update(lead, rec)
+        else:
+            lead.setdefault("outcome", {}).setdefault(bucket_key, []).append(
+                _resolution_row(name, rec)
+            )
+
+
+def _append_attr_update(lead: dict[str, Any], rec: dict[str, str]) -> None:
+    """Fold a flat `:R attr_updates` row (target|key|value) onto the lead's
+    `outcome.attribute_updates[]` list under the canonical
+    `{target, updates: {key: value, ...}}` shape required by validator
+    rule #22 (`_check_attribute_updates_target_shape`).
+
+    Multiple rows sharing the same `target` accumulate into one entry's
+    `updates` mapping, mirroring how the producer flattens
+    `{target, updates}` into one row per (key, value) pair.
+    """
+    target = rec.get("target")
+    if not target:
+        raise DenseParseError(
+            f":R attr_updates: row missing `target`: {rec!r}"
         )
+    key = rec.get("key")
+    if not key:
+        raise DenseParseError(
+            f":R attr_updates: row on target {target!r} missing `key`: {rec!r}"
+        )
+    value = rec.get("value", "")
+    bucket = lead.setdefault("outcome", {}).setdefault("attribute_updates", [])
+    for entry in bucket:
+        if entry.get("target") == target and isinstance(entry.get("updates"), dict):
+            entry["updates"][key] = value
+            return
+    bucket.append({"target": target, "updates": {key: value}})
 
 
 def _resolution_row(kind: str, rec: dict[str, str]) -> dict[str, Any]:
