@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator
+
+import yaml
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
@@ -23,6 +25,40 @@ def iter_yaml_fences(raw: str) -> Iterator[str]:
         info = tok.info.strip()
         if info == "yaml" or info.split(None, 1)[:1] == ["yaml"]:
             yield tok.content
+
+
+def iter_companion_dicts(raw: str) -> Iterator[dict[str, Any]]:
+    """Yield parsed companion-shape dicts from every structured fence in `raw`.
+
+    Walks both ```yaml fences (one dict per fence via `yaml.safe_load`) and
+    the unified ```invlang dense surface (one combined dict via
+    `parse_dense_companion`). Non-dict YAML documents, malformed YAML, and
+    malformed dense blocks are silently skipped — callers that need parse
+    errors should go through the invlang validator instead.
+    """
+    for body in iter_yaml_fences(raw):
+        try:
+            doc = yaml.safe_load(body)
+        except yaml.YAMLError:
+            continue
+        if isinstance(doc, dict):
+            yield doc
+
+    # Lazy import — `_dense_parser` is heavier than `_markdown` consumers
+    # who only want yaml fences should not pay for it on import.
+    try:
+        from scripts.handlers._dense_parser import (  # type: ignore
+            parse_dense_companion,
+            DenseParseError,
+        )
+    except ImportError:
+        return
+    try:
+        dense_doc = parse_dense_companion(raw)
+    except DenseParseError:
+        return
+    if dense_doc:
+        yield dense_doc
 
 
 def _heading_level(tag: str) -> int:

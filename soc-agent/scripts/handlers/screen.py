@@ -41,7 +41,6 @@ from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._investigation_io import append_and_validate
-from scripts.handlers._markdown import iter_yaml_fences
 from scripts.handlers._playbook import load_screen_rows
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
@@ -94,8 +93,11 @@ def _parse_leads_column(leads_cell: str) -> list[str]:
 
 
 def _extract_prologue_yaml(run_dir: Path) -> str:
-    """Return the fenced `prologue:` YAML block from `investigation.md` as a
-    YAML string (no fence markers).
+    """Return the prologue block from `investigation.md` as a YAML string.
+
+    Walks both ```yaml and ```invlang fences so the SCREEN handler can run
+    against the post-foundation on-disk surface. The screen subagent prompt
+    still embeds YAML, so the parsed prologue is re-serialized.
 
     Raises OrchestrationError if `investigation.md` is missing or has no
     prologue — the SCREEN handler cannot run before CONTEXTUALIZE has written
@@ -106,15 +108,13 @@ def _extract_prologue_yaml(run_dir: Path) -> str:
         raise OrchestrationError(
             f"investigation.md not found at {inv_path}; CONTEXTUALIZE must run first"
         )
-    for body in iter_yaml_fences(inv_path.read_text()):
-        try:
-            parsed = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if isinstance(parsed, dict) and "prologue" in parsed:
-            return body
+    from scripts.handlers._markdown import iter_companion_dicts
+    for parsed in iter_companion_dicts(inv_path.read_text()):
+        prologue = parsed.get("prologue")
+        if isinstance(prologue, dict):
+            return yaml.safe_dump({"prologue": prologue}, sort_keys=False)
     raise OrchestrationError(
-        f"investigation.md at {inv_path} has no `prologue:` YAML block"
+        f"investigation.md at {inv_path} has no prologue block"
     )
 
 

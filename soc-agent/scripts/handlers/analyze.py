@@ -348,9 +348,6 @@ def _compose_section(envelope: AnalyzeEnvelope, loop_n: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-_PROLOGUE_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
-
-
 def _first_prologue_vertex_id(investigation_md: str) -> str | None:
     """Return the first `v-*` id declared in any prologue block of the
     companion, or None if no prologue block is present.
@@ -360,14 +357,9 @@ def _first_prologue_vertex_id(investigation_md: str) -> str | None:
     prescribe a target vertex per lead — the lead is investigating the
     alert's subject vertex, which is always v-001 in practice.
     """
-    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
-        try:
-            doc = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
-        vertices = doc.get("prologue", {}).get("vertices") or []
+    from scripts.handlers._markdown import iter_companion_dicts
+    for doc in iter_companion_dicts(investigation_md):
+        vertices = (doc.get("prologue") or {}).get("vertices") or []
         for v in vertices:
             if isinstance(v, dict) and isinstance(v.get("id"), str):
                 return v["id"]
@@ -389,14 +381,9 @@ def _hypothesis_name_to_id_map(investigation_md: str) -> dict[str, str]:
     Both `name` and `id` are keyed — calling `.get(value, value)` falls
     through cleanly whether the subagent emitted the name or the ID.
     """
+    from scripts.handlers._markdown import iter_companion_dicts
     mapping: dict[str, str] = {}
-    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
-        try:
-            doc = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
+    for doc in iter_companion_dicts(investigation_md):
         hypotheses = doc.get("hypothesize", {}).get("hypotheses") or []
         for h in hypotheses:
             if not isinstance(h, dict):
@@ -462,15 +449,10 @@ def _prologue_authoritative_edges(investigation_md: str) -> list[str]:
     any non-circumstantial grade, and the lead-level evidence is always
     at least as authoritative as the prologue edges it confirms.
     """
+    from scripts.handlers._markdown import iter_companion_dicts
     edge_ids: list[str] = []
-    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
-        try:
-            doc = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
-        edges = doc.get("prologue", {}).get("edges") or []
+    for doc in iter_companion_dicts(investigation_md):
+        edges = (doc.get("prologue") or {}).get("edges") or []
         for e in edges:
             if not isinstance(e, dict):
                 continue
@@ -680,14 +662,9 @@ def _hypothesis_id_to_name_map(investigation_md: str) -> dict[str, str]:
     `adversarial-refuted` termination category). X5 is weight-only as
     of v2.16 and does not consume this map.
     """
+    from scripts.handlers._markdown import iter_companion_dicts
     mapping: dict[str, str] = {}
-    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
-        try:
-            doc = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
+    for doc in iter_companion_dicts(investigation_md):
         hypotheses = doc.get("hypothesize", {}).get("hypotheses") or []
         for h in hypotheses:
             if not isinstance(h, dict):

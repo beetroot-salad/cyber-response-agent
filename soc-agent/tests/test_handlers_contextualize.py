@@ -200,8 +200,9 @@ class TestInvestigationWrite:
         inv = (ctx.run_dir / "investigation.md").read_text()
         assert "## CONTEXTUALIZE" in inv
         assert "**Alert:** 1776600000.12345678 — wazuh-rule-5710" in inv
-        assert "```yaml" in inv
-        assert "prologue:" in inv
+        assert "```invlang" in inv
+        assert ":V prologue.vertices" in inv
+        assert ":E prologue.edges" in inv
         assert "v-001" in inv
         assert "attempted_auth" in inv
 

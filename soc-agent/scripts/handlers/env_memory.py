@@ -39,7 +39,6 @@ INACTIVE_HYPOTHESIS_STATUSES: frozenset[str] = frozenset({"refuted", "shelved"})
 
 # Shared regex for extracting fenced YAML blocks from invlang investigation.md
 # files. Lint reuses this via import.
-INV_FENCE_RE = re.compile(r"```yaml\s*\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
@@ -346,18 +345,12 @@ def extract_anchors(ctx: Any) -> dict[str, set[str]]:
         return anchors
     text = inv_file.read_text()
 
-    # Walk every yaml fence; merge vertex maps + collect hypotheses.
+    # Walk every structured fence (yaml + invlang); merge vertex maps + collect hypotheses.
+    from scripts.handlers._markdown import iter_companion_dicts
     vertices_by_id: dict[str, dict] = {}
     hypotheses: list[dict] = []
     shelved_ids: set[str] = set()
-    for m in INV_FENCE_RE.finditer(text):
-        try:
-            parsed = yaml.safe_load(m.group("body"))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-
+    for parsed in iter_companion_dicts(text):
         prologue = parsed.get("prologue")
         if isinstance(prologue, dict):
             for v in prologue.get("vertices") or []:

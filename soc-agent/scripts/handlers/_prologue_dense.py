@@ -43,7 +43,12 @@ _EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
 _VALID_TAGS = frozenset("VE")
 
 
-def _strip_envelope(stdout: str) -> str:
+def strip_envelope(stdout: str) -> str:
+    """Strip an optional ```...``` fence around dense subagent output.
+
+    Public so the CONTEXTUALIZE handler can hand the validated dense body
+    straight into the on-disk ```invlang fence without re-serializing.
+    """
     text = stdout.strip()
     if not text:
         raise PrologueOutputError("prologue output is empty")
@@ -56,6 +61,8 @@ def _strip_envelope(stdout: str) -> str:
             body = body.rstrip()[:-3]
         return body.strip()
     return text
+
+
 
 
 def _vertex_row(row: str) -> dict[str, Any]:
@@ -112,7 +119,7 @@ def parse_prologue_dense(stdout: str) -> dict[str, Any]:
 
     Raises `PrologueOutputError` on the first violation.
     """
-    text = _strip_envelope(stdout)
+    text = strip_envelope(stdout)
     blocks = _prim.tokenize_blocks(
         text, valid_tags=_VALID_TAGS, error_cls=PrologueOutputError
     )
