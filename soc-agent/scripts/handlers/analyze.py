@@ -69,6 +69,7 @@ from scripts.handlers._output_parser import (
     AnalyzeOutputError,
     parse_analyze_envelope_dense,
 )
+from scripts.handlers._prior_recall import build_prior_recall_block
 from scripts.handlers._subagent import (
     make_invoker,
 )
@@ -187,6 +188,11 @@ def _assemble_prompt(ctx: Context) -> str:
         current_gather = format_current_gather_block(gather_out.get("leads") or [])
         if current_gather:
             blocks.append(current_gather)
+        prior_recall = build_prior_recall_block(
+            gather_out.get("leads") or [], investigation_md, salt
+        )
+        if prior_recall:
+            blocks.append(prior_recall)
     if INCLUDE_RAW_DETAILS:
         raw_details_block = _load_raw_details(ctx)
         if raw_details_block:

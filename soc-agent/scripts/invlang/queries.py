@@ -1742,7 +1742,7 @@ def enumerate_hypothesis_tree(corpus: list[Companion]) -> dict[str, Any]:
 # typically by a different vertex in the same case).
 
 
-def _parse_vertex_where_spec(spec: str) -> tuple[str, dict[str, str]]:
+def parse_vertex_where_spec(spec: str) -> tuple[str, dict[str, str]]:
     """Parse one '--vertex-where' string into (kind, {attr: pattern}).
 
     Accepted forms:
@@ -1770,6 +1770,10 @@ def _parse_vertex_where_spec(spec: str) -> tuple[str, dict[str, str]]:
                 )
             attrs[k.strip()] = v.strip()
     return kind, attrs
+
+
+# Underscore alias preserved for cli.py back-compat within this branch.
+_parse_vertex_where_spec = parse_vertex_where_spec
 
 
 def _confirmed_vertices(c: Companion) -> Iterator[dict[str, Any]]:
