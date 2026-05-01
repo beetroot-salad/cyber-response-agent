@@ -428,7 +428,8 @@ def _parse_refut_subcells(cell: str) -> list[dict[str, Any]]:
         }
         refs = m.group("refs")
         if refs:
-            rec["refutes"] = _split_csv(refs)
+            # Canonical field name per validator rule #30 + schema §refutation_shape.
+            rec["refutes_predictions"] = _split_csv(refs)
         out.append(rec)
     return out
 

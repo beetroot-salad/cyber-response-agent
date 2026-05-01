@@ -109,6 +109,7 @@ from scripts.handlers._output_parser import (
     PredictParseResult,
     parse_predict_output,
 )
+from scripts.handlers._hypothesize_dense import emit_hypothesize_dense
 
 # Lazy imports for priors (invlang + contextualize) live inside the priors
 # helpers themselves — keeps import-time cycles avoided and lets failures in
@@ -309,13 +310,10 @@ def _compose_section(result: PredictParseResult, loop_n: int) -> str:
     hypotheses = result.invlang_delta.get("hypotheses")
     if not hypotheses:
         return ""
-    dumped = yaml.safe_dump(
-        {"hypothesize": {"hypotheses": hypotheses}},
-        sort_keys=False, default_flow_style=False,
-    )
+    body = emit_hypothesize_dense(hypotheses)
     return (
         f"## PREDICT (loop {loop_n})\n\n"
-        f"```yaml\n{dumped.rstrip()}\n```\n"
+        f"```invlang\n{body}\n```\n"
     )
 
 
@@ -517,22 +515,19 @@ def _append_fastpath_marker(
     Crucially this is *not* an invlang `hypothesize:` block — no new
     hypotheses are authored on the fast path.
     """
-    distribution_yaml = "\n".join(
-        f"    {lead}: {count}"
+    distribution_lines = "\n".join(
+        f"  - {lead}: {count}"
         for lead, count in hit.lead_distribution.items()
-    ) or "    (none)"
+    ) or "  - (none)"
     matched = ", ".join(hit.matched_case_ids) or "(none)"
     section = (
         f"## PREDICT (loop {loop_n}) — fast-path\n\n"
-        "```yaml\n"
-        "fast_path:\n"
-        f"  selected_lead: {hit.selected_lead}\n"
-        f"  selection_method: {hit.selection_method}\n"
-        f"  signature_id: {cache_key.signature_id}\n"
-        f"  matched_precedents: [{matched}]\n"
-        "  lead_distribution:\n"
-        f"{distribution_yaml}\n"
-        "```\n"
+        f"- **selected_lead:** {hit.selected_lead}\n"
+        f"- **selection_method:** {hit.selection_method}\n"
+        f"- **signature_id:** {cache_key.signature_id}\n"
+        f"- **matched_precedents:** [{matched}]\n"
+        f"- **lead_distribution:**\n"
+        f"{distribution_lines}\n"
     )
     _append_to_investigation(ctx, section)
 
