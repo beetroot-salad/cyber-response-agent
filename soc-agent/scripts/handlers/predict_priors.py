@@ -26,13 +26,12 @@ banner rather than blocking module import.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
-import yaml
 
 from scripts.orchestrate import Context
 
+from scripts.handlers._markdown import iter_companion_dicts
 from scripts.handlers._playbook import load_playbook_metadata
 
 
@@ -49,14 +48,6 @@ _PRIORS_PEERS_TOP_N = 5
 #     it was fired. Below 0.5 the prior is a coin flip.
 _STRONG_PRIOR_MIN_SUPPORT = 5
 _STRONG_PRIOR_MIN_FIDELITY = 0.5
-
-# Detect top-level key of the first fenced ```yaml block that carries one of
-# the expected keys. Tolerates preamble YAML blocks (unlikely, but defensive).
-_FIRST_FENCE_RE = re.compile(
-    r"```yaml\s*\n(?P<body>.*?)\n```",
-    re.DOTALL,
-)
-
 
 def safe_priors_section(ctx: Context) -> str:
     """Produce the `## Past-investigation priors` markdown block.
@@ -262,19 +253,13 @@ def _extract_current_frontier(ctx: Context) -> list[dict]:
 def parse_prologue_and_last_hypothesize(
     text: str,
 ) -> tuple[dict | None, dict | None]:
-    """Walk all yaml fences once; return (prologue, last_hypothesize)."""
+    """Walk all structured fences once; return (prologue, last_hypothesize)."""
     prologue: dict | None = None
     last_hyp: dict | None = None
-    for m in _FIRST_FENCE_RE.finditer(text):
-        try:
-            parsed = yaml.safe_load(m.group("body"))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        if prologue is None and "prologue" in parsed and isinstance(parsed["prologue"], dict):
+    for parsed in iter_companion_dicts(text):
+        if prologue is None and isinstance(parsed.get("prologue"), dict):
             prologue = parsed["prologue"]
-        if "hypothesize" in parsed and isinstance(parsed["hypothesize"], dict):
+        if isinstance(parsed.get("hypothesize"), dict):
             last_hyp = parsed["hypothesize"]
     return prologue, last_hyp
 

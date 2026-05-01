@@ -57,6 +57,7 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._analyze_dense import emit_analyze_findings_dense
 from scripts.handlers._investigation_io import append_and_validate
+from scripts.handlers._markdown import iter_companion_dicts
 from scripts.handlers._context_loader import (
     format_alert_summary_block,
     format_current_gather_block,
@@ -348,9 +349,6 @@ def _compose_section(envelope: AnalyzeEnvelope, loop_n: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-_PROLOGUE_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
-
-
 def _first_prologue_vertex_id(investigation_md: str) -> str | None:
     """Return the first `v-*` id declared in any prologue block of the
     companion, or None if no prologue block is present.
@@ -360,14 +358,8 @@ def _first_prologue_vertex_id(investigation_md: str) -> str | None:
     prescribe a target vertex per lead — the lead is investigating the
     alert's subject vertex, which is always v-001 in practice.
     """
-    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
-        try:
-            doc = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
-        vertices = doc.get("prologue", {}).get("vertices") or []
+    for doc in iter_companion_dicts(investigation_md):
+        vertices = (doc.get("prologue") or {}).get("vertices") or []
         for v in vertices:
             if isinstance(v, dict) and isinstance(v.get("id"), str):
                 return v["id"]
@@ -390,13 +382,7 @@ def _hypothesis_name_to_id_map(investigation_md: str) -> dict[str, str]:
     through cleanly whether the subagent emitted the name or the ID.
     """
     mapping: dict[str, str] = {}
-    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
-        try:
-            doc = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
+    for doc in iter_companion_dicts(investigation_md):
         hypotheses = doc.get("hypothesize", {}).get("hypotheses") or []
         for h in hypotheses:
             if not isinstance(h, dict):
@@ -463,14 +449,8 @@ def _prologue_authoritative_edges(investigation_md: str) -> list[str]:
     at least as authoritative as the prologue edges it confirms.
     """
     edge_ids: list[str] = []
-    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
-        try:
-            doc = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
-        edges = doc.get("prologue", {}).get("edges") or []
+    for doc in iter_companion_dicts(investigation_md):
+        edges = (doc.get("prologue") or {}).get("edges") or []
         for e in edges:
             if not isinstance(e, dict):
                 continue
@@ -681,13 +661,7 @@ def _hypothesis_id_to_name_map(investigation_md: str) -> dict[str, str]:
     of v2.16 and does not consume this map.
     """
     mapping: dict[str, str] = {}
-    for body in _PROLOGUE_BLOCK_RE.findall(investigation_md):
-        try:
-            doc = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
+    for doc in iter_companion_dicts(investigation_md):
         hypotheses = doc.get("hypothesize", {}).get("hypotheses") or []
         for h in hypotheses:
             if not isinstance(h, dict):

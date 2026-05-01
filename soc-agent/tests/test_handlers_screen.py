@@ -473,7 +473,7 @@ class TestPrologueExtraction:
         (ctx.run_dir / "investigation.md").write_text(
             "## CONTEXTUALIZE\n\nno yaml block here\n"
         )
-        with pytest.raises(OrchestrationError, match="no .prologue"):
+        with pytest.raises(OrchestrationError, match="no prologue"):
             screen_handler._extract_prologue_yaml(ctx.run_dir)
 
     def test_extracts_from_tilde_fence(self, tmp_path):
