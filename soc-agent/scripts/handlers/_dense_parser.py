@@ -26,12 +26,15 @@ Schema-mapping table (per `docs/dense-investigation-format.md` §Schema mapping)
     :V prologue.vertices            → prologue.vertices[]
     :E prologue.edges               → prologue.edges[]
     :H hypothesize.hypotheses       → hypothesize.hypotheses[]
-    :L findings                     → findings[<id>].lead (one row per lead)
+    :L findings                     → findings[<id>] (flat: id, name, loop,
+                                       target, mode, ...; query_details
+                                       sub-dict for system/template/query/
+                                       time_window/substitutions)
     :V l-{id}.observations.vertices → findings[<id>].outcome.observations.vertices[]
     :E l-{id}.observations.edges    → findings[<id>].outcome.observations.edges[]
-    :L l-{id}.lead_preds            → findings[<id>].lead.predictions[]
-    :L l-{id}.impact_preds          → findings[<id>].lead.impact_predictions[]
-    :L l-{id}.substitutions         → findings[<id>].lead.query_details.substitutions{}
+    :L l-{id}.lead_preds            → findings[<id>].predictions[]
+    :L l-{id}.impact_preds          → findings[<id>].impact_predictions[]
+    :L l-{id}.substitutions         → findings[<id>].query_details.substitutions{}
     :H l-{id}.new_hypotheses        → findings[<id>].new_hypotheses[]
     :R authz                        → findings[<lead>].outcome.authorization_resolutions[]
     :R consultations                → findings[<lead>].outcome.anchor_consultations[]

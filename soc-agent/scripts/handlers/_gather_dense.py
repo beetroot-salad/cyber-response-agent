@@ -36,6 +36,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from scripts.handlers._dense_emit_common import (
+    cell,
+    flatten_window,
+    render_observation_subblocks,
+    render_substitutions_subblock,
+)
+
 
 class GatherDenseEmitError(ValueError):
     """Raised on a malformed input dict to the gather emitter."""
@@ -45,8 +52,6 @@ _LEAD_COLS = [
     "id", "name", "loop", "target", "mode",
     "system", "template", "query", "window", "status", "tests",
 ]
-_VERTEX_COLS = ["id", "type", "class", "ident", "attrs"]
-_EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
 
 
 def emit_gather_findings_dense(findings: list[dict[str, Any]]) -> str:
@@ -77,14 +82,26 @@ def emit_gather_findings_dense(findings: list[dict[str, Any]]) -> str:
                 f"non-empty resolutions; gather is lead-pick only"
             )
         lead_rows.append(_render_lead_row(entry))
-        sub_blocks.extend(_render_lead_subblocks(entry))
+
+        lid = entry["id"]
+        qd = entry.get("query_details") or {}
+        if isinstance(qd, dict):
+            subs = render_substitutions_subblock(lid, qd)
+            if subs:
+                sub_blocks.append(subs)
+
+        outcome = entry.get("outcome") or {}
+        if isinstance(outcome, dict):
+            sub_blocks.extend(
+                render_observation_subblocks(lid, outcome, GatherDenseEmitError)
+            )
 
     out: list[str] = []
     out.append(":L findings [" + "|".join(_LEAD_COLS) + "]")
     out.extend(lead_rows)
-    for block in sub_blocks:
+    for b in sub_blocks:
         out.append("")
-        out.append(block)
+        out.append(b)
     return "\n".join(out)
 
 
@@ -94,118 +111,24 @@ def _render_lead_row(entry: dict[str, Any]) -> str:
         raise GatherDenseEmitError(
             f"findings[{entry.get('id')!r}].query_details must be a dict"
         )
+    if not entry.get("id") or not entry.get("name"):
+        raise GatherDenseEmitError(
+            f"gather findings row missing id/name: {entry!r}"
+        )
     cells = {
-        "id":       entry.get("id", ""),
-        "name":     entry.get("name", ""),
+        "id":       entry["id"],
+        "name":     entry["name"],
         "loop":     entry.get("loop", ""),
         "target":   entry.get("target", ""),
         "mode":     entry.get("mode", ""),
         "system":   qd.get("system", ""),
         "template": qd.get("template", ""),
         "query":    qd.get("query", ""),
-        "window":   _flatten_window(qd.get("time_window", "")),
+        "window":   flatten_window(qd.get("time_window", "")),
         "status":   entry.get("status", ""),
         "tests":    _join_csv(entry.get("tests_hypotheses")),
     }
-    if not cells["id"] or not cells["name"]:
-        raise GatherDenseEmitError(
-            f"gather findings row missing id/name: {entry!r}"
-        )
-    return "|".join(_cell(cells[c]) for c in _LEAD_COLS)
-
-
-def _render_lead_subblocks(entry: dict[str, Any]) -> list[str]:
-    """Emit `l-{id}.*` sub-blocks for one lead. Order: substitutions,
-    observation vertices, observation edges. Each only when populated.
-    """
-    out: list[str] = []
-    lid = entry["id"]
-    qd = entry.get("query_details") or {}
-    subs = qd.get("substitutions") if isinstance(qd, dict) else None
-    if isinstance(subs, dict) and subs:
-        rows = [f"{_cell(k)}|{_cell(v)}" for k, v in subs.items()]
-        out.append(_block(f":L {lid}.substitutions [key|value]", rows))
-
-    outcome = entry.get("outcome") or {}
-    obs = outcome.get("observations") if isinstance(outcome, dict) else None
-    if isinstance(obs, dict):
-        verts = obs.get("vertices") or []
-        edges = obs.get("edges") or []
-        if verts:
-            out.append(_block(
-                f":V {lid}.observations.vertices [" + "|".join(_VERTEX_COLS) + "]",
-                [_render_vertex_row(v) for v in verts],
-            ))
-        if edges:
-            out.append(_block(
-                f":E {lid}.observations.edges [" + "|".join(_EDGE_COLS) + "]",
-                [_render_edge_row(e) for e in edges],
-            ))
-    return out
-
-
-def _render_vertex_row(v: dict[str, Any]) -> str:
-    cells = [
-        v.get("id", ""),
-        v.get("type", ""),
-        v.get("classification", ""),
-        v.get("identifier", ""),
-        _serialize_attrs(v.get("attributes") or {}),
-    ]
-    return "|".join(_cell(c) for c in cells)
-
-
-def _render_edge_row(e: dict[str, Any]) -> str:
-    when = e.get("when") or {}
-    timestamp = when.get("timestamp", "") if isinstance(when, dict) else ""
-    auth = e.get("authority") or {}
-    if not isinstance(auth, dict) or not auth.get("kind") or not auth.get("source"):
-        raise GatherDenseEmitError(
-            f"observation edge {e.get('id')!r} missing authority kind/source"
-        )
-    cells = [
-        e.get("id", ""),
-        e.get("relation", ""),
-        e.get("source_vertex", ""),
-        e.get("target_vertex", ""),
-        timestamp,
-        f"{auth['kind']}:{auth['source']}",
-        _serialize_attrs(e.get("attributes") or {}),
-    ]
-    return "|".join(_cell(c) for c in cells)
-
-
-# ---------------------------------------------------------------------------
-# Cell helpers
-# ---------------------------------------------------------------------------
-
-
-def _cell(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    s = str(value)
-    return s.replace("|", "\\|")
-
-
-def _serialize_attrs(attrs: dict[str, Any]) -> str:
-    if not attrs:
-        return ""
-    parts: list[str] = []
-    for k, v in attrs.items():
-        if v is None:
-            continue
-        parts.append(f"{k}={v}")
-    return ";".join(parts)
-
-
-def _flatten_window(value: Any) -> str:
-    if value is None or value == "":
-        return ""
-    if isinstance(value, dict):
-        return ";".join(f"{k}={v}" for k, v in value.items() if v is not None)
-    return str(value)
+    return "|".join(cell(cells[c]) for c in _LEAD_COLS)
 
 
 def _join_csv(values: Any) -> str:
@@ -214,7 +137,3 @@ def _join_csv(values: Any) -> str:
     if isinstance(values, str):
         return values
     return ",".join(str(v) for v in values)
-
-
-def _block(header: str, rows: list[str]) -> str:
-    return "\n".join([header, *rows])
