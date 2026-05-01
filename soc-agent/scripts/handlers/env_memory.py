@@ -28,6 +28,8 @@ from typing import Any, Iterable
 
 import yaml
 
+from scripts.handlers._markdown import iter_companion_dicts
+
 
 # Hypothesis statuses that mean "not actively proposing an upstream edge".
 # Mirrors invlang spec (`docs/investigation-language.md` §Companion structure):
@@ -35,10 +37,6 @@ import yaml
 # Confirmed hypotheses still constrain the search — only refuted/shelved are
 # inactive for retrieval purposes.
 INACTIVE_HYPOTHESIS_STATUSES: frozenset[str] = frozenset({"refuted", "shelved"})
-
-
-# Shared regex for extracting fenced YAML blocks from invlang investigation.md
-# files. Lint reuses this via import.
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +344,6 @@ def extract_anchors(ctx: Any) -> dict[str, set[str]]:
     text = inv_file.read_text()
 
     # Walk every structured fence (yaml + invlang); merge vertex maps + collect hypotheses.
-    from scripts.handlers._markdown import iter_companion_dicts
     vertices_by_id: dict[str, dict] = {}
     hypotheses: list[dict] = []
     shelved_ids: set[str] = set()

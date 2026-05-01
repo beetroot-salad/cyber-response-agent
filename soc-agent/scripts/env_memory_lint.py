@@ -44,6 +44,7 @@ from scripts.handlers.env_memory import (  # noqa: E402
     parse_atoms_from_file,
     walk_atom_files,
 )
+from scripts.handlers._markdown import iter_companion_dicts  # noqa: E402
 
 
 _DIGIT_RUN_RE = re.compile(r"\d{4,}")
@@ -164,7 +165,6 @@ def _check_triple_coverage(soc_agent_root: Path, runs_dir: Path | None) -> list[
             continue
         vertices_by_id: dict[str, dict] = {}
         hypotheses: list[dict] = []
-        from scripts.handlers._markdown import iter_companion_dicts
         for parsed in iter_companion_dicts(text):
             for v in (parsed.get("prologue") or {}).get("vertices") or []:
                 if isinstance(v, dict) and isinstance(v.get("id"), str):

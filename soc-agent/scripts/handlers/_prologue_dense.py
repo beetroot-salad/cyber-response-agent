@@ -63,8 +63,6 @@ def strip_envelope(stdout: str) -> str:
     return text
 
 
-
-
 def _vertex_row(row: str) -> dict[str, Any]:
     block = _prim.DenseBlock(
         tag="V", name="prologue.vertices", columns=_VERTEX_COLS, rows=[]

@@ -57,6 +57,7 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._analyze_dense import emit_analyze_findings_dense
 from scripts.handlers._investigation_io import append_and_validate
+from scripts.handlers._markdown import iter_companion_dicts
 from scripts.handlers._context_loader import (
     format_alert_summary_block,
     format_current_gather_block,
@@ -357,7 +358,6 @@ def _first_prologue_vertex_id(investigation_md: str) -> str | None:
     prescribe a target vertex per lead — the lead is investigating the
     alert's subject vertex, which is always v-001 in practice.
     """
-    from scripts.handlers._markdown import iter_companion_dicts
     for doc in iter_companion_dicts(investigation_md):
         vertices = (doc.get("prologue") or {}).get("vertices") or []
         for v in vertices:
@@ -381,7 +381,6 @@ def _hypothesis_name_to_id_map(investigation_md: str) -> dict[str, str]:
     Both `name` and `id` are keyed — calling `.get(value, value)` falls
     through cleanly whether the subagent emitted the name or the ID.
     """
-    from scripts.handlers._markdown import iter_companion_dicts
     mapping: dict[str, str] = {}
     for doc in iter_companion_dicts(investigation_md):
         hypotheses = doc.get("hypothesize", {}).get("hypotheses") or []
@@ -449,7 +448,6 @@ def _prologue_authoritative_edges(investigation_md: str) -> list[str]:
     any non-circumstantial grade, and the lead-level evidence is always
     at least as authoritative as the prologue edges it confirms.
     """
-    from scripts.handlers._markdown import iter_companion_dicts
     edge_ids: list[str] = []
     for doc in iter_companion_dicts(investigation_md):
         edges = (doc.get("prologue") or {}).get("edges") or []
@@ -662,7 +660,6 @@ def _hypothesis_id_to_name_map(investigation_md: str) -> dict[str, str]:
     `adversarial-refuted` termination category). X5 is weight-only as
     of v2.16 and does not consume this map.
     """
-    from scripts.handlers._markdown import iter_companion_dicts
     mapping: dict[str, str] = {}
     for doc in iter_companion_dicts(investigation_md):
         hypotheses = doc.get("hypothesize", {}).get("hypotheses") or []

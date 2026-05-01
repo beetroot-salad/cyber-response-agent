@@ -33,8 +33,19 @@ def iter_companion_dicts(raw: str) -> Iterator[dict[str, Any]]:
     Walks both ```yaml fences (one dict per fence via `yaml.safe_load`) and
     the unified ```invlang dense surface (one combined dict via
     `parse_dense_companion`). Non-dict YAML documents, malformed YAML, and
-    malformed dense blocks are silently skipped — callers that need parse
-    errors should go through the invlang validator instead.
+    malformed dense blocks are silently skipped — this is a permissive
+    walker, not a substitute for the invlang validator (callers that need
+    parse errors must go through `invlang_validate.py`).
+
+    Ordering and merge semantics — important for callers that care about
+    "first" or "last":
+    - YAML fences are yielded first, in document order (one dict per fence).
+    - The dense surface is yielded last as a single combined dict
+      aggregating every ```invlang fence in the document, regardless of
+      where those fences sit physically.
+    During the strict-cutover migration both fence types coexist; in steady
+    state only the dense fence will remain, so this ordering quirk is
+    transient and does not affect call sites today.
     """
     for body in iter_yaml_fences(raw):
         try:

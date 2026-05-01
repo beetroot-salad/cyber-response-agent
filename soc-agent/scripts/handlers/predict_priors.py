@@ -31,6 +31,7 @@ from typing import Any
 
 from scripts.orchestrate import Context
 
+from scripts.handlers._markdown import iter_companion_dicts
 from scripts.handlers._playbook import load_playbook_metadata
 
 
@@ -253,7 +254,6 @@ def parse_prologue_and_last_hypothesize(
     text: str,
 ) -> tuple[dict | None, dict | None]:
     """Walk all structured fences once; return (prologue, last_hypothesize)."""
-    from scripts.handlers._markdown import iter_companion_dicts
     prologue: dict | None = None
     last_hyp: dict | None = None
     for parsed in iter_companion_dicts(text):

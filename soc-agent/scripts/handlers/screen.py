@@ -41,6 +41,7 @@ from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._investigation_io import append_and_validate
+from scripts.handlers._markdown import iter_companion_dicts
 from scripts.handlers._playbook import load_screen_rows
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
@@ -108,7 +109,6 @@ def _extract_prologue_yaml(run_dir: Path) -> str:
         raise OrchestrationError(
             f"investigation.md not found at {inv_path}; CONTEXTUALIZE must run first"
         )
-    from scripts.handlers._markdown import iter_companion_dicts
     for parsed in iter_companion_dicts(inv_path.read_text()):
         prologue = parsed.get("prologue")
         if isinstance(prologue, dict):
