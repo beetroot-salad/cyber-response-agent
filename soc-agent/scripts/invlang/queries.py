@@ -1743,15 +1743,31 @@ def enumerate_hypothesis_tree(corpus: list[Companion]) -> dict[str, Any]:
 
 
 def _parse_vertex_where_spec(spec: str) -> tuple[str, dict[str, str]]:
-    """Parse one '--vertex-where' string into (kind, {attr: pattern})."""
+    """Parse one '--vertex-where' string into (kind, {attr: pattern}).
+
+    Accepted forms:
+      'endpoint'                         — kind only (no attribute predicates)
+      'endpoint:'                        — same; trailing colon tolerated
+      'endpoint:*'                       — same; '*' alone means no attribute predicates
+      'endpoint:classification=high'     — kind + one attribute predicate
+      'endpoint:classification=*,os=lin' — kind + multiple (AND) attribute predicates
+    """
     head, _, rest = spec.partition(":")
     kind = head.strip()
     attrs: dict[str, str] = {}
-    if rest.strip():
+    rest = rest.strip()
+    # Bare-kind forms: '', '*' — both mean "no attribute predicates".
+    if rest and rest != "*":
         for pair in rest.split(","):
+            pair = pair.strip()
+            if not pair:
+                continue
             k, eq, v = pair.partition("=")
             if not eq:
-                raise ValueError(f"--vertex-where: expected key=value in {pair!r}")
+                raise ValueError(
+                    f"--vertex-where: expected key=value in {pair!r} "
+                    f"(use 'KIND' or 'KIND:*' for kind-only filters)"
+                )
             attrs[k.strip()] = v.strip()
     return kind, attrs
 

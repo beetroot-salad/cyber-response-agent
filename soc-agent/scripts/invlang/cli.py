@@ -71,6 +71,9 @@ def _print_result(label: str, result: dict[str, Any], limit: int = 6, as_json: b
         if isinstance(val, dict):
             # class 15 returns `distribution` as dict[str, int] — render directly.
             print(f"\n  {key}:")
+            if not val:
+                print("    (empty)")
+                continue
             for k, v in list(val.items())[:limit]:
                 print(f"    {k}: {v}")
             if len(val) > limit:
@@ -102,6 +105,15 @@ def _print_result(label: str, result: dict[str, Any], limit: int = 6, as_json: b
             print(f"    {c}")
     if "surprises" in result:
         print(f"\n  Surprises: {result['surprises']}")
+    if "telemetry" in result and isinstance(result["telemetry"], dict):
+        print("\n  Telemetry:")
+        for k, v in result["telemetry"].items():
+            print(f"    {k}: {v}")
+    if "matched_case_ids" in result and isinstance(result["matched_case_ids"], list):
+        ids = result["matched_case_ids"]
+        print(f"\n  Matched case ids ({len(ids)}):")
+        for cid in ids[:10]:
+            print(f"    {cid}")
 
 
 def _apply_top(result: dict[str, Any], top: int | None) -> dict[str, Any]:
@@ -163,10 +175,14 @@ QUERY CLASSES
                               with the same signature + prologue topology.
 
 VERTEX-WHERE FILTER (classes 13/14, optional class 15)
-  --vertex-where KIND[:KEY=VAL[,KEY=VAL...]]
-      Restrict hits to cases whose confirmed graph contains a vertex of the given
-      KIND with matching attribute predicates (fnmatch on values; '*' = presence-only).
-      Pass multiple times to AND-combine separate vertex predicates.
+  --vertex-where SPEC          Restrict hits to cases whose confirmed graph
+                                contains a matching vertex. Repeatable (AND).
+      Forms:
+        endpoint                       — kind only (any endpoint vertex)
+        endpoint:classification=high   — kind + attribute predicate
+        endpoint:os=linux*             — fnmatch on the value
+        endpoint:role=*                — '*' on a value = presence-only
+        *:classification=high          — any kind, attribute matches
   --vertex-scope target|prologue|any   (default: any)
       target   — match the lead's target vertex only
       prologue — match only prologue vertices

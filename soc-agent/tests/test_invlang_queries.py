@@ -1063,6 +1063,14 @@ class TestVertexWhereParser:
     def test_wildcard_kind(self):
         assert _parse_vertex_where_spec("*:classification=*") == ("*", {"classification": "*"})
 
+    def test_kind_with_trailing_colon_is_kind_only(self):
+        assert _parse_vertex_where_spec("endpoint:") == ("endpoint", {})
+
+    def test_kind_with_star_attrs_is_kind_only(self):
+        # 'endpoint:*' should mean "any endpoint, no attribute predicates" —
+        # matches the help-text example a Haiku agent would copy.
+        assert _parse_vertex_where_spec("endpoint:*") == ("endpoint", {})
+
     def test_malformed_pair_raises(self):
         with pytest.raises(ValueError):
             _parse_vertex_where_spec("endpoint:classificationonly")
