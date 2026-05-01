@@ -6,10 +6,10 @@ single `:H hypothesize.hypotheses` row block plus packed sub-cells per
 hypothesis — exactly the shape that `scripts.handlers._dense_parser` reads
 back via `_hypothesis_record`.
 
-Surface produced:
+Surface produced (column order matches `_COLS` below):
 
     :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
-    h-001|?monitoring-probe|v-001|attempted_auth|endpoint|monitoring-host||p1:proposed_parent:"…";p2:…|...|r1[p1]:"…"|ac1:proposed:approved-monitoring-sources:"is on approved list":esc/esc|||active
+    h-001|?monitoring-probe|v-001|attempted_auth|endpoint|monitoring-host||p1:proposed_parent:"…";p2:…|...|r1[p1]:"…"|ac1:proposed:approved-monitoring-sources:"is on approved list":esc/esc||null|active
 
 Sub-cell grammars (semicolon-separated, quote-aware via
 `_dense_primitives.split_subcells`):
@@ -75,24 +75,25 @@ def _render_row(h: dict[str, Any]) -> str:
         raise HypothesizeDenseEmitError(
             f"hypothesis row missing id/name: {h!r}"
         )
+    hid = h["id"]
     proposed = h.get("proposed_edge") or {}
     if not isinstance(proposed, dict):
         raise HypothesizeDenseEmitError(
-            f"hypothesis {h.get('id')!r}.proposed_edge must be a dict (got "
+            f"hypothesis {hid!r}.proposed_edge must be a dict (got "
             f"{type(proposed).__name__})"
         )
     cells = {
-        "id":               h["id"],
+        "id":               hid,
         "name":             h["name"],
         "attached_to":      h.get("attached_to_vertex", ""),
         "rel":              proposed.get("relation", ""),
         "parent_type":      proposed.get("parent_type", ""),
         "parent_class":     proposed.get("parent_class", ""),
         "parent_attrs":     serialize_attrs(proposed.get("parent_attributes") or {}),
-        "preds":            _pack_preds(h.get("predictions") or []),
-        "attr_preds":       _pack_attr_preds(h.get("attribute_predictions") or []),
-        "refuts":           _pack_refuts(h.get("refutation_shape") or []),
-        "authz":            _pack_authz(h.get("authorization_contract") or []),
+        "preds":            _pack_preds(hid, _require_list(hid, "predictions", h.get("predictions"))),
+        "attr_preds":       _pack_attr_preds(hid, _require_list(hid, "attribute_predictions", h.get("attribute_predictions"))),
+        "refuts":           _pack_refuts(hid, _require_list(hid, "refutation_shape", h.get("refutation_shape"))),
+        "authz":            _pack_authz(hid, _require_list(hid, "authorization_contract", h.get("authorization_contract"))),
         "integrity_waived": h.get("integrity_waived", ""),
         "weight":           _weight_cell(h.get("weight", "")),
         "status":           h.get("status", ""),
@@ -100,7 +101,24 @@ def _render_row(h: dict[str, Any]) -> str:
     return "|".join(cell(cells[c]) for c in _COLS)
 
 
+def _require_list(hid: str, field: str, value: Any) -> list[Any]:
+    """Coerce a missing/None field to []; reject non-list scalars loudly so
+    a stray string doesn't get iterated character-by-character.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise HypothesizeDenseEmitError(
+            f"hypothesis {hid!r}.{field} must be a list (got "
+            f"{type(value).__name__})"
+        )
+    return value
+
+
 def _weight_cell(w: Any) -> str:
+    # `null` is the explicit sentinel the dense parser maps back to None
+    # for the weight column (see test_project_hypothesis_with_authz_contract
+    # fixture). An empty cell would round-trip as "" rather than None.
     if w is None:
         return "null"
     return str(w)
@@ -117,25 +135,25 @@ def _quote_claim(claim: Any) -> str:
     return f'"{s}"'
 
 
-def _pack_preds(preds: list[dict[str, Any]]) -> str:
+def _pack_preds(hid: str, preds: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for p in preds:
         pid = p.get("id")
         if not pid:
             raise HypothesizeDenseEmitError(
-                f"prediction missing id: {p!r}"
+                f"hypothesis {hid!r} prediction missing id: {p!r}"
             )
         parts.append(f"{pid}:{p.get('subject', '')}:{_quote_claim(p.get('claim'))}")
     return ";".join(parts)
 
 
-def _pack_attr_preds(preds: list[dict[str, Any]]) -> str:
+def _pack_attr_preds(hid: str, preds: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for p in preds:
         pid = p.get("id")
         if not pid:
             raise HypothesizeDenseEmitError(
-                f"attribute_prediction missing id: {p!r}"
+                f"hypothesis {hid!r} attribute_prediction missing id: {p!r}"
             )
         parts.append(
             f"{pid}:{p.get('target', '')}:{p.get('attribute', '')}:"
@@ -144,13 +162,13 @@ def _pack_attr_preds(preds: list[dict[str, Any]]) -> str:
     return ";".join(parts)
 
 
-def _pack_refuts(refuts: list[dict[str, Any]]) -> str:
+def _pack_refuts(hid: str, refuts: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for r in refuts:
         rid = r.get("id")
         if not rid:
             raise HypothesizeDenseEmitError(
-                f"refutation missing id: {r!r}"
+                f"hypothesis {hid!r} refutation missing id: {r!r}"
             )
         refs = r.get("refutes_predictions") or []
         ref_token = ""
@@ -160,13 +178,13 @@ def _pack_refuts(refuts: list[dict[str, Any]]) -> str:
     return ";".join(parts)
 
 
-def _pack_authz(contracts: list[dict[str, Any]]) -> str:
+def _pack_authz(hid: str, contracts: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for c in contracts:
         cid = c.get("id")
         if not cid:
             raise HypothesizeDenseEmitError(
-                f"authorization_contract missing id: {c!r}"
+                f"hypothesis {hid!r} authorization_contract missing id: {c!r}"
             )
         parts.append(
             f"{cid}:{c.get('edge_ref', 'proposed') or 'proposed'}:"

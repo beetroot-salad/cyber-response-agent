@@ -414,6 +414,10 @@ def _parse_attr_pred_subcells(cell: str) -> list[dict[str, Any]]:
 
 
 def _parse_refut_subcells(cell: str) -> list[dict[str, Any]]:
+    # On-disk dense surface: parses `r1[p1,ap1]:"<claim>"` sub-cells from a
+    # `:H ... refuts` column. Distinct from the subagent-output surface
+    # `:P h-NNN.refuts [id|refutes|kind|claim]` parsed in _predict_dense.py
+    # — that one's `refutes` is a literal column name, not this field.
     out: list[dict[str, Any]] = []
     for sub in _split_subcells(cell):
         m = _REFUT_RE.match(sub)

@@ -214,7 +214,7 @@ def test_project_hypothesis_with_predictions_and_refutations():
         "refutation_shape": [{
             "id": "r1",
             "claim": "triple absent",
-            "refutes": ["p1"],
+            "refutes_predictions": ["p1"],
         }],
         "weight": None,
         "status": "active",
