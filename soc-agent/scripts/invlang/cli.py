@@ -21,7 +21,9 @@ import yaml
 from .corpus import Companion, load_corpus, PILOT_CORPUS_FILES, _corpus_root, YAML_BLOCK_RE, extract_ids
 from .queries import (
     ENUM_CHOICES,
+    _parse_vertex_where_spec,
     anchor_calibration,
+    authorization_calibration,
     coarse_case_lookup,
     dead_lead_lookup,
     enumerate_corpus,
@@ -31,8 +33,10 @@ from .queries import (
     lead_discrimination_score,
     lead_effectiveness,
     lead_effectiveness_for_hypothesis,
+    lead_exemplars,
     lead_pair_synergy,
     lead_sequence_pattern,
+    loop_lead_distribution,
     post_failure_recovery,
     prose_substring,
     refinement_chain_shapes,
@@ -63,16 +67,41 @@ def _print_result(label: str, result: dict[str, Any], limit: int = 6, as_json: b
     for key in ("hits", "distribution", "values"):
         if key not in result:
             continue
-        items = result[key][:limit]
+        val = result[key]
+        if isinstance(val, dict):
+            # class 15 returns `distribution` as dict[str, int] — render directly.
+            print(f"\n  {key}:")
+            for k, v in list(val.items())[:limit]:
+                print(f"    {k}: {v}")
+            if len(val) > limit:
+                print(f"    ... ({len(val) - limit} more)")
+            continue
+        items = val[:limit]
         for item in items:
             print(f"  {item}")
-        if len(result[key]) > limit:
-            print(f"  ... ({len(result[key]) - limit} more)")
+        if len(val) > limit:
+            print(f"  ... ({len(val) - limit} more)")
     if "tree" in result:
         tree = result["tree"]
         print(f"\n  Tree ({len(tree)} root(s), {count_val} total hypotheses):")
         for root_id, children in tree.items():
             print(f"    {root_id}: {[c['id'] for c in children] or '(leaf)'}")
+    if "summary" in result and isinstance(result["summary"], dict):
+        print("\n  Summary:")
+        for k, v in result["summary"].items():
+            print(f"    {k}: {v}")
+    if "exemplars" in result and isinstance(result["exemplars"], dict):
+        print("\n  Exemplars by verdict:")
+        for verdict, rows in result["exemplars"].items():
+            print(f"    {verdict} ({len(rows)}):")
+            for row in rows:
+                print(f"      {row}")
+    if "matched_contracts" in result and isinstance(result["matched_contracts"], list):
+        print(f"\n  Matched contracts ({len(result['matched_contracts'])}):")
+        for c in result["matched_contracts"][:10]:
+            print(f"    {c}")
+    if "surprises" in result:
+        print(f"\n  Surprises: {result['surprises']}")
 
 
 def _apply_top(result: dict[str, Any], top: int | None) -> dict[str, Any]:
@@ -96,7 +125,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="""
 Investigation-language query tool (v2.7 corpus).
 
-Without --class or --enumerate, runs the full demo across all 12 classes.
+Without --class or --enumerate, runs the full demo across all 15 classes.
 
 QUICK START
   --enumerate hypotheses          see all hypothesis names (run this before using patterns)
@@ -123,6 +152,25 @@ QUERY CLASSES
   10 lead-pair-synergy      Composite dispatches: does the pair move more weight than either alone?
   11 post-failure-recovery  After a dead lead, what lead came next and how effective was it?
   12 datasource-metric      Distinct system count per case; distribution by termination × disposition
+  13 lead-exemplars         (ANALYZE recall) past resolutions of leads matching --lead-pattern
+                              + aggregate summary (disposition mix, modal hypothesis outcomes,
+                              surprises). Optional: --vertex-where SPEC to scope to similar graph
+                              context (e.g. 'endpoint:classification=high-trust').
+  14 authz-calibration      (ANALYZE recall) verdict distribution + per-bucket exemplars for
+                              --contract-pattern (matches hypothesis name OR predicate substring).
+                              Optional: --vertex-where SPEC.
+  15 loop-lead-distribution Cache-key recall: what lead was picked at --loop N in past cases
+                              with the same signature + prologue topology.
+
+VERTEX-WHERE FILTER (classes 13/14, optional class 15)
+  --vertex-where KIND[:KEY=VAL[,KEY=VAL...]]
+      Restrict hits to cases whose confirmed graph contains a vertex of the given
+      KIND with matching attribute predicates (fnmatch on values; '*' = presence-only).
+      Pass multiple times to AND-combine separate vertex predicates.
+  --vertex-scope target|prologue|any   (default: any)
+      target   — match the lead's target vertex only
+      prologue — match only prologue vertices
+      any      — match any confirmed vertex (prologue + observations)
 
 ENUMERATION
   --enumerate leads|anchors|archetypes|hypotheses|dispositions
@@ -170,8 +218,8 @@ OUTPUT
         ),
     )
     p.add_argument(
-        "--class", dest="query_class", type=int, choices=range(1, 13), metavar="N",
-        help="Run a single query class (1–12) instead of the full demo.",
+        "--class", dest="query_class", type=int, choices=range(1, 16), metavar="N",
+        help="Run a single query class (1–15) instead of the full demo.",
     )
     p.add_argument(
         "--enumerate", dest="enumerate", choices=ENUM_CHOICES, metavar="KIND",
@@ -233,6 +281,42 @@ OUTPUT
         "--discriminate-between", dest="discriminate_between", nargs=2, metavar="PATTERN",
         help="Two fnmatch patterns. Scores each lead by mean(signed_delta_H1 - signed_delta_H2) "
              "across cases where both patterns are present.",
+    )
+
+    g13 = p.add_argument_group("class 13 — lead exemplars (ANALYZE recall)")
+    g13.add_argument(
+        "--lead-pattern", dest="lead_pattern", metavar="PATTERN",
+        help="fnmatch pattern on lead.name (class 13 required, e.g. '*ssh*').",
+    )
+
+    g14 = p.add_argument_group("class 14 — authorization calibration (ANALYZE recall)")
+    g14.add_argument(
+        "--contract-pattern", dest="contract_pattern", metavar="PATTERN",
+        help="fnmatch pattern on the fulfilling hypothesis name OR substring on its "
+             "authorization_contract.predicate (class 14 required).",
+    )
+
+    g15 = p.add_argument_group("class 15 — loop-N lead distribution")
+    g15.add_argument(
+        "--loop", dest="loop", type=int, metavar="N",
+        help="Loop number to recall the primary lead choice from (class 15 required).",
+    )
+    g15.add_argument(
+        "--max-age-days", dest="max_age_days", type=int, default=180, metavar="DAYS",
+        help="Recency cutoff for class 15 (default 180).",
+    )
+
+    g_graph = p.add_argument_group("graph-context filter (classes 13/14, optional class 15)")
+    g_graph.add_argument(
+        "--vertex-where", dest="vertex_where", action="append", metavar="SPEC",
+        default=[],
+        help="KIND[:KEY=VAL[,KEY=VAL...]] — restrict hits to cases whose confirmed graph "
+             "contains a vertex matching this predicate. Repeatable (AND).",
+    )
+    g_graph.add_argument(
+        "--vertex-scope", dest="vertex_scope",
+        choices=("target", "prologue", "any"), default="any",
+        help="Where to look for the matching vertex (default: any).",
     )
 
     return p
@@ -300,7 +384,69 @@ def _run_class(n: int, corpus: list[Companion], args: argparse.Namespace) -> dic
         return post_failure_recovery(corpus, system=args.system, failure_reason=args.failure_reason)
     if n == 12:
         return independent_datasource_metric(corpus, disposition=args.disposition)
+    if n == 13:
+        if not args.lead_pattern:
+            print("error: --class 13 requires --lead-pattern", file=sys.stderr)
+            sys.exit(1)
+        return lead_exemplars(
+            corpus,
+            args.lead_pattern,
+            vertex_where=_parse_vertex_where_args(args.vertex_where),
+            vertex_scope=args.vertex_scope,
+            limit=args.top,
+        )
+    if n == 14:
+        if not args.contract_pattern:
+            print("error: --class 14 requires --contract-pattern", file=sys.stderr)
+            sys.exit(1)
+        return authorization_calibration(
+            corpus,
+            args.contract_pattern,
+            vertex_where=_parse_vertex_where_args(args.vertex_where),
+            vertex_scope=args.vertex_scope,
+        )
+    if n == 15:
+        if args.loop is None:
+            print("error: --class 15 requires --loop N", file=sys.stderr)
+            sys.exit(1)
+        # Class 15 is a cache-key lookup keyed on the *current* alert's
+        # signature + prologue. The CLI form runs against an empty signature
+        # filter — useful for ad-hoc inspection of the corpus's per-loop lead
+        # distribution. Call sites that have a real prologue should call
+        # `loop_lead_distribution` directly.
+        scoped = _apply_vertex_where_filter(corpus, args)
+        return loop_lead_distribution(
+            scoped,
+            signature_id="",
+            prologue={"vertices": [], "edges": []},
+            discriminating_classifications={},
+            loop=args.loop,
+            max_age_days=args.max_age_days,
+        )
     raise ValueError(f"unknown class {n}")
+
+
+def _parse_vertex_where_args(specs: list[str] | None) -> list[tuple[str, dict[str, str]]] | None:
+    if not specs:
+        return None
+    return [_parse_vertex_where_spec(s) for s in specs]
+
+
+def _apply_vertex_where_filter(
+    corpus: list[Companion],
+    args: argparse.Namespace,
+) -> list[Companion]:
+    """Pre-filter a corpus list by --vertex-where (used by class 15 which doesn't
+    take the filter as a function arg)."""
+    parsed = _parse_vertex_where_args(getattr(args, "vertex_where", None))
+    if not parsed:
+        return corpus
+    from .queries import _vertex_where_match  # local import to avoid cycle at top
+    scope = getattr(args, "vertex_scope", "any")
+    if scope == "target":
+        # 'target' is per-lead; not meaningful for class 15 case-level scoping.
+        scope = "any"
+    return [c for c in corpus if _vertex_where_match(c, parsed, scope)]
 
 
 # ---------------------------------------------------------------------------

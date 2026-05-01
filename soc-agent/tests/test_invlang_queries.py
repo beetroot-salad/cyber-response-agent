@@ -1022,3 +1022,373 @@ class TestScreenMatchedCompanion:
         result = coarse_case_lookup([c], disposition="benign")
         assert result["count"] == 1
         assert result["hits"][0]["matched_archetype"] == "misconfigured-automation"
+
+
+# ---------------------------------------------------------------------------
+# Class 13 — lead_exemplars (ANALYZE recall)
+# ---------------------------------------------------------------------------
+
+from invlang.queries import (
+    _parse_vertex_where_spec,
+    _vertex_where_match,
+    authorization_calibration,
+    lead_exemplars,
+)
+
+
+def _prologue_with_endpoint(classification: str, os: str = "linux") -> dict[str, Any]:
+    return {
+        "vertices": [
+            {
+                "id": "v-001",
+                "kind": "endpoint",
+                "classification": classification,
+                "attributes": {"os": os, "role": "worker"},
+            }
+        ],
+        "edges": [],
+    }
+
+
+class TestVertexWhereParser:
+    def test_kind_only(self):
+        assert _parse_vertex_where_spec("endpoint") == ("endpoint", {})
+
+    def test_kind_with_attrs(self):
+        assert _parse_vertex_where_spec("endpoint:classification=high,os=linux") == (
+            "endpoint",
+            {"classification": "high", "os": "linux"},
+        )
+
+    def test_wildcard_kind(self):
+        assert _parse_vertex_where_spec("*:classification=*") == ("*", {"classification": "*"})
+
+    def test_malformed_pair_raises(self):
+        with pytest.raises(ValueError):
+            _parse_vertex_where_spec("endpoint:classificationonly")
+
+    def test_match_kind_only(self):
+        c = make_companion("c", [], [], prologue=_prologue_with_endpoint("high-trust"))
+        assert _vertex_where_match(c, [("endpoint", {})], "any")
+        assert not _vertex_where_match(c, [("user", {})], "any")
+
+    def test_match_classification(self):
+        c = make_companion("c", [], [], prologue=_prologue_with_endpoint("high-trust"))
+        specs = [("endpoint", {"classification": "high-trust"})]
+        assert _vertex_where_match(c, specs, "any")
+        assert _vertex_where_match(c, specs, "prologue")
+        assert not _vertex_where_match(
+            c,
+            [("endpoint", {"classification": "untrusted"})],
+            "any",
+        )
+
+    def test_match_attribute_fnmatch(self):
+        c = make_companion("c", [], [], prologue=_prologue_with_endpoint("high-trust", os="linux-prod"))
+        assert _vertex_where_match(c, [("endpoint", {"os": "linux*"})], "any")
+
+    def test_match_presence_only(self):
+        c = make_companion("c", [], [], prologue=_prologue_with_endpoint("high-trust"))
+        assert _vertex_where_match(c, [("endpoint", {"role": "*"})], "any")
+
+    def test_target_scope(self):
+        prologue = _prologue_with_endpoint("high-trust")
+        prologue["vertices"].append(
+            {"id": "v-002", "kind": "user", "classification": "service-acct", "attributes": {}}
+        )
+        lead = make_lead("l-001", "ssh-login-history", 1)
+        lead["target"] = "v-002"
+        c = make_companion("c", [], [lead], prologue=prologue)
+        # target scope: must match the lead's target vertex specifically
+        assert _vertex_where_match(c, [("user", {})], "target", lead=lead)
+        assert not _vertex_where_match(c, [("endpoint", {})], "target", lead=lead)
+
+    def test_repeated_specs_and(self):
+        prologue = _prologue_with_endpoint("high-trust")
+        prologue["vertices"].append(
+            {"id": "v-002", "kind": "user", "classification": "human", "attributes": {}}
+        )
+        c = make_companion("c", [], [], prologue=prologue)
+        # AND: requires both an endpoint AND a user vertex
+        specs = [("endpoint", {}), ("user", {})]
+        assert _vertex_where_match(c, specs, "any")
+        # Missing one of the two
+        c2 = make_companion("c2", [], [], prologue=_prologue_with_endpoint("high"))
+        assert not _vertex_where_match(c2, specs, "any")
+
+
+class TestLeadExemplars:
+    def _two_cases(self):
+        # Case A: high-trust endpoint, ssh-login-history says authorized → benign
+        h_a = make_hypothesis("h-001", "?monitoring-probe", weight="--")
+        lead_a = make_lead(
+            "l-001", "ssh-login-history", 1, system="wazuh",
+            resolutions=[
+                make_resolution("h-001", before=None, after="--", reasoning="seen as routine"),
+            ],
+            observations={
+                "vertices": [{"id": "v-100", "kind": "process"}],
+                "edges": [{"id": "e-100", "kind": "started-by"}],
+            },
+        )
+        a = make_companion(
+            "case-A", [h_a], [lead_a],
+            disposition="benign",
+            prologue=_prologue_with_endpoint("high-trust"),
+        )
+        a.created_at = "2026-04-01T00:00:00+00:00"
+
+        # Case B: untrusted endpoint, same lead but yields ++ for a different hypothesis
+        # AND a reversal: hypothesis went from + → -- (counts toward `surprises`)
+        h_b1 = make_hypothesis("h-001", "?targeted-bruteforce")
+        h_b2 = make_hypothesis("h-002", "?monitoring-probe")
+        lead_b = make_lead(
+            "l-001", "ssh-login-history", 1, system="wazuh",
+            resolutions=[
+                make_resolution("h-001", before=None, after="++", reasoning="auth fail burst"),
+                make_resolution("h-002", before="+", after="--", reasoning="ruled out"),
+            ],
+            observations={"vertices": [], "edges": []},
+        )
+        b = make_companion(
+            "case-B", [h_b1, h_b2], [lead_b],
+            disposition="true_positive",
+            prologue=_prologue_with_endpoint("untrusted"),
+        )
+        b.created_at = "2026-04-15T00:00:00+00:00"
+        return [a, b]
+
+    def test_basic_recall(self):
+        corpus = self._two_cases()
+        result = lead_exemplars(corpus, "ssh-login-history")
+        assert result["count"] == 2
+        assert result["displayed"] == 2
+        # Most-recent first: case-B (2026-04-15) before case-A (2026-04-01)
+        assert [h["case_id"] for h in result["hits"]] == ["case-B", "case-A"]
+
+    def test_output_drops_scoped_ids(self):
+        result = lead_exemplars(self._two_cases(), "ssh-login-history")
+        for hit in result["hits"]:
+            assert "lead_id" not in hit
+            for r in hit["resolutions"]:
+                assert "hypothesis_id" not in r
+                assert "hypothesis" not in r
+                assert "hypothesis_name" in r
+
+    def test_summary_aggregates(self):
+        result = lead_exemplars(self._two_cases(), "ssh-login-history")
+        s = result["summary"]
+        assert s["disposition_mix"] == {"benign": 1, "true_positive": 1}
+        # 3 resolutions across 2 leads: --, ++, --
+        assert s["assessment_mix"] == {"++": 1, "--": 2}
+        # case-B has +→-- on ?monitoring-probe → 1 surprise
+        assert s["surprises"] == 1
+        # ?monitoring-probe appears in both cases (twice total)
+        modal_names = [m["hypothesis_name"] for m in s["modal_hypothesis_outcome"]]
+        assert "?monitoring-probe" in modal_names
+
+    def test_vertex_where_filter_narrows(self):
+        corpus = self._two_cases()
+        result = lead_exemplars(
+            corpus,
+            "ssh-login-history",
+            vertex_where=[("endpoint", {"classification": "high-trust"})],
+        )
+        assert result["count"] == 1
+        assert result["hits"][0]["case_id"] == "case-A"
+
+    def test_lead_pattern_no_match(self):
+        result = lead_exemplars(self._two_cases(), "*nonexistent*")
+        assert result["count"] == 0
+        assert result["hits"] == []
+        # Empty summary still has the keys
+        assert result["summary"]["surprises"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Class 14 — authorization_calibration (ANALYZE recall)
+# ---------------------------------------------------------------------------
+
+
+def _make_authz_lead(
+    lead_id: str,
+    contract_ref: str,
+    verdict: str,
+    edge_id: str = "e-100",
+    anchor_kind: str = "iam-policy",
+    authority: str = "full",
+) -> dict[str, Any]:
+    return make_lead(
+        lead_id, "iam-policy-check", 1, system="iam",
+        observations={
+            "vertices": [],
+            "edges": [{
+                "id": edge_id,
+                "kind": "executes",
+                "authorization_resolutions": [{
+                    "verdict": verdict,
+                    "anchor_kind": anchor_kind,
+                    "anchor_id": "policy-42",
+                    "grounding_kind": "org-authority",
+                    "authority_for_question": authority,
+                    "as_of": "2026-04-01T00:00:00Z",
+                    "fulfills_contract": contract_ref,
+                    "conditioning_context": ["business-hours"],
+                }],
+            }],
+        },
+    )
+
+
+class TestAuthorizationCalibration:
+    def _corpus(self):
+        # Hypothesis with one authorization_contract entry.
+        h = {
+            "id": "h-001",
+            "name": "?operator-action",
+            "authorization_contract": [
+                {"predicate": "operator initiated this action via approved channel"}
+            ],
+        }
+        c1 = make_companion(
+            "case-1", [h],
+            [_make_authz_lead("l-001", "h-001.ac1", "authorized")],
+            disposition="benign",
+            prologue=_prologue_with_endpoint("high-trust"),
+        )
+        c2 = make_companion(
+            "case-2", [h],
+            [_make_authz_lead("l-002", "h-001.ac1", "unauthorized", anchor_kind="oncall-schedule")],
+            disposition="true_positive",
+            prologue=_prologue_with_endpoint("untrusted"),
+        )
+        c3 = make_companion(
+            "case-3", [h],
+            [_make_authz_lead("l-003", "h-001.ac1", "indeterminate", authority="partial")],
+            disposition="unclear",
+            prologue=_prologue_with_endpoint("high-trust"),
+        )
+        return [c1, c2, c3]
+
+    def test_distribution_by_verdict(self):
+        result = authorization_calibration(self._corpus(), "?operator*")
+        assert result["count"] == 3
+        verdicts = {d["verdict"]: d for d in result["distribution"]}
+        assert set(verdicts) == {"authorized", "unauthorized", "indeterminate"}
+        assert verdicts["authorized"]["count"] == 1
+        assert verdicts["authorized"]["disposition_mix"] == {"benign": 1}
+        assert verdicts["unauthorized"]["disposition_mix"] == {"true_positive": 1}
+
+    def test_predicate_substring_match(self):
+        # Pattern that doesn't match the name but does match the predicate text.
+        result = authorization_calibration(self._corpus(), "*approved channel*")
+        assert result["count"] == 3
+
+    def test_vertex_where_narrows(self):
+        result = authorization_calibration(
+            self._corpus(),
+            "?operator*",
+            vertex_where=[("endpoint", {"classification": "high-trust"})],
+        )
+        # case-1 (benign) and case-3 (unclear) — both high-trust
+        assert result["count"] == 2
+
+    def test_exemplars_capped(self):
+        # 5 cases, all authorized — exemplars["authorized"] capped at 3
+        h = {"id": "h-001", "name": "?op", "authorization_contract": [{"predicate": "x"}]}
+        cases = [
+            make_companion(
+                f"c{i}", [h],
+                [_make_authz_lead(f"l-{i}", "h-001.ac1", "authorized")],
+                prologue=_prologue_with_endpoint("high"),
+            )
+            for i in range(5)
+        ]
+        result = authorization_calibration(cases, "?op")
+        assert len(result["exemplars"]["authorized"]) == 3
+
+    def test_no_match_returns_empty(self):
+        result = authorization_calibration(self._corpus(), "?nothing-matches*")
+        assert result["count"] == 0
+        assert result["distribution"] == []
+        assert result["exemplars"] == {}
+
+    def test_surprises_detected_across_attribute_updates(self):
+        # Same edge gets two different verdicts: first authorized, then unauthorized
+        # via attribute_updates appended in a later lead.
+        h = {"id": "h-001", "name": "?op", "authorization_contract": [{"predicate": "x"}]}
+        first = _make_authz_lead("l-001", "h-001.ac1", "authorized", edge_id="e-100")
+        # Second lead overrides the verdict via attribute_updates targeting the same edge.
+        second = make_lead(
+            "l-002", "policy-recheck", 2, system="iam",
+            attribute_updates=[{
+                "target_edge": "e-100",
+                "authorization_resolutions": [{
+                    "verdict": "unauthorized",
+                    "anchor_kind": "iam-policy",
+                    "anchor_id": "policy-42",
+                    "grounding_kind": "org-authority",
+                    "authority_for_question": "full",
+                    "as_of": "2026-04-02T00:00:00Z",
+                    "fulfills_contract": "h-001.ac1",
+                }],
+            }],
+        )
+        c = make_companion("flip", [h], [first, second], disposition="true_positive")
+        result = authorization_calibration([c], "?op")
+        assert result["surprises"] == 1
+
+
+# ---------------------------------------------------------------------------
+# CLI dispatch — classes 13/14/15
+# ---------------------------------------------------------------------------
+
+
+class TestCliDispatchNewClasses:
+    def _ns(self, **overrides) -> argparse.Namespace:
+        defaults = dict(
+            disposition=None, termination_category=None, confidence=None,
+            matched_archetype=None, ceiling_test_kind=None,
+            anchor_id=None, result=None, authority_for_question=None,
+            system=None, failure_reason=None, contains=None,
+            pattern=None, final_weight=None, hyp_pattern=None, reversals_only=False,
+            phrase=None, case_sensitive=False,
+            hypothesis_patterns=None, discriminate_between=None,
+            lead_pattern=None, contract_pattern=None,
+            loop=None, max_age_days=180,
+            vertex_where=[], vertex_scope="any",
+            top=None,
+        )
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def test_dispatch_class_13(self):
+        h = make_hypothesis("h-001", "?probe", weight="-")
+        lead = make_lead(
+            "l-001", "ssh-login-history", 1,
+            resolutions=[make_resolution("h-001", None, "-")],
+        )
+        c = make_companion("c", [h], [lead], prologue=_prologue_with_endpoint("high"))
+        args = self._ns(lead_pattern="ssh*")
+        result = _run_class(13, [c], args)
+        assert result["count"] == 1
+        assert "summary" in result
+
+    def test_dispatch_class_14(self):
+        h = {"id": "h-001", "name": "?op", "authorization_contract": [{"predicate": "x"}]}
+        c = make_companion(
+            "c", [h],
+            [_make_authz_lead("l-001", "h-001.ac1", "authorized")],
+            prologue=_prologue_with_endpoint("high"),
+        )
+        args = self._ns(contract_pattern="?op")
+        result = _run_class(14, [c], args)
+        assert result["count"] == 1
+
+    def test_dispatch_class_15(self):
+        # Class 15 with empty signature/prologue and no recent companions
+        # should return an empty distribution but not crash.
+        args = self._ns(loop=1)
+        result = _run_class(15, [], args)
+        assert result["distribution"] == {}
+        assert "telemetry" in result
