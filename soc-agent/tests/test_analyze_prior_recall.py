@@ -161,6 +161,15 @@ def test_digest_authz_distribution():
 # ---------------------------------------------------------------------------
 
 
+def test_lead_name_wrapped_in_wildcards_to_match_naming_drift():
+    # Lead name in this run is e.g. `approved-monitoring-sources-lookup`,
+    # corpus has `approved-monitoring-sources-anchor`, etc. Without
+    # wildcarding, exact match returns zero (run #52 finding).
+    corpus = [_make_companion("c1", lead_name="approved-monitoring-sources-anchor")]
+    out = pr._recall_lead(corpus, "approved-monitoring-sources-lookup", [])
+    assert out is not None and out["count"] == 1
+
+
 def test_unscoped_used_when_corpus_too_small_to_narrow(monkeypatch):
     # 3 cases, far below VERTEX_WHERE_MIN_NARROW_HITS — narrowing would
     # zero out, so the unscoped result must win.

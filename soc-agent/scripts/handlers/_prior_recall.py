@@ -200,10 +200,34 @@ def _parse_specs(spec_strings: Iterable[str]) -> list[tuple[str, dict[str, str]]
     return out
 
 
+def _lead_pattern(lead_name: str) -> str:
+    """Translate an exact lead name into an fnmatch pattern that tolerates
+    naming drift across runs.
+
+    Lead names in this repo follow a `family-of-action[-modifier]` shape:
+    `approved-monitoring-sources`, `approved-monitoring-sources-anchor`,
+    `approved-monitoring-sources-lookup`, `approved-monitoring-sources-authorization`.
+    Exact match across this family returns zero (run #52 finding); the
+    24-hit recall the corpus already has is locked behind a wildcard.
+
+    Strategy: when the name has 4+ hyphen-separated segments, anchor on
+    the first three and trail-glob the rest (covers the modifier-suffix
+    drift). Otherwise just substring-glob the whole name. Pre-globbed
+    patterns (containing `*`) pass through.
+    """
+    if "*" in lead_name:
+        return lead_name
+    parts = lead_name.split("-")
+    if len(parts) >= 4:
+        return "-".join(parts[:3]) + "*"
+    return f"*{lead_name}*"
+
+
 def _recall_lead(corpus: list, lead_name: str, vw_specs: list[str]) -> dict[str, Any] | None:
     """Run class 13 unscoped first; only narrow when n>=threshold."""
+    pattern = _lead_pattern(lead_name)
     try:
-        unscoped = lead_exemplars(corpus, lead_pattern=lead_name)
+        unscoped = lead_exemplars(corpus, lead_pattern=pattern)
     except Exception:
         return None
     if (unscoped.get("count") or 0) < VERTEX_WHERE_MIN_NARROW_HITS or not vw_specs:
@@ -212,7 +236,7 @@ def _recall_lead(corpus: list, lead_name: str, vw_specs: list[str]) -> dict[str,
     if not parsed:
         return unscoped
     try:
-        narrowed = lead_exemplars(corpus, lead_pattern=lead_name, vertex_where=parsed)
+        narrowed = lead_exemplars(corpus, lead_pattern=pattern, vertex_where=parsed)
     except Exception:
         return unscoped
     return narrowed if (narrowed.get("count") or 0) > 0 else unscoped
