@@ -37,8 +37,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
 from schemas.state import Phase
 from scripts.invlang.corpus import write_created_header
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
@@ -48,6 +46,7 @@ from scripts.handlers._playbook import PlaybookMetadata, load_playbook_metadata
 from scripts.handlers._prologue_dense import (
     PrologueOutputError,
     parse_prologue_dense,
+    strip_envelope as _strip_prologue_envelope,
 )
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
@@ -219,18 +218,18 @@ def _compose_markdown(
 
 
 def _serialize_prologue(raw: str) -> str:
-    """Parse the dense prologue envelope emitted by the subagent and re-serialize
-    as YAML for embedding into `investigation.md`.
+    """Validate the dense prologue envelope from the subagent and return the
+    bare dense body for embedding into a ```invlang fence in `investigation.md`.
 
-    The subagent emits dense-block grammar (`:V prologue.vertices` /
-    `:E prologue.edges`); the on-disk companion stays YAML so the invlang
-    validator and downstream tooling see the unchanged shape.
+    Both the subagent stdout and the on-disk surface are dense; this handler
+    runs `parse_prologue_dense` only to fail fast on malformed output, then
+    hands the validated body straight through.
     """
     try:
-        parsed = parse_prologue_dense(raw)
+        parse_prologue_dense(raw)
+        return _strip_prologue_envelope(raw)
     except PrologueOutputError as exc:
         raise OrchestrationError(f"prologue subagent output: {exc}") from exc
-    return yaml.safe_dump(parsed, sort_keys=False)
 
 
 def _stamp_created_header() -> str:
@@ -281,15 +280,15 @@ def handle(ctx: Context) -> PhaseResult:
 
     ticket_raw, prologue_raw = _dispatch_parallel(ctx, playbook)
     ticket = extract_terminal_yaml(ticket_raw)
-    prologue_yaml_str = _serialize_prologue(prologue_raw)
+    prologue_dense_body = _serialize_prologue(prologue_raw)
 
     markdown = _compose_markdown(ctx, ticket, playbook, preflight_summary)
     new_section = (
         markdown
         + "\n"
-        + "```yaml\n"
-        + prologue_yaml_str
-        + "```\n"
+        + "```invlang\n"
+        + prologue_dense_body
+        + "\n```\n"
     )
     _validate_and_write(ctx, new_section)
 

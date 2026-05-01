@@ -31,14 +31,12 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
-import yaml
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from scripts.handlers.env_memory import (  # noqa: E402
     DEFAULT_VALIDITY_DAYS,
-    INV_FENCE_RE,
     MECHANIC_VOCAB,
     TRIPLE_TO_MECHANIC,
     Atom,
@@ -46,6 +44,7 @@ from scripts.handlers.env_memory import (  # noqa: E402
     parse_atoms_from_file,
     walk_atom_files,
 )
+from scripts.handlers._markdown import iter_companion_dicts  # noqa: E402
 
 
 _DIGIT_RUN_RE = re.compile(r"\d{4,}")
@@ -166,13 +165,7 @@ def _check_triple_coverage(soc_agent_root: Path, runs_dir: Path | None) -> list[
             continue
         vertices_by_id: dict[str, dict] = {}
         hypotheses: list[dict] = []
-        for m in INV_FENCE_RE.finditer(text):
-            try:
-                parsed = yaml.safe_load(m.group("body"))
-            except yaml.YAMLError:
-                continue
-            if not isinstance(parsed, dict):
-                continue
+        for parsed in iter_companion_dicts(text):
             for v in (parsed.get("prologue") or {}).get("vertices") or []:
                 if isinstance(v, dict) and isinstance(v.get("id"), str):
                     vertices_by_id[v["id"]] = v
