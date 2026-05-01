@@ -678,11 +678,13 @@ class TestFindingsSynthesis:
         # prose ANALYZE section. Validator would have rejected an invalid
         # block via validate_companion, so reaching this assertion proves
         # the synthesized YAML passes schema checks.
-        assert "findings:" in written
-        assert "id: l-001" in written
-        assert "target: v-001" in written  # default from prologue
-        assert "hypothesis: h-001" in written
-        assert "after: +" in written or "after: '+'" in written
+        assert "```invlang" in written
+        assert ":L findings" in written
+        assert "l-001|" in written
+        assert "|v-001|" in written  # target default from prologue
+        assert ":T resolutions" in written
+        assert "h-001" in written
+        assert "→ +" in written
 
     def test_uses_declared_hypothesis_id_directly(self, tmp_path, monkeypatch):
         """Dense form requires `h-NNN` ids on every `:T resolutions` row
@@ -715,7 +717,8 @@ class TestFindingsSynthesis:
         )
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
-        assert "hypothesis: h-001" in written
+        assert "h-001" in written
+        assert ":T resolutions" in written
 
     def test_drops_resolutions_that_reference_undeclared_hypotheses(
         self, tmp_path, monkeypatch,
@@ -753,10 +756,11 @@ class TestFindingsSynthesis:
         )
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
-        findings_yaml = written.split("findings:")[-1] if "findings:" in written else ""
-        # Declared hypothesis resolved; undeclared dropped.
-        assert "hypothesis: h-001" in written
-        assert "h-099" not in findings_yaml
+        # Declared hypothesis resolved; undeclared dropped from the
+        # `:T resolutions` block by the handler's name→id translation guard.
+        findings_block = written.split(":T resolutions")[-1]
+        assert "h-001" in findings_block
+        assert "h-099" not in findings_block
 
     def test_supporting_edges_defaulted_on_confirmed_weights(
         self, tmp_path, monkeypatch,
@@ -849,12 +853,13 @@ class TestFindingsSynthesis:
         )
         analyze_handler.handle(ctx)
         written = (ctx.run_dir / "investigation.md").read_text()
-        findings_yaml = written.split("findings:")[-1]
-        # Both authoritative prologue edges land as supporting_edges defaults
-        # (the row's `no-authority` marker triggers the prologue fallback).
-        assert "supporting_edges" in findings_yaml
-        assert "e-001" in findings_yaml
-        assert "e-002" in findings_yaml
+        # Both authoritative prologue edges land as supporting edges in the
+        # `:T resolutions` row's post-⟂ slot (the subagent's `no-authority`
+        # marker triggers the prologue fallback at handler-synthesis time).
+        resolution_block = written.split(":T resolutions")[-1]
+        assert "e-001" in resolution_block
+        assert "e-002" in resolution_block
+        assert "⟂" in resolution_block
 
     def test_iff_annotation_carried_into_reasoning(self, tmp_path, monkeypatch):
         """The dense iff annotation captures the load-bearing observation

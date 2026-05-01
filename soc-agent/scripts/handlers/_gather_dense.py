@@ -103,7 +103,7 @@ def _render_lead_row(entry: dict[str, Any]) -> str:
         "system":   qd.get("system", ""),
         "template": qd.get("template", ""),
         "query":    qd.get("query", ""),
-        "window":   qd.get("time_window", ""),
+        "window":   _flatten_window(qd.get("time_window", "")),
         "status":   entry.get("status", ""),
         "tests":    _join_csv(entry.get("tests_hypotheses")),
     }
@@ -198,6 +198,14 @@ def _serialize_attrs(attrs: dict[str, Any]) -> str:
             continue
         parts.append(f"{k}={v}")
     return ";".join(parts)
+
+
+def _flatten_window(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, dict):
+        return ";".join(f"{k}={v}" for k, v in value.items() if v is not None)
+    return str(value)
 
 
 def _join_csv(values: Any) -> str:
