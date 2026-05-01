@@ -785,7 +785,7 @@ def parse_analyze_envelope(
 #   :R authz row        → {edge_id, contract_id, verdict, grounding_kind,
 #                          authority_for_question, as_of, reasoning,
 #                          anchor_kind, anchor_id}
-#   :R consultations    → singleton-per-lead {asks: [anchor_id], verdict,
+#   :R consultations    → singleton-per-lead {asks: [anchor_id], result,
 #                          grounding_kind, authority_for_question, as_of,
 #                          reasoning, anchor_kind}
 #   :R impact row       → {prediction_ref, dimension, verdict, grounding_kind,
@@ -1111,7 +1111,7 @@ _CONSULTATIONS_COLUMNS = [
     "anchor_id",
     "anchor_kind",
     "grounding",
-    "verdict",
+    "result",
     "as_of",
     "authority",
     "reasoning",
@@ -1238,7 +1238,7 @@ def _bucket_consultation_rows(
             )
         out[lead] = {
             "asks": [r["anchor_id"]] if r["anchor_id"] else [],
-            "verdict": r["verdict"],
+            "result": r["result"],
             "grounding_kind": grounding,
             "authority_for_question": r["authority"] or None,
             "as_of": r["as_of"] or None,

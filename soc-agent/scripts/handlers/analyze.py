@@ -410,31 +410,20 @@ def _translate_trust_anchor_to_consultation(
     """Map an analyze-envelope trust_anchor_result entry onto invlang's
     `outcome.anchor_consultations[]` shape (see schema §Lead outcome).
 
-    The envelope carries {asks, verdict, reasoning}. Anchor consultations
-    require {anchor_id, anchor_kind, grounding_kind, result, as_of,
-    authority_for_question}. We translate what we can and leave the rest
-    to downstream validators — a malformed consultation is preferable to
-    silent loss of the trust-anchor signal.
+    The envelope carries {asks, result, reasoning} (the dense-format
+    `:R consultations` row uses the `result` column directly per schema
+    rule #11). Anchor consultations require {anchor_id, anchor_kind,
+    grounding_kind, result, as_of, authority_for_question}.
     """
     if not isinstance(entry, dict):
         return None
     asks = entry.get("asks") or []
     anchor_id = asks[0] if asks else None
-    verdict = entry.get("verdict")
-    # Minimal result mapping: authorized → confirmed, unauthorized → refuted,
-    # indeterminate → partial. Schema rule #11 requires anchor_kind +
-    # grounding_kind; we use "policy" / "org-authority" as conservative
-    # defaults (policy checks against an authority anchor).
-    result_map = {
-        "authorized": "confirmed",
-        "unauthorized": "refuted",
-        "indeterminate": "partial",
-    }
     out: dict[str, Any] = {
         "anchor_id": anchor_id or "unspecified",
-        "anchor_kind": "policy",
+        "anchor_kind": entry.get("anchor_kind") or "policy",
         "grounding_kind": entry.get("grounding_kind") or "org-authority",
-        "result": result_map.get(verdict, "partial"),
+        "result": entry.get("result") or "partial",
         "as_of": entry.get("as_of"),
         "authority_for_question": entry.get("authority_for_question") or anchor_id or "unspecified",
     }
