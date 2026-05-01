@@ -22,26 +22,25 @@ handler embeds into `investigation.md`:
 
 Mirrors `_predict_dense.py`'s fail-fast discipline: the first violation raises
 `PrologueOutputError` with a message the agent can read directly. No silent
-coercion.
+coercion. Tokenization (cell splitting, attrs/auth parsing, header detection)
+is delegated to `_dense_primitives.py` — the single source of truth for the
+line grammar shared with the on-disk parser and the other per-phase parsers.
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any
+
+from scripts.handlers import _dense_primitives as _prim
 
 
 class PrologueOutputError(ValueError):
     """Raised on any malformed prologue dense output."""
 
 
-_HEADER_RE = re.compile(
-    r"^:(?P<tag>[VE])\s+(?P<name>\S+)\s*\[(?P<cols>[^\]]*)\]\s*$"
-)
-
-
 _VERTEX_COLS = ["id", "type", "class", "ident", "attrs"]
 _EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
+_VALID_TAGS = frozenset("VE")
 
 
 def _strip_envelope(stdout: str) -> str:
@@ -59,63 +58,11 @@ def _strip_envelope(stdout: str) -> str:
     return text
 
 
-def _split_cells(row: str) -> list[str]:
-    return [c.strip() for c in row.split("|")]
-
-
-def _parse_attrs(cell: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    if not cell:
-        return out
-    for kv in cell.split(";"):
-        kv = kv.strip()
-        if not kv:
-            continue
-        if "=" not in kv:
-            raise PrologueOutputError(
-                f"prologue attrs cell has bare token without `=`: {kv!r}"
-            )
-        k, v = kv.split("=", 1)
-        k = k.strip()
-        v = v.strip()
-        if not k:
-            raise PrologueOutputError(
-                f"prologue attrs cell has empty key: {kv!r}"
-            )
-        out[k] = v
-    return out
-
-
-def _parse_auth(cell: str) -> dict[str, str]:
-    if ":" not in cell:
-        raise PrologueOutputError(
-            f"prologue edge auth_kind:source cell missing `:`: {cell!r}"
-        )
-    kind, source = cell.split(":", 1)
-    kind = kind.strip()
-    source = source.strip()
-    if not kind or not source:
-        raise PrologueOutputError(
-            f"prologue edge auth_kind:source cell has empty kind or source: "
-            f"{cell!r}"
-        )
-    return {"kind": kind, "source": source}
-
-
-def _row_cells(blk_tag: str, blk_name: str, expected: list[str], row: str) -> list[str]:
-    cells = _split_cells(row)
-    if len(cells) < len(expected):
-        cells = cells + [""] * (len(expected) - len(cells))
-    elif len(cells) > len(expected):
-        raise PrologueOutputError(
-            f":{blk_tag} {blk_name}: row has more cells than columns "
-            f"(expected {len(expected)}, got {len(cells)}): {row!r}"
-        )
-    return cells
-
-
 def _vertex_row(row: str) -> dict[str, Any]:
-    cells = _row_cells("V", "prologue.vertices", _VERTEX_COLS, row)
+    block = _prim.DenseBlock(
+        tag="V", name="prologue.vertices", columns=_VERTEX_COLS, rows=[]
+    )
+    cells = _prim.row_cells(block, row, error_cls=PrologueOutputError)
     vid, vtype, vclass, vident, vattrs = cells
     if not vid or not vtype or not vclass or not vident:
         raise PrologueOutputError(
@@ -128,14 +75,17 @@ def _vertex_row(row: str) -> dict[str, Any]:
         "classification": vclass,
         "identifier": vident,
     }
-    attrs = _parse_attrs(vattrs)
+    attrs = _prim.parse_attrs(vattrs, error_cls=PrologueOutputError)
     if attrs:
         out["attributes"] = attrs
     return out
 
 
 def _edge_row(row: str) -> dict[str, Any]:
-    cells = _row_cells("E", "prologue.edges", _EDGE_COLS, row)
+    block = _prim.DenseBlock(
+        tag="E", name="prologue.edges", columns=_EDGE_COLS, rows=[]
+    )
+    cells = _prim.row_cells(block, row, error_cls=PrologueOutputError)
     eid, rel, src, tgt, when, auth, attrs = cells
     if not eid or not rel or not src or not tgt or not auth:
         raise PrologueOutputError(
@@ -150,10 +100,10 @@ def _edge_row(row: str) -> dict[str, Any]:
     }
     if when:
         out["when"] = {"timestamp": when}
-    parsed_attrs = _parse_attrs(attrs)
+    parsed_attrs = _prim.parse_attrs(attrs, error_cls=PrologueOutputError)
     if parsed_attrs:
         out["attributes"] = parsed_attrs
-    out["authority"] = _parse_auth(auth)
+    out["authority"] = _prim.parse_auth(auth, error_cls=PrologueOutputError)
     return out
 
 
@@ -163,79 +113,45 @@ def parse_prologue_dense(stdout: str) -> dict[str, Any]:
     Raises `PrologueOutputError` on the first violation.
     """
     text = _strip_envelope(stdout)
+    blocks = _prim.tokenize_blocks(
+        text, valid_tags=_VALID_TAGS, error_cls=PrologueOutputError
+    )
 
-    # Split into blocks by header lines. Tolerant of blank lines between
-    # blocks; intolerant of content before the first header or unknown tags.
     vertices: list[dict[str, Any]] | None = None
     edges: list[dict[str, Any]] | None = None
-    cur_tag: str | None = None
-    cur_rows: list[dict[str, Any]] | None = None
 
-    for raw in text.splitlines():
-        line = raw.rstrip()
-        stripped = line.strip()
-        if not stripped:
-            continue
-        m = _HEADER_RE.match(stripped)
-        if m:
-            tag = m.group("tag")
-            name = m.group("name")
-            cols = [c.strip().rstrip("?") for c in m.group("cols").split("|")]
-            if tag == "V":
-                if name != "prologue.vertices":
-                    raise PrologueOutputError(
-                        f":V block name must be `prologue.vertices`, got {name!r}"
-                    )
-                if cols != _VERTEX_COLS:
-                    raise PrologueOutputError(
-                        f":V prologue.vertices columns must be "
-                        f"{_VERTEX_COLS!r}, got {cols!r}"
-                    )
-                if vertices is not None:
-                    raise PrologueOutputError(
-                        ":V prologue.vertices declared more than once"
-                    )
-                vertices = []
-                cur_tag = "V"
-                cur_rows = vertices
-            elif tag == "E":
-                if name != "prologue.edges":
-                    raise PrologueOutputError(
-                        f":E block name must be `prologue.edges`, got {name!r}"
-                    )
-                if cols != _EDGE_COLS:
-                    raise PrologueOutputError(
-                        f":E prologue.edges columns must be "
-                        f"{_EDGE_COLS!r}, got {cols!r}"
-                    )
-                if edges is not None:
-                    raise PrologueOutputError(
-                        ":E prologue.edges declared more than once"
-                    )
-                edges = []
-                cur_tag = "E"
-                cur_rows = edges
-            else:
+    for blk in blocks:
+        if blk.tag == "V":
+            if blk.name != "prologue.vertices":
                 raise PrologueOutputError(
-                    f"prologue output: unknown block tag :{tag} "
-                    f"(only :V and :E allowed)"
+                    f":V block name must be `prologue.vertices`, got "
+                    f"{blk.name!r}"
                 )
-            continue
-
-        # Reject any other `:X ...` looking header (catches typos like `:R`).
-        if stripped.startswith(":") and re.match(r"^:[A-Za-z]\b", stripped):
-            raise PrologueOutputError(
-                f"prologue output: unrecognized block header: {stripped!r}"
-            )
-
-        if cur_tag is None or cur_rows is None:
-            raise PrologueOutputError(
-                f"prologue output: row before any block header: {stripped!r}"
-            )
-        if cur_tag == "V":
-            cur_rows.append(_vertex_row(stripped))
-        else:
-            cur_rows.append(_edge_row(stripped))
+            if blk.columns != _VERTEX_COLS:
+                raise PrologueOutputError(
+                    f":V prologue.vertices columns must be "
+                    f"{_VERTEX_COLS!r}, got {blk.columns!r}"
+                )
+            if vertices is not None:
+                raise PrologueOutputError(
+                    ":V prologue.vertices declared more than once"
+                )
+            vertices = [_vertex_row(row) for row in blk.rows]
+        else:  # blk.tag == "E"
+            if blk.name != "prologue.edges":
+                raise PrologueOutputError(
+                    f":E block name must be `prologue.edges`, got {blk.name!r}"
+                )
+            if blk.columns != _EDGE_COLS:
+                raise PrologueOutputError(
+                    f":E prologue.edges columns must be "
+                    f"{_EDGE_COLS!r}, got {blk.columns!r}"
+                )
+            if edges is not None:
+                raise PrologueOutputError(
+                    ":E prologue.edges declared more than once"
+                )
+            edges = [_edge_row(row) for row in blk.rows]
 
     if vertices is None:
         raise PrologueOutputError(

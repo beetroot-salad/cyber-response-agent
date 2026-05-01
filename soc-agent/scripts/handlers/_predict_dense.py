@@ -46,34 +46,25 @@ this module only assembles the routing dict from the dense rows.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any
+
+from scripts.handlers import _dense_primitives as _prim
+from scripts.handlers._dense_primitives import DenseBlock as _Block
 
 DEVIATION_KINDS = frozenset({"geometry", "cadence", "novel-artifact", "absence"})
 NON_DEVIATION_KINDS = frozenset({"presence", "absolute"})
 ALL_KINDS = DEVIATION_KINDS | NON_DEVIATION_KINDS
 
 
-@dataclass
-class _Block:
-    tag: str
-    name: str
-    columns: list[str]
-    rows: list[str]
-
-
-_HEADER_RE = re.compile(
-    r"^:(?P<tag>[A-Z])\s+(?P<name>[A-Za-z0-9_.\-]+)(?:\s*\[(?P<cols>[^\]]+)\])?\s*$"
-)
 _HEADER_LINE_RE = re.compile(r"^predict\s+loop=(\d+)\s+shape=([A-Za-z]+)\s*$")
 _STORY_HEADER_RE = re.compile(r"^###\s+story\s+(h-[\w\-]+)\s*$")
 _SENTENCE_ID_RE = re.compile(r"^(s\d+)\.")
-_QUOTED_RE = re.compile(r'^"(.*)"$')
 
 
-def _unquote(s: str) -> str:
-    m = _QUOTED_RE.match(s)
-    return m.group(1) if m else s
+# Predict uses primitives' `unquote` directly — same `\\"` semantics. The
+# `_QUOTED_RE` shape (`^"(.*)"$`) was equivalent on inputs the producer
+# emits (no embedded backslash quotes in this surface).
+_unquote = _prim.unquote
 
 
 def _strip_envelope(stdout: str, error_cls: type[Exception]) -> str:
@@ -129,7 +120,7 @@ def _tokenize(
             cur_block = None
             continue
 
-        m_block = _HEADER_RE.match(stripped)
+        m_block = _prim.HEADER_RE.match(stripped)
         if m_block:
             if cur_story:
                 stories[cur_story[0]] = cur_story[1]
@@ -171,11 +162,13 @@ def _tokenize(
     return header, blocks, stories
 
 
-def _split_cells(row: str) -> list[str]:
-    return [c.strip() for c in row.split("|")]
-
-
 def _parse_kv_attrs(cell: str) -> dict[str, str]:
+    """Tolerant key=value;key=value parser.
+
+    Differs from `_prim.parse_attrs` in that it silently drops bare tokens
+    (no `=`) instead of raising. The predict subagent has historically
+    emitted permissive attrs; tightening to fail-fast is a separate change.
+    """
     out: dict[str, str] = {}
     for kv in cell.split(";"):
         kv = kv.strip()
@@ -189,14 +182,19 @@ def _parse_kv_attrs(cell: str) -> dict[str, str]:
 def _row_to_rec(
     blk: _Block, row: str, error_cls: type[Exception]
 ) -> dict[str, str]:
-    cells = _split_cells(row)
-    if len(cells) < len(blk.columns):
-        cells = cells + [""] * (len(blk.columns) - len(cells))
-    elif len(cells) > len(blk.columns):
+    """Predict-flavored row→record. The shared primitive emits a fully
+    qualified error message; this wrapper preserves predict's terser form
+    for backwards-compat with the predict-bakeoff test fixtures.
+    """
+    cells = _prim.split_cells(row)
+    cols = blk.columns or []
+    if len(cells) < len(cols):
+        cells = cells + [""] * (len(cols) - len(cells))
+    elif len(cells) > len(cols):
         raise error_cls(
             f":{blk.tag} {blk.name}: row has more cells than columns: {row!r}"
         )
-    return dict(zip(blk.columns, cells))
+    return dict(zip(cols, cells))
 
 
 # ---------------------------------------------------------------------------
