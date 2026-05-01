@@ -73,6 +73,7 @@ from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._context_loader import load_lead_definition
+from scripts.handlers._gather_dense import emit_gather_findings_dense
 from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._output_parser import (
     GatherEnvelope,
@@ -1443,8 +1444,8 @@ def _append_lead_pick_findings(
     if not findings:
         return
 
-    body = yaml.safe_dump({"findings": findings}, sort_keys=False)
-    section = "```yaml\n" + body + "```\n"
+    body = emit_gather_findings_dense(findings)
+    section = "```invlang\n" + body + "\n```\n"
     _append_to_investigation(ctx, section)
 
 

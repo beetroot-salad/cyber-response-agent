@@ -55,6 +55,7 @@ import yaml
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
+from scripts.handlers._analyze_dense import emit_analyze_findings_dense
 from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._context_loader import (
     format_alert_summary_block,
@@ -611,12 +612,16 @@ def _synthesize_findings_block(
             weight = r.get("weight", "")
             res: dict[str, Any] = {
                 "hypothesis": resolved_id,
+                "before_weight": r.get("before_weight", "∅"),
                 "after": weight,
+                "severity": r.get("severity"),
                 "matched_prediction_ids": r.get(
                     "matched_prediction_ids", [],
                 ),
                 "reasoning": r.get("reasoning", ""),
             }
+            if r.get("supporting_edges_marker"):
+                res["supporting_marker"] = r["supporting_edges_marker"]
             mrefs = r.get("matched_refutation_ids")
             if mrefs:
                 res["matched_refutation_ids"] = mrefs
@@ -649,8 +654,8 @@ def _synthesize_findings_block(
         }
         findings.append(entry)
 
-    body = yaml.safe_dump({"findings": findings}, sort_keys=False)
-    return "```yaml\n" + body + "```\n"
+    body = emit_analyze_findings_dense(findings)
+    return "```invlang\n" + body + "\n```\n"
 
 
 # ---------------------------------------------------------------------------

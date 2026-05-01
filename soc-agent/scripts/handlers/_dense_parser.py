@@ -26,12 +26,15 @@ Schema-mapping table (per `docs/dense-investigation-format.md` §Schema mapping)
     :V prologue.vertices            → prologue.vertices[]
     :E prologue.edges               → prologue.edges[]
     :H hypothesize.hypotheses       → hypothesize.hypotheses[]
-    :L findings                     → findings[<id>].lead (one row per lead)
+    :L findings                     → findings[<id>] (flat: id, name, loop,
+                                       target, mode, ...; query_details
+                                       sub-dict for system/template/query/
+                                       time_window/substitutions)
     :V l-{id}.observations.vertices → findings[<id>].outcome.observations.vertices[]
     :E l-{id}.observations.edges    → findings[<id>].outcome.observations.edges[]
-    :L l-{id}.lead_preds            → findings[<id>].lead.predictions[]
-    :L l-{id}.impact_preds          → findings[<id>].lead.impact_predictions[]
-    :L l-{id}.substitutions         → findings[<id>].lead.query_details.substitutions{}
+    :L l-{id}.lead_preds            → findings[<id>].predictions[]
+    :L l-{id}.impact_preds          → findings[<id>].impact_predictions[]
+    :L l-{id}.substitutions         → findings[<id>].query_details.substitutions{}
     :H l-{id}.new_hypotheses        → findings[<id>].new_hypotheses[]
     :R authz                        → findings[<lead>].outcome.authorization_resolutions[]
     :R consultations                → findings[<lead>].outcome.anchor_consultations[]
@@ -120,7 +123,15 @@ _LEAD_PREFIX_RE = re.compile(r"^l-(?P<id>[A-Za-z0-9]+)\.(?P<sub>.+)$")
 
 def companion_dict_from_blocks(blocks: list[DenseBlock]) -> dict[str, Any]:
     """Project a list of tokenized dense blocks onto the canonical companion
-    dict shape (matches `schema.md`).
+    dict shape (matches `schema.md` and `_LEAD_REQUIRED` in invlang_common).
+
+    Lead row fields (id/name/loop/target, plus query_details siblings) are
+    flattened directly onto the finding entry — the validator and corpus
+    loader read `findings[i].id`, `.target`, `.query_details.system`, etc.
+    The `query_details` envelope holds `{system, template, query,
+    time_window, substitutions}` (the row cells that describe how the
+    lead was queried), keeping a clean separation from the lead's identity
+    and outcome.
 
     Lead attribution for sub-blocks works in three ways, in priority order:
       1. Block name carries the lead prefix: `:V l-001.observations.vertices`.
@@ -136,8 +147,10 @@ def companion_dict_from_blocks(blocks: list[DenseBlock]) -> dict[str, Any]:
     findings: dict[str, dict[str, Any]] = {}
 
     def lead_bucket(lead_id: str) -> dict[str, Any]:
-        lead = findings.setdefault(lead_id, {"lead": {"id": lead_id}})
+        lead = findings.setdefault(lead_id, {"id": lead_id})
         lead.setdefault("outcome", {})
+        lead.setdefault("query_details", {})
+        lead.setdefault("resolutions", [])
         return lead
 
     ctx: dict[str, str | None] = {"current_lead": None}
@@ -183,10 +196,12 @@ def _project_block(
     if tag == "L" and name == "findings":
         last_lead_id: str | None = None
         for row in block.rows:
-            rec = _lead_header_record(block, row)
-            lead_id = rec["id"]
+            identity, query_details = _lead_header_record(block, row)
+            lead_id = identity["id"]
             lead = lead_bucket(lead_id)
-            lead["lead"].update(rec)
+            lead.update(identity)
+            if query_details:
+                lead.setdefault("query_details", {}).update(query_details)
             last_lead_id = lead_id
         if last_lead_id:
             ctx["current_lead"] = last_lead_id
@@ -442,21 +457,30 @@ def _parse_authz_subcells(cell: str) -> list[dict[str, Any]]:
 # --- lead header and lead-scoped sub-blocks ---------------------------------
 
 
-def _lead_header_record(block: DenseBlock, row: str) -> dict[str, Any]:
+def _lead_header_record(
+    block: DenseBlock, row: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Project one `:L findings` row into (identity, query_details).
+
+    Identity fields land flat on the finding entry: id, name, loop, target,
+    mode, status, trust_root_reached, failure_reason, screen_result,
+    tests_hypotheses. Query-shape fields go under `query_details`: system,
+    template, query, time_window. (Substitutions land via the dedicated
+    `:L l-{id}.substitutions` sub-block.)
+    """
     rec = _row_record(block, row)
     if not rec.get("id") or not rec.get("name"):
         raise DenseParseError(
             f":L findings row missing id/name: {row!r}"
         )
-    out: dict[str, Any] = {"id": rec["id"], "name": rec["name"]}
+    identity: dict[str, Any] = {
+        "id": rec["id"],
+        "name": rec["name"],
+        "target": rec.get("target", ""),
+    }
     for k_in, k_out in (
         ("loop", "loop"),
-        ("target", "target_vertex"),
         ("mode", "mode"),
-        ("system", "system"),
-        ("template", "template"),
-        ("query", "query"),
-        ("window", "time_window"),
         ("trust_root", "trust_root_reached"),
         ("fail_reason", "failure_reason"),
         ("screen_result", "screen_result"),
@@ -469,10 +493,20 @@ def _lead_header_record(block: DenseBlock, row: str) -> dict[str, Any]:
                     value = int(value)
                 except ValueError:
                     pass
-            out[k_out] = value
+            identity[k_out] = value
     if rec.get("tests"):
-        out["tests_hypotheses"] = _split_csv(rec["tests"])
-    return out
+        identity["tests_hypotheses"] = _split_csv(rec["tests"])
+
+    query_details: dict[str, Any] = {}
+    for k_in, k_out in (
+        ("system", "system"),
+        ("template", "template"),
+        ("query", "query"),
+        ("window", "time_window"),
+    ):
+        if rec.get(k_in):
+            query_details[k_out] = rec[k_in]
+    return identity, query_details
 
 
 def _project_lead_subblock(
@@ -493,12 +527,12 @@ def _project_lead_subblock(
         ]
         return
     if tag == "L" and sub == "lead_preds":
-        lead.setdefault("lead", {})["predictions"] = [
+        lead["predictions"] = [
             _row_record(block, row) for row in block.rows
         ]
         return
     if tag == "L" and sub == "impact_preds":
-        lead.setdefault("lead", {})["impact_predictions"] = [
+        lead["impact_predictions"] = [
             _row_record(block, row) for row in block.rows
         ]
         return
@@ -511,9 +545,7 @@ def _project_lead_subblock(
                     f":L substitutions row missing key|value: {row!r}"
                 )
             subs[cells[0]] = cells[1]
-        lead.setdefault("lead", {}).setdefault("query_details", {})[
-            "substitutions"
-        ] = subs
+        lead.setdefault("query_details", {})["substitutions"] = subs
         return
     if tag == "H" and sub == "new_hypotheses":
         lead["new_hypotheses"] = [

@@ -1067,9 +1067,11 @@ class TestHandleOutput:
         # markdown — empty query_details / outcome / resolutions, mode:
         # lead-pick. Feeds the PREDICT loop-1 fast-path's corpus lookup.
         # ANALYZE later writes the graded findings entry separately.
-        assert "mode: lead-pick" in text
-        assert "loop: 3" in text
-        assert "name: authentication-history" in text
+        assert "```invlang" in text
+        assert ":L findings" in text
+        assert "lead-pick" in text
+        assert "|3|" in text
+        assert "|authentication-history|" in text
 
     def test_routes_to_analyze_when_hypotheses_declared(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path, selected_lead="authentication-history")

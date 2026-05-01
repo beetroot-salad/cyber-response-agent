@@ -264,14 +264,14 @@ def test_project_lead_header():
     """)
     out = parse_dense_companion(text)
     assert len(out["findings"]) == 1
-    lead = out["findings"][0]["lead"]
+    lead = out["findings"][0]
     assert lead["id"] == "l-001"
     assert lead["loop"] == 1
     assert lead["name"] == "approved-monitoring-sources-lookup"
-    assert lead["target_vertex"] == "v-001"
+    assert lead["target"] == "v-001"
     assert lead["tests_hypotheses"] == ["h-001", "h-002"]
-    assert lead["system"] == "approved-monitoring-sources"
-    assert lead["query"] == "src=172.22.0.10 user=sensu dst=target-endpoint"
+    assert lead["query_details"]["system"] == "approved-monitoring-sources"
+    assert lead["query_details"]["query"] == "src=172.22.0.10 user=sensu dst=target-endpoint"
 
 
 def test_project_lead_observations():
@@ -314,7 +314,7 @@ def test_project_substitutions():
         ```
     """)
     out = parse_dense_companion(text)
-    subs = out["findings"][0]["lead"]["query_details"]["substitutions"]
+    subs = out["findings"][0]["query_details"]["substitutions"]
     assert subs == {"src": "172.22.0.10", "user": "sensu"}
 
 
@@ -566,7 +566,7 @@ def test_round_trip_stress_1_minimal():
     # Findings (one lead, with observations + authz)
     assert len(out["findings"]) == 1
     lead = out["findings"][0]
-    assert lead["lead"]["name"] == "approved-monitoring-sources-lookup"
+    assert lead["name"] == "approved-monitoring-sources-lookup"
     assert lead["outcome"]["observations"]["vertices"][0]["id"] == "v-003"
     assert lead["outcome"]["authorization_resolutions"][0]["verdict"] == "authorized"
 
