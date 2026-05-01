@@ -21,7 +21,7 @@ from typing import Any, Iterable
 
 import yaml
 
-from invlang import (
+from scripts.invlang import (
     authorization_calibration,
     lead_exemplars,
     load_corpus,
