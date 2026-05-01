@@ -438,17 +438,19 @@ class TestGatherExtraction:
     def test_extracts_gather_from_parsed(self):
         parsed = {
             "findings": [
-                {"id": "l-001", "loop": 0, "name": "x"},
-                {"id": "l-002", "loop": 0, "name": "y"},
+                {"id": "l-001", "loop": 0, "name": "x", "target": "v-001",
+                 "mode": "screen", "outcome": {}, "resolutions": []},
+                {"id": "l-002", "loop": 0, "name": "y", "target": "v-002",
+                 "mode": "screen", "outcome": {}, "resolutions": []},
             ],
         }
-        out = screen_handler._extract_findings_yaml_from_parsed(parsed)
-        assert out.startswith("findings:")
+        out = screen_handler._extract_findings_dense_from_parsed(parsed)
+        assert out.startswith(":L findings ")
         assert "l-001" in out and "l-002" in out
 
     def test_empty_when_gather_absent(self):
-        assert screen_handler._extract_findings_yaml_from_parsed({}) == ""
-        assert screen_handler._extract_findings_yaml_from_parsed({"findings": []}) == ""
+        assert screen_handler._extract_findings_dense_from_parsed({}) == ""
+        assert screen_handler._extract_findings_dense_from_parsed({"findings": []}) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -514,8 +516,10 @@ class TestInvestigationWrite:
         assert "monitoring-probe fast-path" in text
         assert "source-classification" in text
         assert "authentication-history" in text
-        # Final lead carries screen_result.
-        assert "screen_result: match" in text
+        # Final lead carries screen_result on the dense :L findings row
+        # (last column per `_screen_dense._LEAD_COLS`).
+        assert "```invlang" in text
+        assert "|match\n" in text or text.rstrip().endswith("|match")
 
     def test_no_match_write_has_no_match_section(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path)
@@ -525,7 +529,8 @@ class TestInvestigationWrite:
         screen_handler.handle(ctx)
         text = (ctx.run_dir / "investigation.md").read_text()
         assert "**Result:** no_match" in text
-        assert "screen_result: no_match" in text
+        assert "```invlang" in text
+        assert "|no_match" in text
 
     def test_malformed_invlang_rejected_before_write(self, tmp_path, monkeypatch):
         """A gather block with invalid invlang shape must surface before the

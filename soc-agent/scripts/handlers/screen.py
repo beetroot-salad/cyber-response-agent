@@ -43,6 +43,7 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._markdown import iter_companion_dicts
 from scripts.handlers._playbook import load_screen_rows
+from scripts.handlers._screen_dense import emit_screen_findings_dense
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
     make_invoker,
@@ -240,10 +241,9 @@ def _compose_markdown(
     )
 
 
-def _extract_findings_yaml_from_parsed(parsed: dict) -> str:
-    """Re-serialize the `findings` key from the merged screen subagent's
-    parsed dict back to a YAML string (without fence markers) for inlining
-    into investigation.md.
+def _extract_findings_dense_from_parsed(parsed: dict) -> str:
+    """Render the merged screen subagent's `findings` list as a dense
+    invlang block body (no fence markers) for inlining into investigation.md.
 
     Returns an empty string when `findings` is absent — the handler still
     writes the markdown section but skips the invlang block (consistent
@@ -252,7 +252,7 @@ def _extract_findings_yaml_from_parsed(parsed: dict) -> str:
     findings = parsed.get("findings")
     if not findings:
         return ""
-    return yaml.safe_dump({"findings": findings}, sort_keys=False)
+    return emit_screen_findings_dense(findings)
 
 
 # ---------------------------------------------------------------------------
@@ -330,11 +330,11 @@ def handle(ctx: Context) -> PhaseResult:
         parsed.pop("findings", None)
 
     # Step 3: compose + validate + append to investigation.md.
-    findings_yaml = _extract_findings_yaml_from_parsed(parsed)
+    findings_dense = _extract_findings_dense_from_parsed(parsed)
     markdown = _compose_markdown(parsed, downgrade_reason)
     new_section = markdown
-    if findings_yaml:
-        new_section = markdown + "\n```yaml\n" + findings_yaml + "```\n"
+    if findings_dense:
+        new_section = markdown + "\n```invlang\n" + findings_dense + "\n```\n"
     _validate_and_write(ctx, new_section)
 
     # Step 4: route.
