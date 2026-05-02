@@ -12,8 +12,13 @@ This task tracks the handler-by-handler migration of the on-disk format from `` 
 
 ## Scope
 
-- [ ] **CONTEXTUALIZE / prologue** — `_prologue_dense.py` already touched in foundation; finish the on-disk write path. Verify against `test_prologue_dense.py`.
-- [ ] **PREDICT** — `_predict_dense.py` got 50 lines of foundation work; complete the disk-format swap. Subagent stdout already uses dense (`:H`, `:P`, `:R` rows) so the handler can round-trip through the new parser without prompting changes.
+- [x] **CONTEXTUALIZE / prologue** — merged in PR #163 / #165 (commit 6628345).
+- [x] **SCREEN / findings** — merged in PR #166 (commit 171d6d0).
+- [x] **PREDICT** — PR #167 (branch `predict-onfile-invlang`, HEAD 396e06d). Surfaced and fixed three orthogonal bugs end-to-end:
+    - `:R consultations` column header `verdict→result` (commit 931d9bb) — analyze invlang rejection.
+    - `_predict_dense` parser resolved `:P comparisons` rows inline as it walked blocks in document order, so a `comparisons` block emitted before its sibling `refuts` block hit "unknown pred_ref" (commit 450efd9).
+    - `gather._any_hypotheses_declared` matched only `^:H\s+hypotheses\b` in ```yaml fences; PR #167 flips on-disk fences to ```invlang and the persister normalizes the block name to `hypothesize.hypotheses`. The detector's blind spot caused infinite PREDICT/GATHER loops with no ANALYZE (run #56, #57). Fixed in commit ca3cdf4 + 396e06d.
+    - Run #58 (5710 bait, full loop) — clean 2-loop convergence, ~13 min, 10 subagents rc=0, zero rejections, escalated/unclear/low. Ready to merge.
 - [ ] **GATHER + GATHER-composite** — both write `findings:` YAML today. Decide whether to migrate the lead-outcome block first or land the whole gather payload at once. `gather-composite` is the higher-value target (larger blocks, more variance).
 - [ ] **ANALYZE** — `_analyze_dense.py` (if present) or analyze handler. Resolutions block + self-report; needs round-trip parity tests against the existing YAML fixtures.
 - [ ] **REPORT / CONCLUDE** — `_conclude_dense.py` got 25 lines of foundation work; finish the migration. Frontmatter is the report.md surface, not investigation.md, so this only touches the conclude block fenced inside investigation.md (if any).
