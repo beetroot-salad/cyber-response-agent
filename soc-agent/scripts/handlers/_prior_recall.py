@@ -16,11 +16,9 @@ grading.
 
 from __future__ import annotations
 
-import re
 from typing import Any, Iterable
 
-import yaml
-
+from scripts.handlers._markdown import iter_companion_dicts
 from scripts.invlang import (
     authorization_calibration,
     lead_exemplars,
@@ -45,15 +43,15 @@ MAX_VERTEX_WHERE_SPECS = 2
 # ---------------------------------------------------------------------------
 
 
-_YAML_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
+def _merge_companion_blocks(text: str) -> dict[str, Any]:
+    """Merge every companion fence in investigation.md into one dict.
 
-
-def _merge_yaml_blocks(text: str) -> dict[str, Any]:
-    """Merge every ```yaml block in investigation.md into one dict.
-
-    Mirrors `invlang.corpus._merge_md_blocks` for the keys ANALYZE recall
-    cares about (`hypothesize`, `findings`). Kept local so this module
-    doesn't depend on a private corpus helper.
+    Walks the unified ```invlang dense surface and any legacy ```yaml
+    fences via `iter_companion_dicts`, projecting only the keys ANALYZE
+    recall cares about (`prologue`, `hypothesize.hypotheses`, `findings`).
+    Hypotheses are de-duplicated by id; in-loop hypotheses authored under
+    `findings[*].new_hypotheses` are folded into the same list so the
+    open-contract scan sees them.
     """
     merged: dict[str, Any] = {
         "prologue": {"vertices": [], "edges": []},
@@ -61,13 +59,7 @@ def _merge_yaml_blocks(text: str) -> dict[str, Any]:
         "findings": [],
     }
     seen_hyp_ids: set[str] = set()
-    for m in _YAML_BLOCK_RE.finditer(text):
-        try:
-            doc = yaml.safe_load(m.group(1))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
+    for doc in iter_companion_dicts(text):
         if isinstance(doc.get("prologue"), dict):
             merged["prologue"] = doc["prologue"]
         hyps = (doc.get("hypothesize") or {}).get("hypotheses") or []
@@ -292,7 +284,7 @@ def build_prior_recall_block(
             seen.add(name)
             lead_names.append(name)
 
-    body = _merge_yaml_blocks(investigation_md)
+    body = _merge_companion_blocks(investigation_md)
     contracts = _open_contracts(body)
     vw_specs = _vertex_where_specs(body)
 

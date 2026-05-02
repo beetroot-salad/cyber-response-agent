@@ -57,7 +57,10 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._analyze_dense import emit_analyze_findings_dense
 from scripts.handlers._investigation_io import append_and_validate
-from scripts.handlers._markdown import iter_companion_dicts
+from scripts.handlers._markdown import (
+    first_prologue_vertex_id,
+    iter_companion_dicts,
+)
 from scripts.handlers._context_loader import (
     format_alert_summary_block,
     format_current_gather_block,
@@ -353,23 +356,6 @@ def _compose_section(envelope: AnalyzeEnvelope, loop_n: int) -> str:
 # ---------------------------------------------------------------------------
 # Invlang findings synthesis
 # ---------------------------------------------------------------------------
-
-
-def _first_prologue_vertex_id(investigation_md: str) -> str | None:
-    """Return the first `v-*` id declared in any prologue block of the
-    companion, or None if no prologue block is present.
-
-    Used as the default `target` for synthesized `findings[]` lead entries
-    when the gather envelope doesn't specify one. Non-SCREEN flows don't
-    prescribe a target vertex per lead — the lead is investigating the
-    alert's subject vertex, which is always v-001 in practice.
-    """
-    for doc in iter_companion_dicts(investigation_md):
-        vertices = (doc.get("prologue") or {}).get("vertices") or []
-        for v in vertices:
-            if isinstance(v, dict) and isinstance(v.get("id"), str):
-                return v["id"]
-    return None
 
 
 def _hypothesis_name_to_id_map(investigation_md: str) -> dict[str, str]:
@@ -709,7 +695,7 @@ def handle(ctx: Context) -> PhaseResult:
         raw_leads = gather_out.get("leads") or []
         if isinstance(raw_leads, list):
             gather_leads = [x for x in raw_leads if isinstance(x, dict)]
-    default_target = _first_prologue_vertex_id(investigation_md) or ""
+    default_target = first_prologue_vertex_id(investigation_md) or ""
     hypothesis_id_map = _hypothesis_name_to_id_map(investigation_md)
     default_supporting_edges = _prologue_authoritative_edges(investigation_md)
     findings_block = _synthesize_findings_block(

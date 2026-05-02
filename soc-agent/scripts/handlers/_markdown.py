@@ -72,6 +72,20 @@ def iter_companion_dicts(raw: str) -> Iterator[dict[str, Any]]:
         yield dense_doc
 
 
+def first_prologue_vertex_id(raw: str) -> str | None:
+    """First `v-*` id declared in any prologue block of `raw`, or None.
+
+    Default `target` for synthesized lead-pick / findings entries when the
+    handler envelope didn't supply one.
+    """
+    for doc in iter_companion_dicts(raw):
+        vertices = (doc.get("prologue") or {}).get("vertices") or []
+        for v in vertices:
+            if isinstance(v, dict) and isinstance(v.get("id"), str):
+                return v["id"]
+    return None
+
+
 def _heading_level(tag: str) -> int:
     if len(tag) == 2 and tag.startswith("h") and tag[1].isdigit():
         return int(tag[1])

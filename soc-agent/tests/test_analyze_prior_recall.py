@@ -101,7 +101,7 @@ hypothesize:
 
 
 def test_open_contracts_excludes_refuted_hypotheses():
-    body = pr._merge_yaml_blocks(_INV_MD_WITH_CONTRACTS)
+    body = pr._merge_companion_blocks(_INV_MD_WITH_CONTRACTS)
     contracts = pr._open_contracts(body)
     names = [c[0] for c in contracts]
     assert "?monitoring-probe" in names
@@ -109,7 +109,7 @@ def test_open_contracts_excludes_refuted_hypotheses():
 
 
 def test_vertex_where_specs_from_prologue():
-    body = pr._merge_yaml_blocks(_INV_MD_WITH_CONTRACTS)
+    body = pr._merge_companion_blocks(_INV_MD_WITH_CONTRACTS)
     specs = pr._vertex_where_specs(body)
     assert specs == ["endpoint:classification=internal-endpoint"]
 

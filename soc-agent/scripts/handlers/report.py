@@ -789,10 +789,10 @@ def _extract_findings_blocks(investigation_md: str) -> list[dict]:
     """Extract findings lead entries from investigation.md.
 
     Preference order:
-      1. Invlang `findings: [...]` YAML fences (structured form — carries
-         full outcome shape including anchor_consultations,
-         authorization_resolutions, resolutions,
-         attribute_updates).
+      1. Structured `findings: [...]` blocks from any companion fence
+         (```invlang dense surface or legacy ```yaml) — carries full
+         outcome shape including anchor_consultations,
+         authorization_resolutions, resolutions, attribute_updates.
       2. Prose-form `## GATHER (loop N)` sections with `**Lead:**` /
          `**Status:**` bold-prefix lines (what ANALYZE currently produces).
          Yields `{name, status, loop}` entries — enough for lead counts
@@ -800,17 +800,11 @@ def _extract_findings_blocks(investigation_md: str) -> list[dict]:
 
     Returns an empty list if neither form is present.
     """
-    from scripts.handlers._markdown import iter_yaml_fences  # local import
+    from scripts.handlers._markdown import iter_companion_dicts  # local import
 
     merged: list[dict] = []
-    for body in iter_yaml_fences(investigation_md):
-        try:
-            parsed = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        findings = parsed.get("findings")
+    for doc in iter_companion_dicts(investigation_md):
+        findings = doc.get("findings")
         if not isinstance(findings, list):
             continue
         for entry in findings:
