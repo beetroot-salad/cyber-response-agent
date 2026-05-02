@@ -118,7 +118,7 @@ def _trim_gather_section(section: dict) -> str:
     return header + "\n" + body
 
 
-_INVLANG_OPEN_FENCES = {"```yaml", "```yml", "```invlang"}
+_INVLANG_OPEN_FENCES = {"```invlang"}
 
 
 def _section_yaml_fences(section: dict) -> str:
@@ -126,12 +126,11 @@ def _section_yaml_fences(section: dict) -> str:
     concatenated verbatim (fences included). Markdown prose outside fences
     is dropped.
 
-    Accepts both ```` ```yaml ```` (legacy on-disk surface) and
-    ```` ```invlang ```` (dense surface). Used by the analyze mode to strip
-    free-form prose surfaces (e.g. `**Playbook hypotheses:** ?foo, ?bar`
-    enumerations in CONTEXTUALIZE, archetype-catalog prose in PREDICT) that
-    analyze must not grade against. The only grading-valid hypothesis set
-    lives inside a structured fence.
+    Accepts the dense ```` ```invlang ```` surface only. Used by the
+    analyze mode to strip free-form prose surfaces (e.g. `**Playbook
+    hypotheses:** ?foo, ?bar` enumerations in CONTEXTUALIZE, archetype-
+    catalog prose in PREDICT) that analyze must not grade against. The
+    only grading-valid hypothesis set lives inside a structured fence.
 
     Returns an empty string if the section has no structured fences.
     """
@@ -261,12 +260,13 @@ def format_investigation_block(
         return f"<investigation mode=\"predict\">\n{body}\n</investigation>"
 
     if mode == "analyze":
-        # YAML-only: drop every markdown-prose surface that could be mistaken
-        # for a grading target. The canonical hypothesis set lives inside
-        # `hypothesize.hypotheses[]` in the PREDICT YAML fence; archetype
-        # catalogs and playbook-hypothesis enumerations that appear in prose
-        # must not be visible to the analyze subagent. Prior-loop grades
-        # live inside prior `findings[]` YAML fences — those are kept.
+        # Structured-fence-only: drop every markdown-prose surface that
+        # could be mistaken for a grading target. The canonical hypothesis
+        # set lives inside `hypothesize.hypotheses[]` in the PREDICT
+        # ```invlang fence; archetype catalogs and playbook-hypothesis
+        # enumerations that appear in prose must not be visible to the
+        # analyze subagent. Prior-loop grades live inside prior
+        # `findings[]` ```invlang fences — those are kept.
         parts = []
         for s in sections:
             fences = _section_yaml_fences(s)

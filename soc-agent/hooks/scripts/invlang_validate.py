@@ -45,8 +45,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(SOC_AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(SOC_AGENT_ROOT))
@@ -55,7 +53,7 @@ from hooks.scripts.investigation_parse import resolve_proposed_text
 from hooks.scripts.invlang_common import (
     COMPANION_TOP_LEVEL,
     INVLANG_BLOCK_RE,
-    YAML_BLOCK_RE,
+    YAML_BLOCK_RE,  # retained for the cutover error scan only — not parsed
     _merge_blocks,
 )
 from hooks.scripts.invlang_checks_structural import (
@@ -106,7 +104,6 @@ from hooks.scripts.invlang_checks_hypothesis import (
 # Re-exports required by consumers importing from this module path
 # (validate_report_precheck.py, scripts/handlers/*.py, tests/*.py).
 __all__ = [
-    "YAML_BLOCK_RE",
     "COMPANION_TOP_LEVEL",
     "_merge_blocks",
     "_parse_blocks",
@@ -159,13 +156,13 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 def _check_append_only(proposed_text: str, current_text: str) -> list[str]:
-    """Fail if the proposed content has fewer YAML blocks than the on-disk content."""
-    current_count = len(YAML_BLOCK_RE.findall(current_text))
-    proposed_count = len(YAML_BLOCK_RE.findall(proposed_text))
+    """Fail if the proposed content has fewer ```invlang blocks than the on-disk content."""
+    current_count = len(INVLANG_BLOCK_RE.findall(current_text))
+    proposed_count = len(INVLANG_BLOCK_RE.findall(proposed_text))
     if proposed_count < current_count:
         return [
-            f"append-only violation: proposed content has {proposed_count} YAML "
-            f"block(s) but the on-disk file has {current_count} — existing YAML "
+            f"append-only violation: proposed content has {proposed_count} invlang "
+            f"block(s) but the on-disk file has {current_count} — existing invlang "
             f"blocks must not be removed"
         ]
     return []
@@ -383,37 +380,26 @@ def _check_tool_audit_cross_ref_warnings(
 def _parse_blocks(text: str) -> tuple[list[dict[str, Any]], list[str]]:
     """Extract and parse all companion blocks from `text`.
 
-    Three surfaces are walked, in this order:
-      1. Every ```yaml fenced block (legacy + non-cutover phases).
-      2. Every ```invlang fenced block (dense surface; Foundation-onward).
-         Parsed via `scripts/handlers/_dense_parser` and projected to the
-         canonical companion dict shape so `_merge_blocks` and the 29
-         validator rules remain untouched.
-      3. The legacy bare `:T conclude` block (no fence) authored by REPORT
-         pre-Foundation. Synthesized as a `{"conclude": <dict>}` document
-         and appended last so it wins over any conflicting YAML/dense
-         conclude (mirrors the on-disk write order).
+    Strict-cutover surface: only ```invlang fenced blocks are accepted.
+    Each fence is walked via `scripts/handlers/_dense_parser` and
+    projected to the canonical companion dict shape so `_merge_blocks`
+    and the 29 validator rules can run unchanged.
 
-    Returns (parsed_dicts, parse_errors). Non-dict YAML documents,
-    malformed YAML, and malformed dense blocks are surfaced via the error
-    list.
+    Any ```yaml fence in the proposed text is rejected with a clear
+    error — the on-disk surface is dense-only post-cutover.
+
+    Returns (parsed_dicts, parse_errors). Malformed dense blocks and
+    rejected ```yaml fences are surfaced via the error list.
     """
     blocks: list[dict[str, Any]] = []
     errors: list[str] = []
-    for match in YAML_BLOCK_RE.finditer(text):
-        raw = match.group(1)
-        try:
-            doc = yaml.safe_load(raw)
-        except yaml.YAMLError as e:
-            errors.append(f"YAML parse error in block: {e}")
-            continue
-        if isinstance(doc, dict):
-            blocks.append(doc)
 
-    # ```invlang fences — walk via the unified dense parser. Track whether
-    # the dense surface emitted a `conclude` so the legacy bare-conclude
-    # fallback (next step) only fires for pre-Foundation files.
-    dense_emitted_conclude = False
+    if YAML_BLOCK_RE.search(text):
+        errors.append(
+            "```yaml fences are no longer accepted in investigation.md — "
+            "the on-disk surface is dense-only; emit a ```invlang fence instead"
+        )
+
     if INVLANG_BLOCK_RE.search(text):
         try:
             from scripts.handlers._dense_parser import (  # type: ignore
@@ -423,46 +409,10 @@ def _parse_blocks(text: str) -> tuple[list[dict[str, Any]], list[str]]:
             dense_doc = parse_dense_companion(text)
             if dense_doc:
                 blocks.append(dense_doc)
-                if "conclude" in dense_doc:
-                    dense_emitted_conclude = True
         except DenseParseError as e:
             errors.append(f"dense ```invlang block malformed: {e}")
 
-    # Legacy bare `:T conclude` (pre-Foundation; old on-disk files only).
-    # Skipped only if a ```invlang fence already produced a conclude — a
-    # YAML-fence conclude is intentionally still overridden by the legacy
-    # bare block so behavior matches the pre-Foundation last-wins order.
-    if not dense_emitted_conclude:
-        dense_conclude = _parse_dense_conclude(text, errors)
-        if dense_conclude is not None:
-            for b in blocks:
-                b.pop("conclude", None)
-            blocks.append({"conclude": dense_conclude})
-
     return blocks, errors
-
-
-def _parse_dense_conclude(
-    text: str, errors: list[str]
-) -> dict[str, Any] | None:
-    """Parse the REPORT-phase dense `:T conclude` block (if present) into
-    the canonical conclude dict shape.
-
-    Malformed dense blocks append a parse error and return None so the
-    validator surfaces a precise message rather than silently falling back.
-
-    SOC_AGENT_ROOT is on sys.path from this module's top — no local
-    sys.path manipulation needed.
-    """
-    from scripts.handlers._conclude_dense import (  # type: ignore
-        ConcludeOutputError,
-        parse_conclude_dense,
-    )
-    try:
-        return parse_conclude_dense(text)
-    except ConcludeOutputError as e:
-        errors.append(f"dense :T conclude block malformed: {e}")
-        return None
 
 
 def validate_companion(proposed_text: str, current_text: str | None) -> list[str]:
