@@ -912,6 +912,24 @@ def _extract_final_analyze_section(investigation_md: str) -> str:
     return "\n".join(lines[last:end]).rstrip()
 
 
+def _entry_resolutions(entry: dict) -> list:
+    """Return hypothesis-transition resolutions for one findings entry.
+
+    Dense canonical shape (post-Foundation) puts `:T resolutions` rows at
+    `entry['resolutions']`. Legacy YAML fences emitted them nested under
+    `entry['outcome']['resolutions']`. Prefer the top-level list and fall
+    back to the nested one so REPORT keeps composing the trace,
+    Hypothesis Outcomes, and Key Evidence sections correctly across the
+    dual-accept window.
+    """
+    res = entry.get("resolutions")
+    if isinstance(res, list) and res:
+        return res
+    outcome = entry.get("outcome") or {}
+    res = outcome.get("resolutions")
+    return res if isinstance(res, list) else []
+
+
 def _compose_trace_analyze(
     findings: list[dict],
     disposition: str,
@@ -935,13 +953,15 @@ def _compose_trace_analyze(
             summary = str(authz_entries[0]["verdict"])
         elif cons_entries and isinstance(cons_entries[0], dict) and cons_entries[0].get("result"):
             summary = str(cons_entries[0]["result"])
-        elif outcome_obj.get("resolutions"):
-            res = outcome_obj["resolutions"]
-            if isinstance(res, list) and res:
-                first = res[0] if isinstance(res[0], dict) else {}
-                summary = str(first.get("weight") or "resolved")
-            else:
-                summary = "resolved"
+        elif _entry_resolutions(entry):
+            res = _entry_resolutions(entry)
+            first = res[0] if isinstance(res[0], dict) else {}
+            summary = str(
+                first.get("weight")
+                or first.get("to_weight")
+                or first.get("after")
+                or "resolved"
+            )
         elif outcome_obj.get("attribute_updates"):
             summary = "classified"
         else:
@@ -977,16 +997,15 @@ def _compose_hypothesis_outcomes_md(
     # hypothesis_id -> (latest_weight, lead_names_that_resolved_it)
     resolved: dict[str, tuple[str, list[str]]] = {}
     for entry in findings:
-        outcome = entry.get("outcome") or {}
-        resolutions = outcome.get("resolutions")
-        if not isinstance(resolutions, list):
+        resolutions = _entry_resolutions(entry)
+        if not resolutions:
             continue
         lead_name = entry.get("name") or entry.get("id") or "?"
         for r in resolutions:
             if not isinstance(r, dict):
                 continue
             hyp = r.get("hypothesis") or r.get("hypothesis_id")
-            weight = r.get("weight") or r.get("to_weight")
+            weight = r.get("weight") or r.get("to_weight") or r.get("after")
             if not hyp or not weight:
                 continue
             prev = resolved.get(str(hyp))
@@ -1059,10 +1078,9 @@ def _compose_key_evidence_md(findings: list[dict]) -> str:
                     citation = f"attribute update on `{target}`"
             else:
                 citation = "attribute update recorded"
-        elif outcome.get("resolutions"):
-            res = outcome["resolutions"]
-            count = len(res) if isinstance(res, list) else 0
-            citation = f"{count} hypothesis resolution(s) recorded"
+        elif _entry_resolutions(entry):
+            res = _entry_resolutions(entry)
+            citation = f"{len(res)} hypothesis resolution(s) recorded"
         else:
             status = entry.get("status") or "observed"
             citation = f"lead completed (status: `{status}`)"

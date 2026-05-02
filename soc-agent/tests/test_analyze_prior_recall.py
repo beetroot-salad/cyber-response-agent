@@ -108,6 +108,55 @@ def test_open_contracts_excludes_refuted_hypotheses():
     assert "?adversary-credential-stuffing" not in names
 
 
+_INV_MD_MIXED_YAML_THEN_DENSE = """\
+## CONTEXTUALIZE
+
+```yaml
+prologue:
+  vertices:
+    - id: v-1
+      type: endpoint
+      classification: internal-endpoint
+  edges: []
+```
+
+## PREDICT (loop 1)
+
+```yaml
+hypothesize:
+  hypotheses:
+    - id: h-001
+      name: "?monitoring-probe"
+      weight: null
+      authorization_contract:
+        - predicate: "actor is registered in approved-monitoring-sources"
+```
+
+## PREDICT (loop 2)
+
+```invlang
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
+h-001|?monitoring-probe|||||||||||--|
+```
+"""
+
+
+def test_merge_companion_blocks_last_wins_dense_overrides_yaml(monkeypatch):
+    """Regression: a later dense hypothesize block must override an
+    older YAML copy of the same hypothesis id, so a now-refuted
+    hypothesis (weight `--`) is excluded from `_live_hypotheses` and
+    `_open_contracts` rather than retaining the stale YAML record.
+    """
+    body = pr._merge_companion_blocks(_INV_MD_MIXED_YAML_THEN_DENSE)
+    hyps = body["hypothesize"]["hypotheses"]
+    assert len(hyps) == 1
+    assert hyps[0]["id"] == "h-001"
+    # If last-wins worked, weight is `--` and the hypothesis is filtered
+    # out by `_live_hypotheses`, so the contract list is empty.
+    assert pr._live_hypotheses(body) == []
+    assert pr._open_contracts(body) == []
+
+
 def test_vertex_where_specs_from_prologue():
     body = pr._merge_companion_blocks(_INV_MD_WITH_CONTRACTS)
     specs = pr._vertex_where_specs(body)
