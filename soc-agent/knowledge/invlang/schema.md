@@ -2,7 +2,7 @@
 
 Schema v2.15. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes; 29 active rules across numbering 1–36 with seven preserved-as-redirect gaps). Full spec: `docs/investigation-language.md`. On-disk surface grammar: `docs/dense-investigation-format.md`.
 
-**Surface.** `investigation.md` is dense `​```invlang` blocks only — `​```yaml` fences are rejected by the validator. Every block tag below projects to a region of the canonical companion dict via `scripts/handlers/_dense_parser.py`; validators and corpus queries operate on the dict.
+**Surface.** `investigation.md` is `​```invlang` blocks only — `​```yaml` fences are rejected by the validator. Every block tag below projects to a region of the canonical companion dict via `scripts/handlers/_dense_parser.py`; validators and corpus queries operate on the dict.
 
 Three orthogonal resolution axes:
 
@@ -521,7 +521,7 @@ Use `unclassified-{type}` when unknown; `ambiguous-{a}-or-{b}` when genuinely in
 
 ## Examples
 
-A complete worked investigation showing the dense surface end-to-end. The case: a failed SSH brute-force from an external IP (`203.0.113.47`) against an internal web server, where `?opportunistic-scanner` is the sole hypothesis. The source-classification lead refutes the scanner reading (the IP authenticated successfully against the same target six hours prior), grading `h-001` to `--`. CONCLUDE lands `benign` with `adversarial-refuted` termination — no surviving hypothesis, no contract closure required.
+A complete worked investigation showing the surface end-to-end. The case: a failed SSH brute-force from an external IP (`203.0.113.47`) against an internal web server, where `?opportunistic-scanner` is the sole hypothesis. The source-classification lead refutes the scanner reading (the IP authenticated successfully against the same target six hours prior), grading `h-001` to `--`. CONCLUDE lands `benign` with `adversarial-refuted` termination — no surviving hypothesis, no contract closure required.
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs]
@@ -565,7 +565,7 @@ Notes on this run:
 - The trace line `h-001  null → --    [l-001 r1 strong ⟂ e-001 :: …]` is the proof-trace canonical form: `<hyp> <before> → <after>    [<lead> <pred/refut-ids> <severity> ⟂ <supp-edges> :: <annotation>]`. `r1` is cited (rule #5 requires `--` rows to cite at least one refutation belonging to the target hypothesis); `e-001` is `siem-event` authority (rule #4 admits `++`/`--` only against `siem-event` / `runtime-audit` / `authoritative-source`).
 - `surviving: none` is correct here — `h-001` reached `--` so it is not a survivor. Rule #24 (hypothesis persistence) accepts this because every declared hypothesis was either graded `--` or listed.
 - No `authorization_contract` was declared (`?opportunistic-scanner` is an adversarial-mechanism hypothesis — the classification carries the claim per §Hypothesis), so rule #21 / rule #26 don't gate this disposition.
-- Companion examples covering the contract-resolution path (`:R authz` + an integrity peer), lead-level branch plans (`:L l-{id}.lead_preds`), and impact predictions (`:L l-{id}.impact_preds` + `:R impact`) live in `docs/dense-investigation-format.md`. The contract-resolution dense surface is implemented but rule-#21 closure against a dense-only `:R authz` row currently has a parser↔validator gap (see `tasks/dense-r-authz-parser-validator-gap.md`); production runs continue to use the YAML-equivalent inline-on-edge shape until that gap closes.
+- Companion examples covering the contract-resolution path (`:R authz` + an integrity peer), lead-level branch plans (`:L l-{id}.lead_preds`), and impact predictions (`:L l-{id}.impact_preds` + `:R impact`) live in `docs/dense-investigation-format.md`. Note: rule-#21 closure against a `:R authz` row currently has a parser↔validator gap (see `tasks/dense-r-authz-parser-validator-gap.md`); production runs continue to use the inline-on-edge `authorization_resolutions` shape until that gap closes.
 
 ---
 

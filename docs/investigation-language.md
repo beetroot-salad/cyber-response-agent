@@ -2,7 +2,7 @@
 
 **Status:** Spec v2.15. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
-**On-disk surface:** dense `​```invlang` fenced blocks. Strict cutover: `​```yaml` fences in `investigation.md` are rejected by the validator. Block-tag grammar (`:V` / `:E` / `:H` / `:L` / `:R` / `:T` / `:G`), row shapes, and the dense-to-canonical-dict projection live in `docs/dense-investigation-format.md`. The canonical companion dict — what the validator and the corpus queries operate on — is unchanged from prior versions; only the on-disk *surface* flipped. The YAML examples throughout this spec depict the canonical schema shape; both surfaces project to the same dict via `soc-agent/scripts/handlers/_dense_parser.py`.
+**On-disk surface:** `​```invlang` fenced blocks. `​```yaml` fences in `investigation.md` are rejected by the validator. Block-tag grammar (`:V` / `:E` / `:H` / `:L` / `:R` / `:T` / `:G`), row shapes, and the surface-to-canonical-dict projection live in `docs/dense-investigation-format.md`. The canonical companion dict — what the validator and the corpus queries operate on — is what every block projects to via `soc-agent/scripts/handlers/_dense_parser.py`.
 
 **v2.16 delta:** rule #36 simplified — `disposition: true_positive` now requires only `++` on a surviving hypothesis (weight-only). The v2.14 adversarial-classification token check is removed; the lexical token list desynced from playbook-canonical fork names (e.g. `?credentials-used-outside-registered-actor`) and produced false rejections of legitimately-graded `true_positive` routings. The affirmative-evidence signal is captured by the `++` requirement; the "wrong-named survivor" failure mode is caught by Tier-2 judges and rule #21. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Parser-side X5 (`scripts/handlers/_output_parser.py:_validate_cross_block_invariants`) similarly weight-only.
 
@@ -407,9 +407,9 @@ accumulates; it does not revise.
 
 ## Schema
 
-The on-disk surface is the dense `​```invlang` form. The **canonical companion dict** the validator and corpus queries operate on is what every dense block projects to via `soc-agent/scripts/handlers/_dense_parser.py`. This section captures the schema's design intent and invariants; the **field-level grammar** (block tags, column shapes, sub-cell packing, cell enums) lives in two places that should be read together:
+The on-disk surface is `​```invlang` blocks. The **canonical companion dict** the validator and corpus queries operate on is what every block projects to via `soc-agent/scripts/handlers/_dense_parser.py`. This section captures the schema's design intent and invariants; the **field-level grammar** (block tags, column shapes, sub-cell packing, cell enums) lives in two places that should be read together:
 
-- `soc-agent/knowledge/invlang/schema.md` — agent runtime reference (loaded into the investigate prompt). Every section below has a corresponding §section in schema.md describing the dense surface.
+- `soc-agent/knowledge/invlang/schema.md` — agent runtime reference (loaded into the investigate prompt). Every section below has a corresponding §section in schema.md.
 - `docs/dense-investigation-format.md` — surface design doc with full block-tag grammar and the schema-mapping table.
 
 ### Top-level structure

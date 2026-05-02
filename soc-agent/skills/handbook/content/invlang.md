@@ -1,19 +1,19 @@
 # Investigation Language (invlang)
 
-The structured companion schema the agent writes alongside its narrative during an investigation. Each dense `​```invlang` block co-located in `investigation.md` encodes the phase's reasoning as a typed graph — vertices, edges, hypotheses, leads, resolutions — that a PreToolUse hook validates on every write.
+The structured companion schema the agent writes alongside its narrative during an investigation. Each `​```invlang` block co-located in `investigation.md` encodes the phase's reasoning as a typed graph — vertices, edges, hypotheses, leads, resolutions — that a PreToolUse hook validates on every write.
 
 This file is a handbook-level orientation. The **authoritative schema reference** is `knowledge/invlang/schema.md` (resolved inline into the investigate skill at load time via a `!command`). The **on-disk surface grammar** (block tags `:V` / `:E` / `:H` / `:L` / `:R` / `:T` / `:G`, row shapes, sub-cell packing) lives in `docs/dense-investigation-format.md`. Read those for field-level detail; read this page to understand what role invlang plays in the plugin and why it exists.
 
 ### Where the field grammar lives
 
-The canonical artifact the validator and corpus queries operate on is a Python dict — vertices, edges, hypotheses, leads, conclude. The on-disk surface that produces it is dense `​```invlang` fenced blocks (strict cutover; `​```yaml` fences in `investigation.md` are rejected; parser: `scripts/handlers/_dense_parser.py`).
+The canonical artifact the validator and corpus queries operate on is a Python dict — vertices, edges, hypotheses, leads, conclude. The on-disk surface that produces it is `​```invlang` fenced blocks; `​```yaml` fences in `investigation.md` are rejected. Parser: `scripts/handlers/_dense_parser.py`.
 
-Field grammar lives in two places, both dense-native:
+Field grammar lives in two places:
 
 - `soc-agent/knowledge/invlang/schema.md` — agent runtime reference (resolved inline into the investigate prompt). Per-section column shapes, cell enums, sub-cell grammar, validator-rule cross-refs.
-- `docs/dense-investigation-format.md` — surface design doc with the full block-tag grammar and the dense-to-canonical-dict mapping table.
+- `docs/dense-investigation-format.md` — surface design doc with the full block-tag grammar and the surface-to-canonical-dict mapping table.
 
-Validator rules #1–#36 are written against the canonical dict; legacy archived runs may carry the old YAML shape, but every new write goes through the dense parser.
+Validator rules #1–#36 are written against the canonical dict.
 
 ## Why invlang
 
@@ -49,7 +49,7 @@ Field vocabulary (vertex types, relation catalog, authority kinds, termination c
 
 ## Validation — `invlang_validate.py`
 
-Registered as a **PreToolUse** hook on `Write|Edit` to `investigation.md` in `plugin.json`. Fires on every proposed write, extracts the dense `​```invlang` fenced blocks (rejecting any `​```yaml` fence outright — strict cutover), projects them to the canonical companion dict via `scripts/handlers/_dense_parser.py`, and runs the structural checks against the dict. On failure it prints errors to stderr and exits 2 — the write is blocked before it lands on disk, `state.json` never advances, and the agent's next action is to rewrite the block.
+Registered as a **PreToolUse** hook on `Write|Edit` to `investigation.md` in `plugin.json`. Fires on every proposed write, extracts the `​```invlang` fenced blocks (rejecting any `​```yaml` fence outright), projects them to the canonical companion dict via `scripts/handlers/_dense_parser.py`, and runs the structural checks against the dict. On failure it prints errors to stderr and exits 2 — the write is blocked before it lands on disk, `state.json` never advances, and the agent's next action is to rewrite the block.
 
 ### Error checks (block the write)
 
@@ -82,20 +82,20 @@ Not a validator check but a modeling rule: a resolution grounded *solely* by `au
 
 ## How invlang relates to the report
 
-At REPORT the agent writes the dense `:T conclude` block (canonical-dict block name `conclude` preserved for corpus backward-compat) and then `report.md`. The report's frontmatter enums (`disposition`, `confidence`, `status`, trust-anchor `result`) mirror the invlang vocabulary — the mapping happens at the invlang→report boundary so the richer companion vocabulary (e.g., `partial|no-data` anchor results) collapses to the report's narrower enum (`unavailable`) without lossy downgrading of the investigation record itself.
+At REPORT the agent writes the `:T conclude` block (canonical-dict block name `conclude` preserved for corpus backward-compat) and then `report.md`. The report's frontmatter enums (`disposition`, `confidence`, `status`, trust-anchor `result`) mirror the invlang vocabulary — the mapping happens at the invlang→report boundary so the richer companion vocabulary (e.g., `partial|no-data` anchor results) collapses to the report's narrower enum (`unavailable`) without lossy downgrading of the investigation record itself.
 
 The companion `matched_archetype` names the archetype directory under `knowledge/signatures/{sig}/archetypes/{name}/`, matching the report's `matched_archetype` frontmatter field. Two-leg resolution (see `content/validation.md#tier-1-checks`) — shape via archetype, grounding via anchors or precedent — is enforced on the report side; invlang's job is to make sure the supporting record inside `investigation.md` is internally consistent.
 
 **Three orthogonal axes (v2.11 onwards).** A disposition is the join of three independent verdicts: **authorization** (anchor-backed, contract-on-hypothesis, resolution-inline-on-edge), **integrity** (peer-hypothesis discipline — `?adversary-controlled-*` siblings on acting-entity sources, evidential not anchor-backed), and **impact** (threshold-gated — leads declare `impact_predictions[]`, ANALYZE grades them into `impact_resolutions[]`, REPORT rolls up `conclude.impact_verdict` and `conclude.impact_severity`). Authorized-but-impactful (e.g., authorized bulk read at 3σ above baseline) resolves on the impact axis, not by softening authorization. See `docs/investigation-language.md` §Authorization / §Integrity / §Impact.
 
-**Handler-authored synthesis (v2.12 onwards).** Subagents emit dense-block trailers (`:T resolutions`, `:R *`, `:A routing`, etc. — see `docs/dense-investigation-format.md` §ANALYZE trailer dense form); the orchestrator/skill handlers (`scripts/handlers/gather.py`, `scripts/handlers/analyze.py`) synthesize the canonical `findings[]` entries and merge them via the validator. Raw SIEM/anchor payloads are saved off-companion to `runs/{run_id}/raw_details/loop-{N}/{lead-id}.yaml` by the `save_raw_tool_output.py` PostToolUse hook; the analyze handler preloads those per-loop. Keeps companion blocks trim while preserving full evidence under the run.
+**Handler-authored synthesis (v2.12 onwards).** Subagents emit trailer blocks (`:T resolutions`, `:R *`, `:A routing`, etc. — see `docs/dense-investigation-format.md` §ANALYZE trailer); the orchestrator/skill handlers (`scripts/handlers/gather.py`, `scripts/handlers/analyze.py`) synthesize the canonical `findings[]` entries and merge them via the validator. Raw SIEM/anchor payloads are saved off-companion to `runs/{run_id}/raw_details/loop-{N}/{lead-id}.yaml` by the `save_raw_tool_output.py` PostToolUse hook; the analyze handler preloads those per-loop. Keeps companion blocks trim while preserving full evidence under the run.
 
 ## Relationship to other validation
 
 invlang validation complements, does not replace, the other REPORT-path checks:
 
 - **Layer 0 `validate_report_precheck.py`** — fires two parallel Haiku judges (log integrity + archetype/grounding) when the `## REPORT` write lands the `:T conclude` block, blocking the write on any FLAG.
-- **`invlang_validate.py`** — ensures the dense companion blocks are structurally consistent at every investigation.md write.
+- **`invlang_validate.py`** — ensures the companion blocks are structurally consistent at every investigation.md write.
 - **Tier 1 `validate_report.py`** — ensures the `report.md` artifact is structurally legal (frontmatter, archetype shape, grounding, temporal re-confirmation).
 - **Tier 2 semantic judge** — slimmed to validating the report↔log delta plus precedent transfer.
 

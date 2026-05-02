@@ -77,7 +77,7 @@ All hooks live under `soc-agent/hooks/scripts/` and are registered in `soc-agent
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `infer_state_pre.py` | Pre-write state transition check |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `validate_report_precheck.py` | Pre-REPORT self-contradiction guards (parallel Haiku judges) |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `invlang_validate.py` | Pre-write schema validation (29 active rules across numbering 1–36; seven preserved-as-redirect gaps from the v2.15 consolidation) — blocks writes on schema errors |
-| PostToolUse | `Task\|Agent` | `extract_subagent_yaml.py` | Extract subagent dense-block trailer into the investigation record (script name retained from the YAML era; trailers are dense `:T` / `:R` / `:H` blocks today) |
+| PostToolUse | `Task\|Agent` | `extract_subagent_yaml.py` | Extract subagent trailer (`:T` / `:R` / `:H` blocks) into the investigation record (script name retained from the YAML era) |
 | PostToolUse | `Write\|Edit\|Bash` | `infer_state.py` | Infer state transitions from `## PHASE` headers |
 | PostToolUse | `Write\|Edit` | `validate_report.py` | Two-tier report validation (Tier 1 structural + Tier 2 Haiku judge) |
 | PostToolUse | `Bash\|mcp__.*` / `Read(*/alert.json)` | `tag_tool_results.py` | Tag tool results with salted delimiters for injection safety |
@@ -244,7 +244,7 @@ pytest soc-agent/tests/test_judge_report.py -m llm          # Tier 2 judge
 
 ## Investigation Flow Language
 
-**Full spec:** `docs/investigation-language.md` (v2.15, implemented; rule consolidation 36→29 active rules — see v2.15 delta. Rule #36 affirmative true_positive disposition added in v2.14 is unaffected.). **On-disk surface:** dense `​```invlang` fenced blocks — see `docs/dense-investigation-format.md` for block-tag grammar and the dense-to-canonical-dict mapping. Strict cutover: `​```yaml` fences in `investigation.md` are rejected by the validator. **Agent runtime reference** (loaded inline into the investigate prompt): `soc-agent/knowledge/invlang/schema.md` — dense-native field grammar per section. Validators and corpus queries operate on the canonical companion dict the dense parser projects to, so they are surface-agnostic. Query CLI: invoke via `bash soc-agent/scripts/invlang/run.sh` (see the canonical invocation note — `python -m invlang` and direct `cli.py` calls fail). Validator runs as a PreToolUse hook on `investigation.md` writes (`hooks/scripts/invlang_validate.py`).
+**Full spec:** `docs/investigation-language.md` (v2.15, implemented; rule consolidation 36→29 active rules — see v2.15 delta. Rule #36 affirmative true_positive disposition added in v2.14 is unaffected.). **On-disk surface:** `​```invlang` fenced blocks — see `docs/dense-investigation-format.md` for the block-tag grammar and the surface-to-canonical-dict mapping. `​```yaml` fences in `investigation.md` are rejected by the validator. **Agent runtime reference** (loaded inline into the investigate prompt): `soc-agent/knowledge/invlang/schema.md` — field grammar per section. Validators and corpus queries operate on the canonical companion dict, so they are surface-agnostic. Query CLI: invoke via `bash soc-agent/scripts/invlang/run.sh` (see the canonical invocation note — `python -m invlang` and direct `cli.py` calls fail). Validator runs as a PreToolUse hook on `investigation.md` writes (`hooks/scripts/invlang_validate.py`).
 
 ### Purpose
 
@@ -264,7 +264,7 @@ Inline vocabulary used in `investigation.md`:
 
 ### Companion structure (top-level)
 
-The on-disk surface is dense `​```invlang` blocks; the canonical companion dict the validator and corpus queries see has this shape:
+The on-disk surface is `​```invlang` blocks; the canonical companion dict the validator and corpus queries see has this shape:
 
 ```
 prologue        — CONTEXTUALIZE: vertices + edges derived from the alert
@@ -278,7 +278,7 @@ conclude        — REPORT: termination, disposition, confidence, matched_archet
                   (:T conclude + :T conclude.{surviving,deferred_*,ceiling_test} sub-tables)
 ```
 
-Full block-tag grammar and dense-to-canonical-dict mapping: `docs/dense-investigation-format.md` §Schema mapping. Parser: `soc-agent/scripts/handlers/_dense_parser.py`.
+Full block-tag grammar and the surface-to-canonical-dict mapping: `docs/dense-investigation-format.md` §Schema mapping. Parser: `soc-agent/scripts/handlers/_dense_parser.py`.
 
 The key invariants enforced by the validator (29 active rules across numbering 1–36; seven preserved-as-redirect gaps from the v2.15 consolidation — see spec §Validator rules; rule #23 enforces sibling-hypothesis classification uniqueness so proposed forks are structurally distinct):
 - **Edge authority** — `++`/`--` resolutions must cite at least one `siem-event`, `runtime-audit`, or `authoritative-source` edge.
@@ -307,7 +307,7 @@ The key invariants enforced by the validator (29 active rules across numbering 1
 - JSONL investigation outcomes in `runs/audit.jsonl`
 - JSONL tool call audit trail in `runs/tool_audit.jsonl` (state-changing tools)
 - JSONL tool call trace in `runs/tool_trace.jsonl` (read-only tools, for debugging)
-- Subagent dense-block trailers extracted into the companion via `extract_subagent_yaml.py` PostToolUse hook (name retained; the trailer surface is now dense `:T` / `:R` / `:H` blocks per phase)
+- Subagent trailers (`:T` / `:R` / `:H` blocks) extracted into the companion via `extract_subagent_yaml.py` PostToolUse hook (script name retained from the YAML era)
 - Session → run dir mapping is stable under concurrent runs (use `run_context.resolve_run_dir`, not mtime fallback)
 
 ## Adding a New Signature
