@@ -1673,10 +1673,15 @@ def _any_hypotheses_declared(ctx: Context) -> bool:
             hyp = parsed.get("hypothesize")
             if isinstance(hyp, dict) and hyp.get("hypotheses"):
                 return True
-        # Dense invlang shape: a `:H hypotheses` block with at least one
-        # data row (an `h-*` line) signals declared hypotheses.
-        if re.search(r"^:H\s+hypotheses\b", body, re.MULTILINE):
-            after = body.split(":H hypotheses", 1)[1]
+        # Dense invlang shape: a `:H hypothesize.hypotheses` block (the
+        # on-disk projection name; subagent stdout uses bare `:H hypotheses`
+        # but the persister normalizes it) with at least one `h-*` data row
+        # signals declared hypotheses.
+        m_h = re.search(
+            r"^:H\s+(?:hypothesize\.)?hypotheses\b", body, re.MULTILINE,
+        )
+        if m_h:
+            after = body[m_h.end():]
             for line in after.splitlines()[1:]:
                 stripped = line.strip()
                 if not stripped or stripped.startswith(":"):

@@ -1111,8 +1111,8 @@ class TestHandleOutput:
             ## PREDICT (loop 1)
 
             ```invlang
-            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
-            h-001|?monitoring-system-is-the-actor|v-001|initiated_by|identity|sa||"none"|null|active
+            :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
+            h-001|?monitoring-system-is-the-actor|v-001|initiated_by|identity|sa|||||||"none"|null|active
             ```
         """).strip() + "\n")
         ctx = Context(
@@ -1130,7 +1130,7 @@ class TestHandleOutput:
             ## CONTEXTUALIZE
 
             ```invlang
-            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
             ```
         """).strip() + "\n")
         ctx = Context(
