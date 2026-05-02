@@ -19,19 +19,17 @@ Foundation for the dense on-disk format landed via #160. Per-handler flips landi
 
 ## Status — pending
 
-- [ ] **Validator strict cutover** — `invlang_validate.py` should reject `` ```yaml `` fences in `investigation.md` once we are ready to stop supporting mixed live files. Concretely:
-  - drop `YAML_BLOCK_RE` handling in `invlang_validate.py:_parse_blocks()` (`~:403–411`)
-  - drop the legacy bare `:T conclude` fallback in `invlang_validate.py` (`~:431–440`)
-  - update append-only counting in `_check_append_only()` to stop reasoning in terms of YAML-block counts
-- [x] **Live read-path cleanup** (#170) — gather/report/_prior_recall switched to `iter_companion_dicts()`. Shared helper `first_prologue_vertex_id()` extracted to `_markdown.py` and imported by both `gather.py` and `analyze.py` (closes the duplicated-prologue-readers cleanup item too). `_PROLOGUE_FENCE_RE` and the local `_YAML_BLOCK_RE` in `_prior_recall` are gone. Validator still dual-accepts.
-- [ ] **Legacy dual-read cleanup in prompt/render helpers** — once the validator cutover lands, trim the transitional YAML-accept branches in `investigation_views.py`, `screen.py`, and related comments/docstrings that still describe mixed live surfaces.
+- [x] **Validator strict cutover** (#170, commit `9f5d543`) — `invlang_validate._parse_blocks()` now rejects `` ```yaml `` fences in `investigation.md` with a precise error and parses only `` ```invlang ``. Legacy bare `:T conclude` fallback removed; `_parse_dense_conclude` helper deleted. `_check_append_only()` counts `INVLANG_BLOCK_RE` matches. `YAML_BLOCK_RE` dropped from `__all__` (still imported internally for the cutover-rejection scan).
+- [x] **Live read-path cleanup** (#170) — gather/report/_prior_recall switched to `iter_companion_dicts()`. Shared helper `first_prologue_vertex_id()` extracted to `_markdown.py` and imported by both `gather.py` and `analyze.py` (closes the duplicated-prologue-readers cleanup item too). `_PROLOGUE_FENCE_RE` and the local `_YAML_BLOCK_RE` in `_prior_recall` are gone.
+- [x] **Legacy dual-read cleanup in prompt/render helpers** (#170, commit `9f5d543`) — `investigation_views._INVLANG_OPEN_FENCES` narrowed to `{"```invlang"}`; analyze-mode prose-trim now keeps only structured dense fences. `screen._extract_prologue_yaml` docstring updated to dense-only. Screen subagent prompt-side fence (off-disk) intentionally left as `` ```yaml `` — flipping it requires a coordinated subagent prompt edit and is tracked separately below.
+- [ ] **Test suite update for validator cutover** — `tests/test_invlang_*.py` use handcrafted `` ```yaml `` fixtures that the new validator rejects. Convert the shared `VALID_*_YAML` fixtures (and the inline `_run_hook` integration tests) to dense `` ```invlang `` form so the rule-coverage stays intact.
 - [ ] **Acceptance runs** — one end-to-end live eval per signature (5710 scenario A or B, 100001, 100110) producing a fully-dense `investigation.md` and clean `report.md` after the validator cutover.
 
 ## Cleanup We Should Do In The Cutover PR
 
 - [x] **Consolidate duplicated prologue readers** (#170) — both handlers now import `first_prologue_vertex_id` from `_markdown.py`.
 - [ ] **Consolidate companion merging/walking** — we now have overlapping logic in `_markdown.iter_companion_dicts()`, `_prior_recall._merge_yaml_blocks()`, `report.py:_extract_findings_blocks()`, and `invlang.corpus._merge_md_blocks()`. During cutover, it is worth centralizing the live-`investigation.md` read path around one shared dense-aware helper rather than keeping several partial readers in sync.
-- [ ] **Screen prompt-side fence** (`screen.py:134`) — currently passes a re-serialized YAML prologue to the screen subagent inside a `` ```yaml `` fence. Not on-disk, so not gating. If we touch screen prompt assembly during cutover, pass the dense body through and label it `` ```invlang `` instead.
+- [ ] **Screen prompt-side fence** (`screen.py:134`) — still passes a re-serialized YAML prologue to the screen subagent inside a `` ```yaml `` fence (off-disk, non-gating). Cutover commit `9f5d543` left it untouched because the screen subagent prompt template still expects yaml-shape input; flipping it requires a coordinated subagent prompt edit.
 
 Scope discipline: yes to consolidating methods during the cutover, but keep it narrowly tied to live `investigation.md` parsing / helper dedup. Avoid bundling unrelated format design changes or broad handler refactors into the strict-cutover PR.
 
