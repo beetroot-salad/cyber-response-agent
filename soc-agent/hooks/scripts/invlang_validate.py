@@ -536,7 +536,7 @@ def main() -> None:
         for err in errors:
             print(f"  - {err}", file=sys.stderr)
         print(
-            "Next action: fix the YAML block(s) and retry the write.",
+            "Next action: fix the ```invlang block(s) and retry the write.",
             file=sys.stderr,
         )
         sys.exit(2)

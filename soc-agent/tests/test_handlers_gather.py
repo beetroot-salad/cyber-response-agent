@@ -56,11 +56,12 @@ def make_ctx(
 
             some existing content
 
-            ```yaml
-            hypothesize:
-              hypotheses:
-                - id: h-001
-                  name: "?default-test-hypothesis"
+            ```invlang
+            :V prologue.vertices [id|type|class|ident|attrs]
+            v-001|endpoint|target-endpoint|target-endpoint|
+
+            :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
+            h-001|?default-test-hypothesis|v-001|||||p1:proposed_parent:"x"|||||null|
             ```
         """).strip() + "\n"
     (run_dir / "investigation.md").write_text(existing_investigation)
@@ -1149,9 +1150,9 @@ class TestHandleOutput:
             selected_lead="authentication-history",
             existing_investigation=textwrap.dedent("""
                 ## CONTEXTUALIZE
-                ```yaml
-                hypothesize:
-                  hypotheses: []
+                ```invlang
+                :V prologue.vertices [id|type|class|ident|attrs]
+                v-001|endpoint|target|host|
                 ```
             """).strip() + "\n",
         )

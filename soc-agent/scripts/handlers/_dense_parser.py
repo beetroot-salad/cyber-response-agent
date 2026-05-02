@@ -760,6 +760,10 @@ def _parse_resolution_line(row: str) -> dict[str, Any]:
     pred_tokens = head_tokens[1:-1]
     supp_text = supp.strip()
     record: dict[str, Any] = {
+        # Spec-canonical field name is `hypothesis` (the yaml surface used
+        # this; validator/walkers index on it). Keep `hypothesis_id` as an
+        # alias so consumers reading either name continue to work.
+        "hypothesis": m.group("hyp"),
         "hypothesis_id": m.group("hyp"),
         "before": m.group("before"),
         "after": m.group("after"),

@@ -135,21 +135,70 @@ conclude:
   summary: "SSH brute force from external scanner; no successful auth"
 """
 
+# ---------------------------------------------------------------------------
+# Dense ```invlang fixtures — strict-cutover form (post-#170)
+# ---------------------------------------------------------------------------
+# Mirror the YAML fixtures above semantically so end-to-end / hook tests
+# exercise the same validator paths after the validator stopped accepting
+# ```yaml fences. The YAML strings are still consumed by sibling test
+# modules via `_parse_yaml_block` (dict source, not a markdown surface).
+
+VALID_PROLOGUE_INVLANG = """\
+:V prologue.vertices [id|type|class|ident|attrs]
+v-001|endpoint|external-unknown|203.0.113.47|
+v-002|endpoint|internal-server|web-server-01|
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs]
+e-001|attempted_auth|v-001|v-002||siem-event:wazuh-indexer|
+"""
+
+VALID_PREDICT_INVLANG = """\
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
+h-001|?opportunistic-scanner|v-001|initiated_by|identity|automated-scanner||p1:proposed_parent:"source IP appears in threat-intel scanner list"||r1[p1]:"source IP authenticated previously in last 90d"|||null|
+"""
+
+VALID_LEAD_INVLANG = """\
+:L findings [id|name|loop|target|mode|system|template|query|window|status]
+l-001|source-classification|1|v-001|graded|wazuh-indexer|source-ip-lookup|src_ip:203.0.113.47|30d|
+
+:E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs]
+e-002|classified_as|v-001|v-002||siem-event:wazuh-indexer|
+
+:R attr_updates [resolved_by|target|key|value]
+l-001|v-001|classification|external-unknown
+
+:T resolutions
+h-001  null → --    [l-001 r1 strong ⟂ e-001 :: source IP authenticated from web-server-01 six hours prior — refutation r1 matched]
+"""
+
+VALID_CONCLUDE_INVLANG = """\
+:T conclude
+termination.category   adversarial-refuted
+termination.rationale  "All adversarial hypotheses refuted with -- evidence"
+disposition            benign
+impact_verdict         none
+impact_severity        null
+confidence             high
+matched_archetype      external-bruteforce
+summary                "SSH brute force from external scanner; no successful auth"
+
+:T conclude.surviving [hyp_id|final_weight]
+none
+"""
+
 FULL_COMPANION_MD = f"""## CONTEXTUALIZE
 
 **Alert:** TEST-001
 
-```yaml
-{VALID_PROLOGUE_YAML}
-```
+```invlang
+{VALID_PROLOGUE_INVLANG}```
 
 ## PREDICT (loop 1)
 
 **Active hypotheses:** ?opportunistic-scanner
 
-```yaml
-{VALID_PREDICT_YAML}
-```
+```invlang
+{VALID_PREDICT_INVLANG}```
 
 ## GATHER (loop 1)
 
@@ -159,17 +208,15 @@ FULL_COMPANION_MD = f"""## CONTEXTUALIZE
 
 **Assessment:** h-001 moves to +
 
-```yaml
-{VALID_LEAD_YAML}
-```
+```invlang
+{VALID_LEAD_INVLANG}```
 
 ## REPORT
 
 **Verdict:** resolved
 
-```yaml
-{VALID_CONCLUDE_YAML}
-```
+```invlang
+{VALID_CONCLUDE_INVLANG}```
 """
 
 
@@ -376,27 +423,13 @@ class TestCheckRouteCompliance:
 class TestCollectWarnings:
     def test_companion_with_route_warning(self):
         text = (
-            "```yaml\n"
-            "findings:\n"
-            "  - id: l-001\n"
-            "    loop: 1\n"
-            "    name: first\n"
-            "    target: v-001\n"
-            "    query_details: {}\n"
-            "    outcome: {}\n"
-            "    predictions:\n"
-            "      - id: lp1\n"
-            "        if: x\n"
-            "        read_as: y\n"
-            "        advance_to: expected-next\n"
-            "    resolutions: []\n"
-            "  - id: l-002\n"
-            "    loop: 1\n"
-            "    name: actual-next\n"
-            "    target: v-001\n"
-            "    query_details: {}\n"
-            "    outcome: {}\n"
-            "    resolutions: []\n"
+            "```invlang\n"
+            ":L findings [id|name|loop|target|mode]\n"
+            "l-001|first|1|v-001|graded\n"
+            "l-002|actual-next|1|v-001|graded\n"
+            "\n"
+            ":L l-001.lead_preds [id|if|read_as|advance_to]\n"
+            "lp1|x|y|expected-next\n"
             "```\n"
         )
         warnings = collect_warnings(text)
@@ -412,15 +445,15 @@ class TestCollectWarnings:
 class TestCheckAppendOnly:
     def test_adding_block_passes(self):
         current = "## CONTEXTUALIZE\n\nsome prose\n"
-        proposed = current + "\n```yaml\nprologue:\n  vertices: []\n  edges: []\n```\n"
+        proposed = current + "\n```invlang\n:V prologue.vertices [id|type|class|ident|attrs]\nv-001|endpoint|external|1.2.3.4|\n```\n"
         assert _check_append_only(proposed, current) == []
 
     def test_same_count_passes(self):
-        block = "\n```yaml\nprologue:\n  vertices: []\n  edges: []\n```\n"
+        block = "\n```invlang\n:V prologue.vertices [id|type|class|ident|attrs]\nv-001|endpoint|external|1.2.3.4|\n```\n"
         assert _check_append_only(block, block) == []
 
     def test_removing_block_fails(self):
-        block = "\n```yaml\nprologue:\n  vertices: []\n  edges: []\n```\n"
+        block = "\n```invlang\n:V prologue.vertices [id|type|class|ident|attrs]\nv-001|endpoint|external|1.2.3.4|\n```\n"
         current = block + block
         proposed = block  # one block removed
         errors = _check_append_only(proposed, current)
@@ -442,10 +475,20 @@ class TestValidateCompanion:
         errs = validate_companion(FULL_COMPANION_MD, None)
         assert errs == [], errs
 
-    def test_yaml_parse_error_caught(self):
-        text = "## CONTEXTUALIZE\n\n```yaml\n: invalid: yaml: [\n```\n"
+    def test_yaml_fence_rejected_post_cutover(self):
+        """Strict cutover (#170): any ```yaml fence in investigation.md is
+        rejected with a clear error so the writer immediately knows to
+        switch to ```invlang. Replaces the prior `test_yaml_parse_error_caught`
+        — yaml content is no longer parsed at all.
+        """
+        text = "## CONTEXTUALIZE\n\n```yaml\nprologue:\n  vertices: []\n```\n"
         errors = validate_companion(text, None)
-        assert any("parse error" in e.lower() for e in errors)
+        assert any("```yaml" in e and "no longer accepted" in e for e in errors), errors
+
+    def test_invlang_fence_parse_error_caught(self):
+        text = "## CONTEXTUALIZE\n\n```invlang\n:Q bogus tag\n```\n"
+        errors = validate_companion(text, None)
+        assert any("malformed" in e.lower() or "unknown" in e.lower() for e in errors), errors
 
     def test_trap_shape_rejected_at_validate_time(self):
         """Mirrors the documented production trap (run #44 / 20260428-060839):
@@ -454,63 +497,33 @@ class TestValidateCompanion:
         """
         text = (
             "## CONTEXTUALIZE\n\n"
-            "```yaml\n"
-            "prologue:\n"
-            "  vertices:\n"
-            "    - id: v-001\n"
-            "      type: process\n"
-            "      classification: container-runtime\n"
-            "      identifier: \"runc\"\n"
-            "  edges:\n"
-            "    - id: e-001\n"
-            "      relation: spawned\n"
-            "      source_vertex: v-001\n"
-            "      target_vertex: v-001\n"
-            "      authority: {kind: runtime-audit, source: Falco}\n"
+            "```invlang\n"
+            ":V prologue.vertices [id|type|class|ident|attrs]\n"
+            "v-001|process|container-runtime|runc|\n"
+            "\n"
+            ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs]\n"
+            "e-001|spawned|v-001|v-001||runtime-audit:Falco|\n"
             "```\n\n"
             "## PREDICT (loop 1)\n\n"
-            "```yaml\n"
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?operator-runtime-exec\"\n"
-            "      attached_to_vertex: v-001\n"
-            "      proposed_edge:\n"
-            "        relation: exec_into\n"
-            "        parent_vertex:\n"
-            "          type: process\n"
-            "          classification: host-side-runtime-exec-primitive\n"
-            "      predictions:\n"
-            "        - id: p1\n"
-            "          subject: proposed_parent\n"
-            "          claim: \"a change-management ticket exists for this exec\"\n"
-            "      weight: null\n"
+            "```invlang\n"
+            ":H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]\n"
+            "h-001|?operator-runtime-exec|v-001|exec_into|process|host-side-runtime-exec-primitive||p1:proposed_parent:\"a change-management ticket exists for this exec\"|||||null|\n"
             "```\n\n"
             "## REPORT\n\n"
-            "```yaml\n"
-            "findings:\n"
-            "  - id: l-001\n"
-            "    loop: 1\n"
-            "    name: change-management\n"
-            "    target: v-001\n"
-            "    query_details: {}\n"
-            "    outcome: {}\n"
-            "    resolutions:\n"
-            "      - hypothesis: h-001\n"
-            "        before: null\n"
-            "        after: \"+\"\n"
-            "        severity_of_test: weak\n"
-            "        matched_prediction_ids: [p1]\n"
-            "        reasoning: ticket query returned no records\n"
-            "        supporting_edges: [e-001]\n"
-            "conclude:\n"
-            "  termination:\n"
-            "    category: trust-root\n"
-            "  disposition: true_positive\n"
-            "  confidence: medium\n"
-            "  surviving_hypotheses: [h-001]\n"
-            "  matched_archetype: null\n"
-            "  deferred_predictions: []\n"
+            "```invlang\n"
+            ":L findings [id|name|loop|target|mode|status]\n"
+            "l-001|change-management|1|v-001|graded|active\n"
+            "\n"
+            ":T resolutions\n"
+            "h-001  null → +    [l-001 p1 weak ⟂ e-001 :: ticket query returned no records]\n"
+            "\n"
+            ":T conclude\n"
+            "termination.category   trust-root\n"
+            "disposition            true_positive\n"
+            "confidence             medium\n"
+            "\n"
+            ":T conclude.surviving [hyp_id|final_weight]\n"
+            "h-001|+\n"
             "```\n"
         )
         errors = validate_companion(text, None)
@@ -526,77 +539,38 @@ class TestValidateCompanion:
         """
         text = (
             "## CONTEXTUALIZE\n\n"
-            "```yaml\n"
-            "prologue:\n"
-            "  vertices:\n"
-            "    - id: v-001\n"
-            "      type: process\n"
-            "      classification: container-runtime\n"
-            "      identifier: \"runc\"\n"
-            "  edges:\n"
-            "    - id: e-001\n"
-            "      relation: spawned\n"
-            "      source_vertex: v-001\n"
-            "      target_vertex: v-001\n"
-            "      authority: {kind: runtime-audit, source: Falco}\n"
+            "```invlang\n"
+            ":V prologue.vertices [id|type|class|ident|attrs]\n"
+            "v-001|process|container-runtime|runc|\n"
+            "\n"
+            ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs]\n"
+            "e-001|spawned|v-001|v-001||runtime-audit:Falco|\n"
             "```\n\n"
             "## PREDICT (loop 1)\n\n"
-            "```yaml\n"
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?operator-runtime-exec\"\n"
-            "      attached_to_vertex: v-001\n"
-            "      proposed_edge:\n"
-            "        relation: exec_into\n"
-            "        parent_vertex:\n"
-            "          type: process\n"
-            "          classification: host-side-runtime-exec-primitive\n"
-            "      predictions:\n"
-            "        - id: p1\n"
-            "          subject: proposed_parent\n"
-            "          claim: \"a change-management ticket exists\"\n"
-            "      weight: null\n"
-            "    - id: h-002\n"
-            "      name: \"?adversary-controlled-runtime-exec\"\n"
-            "      attached_to_vertex: v-001\n"
-            "      proposed_edge:\n"
-            "        relation: exec_into\n"
-            "        parent_vertex:\n"
-            "          type: process\n"
-            "          classification: adversary-controlled-runtime-exec\n"
-            "      predictions:\n"
-            "        - id: p1\n"
-            "          subject: proposed_parent\n"
-            "          claim: \"audit shows no operator session for this exec\"\n"
-            "      weight: null\n"
+            "```invlang\n"
+            ":H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]\n"
+            "h-001|?operator-runtime-exec|v-001|exec_into|process|host-side-runtime-exec-primitive||p1:proposed_parent:\"a change-management ticket exists\"|||||null|\n"
+            "h-002|?adversary-controlled-runtime-exec|v-001|exec_into|process|adversary-controlled-runtime-exec||p1:proposed_parent:\"audit shows no operator session for this exec\"|||||null|\n"
             "```\n\n"
             "## REPORT\n\n"
-            "```yaml\n"
-            "findings:\n"
-            "  - id: l-001\n"
-            "    loop: 1\n"
-            "    name: audit-correlation\n"
-            "    target: v-001\n"
-            "    query_details: {}\n"
-            "    outcome: {}\n"
-            "    resolutions:\n"
-            "      - hypothesis: h-002\n"
-            "        before: null\n"
-            "        after: \"++\"\n"
-            "        severity_of_test: severe\n"
-            "        matched_prediction_ids: [p1]\n"
-            "        reasoning: audit confirmed no operator session correlated with the exec\n"
-            "        supporting_edges: [e-001]\n"
-            "conclude:\n"
-            "  termination:\n"
-            "    category: adversarial-refuted\n"
-            "  disposition: true_positive\n"
-            "  confidence: high\n"
-            "  surviving_hypotheses: [h-001, h-002]\n"
-            "  matched_archetype: null\n"
-            "  deferred_predictions:\n"
-            "    - {prediction_ref: \"h-001.p1\", rationale: \"ticket anchor unreachable; superseded by h-002 ++\"}\n"
+            "```invlang\n"
+            ":L findings [id|name|loop|target|mode|status]\n"
+            "l-001|audit-correlation|1|v-001|graded|active\n"
+            "\n"
+            ":T resolutions\n"
+            "h-002  null → ++    [l-001 p1 severe ⟂ e-001 :: audit confirmed no operator session correlated with the exec]\n"
+            "\n"
+            ":T conclude\n"
+            "termination.category   adversarial-refuted\n"
+            "disposition            true_positive\n"
+            "confidence             high\n"
+            "\n"
+            ":T conclude.surviving [hyp_id|final_weight]\n"
+            "h-001|null\n"
+            "h-002|++\n"
+            "\n"
+            ":T conclude.deferred_preds [prediction_ref|rationale]\n"
+            "h-001.p1|ticket anchor unreachable; superseded by h-002 ++\n"
             "```\n"
         )
         errors = validate_companion(text, None)
@@ -658,7 +632,7 @@ class TestHookIntegration:
         assert result.returncode == 0
 
     def test_valid_prologue_passes(self, tmp_path):
-        content = f"## CONTEXTUALIZE\n\n```yaml\n{VALID_PROLOGUE_YAML}```\n"
+        content = f"## CONTEXTUALIZE\n\n```invlang\n{VALID_PROLOGUE_INVLANG}```\n"
         result = _run_hook(content, tmp_path=tmp_path)
         assert result.returncode == 0, result.stderr
 
@@ -666,130 +640,49 @@ class TestHookIntegration:
         result = _run_hook(FULL_COMPANION_MD, tmp_path=tmp_path)
         assert result.returncode == 0, result.stderr
 
-    def test_missing_lead_field_fails(self, tmp_path):
-        bad_lead = """\
-findings:
-  - id: l-001
-    loop: 1
-    name: test
-    target: v-001
-    query_details:
-      system: wazuh
-      template: t
-      query: q
-      time_window: 1h
-      substitutions: {}
-    outcome:
-      observations:
-        vertices: []
-        edges: []
-    # resolutions missing
-"""
-        content = f"## ANALYZE\n\n```yaml\n{bad_lead}```\n"
-        result = _run_hook(content, tmp_path=tmp_path)
-        assert result.returncode == 2
-        assert "resolutions" in result.stderr
-
     def test_pp_missing_supporting_edges_fails(self, tmp_path):
-        prologue_content = f"## CONTEXTUALIZE\n\n```yaml\n{VALID_PROLOGUE_YAML}```\n"
-        lead_no_edges = """\
-findings:
-  - id: l-001
-    loop: 1
-    name: test
-    target: v-001
-    query_details:
-      system: wazuh
-      template: t
-      query: q
-      time_window: 1h
-      substitutions: {}
-    outcome:
-      observations:
-        vertices: []
-        edges: []
-    resolutions:
-      - hypothesis: h-001
-        before: null
-        after: "++"
-        severity_of_test: severe
-        matched_prediction_ids: [p1]
-        matched_refutation_ids: []
-        reasoning: "strong evidence"
-        supporting_edges: []
-"""
-        content = prologue_content + f"\n```yaml\n{lead_no_edges}```\n"
+        # Resolution graded `++` but the supp-edges slot uses the
+        # `no-authority` marker — rule #14 (strong-resolution authority)
+        # rejects.
+        prologue_content = f"## CONTEXTUALIZE\n\n```invlang\n{VALID_PROLOGUE_INVLANG}```\n"
+        predict_content = f"## PREDICT (loop 1)\n\n```invlang\n{VALID_PREDICT_INVLANG}```\n"
+        analyze_content = (
+            "## ANALYZE (loop 1)\n\n"
+            "```invlang\n"
+            ":L findings [id|name|loop|target|mode|status]\n"
+            "l-001|test|1|v-001|graded|active\n"
+            "\n"
+            ":T resolutions\n"
+            "h-001  null → ++    [l-001 p1 severe ⟂ no-authority :: strong evidence]\n"
+            "```\n"
+        )
+        content = prologue_content + "\n" + predict_content + "\n" + analyze_content
         result = _run_hook(content, tmp_path=tmp_path)
         assert result.returncode == 2
         assert "supporting_edges" in result.stderr
 
     def test_mm_missing_refutation_ids_fails(self, tmp_path):
-        bad_resolution = """\
-findings:
-  - id: l-001
-    loop: 1
-    name: test
-    target: v-001
-    query_details:
-      system: wazuh
-      template: t
-      query: q
-      time_window: 1h
-      substitutions: {}
-    outcome:
-      observations:
-        vertices: []
-        edges:
-          - id: e-003
-            relation: attempted_auth
-            source_vertex: v-001
-            target_vertex: v-002
-            authority:
-              kind: siem-event
-              source: wazuh
-    resolutions:
-      - hypothesis: h-001
-        before: null
-        after: "--"
-        severity_of_test: severe
-        matched_prediction_ids: []
-        matched_refutation_ids: []
-        reasoning: "contradicts prediction"
-        supporting_edges: [e-003]
-"""
-        prologue = f"```yaml\n{VALID_PROLOGUE_YAML}```\n"
-        content = f"## CONTEXTUALIZE\n\n{prologue}\n## ANALYZE\n\n```yaml\n{bad_resolution}```\n"
+        # Resolution graded `--` with no matched_refutation_ids — rule
+        # requiring `--` to cite at least one refutation fires.
+        prologue = f"## CONTEXTUALIZE\n\n```invlang\n{VALID_PROLOGUE_INVLANG}```\n"
+        predict = f"## PREDICT (loop 1)\n\n```invlang\n{VALID_PREDICT_INVLANG}```\n"
+        analyze_content = (
+            "## ANALYZE (loop 1)\n\n"
+            "```invlang\n"
+            ":L findings [id|name|loop|target|mode|status]\n"
+            "l-001|test|1|v-001|graded|active\n"
+            "\n"
+            ":T resolutions\n"
+            "h-001  null → --    [l-001 severe ⟂ e-001 :: contradicts prediction]\n"
+            "```\n"
+        )
+        content = prologue + "\n" + predict + "\n" + analyze_content
         result = _run_hook(content, tmp_path=tmp_path)
         assert result.returncode == 2
-        assert "matched_refutation_ids" in result.stderr
-
-    def test_screen_result_on_non_screen_lead_fails(self, tmp_path):
-        bad_screen = """\
-findings:
-  - id: l-001
-    loop: 1
-    name: test
-    target: v-001
-    query_details:
-      system: wazuh
-      template: t
-      query: q
-      time_window: 1h
-      substitutions: {}
-    outcome:
-      screen_result: no_match
-      observations:
-        vertices: []
-        edges: []
-    resolutions: []
-"""
-        content = f"## ANALYZE\n\n```yaml\n{bad_screen}```\n"
-        result = _run_hook(content, tmp_path=tmp_path)
-        assert result.returncode == 2
-        assert "screen_result" in result.stderr
+        assert "refutation" in result.stderr.lower() or "matched_refutation_ids" in result.stderr
 
     def test_append_only_removing_block_fails(self, tmp_path):
-        existing = f"## CONTEXTUALIZE\n\n```yaml\n{VALID_PROLOGUE_YAML}```\n"
+        existing = f"## CONTEXTUALIZE\n\n```invlang\n{VALID_PROLOGUE_INVLANG}```\n"
         proposed = "## CONTEXTUALIZE\n\nsome prose only\n"
         result = _run_hook(
             content=proposed,
@@ -800,32 +693,30 @@ findings:
         assert result.returncode == 2
         assert "append-only" in result.stderr
 
-    def test_yaml_parse_error_fails(self, tmp_path):
-        content = "## CONTEXTUALIZE\n\n```yaml\n: invalid: [\n```\n"
+    def test_yaml_fence_rejected_by_hook(self, tmp_path):
+        """Strict-cutover (#170): a ```yaml fence on the proposed write is
+        rejected with the cutover-specific error string. Replaces the prior
+        `test_yaml_parse_error_fails` — the validator no longer parses
+        yaml content at all.
+        """
+        content = "## CONTEXTUALIZE\n\n```yaml\nprologue: {}\n```\n"
         result = _run_hook(content, tmp_path=tmp_path)
         assert result.returncode == 2
-        assert "parse error" in result.stderr.lower()
+        assert "```yaml" in result.stderr and "no longer accepted" in result.stderr
 
     def test_dangling_id_reference_fails(self, tmp_path):
-        bad_ref = """\
-findings:
-  - id: l-001
-    loop: 1
-    name: test
-    target: v-999
-    query_details:
-      system: wazuh
-      template: t
-      query: q
-      time_window: 1h
-      substitutions: {}
-    outcome:
-      observations:
-        vertices: []
-        edges: []
-    resolutions: []
-"""
-        content = f"## ANALYZE\n\n```yaml\n{bad_ref}```\n"
+        # Lead targets a non-existent vertex (v-999) — rule rejecting
+        # dangling id references fires.
+        prologue = f"## CONTEXTUALIZE\n\n```invlang\n{VALID_PROLOGUE_INVLANG}```\n"
+        predict = f"## PREDICT (loop 1)\n\n```invlang\n{VALID_PREDICT_INVLANG}```\n"
+        analyze_content = (
+            "## ANALYZE (loop 1)\n\n"
+            "```invlang\n"
+            ":L findings [id|name|loop|target|mode|status]\n"
+            "l-001|test|1|v-999|graded|active\n"
+            "```\n"
+        )
+        content = prologue + "\n" + predict + "\n" + analyze_content
         result = _run_hook(content, tmp_path=tmp_path)
         assert result.returncode == 2
         assert "v-999" in result.stderr
