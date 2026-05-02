@@ -1098,6 +1098,48 @@ class TestHandleOutput:
         result = gather_handler.handle(ctx)
         assert result.next_phase == Phase.PREDICT
 
+    def test_any_hypotheses_declared_recognizes_invlang_fence(self, tmp_path):
+        # Regression for run #56 (PR #167): predict's on-disk fence is now
+        # ```invlang with `:H hypotheses` rows. _any_hypotheses_declared must
+        # recognize the dense shape, not just the legacy ```yaml shape — the
+        # ANALYZE-vs-PREDICT routing decision in handle() depends on it.
+        run_dir = tmp_path / "run-test"
+        run_dir.mkdir()
+        (run_dir / "investigation.md").write_text(textwrap.dedent("""
+            ## CONTEXTUALIZE
+
+            ## PREDICT (loop 1)
+
+            ```invlang
+            :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
+            h-001|?monitoring-system-is-the-actor|v-001|initiated_by|identity|sa|||||||"none"|null|active
+            ```
+        """).strip() + "\n")
+        ctx = Context(
+            run_dir=run_dir, signature_id="wazuh-rule-5710",
+            ticket_id="t", alert={},
+            history=[], outputs={},
+        )
+        assert gather_handler._any_hypotheses_declared(ctx) is True
+
+    def test_any_hypotheses_declared_invlang_empty_block(self, tmp_path):
+        # Header-only `:H hypotheses` with no data rows must not count.
+        run_dir = tmp_path / "run-test"
+        run_dir.mkdir()
+        (run_dir / "investigation.md").write_text(textwrap.dedent("""
+            ## CONTEXTUALIZE
+
+            ```invlang
+            :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
+            ```
+        """).strip() + "\n")
+        ctx = Context(
+            run_dir=run_dir, signature_id="wazuh-rule-5710",
+            ticket_id="t", alert={},
+            history=[], outputs={},
+        )
+        assert gather_handler._any_hypotheses_declared(ctx) is False
+
     def test_routes_to_analyze_when_hypothesize_block_empty(self, tmp_path, monkeypatch):
         # Edge case: a `hypothesize:` block exists but its `hypotheses[]` is
         # empty (e.g. shelved-only block). Treat as no-hypotheses — route

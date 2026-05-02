@@ -625,7 +625,8 @@ class TestHandleHappyPaths:
         written = (ctx.run_dir / "investigation.md").read_text()
         assert "existing." in written
         assert "## PREDICT (loop 1)" in written
-        assert "hypothesize:" in written
+        assert "```invlang" in written
+        assert ":H hypothesize.hypotheses" in written
         # Terminal trailer must not land in investigation.md.
         assert ":R routing" not in written
         assert "selected_lead         authentication-history" not in written

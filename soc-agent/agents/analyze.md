@@ -150,13 +150,13 @@ Pipe-delimited. Header line required (column-spec).
 ### `:R consultations` row grammar
 
 ```
-:R consultations [lead|anchor_id|anchor_kind|grounding|verdict|as_of|authority|reasoning]
-<l-id>|<anchor_id>|<anchor_kind>|<grounding>|<verdict>|<as_of>|<authority>|<reasoning>
+:R consultations [lead|anchor_id|anchor_kind|grounding|result|as_of|authority|reasoning]
+<l-id>|<anchor_id>|<anchor_kind>|<grounding>|<result>|<as_of>|<authority>|<reasoning>
 ```
 
 - **`lead`** = the `l-NNN` whose query consulted this anchor.
 - **`grounding`** ∈ `{org-authority, telemetry-baseline}` — both admissible here.
-- **`verdict`** = `authorized | unauthorized | indeterminate | confirmed | ...`.
+- **`result`** ∈ `{confirmed, refuted, partial, no-data}` — the consultation outcome (per invlang schema rule #11). Authorization verdicts (`authorized | unauthorized | indeterminate`) belong on `:R authz`, not here; if you reach for an authz verdict on `:R consultations`, you probably want `:R authz` instead.
 - One row per lead. Multi-anchor leads collapse into one row using the dominant anchor; if anchors materially diverge, escalate via `:A anomalies`.
 
 ### `:R impact` row grammar

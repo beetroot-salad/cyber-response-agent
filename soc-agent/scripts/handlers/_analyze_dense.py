@@ -18,7 +18,7 @@ Surface produced (per `docs/dense-investigation-format.md` §Findings,
     :E l-001.observations.edges    [id|rel|src|tgt|when|auth_kind:source|attrs]
 
     :R authz [resolved_by|edge|verdict|fulfills|anchor_kind|anchor_id|grounding|authority|as_of|reasoning]
-    :R consultations [resolved_by|verdict|grounding|anchor_kind|anchor_id|authority|as_of|reasoning]
+    :R consultations [resolved_by|result|grounding|anchor_kind|anchor_id|authority|as_of|reasoning]
     :R impact [resolved_by|pred_ref|dim|verdict|grounding|authority|as_of|reasoning]
     :R attr_updates [resolved_by|target|key|value]
 
@@ -60,7 +60,7 @@ _AUTHZ_COLS = [
     "anchor_kind", "anchor_id", "grounding", "authority", "as_of", "reasoning",
 ]
 _CONSULT_COLS = [
-    "resolved_by", "verdict", "grounding",
+    "resolved_by", "result", "grounding",
     "anchor_kind", "anchor_id", "authority", "as_of", "reasoning",
 ]
 _IMPACT_COLS = [
@@ -224,7 +224,7 @@ def _render_consult_row(lid: str, r: dict[str, Any]) -> str:
         )
     cells = [
         lid,
-        r.get("verdict", ""),
+        r.get("result", ""),
         r.get("grounding_kind", ""),
         r.get("anchor_kind", ""),
         r.get("anchor_id", ""),
