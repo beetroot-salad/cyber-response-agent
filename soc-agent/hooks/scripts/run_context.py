@@ -33,6 +33,21 @@ from pathlib import Path
 
 _BASH_INV_PATH_RE = re.compile(r"([^\s'\"<>|&;()`$]*investigation\.md)")
 
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def is_safe_id(value: str) -> bool:
+    """Return True if `value` is safe to use as a single filesystem path component.
+
+    Accepts only letters, digits, dot, dash, underscore. Rejects empty strings,
+    bare/double-dot, anything containing path separators, and any other shell
+    metacharacter. Used to gate untrusted strings (session_id, signature_id)
+    before they are joined into a path.
+    """
+    if not value or value in (".", ".."):
+        return False
+    return bool(_SAFE_ID_RE.match(value))
+
 
 def get_runs_dir() -> Path:
     """Return the configured runs directory. Fails fast if unset."""
@@ -104,6 +119,8 @@ def write_session_mapping(
     """
     if not session_id:
         return
+    if not is_safe_id(session_id):
+        raise ValueError(f"unsafe session_id: {session_id!r}")
     sessions_dir = runs_dir / ".sessions"
     mapping_path = sessions_dir / f"{session_id}.json"
 
@@ -173,6 +190,8 @@ def resolve_run_dir(session_id: str, runs_dir: Path) -> tuple[Path | None, str]:
     recently modified unmapped active run. This has a narrow race window when
     two sessions start concurrently — see module docstring.
     """
+    if not session_id or not is_safe_id(session_id):
+        return None, ""
     sessions_dir = runs_dir / ".sessions"
     mapping_path = sessions_dir / f"{session_id}.json"
 

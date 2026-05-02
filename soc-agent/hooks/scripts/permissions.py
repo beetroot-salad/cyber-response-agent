@@ -12,6 +12,8 @@ from pathlib import Path
 
 import yaml
 
+from .run_context import is_safe_id
+
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -22,7 +24,7 @@ def load_permissions(signature_id: str, root: Path | None = None) -> dict:
 
     `root` lets callers (and tests) point at an alternate soc-agent root.
     """
-    if not signature_id:
+    if not signature_id or not is_safe_id(signature_id):
         return {}
     base = root if root is not None else SOC_AGENT_ROOT
     perms_path = base / "config" / "signatures" / signature_id / "permissions.yaml"
