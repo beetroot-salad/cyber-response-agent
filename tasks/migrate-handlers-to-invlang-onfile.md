@@ -1,41 +1,43 @@
 ---
 title: Migrate handler on-disk format from yaml fences to ```invlang
-status: backlog
+status: doing
 groups: invlang, dense-onfile
 ---
 
-Foundation for the dense on-disk format landed in branch `worktree-dense-onfile-foundation` (commits 0f26b62 + 5e23061): parser at `soc-agent/scripts/handlers/_dense_parser.py` (859 lines), primitives at `_dense_primitives.py` (353 lines), validator hook updates in `invlang_validate.py`, and parity tests (`test_dense_parser.py` 602 lines, `test_invlang_dense_parity.py` 312 lines).
+Foundation for the dense on-disk format landed via #160. Per-handler flips landing strict-cutover: `invlang_validate.py` flips to accept-only-`` ```invlang `` atomically with the final handler PR.
 
-Run #51 (eval `20260501-012101-rule100001`) confirmed the foundation does not regress the existing pipeline — full 2-loop completes, zero validator rejections — but every phase still wrote `` ```yaml `` fences. No phase has been migrated to emit `` ```invlang `` on disk yet, so the new parser path is unexercised end-to-end.
+## Status — done
 
-This task tracks the handler-by-handler migration of the on-disk format from `` ```yaml `` to `` ```invlang ``.
+- [x] **Foundation** (#160) — parser at `_dense_parser.py`, primitives at `_dense_primitives.py`, validator hook updates, parity tests.
+- [x] **GATHER + GATHER-composite** (#162) — `_gather_dense.py` wired at `gather.py:1448`.
+- [x] **ANALYZE** (#162) — `_analyze_dense.py` wired at `analyze.py:664`.
+- [x] **CONTEXTUALIZE / prologue** (#163 → replayed onto main as #165) — `contextualize.py` writes dense body straight into a `` ```invlang `` fence; readers (`screen.py`, `analyze.py`, `env_memory.py`, `predict_priors.py`, `env_memory_lint.py`) switched to `iter_companion_dicts`.
+- [x] **SCREEN** (#166) — new `_screen_dense.py`; `screen.py` writes `` ```invlang ``. Also fixed a latent dense-parser bug: `_project_resolution` was storing `attr_updates` rows flat (`{target, key, value}`) but validator rule #22 requires `{target, updates: {key: value}}`. New `_append_attr_update` folds rows by target.
+- [x] **REPORT / CONCLUDE on-disk write** — both compose paths in `report.py` (SCREEN-routed `~:496` and ANALYZE-routed `~:1400`) wrap `emit_conclude_dense(...)` output in a `` ```invlang `` fence before appending to `investigation.md`. `_conclude_dense.py` already existed; this PR is just the fence wrapper.
 
-## Scope
+## Status — pending
 
-- [x] **CONTEXTUALIZE / prologue** — merged in PR #163 / #165 (commit 6628345).
-- [x] **SCREEN / findings** — merged in PR #166 (commit 171d6d0).
-- [x] **PREDICT** — PR #167 (branch `predict-onfile-invlang`, HEAD 396e06d). Surfaced and fixed three orthogonal bugs end-to-end:
-    - `:R consultations` column header `verdict→result` (commit 931d9bb) — analyze invlang rejection.
-    - `_predict_dense` parser resolved `:P comparisons` rows inline as it walked blocks in document order, so a `comparisons` block emitted before its sibling `refuts` block hit "unknown pred_ref" (commit 450efd9).
-    - `gather._any_hypotheses_declared` matched only `^:H\s+hypotheses\b` in ```yaml fences; PR #167 flips on-disk fences to ```invlang and the persister normalizes the block name to `hypothesize.hypotheses`. The detector's blind spot caused infinite PREDICT/GATHER loops with no ANALYZE (run #56, #57). Fixed in commit ca3cdf4 + 396e06d.
-    - Run #58 (5710 bait, full loop) — clean 2-loop convergence, ~13 min, 10 subagents rc=0, zero rejections, escalated/unclear/low. Ready to merge.
-- [ ] **GATHER + GATHER-composite** — both write `findings:` YAML today. Decide whether to migrate the lead-outcome block first or land the whole gather payload at once. `gather-composite` is the higher-value target (larger blocks, more variance).
-- [ ] **ANALYZE** — `_analyze_dense.py` (if present) or analyze handler. Resolutions block + self-report; needs round-trip parity tests against the existing YAML fixtures.
-- [ ] **REPORT / CONCLUDE** — `_conclude_dense.py` got 25 lines of foundation work; finish the migration. Frontmatter is the report.md surface, not investigation.md, so this only touches the conclude block fenced inside investigation.md (if any).
+- [ ] **PREDICT** — flip `predict.py:318` and `:527` to use `_predict_dense` writer; emit `` ```invlang ``. (PR #167, in review.)
+- [ ] **Validator cutover** — `invlang_validate.py` rejects `` ```yaml `` fences in `investigation.md`. Lands atomically *after* both PREDICT (#167) and REPORT have merged — kept separate from this PR to avoid coupling REPORT to PREDICT's merge order. Drops `YAML_BLOCK_RE` handling in `invlang_validate.py:403–411`, the legacy bare `:T conclude` fallback at `:435–440`, and the `` ```yaml `` reading paths in `investigation_views.py:121` / `gather.py:1389,1654` / `screen.py:100`.
+
+## Follow-ups (not gating)
+
+- [ ] **Latent `_analyze_dense._render_consult_row` field-name bug** — reads `r.get("verdict", "")` but the canonical anchor-consultation field is `result` (per schema rule #11). Untriggered today because analyze tests don't exercise consultations through the dense path; worth a small fix-and-test PR.
+- [ ] **Screen prompt-side fence** (`screen.py:134`) — currently passes a re-serialized YAML prologue to the screen subagent inside a `` ```yaml `` fence. Honest to the contents today. Once the prologue is dense on main (now true post-#165), we can pass the dense body through and label it `` ```invlang `` instead.
 
 ## Acceptance
 
 - Every phase emits `` ```invlang `` fences on disk; zero `` ```yaml `` fences in `investigation.md` after the migration.
-- `invlang_validate.py` accepts the new fences and rejects the old ones (or accepts both during a transition window — decide explicitly).
+- `invlang_validate.py` accepts only `` ```invlang `` (strict cutover — no dual-accept window).
 - Round-trip parity tests pass: parse-dense → serialize-yaml → parse-yaml produces the same structured payload as the legacy direct path.
-- One end-to-end live eval per signature (5710 scenario A or B, 100001, 100110) writes a fully-dense investigation.md with no rejections and lands a clean report.md.
+- One end-to-end live eval per signature (5710 scenario A or B, 100001, 100110) writes a fully-dense `investigation.md` with no rejections and lands a clean `report.md`.
 
 ## Order of leverage
 
-Prologue → predict → analyze → gather/gather-composite. Conclude last (smallest delta, most fragile downstream readers).
+PREDICT (#167) + REPORT (this PR) → validator cutover.
 
 ## Out of scope
 
 - Dense format design changes; the schema is locked by the foundation parser.
-- Subagent prompt rewrites beyond what the on-disk swap requires (the stdout dense contract is already in place).
-- Migration of the report.md frontmatter (separate concern).
+- Subagent prompt rewrites (stdout dense contract is already in place across all phases).
+- Migration of the `report.md` frontmatter (separate concern).

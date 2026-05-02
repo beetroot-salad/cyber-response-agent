@@ -493,7 +493,9 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
         f"**Confirmed hypothesis:** ?{archetype} via SCREEN fast-path",
         f"**Trace:** {trace}",
         "",
+        "```invlang",
         conclude_dense_text,
+        "```",
         "",
     ]
 
@@ -1397,7 +1399,9 @@ def _compose_analyze_routed(
         f"**Confirmed hypothesis:** {confirmed_hyp}",
         f"**Trace:** {trace}",
         "",
+        "```invlang",
         conclude_dense_text,
+        "```",
         "",
     ]
 
