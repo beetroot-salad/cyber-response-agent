@@ -1651,24 +1651,36 @@ def handle(ctx: Context) -> PhaseResult:
     return PhaseResult(next_phase=Phase.ANALYZE, payload=payload)
 
 
-_HYP_FENCE_RE = re.compile(r"```yaml\n(?P<body>.*?)\n```", re.DOTALL)
+_HYP_FENCE_RE = re.compile(r"```(?:yaml|invlang)\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 def _any_hypotheses_declared(ctx: Context) -> bool:
-    """True when any `hypothesize:` YAML fence in investigation.md carries a
-    non-empty `hypotheses[]` list. Scans every fence (not just the last) so a
+    """True when any predict block in investigation.md carries a non-empty
+    `hypotheses[]` list. Handles both legacy ```yaml fences and the
+    ```invlang dense fences PR #167 introduced. Scans every fence so a
     shape-E block after a prior shape-A/M doesn't falsely look empty."""
     inv = ctx.run_dir / "investigation.md"
     if not inv.exists():
         return False
     for m in _HYP_FENCE_RE.finditer(inv.read_text()):
+        body = m.group("body")
+        # Legacy yaml shape: top-level `hypothesize.hypotheses[]` list.
         try:
-            parsed = yaml.safe_load(m.group("body"))
+            parsed = yaml.safe_load(body)
         except yaml.YAMLError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        hyp = parsed.get("hypothesize")
-        if isinstance(hyp, dict) and hyp.get("hypotheses"):
-            return True
+            parsed = None
+        if isinstance(parsed, dict):
+            hyp = parsed.get("hypothesize")
+            if isinstance(hyp, dict) and hyp.get("hypotheses"):
+                return True
+        # Dense invlang shape: a `:H hypotheses` block with at least one
+        # data row (an `h-*` line) signals declared hypotheses.
+        if re.search(r"^:H\s+hypotheses\b", body, re.MULTILINE):
+            after = body.split(":H hypotheses", 1)[1]
+            for line in after.splitlines()[1:]:
+                stripped = line.strip()
+                if not stripped or stripped.startswith(":"):
+                    break
+                if stripped.startswith("h-"):
+                    return True
     return False
