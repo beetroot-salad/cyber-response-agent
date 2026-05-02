@@ -1091,6 +1091,51 @@ class TestMechanicalAnalyzeCompose:
         gather = report_handler._extract_findings_blocks(md)
         assert [g["id"] for g in gather] == ["l-001"]
 
+    def test_extract_findings_blocks_picks_up_dense_invlang_fence(self, tmp_path):
+        """Regression: REPORT must read findings from the dense ```invlang
+        surface, not just from legacy ```yaml fences. Without this the
+        Hypothesis Outcomes / trace / Key Evidence sections fall back to
+        survivor placeholders on dense ANALYZE-routed runs.
+        """
+        md = (
+            "## ANALYZE (loop 1)\n\n"
+            "```invlang\n"
+            ":L findings [id|name|loop|target|mode|system|template|query|window|status]\n"
+            "l-001|host-query|1||graded|wazuh||||active\n"
+            "\n"
+            ":T resolutions\n"
+            "h-001  + → ++    [l-001 p1 severe ⟂ e-1]\n"
+            "```\n"
+        )
+        gather = report_handler._extract_findings_blocks(md)
+        assert [g["id"] for g in gather] == ["l-001"]
+        # Top-level `resolutions` (dense canonical shape) — not under outcome.
+        res = report_handler._entry_resolutions(gather[0])
+        assert len(res) == 1
+        assert res[0]["hypothesis_id"] == "h-001"
+        assert res[0]["after"] == "++"
+
+    def test_compose_hypothesis_outcomes_reads_dense_top_level(self):
+        """`_compose_hypothesis_outcomes_md` must walk the canonical dense
+        shape where resolutions sit at `entry['resolutions']` (not under
+        `outcome.resolutions`) and weight is in the `after` field (not
+        `weight` / `to_weight`).
+        """
+        findings = [{
+            "id": "l-001",
+            "name": "host-query",
+            "resolutions": [{
+                "hypothesis_id": "h-001",
+                "before": "+",
+                "after": "++",
+                "severity_of_test": "severe",
+            }],
+        }]
+        md = report_handler._compose_hypothesis_outcomes_md(findings, surviving_hypotheses=None)
+        assert "h-001" in md
+        assert "`++`" in md
+        assert "host-query" in md
+
     def test_extract_final_analyze_section_returns_last(self, tmp_path):
         md = (
             "## CONTEXTUALIZE\n\nfoo.\n\n"

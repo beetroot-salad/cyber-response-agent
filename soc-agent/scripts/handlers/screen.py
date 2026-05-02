@@ -97,8 +97,8 @@ def _parse_leads_column(leads_cell: str) -> list[str]:
 def _extract_prologue_yaml(run_dir: Path) -> str:
     """Return the prologue block from `investigation.md` as a YAML string.
 
-    Walks both ```yaml and ```invlang fences so the SCREEN handler can run
-    against the post-foundation on-disk surface. The screen subagent prompt
+    Walks the dense ```invlang surface (the only on-disk format
+    post-cutover) via `iter_companion_dicts`. The screen subagent prompt
     still embeds YAML, so the parsed prologue is re-serialized.
 
     Raises OrchestrationError if `investigation.md` is missing or has no

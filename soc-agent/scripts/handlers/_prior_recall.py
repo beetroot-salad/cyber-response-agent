@@ -16,11 +16,9 @@ grading.
 
 from __future__ import annotations
 
-import re
 from typing import Any, Iterable
 
-import yaml
-
+from scripts.handlers._markdown import iter_companion_dicts
 from scripts.invlang import (
     authorization_calibration,
     lead_exemplars,
@@ -45,46 +43,54 @@ MAX_VERTEX_WHERE_SPECS = 2
 # ---------------------------------------------------------------------------
 
 
-_YAML_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
+def _merge_companion_blocks(text: str) -> dict[str, Any]:
+    """Merge every companion fence in investigation.md into one dict.
 
-
-def _merge_yaml_blocks(text: str) -> dict[str, Any]:
-    """Merge every ```yaml block in investigation.md into one dict.
-
-    Mirrors `invlang.corpus._merge_md_blocks` for the keys ANALYZE recall
-    cares about (`hypothesize`, `findings`). Kept local so this module
-    doesn't depend on a private corpus helper.
+    Walks the unified ```invlang dense surface and any legacy ```yaml
+    fences via `iter_companion_dicts`, projecting only the keys ANALYZE
+    recall cares about (`prologue`, `hypothesize.hypotheses`, `findings`).
+    Hypotheses are merged **last-wins** by id so a later dense block
+    overrides an older YAML copy of the same hypothesis (mirrors
+    `predict_priors.parse_prologue_and_last_hypothesize`); in-loop
+    hypotheses authored under `findings[*].new_hypotheses` are folded
+    into the same map so the open-contract scan sees them.
     """
     merged: dict[str, Any] = {
         "prologue": {"vertices": [], "edges": []},
         "hypothesize": {"hypotheses": []},
         "findings": [],
     }
-    seen_hyp_ids: set[str] = set()
-    for m in _YAML_BLOCK_RE.finditer(text):
-        try:
-            doc = yaml.safe_load(m.group(1))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
+    # Last-wins by id: a later block (typically the dense fence)
+    # replaces an older copy of the same hypothesis. Insertion order is
+    # preserved on first sight so the rendered list still reflects the
+    # order PREDICT introduced the hypotheses in.
+    hyps_by_id: "dict[str, dict[str, Any]]" = {}
+    hyp_order: list[str] = []
+    for doc in iter_companion_dicts(text):
         if isinstance(doc.get("prologue"), dict):
             merged["prologue"] = doc["prologue"]
         hyps = (doc.get("hypothesize") or {}).get("hypotheses") or []
         for h in hyps:
-            if isinstance(h, dict) and h.get("id") and h["id"] not in seen_hyp_ids:
-                merged["hypothesize"]["hypotheses"].append(h)
-                seen_hyp_ids.add(h["id"])
+            if isinstance(h, dict) and h.get("id"):
+                hid = h["id"]
+                if hid not in hyps_by_id:
+                    hyp_order.append(hid)
+                hyps_by_id[hid] = h
         for findings_key in ("findings", "gather"):
             entries = doc.get(findings_key)
             if isinstance(entries, list):
                 merged["findings"].extend(entries)
-    # In-loop hypotheses authored under findings[*].new_hypotheses
+    # In-loop hypotheses authored under findings[*].new_hypotheses —
+    # folded in only when no top-level record exists, so a later
+    # hypothesize: block still wins.
     for lead in merged["findings"]:
         for h in (lead.get("new_hypotheses") or []) if isinstance(lead, dict) else []:
-            if isinstance(h, dict) and h.get("id") and h["id"] not in seen_hyp_ids:
-                merged["hypothesize"]["hypotheses"].append(h)
-                seen_hyp_ids.add(h["id"])
+            if isinstance(h, dict) and h.get("id"):
+                hid = h["id"]
+                if hid not in hyps_by_id:
+                    hyp_order.append(hid)
+                    hyps_by_id[hid] = h
+    merged["hypothesize"]["hypotheses"] = [hyps_by_id[hid] for hid in hyp_order]
     return merged
 
 
@@ -292,7 +298,7 @@ def build_prior_recall_block(
             seen.add(name)
             lead_names.append(name)
 
-    body = _merge_yaml_blocks(investigation_md)
+    body = _merge_companion_blocks(investigation_md)
     contracts = _open_contracts(body)
     vw_specs = _vertex_where_specs(body)
 

@@ -119,19 +119,15 @@ class TestPromptAssembly:
             existing_investigation=(
                 "## CONTEXTUALIZE\n\n"
                 "**Playbook hypotheses:** ?bleed-target, ?should-not-grade\n\n"
-                "```yaml\n"
-                "prologue:\n"
-                "  vertices:\n"
-                "  - id: v-001\n"
-                "    type: endpoint\n"
+                "```invlang\n"
+                ":V prologue.vertices [id|type|class|ident|attrs]\n"
+                "v-001|endpoint|target-endpoint|host-1|\n"
                 "```\n"
                 "\n"
                 "## PREDICT (loop 1)\n\n"
-                "```yaml\n"
-                "hypothesize:\n"
-                "  hypotheses:\n"
-                "  - id: h-001\n"
-                "    name: ?monitoring-probe\n"
+                "```invlang\n"
+                ":H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]\n"
+                "h-001|?monitoring-probe|v-001|||||p1:proposed_parent:\"x\"|||||null|\n"
                 "```\n"
             ),
         )
@@ -580,36 +576,19 @@ class TestFindingsSynthesis:
     _PROLOGUE = textwrap.dedent("""\
         ## CONTEXTUALIZE
 
-        ```yaml
-        prologue:
-          vertices:
-            - id: v-001
-              type: endpoint
-              classification: target-endpoint
-              identifier: "target-endpoint"
-          edges: []
+        ```invlang
+        :V prologue.vertices [id|type|class|ident|attrs]
+        v-001|endpoint|target-endpoint|target-endpoint|
+
+        :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs]
+        e-001|attempted_auth|v-001|v-001||siem-event:wazuh|
         ```
 
         ## PREDICT (loop 1)
 
-        ```yaml
-        hypothesize:
-          hypotheses:
-            - id: h-001
-              name: "?monitoring-probe"
-              status: active
-              classification: benign-mechanism
-              proposed_edge:
-                id: e-p001
-                parent_vertex: {type: identity, classification: external-source, identifier: "monitorprobe"}
-                attached_to_vertex: v-001
-                relation: authenticates_to
-                authority: siem-event
-              predictions:
-                - id: p1
-                  subject: proposed_parent
-                  claim: "single attempt per tick"
-              weight: null
+        ```invlang
+        :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
+        h-001|?monitoring-probe|v-001|authenticates_to|identity|external-source||p1:proposed_parent:"single attempt per tick"|||||null|active
         ```
         """)
 
@@ -774,52 +753,21 @@ class TestFindingsSynthesis:
         prologue_with_edges = textwrap.dedent("""\
             ## CONTEXTUALIZE
 
-            ```yaml
-            prologue:
-              vertices:
-                - id: v-001
-                  type: endpoint
-                  classification: target-endpoint
-                  identifier: "target-endpoint"
-                - id: v-002
-                  type: process
-                  classification: runtime-exec-primitive
-                  identifier: runc
-              edges:
-                - id: e-001
-                  relation: spawned
-                  source_vertex: v-002
-                  target_vertex: v-001
-                  authority: {kind: runtime-audit, source: "Wazuh (rule 100001)"}
-                - id: e-002
-                  relation: observed
-                  source_vertex: v-001
-                  target_vertex: v-002
-                  authority: {kind: siem-event, source: "Wazuh"}
+            ```invlang
+            :V prologue.vertices [id|type|class|ident|attrs]
+            v-001|endpoint|target-endpoint|target-endpoint|
+            v-002|process|runtime-exec-primitive|runc|
+
+            :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs]
+            e-001|spawned|v-002|v-001||runtime-audit:Wazuh (rule 100001)|
+            e-002|observed|v-001|v-002||siem-event:Wazuh|
             ```
 
             ## PREDICT (loop 1)
 
-            ```yaml
-            hypothesize:
-              hypotheses:
-                - id: h-001
-                  name: "?underlying-host"
-                  proposed_edge:
-                    id: e-p001
-                    parent_vertex: {type: process, classification: host-invoker, identifier: "runc"}
-                    attached_to_vertex: v-002
-                    relation: invoked
-                    authority: siem-event
-                  predictions:
-                    - id: p1
-                      subject: proposed_edge
-                      claim: "prior events exist in the 7d window"
-                  refutation_shape:
-                    - id: r1
-                      refutes_predictions: [p1]
-                      claim: "empty baseline"
-                  weight: null
+            ```invlang
+            :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
+            h-001|?underlying-host|v-002|invoked|process|host-invoker||p1:proposed_edge:"prior events exist in the 7d window"||r1[p1]:"empty baseline"|||null|
             ```
             """)
         ctx = make_ctx(

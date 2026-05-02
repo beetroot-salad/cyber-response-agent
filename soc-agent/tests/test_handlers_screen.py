@@ -59,11 +59,22 @@ PROLOGUE_YAML = textwrap.dedent("""\
 """)
 
 
+PROLOGUE_INVLANG = textwrap.dedent("""\
+    :V prologue.vertices [id|type|class|ident|attrs]
+    v-001|endpoint|internal-monitoring-host|172.22.0.10|
+    v-002|endpoint|unclassified-endpoint|target-endpoint|
+    v-003|identity|monitoring-pattern|nagios|
+
+    :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs]
+    e-001|attempted_auth|v-001|v-002|2026-04-20T19:25:01.616Z|siem-event:Wazuh (rule 5710)|target_user=nagios
+""")
+
+
 SEED_CONTEXTUALIZE = (
     "## CONTEXTUALIZE\n\n"
     "**Alert:** SEC-2026-042 — wazuh-rule-5710\n\n"
-    "```yaml\n"
-    + PROLOGUE_YAML
+    "```invlang\n"
+    + PROLOGUE_INVLANG
     + "```\n"
 )
 
@@ -684,9 +695,10 @@ class TestRouting:
         # markdown but no fenced yaml block.
         text = (ctx.run_dir / "investigation.md").read_text()
         assert "## SCREEN" in text
-        # The only `````yaml block already present is the CONTEXTUALIZE
-        # prologue; no new one was appended.
-        assert text.count("```yaml") == 1
+        # No new ```invlang block was appended on downgrade — the only
+        # ```invlang already present is the CONTEXTUALIZE prologue.
+        assert text.count("```invlang") == 1
+        assert "```yaml" not in text
 
     def test_error_routes_to_hypothesize(self, tmp_path, monkeypatch):
         ctx = make_ctx(tmp_path)

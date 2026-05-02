@@ -75,6 +75,7 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 from scripts.handlers._context_loader import load_lead_definition
 from scripts.handlers._gather_dense import emit_gather_findings_dense
 from scripts.handlers._investigation_io import append_and_validate
+from scripts.handlers._markdown import first_prologue_vertex_id
 from scripts.handlers._output_parser import (
     GatherEnvelope,
     GatherOutputError,
@@ -1362,34 +1363,6 @@ def _append_to_investigation(ctx: Context, section: str) -> None:
     append_and_validate(ctx.run_dir, section, phase="GATHER")
 
 
-_PROLOGUE_VERTEX_ID_RE = re.compile(r"^\s*-\s+id:\s*(v-[a-z0-9][a-z0-9-]*)", re.MULTILINE)
-
-
-def _first_prologue_vertex_id(investigation_md: str) -> str | None:
-    """First `v-*` id declared in any prologue block. Default `target` for
-    synthesized lead-pick entries when the gather envelope didn't supply one.
-    Mirrors `analyze.py:_first_prologue_vertex_id` to avoid a cross-handler
-    import."""
-    for m in _PROLOGUE_FENCE_RE.finditer(investigation_md):
-        body = m.group("body")
-        try:
-            parsed = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(parsed, dict) or "prologue" not in parsed:
-            continue
-        verts = parsed["prologue"].get("vertices") or []
-        for v in verts:
-            if isinstance(v, dict) and isinstance(v.get("id"), str):
-                return v["id"]
-    return None
-
-
-_PROLOGUE_FENCE_RE = re.compile(
-    r"```yaml\s*\n(?P<body>.*?)\n```", re.DOTALL,
-)
-
-
 def _append_lead_pick_findings(
     ctx: Context, envelope: GatherEnvelope, loop_n: int,
 ) -> None:
@@ -1412,7 +1385,7 @@ def _append_lead_pick_findings(
     """
     inv_path = ctx.run_dir / "investigation.md"
     investigation_md = inv_path.read_text() if inv_path.exists() else ""
-    default_target = _first_prologue_vertex_id(investigation_md) or ""
+    default_target = first_prologue_vertex_id(investigation_md) or ""
 
     findings: list[dict[str, Any]] = []
     for lead in envelope.leads:

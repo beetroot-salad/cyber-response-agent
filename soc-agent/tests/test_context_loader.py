@@ -402,10 +402,10 @@ class TestFormatInvestigationBlock:
             "## CONTEXTUALIZE\n"
             "**Alert:** test\n"
             "candidate archetype: X\n"
-            "```yaml\nprologue:\n  vertices: []\n```\n"
+            "```invlang\n:V prologue.vertices [id|type|class|ident]\nv-001|endpoint|host|h1\n```\n"
             "## PREDICT (loop 1)\n"
             "**Selected lead:** l1\n"
-            "```yaml\nhypothesize:\n  hypotheses: []\n```\n"
+            "```invlang\n:H hypothesize.hypotheses [id|name]\n```\n"
             "## GATHER (loop 1)\n"
             "**Lead:** l1\n"
             "**Status:** complete\n"
@@ -427,7 +427,7 @@ class TestFormatInvestigationBlock:
             "- anomaly note\n"
             "## PREDICT (loop 2)\n"
             "**Selected lead:** l2\n"
-            "```yaml\nhypothesize:\n  hypotheses: [h-001]\n```\n"
+            "```invlang\n:H hypothesize.hypotheses [id|name]\nh-001|?bar\n```\n"
             "## GATHER (loop 2)\n"
             "**Lead:** l2\n"
             "**Status:** complete\n"
@@ -457,9 +457,9 @@ class TestFormatInvestigationBlock:
         assert "raw-observation prose trimmed" in block
         # Latest ANALYZE kept verbatim
         assert "grade narrative first sentence" in block
-        # YAML fences preserved
-        assert "prologue:" in block
-        assert "hypothesize:" in block
+        # Dense fences preserved
+        assert ":V prologue.vertices" in block
+        assert ":H hypothesize.hypotheses" in block
 
     def test_hypothesize_mode_is_smaller_than_full(self):
         fx = self._multiloop_fixture()
@@ -467,21 +467,21 @@ class TestFormatInvestigationBlock:
         hyp = format_investigation_block(fx, mode="predict")
         assert len(hyp) < len(full)
 
-    def test_analyze_mode_is_yaml_only(self):
-        """Analyze mode strips all markdown prose and keeps only YAML fences.
-        This structurally removes free-form hypothesis-name surfaces
-        (archetype catalogs, playbook-hypothesis enumerations, ANALYZE grade
-        prose) that analyze could otherwise mistake for grading targets.
-        The canonical hypothesis set lives only in `hypothesize.hypotheses[]`
-        inside the PREDICT YAML fence."""
+    def test_analyze_mode_is_dense_fence_only(self):
+        """Analyze mode strips all markdown prose and keeps only dense
+        ```invlang fences. This structurally removes free-form
+        hypothesis-name surfaces (archetype catalogs, playbook-hypothesis
+        enumerations, ANALYZE grade prose) that analyze could otherwise
+        mistake for grading targets. The canonical hypothesis set lives
+        only in `:H hypothesize.hypotheses` inside the PREDICT dense fence.
+        """
         block = format_investigation_block(
             self._multiloop_fixture(), mode="analyze"
         )
         assert 'mode="analyze"' in block
-        # YAML fence content from every loop is preserved (prior grades live
-        # in future findings[] fences; this fixture only has hypothesize).
-        assert "prologue:" in block
-        assert "hypothesize:" in block
+        # Dense fence content from every loop is preserved.
+        assert ":V prologue.vertices" in block
+        assert ":H hypothesize.hypotheses" in block
         assert "h-001" in block  # current-loop hypothesize payload
         # Section headers preserved as anchors (so the subagent can locate
         # which YAML fence belongs to which loop).
@@ -513,10 +513,11 @@ class TestFormatInvestigationBlock:
         explicit_full = format_investigation_block(fx, mode="full")
         assert legacy == explicit_full
 
-    def test_analyze_mode_keeps_invlang_fences_alongside_yaml(self):
-        """Analyze mode treats ```invlang fences as structured grading
-        surfaces alongside ```yaml fences, so the dense on-disk migration
-        does not silently drop content the analyze subagent needs to see.
+    def test_analyze_mode_drops_legacy_yaml_fences(self):
+        """Strict-cutover (post-#170): legacy ```yaml fences in
+        investigation.md are the wrong on-disk surface and the prose-trim
+        helper drops them. Only ```invlang dense content survives the
+        analyze-mode trim.
         """
         fx = (
             "## CONTEXTUALIZE\n"
@@ -529,8 +530,8 @@ class TestFormatInvestigationBlock:
         block = format_investigation_block(fx, mode="analyze")
         assert ":V prologue.vertices" in block
         assert "v-001|endpoint|host|h1" in block
-        # Hypothesize YAML fence still preserved
-        assert "hypothesize:" in block
+        # Legacy yaml fences are no longer treated as grading surfaces.
+        assert "hypothesize:" not in block
         # Markdown prose still stripped
         assert "**Alert:**" not in block
 

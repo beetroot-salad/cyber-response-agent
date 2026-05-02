@@ -13,28 +13,37 @@ Foundation for the dense on-disk format landed via #160. Per-handler flips landi
 - [x] **ANALYZE** (#162) — `_analyze_dense.py` wired at `analyze.py:664`.
 - [x] **CONTEXTUALIZE / prologue** (#163 → replayed onto main as #165) — `contextualize.py` writes dense body straight into a `` ```invlang `` fence; readers (`screen.py`, `analyze.py`, `env_memory.py`, `predict_priors.py`, `env_memory_lint.py`) switched to `iter_companion_dicts`.
 - [x] **SCREEN** (#166) — new `_screen_dense.py`; `screen.py` writes `` ```invlang ``. Also fixed a latent dense-parser bug: `_project_resolution` was storing `attr_updates` rows flat (`{target, key, value}`) but validator rule #22 requires `{target, updates: {key: value}}`. New `_append_attr_update` folds rows by target.
-- [x] **REPORT / CONCLUDE on-disk write** — both compose paths in `report.py` (SCREEN-routed `~:496` and ANALYZE-routed `~:1400`) wrap `emit_conclude_dense(...)` output in a `` ```invlang `` fence before appending to `investigation.md`. `_conclude_dense.py` already existed; this PR is just the fence wrapper.
+- [x] **PREDICT** (#167) — `predict.py:_compose_section()` now writes `hypothesize:` as `` ```invlang `` via `emit_hypothesize_dense(...)`; the fast-path audit trail was also moved out of a structured YAML fence into plain markdown bullets.
+- [x] **REPORT / CONCLUDE on-disk write** (#168) — both compose paths in `report.py` (SCREEN-routed `~:496` and ANALYZE-routed `~:1400`) wrap `emit_conclude_dense(...)` output in a `` ```invlang `` fence before appending to `investigation.md`. `_conclude_dense.py` already existed; this PR is just the fence wrapper.
+- [x] **Dense consultation row field-name fix** — `_analyze_dense._render_consult_row()` now emits `result` (not the stale `verdict` field name) for `:R consultations`, matching schema rule #11.
 
 ## Status — pending
 
-- [ ] **PREDICT** — flip `predict.py:318` and `:527` to use `_predict_dense` writer; emit `` ```invlang ``. (PR #167, in review.)
-- [ ] **Validator cutover** — `invlang_validate.py` rejects `` ```yaml `` fences in `investigation.md`. Lands atomically *after* both PREDICT (#167) and REPORT have merged — kept separate from this PR to avoid coupling REPORT to PREDICT's merge order. Drops `YAML_BLOCK_RE` handling in `invlang_validate.py:403–411`, the legacy bare `:T conclude` fallback at `:435–440`, and the `` ```yaml `` reading paths in `investigation_views.py:121` / `gather.py:1389,1654` / `screen.py:100`.
+- [x] **Validator strict cutover** (#170, commit `9f5d543`) — `invlang_validate._parse_blocks()` now rejects `` ```yaml `` fences in `investigation.md` with a precise error and parses only `` ```invlang ``. Legacy bare `:T conclude` fallback removed; `_parse_dense_conclude` helper deleted. `_check_append_only()` counts `INVLANG_BLOCK_RE` matches. `YAML_BLOCK_RE` dropped from `__all__` (still imported internally for the cutover-rejection scan).
+- [x] **Live read-path cleanup** (#170) — gather/report/_prior_recall switched to `iter_companion_dicts()`. Shared helper `first_prologue_vertex_id()` extracted to `_markdown.py` and imported by both `gather.py` and `analyze.py` (closes the duplicated-prologue-readers cleanup item too). `_PROLOGUE_FENCE_RE` and the local `_YAML_BLOCK_RE` in `_prior_recall` are gone.
+- [x] **Legacy dual-read cleanup in prompt/render helpers** (#170, commit `9f5d543`) — `investigation_views._INVLANG_OPEN_FENCES` narrowed to `{"```invlang"}`; analyze-mode prose-trim now keeps only structured dense fences. `screen._extract_prologue_yaml` docstring updated to dense-only. Screen subagent prompt-side fence (off-disk) intentionally left as `` ```yaml `` — flipping it requires a coordinated subagent prompt edit and is tracked separately below.
+- [x] **Test suite update for validator cutover** (#170) — added dense `VALID_*_INVLANG` companions and rebuilt `FULL_COMPANION_MD` in `test_invlang_validate.py`; converted every red `_run_hook` integration test to dense fixtures; reframed `test_yaml_parse_error_*` tests as `test_yaml_fence_rejected_*`; collapsed `test_parse_blocks_yaml_and_invlang_coexist` + `test_parse_blocks_legacy_bare_conclude_still_works` into `test_parse_blocks_rejects_yaml_fence` in `test_invlang_dense_parity.py`; converted on-disk yaml fixtures in `test_handlers_analyze.py`, `test_handlers_gather.py`, `test_handlers_screen.py`, and `test_context_loader.py`. Also fixed an aliasing gap in `_dense_parser._parse_resolution_line` that was setting only `hypothesis_id` (the validator and walkers index on `hypothesis`); the dense parser now sets both.
+- [ ] **Acceptance runs** — one end-to-end live eval per signature (5710 scenario A or B, 100001, 100110) producing a fully-dense `investigation.md` and clean `report.md` after the validator cutover.
 
-## Follow-ups (not gating)
+## Cleanup We Should Do In The Cutover PR
 
-- [ ] **Latent `_analyze_dense._render_consult_row` field-name bug** — reads `r.get("verdict", "")` but the canonical anchor-consultation field is `result` (per schema rule #11). Untriggered today because analyze tests don't exercise consultations through the dense path; worth a small fix-and-test PR.
-- [ ] **Screen prompt-side fence** (`screen.py:134`) — currently passes a re-serialized YAML prologue to the screen subagent inside a `` ```yaml `` fence. Honest to the contents today. Once the prologue is dense on main (now true post-#165), we can pass the dense body through and label it `` ```invlang `` instead.
+- [x] **Consolidate duplicated prologue readers** (#170) — both handlers now import `first_prologue_vertex_id` from `_markdown.py`.
+- [ ] **Consolidate companion merging/walking** — we now have overlapping logic in `_markdown.iter_companion_dicts()`, `_prior_recall._merge_yaml_blocks()`, `report.py:_extract_findings_blocks()`, and `invlang.corpus._merge_md_blocks()`. During cutover, it is worth centralizing the live-`investigation.md` read path around one shared dense-aware helper rather than keeping several partial readers in sync.
+- [ ] **Screen prompt-side fence** (`screen.py:134`) — still passes a re-serialized YAML prologue to the screen subagent inside a `` ```yaml `` fence (off-disk, non-gating). Cutover commit `9f5d543` left it untouched because the screen subagent prompt template still expects yaml-shape input; flipping it requires a coordinated subagent prompt edit.
+
+Scope discipline: yes to consolidating methods during the cutover, but keep it narrowly tied to live `investigation.md` parsing / helper dedup. Avoid bundling unrelated format design changes or broad handler refactors into the strict-cutover PR.
 
 ## Acceptance
 
 - Every phase emits `` ```invlang `` fences on disk; zero `` ```yaml `` fences in `investigation.md` after the migration.
 - `invlang_validate.py` accepts only `` ```invlang `` (strict cutover — no dual-accept window).
+- No live handler path depends on YAML-only parsing of `investigation.md`; REPORT, ANALYZE recall, GATHER, SCREEN, and prompt trimmers all consume the dense surface correctly.
 - Round-trip parity tests pass: parse-dense → serialize-yaml → parse-yaml produces the same structured payload as the legacy direct path.
 - One end-to-end live eval per signature (5710 scenario A or B, 100001, 100110) writes a fully-dense `investigation.md` with no rejections and lands a clean `report.md`.
 
 ## Order of leverage
 
-PREDICT (#167) + REPORT (this PR) → validator cutover.
+Validator cutover + live read-path cleanup → acceptance runs.
 
 ## Out of scope
 
