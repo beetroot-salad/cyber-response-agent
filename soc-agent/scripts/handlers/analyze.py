@@ -45,12 +45,9 @@ Output:
 from __future__ import annotations
 
 import os
-import re
-import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
 
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
@@ -146,7 +143,7 @@ def _load_raw_details(ctx: Context) -> str:
             continue
         lines.append(f"  <lead id=\"{path.stem}\">")
         lines.append(body)
-        lines.append(f"  </lead>")
+        lines.append("  </lead>")
     lines.append("</raw_details>")
     return "\n".join(lines)
 

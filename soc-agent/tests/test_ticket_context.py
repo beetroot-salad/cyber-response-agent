@@ -19,7 +19,6 @@ import yaml
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT / "scripts" / "tools"))
 
-import ticket_context  # noqa: E402
 from ticket_context import (  # noqa: E402
     _scalar,
     cluster_events,
@@ -123,7 +122,7 @@ def test_cluster_events_repeat_all_observables_match():
         "e1": _ev("e1", "1.1.1.1", "alice", "2026-04-19T10:00:00Z"),
         "e2": _ev("e2", "1.1.1.1", "alice", "2026-04-19T10:05:00Z"),
     }
-    repeats, related = cluster_events(events, current, "cur", OBSERVABLES)
+    repeats, related = cluster_events(events, current, OBSERVABLES)
     assert len(repeats) == 1
     assert repeats[0]["count"] == 2
     assert sorted(repeats[0]["alert_ids"]) == ["e1", "e2"]
@@ -137,7 +136,7 @@ def test_cluster_events_related_partial_share():
         "e2": _ev("e2", "1.1.1.1", "bob", "2026-04-19T10:05:00Z"),
         "e3": _ev("e3", "2.2.2.2", "alice", "2026-04-19T10:10:00Z"),
     }
-    repeats, related = cluster_events(events, current, "cur", OBSERVABLES)
+    repeats, related = cluster_events(events, current, OBSERVABLES)
     assert repeats == []
     # Two distinct related groups: {srcip=1.1.1.1} and {user=alice}
     assert len(related) == 2
@@ -155,7 +154,7 @@ def test_cluster_events_list_valued_observable_is_hashable():
         "data": {"srcip": ["1.1.1.1", "2.2.2.2"], "user": "bob"},
         "rule": {"id": "5710"},
     }
-    repeats, related = cluster_events({"e1": ev}, current, "cur", OBSERVABLES)
+    repeats, related = cluster_events({"e1": ev}, current, OBSERVABLES)
     # srcip list matches current (both coerced to same JSON repr) -> shares one dim -> related
     assert repeats == []
     assert len(related) == 1

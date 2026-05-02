@@ -13,9 +13,8 @@ Exit codes:
 """
 
 import json
-import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -62,7 +61,7 @@ def main():
         sys.exit(0)
 
     entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "session_id": hook_data.get("session_id"),
         "tool_name": hook_data.get("tool_name"),
         "tool_input": sanitize_tool_input(hook_data.get("tool_input", {})),

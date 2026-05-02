@@ -37,7 +37,6 @@ from __future__ import annotations
 from typing import Any
 
 from scripts.handlers._dense_emit_common import (
-    block,
     cell,
     flatten_value,
     flatten_window,

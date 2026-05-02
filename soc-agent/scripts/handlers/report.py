@@ -62,7 +62,6 @@ Output:
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -81,12 +80,11 @@ from scripts.handlers._context_loader import (
     load_investigation_md,
     load_run_salt,
 )
-from scripts.handlers._playbook import load_playbook_metadata
 from scripts.handlers.investigation_views import format_investigation_block
 from scripts.handlers.report_benign_action import (
-    _command_body_matches_benign_list,
+    _command_body_matches_benign_list,  # noqa: F401 — re-exported for tests
     _maybe_apply_benign_action_shortcircuit,
-    _normalize_command_body,
+    _normalize_command_body,  # noqa: F401 — re-exported for tests
 )
 from scripts.handlers.report_termination import (
     _compose_termination_rationale,

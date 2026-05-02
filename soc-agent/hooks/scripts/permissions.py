@@ -7,7 +7,6 @@ need consistent parsing. This module centralizes the parse + getters so both
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import yaml

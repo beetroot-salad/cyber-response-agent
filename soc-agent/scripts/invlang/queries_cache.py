@@ -13,7 +13,7 @@ Distinct from lead_effectiveness_* in queries_effectiveness.py:
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from .corpus import Companion
@@ -134,7 +134,7 @@ def loop_lead_distribution(
         },
       }
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     cutoff = now - timedelta(days=max_age_days)
 
     if discriminating_classifications is None:
@@ -160,7 +160,7 @@ def loop_lead_distribution(
         if ts is None:
             continue
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         if ts >= cutoff:
             scoped_recent.append(c)
 

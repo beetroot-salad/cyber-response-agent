@@ -70,10 +70,8 @@ from __future__ import annotations
 
 import json
 import os
-import re
-import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 import yaml
@@ -479,7 +477,7 @@ def _log_predict_priors_jsonl(
     Best-effort — log failures don't break the loop.
     """
     record: dict = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "loop_n": loop_n,
         "status": status,
         "fastpath_eligible": fastpath_eligible,

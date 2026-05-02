@@ -508,7 +508,7 @@ class TestAuditTrailCompleteness:
     def test_tool_audit_trail_exists(self, live_alerts_ready, live_runs_dir):
         """audit_tool_calls hook should produce tool_audit.jsonl during investigation."""
         alert = make_monitoring_probe_alert()
-        result = _cached_investigation("screen_resolve", alert, live_runs_dir)
+        _cached_investigation("screen_resolve", alert, live_runs_dir)
 
         audit_path = live_runs_dir / "tool_audit.jsonl"
         assert audit_path.exists(), (
@@ -524,7 +524,7 @@ class TestAuditTrailCompleteness:
         If not, we run the hook post-hoc to validate it WOULD produce correct output.
         """
         alert = make_monitoring_probe_alert()
-        result = _cached_investigation("screen_resolve", alert, live_runs_dir)
+        _cached_investigation("screen_resolve", alert, live_runs_dir)
 
         audit_path = live_runs_dir / "audit.jsonl"
 

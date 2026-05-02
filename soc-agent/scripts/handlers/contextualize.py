@@ -29,13 +29,11 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
-from typing import Optional
 
 from schemas.state import Phase
 from scripts.invlang.corpus import write_created_header
@@ -236,7 +234,7 @@ def _stamp_created_header() -> str:
     """First-write prefix: stamp the file's creation time so the corpus
     loader's recency filter has a stable per-file timestamp without needing
     to read sibling alert.json or trust file mtime."""
-    return write_created_header(datetime.now(timezone.utc).isoformat())
+    return write_created_header(datetime.now(UTC).isoformat())
 
 
 def _validate_and_write(ctx: Context, new_section: str) -> None:
@@ -252,7 +250,7 @@ def _validate_and_write(ctx: Context, new_section: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _route(ticket: dict, playbook: PlaybookMetadata) -> tuple[Phase, Optional[str]]:
+def _route(ticket: dict, playbook: PlaybookMetadata) -> tuple[Phase, str | None]:
     tc = ticket.get("ticket_context", {}) or {}
     dedup_id = tc.get("dedup_candidate")
     # Dedup fast-path retired — see module docstring. `dedup_id` is still returned

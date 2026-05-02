@@ -24,7 +24,7 @@ import os
 import secrets
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
@@ -77,7 +77,7 @@ def main() -> int:
                 "signature_id": signature_id,
                 "severity": severity,
                 "salt": secrets.token_hex(8),
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             },
             indent=2,
         )

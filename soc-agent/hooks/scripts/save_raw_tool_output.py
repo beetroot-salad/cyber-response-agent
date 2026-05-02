@@ -20,11 +20,10 @@ Exit codes:
 """
 
 import json
-import os
 import re
 import secrets
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -226,7 +225,7 @@ def main() -> None:
         sys.exit(0)
 
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "session_id": session_id,
         "tool_use_id": hook_data.get("tool_use_id"),
         "agent_id": hook_data.get("agent_id"),

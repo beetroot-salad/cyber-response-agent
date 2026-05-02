@@ -1,7 +1,7 @@
 """Tests for scripts/tools/data_source_health.py — verdict logic + sampling."""
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 TOOLS_DIR = Path(__file__).resolve().parent.parent / "scripts" / "tools"
@@ -15,7 +15,7 @@ def _window(end: datetime, hours: int) -> tuple[datetime, datetime]:
 
 
 def test_normal_when_incident_rate_matches_baseline():
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     # Baseline: ~10/hr; incident: 10 events in 1h → 10/hr.
@@ -32,7 +32,7 @@ def test_normal_when_incident_rate_matches_baseline():
 
 
 def test_elevated_when_incident_far_above_baseline():
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     def count_fn(start, end):
@@ -46,7 +46,7 @@ def test_elevated_when_incident_far_above_baseline():
 
 
 def test_low_when_incident_far_below_baseline():
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     def count_fn(start, end):
@@ -60,7 +60,7 @@ def test_low_when_incident_far_below_baseline():
 
 
 def test_inconclusive_when_baseline_and_incident_both_empty():
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     v = dsh.assess_health(lambda s, e: 0, incident_window, "agent-001", samples=5, seed=1)
@@ -72,7 +72,7 @@ def test_inconclusive_when_baseline_all_zero_but_incident_has_events():
     """Sparse-source case: baseline historically silent, incident has events.
     This is the expected shape for cron / batch / on-demand sources — don't
     escalate, let the lead characterize the events directly."""
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     def count_fn(start, end):
@@ -88,7 +88,7 @@ def test_inconclusive_when_baseline_all_zero_but_incident_has_events():
 
 
 def test_broken_when_baseline_samples_all_raise_but_incident_succeeds():
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     def count_fn(start, end):
@@ -102,7 +102,7 @@ def test_broken_when_baseline_samples_all_raise_but_incident_succeeds():
 
 
 def test_broken_when_count_fn_always_raises():
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     def boom(start, end):
@@ -117,7 +117,7 @@ def test_broken_when_count_fn_always_raises():
 
 
 def test_partial_baseline_failures_still_produce_verdict():
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     calls = {"n": 0}
@@ -135,7 +135,7 @@ def test_partial_baseline_failures_still_produce_verdict():
 
 
 def test_sample_windows_dont_overlap_incident_buffer():
-    incident_start = datetime(2026, 4, 17, 11, 0, tzinfo=timezone.utc)
+    incident_start = datetime(2026, 4, 17, 11, 0, tzinfo=UTC)
     rng = __import__("random").Random(0)
     windows = dsh._sample_windows(
         incident_start=incident_start,
@@ -153,7 +153,7 @@ def test_sample_windows_dont_overlap_incident_buffer():
 def test_inconclusive_when_baseline_mostly_zero():
     """If most baseline samples are empty, we can't establish a reference rate
     — return broken/baseline_too_sparse rather than a misleading elevated."""
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     calls = {"n": 0}
@@ -174,7 +174,7 @@ def test_inconclusive_when_baseline_mostly_zero():
 def test_dense_baseline_passes_through_to_elevated_low_normal():
     """When baseline is dense enough (≥50% nonzero), the gate must not block
     the standard elevated/low/normal logic."""
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     calls = {"n": 0}
@@ -193,7 +193,7 @@ def test_dense_baseline_passes_through_to_elevated_low_normal():
 
 def test_min_nonzero_fraction_is_configurable():
     """Caller can tune the gate. A strict 1.0 floor should reject any zero sample."""
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = _window(incident_end, 1)
 
     calls = {"n": 0}
@@ -218,7 +218,7 @@ def test_min_nonzero_fraction_is_configurable():
 def test_subhour_incident_window_uses_matching_baseline_duration():
     """A 60s incident window must sample 60s baseline windows, not the prior
     hard-coded 3h — otherwise a single event normalizes to a spurious spike."""
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     incident_window = (incident_end - timedelta(seconds=60), incident_end)
 
     # count_fn returns 1 for any window of any duration.
@@ -238,7 +238,7 @@ def test_subhour_incident_window_uses_matching_baseline_duration():
 
 def test_to_dict_round_trips_via_json():
     import json as _json
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
     v = dsh.assess_health(lambda s, e: 5, _window(incident_end, 1), "agent-001", samples=3, seed=1)
     payload = _json.loads(_json.dumps(v.to_dict()))
     assert payload["reporting_agent"] == "agent-001"
@@ -249,7 +249,7 @@ def test_to_dict_round_trips_via_json():
 def test_sampled_windows_present_for_audit():
     """Every timestamp the probe picks must appear in `sampled_windows` — this is
     what the tool-audit log captures for debugging, independent of count_fn outcome."""
-    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    incident_end = datetime(2026, 4, 17, 12, 0, tzinfo=UTC)
 
     def boom(start, end):
         raise RuntimeError("down")

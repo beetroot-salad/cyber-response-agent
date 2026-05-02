@@ -28,7 +28,6 @@ Writes to stdout.
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
@@ -138,7 +137,7 @@ def render_arm_A(segments: list[tuple[str, list[str]]], alert_json: str) -> str:
         if tag == "PREAMBLE":
             continue
         yaml_only = keep_only_yaml_blocks(lines)
-        if any(l.strip() for l in yaml_only):
+        if any(line.strip() for line in yaml_only):
             pieces.extend(yaml_only)
     return "\n".join(pieces) + "\n"
 
@@ -150,7 +149,7 @@ def render_arm_B(segments: list[tuple[str, list[str]]], alert_json: str) -> str:
         if tag == "PREAMBLE":
             continue
         prose_only = strip_yaml_blocks(lines)
-        if any(l.strip() for l in prose_only):
+        if any(line.strip() for line in prose_only):
             pieces.extend(prose_only)
             pieces.append("")
     return "\n".join(pieces) + "\n"

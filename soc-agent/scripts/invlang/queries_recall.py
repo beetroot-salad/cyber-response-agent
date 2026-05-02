@@ -20,15 +20,14 @@ from __future__ import annotations
 
 import fnmatch
 import re
-from datetime import datetime, timezone
-from typing import Any, Iterator
+from datetime import datetime, UTC
+from typing import Any
+from collections.abc import Iterator
 
 import polars as pl
 
 from .corpus import Companion, conclude_field
 from ._shared import (
-    _hypothesis_name,
-    _last_weight_map,
     _lead_kind,
     _parse_created_at,
 )
@@ -297,9 +296,9 @@ def lead_exemplars(
     def _sort_key(h: dict[str, Any]) -> tuple[int, datetime, str]:
         ts = h["_sort_ts"]
         if ts is None:
-            return (1, datetime.min.replace(tzinfo=timezone.utc), h["case_id"])
+            return (1, datetime.min.replace(tzinfo=UTC), h["case_id"])
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         return (0, ts, h["case_id"])
 
     hits.sort(key=_sort_key, reverse=True)

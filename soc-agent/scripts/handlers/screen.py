@@ -31,9 +31,7 @@ from __future__ import annotations
 
 import os
 import re
-import sys
 from pathlib import Path
-from typing import Optional
 
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
@@ -149,7 +147,7 @@ def _validate_screen_result(parsed: dict) -> dict:
 
 def _structural_verify(
     parsed: dict, screen_rows: list[dict[str, str]],
-) -> tuple[dict, Optional[str]]:
+) -> tuple[dict, str | None]:
     """Verify a `screen_result: match` claim against the playbook Screen table.
 
     Returns (parsed, downgrade_reason). When downgrade_reason is non-None the
@@ -192,7 +190,7 @@ def _structural_verify(
 
 
 def _compose_markdown(
-    screen_result: dict, downgrade_reason: Optional[str],
+    screen_result: dict, downgrade_reason: str | None,
 ) -> str:
     """Append a `## SCREEN` human-readable section.
 
@@ -200,7 +198,7 @@ def _compose_markdown(
     """
     result_tag = screen_result.get("screen_result", "error")
     if downgrade_reason:
-        result_tag = f"error (structural downgrade)"
+        result_tag = "error (structural downgrade)"
 
     leads_run = screen_result.get("leads_run") or []
     if leads_run:
@@ -285,7 +283,7 @@ def _match_payload(parsed: dict) -> dict:
     }
 
 
-def _fallthrough_payload(parsed: dict, override_reason: Optional[str] = None) -> dict:
+def _fallthrough_payload(parsed: dict, override_reason: str | None = None) -> dict:
     return {
         "screen_result": "error" if override_reason else parsed.get("screen_result"),
         "leads_run": parsed.get("leads_run") or [],

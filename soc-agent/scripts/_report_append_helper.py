@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Temporary helper: append REPORT block to investigation.md and write report.md."""
-import sys, pathlib
+import sys
+import pathlib
 
 run_dir = sys.argv[1]
 

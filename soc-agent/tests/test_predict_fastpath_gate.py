@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import random
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Any
 
@@ -88,7 +88,7 @@ def _companion(
     signature_id: str = "wazuh-rule-5710",
 ) -> Companion:
     iso = (
-        datetime.now(timezone.utc) - timedelta(days=age_days)
+        datetime.now(UTC) - timedelta(days=age_days)
     ).isoformat()
     body = {
         "prologue": prologue,

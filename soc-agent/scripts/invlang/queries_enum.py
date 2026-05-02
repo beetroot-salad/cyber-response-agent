@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .corpus import Companion
-from ._shared import _hypothesis_name, _parse_hypothesis_chain
+from ._shared import _parse_hypothesis_chain
 
 
 ENUM_CHOICES = ("leads", "anchors", "archetypes", "hypotheses", "dispositions")

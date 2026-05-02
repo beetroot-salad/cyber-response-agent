@@ -9,7 +9,8 @@ Emits a JSON summary with:
   - per-turn breakdown
 """
 from __future__ import annotations
-import json, sys
+import json
+import sys
 from pathlib import Path
 
 
@@ -69,5 +70,6 @@ def tally(path: Path) -> dict:
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print(__doc__, file=sys.stderr); sys.exit(2)
+        print(__doc__, file=sys.stderr)
+        sys.exit(2)
     print(json.dumps(tally(Path(sys.argv[1])), indent=2))

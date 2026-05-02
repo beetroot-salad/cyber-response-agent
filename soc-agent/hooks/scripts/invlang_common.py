@@ -16,7 +16,8 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
+from collections.abc import Iterator
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(SOC_AGENT_ROOT) not in sys.path:

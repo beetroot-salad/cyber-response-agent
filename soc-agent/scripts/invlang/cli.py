@@ -525,7 +525,7 @@ def _run_ids(path_str: str) -> int:
     """Print all IDs from a single investigation.md, grouped by type."""
     path = Path(path_str)
     if not path.exists():
-        print(f"(file not yet created — ID namespace is empty)", file=sys.stderr)
+        print("(file not yet created — ID namespace is empty)", file=sys.stderr)
         for kind in ("vertices", "edges", "hypotheses", "leads"):
             print(f"{kind + ':':<12} (none)")
         return 0

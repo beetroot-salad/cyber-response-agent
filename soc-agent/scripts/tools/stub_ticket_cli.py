@@ -41,7 +41,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -155,7 +155,7 @@ def cmd_close(args: argparse.Namespace) -> int:
         runs_dir.mkdir(parents=True, exist_ok=True)
         log_path = runs_dir / STUB_LOG_NAME
         entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "run_dir": args.run_dir,
             **result,
         }

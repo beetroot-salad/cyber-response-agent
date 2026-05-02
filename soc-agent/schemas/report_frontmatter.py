@@ -5,7 +5,6 @@ Used by hooks/scripts/validate_report.py to enforce structural safety.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from schemas.enums import (
     VALID_AUTHORIZATION_VERDICTS,
@@ -37,8 +36,8 @@ class ReportFrontmatter:
     leads_pursued: int
 
     # Optional fields
-    signature_description: Optional[str] = None
-    trace: Optional[str] = None
+    signature_description: str | None = None
+    trace: str | None = None
     # Archetype + optional precedent ticket citation. matched_archetype names
     # a directory under knowledge/signatures/{sig}/archetypes/ containing
     # story.md (observable shape) and trust-anchors.md (required_anchors +
@@ -48,8 +47,8 @@ class ReportFrontmatter:
     # trust_anchors_consulted records which anchors were consulted and what
     # they returned; each entry is a dict with keys: anchor, kind, result,
     # citation (citation is a free-form short description).
-    matched_archetype: Optional[str] = None
-    matched_ticket_id: Optional[str] = None
+    matched_archetype: str | None = None
+    matched_ticket_id: str | None = None
     trust_anchors_consulted: list = field(default_factory=list)
 
     def validate(self) -> list[str]:
@@ -132,7 +131,7 @@ class ReportFrontmatter:
         return errors
 
 
-def parse_frontmatter(fields: dict) -> tuple[Optional[ReportFrontmatter], list[str]]:
+def parse_frontmatter(fields: dict) -> tuple[ReportFrontmatter | None, list[str]]:
     """Parse a dict of frontmatter fields into a ReportFrontmatter.
 
     Returns (report, errors). If errors is non-empty, report may be partial.

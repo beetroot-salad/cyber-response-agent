@@ -229,7 +229,7 @@ class TestLoadReportFrontmatter:
 # --- Precedent loading ---
 
 
-@pytest.fixture()
+@pytest.fixture
 def fake_root(tmp_path, monkeypatch):
     """Redirect SOC_AGENT_ROOT to a temp dir and restore after test."""
     import hooks.scripts.validate_report as vr

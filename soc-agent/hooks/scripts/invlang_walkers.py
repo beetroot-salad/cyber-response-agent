@@ -11,7 +11,8 @@ and has top-level keys `prologue`, `hypothesize`, `gather`, `conclude`.
 
 from __future__ import annotations
 
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
+from collections.abc import Iterator
 
 # Numeric ordering for hypothesis weights. Used by the rollup check and any
 # other comparison that needs "stronger than" semantics.

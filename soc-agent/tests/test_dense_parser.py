@@ -19,10 +19,8 @@ import textwrap
 import pytest
 
 from scripts.handlers._dense_parser import (
-    DenseBlock,
     DenseParseError,
     INVLANG_BLOCK_RE,
-    companion_dict_from_blocks,
     parse_dense_blocks_in_text,
     parse_dense_companion,
 )

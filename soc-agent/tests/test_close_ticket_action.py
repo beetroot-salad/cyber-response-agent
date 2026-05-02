@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -27,7 +26,7 @@ STUB_CONNECTOR = "scripts/tools/stub_ticket_cli.py"
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def runs_dir(tmp_path, monkeypatch):
     """Isolated runs dir."""
     path = tmp_path / "runs"

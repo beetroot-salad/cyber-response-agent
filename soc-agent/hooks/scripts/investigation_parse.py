@@ -8,7 +8,7 @@ and do not depend on a full Markdown parser.
 
 import re
 from pathlib import Path
-from typing import Iterator
+from collections.abc import Iterator
 
 from hooks.scripts.run_context import extract_run_dir_from_path
 from schemas.state import Phase

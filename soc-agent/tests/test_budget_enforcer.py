@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -25,7 +25,7 @@ from hooks.scripts.budget_enforcer import (
     resolve_run_dir,
     update_budget_locked,
 )
-from schemas.budget import DEFAULT_LIMITS, WARNING_THRESHOLD, make_budget_state
+from schemas.budget import DEFAULT_LIMITS, make_budget_state
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +225,7 @@ class TestCheckBudgets:
         return limits
 
     def _budget(self, tool_calls=0, subagent_spawns=0, seconds_ago=0):
-        started = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
+        started = datetime.now(UTC) - timedelta(seconds=seconds_ago)
         return {
             "run_id": "run-test",
             "tool_calls": tool_calls,

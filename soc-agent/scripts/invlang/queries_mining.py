@@ -16,7 +16,7 @@ from typing import Any
 import polars as pl
 
 from .corpus import Companion, conclude_field
-from ._shared import _abs_delta, _hypothesis_name, _signed_delta
+from ._shared import _abs_delta, _signed_delta
 
 
 _POSITIVE_WEIGHTS = {None, "+", "++"}

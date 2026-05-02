@@ -17,7 +17,7 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from schemas.state import Phase  # noqa: E402
 from scripts.handlers import analyze as analyze_handler  # noqa: E402
-from scripts.orchestrate import Context, OrchestrationError, PhaseResult  # noqa: E402
+from scripts.orchestrate import Context, OrchestrationError  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

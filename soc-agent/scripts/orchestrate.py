@@ -18,7 +18,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
@@ -65,7 +65,7 @@ class Context:
     alert: dict
     outputs: dict[Phase, dict] = field(default_factory=dict)
     history: list[str] = field(default_factory=list)
-    current_phase: Optional[Phase] = None
+    current_phase: Phase | None = None
     forced_report: bool = False
 
 

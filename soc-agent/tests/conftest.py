@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from datetime import UTC
 
 # Add soc-agent root to sys.path so schemas can be imported
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
@@ -357,9 +358,9 @@ def live_alerts_ready(wazuh_healthy):
 
     Returns the approximate timestamp of injection for query windows.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    inject_time = datetime.now(timezone.utc)
+    inject_time = datetime.now(UTC)
     _inject_ssh_alerts()
 
     # Wait for at least one rule 5710 alert to appear
@@ -389,8 +390,8 @@ def make_monitoring_probe_alert(timestamp: str | None = None) -> dict:
     Uses an internal IP and a monitoring-style username. The username
     'probe-test01' matches the injected SSH attempt in _inject_ssh_alerts().
     """
-    from datetime import datetime, timezone
-    ts = timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    from datetime import datetime
+    ts = timestamp or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
         "ticket_id": f"TEST-PROBE-{int(time.time())}",
         "signature_id": "wazuh-rule-5710",
@@ -410,8 +411,8 @@ def make_brute_force_alert(timestamp: str | None = None) -> dict:
     Uses an external IP and a common attack username. The SIEM will have
     matching multi-username attempts from _inject_ssh_alerts().
     """
-    from datetime import datetime, timezone
-    ts = timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    from datetime import datetime
+    ts = timestamp or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
         "ticket_id": f"TEST-BRUTE-{int(time.time())}",
         "signature_id": "wazuh-rule-5710",
@@ -427,8 +428,8 @@ def make_brute_force_alert(timestamp: str | None = None) -> dict:
 
 def make_nagios_probe_alert(timestamp: str | None = None) -> dict:
     """Create a monitoring-probe alert with nagios-style username (internal, monitoring pattern)."""
-    from datetime import datetime, timezone
-    ts = timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    from datetime import datetime
+    ts = timestamp or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
         "ticket_id": f"TEST-NAGIOS-{int(time.time())}",
         "signature_id": "wazuh-rule-5710",
@@ -453,7 +454,7 @@ def seed_prior_investigation(runs_dir: Path, alert: dict, signature_id: str = "w
     an entry to audit.jsonl — simulating a past resolved investigation.
     """
     import secrets
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     prior_run_id = f"prior-{int(time.time())}"
     prior_dir = runs_dir / prior_run_id
@@ -478,7 +479,7 @@ def seed_prior_investigation(runs_dir: Path, alert: dict, signature_id: str = "w
         "signature_id": signature_id,
         "phase": "REPORT",
         "history": ["CONTEXTUALIZE", "SCREEN", "REPORT"],
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }, indent=2))
 
     # report.md — valid resolved report
@@ -530,7 +531,7 @@ Resolved as benign monitoring probe matching archetype monitoring-probe.
         "matched_archetype": "monitoring-probe",
         "matched_ticket_id": "SEC-2024-001",
         "leads_pursued": 2,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
     audit_path = runs_dir / "audit.jsonl"
     with open(audit_path, "a") as f:

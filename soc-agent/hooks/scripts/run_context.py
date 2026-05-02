@@ -28,7 +28,7 @@ mapping available before the slow path is ever needed.
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 _BASH_INV_PATH_RE = re.compile(r"([^\s'\"<>|&;()`$]*investigation\.md)")
@@ -136,7 +136,7 @@ def write_session_mapping(
     mapping_path.write_text(json.dumps({
         "run_dir": str(run_dir),
         "signature_id": signature_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }))
 
 
@@ -219,7 +219,7 @@ def resolve_run_dir(session_id: str, runs_dir: Path) -> tuple[Path | None, str]:
     mapping_path.write_text(json.dumps({
         "run_dir": str(run_dir),
         "signature_id": signature_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }))
 
     return run_dir, signature_id

@@ -23,8 +23,7 @@ Shape:
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, UTC
 
 from schemas.enums import (
     VALID_CONSULTATION_RESULTS,
@@ -45,7 +44,7 @@ class Precedent:
     narrative: str
     alert: dict
     anchors_at_time: list = field(default_factory=list)
-    captured_at: Optional[str] = None  # ISO 8601 date — required at validate time
+    captured_at: str | None = None  # ISO 8601 date — required at validate time
 
     def validate(self) -> list[str]:
         """Validate the precedent. Returns list of error messages."""
@@ -117,7 +116,7 @@ def parse_captured_at(value: str) -> datetime:
         try:
             dt = datetime.strptime(value, fmt)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return dt
         except ValueError:
             continue
@@ -134,7 +133,7 @@ def check_recency(captured_at: str, max_age_days: int = DEFAULT_MAX_AGE_DAYS) ->
     except ValueError as e:
         return False, str(e)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     age_days = (now - dt).days
     if age_days > max_age_days:
         return False, (
@@ -144,7 +143,7 @@ def check_recency(captured_at: str, max_age_days: int = DEFAULT_MAX_AGE_DAYS) ->
     return True, ""
 
 
-def parse_precedent(data: dict) -> tuple[Optional[Precedent], list[str]]:
+def parse_precedent(data: dict) -> tuple[Precedent | None, list[str]]:
     """Parse a dict into a Precedent. Returns (precedent, errors)."""
     errors = []
 

@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
+from collections.abc import Iterable
 
 
 MANIFEST_FILENAME = "manifest.jsonl"
@@ -35,6 +36,38 @@ CURSOR_FILENAME = "_consumed_offset"
 
 def _manifest_dir(run_dir: Path) -> Path:
     return run_dir / "raw_query_outputs"
+
+
+def _read_manifest_tail(run_dir: Path) -> tuple[Path, str, int]:
+    """Read manifest bytes past the cursor.
+
+    Returns (cursor_path, decoded_tail, new_offset). `decoded_tail` is "" when
+    the manifest is missing or there's nothing new — callers can treat that
+    as the empty case. Errors are swallowed to keep the gather flow resilient.
+    """
+    manifest = _manifest_dir(run_dir) / MANIFEST_FILENAME
+    cursor = _manifest_dir(run_dir) / CURSOR_FILENAME
+    if not manifest.exists():
+        return cursor, "", 0
+    try:
+        offset = int(cursor.read_text().strip()) if cursor.exists() else 0
+    except (OSError, ValueError):
+        offset = 0
+    try:
+        with manifest.open("rb") as f:
+            f.seek(offset)
+            tail = f.read()
+            new_offset = f.tell()
+    except OSError:
+        return cursor, "", 0
+    return cursor, tail.decode("utf-8", errors="replace"), new_offset
+
+
+def _advance_cursor(cursor: Path, new_offset: int) -> None:
+    try:
+        cursor.write_text(str(new_offset))
+    except OSError:
+        pass
 
 
 def consume_new_entries(run_dir: Path) -> list[dict[str, Any]]:
@@ -50,28 +83,12 @@ def consume_new_entries(run_dir: Path) -> list[dict[str, Any]]:
     dispatches, use `consume_entries_by_session` instead — it partitions
     the same cursor window by `session_id` (recorded in each entry).
     """
-    manifest = _manifest_dir(run_dir) / MANIFEST_FILENAME
-    cursor = _manifest_dir(run_dir) / CURSOR_FILENAME
-    if not manifest.exists():
-        return []
-    try:
-        offset = int(cursor.read_text().strip()) if cursor.exists() else 0
-    except (OSError, ValueError):
-        offset = 0
-
-    try:
-        with manifest.open("rb") as f:
-            f.seek(offset)
-            tail = f.read()
-            new_offset = f.tell()
-    except OSError:
-        return []
-
+    cursor, tail, new_offset = _read_manifest_tail(run_dir)
     if not tail:
         return []
 
     entries: list[dict[str, Any]] = []
-    for line in tail.decode("utf-8", errors="replace").splitlines():
+    for line in tail.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -80,11 +97,7 @@ def consume_new_entries(run_dir: Path) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             continue
 
-    try:
-        cursor.write_text(str(new_offset))
-    except OSError:
-        pass
-
+    _advance_cursor(cursor, new_offset)
     return entries
 
 
@@ -109,27 +122,11 @@ def consume_entries_by_session(
     requested = set(session_ids)
     grouped: dict[str, list[dict[str, Any]]] = {sid: [] for sid in requested}
 
-    manifest = _manifest_dir(run_dir) / MANIFEST_FILENAME
-    cursor = _manifest_dir(run_dir) / CURSOR_FILENAME
-    if not manifest.exists():
-        return grouped
-    try:
-        offset = int(cursor.read_text().strip()) if cursor.exists() else 0
-    except (OSError, ValueError):
-        offset = 0
-
-    try:
-        with manifest.open("rb") as f:
-            f.seek(offset)
-            tail = f.read()
-            new_offset = f.tell()
-    except OSError:
-        return grouped
-
+    cursor, tail, new_offset = _read_manifest_tail(run_dir)
     if not tail:
         return grouped
 
-    for line in tail.decode("utf-8", errors="replace").splitlines():
+    for line in tail.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -141,11 +138,7 @@ def consume_entries_by_session(
         if isinstance(sid, str) and sid in requested:
             grouped[sid].append(entry)
 
-    try:
-        cursor.write_text(str(new_offset))
-    except OSError:
-        pass
-
+    _advance_cursor(cursor, new_offset)
     return grouped
 
 
