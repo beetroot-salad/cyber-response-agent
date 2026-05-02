@@ -269,6 +269,11 @@ def parse_predict_dense(
             by_id[hid] = hyp
 
     # Pass 2: per-hypothesis sub-blocks (`:P h-NNN.<kind>`).
+    # Done in two phases so `comparisons` rows can reference `p*`/`r*` IDs
+    # regardless of the order the agent emitted blocks in. Phase 2a collects
+    # preds/attr_preds/refuts/authz; phase 2b attaches comparisons against the
+    # now-complete prediction/refutation buckets.
+    deferred_comparisons: list[tuple[str, str, dict]] = []
     for blk in blocks:
         if blk.tag != "P":
             continue
@@ -349,7 +354,12 @@ def parse_predict_dense(
                     "selector": _unquote(rec.get("selector", "")),
                     "dimension": rec.get("dimension", ""),
                 }
-                _attach_comparison(hyp, pred_ref, comp, error_cls)
+                deferred_comparisons.append((hid, pred_ref, comp))
+
+    # Phase 2b: attach deferred comparisons now that all p*/r*/ap* are
+    # collected on each hypothesis.
+    for hid, pred_ref, comp in deferred_comparisons:
+        _attach_comparison(by_id[hid], pred_ref, comp, error_cls)
 
     # Pass 3: branch_plan (`:L lead_preds` + optional `:L lead_preds.comparisons`).
     for blk in blocks:

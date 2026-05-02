@@ -8,6 +8,8 @@ expectations.
 
 from __future__ import annotations
 
+import textwrap
+
 import pytest
 
 from scripts.handlers._dense_parser import parse_dense_companion
@@ -15,6 +17,7 @@ from scripts.handlers._hypothesize_dense import (
     HypothesizeDenseEmitError,
     emit_hypothesize_dense,
 )
+from scripts.handlers._predict_dense import parse_predict_dense
 
 
 def _wrap(body: str) -> str:
@@ -153,3 +156,52 @@ def test_missing_id_raises():
     }]
     with pytest.raises(HypothesizeDenseEmitError, match="missing id/name"):
         emit_hypothesize_dense(hyps)
+
+
+def test_comparisons_block_can_precede_refuts_block():
+    """Regression for run #54: agent emits :P h-001.comparisons referencing
+    `r2` before :P h-001.refuts declares `r2`. The parser must defer
+    comparison attachment until all preds/refuts/attr_preds are collected,
+    not resolve them inline as it walks blocks in document order.
+    """
+
+    class _Err(Exception):
+        pass
+
+    stdout = textwrap.dedent(
+        """\
+        predict loop=1 shape=A
+
+        ### story h-001
+        s1. registered triple
+        s2. cadence within tolerance
+
+        :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+        h-001|?monitoring-system-is-the-actor|v-001|initiated_by|identity|approved-monitoring-service-account||"none"|null|active
+
+        :P h-001.preds [id|subject|kind|from_story|claim]
+        p1|proposed_parent|absolute|s1|"triple in registry"
+        p2|proposed_edge|cadence|s2|"foreground cadence matches baseline"
+
+        :P h-001.comparisons [pred_ref|selector_kind|selector|dimension]
+        p2|historical-self|"src=X AND user=Y over 24h"|inter-cluster-gap-distribution
+        r2|historical-self|"src=X AND user=Y over 24h"|inter-cluster-gap-distribution
+
+        :P h-001.refuts [id|refutes|kind|claim]
+        r1|p1|absolute|"triple absent"
+        r2|p2|cadence|"foreground deviates from baseline"
+
+        :R routing
+        selected_lead         approved-monitoring-sources
+        composite_secondary   -
+        override_data_source  -
+        rationale             "lock authorization"
+        """
+    )
+
+    pred = parse_predict_dense(stdout, _Err)
+    hyp = pred["hypotheses"][0]
+    p2 = next(p for p in hyp["predictions"] if p["id"] == "p2")
+    r2 = next(r for r in hyp["refutation_shape"] if r["id"] == "r2")
+    assert p2["comparison"]["dimension"] == "inter-cluster-gap-distribution"
+    assert r2["comparison"]["dimension"] == "inter-cluster-gap-distribution"
