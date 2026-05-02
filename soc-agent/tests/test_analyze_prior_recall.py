@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from invlang.corpus import Companion
 from handlers import _prior_recall as pr
+from tests._dense_fixture_helpers import companion_to_invlang_fence
 
 
 # ---------------------------------------------------------------------------
@@ -69,35 +70,38 @@ def _make_companion(
 # ---------------------------------------------------------------------------
 
 
-_INV_MD_WITH_CONTRACTS = """\
-## CONTEXTUALIZE
-
-```yaml
-prologue:
-  vertices:
-    - id: v-1
-      type: endpoint
-      classification: internal-endpoint
-  edges: []
-```
-
-## PREDICT (loop 1)
-
-```yaml
-hypothesize:
-  hypotheses:
-    - id: h-001
-      name: "?monitoring-probe"
-      weight: null
-      authorization_contract:
-        - predicate: "actor is registered in approved-monitoring-sources"
-    - id: h-002
-      name: "?adversary-credential-stuffing"
-      weight: "--"
-      authorization_contract:
-        - predicate: "should not appear here (refuted)"
-```
-"""
+_INV_MD_WITH_CONTRACTS = (
+    "## CONTEXTUALIZE\n\n"
+    + companion_to_invlang_fence({
+        "prologue": {
+            "vertices": [{
+                "id": "v-1", "type": "endpoint",
+                "classification": "internal-endpoint",
+                "identifier": "1.2.3.4",
+            }],
+            "edges": [],
+        },
+    })
+    + "\n\n## PREDICT (loop 1)\n\n"
+    + companion_to_invlang_fence({
+        "hypothesize": {"hypotheses": [
+            {
+                "id": "h-001", "name": "?monitoring-probe",
+                "authorization_contract": [{
+                    "predicate": "actor is registered in approved-monitoring-sources",
+                }],
+            },
+            {
+                "id": "h-002", "name": "?adversary-credential-stuffing",
+                "weight": "--",
+                "authorization_contract": [{
+                    "predicate": "should not appear here (refuted)",
+                }],
+            },
+        ]},
+    })
+    + "\n"
+)
 
 
 def test_open_contracts_excludes_refuted_hypotheses():
@@ -108,46 +112,44 @@ def test_open_contracts_excludes_refuted_hypotheses():
     assert "?adversary-credential-stuffing" not in names
 
 
-_INV_MD_MIXED_YAML_THEN_DENSE = """\
-## CONTEXTUALIZE
-
-```yaml
-prologue:
-  vertices:
-    - id: v-1
-      type: endpoint
-      classification: internal-endpoint
-  edges: []
-```
-
-## PREDICT (loop 1)
-
-```yaml
-hypothesize:
-  hypotheses:
-    - id: h-001
-      name: "?monitoring-probe"
-      weight: null
-      authorization_contract:
-        - predicate: "actor is registered in approved-monitoring-sources"
-```
-
-## PREDICT (loop 2)
-
-```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
-h-001|?monitoring-probe|||||||||||--|
-```
-"""
+_INV_MD_TWO_DENSE_HYPOTHESIZE_BLOCKS = (
+    "## CONTEXTUALIZE\n\n"
+    + companion_to_invlang_fence({
+        "prologue": {
+            "vertices": [{
+                "id": "v-1", "type": "endpoint",
+                "classification": "internal-endpoint",
+                "identifier": "1.2.3.4",
+            }],
+            "edges": [],
+        },
+    })
+    + "\n\n## PREDICT (loop 1)\n\n"
+    + companion_to_invlang_fence({
+        "hypothesize": {"hypotheses": [{
+            "id": "h-001", "name": "?monitoring-probe",
+            "authorization_contract": [{
+                "predicate": "actor is registered in approved-monitoring-sources",
+            }],
+        }]},
+    })
+    + "\n\n## PREDICT (loop 2)\n\n"
+    + companion_to_invlang_fence({
+        "hypothesize": {"hypotheses": [{
+            "id": "h-001", "name": "?monitoring-probe", "weight": "--",
+        }]},
+    })
+    + "\n"
+)
 
 
-def test_merge_companion_blocks_last_wins_dense_overrides_yaml(monkeypatch):
+def test_merge_companion_blocks_last_wins_across_dense_blocks(monkeypatch):
     """Regression: a later dense hypothesize block must override an
-    older YAML copy of the same hypothesis id, so a now-refuted
-    hypothesis (weight `--`) is excluded from `_live_hypotheses` and
-    `_open_contracts` rather than retaining the stale YAML record.
+    earlier copy of the same hypothesis id, so a now-refuted hypothesis
+    (weight `--`) is excluded from `_live_hypotheses` and
+    `_open_contracts` rather than retaining the stale earlier record.
     """
-    body = pr._merge_companion_blocks(_INV_MD_MIXED_YAML_THEN_DENSE)
+    body = pr._merge_companion_blocks(_INV_MD_TWO_DENSE_HYPOTHESIZE_BLOCKS)
     hyps = body["hypothesize"]["hypotheses"]
     assert len(hyps) == 1
     assert hyps[0]["id"] == "h-001"

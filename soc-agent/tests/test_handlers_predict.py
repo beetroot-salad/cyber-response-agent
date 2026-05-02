@@ -253,40 +253,47 @@ class TestPromptAssembly:
 # ---------------------------------------------------------------------------
 
 
-_INVESTIGATION_WITH_PREDICT = textwrap.dedent("""
-## CONTEXTUALIZE
+def _build_investigation_with_predict() -> str:
+    from tests._dense_fixture_helpers import companion_to_invlang_fence
+    return (
+        "## CONTEXTUALIZE\n\n"
+        + companion_to_invlang_fence({
+            "prologue": {
+                "vertices": [
+                    {"id": "v-001", "type": "endpoint",
+                     "classification": "monitoring-host",
+                     "identifier": "10.0.0.1"},
+                    {"id": "v-002", "type": "endpoint",
+                     "classification": "internal-server",
+                     "identifier": "target"},
+                ],
+                "edges": [{
+                    "id": "e-001", "relation": "attempted_auth",
+                    "source_vertex": "v-001", "target_vertex": "v-002",
+                    "authority": {"kind": "siem-event",
+                                  "source": "wazuh-rule-5710"},
+                }],
+            },
+        })
+        + "\n\n## PREDICT (loop 1)\n\n"
+        + companion_to_invlang_fence({
+            "hypothesize": {"hypotheses": [{
+                "id": "h-001", "name": "?monitoring-probe",
+                "attached_to_vertex": "v-002",
+                "proposed_edge": {
+                    "relation": "attempted_auth",
+                    "parent_vertex": {
+                        "type": "endpoint",
+                        "classification": "monitoring-host",
+                    },
+                },
+            }]},
+        })
+        + "\n"
+    )
 
-```yaml
-prologue:
-  vertices:
-    - id: v-001
-      type: endpoint
-      classification: monitoring-host
-    - id: v-002
-      type: endpoint
-      classification: internal-server
-  edges:
-    - id: e-001
-      relation: attempted_auth
-      source_vertex: v-001
-      target_vertex: v-002
-```
 
-## PREDICT (loop 1)
-
-```yaml
-hypothesize:
-  hypotheses:
-    - id: h-001
-      name: "?monitoring-probe"
-      attached_to_vertex: v-002
-      proposed_edge:
-        relation: attempted_auth
-        parent_vertex:
-          type: endpoint
-          classification: monitoring-host
-```
-""").strip() + "\n"
+_INVESTIGATION_WITH_PREDICT = _build_investigation_with_predict()
 
 
 def _synthetic_companion():

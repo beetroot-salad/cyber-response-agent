@@ -1113,7 +1113,7 @@ class TestHandleOutput:
 
             ```invlang
             :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
-            h-001|?monitoring-system-is-the-actor|v-001|initiated_by|identity|sa|||||||"none"|null|active
+            h-001|?monitoring-system-is-the-actor|v-001|initiated_by|identity|sa||||||true|none|active
             ```
         """).strip() + "\n")
         ctx = Context(

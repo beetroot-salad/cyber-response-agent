@@ -53,6 +53,7 @@ class AnalyzeDenseEmitError(ValueError):
 _LEAD_COLS = [
     "id", "name", "loop", "target", "mode",
     "system", "template", "query", "window", "status",
+    "fail_reason",
 ]
 
 _AUTHZ_COLS = [
@@ -178,17 +179,20 @@ def _render_lead_row(entry: dict[str, Any]) -> str:
         raise AnalyzeDenseEmitError(
             f"analyze findings row missing name: {entry!r}"
         )
+    outcome = entry.get("outcome") or {}
+    fail_reason = outcome.get("failure_reason") if isinstance(outcome, dict) else ""
     cells = {
-        "id":       entry["id"],
-        "name":     entry["name"],
-        "loop":     entry.get("loop", ""),
-        "target":   entry.get("target", ""),
-        "mode":     entry.get("mode", "graded"),
-        "system":   qd.get("system", ""),
-        "template": qd.get("template", ""),
-        "query":    qd.get("query", ""),
-        "window":   flatten_window(qd.get("time_window", "")),
-        "status":   entry.get("status", "active"),
+        "id":          entry["id"],
+        "name":        entry["name"],
+        "loop":        entry.get("loop", ""),
+        "target":      entry.get("target", ""),
+        "mode":        entry.get("mode", "graded"),
+        "system":      qd.get("system", ""),
+        "template":    qd.get("template", ""),
+        "query":       qd.get("query", ""),
+        "window":      flatten_window(qd.get("time_window", "")),
+        "status":      entry.get("status", "active"),
+        "fail_reason": fail_reason or "",
     }
     return "|".join(cell(cells[c]) for c in _LEAD_COLS)
 

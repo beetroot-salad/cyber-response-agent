@@ -45,8 +45,6 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
-
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
@@ -71,7 +69,6 @@ from hooks.scripts.run_context import extract_run_dir_from_path
 JUDGE_A_PROMPT_PATH = Path(__file__).resolve().parent / "report_judge_A_prompt.md"
 JUDGE_B_PROMPT_PATH = Path(__file__).resolve().parent / "report_judge_B_prompt.md"
 
-YAML_BLOCK_RE = re.compile(r"```yaml[ \t]*\r?\n(.*?)\r?\n```", re.DOTALL)
 VERDICT_LINE_RE = re.compile(
     r"\*\*Verdict:\*\*\s*(resolved|escalated)\b", re.IGNORECASE
 )
@@ -131,48 +128,30 @@ def check_ticket_context_spawned(run_dir: Path) -> str | None:
 # Gate 2 fire condition + context extraction
 # ---------------------------------------------------------------------------
 
-def extract_conclude_yaml(text: str) -> dict | None:
+def extract_conclude_dense(text: str) -> dict | None:
     """Return the parsed conclude block (or None).
 
-    REPORT now emits the conclude block in **dense format** (see
-    `scripts/handlers/_conclude_dense.py`). Fall back to a legacy
-    ```yaml conclude: ...``` fence for archived corpora that predate
-    the migration.
-
-    The function name is preserved for back-compat — callers don't care
-    which surface produced the dict.
-
-    A malformed dense block emits a stderr warning before falling back
-    to the YAML branch — the precise error still surfaces from the
-    sibling `invlang_validate.py` PreToolUse hook, but we shouldn't
-    swallow it silently here.
+    Routes through the fence-aware `parse_dense_companion` so callers
+    can pass raw `investigation.md` text (with ```invlang fences
+    intact). A malformed dense block emits a stderr warning and returns
+    None — the precise error still surfaces from the sibling
+    `invlang_validate.py` PreToolUse hook.
     """
-    from scripts.handlers._conclude_dense import (  # type: ignore
-        ConcludeOutputError,
-        parse_conclude_dense,
+    from scripts.handlers._dense_parser import (  # type: ignore
+        DenseParseError,
+        parse_dense_companion,
     )
     try:
-        dense = parse_conclude_dense(text)
-        if isinstance(dense, dict):
-            return dense
-    except ConcludeOutputError as e:
+        companion = parse_dense_companion(text)
+    except DenseParseError as e:
         print(
-            f"[validate_report_precheck] warning: malformed dense :T "
-            f"conclude block — falling back to YAML extraction. "
-            f"Error: {e}",
+            f"[validate_report_precheck] warning: malformed dense "
+            f"```invlang block — skipping. Error: {e}",
             file=sys.stderr,
         )
-
-    for raw in YAML_BLOCK_RE.findall(text):
-        try:
-            doc = yaml.safe_load(raw)
-        except yaml.YAMLError:
-            continue
-        if isinstance(doc, dict) and "conclude" in doc:
-            inner = doc["conclude"]
-            if isinstance(inner, dict):
-                return inner
-    return None
+        return None
+    conclude = (companion or {}).get("conclude")
+    return conclude if isinstance(conclude, dict) else None
 
 
 def extract_status(text: str) -> str | None:
@@ -329,7 +308,7 @@ def run_judges(run_dir: Path, proposed_text: str) -> str | None:
             "line, retry the write."
         )
 
-    conclude_block = extract_conclude_yaml(proposed_text)
+    conclude_block = extract_conclude_dense(proposed_text)
     if conclude_block is None:
         # Pre-YAML write — defer until the conclude: block is added.
         return None
@@ -429,18 +408,12 @@ def check_frontier_closure(proposed_text: str) -> str | None:
     Returns None on pass; a single error message (possibly aggregating
     multiple active hypotheses) on fail.
     """
-    blocks: list = []
-    for match in YAML_BLOCK_RE.finditer(proposed_text):
-        try:
-            doc = yaml.safe_load(match.group(1))
-        except yaml.YAMLError:
-            continue
-        if isinstance(doc, dict):
-            blocks.append(doc)
-    # Pick up the dense `:T conclude` block (REPORT phase). The
-    # frontier-closure check needs `merged["conclude"]["termination"]
-    # ["category"]` to gate.
-    dense_conclude = extract_conclude_yaml(proposed_text)
+    # Walk the dense ```invlang surface for hypothesis state + the
+    # `:T conclude` block. The frontier-closure check needs
+    # `merged["conclude"]["termination"]["category"]` to gate.
+    from scripts.handlers._markdown import iter_companion_dicts  # type: ignore
+    blocks: list = list(iter_companion_dicts(proposed_text))
+    dense_conclude = extract_conclude_dense(proposed_text)
     if dense_conclude is not None and not any("conclude" in b for b in blocks):
         blocks.append({"conclude": dense_conclude})
     if not blocks:
@@ -503,7 +476,7 @@ def check_termination_vs_verdict(proposed_text: str) -> str | None:
 
     Returns None on pass, an error message on fail.
     """
-    conclude_block = extract_conclude_yaml(proposed_text)
+    conclude_block = extract_conclude_dense(proposed_text)
     if conclude_block is None:
         return None
 

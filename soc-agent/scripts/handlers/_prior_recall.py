@@ -46,11 +46,10 @@ MAX_VERTEX_WHERE_SPECS = 2
 def _merge_companion_blocks(text: str) -> dict[str, Any]:
     """Merge every companion fence in investigation.md into one dict.
 
-    Walks the unified ```invlang dense surface and any legacy ```yaml
-    fences via `iter_companion_dicts`, projecting only the keys ANALYZE
-    recall cares about (`prologue`, `hypothesize.hypotheses`, `findings`).
-    Hypotheses are merged **last-wins** by id so a later dense block
-    overrides an older YAML copy of the same hypothesis (mirrors
+    Walks the dense ```invlang surface via `iter_companion_dicts`,
+    projecting only the keys ANALYZE recall cares about (`prologue`,
+    `hypothesize.hypotheses`, `findings`). Hypotheses are merged
+    **last-wins** by id (mirrors
     `predict_priors.parse_prologue_and_last_hypothesize`); in-loop
     hypotheses authored under `findings[*].new_hypotheses` are folded
     into the same map so the open-contract scan sees them.

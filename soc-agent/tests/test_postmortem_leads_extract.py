@@ -30,6 +30,7 @@ from scripts.postmortem.leads.extract import (
     extract_ad_hoc_leads,
     has_ad_hoc_leads,
 )
+from tests._dense_fixture_helpers import companion_to_invlang_fence
 
 FIXTURES = Path(__file__).parent / "fixtures" / "postmortem_leads"
 
@@ -92,22 +93,20 @@ class TestExtractAdHocLeads:
         (run_dir / "meta.json").write_text(
             (FIXTURES / "meta.json").read_text()
         )
+        fence = companion_to_invlang_fence({
+            "findings": [{
+                "id": "l-001", "loop": 1,
+                "name": "parent-domain-classification",
+                "target": "v-001", "mode": "gather",
+                "query_details": {"template": "ad-hoc"},
+            }],
+        })
         (run_dir / "investigation.md").write_text(
             "## ANALYZE (loop 1)\n\n"
             "**Lead:** parent-domain-classification\n\n"
             "**Query:** `data.dns_domain:*example.net* AND agent.name:host`\n\n"
             "**Selection rationale:** characterize parent-domain reputation\n\n"
-            "```yaml\n"
-            "findings:\n"
-            "  - id: l-001\n"
-            "    loop: 1\n"
-            "    name: parent-domain-classification\n"
-            "    target: v-001\n"
-            "    mode: lead-pick\n"
-            "    query_details: {}\n"
-            "    outcome: {}\n"
-            "    resolutions: []\n"
-            "```\n"
+            + fence + "\n"
         )
         leads = extract_ad_hoc_leads(run_dir, vendor="wazuh")
         assert len(leads) == 1
@@ -124,22 +123,21 @@ class TestExtractAdHocLeads:
         (run_dir / "meta.json").write_text(
             (FIXTURES / "meta.json").read_text()
         )
+        fence = companion_to_invlang_fence({
+            "findings": [{
+                "id": "l-001", "loop": 1,
+                "name": "parent-domain-classification",
+                "target": "v-001", "mode": "gather",
+                "query_details": {
+                    "system": "wazuh", "template": "ad-hoc",
+                    "query": "authoritative invlang query",
+                },
+            }],
+        })
         (run_dir / "investigation.md").write_text(
             "**Lead:** parent-domain-classification\n\n"
             "**Query:** `STALE PROSE QUERY`\n\n"
-            "```yaml\n"
-            "findings:\n"
-            "  - id: l-001\n"
-            "    loop: 1\n"
-            "    name: parent-domain-classification\n"
-            "    target: v-001\n"
-            "    mode: lead-pick\n"
-            "    query_details:\n"
-            "      query: 'authoritative invlang query'\n"
-            "      system: wazuh\n"
-            "    outcome: {}\n"
-            "    resolutions: []\n"
-            "```\n"
+            + fence + "\n"
         )
         leads = extract_ad_hoc_leads(run_dir, vendor="wazuh")
         assert leads[0].query == "authoritative invlang query"
@@ -190,53 +188,9 @@ class TestExtractAdHocLeads:
         assert l3.result_shape == "errored"
 
 
-class TestFindingsGatherAlias:
-    """`_merge_md_blocks` accepts both `findings:` (current spec) and
-    `gather:` (older on-disk shape) and merges them under one `findings`
-    key. The post-mortem extractor relies on this — real production runs
-    write `gather:`. Covered transitively by the gold fixture, but a
-    direct unit test pins the contract."""
-
-    def test_findings_key_parses(self) -> None:
-        from scripts.invlang.corpus import _merge_md_blocks
-        text = (
-            "```yaml\n"
-            "findings:\n"
-            "  - id: l-1\n"
-            "    name: example\n"
-            "```\n"
-        )
-        merged = _merge_md_blocks(text)
-        assert [f["id"] for f in merged["findings"]] == ["l-1"]
-
-    def test_gather_key_parses_as_alias(self) -> None:
-        from scripts.invlang.corpus import _merge_md_blocks
-        text = (
-            "```yaml\n"
-            "gather:\n"
-            "  - id: l-1\n"
-            "    name: example\n"
-            "```\n"
-        )
-        merged = _merge_md_blocks(text)
-        assert [f["id"] for f in merged["findings"]] == ["l-1"]
-
-    def test_findings_and_gather_merge(self) -> None:
-        from scripts.invlang.corpus import _merge_md_blocks
-        text = (
-            "```yaml\n"
-            "findings:\n"
-            "  - id: l-1\n"
-            "    name: a\n"
-            "```\n\n"
-            "```yaml\n"
-            "gather:\n"
-            "  - id: l-2\n"
-            "    name: b\n"
-            "```\n"
-        )
-        merged = _merge_md_blocks(text)
-        assert [f["id"] for f in merged["findings"]] == ["l-1", "l-2"]
+# NOTE: `TestFindingsGatherAlias` (yaml-only `findings:`/`gather:` key
+# alias) was removed when `_merge_md_blocks` went dense-only. The dense
+# surface uses `:L findings`; there's no `gather:` key alias to test.
 
 
 class TestHasAdHocLeads:

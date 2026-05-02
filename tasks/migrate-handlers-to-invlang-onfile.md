@@ -28,10 +28,24 @@ Foundation for the dense on-disk format landed via #160. Per-handler flips landi
 ## Cleanup We Should Do In The Cutover PR
 
 - [x] **Consolidate duplicated prologue readers** (#170) — both handlers now import `first_prologue_vertex_id` from `_markdown.py`.
-- [ ] **Consolidate companion merging/walking** — we now have overlapping logic in `_markdown.iter_companion_dicts()`, `_prior_recall._merge_yaml_blocks()`, `report.py:_extract_findings_blocks()`, and `invlang.corpus._merge_md_blocks()`. During cutover, it is worth centralizing the live-`investigation.md` read path around one shared dense-aware helper rather than keeping several partial readers in sync.
-- [ ] **Screen prompt-side fence** (`screen.py:134`) — still passes a re-serialized YAML prologue to the screen subagent inside a `` ```yaml `` fence (off-disk, non-gating). Cutover commit `9f5d543` left it untouched because the screen subagent prompt template still expects yaml-shape input; flipping it requires a coordinated subagent prompt edit.
+- [x] **Consolidate companion merging/walking** — `iter_companion_dicts()` is the single live-path walker; the remaining wrappers (`_prior_recall._merge_companion_blocks`, `report._extract_findings_blocks`) carry phase-specific semantics on top of it (hypothesis dedup; findings flattening + prose-form fallback). `invlang.corpus._merge_md_blocks` was rewritten to dense-only after the test corpus was discarded.
+- [x] **Screen prompt-side fence** (`screen.py`) — flipped the input fence from `` ```yaml `` to `` ```invlang ``. New `emit_prologue_dense_body()` helper in `_prologue_dense.py`; `_extract_prologue_yaml` renamed `_extract_prologue_dense`; `agents/screen.md` updated with a dense-row cheat-sheet (input only — subagent stdout still emits yaml, tracked separately).
+- [x] **Drop yaml corpus support** — `scripts/invlang/corpus.py` and `scripts/invlang/cli.py` no longer carry `YAML_BLOCK_RE` / `PILOT_CORPUS_FILES` / yaml-fence walking. In-repo pilot fixtures under `docs/experiments/investigation-language-pilot/case-*/walk-*.yaml` and `companion-v2*.yaml` deleted.
+- [x] **Drop yaml fallbacks in `validate_report_precheck.py`** — `extract_conclude_yaml` renamed `extract_conclude_dense`; routes through fence-aware `parse_dense_companion`. `_check_frontier_closure` walks via `iter_companion_dicts` (no yaml-block scan).
+- [x] **Dense parser projects to one canonical companion shape** (no shape tolerance in readers). The parser now projects:
+   - `:H` `parent_type` / `parent_class` cells → `proposed_edge.parent_vertex.{type, classification}` (nested — yaml convention; matches every reader: `invlang_checks_hypothesis`, `corpus.hypothesis_topology`, `env_memory.extract_anchors`, `env_memory_lint`, `predict_priors`).
+   - `:T shelved` rows → `lead.shelved` is a flat list of bare hypothesis ids (canonical companion shape); rationales (if any) land in the sibling `lead.shelved_rationales` map keyed by id, so `compute_final_status` can stay strict.
+   - `:L findings` `fail_reason` cell → `outcome.failure_reason` (where postmortem and downstream readers expect it). `_gather_dense` and `_analyze_dense` emitters now write the cell from `outcome.failure_reason`, closing the previously-silent emit gap.
+- [x] **`invlang_validate.extract_conclude_yaml` rename → `extract_conclude_dense`** and rerouted through the fence-aware `parse_dense_companion` so callers can pass raw `investigation.md` text. Old function name was misleading post-cutover.
+- [x] **`postmortem.leads.extract._derive_result_shape`** widened to accept `attribute_updates` even when `outcome.observations` is absent (was previously gated inside the observations-dict branch).
+- [x] **Test fixture helper** (`tests/_dense_fixture_helpers.py`) added so test fixtures can stay declarative as companion dicts. Production emitters remain strict; the helper fills test-only defaults (resolution `before_weight: "none"` + `severity: low`, contract `id: ac<n>` + `anchor_kind: org-authority` + `edge_ref: proposed`) before calling them. Live yaml fixtures in test_validate_report_precheck, test_handlers_report, test_invlang_dense_parity, test_analyze_prior_recall, test_handlers_predict, test_predict_fastpath_handler, test_postmortem_leads_extract, test_env_memory, test_env_memory_lint converted to dense.
+- [x] **Removed yaml-only `findings:`/`gather:` alias test** (`TestFindingsGatherAlias` in test_postmortem_leads_extract). Aliasing was a yaml-only artifact; the dense surface uses `:L findings`.
 
 Scope discipline: yes to consolidating methods during the cutover, but keep it narrowly tied to live `investigation.md` parsing / helper dedup. Avoid bundling unrelated format design changes or broad handler refactors into the strict-cutover PR.
+
+## Out of scope, tracked elsewhere
+
+- **Subagent stdout yaml contracts** (gather, gather-composite, predict, report, archetype-match, ticket-context, screen output blocks). Every prompt under `soc-agent/agents/` still ends with "emit EXACTLY this YAML, then STOP". Flipping these to dense invlang is a coordinated multi-subagent refactor with persister-side parsing changes (`_subagent.extract_terminal_yaml`, `extract_subagent_yaml.py`, `_output_parser`).
 
 ## Acceptance
 

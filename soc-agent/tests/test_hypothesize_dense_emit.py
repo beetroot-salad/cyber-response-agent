@@ -31,8 +31,10 @@ def test_round_trip_minimal():
         "attached_to_vertex": "v-001",
         "proposed_edge": {
             "relation": "initiated_by",
-            "parent_type": "identity",
-            "parent_class": "approved-monitoring-service-account",
+            "parent_vertex": {
+                "type": "identity",
+                "classification": "approved-monitoring-service-account",
+            },
         },
         "predictions": [
             {"id": "p1", "subject": "proposed_parent",
@@ -64,8 +66,8 @@ def test_round_trip_authz_contract():
         "name": "?probe",
         "attached_to_vertex": "v-001",
         "proposed_edge": {
-            "relation": "initiated_by", "parent_type": "identity",
-            "parent_class": "sa",
+            "relation": "initiated_by",
+            "parent_vertex": {"type": "identity", "classification": "sa"},
         },
         "predictions": [
             {"id": "p1", "subject": "proposed_parent", "claim": "triple listed"},
@@ -103,7 +105,7 @@ def test_round_trip_claim_with_embedded_quote_and_semicolon():
         "id": "h-001",
         "name": "?quoted",
         "attached_to_vertex": "v-001",
-        "proposed_edge": {"relation": "r", "parent_type": "t", "parent_class": "c"},
+        "proposed_edge": {"relation": "r", "parent_vertex": {"type": "t", "classification": "c"}},
         "predictions": [
             {"id": "p1", "subject": "proposed_parent", "claim": tricky},
             {"id": "p2", "subject": "proposed_parent", "claim": "second pred"},
@@ -136,7 +138,7 @@ def test_non_list_predictions_raises_loud():
         "id": "h-001",
         "name": "?x",
         "attached_to_vertex": "v-001",
-        "proposed_edge": {"relation": "r", "parent_type": "t", "parent_class": "c"},
+        "proposed_edge": {"relation": "r", "parent_vertex": {"type": "t", "classification": "c"}},
         "predictions": "p1:proposed_parent:\"oops\"",  # wrong type
         "weight": None,
         "status": "active",
@@ -150,7 +152,7 @@ def test_missing_id_raises():
         "id": "",
         "name": "?x",
         "attached_to_vertex": "v-001",
-        "proposed_edge": {"relation": "r", "parent_type": "t", "parent_class": "c"},
+        "proposed_edge": {"relation": "r", "parent_vertex": {"type": "t", "classification": "c"}},
         "weight": None,
         "status": "active",
     }]

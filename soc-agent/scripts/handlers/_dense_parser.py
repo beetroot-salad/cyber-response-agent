@@ -350,14 +350,21 @@ def _hypothesis_record(block: DenseBlock, row: str) -> dict[str, Any]:
         out["attached_to_vertex"] = rec["attached_to"]
     if rec.get("rel"):
         out.setdefault("proposed_edge", {})["relation"] = rec["rel"]
-    if rec.get("parent_type"):
-        out.setdefault("proposed_edge", {})["parent_type"] = rec["parent_type"]
-    if rec.get("parent_class"):
-        out.setdefault("proposed_edge", {})["parent_class"] = rec["parent_class"]
+    # Project the dense `parent_type` / `parent_class` cells back into the
+    # canonical companion shape `proposed_edge.parent_vertex.{type,
+    # classification}` (yaml convention — every validator + reader indexes
+    # on this nested form).
+    if rec.get("parent_type") or rec.get("parent_class"):
+        pv: dict[str, Any] = {}
+        if rec.get("parent_type"):
+            pv["type"] = rec["parent_type"]
+        if rec.get("parent_class"):
+            pv["classification"] = rec["parent_class"]
+        out.setdefault("proposed_edge", {})["parent_vertex"] = pv
     if rec.get("parent_attrs"):
-        out.setdefault("proposed_edge", {})["parent_attributes"] = _parse_attrs(
-            rec["parent_attrs"]
-        )
+        out.setdefault("proposed_edge", {}).setdefault(
+            "parent_vertex", {}
+        )["attributes"] = _parse_attrs(rec["parent_attrs"])
     preds_cell = rec.get("preds", "")
     if preds_cell:
         out["predictions"] = _parse_pred_subcells(preds_cell)
@@ -487,7 +494,6 @@ def _lead_header_record(
         ("loop", "loop"),
         ("mode", "mode"),
         ("trust_root", "trust_root_reached"),
-        ("fail_reason", "failure_reason"),
         ("screen_result", "screen_result"),
         ("status", "status"),
     ):
@@ -501,6 +507,12 @@ def _lead_header_record(
             identity[k_out] = value
     if rec.get("tests"):
         identity["tests_hypotheses"] = _split_csv(rec["tests"])
+    # `fail_reason` lives under `outcome.failure_reason` in the canonical
+    # companion dict (yaml convention + postmortem contract); the emitters
+    # read from that path. Project the cell back into `outcome` so the
+    # surface round-trips cleanly.
+    if rec.get("fail_reason"):
+        identity.setdefault("outcome", {})["failure_reason"] = rec["fail_reason"]
 
     query_details: dict[str, Any] = {}
     for k_in, k_out in (
@@ -787,6 +799,10 @@ def _project_shelved(
     lead_bucket,
     ctx: dict[str, str | None],
 ) -> None:
+    """Project `:T shelved` rows to the canonical companion shape:
+    `lead.shelved` is a flat list of hypothesis ids; rationales (if any)
+    land in the sibling `lead.shelved_rationales` map keyed by id.
+    """
     for row in block.rows:
         rec = _row_record(block, row)
         if not rec.get("hyp_id"):
@@ -799,10 +815,11 @@ def _project_shelved(
                 f":T shelved row missing by_lead and no lead context: {row!r}"
             )
         lead = lead_bucket(lead_id)
-        lead.setdefault("shelved", []).append({
-            "hypothesis_id": rec["hyp_id"],
-            "rationale": _unquote(rec.get("rationale", "")),
-        })
+        hyp_id = rec["hyp_id"]
+        lead.setdefault("shelved", []).append(hyp_id)
+        rationale = _unquote(rec.get("rationale", ""))
+        if rationale:
+            lead.setdefault("shelved_rationales", {})[hyp_id] = rationale
 
 
 # --- conclude ---------------------------------------------------------------

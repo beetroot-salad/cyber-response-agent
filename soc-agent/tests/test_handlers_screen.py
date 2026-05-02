@@ -29,36 +29,6 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult, run  #
 # ---------------------------------------------------------------------------
 
 
-PROLOGUE_YAML = textwrap.dedent("""\
-    prologue:
-      vertices:
-      - id: v-001
-        type: endpoint
-        classification: internal-monitoring-host
-        identifier: 172.22.0.10
-      - id: v-002
-        type: endpoint
-        classification: unclassified-endpoint
-        identifier: target-endpoint
-      - id: v-003
-        type: identity
-        classification: monitoring-pattern
-        identifier: nagios
-      edges:
-      - id: e-001
-        relation: attempted_auth
-        source_vertex: v-001
-        target_vertex: v-002
-        when:
-          timestamp: '2026-04-20T19:25:01.616Z'
-        attributes:
-          target_user: nagios
-        authority:
-          kind: siem-event
-          source: Wazuh (rule 5710)
-""")
-
-
 PROLOGUE_INVLANG = textwrap.dedent("""\
     :V prologue.vertices [id|type|class|ident|attrs]
     v-001|endpoint|internal-monitoring-host|172.22.0.10|
@@ -349,7 +319,9 @@ class TestScreenDispatch:
         assert "signature_id=wazuh-rule-5710" in prompt
         # Prologue is inlined so the merged subagent can pick `target: v-*`
         # without reading investigation.md.
-        assert "prologue_yaml:" in prompt
+        assert "prologue_dense:" in prompt
+        assert "```invlang" in prompt
+        assert ":V prologue.vertices" in prompt
         assert "v-001" in prompt
         assert "attempted_auth" in prompt
 
@@ -472,39 +444,23 @@ class TestGatherExtraction:
 class TestPrologueExtraction:
     def test_extracts_from_seeded_investigation(self, tmp_path):
         ctx = make_ctx(tmp_path)
-        block = screen_handler._extract_prologue_yaml(ctx.run_dir)
-        assert "prologue:" in block
-        assert "v-001" in block
+        body = screen_handler._extract_prologue_dense(ctx.run_dir)
+        assert ":V prologue.vertices" in body
+        assert ":E prologue.edges" in body
+        assert "v-001" in body
 
     def test_missing_investigation_raises(self, tmp_path):
         ctx = make_ctx(tmp_path, seed_investigation=False)
         with pytest.raises(OrchestrationError, match="investigation.md not found"):
-            screen_handler._extract_prologue_yaml(ctx.run_dir)
+            screen_handler._extract_prologue_dense(ctx.run_dir)
 
     def test_no_prologue_block_raises(self, tmp_path):
         ctx = make_ctx(tmp_path, seed_investigation=False)
         (ctx.run_dir / "investigation.md").write_text(
-            "## CONTEXTUALIZE\n\nno yaml block here\n"
+            "## CONTEXTUALIZE\n\nno invlang block here\n"
         )
         with pytest.raises(OrchestrationError, match="no prologue"):
-            screen_handler._extract_prologue_yaml(ctx.run_dir)
-
-    def test_extracts_from_tilde_fence(self, tmp_path):
-        """A ``~~~yaml`` fenced block is an equally valid CommonMark fence;
-        markdown-it-py handles it natively."""
-        ctx = make_ctx(tmp_path, seed_investigation=False)
-        (ctx.run_dir / "investigation.md").write_text(
-            "## CONTEXTUALIZE\n\n"
-            "~~~yaml\n"
-            "prologue:\n"
-            "  vertices:\n"
-            "    - id: v-001\n"
-            "      kind: ip\n"
-            "~~~\n"
-        )
-        block = screen_handler._extract_prologue_yaml(ctx.run_dir)
-        assert "prologue:" in block
-        assert "v-001" in block
+            screen_handler._extract_prologue_dense(ctx.run_dir)
 
 
 # ---------------------------------------------------------------------------

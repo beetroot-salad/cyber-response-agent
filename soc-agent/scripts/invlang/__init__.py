@@ -12,7 +12,6 @@ Example:
 
 from .corpus import (
     Companion,
-    PILOT_CORPUS_FILES,
     conclude_field,
     hypothesis_topology,
     load_corpus,
@@ -48,7 +47,6 @@ from .queries import (
 __all__ = [
     # corpus
     "Companion",
-    "PILOT_CORPUS_FILES",
     "conclude_field",
     "load_corpus",
     # queries — classes 1–8 (original)

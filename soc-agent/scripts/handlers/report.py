@@ -789,10 +789,10 @@ def _extract_findings_blocks(investigation_md: str) -> list[dict]:
     """Extract findings lead entries from investigation.md.
 
     Preference order:
-      1. Structured `findings: [...]` blocks from any companion fence
-         (```invlang dense surface or legacy ```yaml) — carries full
-         outcome shape including anchor_consultations,
-         authorization_resolutions, resolutions, attribute_updates.
+      1. Structured `findings: [...]` blocks from the ```invlang dense
+         surface — carries full outcome shape including
+         anchor_consultations, authorization_resolutions, resolutions,
+         attribute_updates.
       2. Prose-form `## GATHER (loop N)` sections with `**Lead:**` /
          `**Status:**` bold-prefix lines (what ANALYZE currently produces).
          Yields `{name, status, loop}` entries — enough for lead counts

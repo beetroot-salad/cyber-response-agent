@@ -19,6 +19,7 @@ sys.path.insert(0, str(SOC_AGENT_ROOT / "scripts"))
 
 from scripts import env_memory_lint as lint  # noqa: E402
 from scripts.handlers import env_memory  # noqa: E402
+from tests._dense_fixture_helpers import companion_to_invlang_fence  # noqa: E402
 
 
 def _atoms_section(yaml_body: str) -> str:
@@ -200,28 +201,26 @@ class TestCheckTripleCoverage:
         runs = tmp_path / "runs"
         run_dir = runs / "run-1"
         run_dir.mkdir(parents=True)
-        inv = textwrap.dedent("""\
-            ```yaml
-            prologue:
-              vertices:
-                - id: v-001
-                  type: novel-type
-                  classification: foo
-                  identifier: x
-              edges: []
-            ```
-
-            ```yaml
-            hypothesize:
-              hypotheses:
-                - id: h-001
-                  attached_to_vertex: v-001
-                  proposed_edge:
-                    relation: novel-relation
-                    parent_vertex: {type: novel-parent, classification: bar}
-                  weight: null
-            ```
-        """)
+        inv = companion_to_invlang_fence({
+            "prologue": {
+                "vertices": [{
+                    "id": "v-001", "type": "novel-type",
+                    "classification": "foo", "identifier": "x",
+                }],
+                "edges": [],
+            },
+            "hypothesize": {"hypotheses": [{
+                "id": "h-001", "name": "?novel",
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "novel-relation",
+                    "parent_vertex": {
+                        "type": "novel-parent",
+                        "classification": "bar",
+                    },
+                },
+            }]},
+        }) + "\n"
         (run_dir / "investigation.md").write_text(inv)
         warns = lint._check_triple_coverage(tmp_path, runs)
         assert any("TRIPLE-COVERAGE" in w for w in warns)
