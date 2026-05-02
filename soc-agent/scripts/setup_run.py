@@ -28,6 +28,7 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.frontmatter import parse_yaml_frontmatter
+from hooks.scripts.run_context import is_safe_id
 from schemas.report_frontmatter import MIN_LEADS_BY_SEVERITY
 
 # ---------------------------------------------------------------------------
@@ -112,6 +113,10 @@ def main() -> int:
 
     signature_id = sys.argv[1]
     alert_json_str = sys.argv[2]
+
+    if not is_safe_id(signature_id):
+        print(f"Error: invalid signature_id: {signature_id!r}", file=sys.stderr)
+        return 1
 
     # Read + validate severity from the signature's context.md before any
     # filesystem mutation, so a misconfigured signature fails loudly without

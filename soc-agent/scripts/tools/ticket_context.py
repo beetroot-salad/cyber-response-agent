@@ -295,6 +295,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--window", default="4h", help="Lookback window ending at alert timestamp (default 4h)")
     args = p.parse_args(argv)
 
+    sys.path.insert(0, str(REPO_ROOT))
+    from hooks.scripts.run_context import is_safe_id  # noqa: E402
+
+    if not is_safe_id(args.signature_id):
+        print(f"error: invalid signature_id: {args.signature_id!r}", file=sys.stderr)
+        return 2
+
     run_dir = Path(args.run_dir)
     alert_path = run_dir / "alert.json"
     field_quirks_path = REPO_ROOT / "knowledge" / "signatures" / args.signature_id / "field-quirks.md"

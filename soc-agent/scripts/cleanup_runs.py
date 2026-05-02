@@ -127,9 +127,18 @@ def clean_run_dirs(
         if not entry.is_dir() or entry.name.startswith("."):
             continue
 
-        # Safety check — only delete directories directly under runs_dir.
-        # Protects against a misconfigured SOC_AGENT_RUNS_DIR pointing at /.
-        if entry.parent.resolve() != runs_dir.resolve():
+        # Safety check — only delete directories that look like real runs.
+        # Requires meta.json (written once by setup_run.py) so a misconfigured
+        # SOC_AGENT_RUNS_DIR pointing at /, /tmp, $HOME, etc. cannot turn
+        # arbitrary sibling directories into deletion candidates.
+        if not (entry / "meta.json").is_file():
+            continue
+        # Reject symlinks — resolve must land inside runs_dir.
+        try:
+            resolved = entry.resolve(strict=True)
+        except OSError:
+            continue
+        if resolved.parent != runs_dir.resolve():
             continue
 
         if is_dir_expired(entry, cutoff):
