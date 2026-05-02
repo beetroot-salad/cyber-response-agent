@@ -54,6 +54,44 @@ _CONFIDENCE_ORDER: dict[str, int] = {"high": 3, "medium": 2, "low": 1}
 # Higher number = more severe weight (used for final_weight sort in Class 6)
 _FINAL_WEIGHT_SORT: dict[Any, int] = {"++": 4, "+": 3, None: 2, "-": 1, "--": 0}
 
+_WEIGHT_BUCKETS = ("++", "+", "null", "-", "--")
+
+
+def _last_weight_map(c: Companion) -> dict[str, Any]:
+    """Last resolution weight per hypothesis_id across all leads."""
+    weights: dict[str, Any] = {}
+    for lead in c.leads:
+        for r in lead.get("resolutions", []) or []:
+            h_id = r.get("hypothesis")
+            if h_id:
+                weights[h_id] = r.get("after")
+    return weights
+
+
+def _build_peer_hits(
+    peer_counts: dict[str, int],
+    peer_weights: dict[str, dict[str, int]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "classification": name,
+            "peer_count": peer_counts[name],
+            "final_weight_histogram": peer_weights[name],
+        }
+        for name in sorted(peer_counts.keys(), key=lambda n: (-peer_counts[n], n))
+    ]
+
+
+def _sort_effectiveness_rows(rows: list[dict[str, Any]]) -> None:
+    rows.sort(
+        key=lambda r: (
+            r["mean_branching_delta"] if r["mean_branching_delta"] is not None else float("-inf"),
+            r["fidelity_rate"] if r["fidelity_rate"] is not None else float("-inf"),
+            r["branching_support"],
+        ),
+        reverse=True,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Class 1 — coarse case lookup (ad-hoc / general exploration)
@@ -497,21 +535,17 @@ def _lead_effectiveness_rows(
             # AND (if filter set) touching a matching hypothesis.
             if lead.get("tests") and touches_filter:
                 resolutions = lead.get("resolutions", []) or []
-                if filter_active:
-                    deltas = [
-                        _abs_delta(r.get("before"), r.get("after"))
-                        for r in resolutions
-                        if matches(
-                            case_idx,
-                            r.get("hypothesis", ""),
-                            h_names.get(r.get("hypothesis", ""), ""),
-                        )
-                    ]
-                else:
-                    deltas = [_abs_delta(r.get("before"), r.get("after")) for r in resolutions]
+                deltas = [
+                    _abs_delta(r.get("before"), r.get("after"))
+                    for r in resolutions
+                    if not filter_active or matches(
+                        case_idx,
+                        r.get("hypothesis", ""),
+                        h_names.get(r.get("hypothesis", ""), ""),
+                    )
+                ]
                 if deltas:
-                    lead_mean = sum(deltas) / len(deltas)
-                    branching_deltas.setdefault(name, []).append(lead_mean)
+                    branching_deltas.setdefault(name, []).append(sum(deltas) / len(deltas))
 
             # Prediction-fidelity: route compliance for leads with predictions.
             # Orthogonal to the hypothesis filter.
@@ -826,14 +860,7 @@ def lead_effectiveness_for_topology(
     if not ids:
         return {"hits": [], "count": 0, "tier_used": 4, "tier_label": "no match"}
     rows = _lead_effectiveness_rows(corpus, hypothesis_id_filter=ids)
-    rows.sort(
-        key=lambda r: (
-            r["mean_branching_delta"] if r["mean_branching_delta"] is not None else float("-inf"),
-            r["fidelity_rate"] if r["fidelity_rate"] is not None else float("-inf"),
-            r["branching_support"],
-        ),
-        reverse=True,
-    )
+    _sort_effectiveness_rows(rows)
     return {
         "hits": rows,
         "count": len(rows),
@@ -876,18 +903,10 @@ def peer_hypothesis_distribution_for_topology(
 
     peer_counts: dict[str, int] = {}
     peer_weights: dict[str, dict[str, int]] = {}
-    weight_buckets = ("++", "+", "null", "-", "--")
 
     for case_idx in cases_in_scope:
         c = corpus[case_idx]
-        # Resolve last-weight per hypothesis_id in this case from resolutions.
-        last_weight: dict[str, Any] = {}
-        for lead in c.leads:
-            for r in lead.get("resolutions", []) or []:
-                h_id = r.get("hypothesis")
-                if h_id:
-                    last_weight[h_id] = r.get("after")
-        # Count each classification once per in-scope case (dedup per case).
+        last_weight = _last_weight_map(c)
         seen_this_case: set[str] = set()
         for sib in c.hypotheses:
             classification = _hypothesis_name(sib)
@@ -897,20 +916,11 @@ def peer_hypothesis_distribution_for_topology(
             seen_this_case.add(classification)
             peer_counts[classification] = peer_counts.get(classification, 0) + 1
             bucket_key = "null" if last_weight.get(sib_id) is None else str(last_weight[sib_id])
-            hist = peer_weights.setdefault(
-                classification, {b: 0 for b in weight_buckets}
-            )
+            hist = peer_weights.setdefault(classification, {b: 0 for b in _WEIGHT_BUCKETS})
             if bucket_key in hist:
                 hist[bucket_key] += 1
 
-    hits = [
-        {
-            "classification": name,
-            "peer_count": peer_counts[name],
-            "final_weight_histogram": peer_weights[name],
-        }
-        for name in sorted(peer_counts.keys(), key=lambda n: (-peer_counts[n], n))
-    ]
+    hits = _build_peer_hits(peer_counts, peer_weights)
     return {
         "hits": hits,
         "count": len(hits),
@@ -1063,14 +1073,7 @@ def lead_effectiveness_for_prologue(
             if hid:
                 hypothesis_ids.add((case_idx, hid))
     rows = _lead_effectiveness_rows(corpus, hypothesis_id_filter=hypothesis_ids)
-    rows.sort(
-        key=lambda r: (
-            r["mean_branching_delta"] if r["mean_branching_delta"] is not None else float("-inf"),
-            r["fidelity_rate"] if r["fidelity_rate"] is not None else float("-inf"),
-            r["branching_support"],
-        ),
-        reverse=True,
-    )
+    _sort_effectiveness_rows(rows)
     return {
         "hits": rows,
         "count": len(rows),
@@ -1104,15 +1107,9 @@ def peer_hypothesis_distribution_for_prologue(
         }
     peer_counts: dict[str, int] = {}
     peer_weights: dict[str, dict[str, int]] = {}
-    weight_buckets = ("++", "+", "null", "-", "--")
     for case_idx in case_indices:
         c = corpus[case_idx]
-        last_weight: dict[str, Any] = {}
-        for lead in c.leads:
-            for r in lead.get("resolutions", []) or []:
-                h_id = r.get("hypothesis")
-                if h_id:
-                    last_weight[h_id] = r.get("after")
+        last_weight = _last_weight_map(c)
         seen: set[str] = set()
         for sib in c.iter_new_hypotheses():
             classification = _hypothesis_name(sib)
@@ -1122,17 +1119,10 @@ def peer_hypothesis_distribution_for_prologue(
             seen.add(classification)
             peer_counts[classification] = peer_counts.get(classification, 0) + 1
             bucket_key = "null" if last_weight.get(sib_id) is None else str(last_weight[sib_id])
-            hist = peer_weights.setdefault(classification, {b: 0 for b in weight_buckets})
+            hist = peer_weights.setdefault(classification, {b: 0 for b in _WEIGHT_BUCKETS})
             if bucket_key in hist:
                 hist[bucket_key] += 1
-    hits = [
-        {
-            "classification": name,
-            "peer_count": peer_counts[name],
-            "final_weight_histogram": peer_weights[name],
-        }
-        for name in sorted(peer_counts.keys(), key=lambda n: (-peer_counts[n], n))
-    ]
+    hits = _build_peer_hits(peer_counts, peer_weights)
     return {
         "hits": hits,
         "count": len(hits),
