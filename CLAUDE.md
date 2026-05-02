@@ -77,7 +77,7 @@ All hooks live under `soc-agent/hooks/scripts/` and are registered in `soc-agent
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `infer_state_pre.py` | Pre-write state transition check |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `validate_report_precheck.py` | Pre-REPORT self-contradiction guards (parallel Haiku judges) |
 | PreToolUse | `Write\|Edit` on `*/investigation.md` | `invlang_validate.py` | Pre-write schema validation (29 active rules across numbering 1–36; seven preserved-as-redirect gaps from the v2.15 consolidation) — blocks writes on schema errors |
-| PostToolUse | `Task\|Agent` | `extract_subagent_yaml.py` | Extract subagent YAML output into the investigation record |
+| PostToolUse | `Task\|Agent` | `extract_subagent_yaml.py` | Extract subagent trailer (`:T` / `:R` / `:H` blocks) into the investigation record (script name retained from the YAML era) |
 | PostToolUse | `Write\|Edit\|Bash` | `infer_state.py` | Infer state transitions from `## PHASE` headers |
 | PostToolUse | `Write\|Edit` | `validate_report.py` | Two-tier report validation (Tier 1 structural + Tier 2 Haiku judge) |
 | PostToolUse | `Bash\|mcp__.*` / `Read(*/alert.json)` | `tag_tool_results.py` | Tag tool results with salted delimiters for injection safety |
@@ -244,11 +244,11 @@ pytest soc-agent/tests/test_judge_report.py -m llm          # Tier 2 judge
 
 ## Investigation Flow Language
 
-**Full spec:** `docs/investigation-language.md` (v2.15, implemented; rule consolidation 36→29 active rules — see v2.15 delta. Rule #36 affirmative true_positive disposition added in v2.14 is unaffected.). Query CLI: invoke via `bash soc-agent/scripts/invlang/run.sh` (see the canonical invocation note — `python -m invlang` and direct `cli.py` calls fail). Schema loaded into the investigate prompt lives at `soc-agent/knowledge/invlang/schema.md`. Validator runs as a PreToolUse hook on `investigation.md` writes (`hooks/scripts/invlang_validate.py`).
+**Full spec:** `docs/investigation-language.md` (v2.15, implemented; rule consolidation 36→29 active rules — see v2.15 delta. Rule #36 affirmative true_positive disposition added in v2.14 is unaffected.). **On-disk surface:** `​```invlang` fenced blocks — see `docs/dense-investigation-format.md` for the block-tag grammar and the surface-to-canonical-dict mapping. `​```yaml` fences in `investigation.md` are rejected by the validator. **Agent runtime reference** (loaded inline into the investigate prompt): `soc-agent/knowledge/invlang/schema.md` — field grammar per section. Validators and corpus queries operate on the canonical companion dict, so they are surface-agnostic. Query CLI: invoke via `bash soc-agent/scripts/invlang/run.sh` (see the canonical invocation note — `python -m invlang` and direct `cli.py` calls fail). Validator runs as a PreToolUse hook on `investigation.md` writes (`hooks/scripts/invlang_validate.py`).
 
 ### Purpose
 
-The investigation language is a structured YAML schema for recording security investigations as **graph traversals**. Each investigation produces a companion document — a machine-readable + human-readable audit trail of every hypothesis, lead, observation, and weight update from alert to disposition. Companions are designed to be corpus-queryable: which hypothesis patterns recur, which leads are most discriminating, where investigations stall.
+The investigation language is a structured graph schema for recording security investigations as **graph traversals**. Each investigation produces a companion document — a machine-readable + human-readable audit trail of every hypothesis, lead, observation, and weight update from alert to disposition. Companions are designed to be corpus-queryable: which hypothesis patterns recur, which leads are most discriminating, where investigations stall.
 
 ### Philosophy
 
@@ -264,29 +264,26 @@ Inline vocabulary used in `investigation.md`:
 
 ### Companion structure (top-level)
 
-```yaml
-prologue:       # CONTEXTUALIZE: vertices + edges derived from the alert
-  vertices: []
-  edges: []
+The on-disk surface is `​```invlang` blocks; the canonical companion dict the validator and corpus queries see has this shape:
 
-hypothesize:    # PREDICT: initial proposed frontier (omit for SCREEN-matched cases). Block name preserved for corpus backward-compat.
-  hypotheses: []
-
-findings:       # GATHER + ANALYZE: ordered lead blocks (same id merges across phases)
-  - lead: {...}
-
-conclude:       # REPORT: termination category, disposition, confidence, matched_archetype. Block name preserved for corpus backward-compat.
-  termination:
-    category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
-  disposition: benign | true_positive | unclear
-  confidence: high | medium | low
-  matched_archetype: <name> | null
+```
+prologue        — CONTEXTUALIZE: vertices + edges derived from the alert
+                  (:V prologue.vertices, :E prologue.edges)
+hypothesize     — PREDICT: initial proposed frontier (omit for SCREEN-matched cases;
+                  block name preserved for corpus backward-compat)
+                  (:H hypothesize.hypotheses)
+findings        — GATHER + ANALYZE: ordered lead blocks (same id merges across phases)
+                  (:L findings + lead-scoped :V/:E/:R/:T sub-blocks)
+conclude        — REPORT: termination, disposition, confidence, matched_archetype, impact
+                  (:T conclude + :T conclude.{surviving,deferred_*,ceiling_test} sub-tables)
 ```
 
-The key invariants enforced by the validator (36 rules in total — see spec §Validator rules; rule #23 enforces sibling-hypothesis classification uniqueness so proposed forks are structurally distinct):
+Full block-tag grammar and the surface-to-canonical-dict mapping: `docs/dense-investigation-format.md` §Schema mapping. Parser: `soc-agent/scripts/handlers/_dense_parser.py`.
+
+The key invariants enforced by the validator (29 active rules across numbering 1–36; seven preserved-as-redirect gaps from the v2.15 consolidation — see spec §Validator rules; rule #23 enforces sibling-hypothesis classification uniqueness so proposed forks are structurally distinct):
 - **Edge authority** — `++`/`--` resolutions must cite at least one `siem-event`, `runtime-audit`, or `authoritative-source` edge.
 - **Append-only** — no existing record is ever mutated; decomposition adds sub-vertices, attribution adds `identified_as` links.
-- **Mechanical leads stay within their data source** — a lead's observations contain only entities the queried system directly names by native identity.
+- **Mechanical leads stay within their data source** — a review-only discipline (former rule #10, demoted in v2.15): a lead's observations should contain only entities the queried system directly names by native identity.
 
 ## Key Design Patterns
 
@@ -310,7 +307,7 @@ The key invariants enforced by the validator (36 rules in total — see spec §V
 - JSONL investigation outcomes in `runs/audit.jsonl`
 - JSONL tool call audit trail in `runs/tool_audit.jsonl` (state-changing tools)
 - JSONL tool call trace in `runs/tool_trace.jsonl` (read-only tools, for debugging)
-- Subagent YAML extracted into the companion via `extract_subagent_yaml.py` PostToolUse hook
+- Subagent trailers (`:T` / `:R` / `:H` blocks) extracted into the companion via `extract_subagent_yaml.py` PostToolUse hook (script name retained from the YAML era)
 - Session → run dir mapping is stable under concurrent runs (use `run_context.resolve_run_dir`, not mtime fallback)
 
 ## Adding a New Signature
