@@ -4,14 +4,16 @@ The structured companion schema the agent writes alongside its narrative during 
 
 This file is a handbook-level orientation. The **authoritative schema reference** is `knowledge/invlang/schema.md` (resolved inline into the investigate skill at load time via a `!command`). The **on-disk surface grammar** (block tags `:V` / `:E` / `:H` / `:L` / `:R` / `:T` / `:G`, row shapes, sub-cell packing) lives in `docs/dense-investigation-format.md`. Read those for field-level detail; read this page to understand what role invlang plays in the plugin and why it exists.
 
-### Two surfaces, one dict
+### Where the field grammar lives
 
-The canonical artifact the validator and corpus queries operate on is a Python dict — vertices, edges, hypotheses, leads, conclude. That dict has two surface forms:
+The canonical artifact the validator and corpus queries operate on is a Python dict — vertices, edges, hypotheses, leads, conclude. The on-disk surface that produces it is dense `​```invlang` fenced blocks (strict cutover; `​```yaml` fences in `investigation.md` are rejected; parser: `scripts/handlers/_dense_parser.py`).
 
-- **On-disk**, in `investigation.md`: dense `​```invlang` fenced blocks. This is the only surface the plugin writes today (strict cutover; `​```yaml` fences in `investigation.md` are rejected). Parser: `scripts/handlers/_dense_parser.py`.
-- **In the spec / examples**: YAML rendered for readability. `knowledge/invlang/schema.md` shows fields in YAML because the field grammar is easier to read that way; the on-disk surface packs the same fields into row cells.
+Field grammar lives in two places, both dense-native:
 
-Both project to the same companion dict. Validator rules #1–#36 are written against the dict, not against either surface.
+- `soc-agent/knowledge/invlang/schema.md` — agent runtime reference (resolved inline into the investigate prompt). Per-section column shapes, cell enums, sub-cell grammar, validator-rule cross-refs.
+- `docs/dense-investigation-format.md` — surface design doc with the full block-tag grammar and the dense-to-canonical-dict mapping table.
+
+Validator rules #1–#36 are written against the canonical dict; legacy archived runs may carry the old YAML shape, but every new write goes through the dense parser.
 
 ## Why invlang
 

@@ -279,48 +279,11 @@ reliable transfers to impact verdicts: the threshold is written into
 the record before the lead runs, so ANALYZE cannot retroactively
 shift the bar after seeing the observation.
 
-**Lead-level `impact_predictions[]`.** A PREDICT-scaffolded lead that
-measures impact-relevant observables carries one or more entries:
+**Lead-level `:L l-{id}.impact_preds`.** A PREDICT-scaffolded lead that measures impact-relevant observables carries one or more `ip*` rows. Column shape and enums: see `soc-agent/knowledge/invlang/schema.md` §Lead → Impact predictions.
 
-```yaml
-lead:
-  impact_predictions:
-    - id: ip1                           # ^ip\d+$, unique within lead
-      dimension: confidentiality | integrity | availability | scope
-      claim: "<threshold predicate — e.g., session_total_bytes within 30d baseline mean ± 2σ>"
-      on_match: within                  # verdict emitted by ANALYZE when observation matches predicate
-      on_mismatch: exceeds              # verdict emitted when observation violates predicate
-      on_indeterminate: indeterminate   # verdict emitted when baseline/authority unavailable or scope-mismatched
-      escalation_on: exceeds | indeterminate | none  # which verdicts force escalation at CONCLUDE
-```
+One observable per `claim` (rule #29): split compound AND/OR predicates into multiple `ip*` rows so partial evidence can pivot each side independently.
 
-One observable per claim (rule #26 applied to impact): split compound
-AND/OR predicates into multiple `ip*` entries so partial evidence can
-pivot each side independently.
-
-**Outcome-level `impact_resolutions[]`.** ANALYZE emits one entry per
-fulfilled `ip*`:
-
-```yaml
-gather[].outcome.impact_resolutions:
-  - prediction_ref: ip1                 # back-reference to the lead's impact_predictions[] entry
-    dimension: confidentiality
-    observed_value: "180GB (3σ above 30d baseline mean 60GB, σ 40GB)"
-    verdict: within | exceeds | indeterminate
-    matched_predicate: "<verbatim predicate from ip1>"
-    grounded_by_lead: l-{id}
-    grounding_kind: telemetry-baseline | business-owner-attestation | dlp-policy
-                                        # past-case NOT admissible — category reasoning, not instance reasoning
-    anchor_id: <string>                 # the specific baseline, policy record, or attestation consulted
-    anchor_kind: <string>               # vendor surface (volume-baseline, sensitive-data-registry, ...)
-    authority_for_question: full | partial
-    as_of: <iso>
-    effective_window:                   # optional; baseline-snapshot window or policy validity period
-      start: <iso>
-      end: <iso>
-    conditioning_context: []            # optional; then-true state the verdict rests on
-    reasoning: "<string>"
-```
+**Outcome-level `:R impact`.** ANALYZE emits one row per fulfilled `ip*`. Column shape `[pred_ref|dim|observed|verdict|matched_pred|grounding|anchor_id|anchor_kind|authority|as_of|effective_window?|conditioning?|reasoning]` and per-cell enums: see schema.md §Resolutions → `:R impact`. Past-case is not admissible as `grounding` — impact reasoning is per-instance, not category-of-event.
 
 Rule #14 (partial authority caps weight) applies — a baseline that
 covers magnitude but not intent is `partial` and cannot alone force
@@ -332,18 +295,7 @@ resolving lead ran must either have a fulfilling
 `conclude.deferred_impact_predictions[]` with rationale. Mirrors
 rule #26's orphan gate for authorization contracts.
 
-**Two-axis CONCLUDE.** The `conclude:` block carries both axes:
-
-```yaml
-conclude:
-  disposition: benign | true_positive | unclear     # authz/mechanism axis
-  impact_verdict: none | within | exceeds | indeterminate   # impact axis
-  impact_severity: null | low | moderate | high     # present when impact_verdict ∈ {exceeds, indeterminate}
-  confidence: high | medium | low
-  ...
-```
-
-The two combine orthogonally:
+**Two-axis CONCLUDE.** The `:T conclude` block carries both axes — `disposition` (authz/mechanism: `benign` \| `true_positive` \| `unclear`) and `impact_verdict` (impact: `none` \| `within` \| `exceeds` \| `indeterminate`), with `impact_severity` set when `impact_verdict ∈ {exceeds, indeterminate}`. They combine orthogonally:
 - `(benign, within)` — routine activity, no escalation.
 - `(benign, exceeds)` — **authorized but malifying.** Mechanism
   confirmed benign; consequence exceeds threshold. Requires analyst
@@ -455,23 +407,20 @@ accumulates; it does not revise.
 
 ## Schema
 
-The schema below is expressed as YAML for readability — it describes the **canonical companion dict** that the validator and corpus queries operate on. The on-disk surface is the dense `​```invlang` form (see `docs/dense-investigation-format.md` §Schema mapping for the row/cell projection of every field below).
+The on-disk surface is the dense `​```invlang` form. The **canonical companion dict** the validator and corpus queries operate on is what every dense block projects to via `soc-agent/scripts/handlers/_dense_parser.py`. This section captures the schema's design intent and invariants; the **field-level grammar** (block tags, column shapes, sub-cell packing, cell enums) lives in two places that should be read together:
+
+- `soc-agent/knowledge/invlang/schema.md` — agent runtime reference (loaded into the investigate prompt). Every section below has a corresponding §section in schema.md describing the dense surface.
+- `docs/dense-investigation-format.md` — surface design doc with full block-tag grammar and the schema-mapping table.
 
 ### Top-level structure
 
-```yaml
-prologue:           # CONTEXTUALIZE: vertices + edges derived from the alert
-  vertices: [...]
-  edges: [...]
-
-hypothesize:        # HYPOTHESIZE: initial proposed frontier (omit for SCREEN-matched cases)
-  hypotheses: [...]
-
-findings:           # GATHER + ANALYZE: ordered lead blocks (same id merges across phases)
-  - lead: {...}
-
-conclude:           # CONCLUDE
-  ...
+```
+:V prologue.vertices    — CONTEXTUALIZE: vertices derived from the alert
+:E prologue.edges       — CONTEXTUALIZE: edges derived from the alert
+:H hypothesize.hypotheses — PREDICT: initial proposed frontier (omit for SCREEN-matched cases)
+:L findings             — GATHER + ANALYZE: one row per lead; same id merges across phases
+  (per-lead sub-blocks: :V/:E/:R/:T scoped by l-{id})
+:T conclude (+ sub-tables) — REPORT termination, disposition, deferreds
 ```
 
 **`hypothesize` is optional.** For SCREEN-matched investigations, no
@@ -487,17 +436,7 @@ block.
 
 ### Vertex
 
-```yaml
-vertex:
-  id: v-{nonce}                    # local, stable, append-only
-  type: <string>                   # from type vocabulary (§Types)
-  classification: <string>         # from seed list or {type}:{slug} provisional
-  identifier: <string>             # human-readable primary key for this entity
-  attributes: {}                   # type-specific key-value pairs; omit if empty
-  placeholder: true                # omit when false — unknown endpoint (§Conventions)
-  concerns: []                     # reliability, scope, or interpretation traps; omit if empty
-  citations: []                    # source references; omit if single or implicit
-```
+Field grammar: `:V <block> [id|type|class|ident|attrs?|placeholder?|concerns?|citations?]` — see `soc-agent/knowledge/invlang/schema.md` §Vertex for cell-level semantics and enums. Used by `:V prologue.vertices` (CONTEXTUALIZE) and `:V l-{id}.observations.vertices` (GATHER).
 
 **Sub-vertex IDs.** When a vertex is decomposed inward via
 `component_of`, sub-vertices use `v-{parent}-{nonce}` IDs (e.g.,
@@ -520,23 +459,7 @@ placeholder.
 
 ### Edge
 
-```yaml
-edge:
-  id: e-{nonce}
-  relation: <string>               # from relation catalog (§Relations)
-  source_vertex: v-{id}
-  target_vertex: v-{id}
-  when: { timestamp: <iso> }       # omit if not meaningful
-  attributes: {}                   # omit if empty
-  status: observed                 # omit; emit hypothesized or refuted when non-default
-  authority:
-    kind: siem-event | runtime-audit | authoritative-source
-        | client-asserted | inferred-structural
-    source: <string>
-    trust_chain: []                # omit if empty
-  authorization_resolutions: []    # omit when no contract resolves against this edge (§Authorization)
-  concerns: []                     # omit if empty
-```
+Field grammar: `:E <block> [id|rel|src|tgt|when|auth_kind:source|attrs?|status?|trust_chain?|concerns?]` — see `soc-agent/knowledge/invlang/schema.md` §Edge for cell-level semantics and enums. Authorization verdicts live in `:R authz` rows, not on the `:E` row itself (see §Authorization below). Used by `:E prologue.edges` and `:E l-{id}.observations.edges`.
 
 **Authority is observational, not authorization.** It describes how
 reliably the source recorded the observation. `siem-event`,
@@ -546,32 +469,7 @@ weight. `client-asserted` and `inferred-structural` cap at `+`/`-`.
 A `client-asserted` edge on a verified trust chain gets effective
 `authoritative-source` authority; record the chain in `trust_chain`.
 
-**`authorization_resolutions` is a plural list.** Each entry records
-one contract's verdict:
-
-```yaml
-authorization_resolutions:
-  - verdict: authorized | unauthorized | indeterminate
-    anchor_kind: <string>           # iam-policy | data-classification-policy | oncall-schedule | deploy-runs | ...
-    anchor_id: <string>             # concrete authority identifier consulted
-    grounding_kind: org-authority | past-case
-                                    # telemetry-baseline is NOT admissible here — baselines
-                                    # answer expectation, not authorization. Use anchor_consultations
-                                    # on the lead outcome for baseline queries.
-    authority_for_question: full | partial
-    anchor_query: <string>          # short human-readable record of what was asked
-    as_of: <iso>                    # timestamp the answer is authoritative ABOUT
-    effective_window:               # optional; authz grants with explicit time bounds
-      start: <iso>
-      end: <iso>
-    conditioning_context: []        # optional prose list of then-true conditions the verdict rests on
-    cites_past_case:                # required when grounding_kind: past-case
-      run_id: <run-id>
-      contract_ref: h-{id}.ac{n}
-    resolved_by_lead: l-{id}
-    fulfills_contract: h-{id}.ac{n} # back-reference to the declaring hypothesis's contract entry
-    concerns: []                    # omit if empty; snapshot freshness, partial anchor coverage, etc.
-```
+**Authorization verdicts are plural per edge.** Each `:R authz` row resolves one contract's verdict — see `soc-agent/knowledge/invlang/schema.md` §`:R authz` for the full row grammar (column shape `[edge|verdict|anchor_kind|anchor_id|grounding|authority|as_of|effective_window?|fulfills|resolved_by|cites_past_case?|conditioning?|concerns?]` plus per-cell enums and the past-case constraints).
 
 Plural because real edges often face parallel policy layers — IAM ×
 data-classification × time-of-day — each resolved independently by a
@@ -595,35 +493,7 @@ not the edge itself. It lives in
 
 ### Hypothesis
 
-```yaml
-hypothesis:
-  id: h-{nonce} | h-{parent}-{nonce}   # hierarchical for refinement chains
-  name: "?descriptive-slug"
-
-  attached_to_vertex: v-{id}            # confirmed vertex this hypothesis's one-hop extension grafts onto
-
-  proposed_edge:                        # the one-hop upstream extension
-    relation: <string>
-    parent_vertex:
-      type: <string>
-      classification: <string>
-      attributes: {}                    # omit if empty
-
-  predictions:
-    - id: p1
-      claim: "<source-agnostic claim about world state>"
-
-  refutation_shape:
-    - id: r1
-      claim: "<observation that would contradict a core prediction>"
-
-  authorization_contract: []            # optional; present when disposition depends on policy authorization (§Authorization)
-
-  concerns: []                          # residuals, unfalsifiability caveats; omit if empty
-  weight: null | "++" | "+" | "-" | "--"
-  weight_history: []                    # omit until transitions exist
-  status: active                        # omit; emit confirmed | refuted | shelved when non-default
-```
+Field grammar: `:H <block> [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status|concerns?]` — see `soc-agent/knowledge/invlang/schema.md` §Hypothesis for cell semantics, sub-cell packing (`p<n>:<subject>:"<claim>"`, `ap<n>:<target>:<attribute>:"<claim>"`, `r<n>[<refs>]:"<claim>"`, `ac<n>:<edge_ref>:<anchor_kind>:"<predicate>":<on_unauth>/<on_indet>`), and the integrity-waiver rule. Used by `:H hypothesize.hypotheses` (top-level) and `:H l-{id}.new_hypotheses` (born inside a lead).
 
 **One-hop discipline.** `proposed_edge.parent_vertex` is the
 immediate upstream cause — exactly one hop from `attached_to_vertex`.
@@ -642,20 +512,7 @@ facts each partially confirm the hypothesis and neither alone
 suffices. Three or more predictions usually signals either a
 non-lean hypothesis or a refinement that should be deferred.
 
-**Authorization contracts** are declared on the hypothesis when
-disposition hinges on an authorization lookup (§Authorization). Each
-contract entry:
-
-```yaml
-authorization_contract:
-  - id: ac1                             # local to hypothesis; ^ac\d+$
-    edge_ref: proposed | e-{id}         # the hypothesis's proposed_edge, or an existing confirmed edge
-    anchor_kind: <string>               # which authority resolves it
-    predicate: "<natural-language claim — authorized iff ...>"
-    on_unauthorized: escalate
-    on_indeterminate: escalate
-    concerns: []                        # optional; e.g., anchor known to be behind preflight
-```
+**Authorization contracts** are declared on the hypothesis when disposition hinges on an authorization lookup (§Authorization). Each contract is one `ac<n>` sub-cell on the `:H` row's `authz?` cell — packed `ac<n>:<edge_ref>:<anchor_kind>:"<predicate>":<on_unauth>/<on_indet>` (see schema.md §Hypothesis for the sub-cell grammar). `edge_ref` is `proposed` (the hypothesis's own proposed edge) or `e-{id}` (an existing confirmed edge).
 
 The predicate is natural language. Any AND/OR combination is
 permitted — no structured DSL. The agent evaluates the predicate
@@ -677,116 +534,22 @@ confabulate.
 
 ### Lead
 
-```yaml
-findings:
-  - lead:
-      id: l-{nonce}
-      loop: <int>
-      name: <string>
-      target: v-{id}                    # vertex this lead operates on / investigates
+A lead has one header row in `:L findings` plus zero or more lead-scoped sub-blocks (all sub-block names namespaced by the lead id). Field grammar lives in `soc-agent/knowledge/invlang/schema.md` §Lead — covering the header row columns (`[id|loop|name|target|mode?|tests|system|template|query|window|trust_root?|fail_reason?|screen_result?|selection_rationale?]`) and every sub-block:
 
-      selection_rationale: <string>     # optional — 1–3 sentences on why this lead now, not another
-      mode: screen                      # omit unless this lead was dispatched by the SCREEN subagent
-
-      tests: [h-{id}, ...]              # optional — hypotheses this lead discriminates.
-                                        # Presence ⇒ fork-collapsing; absence ⇒ non-branching.
-
-      observes:                         # optional — explicit prediction/refutation mapping
-        - { hypothesis: h-{id}, predictions: [p1], refutations: [r1] }
-
-      predictions:                      # optional — conditional branch plans for
-                                        # non-branching but interpretation-vulnerable leads.
-                                        # IDs local to the lead (lp1, lp2, …).
-        - id: lp1
-          if: "<outcome pattern>"
-          read_as: "<interpretation>"
-          advance_to: "<lead-name | CONCLUDE | HYPOTHESIZE>"
-
-      impact_predictions:               # optional — pre-registered threshold predicates
-                                        # for leads that measure impact-relevant observables.
-                                        # See §Impact as lead-level prediction.
-                                        # IDs local to the lead (ip1, ip2, …).
-        - id: ip1
-          dimension: confidentiality | integrity | availability | scope
-          claim: "<threshold predicate>"
-          on_match: within
-          on_mismatch: exceeds
-          on_indeterminate: indeterminate
-          escalation_on: exceeds | indeterminate | none
-
-      query_details:
-        system: <string>
-        template: <string>
-        query: <string>
-        time_window: <string>
-        substitutions: {}
-
-      concerns: []                      # omit if empty
-
-      outcome:
-        attribute_updates:              # optional — enriches existing confirmed vertices OR edges
-          - target: v-{id} | e-{id}     # vertex or edge id; exactly one
-            updates: {}
-
-        observations:
-          vertices: []
-          edges: []
-
-        anchor_consultations:           # optional — structured record of baseline/registry lookups
-                                        # that inform hypothesis weight but do not fulfill an
-                                        # authorization_contract. See §Anchor consultation.
-          - anchor_id: <string>
-            anchor_kind: <string>       # vendor-level surface: image-baseline, user-cadence, asset-inventory, …
-            grounding_kind: org-authority | telemetry-baseline
-                                        # past-case is NOT admissible — past-case citations are authz
-                                        # evidence only (live in authorization_resolutions[]).
-            result: confirmed | refuted | partial | no-data
-            as_of: <iso>
-            authority_for_question: full | partial
-            anchor_query: <string>      # optional; human-readable record of what was asked
-            effective_window:           # optional; when the consulted record itself carries time bounds
-              start: <iso>
-              end: <iso>
-            conditioning_context: []    # optional prose list of then-true conditions the verdict rests on
-            concerns: []                # optional; snapshot freshness, coverage caveats
-
-        impact_resolutions:             # optional — emitted by ANALYZE against the lead's
-                                        # pre-registered impact_predictions[]. See §Impact as
-                                        # lead-level prediction.
-          - prediction_ref: ip1
-            dimension: confidentiality
-            observed_value: <string>
-            verdict: within | exceeds | indeterminate
-            matched_predicate: "<verbatim predicate from ip*>"
-            grounded_by_lead: l-{id}
-            grounding_kind: telemetry-baseline | business-owner-attestation | dlp-policy
-            anchor_id: <string>
-            anchor_kind: <string>
-            authority_for_question: full | partial
-            as_of: <iso>
-            effective_window:           # optional
-              start: <iso>
-              end: <iso>
-            conditioning_context: []    # optional
-            reasoning: <string>
-
-        trust_root_reached: v-{id}      # omit when null
-        failure_reason: <string>        # omit unless errored or degraded
-        screen_result: match | no_match # include only when mode: screen
-
-      new_hypotheses: []                # full hypothesis records
-      shelved: []                       # hypothesis IDs shelved by this lead
-
-      resolutions:
-        - hypothesis: h-{id}
-          before: null | "++" | "+" | "-" | "--"
-          after: "++" | "+" | "-" | "--"
-          severity_of_test: severe | moderate | weak
-          matched_prediction_ids: []
-          matched_refutation_ids: []
-          reasoning: "<string>"
-          supporting_edges: []
-```
+| Sub-block | Carries |
+|---|---|
+| `:V l-{id}.observations.vertices` | new vertices entering the confirmed graph |
+| `:E l-{id}.observations.edges` | new edges entering the confirmed graph |
+| `:L l-{id}.lead_preds` | conditional branch plans (`lp*`) for non-branching but interpretation-vulnerable leads |
+| `:L l-{id}.impact_preds` | pre-registered threshold predicates (`ip*`) graded by ANALYZE into `:R impact` rows |
+| `:L l-{id}.substitutions` | query substitutions (`key|value` pairs) |
+| `:H l-{id}.new_hypotheses` | hypotheses born inside the lead |
+| `:T l-{id}.shelved` (or `:T shelved` in context) | hypotheses dropped from the live frontier by this lead |
+| `:R authz` | authorization-contract verdicts on confirmed edges (see §Authorization) |
+| `:R consultations` | non-authz anchor queries (baselines, registry lookups) |
+| `:R impact` | impact-prediction verdicts (see §Impact) |
+| `:R attr_updates` | vertex/edge enrichment without new topology |
+| `:T resolutions` | proof-trace lines — one per hypothesis weight transition |
 
 **`selection_rationale` is optional.** Use it to capture the inter-lead
 strategic reasoning — why this lead was chosen next given what was
@@ -926,29 +689,7 @@ names the exact contract in that companion being relied upon.
 
 ### Conclude
 
-```yaml
-conclude:
-  termination:
-    category: trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
-    rationale: <string>
-  disposition: benign | true_positive | unclear              # authz/mechanism axis
-  impact_verdict: none | within | exceeds | indeterminate    # impact axis (§Impact)
-  impact_severity: null | low | moderate | high              # present when impact_verdict ∈ {exceeds, indeterminate}
-  confidence: high | medium | low
-  matched_archetype: <name> | null
-  surviving_hypotheses: [h-001, h-002]   # IDs of declared hypotheses whose final weight is not `--`; required by rule 24
-  deferred_authorizations:               # required when any declared authorization_contract has no fulfilling resolution; see rule 26
-    - contract_ref: h-{id}.ac{n}
-      rationale: "<why this contract was not resolved>"
-  deferred_impact_predictions:           # required when any declared impact_predictions[] entry has no fulfilling resolution; impact-axis analog of rule 26
-    - prediction_ref: l-{id}.ip{n}
-      rationale: "<why this impact prediction was not resolved>"
-  ceiling_test:                          # required when category = severity-ceiling
-    kind: out-of-band-human-contact | tool-unavailable | legal-authorization | other
-    subject: <string>
-  ceiling_rationale: <string>            # required when category = severity-ceiling
-  summary: <string>
-```
+REPORT writes a flat `:T conclude` key/value block plus required sub-tables (`:T conclude.surviving`, `:T conclude.deferred_authz`, `:T conclude.deferred_impact`, `:T conclude.deferred_preds`, `:T conclude.ceiling_test`). Field grammar — every key, every sub-table column shape, every enum, and the missing-vs-empty convention — lives in `soc-agent/knowledge/invlang/schema.md` §Conclude.
 
 **`deferred_authorizations`.** Lists authorization contracts that were
 declared but not resolved by any lead. Each entry names the contract
