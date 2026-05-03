@@ -3,7 +3,6 @@
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -11,10 +10,9 @@ import pytest
 TOOLS_DIR = Path(__file__).resolve().parent.parent / "scripts" / "tools"
 sys.path.insert(0, str(TOOLS_DIR))
 
-# Patch opensearchpy before importing wazuh_cli (it's not installed in test env)
-sys.modules["opensearchpy"] = MagicMock()
-
 import wazuh_cli  # noqa: E402
+
+from tests.fakes.opensearch_client import FakeOpenSearchClient  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +151,7 @@ class TestCredentials:
 # ---------------------------------------------------------------------------
 
 def _make_hit(ts, doc_id):
-    """Create a mock OpenSearch hit."""
+    """Build an OpenSearch-shaped hit for FakeOpenSearchClient pages."""
     return {
         "_source": {"timestamp": ts, "rule": {"id": "5710"}},
         "sort": [ts, doc_id],
@@ -161,41 +159,29 @@ def _make_hit(ts, doc_id):
 
 
 class TestQueryAlertsPagination:
-    def _mock_search(self, pages):
-        """Return a side_effect function that yields pages in order, then empty."""
-        call_count = [0]
-        def search_fn(**kwargs):
-            idx = call_count[0]
-            call_count[0] += 1
-            if idx < len(pages):
-                return pages[idx]
-            return {"hits": {"total": {"value": 0}, "hits": []}}
-        return search_fn
-
     def test_single_page(self):
         hits = [_make_hit(f"2026-04-0{i+1}T00:00:00Z", str(i)) for i in range(3)]
-        pages = [
+        client = FakeOpenSearchClient(pages=[
             {"hits": {"total": {"value": 3}, "hits": hits}},
-        ]
-        client = MagicMock()
-        client.search.side_effect = self._mock_search(pages)
+        ])
         config = {"WAZUH_INDEX": "alerts-*"}
 
         items, total = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-05", limit=10)
         assert len(items) == 3
         assert total == 3
         # First call returns 3 hits, second call returns empty → 2 calls total
-        assert client.search.call_count == 2
+        assert client.call_count == 2
 
     def test_count_only_limit_zero(self):
-        client = MagicMock()
-        client.search.return_value = {"hits": {"total": {"value": 42}, "hits": []}}
+        client = FakeOpenSearchClient(pages=[
+            {"hits": {"total": {"value": 42}, "hits": []}},
+        ])
         config = {"WAZUH_INDEX": "alerts-*"}
 
         items, total = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-05", limit=0)
         assert items == []
         assert total == 42
-        body = client.search.call_args.kwargs["body"]
+        body = client.calls[0]["body"]
         assert body["size"] == 0
 
     def test_multi_page(self, monkeypatch):
@@ -203,21 +189,19 @@ class TestQueryAlertsPagination:
         page1_hits = [_make_hit("2026-04-05T00:00:00Z", "a"), _make_hit("2026-04-04T00:00:00Z", "b")]
         page2_hits = [_make_hit("2026-04-03T00:00:00Z", "c")]
 
-        pages = [
+        client = FakeOpenSearchClient(pages=[
             {"hits": {"total": {"value": 3}, "hits": page1_hits}},
             {"hits": {"total": {"value": 3}, "hits": page2_hits}},
-        ]
-        client = MagicMock()
-        client.search.side_effect = self._mock_search(pages)
+        ])
         config = {"WAZUH_INDEX": "alerts-*"}
 
         items, total = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-06", limit=5)
         assert len(items) == 3
         assert total == 3
         # page1 (2 hits) + page2 (1 hit) + empty page = 3 calls
-        assert client.search.call_count == 3
+        assert client.call_count == 3
         # Second call should have search_after from last hit of page 1
-        second_body = client.search.call_args_list[1].kwargs["body"]
+        second_body = client.calls[1]["body"]
         assert "search_after" in second_body
         assert second_body["search_after"] == ["2026-04-04T00:00:00Z", "b"]
 
@@ -226,24 +210,22 @@ class TestQueryAlertsPagination:
         page1_hits = [_make_hit("2026-04-05T00:00:00Z", "a"), _make_hit("2026-04-04T00:00:00Z", "b")]
         page2_hits = [_make_hit("2026-04-03T00:00:00Z", "c"), _make_hit("2026-04-02T00:00:00Z", "d")]
 
-        pages = [
+        client = FakeOpenSearchClient(pages=[
             {"hits": {"total": {"value": 100}, "hits": page1_hits}},
             {"hits": {"total": {"value": 100}, "hits": page2_hits}},
-        ]
-        client = MagicMock()
-        client.search.side_effect = self._mock_search(pages)
+        ])
         config = {"WAZUH_INDEX": "alerts-*"}
 
         items, total = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-06", limit=3)
         assert len(items) == 3
         # Second call should request size=1 (remaining)
-        second_body = client.search.call_args_list[1].kwargs["body"]
+        second_body = client.calls[1]["body"]
         assert second_body["size"] == 1
 
     def test_empty_result(self):
-        pages = [{"hits": {"total": {"value": 0}, "hits": []}}]
-        client = MagicMock()
-        client.search.side_effect = self._mock_search(pages)
+        client = FakeOpenSearchClient(pages=[
+            {"hits": {"total": {"value": 0}, "hits": []}},
+        ])
         config = {"WAZUH_INDEX": "alerts-*"}
 
         items, total = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-05", limit=10)

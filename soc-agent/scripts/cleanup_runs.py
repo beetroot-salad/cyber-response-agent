@@ -246,11 +246,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    runs_dir: Path | None = None,
+    env=None,
+) -> int:
+    """Entry point. `runs_dir` and `env` default to live values; tests pass
+    them directly so they don't have to patch the environment."""
     try:
         args = parse_args(argv)
-        policy = load_retention_policy()  # exits 1 on bad config
-        runs_dir = get_runs_dir()
+        policy = load_retention_policy(env=env)  # exits 1 on bad config
+        if runs_dir is None:
+            if env is not None:
+                val = (env.get("SOC_AGENT_RUNS_DIR") or "").strip()
+                if not val:
+                    raise RuntimeError("SOC_AGENT_RUNS_DIR is not set.")
+                runs_dir = Path(val)
+            else:
+                runs_dir = get_runs_dir()
         now = datetime.now(UTC)
 
         run_cutoff   = now - timedelta(days=policy.run_max_age_days)
