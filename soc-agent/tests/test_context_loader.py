@@ -590,6 +590,145 @@ class TestFormatPredictStateBlock:
     @staticmethod
     def _loop2_fixture() -> str:
         from tests._dense_fixture_helpers import companion_to_invlang_fence
+        from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
+
+        predict_loop1 = (
+            "```invlang\n"
+            + emit_hypothesize_state_dense([
+                {
+                    "id": "h-001",
+                    "name": "?monitoring-probe",
+                    "story": (
+                        "s1. The source host emits the alert at a documented probe cadence.\n"
+                        "s2. The 72h baseline distinguishes routine probe activity from drift."
+                    ),
+                    "attached_to_vertex": "v-001",
+                    "proposed_edge": {
+                        "relation": "attempted_auth",
+                        "parent_vertex": {
+                            "type": "endpoint",
+                            "classification": "monitoring-host",
+                        },
+                    },
+                    "predictions": [{
+                        "id": "p1",
+                        "subject": "proposed_parent",
+                        "kind": "cadence",
+                        "from_story_link": "s1",
+                        "claim": "foreground cadence stays within the documented probe baseline",
+                        "comparison": {
+                            "selector_kind": "historical-self",
+                            "selector": "src=<source_ip> rule=5710 72h",
+                            "dimension": "inter-arrival-distribution",
+                        },
+                    }],
+                    "refutation_shape": [{
+                        "id": "r1",
+                        "refutes_predictions": ["p1"],
+                        "kind": "cadence",
+                        "claim": "foreground cadence falls outside the documented probe baseline",
+                        "comparison": {
+                            "selector_kind": "historical-self",
+                            "selector": "src=<source_ip> rule=5710 72h",
+                            "dimension": "inter-arrival-distribution",
+                        },
+                    }],
+                    "status": "active",
+                },
+                {
+                    "id": "h-003",
+                    "name": "?discard-me",
+                    "attached_to_vertex": "v-001",
+                    "proposed_edge": {
+                        "relation": "attempted_auth",
+                        "parent_vertex": {
+                            "type": "endpoint",
+                            "classification": "stale-host",
+                        },
+                    },
+                    "status": "active",
+                },
+            ])
+            + "\n```"
+        )
+        predict_loop2 = (
+            "```invlang\n"
+            + emit_hypothesize_state_dense([
+                {
+                    "id": "h-001",
+                    "name": "?monitoring-probe",
+                    "story": (
+                        "s1. The source host emits the alert at a documented probe cadence.\n"
+                        "s2. The 72h baseline distinguishes routine probe activity from drift."
+                    ),
+                    "attached_to_vertex": "v-001",
+                    "proposed_edge": {
+                        "relation": "attempted_auth",
+                        "parent_vertex": {
+                            "type": "endpoint",
+                            "classification": "monitoring-host",
+                        },
+                    },
+                    "predictions": [{
+                        "id": "p1",
+                        "subject": "proposed_parent",
+                        "kind": "cadence",
+                        "from_story_link": "s1",
+                        "claim": "foreground cadence stays within the documented probe baseline",
+                        "comparison": {
+                            "selector_kind": "historical-self",
+                            "selector": "src=<source_ip> rule=5710 72h",
+                            "dimension": "inter-arrival-distribution",
+                        },
+                    }],
+                    "refutation_shape": [{
+                        "id": "r1",
+                        "refutes_predictions": ["p1"],
+                        "kind": "cadence",
+                        "claim": "foreground cadence falls outside the documented probe baseline",
+                        "comparison": {
+                            "selector_kind": "historical-self",
+                            "selector": "src=<source_ip> rule=5710 72h",
+                            "dimension": "inter-arrival-distribution",
+                        },
+                    }],
+                    "weight": "++",
+                    "status": "confirmed",
+                },
+                {
+                    "id": "h-002",
+                    "name": "?service-account-use",
+                    "story": (
+                        "s1. A service account on the source could be driving the repeated SSH attempts.\n"
+                        "s2. Process lineage resolves whether the parent process is the scheduled service wrapper."
+                    ),
+                    "attached_to_vertex": "v-001",
+                    "proposed_edge": {
+                        "relation": "attempted_auth",
+                        "parent_vertex": {
+                            "type": "identity",
+                            "classification": "service-account",
+                        },
+                    },
+                    "predictions": [{
+                        "id": "p1",
+                        "subject": "proposed_parent",
+                        "kind": "absolute",
+                        "from_story_link": "s2",
+                        "claim": "process lineage names the scheduled service wrapper as the initiating parent",
+                    }],
+                    "refutation_shape": [{
+                        "id": "r1",
+                        "refutes_predictions": ["p1"],
+                        "kind": "absolute",
+                        "claim": "process lineage names a different initiating parent",
+                    }],
+                    "weight": "+",
+                    "status": "active",
+                },
+            ])
+            + "\n```"
+        )
 
         return (
             "## CONTEXTUALIZE\n"
@@ -611,36 +750,7 @@ class TestFormatPredictStateBlock:
             + "\n"
             "## PREDICT (loop 1)\n"
             "**Selected lead:** l1\n"
-            + companion_to_invlang_fence({
-                "hypothesize": {
-                    "hypotheses": [
-                        {
-                            "id": "h-001",
-                            "name": "?monitoring-probe",
-                            "attached_to_vertex": "v-001",
-                            "proposed_edge": {
-                                "relation": "attempted_auth",
-                                "parent_vertex": {
-                                    "type": "endpoint",
-                                    "classification": "monitoring-host",
-                                },
-                            },
-                        },
-                        {
-                            "id": "h-003",
-                            "name": "?discard-me",
-                            "attached_to_vertex": "v-001",
-                            "proposed_edge": {
-                                "relation": "attempted_auth",
-                                "parent_vertex": {
-                                    "type": "endpoint",
-                                    "classification": "stale-host",
-                                },
-                            },
-                        },
-                    ],
-                },
-            })
+            + predict_loop1
             + "\n"
             "## GATHER (loop 1)\n"
             "**Lead:** l1\n"
@@ -666,24 +776,7 @@ class TestFormatPredictStateBlock:
             "- anomaly note\n"
             "## PREDICT (loop 2)\n"
             "**Selected lead:** l2\n"
-            + companion_to_invlang_fence({
-                "hypothesize": {
-                    "hypotheses": [
-                        {
-                            "id": "h-002",
-                            "name": "?service-account-use",
-                            "attached_to_vertex": "v-001",
-                            "proposed_edge": {
-                                "relation": "attempted_auth",
-                                "parent_vertex": {
-                                    "type": "identity",
-                                    "classification": "service-account",
-                                },
-                            },
-                        },
-                    ],
-                },
-            })
+            + predict_loop2
             + "\n"
             "## GATHER (loop 2)\n"
             "**Lead:** l2\n"
@@ -726,7 +819,11 @@ class TestFormatPredictStateBlock:
         assert "## Active Hypothesis Frontier" in block
         assert "?monitoring-probe" in block
         assert "?service-account-use" in block
+        assert "### story h-001" in block
+        assert ":P h-001.preds" in block
+        assert "inter-arrival-distribution" in block
         assert "?discard-me" not in block
+        assert "h-001|?monitoring-probe|v-001|attempted_auth|endpoint|monitoring-host" in block
         assert "|++|confirmed" in block
         assert "## ANALYZE (loop 2)" in block
         assert "process-lineage" in block

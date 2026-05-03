@@ -71,6 +71,21 @@ def test_multiple_blocks_in_one_fence():
     assert (blocks[1].tag, blocks[1].name) == ("E", "prologue.edges")
 
 
+def test_story_headers_inside_fence_are_tolerated_by_block_tokenizer():
+    text = textwrap.dedent("""\
+        ```invlang
+        ### story h-001
+        s1. baseline says this is periodic.
+
+        :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|weight|status]
+        h-001|?monitoring-probe|v-001|initiated_by|identity|sa|null|active
+        ```
+    """)
+    blocks = parse_dense_blocks_in_text(text)
+    assert len(blocks) == 1
+    assert blocks[0].name == "hypothesize.hypotheses"
+
+
 def test_blocks_across_multiple_fences():
     text = textwrap.dedent("""\
         ## CONTEXTUALIZE
@@ -237,6 +252,40 @@ def test_project_hypothesis_with_authz_contract():
         "on_unauthorized": "esc",
         "on_indeterminate": "esc",
     }]
+
+
+def test_project_hypothesis_story_and_expanded_subblocks():
+    text = textwrap.dedent("""\
+        ```invlang
+        :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|weight|status]
+        h-001|?monitoring-probe|v-001|initiated_by|identity|approved-monitoring-service-account|null|active
+
+        ### story h-001
+        s1. The source host emits the alert at a documented probe cadence.
+        s2. The historical baseline is the discriminator for off-schedule use.
+
+        :P h-001.preds [id|subject|kind|from_story|claim]
+        p1|proposed_parent|cadence|s1|"foreground cadence stays within the documented probe baseline"
+
+        :P h-001.refuts [id|refutes|kind|claim]
+        r1|p1|cadence|"foreground cadence falls outside the documented probe baseline"
+
+        :P h-001.comparisons [pred_ref|selector_kind|selector|dimension]
+        p1|historical-self|"src=<source_ip> rule=5710 72h"|inter-arrival-distribution
+        r1|historical-self|"src=<source_ip> rule=5710 72h"|inter-arrival-distribution
+
+        :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+        ac1|proposed|approved-monitoring-sources|"triple listed as active"|esc|esc
+        ```
+    """)
+    out = parse_dense_companion(text)
+    hyp = out["hypothesize"]["hypotheses"][0]
+    assert hyp["story"].startswith("s1.")
+    assert hyp["predictions"][0]["kind"] == "cadence"
+    assert hyp["predictions"][0]["from_story_link"] == "s1"
+    assert hyp["predictions"][0]["comparison"]["dimension"] == "inter-arrival-distribution"
+    assert hyp["refutation_shape"][0]["comparison"]["selector_kind"] == "historical-self"
+    assert hyp["authorization_contract"][0]["anchor_kind"] == "approved-monitoring-sources"
 
 
 def test_malformed_pred_subcell_raises():

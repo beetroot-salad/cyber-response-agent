@@ -18,6 +18,7 @@ The prompt no longer preloads the full playbook, lead catalog, or environment-me
 - Start lead discovery with `TAGS.md`, then Read only the relevant `knowledge/common-investigation/leads/<lead>/definition.md` file(s). Do not assume the common lead catalog is already in the prompt.
 - Full alert JSON is pointer-only. Use the summarized alert block first; Read `alert.json` only when you need a field the summary omitted.
 - Environment knowledge is optional. Read from `environment_root` only when the current decision actually needs operations / fleet / data-source / system context.
+- `<investigation_state>` surfaces the current active frontier as expanded full-state blocks (`### story`, `:H hypotheses`, `:P h-...`), not as append-only history. Read that state literally; do not infer hidden merge semantics from prior loops.
 
 ## Shapes
 
@@ -313,7 +314,7 @@ Use when the classification stereotype is load-bearing for disposition — e.g. 
 
 Hypothesis novelty is implicit in the id: a hypothesis whose `id` has not appeared in the accumulated companion is new; `h-{parent}-{ordinal}` refines a confirmed parent.
 
-Each PREDICT loop emits its own `hypothesize:` block containing only the hypotheses **authored this loop** — prior-loop hypotheses stay declared through invlang's additive merge (first-wins on duplicate ids). Do not re-emit prior-loop hypotheses verbatim; they are carried across automatically. When you need to refine a confirmed parent, emit a new `h-{parent}-{ordinal}` entry; when you're introducing a fresh mechanism fork, emit new `h-{n}` ids that don't collide with any prior loop.
+You only author the hypotheses introduced or refined **this loop**. The handler materializes the full active frontier when it persists investigation state, so the prompt you read next loop already contains the live frontier in expanded form. When you need to refine a confirmed parent, emit a new `h-{parent}-{ordinal}` entry; when you're introducing a fresh mechanism fork, emit new `h-{n}` ids that don't collide with any prior loop.
 
 ### `composite_secondary` and overrides
 

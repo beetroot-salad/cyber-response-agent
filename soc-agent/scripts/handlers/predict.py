@@ -96,6 +96,7 @@ from scripts.handlers.predict_priors import (
     safe_priors_section,
 )
 from scripts.handlers.investigation_views import format_predict_state_block
+from scripts.handlers.investigation_views import predict_frontier_hypotheses
 from scripts.handlers._subagent import (
     make_invoker,
 )
@@ -104,7 +105,7 @@ from scripts.handlers._output_parser import (
     PredictParseResult,
     parse_predict_output,
 )
-from scripts.handlers._hypothesize_dense import emit_hypothesize_dense
+from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
 
 # Lazy imports for priors (invlang + contextualize) live inside the priors
 # helpers themselves — keeps import-time cycles avoided and lets failures in
@@ -300,8 +301,8 @@ class _AttemptResult:
     errors: list[str]
 
 
-def _compose_section(result: PredictParseResult, loop_n: int) -> str:
-    """Render the invlang-state delta from a parsed predict output into the
+def _compose_section(ctx: Context, result: PredictParseResult, loop_n: int) -> str:
+    """Render the predict-time full frontier into the
     markdown section the handler appends to investigation.md.
 
     On shape E (branch_plan only, no hypotheses) no section is emitted —
@@ -309,18 +310,57 @@ def _compose_section(result: PredictParseResult, loop_n: int) -> str:
     stamped by the GATHER handler onto its gather entry.
 
     On shape A/I/M/D-with-fork the hypotheses are rendered as a single
-    `hypothesize:` invlang block under a `## PREDICT (loop N)` header.
-    Invlang's block merge semantics fold multiple `hypothesize:` blocks
-    (one per loop) into one accumulated companion state.
+    full-state `hypothesize:` invlang block under a `## PREDICT (loop N)`
+    header. The handler materializes the active frontier here so the
+    persisted investigation surface stays self-contained and readable: the
+    latest loop's block always carries every live hypothesis, not just the
+    new hypotheses the subagent authored this turn.
     """
-    hypotheses = result.invlang_delta.get("hypotheses")
-    if not hypotheses:
+    authored = result.invlang_delta.get("hypotheses")
+    if not authored:
         return ""
-    body = emit_hypothesize_dense(hypotheses)
+    current_frontier = predict_frontier_hypotheses(load_investigation_md(ctx.run_dir))
+    hypotheses = _merge_frontier_with_authored(current_frontier, authored)
+    body = emit_hypothesize_state_dense(hypotheses)
     return (
         f"## PREDICT (loop {loop_n})\n\n"
         f"```invlang\n{body}\n```\n"
     )
+
+
+def _merge_frontier_with_authored(
+    current_frontier: list[dict],
+    authored: list[dict],
+) -> list[dict]:
+    """Overlay newly-authored hypotheses onto the live frontier.
+
+    Existing active hypotheses keep their prior order and detail; newly
+    introduced ids append at the end in authored order. If the subagent
+    re-emits an existing id, the latest authored record wins.
+    """
+    ordered: list[dict] = []
+    by_id: dict[str, dict] = {}
+    for h in current_frontier:
+        hid = h.get("id")
+        if not isinstance(hid, str) or not hid:
+            continue
+        clone = dict(h)
+        ordered.append(clone)
+        by_id[hid] = clone
+    for h in authored:
+        hid = h.get("id")
+        if not isinstance(hid, str) or not hid:
+            continue
+        clone = dict(h)
+        if hid in by_id:
+            for idx, existing in enumerate(ordered):
+                if existing.get("id") == hid:
+                    ordered[idx] = clone
+                    break
+        else:
+            ordered.append(clone)
+        by_id[hid] = clone
+    return ordered
 
 
 def _attempt(
@@ -375,7 +415,7 @@ def _attempt(
         return _AttemptResult(section="", result=None, errors=[str(e)])
 
     # Compose section + validate against companion.
-    section = _compose_section(result, expected_loop_n)
+    section = _compose_section(ctx, result, expected_loop_n)
     errors = _validate_companion_proposed(ctx, section) if section else []
     return _AttemptResult(section=section, result=result, errors=errors)
 
@@ -423,7 +463,7 @@ def _synthesize_from_checkpoint(
     except PredictOutputError:
         return None
 
-    section = _compose_section(result, expected_loop_n)
+    section = _compose_section(ctx, result, expected_loop_n)
     errors = _validate_companion_proposed(ctx, section) if section else []
     if errors:
         # Validator disagrees with the checkpoint — route into the retry

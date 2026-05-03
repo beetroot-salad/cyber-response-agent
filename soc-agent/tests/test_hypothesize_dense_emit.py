@@ -16,6 +16,7 @@ from scripts.handlers._dense_parser import parse_dense_companion
 from scripts.handlers._hypothesize_dense import (
     HypothesizeDenseEmitError,
     emit_hypothesize_dense,
+    emit_hypothesize_state_dense,
 )
 from scripts.handlers._predict_dense import parse_predict_dense
 
@@ -119,6 +120,72 @@ def test_round_trip_claim_with_embedded_quote_and_semicolon():
     assert len(preds) == 2
     assert preds[0]["claim"] == tricky
     assert preds[1]["claim"] == "second pred"
+
+
+def test_expanded_state_round_trip_preserves_story_and_prediction_metadata():
+    hyps = [{
+        "id": "h-001",
+        "name": "?monitoring-probe",
+        "story": (
+            "s1. The source host emits the alert at a documented probe cadence.\n"
+            "s2. The historical baseline is the discriminator for off-schedule use."
+        ),
+        "attached_to_vertex": "v-001",
+        "proposed_edge": {
+            "relation": "initiated_by",
+            "parent_vertex": {
+                "type": "identity",
+                "classification": "approved-monitoring-service-account",
+            },
+        },
+        "predictions": [
+            {
+                "id": "p1",
+                "subject": "proposed_parent",
+                "kind": "cadence",
+                "from_story_link": "s1",
+                "claim": "foreground cadence stays within the documented probe baseline",
+                "comparison": {
+                    "selector_kind": "historical-self",
+                    "selector": "src=<source_ip> rule=5710 72h",
+                    "dimension": "inter-arrival-distribution",
+                },
+            },
+        ],
+        "refutation_shape": [
+            {
+                "id": "r1",
+                "refutes_predictions": ["p1"],
+                "kind": "cadence",
+                "claim": "foreground cadence falls outside the documented probe baseline",
+                "comparison": {
+                    "selector_kind": "historical-self",
+                    "selector": "src=<source_ip> rule=5710 72h",
+                    "dimension": "inter-arrival-distribution",
+                },
+            },
+        ],
+        "authorization_contract": [
+            {
+                "id": "ac1",
+                "edge_ref": "proposed",
+                "anchor_kind": "approved-monitoring-sources",
+                "predicate": "triple listed as active",
+                "on_unauthorized": "esc",
+                "on_indeterminate": "esc",
+            },
+        ],
+        "weight": "+",
+        "status": "active",
+    }]
+    out = parse_dense_companion(_wrap(emit_hypothesize_state_dense(hyps)))
+    parsed = out["hypothesize"]["hypotheses"][0]
+    assert parsed["story"].startswith("s1.")
+    assert parsed["predictions"][0]["kind"] == "cadence"
+    assert parsed["predictions"][0]["from_story_link"] == "s1"
+    assert parsed["predictions"][0]["comparison"]["dimension"] == "inter-arrival-distribution"
+    assert parsed["refutation_shape"][0]["kind"] == "cadence"
+    assert parsed["authorization_contract"][0]["anchor_kind"] == "approved-monitoring-sources"
 
 
 def test_empty_input_returns_empty_string():

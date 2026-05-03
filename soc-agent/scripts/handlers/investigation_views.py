@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 
-from scripts.handlers._hypothesize_dense import emit_hypothesize_dense
+from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
 from scripts.handlers._markdown import iter_companion_dicts
 
 _PHASE_HEADER_RE = re.compile(
@@ -301,12 +301,12 @@ def format_predict_state_block(investigation_md: str) -> str:
         if prologue_fences.strip():
             parts.append(prologue_section["header"] + "\n" + prologue_fences)
 
-    frontier = _predict_frontier_hypotheses(sections)
+    frontier = predict_frontier_hypotheses(investigation_md)
     if frontier:
         parts.append(
             "## Active Hypothesis Frontier\n"
             "```invlang\n"
-            f"{emit_hypothesize_dense(frontier)}\n"
+            f"{emit_hypothesize_state_dense(frontier, block_name='hypotheses')}\n"
             "```"
         )
 
@@ -431,3 +431,14 @@ def format_investigation_block(
         # Everything else (GATHER, self-report, prior PREDICT/ANALYZE) dropped.
     body = "\n\n".join(p.rstrip() for p in parts if p.strip())
     return f"<investigation mode=\"report-narrative\">\n{body}\n</investigation>"
+
+
+def predict_frontier_hypotheses(investigation_md: str) -> list[dict]:
+    """Return the currently-active hypothesis frontier from investigation.md."""
+    body_raw = investigation_md.rstrip()
+    if not body_raw:
+        return []
+    sections = _parse_investigation_sections(body_raw)
+    if not sections:
+        return []
+    return _predict_frontier_hypotheses(sections)

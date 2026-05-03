@@ -238,6 +238,8 @@ class TestPromptAssembly:
         assert "## Active Hypothesis Frontier" in prompt
         assert "?monitoring-probe" in prompt
         assert "?service-account-use" in prompt
+        assert "### story h-001" in prompt
+        assert ":P h-001.preds" in prompt
         assert "process-lineage" in prompt
         assert "old prose" not in prompt
         assert "latest prose" not in prompt
@@ -350,6 +352,103 @@ _INVESTIGATION_WITH_PREDICT = _build_investigation_with_predict()
 
 def _build_multiloop_investigation() -> str:
     from tests._dense_fixture_helpers import companion_to_invlang_fence
+    from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
+
+    predict_loop1 = (
+        "```invlang\n"
+        + emit_hypothesize_state_dense([
+            {
+                "id": "h-001",
+                "name": "?monitoring-probe",
+                "story": (
+                    "s1. The source host emits the alert at a documented probe cadence.\n"
+                    "s2. The baseline distinguishes routine probe activity from drift."
+                ),
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "attempted_auth",
+                    "parent_vertex": {
+                        "type": "endpoint",
+                        "classification": "monitoring-host",
+                    },
+                },
+                "predictions": [{
+                    "id": "p1",
+                    "subject": "proposed_parent",
+                    "kind": "cadence",
+                    "from_story_link": "s1",
+                    "claim": "foreground cadence stays within the documented probe baseline",
+                    "comparison": {
+                        "selector_kind": "historical-self",
+                        "selector": "src=<source_ip> rule=5710 72h",
+                        "dimension": "inter-arrival-distribution",
+                    },
+                }],
+            },
+        ])
+        + "\n```"
+    )
+    predict_loop2 = (
+        "```invlang\n"
+        + emit_hypothesize_state_dense([
+            {
+                "id": "h-001",
+                "name": "?monitoring-probe",
+                "story": (
+                    "s1. The source host emits the alert at a documented probe cadence.\n"
+                    "s2. The baseline distinguishes routine probe activity from drift."
+                ),
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "attempted_auth",
+                    "parent_vertex": {
+                        "type": "endpoint",
+                        "classification": "monitoring-host",
+                    },
+                },
+                "predictions": [{
+                    "id": "p1",
+                    "subject": "proposed_parent",
+                    "kind": "cadence",
+                    "from_story_link": "s1",
+                    "claim": "foreground cadence stays within the documented probe baseline",
+                    "comparison": {
+                        "selector_kind": "historical-self",
+                        "selector": "src=<source_ip> rule=5710 72h",
+                        "dimension": "inter-arrival-distribution",
+                    },
+                }],
+                "weight": "++",
+                "status": "confirmed",
+            },
+            {
+                "id": "h-002",
+                "name": "?service-account-use",
+                "story": (
+                    "s1. A service account on the source could be driving the repeated SSH attempts.\n"
+                    "s2. Process lineage resolves whether the parent process is the scheduled service wrapper."
+                ),
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "attempted_auth",
+                    "parent_vertex": {
+                        "type": "identity",
+                        "classification": "service-account",
+                    },
+                },
+                "predictions": [{
+                    "id": "p1",
+                    "subject": "proposed_parent",
+                    "kind": "absolute",
+                    "from_story_link": "s2",
+                    "claim": "process lineage names the scheduled service wrapper as the initiating parent",
+                }],
+                "weight": "+",
+                "status": "active",
+            },
+        ])
+        + "\n```"
+    )
 
     return (
         "## CONTEXTUALIZE\n"
@@ -370,22 +469,7 @@ def _build_multiloop_investigation() -> str:
         + "\n"
         "## PREDICT (loop 1)\n"
         "**Selected lead:** authentication-history\n"
-        + companion_to_invlang_fence({
-            "hypothesize": {
-                "hypotheses": [{
-                    "id": "h-001",
-                    "name": "?monitoring-probe",
-                    "attached_to_vertex": "v-001",
-                    "proposed_edge": {
-                        "relation": "attempted_auth",
-                        "parent_vertex": {
-                            "type": "endpoint",
-                            "classification": "monitoring-host",
-                        },
-                    },
-                }],
-            },
-        })
+        + predict_loop1
         + "\n"
         "## GATHER (loop 1)\n"
         "**Lead:** authentication-history\n"
@@ -407,22 +491,7 @@ def _build_multiloop_investigation() -> str:
         "- anomaly note\n"
         "## PREDICT (loop 2)\n"
         "**Selected lead:** process-lineage\n"
-        + companion_to_invlang_fence({
-            "hypothesize": {
-                "hypotheses": [{
-                    "id": "h-002",
-                    "name": "?service-account-use",
-                    "attached_to_vertex": "v-001",
-                    "proposed_edge": {
-                        "relation": "attempted_auth",
-                        "parent_vertex": {
-                            "type": "identity",
-                            "classification": "service-account",
-                        },
-                    },
-                }],
-            },
-        })
+        + predict_loop2
         + "\n"
         "## GATHER (loop 2)\n"
         "**Lead:** process-lineage\n"
@@ -710,9 +779,96 @@ class TestHandleHappyPaths:
         assert "## PREDICT (loop 1)" in written
         assert "```invlang" in written
         assert ":H hypothesize.hypotheses" in written
+        assert "### story h-001" in written
+        assert ":P h-001.preds" in written
         # Terminal trailer must not land in investigation.md.
         assert ":R routing" not in written
         assert "selected_lead         authentication-history" not in written
+
+    def test_loop2_persisted_section_materializes_full_frontier(self, tmp_path, monkeypatch):
+        from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
+
+        existing_investigation = (
+            "## CONTEXTUALIZE\n\nexisting.\n\n"
+            "## PREDICT (loop 1)\n\n"
+            "```invlang\n"
+            + emit_hypothesize_state_dense([{
+                "id": "h-001",
+                "name": "?monitoring-probe",
+                "story": (
+                    "s1. The source host emits the alert at a documented probe cadence.\n"
+                    "s2. The baseline distinguishes routine probe activity from drift."
+                ),
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "attempted_auth",
+                    "parent_vertex": {
+                        "type": "endpoint",
+                        "classification": "monitoring-host",
+                    },
+                },
+                "predictions": [{
+                    "id": "p1",
+                    "subject": "proposed_parent",
+                    "kind": "cadence",
+                    "from_story_link": "s1",
+                    "claim": "foreground cadence stays within the documented probe baseline",
+                    "comparison": {
+                        "selector_kind": "historical-self",
+                        "selector": "src=<source_ip> rule=5710 72h",
+                        "dimension": "inter-arrival-distribution",
+                    },
+                }],
+                "weight": "+",
+                "status": "active",
+            }])
+            + "\n```\n"
+        )
+        ctx = make_ctx(
+            tmp_path,
+            history=[
+                Phase.CONTEXTUALIZE.value,
+                Phase.PREDICT.value,
+                Phase.GATHER.value,
+                Phase.ANALYZE.value,
+                Phase.PREDICT.value,
+            ],
+            existing_investigation=existing_investigation,
+        )
+        response = textwrap.dedent("""
+            predict loop=2 shape=A
+
+            ### story h-002
+            s1. A service account on the source could be driving the repeated SSH attempts.
+            s2. Process lineage resolves whether the parent process is the scheduled service wrapper.
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-002|?service-account-use|v-001|attempted_auth|identity|service-account|||null|active
+
+            :P h-002.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s2|"process lineage names the scheduled service wrapper as the initiating parent"
+
+            :P h-002.refuts [id|refutes|kind|claim]
+            r1|p1|absolute|"process lineage names a different initiating parent"
+
+            :R routing
+            selected_lead         process-lineage
+            composite_secondary   -
+            override_data_source  -
+            rationale             "process lineage discriminates the new service-account branch"
+        """).strip()
+        monkeypatch.setattr(predict_handler, "_invoke_subagent", stub_invoke([], [response]))
+        monkeypatch.setattr(predict_handler, "_validate_companion_proposed", stub_validator([[]]))
+
+        predict_handler.handle(ctx)
+        written = (ctx.run_dir / "investigation.md").read_text()
+        latest = written.rsplit("## PREDICT (loop 2)", 1)[1]
+        assert "?monitoring-probe" in latest
+        assert "?service-account-use" in latest
+        assert "### story h-001" in latest
+        assert "### story h-002" in latest
+        assert ":P h-001.preds" in latest
+        assert ":P h-002.preds" in latest
 
     def test_unresolved_prescribed_set_threaded_as_remediation_note(
         self, tmp_path, monkeypatch,
@@ -948,6 +1104,8 @@ class TestCheckpointRecovery:
         assert "existing." in written
         assert "## PREDICT (loop 1)" in written
         assert "?scheduled-automation-health-check" in written
+        assert "### story h-001" in written
+        assert ":P h-001.preds" in written
 
     def test_incomplete_checkpoint_falls_through_to_retry(self, tmp_path, monkeypatch):
         """Checkpoint with status != 'complete' should NOT synthesize — the
