@@ -26,6 +26,11 @@ Schema-mapping table (per `docs/dense-investigation-format.md` §Schema mapping)
     :V prologue.vertices            → prologue.vertices[]
     :E prologue.edges               → prologue.edges[]
     :H hypothesize.hypotheses       → hypothesize.hypotheses[]
+    ### story h-<id>                → hypothesize.hypotheses[<id>].story
+    :P h-<id>.<sub>                 → hypothesize.hypotheses[<id>].{predictions,
+                                       attribute_predictions,
+                                       refutation_shape,
+                                       authorization_contract}
     :L findings                     → findings[<id>] (flat: id, name, loop,
                                        target, mode, ...; query_details
                                        sub-dict for system/template/query/
@@ -62,7 +67,6 @@ from scripts.handlers._dense_primitives import (
     split_csv_or_semi as _split_csv_or_semi,
     split_subcells as _split_subcells,
     split_cells as _split_cells,
-    tokenize_blocks,
     unquote as _unquote,
 )
 
@@ -73,7 +77,12 @@ class DenseParseError(ValueError):
     surfaced to the writer (validator hook output)."""
 
 
-_VALID_TAGS = frozenset("VEHLRTG")
+_VALID_TAGS = frozenset("VEHLRTPG")
+
+_STORY_HEADER_RE = re.compile(r"^###\s+story\s+(h-[\w\-]+)\s*$")
+_TOP_LEVEL_HYP_P_RE = re.compile(
+    r"^(h-[\w\-]+)\.(preds|attr_preds|refuts|authz|comparisons)$"
+)
 
 
 def _parse_attrs(cell: str) -> dict[str, str]:
@@ -89,20 +98,108 @@ def parse_dense_blocks_in_text(text: str) -> list[DenseBlock]:
 
     Multiple blocks may share a single fence — they're separated by header
     lines (`:V foo [...]`, `:T conclude`, etc.). Blank lines between blocks
-    are tolerated.
+    are tolerated. Story headers inside a fence are accepted and ignored by
+    this block-only surface; `parse_dense_companion(...)` reads them through
+    the richer document parser below.
+    """
+    blocks, _stories = _parse_dense_document(text)
+    return blocks
+
+
+def _parse_dense_document(text: str) -> tuple[list[DenseBlock], dict[str, str]]:
+    """Tokenize all dense blocks plus any in-fence `### story h-...` prose."""
+    blocks: list[DenseBlock] = []
+    stories: dict[str, str] = {}
+    for fence_idx, match in enumerate(INVLANG_BLOCK_RE.finditer(text)):
+        fence_blocks, fence_stories = _tokenize_companion_fence(
+            match.group(1), fence_index=fence_idx
+        )
+        blocks.extend(fence_blocks)
+        stories.update(fence_stories)
+    return blocks, stories
+
+
+def _tokenize_companion_fence(
+    body: str,
+    *,
+    fence_index: int,
+) -> tuple[list[DenseBlock], dict[str, str]]:
+    """Tokenize one ```` ```invlang ```` fence.
+
+    Companion fences accept the normal `:<TAG> ...` block grammar plus the
+    richer predict-time `### story h-...` prose blocks. Stories are kept
+    separate from `DenseBlock`s so the canonical projection can attach them to
+    the corresponding hypothesis record.
     """
     blocks: list[DenseBlock] = []
-    for fence_idx, match in enumerate(INVLANG_BLOCK_RE.finditer(text)):
-        body = match.group(1)
-        blocks.extend(
-            tokenize_blocks(
-                body,
-                valid_tags=_VALID_TAGS,
-                error_cls=DenseParseError,
-                fence_index=fence_idx,
+    stories: dict[str, str] = {}
+    cur: DenseBlock | None = None
+    cur_story_hid: str | None = None
+    cur_story_lines: list[str] = []
+
+    def flush_story() -> None:
+        nonlocal cur_story_hid, cur_story_lines
+        if cur_story_hid and cur_story_lines:
+            stories[cur_story_hid] = "\n".join(cur_story_lines)
+        cur_story_hid = None
+        cur_story_lines = []
+
+    for raw in body.splitlines():
+        line = raw.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        m_story = _STORY_HEADER_RE.match(stripped)
+        if m_story:
+            flush_story()
+            cur_story_hid = m_story.group(1)
+            cur = None
+            continue
+
+        m = _prim.HEADER_RE.match(stripped)
+        if m:
+            flush_story()
+            tag = m.group("tag")
+            if tag not in _VALID_TAGS:
+                raise DenseParseError(
+                    f"unknown dense block tag :{tag} in {stripped!r} "
+                    f"(valid: {sorted(_VALID_TAGS)})"
+                )
+            cols_raw = m.group("cols")
+            cols = (
+                [c.strip().rstrip("?") for c in cols_raw.split("|")]
+                if cols_raw is not None
+                else None
             )
-        )
-    return blocks
+            cur = DenseBlock(
+                tag=tag,
+                name=m.group("name"),
+                columns=cols,
+                rows=[],
+                fence_index=fence_index,
+            )
+            blocks.append(cur)
+            continue
+
+        if stripped.startswith(":") and re.match(r"^:[A-Za-z]", stripped):
+            raise DenseParseError(
+                f"malformed dense block header: {stripped!r} "
+                f"(expected `:<TAG> <name> [col1|col2|...]`)"
+            )
+
+        if cur_story_hid is not None:
+            cur_story_lines.append(stripped)
+            continue
+
+        if cur is None:
+            raise DenseParseError(
+                f"dense row appears before any block header: {stripped!r}"
+            )
+        cur.rows.append(stripped)
+
+    flush_story()
+    return blocks, stories
 
 
 def _row_cells(block: DenseBlock, row: str) -> list[str]:
@@ -121,7 +218,11 @@ def _row_record(block: DenseBlock, row: str) -> dict[str, str]:
 _LEAD_PREFIX_RE = re.compile(r"^l-(?P<id>[A-Za-z0-9]+)\.(?P<sub>.+)$")
 
 
-def companion_dict_from_blocks(blocks: list[DenseBlock]) -> dict[str, Any]:
+def companion_dict_from_blocks(
+    blocks: list[DenseBlock],
+    *,
+    stories: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Project a list of tokenized dense blocks onto the canonical companion
     dict shape (matches `schema.md` and `_LEAD_REQUIRED` in invlang_common).
 
@@ -153,10 +254,17 @@ def companion_dict_from_blocks(blocks: list[DenseBlock]) -> dict[str, Any]:
         lead.setdefault("resolutions", [])
         return lead
 
-    ctx: dict[str, str | None] = {"current_lead": None}
+    ctx: dict[str, Any] = {
+        "current_lead": None,
+        "hypotheses_by_id": {},
+        "deferred_hypothesis_comparisons": [],
+        "stories": stories or {},
+    }
 
     for block in blocks:
         _project_block(block, out, lead_bucket, ctx)
+
+    _attach_deferred_hypothesis_comparisons(ctx)
 
     if findings:
         out["findings"] = [findings[lid] for lid in findings]
@@ -187,10 +295,27 @@ def _project_block(
 
     # Top-level hypotheses --------------------------------------------------
     if tag == "H" and name == "hypothesize.hypotheses":
-        out.setdefault("hypothesize", {})["hypotheses"] = [
-            _hypothesis_record(block, row) for row in block.rows
-        ]
+        hypotheses = [_hypothesis_record(block, row) for row in block.rows]
+        for h in hypotheses:
+            hid = h["id"]
+            story = ctx.get("stories", {}).get(hid)
+            if isinstance(story, str) and story:
+                h["story"] = story
+        out.setdefault("hypothesize", {})["hypotheses"] = hypotheses
+        ctx["hypotheses_by_id"] = {
+            h["id"]: h for h in hypotheses if isinstance(h.get("id"), str)
+        }
         return
+    if tag == "P":
+        m = _TOP_LEVEL_HYP_P_RE.match(name)
+        if m:
+            _project_top_level_hypothesis_subblock(
+                block,
+                hypothesis_id=m.group(1),
+                subblock=m.group(2),
+                ctx=ctx,
+            )
+            return
 
     # Findings header (one row per lead, scalar fields) --------------------
     if tag == "L" and name == "findings":
@@ -384,6 +509,135 @@ def _hypothesis_record(block: DenseBlock, row: str) -> dict[str, Any]:
     if rec.get("status"):
         out["status"] = rec["status"]
     return out
+
+
+def _project_top_level_hypothesis_subblock(
+    block: DenseBlock,
+    *,
+    hypothesis_id: str,
+    subblock: str,
+    ctx: dict[str, Any],
+) -> None:
+    by_id = ctx.get("hypotheses_by_id") or {}
+    hypothesis = by_id.get(hypothesis_id)
+    if not isinstance(hypothesis, dict):
+        raise DenseParseError(
+            f":P {block.name}: hypothesis {hypothesis_id!r} not declared in "
+            f":H hypothesize.hypotheses"
+        )
+
+    if subblock == "preds":
+        bucket = hypothesis.setdefault("predictions", [])
+        for row in block.rows:
+            rec = _row_record(block, row)
+            entry: dict[str, Any] = {
+                "id": rec.get("id", ""),
+                "subject": rec.get("subject", ""),
+                "claim": _unquote(rec.get("claim", "")),
+            }
+            if rec.get("kind"):
+                entry["kind"] = rec["kind"]
+            if rec.get("from_story"):
+                entry["from_story_link"] = rec["from_story"]
+            bucket.append(entry)
+        return
+
+    if subblock == "attr_preds":
+        bucket = hypothesis.setdefault("attribute_predictions", [])
+        for row in block.rows:
+            rec = _row_record(block, row)
+            entry = {
+                "id": rec.get("id", ""),
+                "target": rec.get("target", ""),
+                "attribute": rec.get("attribute", ""),
+                "claim": _unquote(rec.get("claim", "")),
+            }
+            if rec.get("kind"):
+                entry["kind"] = rec["kind"]
+            bucket.append(entry)
+        return
+
+    if subblock == "refuts":
+        bucket = hypothesis.setdefault("refutation_shape", [])
+        for row in block.rows:
+            rec = _row_record(block, row)
+            entry = {
+                "id": rec.get("id", ""),
+                "claim": _unquote(rec.get("claim", "")),
+            }
+            if rec.get("refutes"):
+                entry["refutes_predictions"] = _split_csv(rec["refutes"])
+            if rec.get("kind"):
+                entry["kind"] = rec["kind"]
+            bucket.append(entry)
+        return
+
+    if subblock == "authz":
+        bucket = hypothesis.setdefault("authorization_contract", [])
+        for row in block.rows:
+            rec = _row_record(block, row)
+            bucket.append({
+                "id": rec.get("id", ""),
+                "edge_ref": rec.get("edge_ref", "proposed") or "proposed",
+                "anchor_kind": rec.get("anchor_kind", ""),
+                "predicate": _unquote(rec.get("predicate", "")),
+                "on_unauthorized": rec.get("on_unauth", "esc") or "esc",
+                "on_indeterminate": rec.get("on_indet", "esc") or "esc",
+            })
+        return
+
+    if subblock == "comparisons":
+        deferred = ctx.setdefault("deferred_hypothesis_comparisons", [])
+        for row in block.rows:
+            rec = _row_record(block, row)
+            deferred.append((
+                hypothesis_id,
+                rec.get("pred_ref", ""),
+                {
+                    "selector_kind": rec.get("selector_kind", ""),
+                    "selector": _unquote(rec.get("selector", "")),
+                    "dimension": rec.get("dimension", ""),
+                },
+            ))
+        return
+
+    raise DenseParseError(f"unknown :P block name: {block.name!r}")
+
+
+def _attach_deferred_hypothesis_comparisons(ctx: dict[str, Any]) -> None:
+    deferred = ctx.get("deferred_hypothesis_comparisons") or []
+    by_id = ctx.get("hypotheses_by_id") or {}
+    for hypothesis_id, pred_ref, comp in deferred:
+        hypothesis = by_id.get(hypothesis_id)
+        if not isinstance(hypothesis, dict):
+            raise DenseParseError(
+                f":P {hypothesis_id}.comparisons: hypothesis {hypothesis_id!r} "
+                f"not declared in :H hypothesize.hypotheses"
+            )
+        _attach_hypothesis_comparison(hypothesis, pred_ref, comp)
+
+
+def _attach_hypothesis_comparison(
+    hypothesis: dict[str, Any],
+    pred_ref: str,
+    comp: dict[str, str],
+) -> None:
+    hid = hypothesis.get("id", "?")
+    for bucket in ("predictions", "refutation_shape"):
+        for entry in hypothesis.get(bucket) or []:
+            if entry.get("id") == pred_ref:
+                entry["comparison"] = comp
+                return
+    for entry in hypothesis.get("attribute_predictions") or []:
+        if entry.get("id") == pred_ref:
+            raise DenseParseError(
+                f"{hid}: :P {hid}.comparisons references attribute_prediction "
+                f"{pred_ref!r}; attribute_predictions do not carry comparisons"
+            )
+    raise DenseParseError(
+        f"{hid}: :P {hid}.comparisons row references unknown pred_ref "
+        f"{pred_ref!r} (must name a prediction or refutation on the same hypothesis)"
+    )
 
 
 def _parse_pred_subcells(cell: str) -> list[dict[str, Any]]:
@@ -943,7 +1197,7 @@ def _parse_conclude_scalar_value(raw: str) -> Any:
 def parse_dense_companion(text: str) -> dict[str, Any]:
     """Walk ```invlang fences in `text` and project to the canonical
     companion dict. Returns an empty dict if no fences are present."""
-    blocks = parse_dense_blocks_in_text(text)
+    blocks, stories = _parse_dense_document(text)
     if not blocks:
         return {}
-    return companion_dict_from_blocks(blocks)
+    return companion_dict_from_blocks(blocks, stories=stories)

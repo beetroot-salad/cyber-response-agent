@@ -84,21 +84,19 @@ from scripts.handlers._investigation_io import (
     validate_proposed_companion,
 )
 from scripts.handlers._context_loader import (
-    format_alert_block,
-    format_lead_definitions_summary_block,
-    format_signature_text_block,
+    format_alert_summary_block,
+    format_predict_available_context_block,
     load_alert,
     load_investigation_md,
-    load_lead_definitions,
     load_run_salt,
-    load_signature_text,
 )
 from scripts.handlers._playbook import load_playbook_metadata
 from scripts.handlers.predict_priors import (
     parse_prologue_and_last_hypothesize,
     safe_priors_section,
 )
-from scripts.handlers.investigation_views import format_investigation_block
+from scripts.handlers.investigation_views import format_predict_state_block
+from scripts.handlers.investigation_views import predict_frontier_hypotheses
 from scripts.handlers._subagent import (
     make_invoker,
 )
@@ -107,7 +105,7 @@ from scripts.handlers._output_parser import (
     PredictParseResult,
     parse_predict_output,
 )
-from scripts.handlers._hypothesize_dense import emit_hypothesize_dense
+from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
 
 # Lazy imports for priors (invlang + contextualize) live inside the priors
 # helpers themselves — keeps import-time cycles avoided and lets failures in
@@ -153,43 +151,52 @@ def _compute_loop_n(ctx: Context) -> int:
 
 
 def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None) -> str:
-    """Build the predict subagent prompt with all deterministic context inline.
+    """Build the predict subagent prompt around minimal inline state.
 
-    The subagent receives alert.json, investigation.md, signature playbook +
-    context, and the full lead catalog preloaded — no Read tool calls
-    required. Bash stays available for invlang corpus queries (pre-baked
-    priors are inlined, but CLI is retained for shape-calibration lookups the
-    priors don't answer).
+    Inline context stays intentionally narrow:
+      - run metadata
+      - matched priors (when useful)
+      - a summarized alert block
+      - compact structured investigation state
+      - explicit on-disk retrieval pointers in `<available_context>`
 
-    Archetype context is intentionally absent: PREDICT works at the mechanism
-    layer, archetypes are a disposition-routing concern that REPORT consumes.
+    Full alert JSON, signature docs, lead definitions, and environment
+    knowledge remain available on disk and are loaded on demand through the
+    subagent's Read tool.
     """
     loop_n = _compute_loop_n(ctx)
-    priors_section = safe_priors_section(ctx)
+    priors_section = _filtered_priors_section(ctx)
 
     alert = load_alert(ctx.run_dir)
     salt = load_run_salt(ctx.run_dir)
     investigation_md = load_investigation_md(ctx.run_dir)
-    signature_texts = load_signature_text(ctx.signature_id, SOC_AGENT_ROOT)
-    lead_defs = load_lead_definitions(SOC_AGENT_ROOT)
+    vendor = (
+        ctx.signature_id.split("-", 1)[0]
+        if "-" in ctx.signature_id
+        else ctx.signature_id
+    )
 
-    env_memory_section = _safe_env_memory_section(ctx)
-
-    blocks = [
+    blocks: list[str] = [
         (
             f"run_dir={ctx.run_dir}\n"
             f"signature_id={ctx.signature_id}\n"
             f"loop_n={loop_n}"
         ),
-        priors_section,
     ]
-    if env_memory_section:
-        blocks.append(env_memory_section)
+    if priors_section:
+        blocks.append(priors_section)
     blocks.extend([
-        format_alert_block(alert, salt),
-        format_investigation_block(investigation_md, mode="predict"),
-        format_signature_text_block(signature_texts, exclude_archetype_catalog=True),
-        format_lead_definitions_summary_block(lead_defs),
+        format_alert_summary_block(
+            alert, vendor, salt, soc_agent_root=SOC_AGENT_ROOT
+        ),
+        format_predict_state_block(investigation_md),
+        format_predict_available_context_block(
+            ctx.run_dir,
+            investigation_md,
+            ctx.signature_id,
+            vendor,
+            soc_agent_root=SOC_AGENT_ROOT,
+        ),
     ])
 
     if remediation_notes:
@@ -201,31 +208,33 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
     return "\n\n".join(blocks)
 
 
-# ---------------------------------------------------------------------------
-# Optional prompt sections that must never block the loop
-# ---------------------------------------------------------------------------
+def _filtered_priors_section(ctx: Context) -> str:
+    """Return only matched/useful priors for inline prompting.
 
-
-def _safe_env_memory_section(ctx: Context) -> str:
-    """Produce the environment-memory prompt block.
-
-    Walks `knowledge/environment/{fleet,systems}/**/*.md`, scores atoms
-    against anchors extracted from the live investigation state, returns the
-    formatted block. Empty match → empty string (caller skips the section).
-
-    All exceptions degrade to a banner — env-memory must never block the
-    loop. Same discipline as `predict_priors.safe_priors_section`.
+    Sparse, unavailable, or explicit no-match renderings are omitted
+    entirely so the prompt does not pay for banners that carry no actionable
+    scaffold.
     """
-    try:
-        from scripts.handlers import env_memory  # type: ignore
+    priors_section = safe_priors_section(ctx).strip()
+    if not priors_section:
+        return ""
 
-        matched = env_memory.retrieve(SOC_AGENT_ROOT, ctx)
-        return env_memory.format_env_memory_block(matched)
-    except Exception as exc:  # noqa: BLE001 — intentional broad catch
-        return (
-            "## Environment memory\n"
-            f"(env-memory unavailable: {type(exc).__name__}: {exc})"
-        )
+    suppress_markers = (
+        "(priors unavailable:",
+        "(no frontier extracted)",
+        "Priors at this topology are sparse",
+        "Leads: (no corpus matches at any tier)",
+    )
+    if any(marker in priors_section for marker in suppress_markers):
+        return ""
+
+    useful_markers = (
+        "**Strongest prior at this topology:**",
+        "Leads (per-occurrence effectiveness; n = support):",
+    )
+    if any(marker in priors_section for marker in useful_markers):
+        return priors_section
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -292,8 +301,8 @@ class _AttemptResult:
     errors: list[str]
 
 
-def _compose_section(result: PredictParseResult, loop_n: int) -> str:
-    """Render the invlang-state delta from a parsed predict output into the
+def _compose_section(ctx: Context, result: PredictParseResult, loop_n: int) -> str:
+    """Render the predict-time full frontier into the
     markdown section the handler appends to investigation.md.
 
     On shape E (branch_plan only, no hypotheses) no section is emitted —
@@ -301,18 +310,57 @@ def _compose_section(result: PredictParseResult, loop_n: int) -> str:
     stamped by the GATHER handler onto its gather entry.
 
     On shape A/I/M/D-with-fork the hypotheses are rendered as a single
-    `hypothesize:` invlang block under a `## PREDICT (loop N)` header.
-    Invlang's block merge semantics fold multiple `hypothesize:` blocks
-    (one per loop) into one accumulated companion state.
+    full-state `hypothesize:` invlang block under a `## PREDICT (loop N)`
+    header. The handler materializes the active frontier here so the
+    persisted investigation surface stays self-contained and readable: the
+    latest loop's block always carries every live hypothesis, not just the
+    new hypotheses the subagent authored this turn.
     """
-    hypotheses = result.invlang_delta.get("hypotheses")
-    if not hypotheses:
+    authored = result.invlang_delta.get("hypotheses")
+    if not authored:
         return ""
-    body = emit_hypothesize_dense(hypotheses)
+    current_frontier = predict_frontier_hypotheses(load_investigation_md(ctx.run_dir))
+    hypotheses = _merge_frontier_with_authored(current_frontier, authored)
+    body = emit_hypothesize_state_dense(hypotheses)
     return (
         f"## PREDICT (loop {loop_n})\n\n"
         f"```invlang\n{body}\n```\n"
     )
+
+
+def _merge_frontier_with_authored(
+    current_frontier: list[dict],
+    authored: list[dict],
+) -> list[dict]:
+    """Overlay newly-authored hypotheses onto the live frontier.
+
+    Existing active hypotheses keep their prior order and detail; newly
+    introduced ids append at the end in authored order. If the subagent
+    re-emits an existing id, the latest authored record wins.
+    """
+    ordered: list[dict] = []
+    by_id: dict[str, dict] = {}
+    for h in current_frontier:
+        hid = h.get("id")
+        if not isinstance(hid, str) or not hid:
+            continue
+        clone = dict(h)
+        ordered.append(clone)
+        by_id[hid] = clone
+    for h in authored:
+        hid = h.get("id")
+        if not isinstance(hid, str) or not hid:
+            continue
+        clone = dict(h)
+        if hid in by_id:
+            for idx, existing in enumerate(ordered):
+                if existing.get("id") == hid:
+                    ordered[idx] = clone
+                    break
+        else:
+            ordered.append(clone)
+        by_id[hid] = clone
+    return ordered
 
 
 def _attempt(
@@ -367,7 +415,7 @@ def _attempt(
         return _AttemptResult(section="", result=None, errors=[str(e)])
 
     # Compose section + validate against companion.
-    section = _compose_section(result, expected_loop_n)
+    section = _compose_section(ctx, result, expected_loop_n)
     errors = _validate_companion_proposed(ctx, section) if section else []
     return _AttemptResult(section=section, result=result, errors=errors)
 
@@ -415,7 +463,7 @@ def _synthesize_from_checkpoint(
     except PredictOutputError:
         return None
 
-    section = _compose_section(result, expected_loop_n)
+    section = _compose_section(ctx, result, expected_loop_n)
     errors = _validate_companion_proposed(ctx, section) if section else []
     if errors:
         # Validator disagrees with the checkpoint — route into the retry

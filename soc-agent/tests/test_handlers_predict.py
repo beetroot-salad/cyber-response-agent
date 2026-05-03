@@ -8,7 +8,6 @@ and routing output. They do not spawn a Claude subprocess.
 
 import sys
 import textwrap
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -36,9 +35,8 @@ def make_ctx(
 ) -> Context:
     run_dir = tmp_path / "run-test"
     run_dir.mkdir()
-    # alert.json + meta.json are required — the predict handler preloads
-    # the alert and per-run salt into the prompt along with investigation.md
-    # + signature knowledge + lead catalog.
+    # alert.json + meta.json are required — the predict handler renders a
+    # summarized alert block and an available-context manifest from them.
     import json as _json
     alert = {"id": "alert-1", "rule": {"id": "5710"}, "data": {}}
     (run_dir / "alert.json").write_text(_json.dumps(alert))
@@ -181,14 +179,11 @@ class TestPromptAssembly:
         assert "signature_id=wazuh-rule-5710" in captured[0]
         assert "resume_from_checkpoint" not in captured[0]
 
-    def test_prompt_inlines_all_deterministic_context(self, tmp_path, monkeypatch):
-        """Handler preloads alert + investigation + signature knowledge +
-        lead catalog so the subagent needs no Read tool. Archetype context
-        is intentionally absent — PREDICT works at the mechanism layer."""
+    def test_prompt_uses_summarized_state_and_context_pointers(self, tmp_path, monkeypatch):
         ctx = make_ctx(
             tmp_path,
             history=[Phase.PREDICT.value],
-            existing_investigation="## CONTEXTUALIZE\n\nsignature summary.\n",
+            existing_investigation=_build_prologue_only_investigation(),
         )
         captured: list[str] = []
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
@@ -198,17 +193,60 @@ class TestPromptAssembly:
         predict_handler.handle(ctx)
         prompt = captured[0]
 
-        # Tagged blocks present (alert tag is salted)
+        # Alert is summarized, not preloaded as raw JSON.
         assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
-        # predict handler uses mode="predict" — tag carries a mode attribute
-        assert "<investigation mode=\"predict\">" in prompt and "signature summary" in prompt
-        assert "<signature-knowledge>" in prompt
-        assert "<playbook>" in prompt  # real 5710 playbook body inlined
-        # Archetype context is NOT in the PREDICT prompt (dropped per the
-        # reframe — archetypes are a REPORT-phase concern).
-        assert "<archetypes>" not in prompt
-        assert "<lead-catalog>" in prompt
-        assert 'name="authentication-history"' in prompt  # real lead inlined
+        assert 'rule.id: "5710"' in prompt
+        assert '"id": "alert-1"' not in prompt
+
+        # Investigation context is the compact structured state, not the
+        # broad history replay.
+        assert "<investigation_state>" in prompt
+        assert ":V prologue.vertices" in prompt
+        assert "<investigation mode=\"predict\">" not in prompt
+
+        # Signature knowledge, lead catalog, and env-memory are pointer-only.
+        assert "<signature-knowledge>" not in prompt
+        assert "<lead-catalog>" not in prompt
+        assert "## Environment memory" not in prompt
+
+        # Read targets are surfaced explicitly.
+        assert "<available_context>" in prompt
+        assert "alert.json" in prompt
+        assert "field-quirks.md" in prompt
+        assert "playbook.md" in prompt
+        assert "context.md" in prompt
+        assert "TAGS.md" in prompt
+        assert "common-investigation/leads" in prompt
+        assert "knowledge/environment" in prompt
+
+    def test_prompt_keeps_only_compact_loop2_state(self, tmp_path):
+        history = [
+            Phase.CONTEXTUALIZE.value,
+            Phase.PREDICT.value,
+            Phase.GATHER.value,
+            Phase.ANALYZE.value,
+            Phase.PREDICT.value,
+        ]
+        ctx = make_ctx(
+            tmp_path,
+            history=history,
+            existing_investigation=_build_multiloop_investigation(),
+        )
+
+        prompt = predict_handler._assemble_prompt(ctx)
+        assert "<investigation_state>" in prompt
+        assert "## Active Hypothesis Frontier" in prompt
+        assert "?monitoring-probe" in prompt
+        assert "?service-account-use" in prompt
+        assert "### story h-001" in prompt
+        assert ":P h-001.preds" in prompt
+        assert "process-lineage" in prompt
+        assert "old prose" not in prompt
+        assert "latest prose" not in prompt
+        assert "bulky loop-1 observation" not in prompt
+        assert "bulky loop-2 observation" not in prompt
+        assert "anomaly note" not in prompt
+        assert "**Selected lead:**" not in prompt
 
     def test_second_loop_passes_loop_n_2(self, tmp_path, monkeypatch):
         # History of one completed loop + current PREDICT entry for loop 2.
@@ -253,28 +291,44 @@ class TestPromptAssembly:
 # ---------------------------------------------------------------------------
 
 
-def _build_investigation_with_predict() -> str:
+def _build_prologue_only_investigation() -> str:
     from tests._dense_fixture_helpers import companion_to_invlang_fence
+
     return (
         "## CONTEXTUALIZE\n\n"
         + companion_to_invlang_fence({
             "prologue": {
                 "vertices": [
-                    {"id": "v-001", "type": "endpoint",
-                     "classification": "monitoring-host",
-                     "identifier": "10.0.0.1"},
-                    {"id": "v-002", "type": "endpoint",
-                     "classification": "internal-server",
-                     "identifier": "target"},
+                    {
+                        "id": "v-001",
+                        "type": "endpoint",
+                        "classification": "monitoring-host",
+                        "identifier": "10.0.0.1",
+                    },
+                    {
+                        "id": "v-002",
+                        "type": "endpoint",
+                        "classification": "internal-server",
+                        "identifier": "target",
+                    },
                 ],
                 "edges": [{
-                    "id": "e-001", "relation": "attempted_auth",
-                    "source_vertex": "v-001", "target_vertex": "v-002",
-                    "authority": {"kind": "siem-event",
-                                  "source": "wazuh-rule-5710"},
+                    "id": "e-001",
+                    "relation": "attempted_auth",
+                    "source_vertex": "v-001",
+                    "target_vertex": "v-002",
+                    "authority": {"kind": "siem-event", "source": "wazuh-rule-5710"},
                 }],
             },
         })
+        + "\n"
+    )
+
+
+def _build_investigation_with_predict() -> str:
+    from tests._dense_fixture_helpers import companion_to_invlang_fence
+    return (
+        _build_prologue_only_investigation().rstrip("\n")
         + "\n\n## PREDICT (loop 1)\n\n"
         + companion_to_invlang_fence({
             "hypothesize": {"hypotheses": [{
@@ -294,6 +348,171 @@ def _build_investigation_with_predict() -> str:
 
 
 _INVESTIGATION_WITH_PREDICT = _build_investigation_with_predict()
+
+
+def _build_multiloop_investigation() -> str:
+    from tests._dense_fixture_helpers import companion_to_invlang_fence
+    from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
+
+    predict_loop1 = (
+        "```invlang\n"
+        + emit_hypothesize_state_dense([
+            {
+                "id": "h-001",
+                "name": "?monitoring-probe",
+                "story": (
+                    "s1. The source host emits the alert at a documented probe cadence.\n"
+                    "s2. The baseline distinguishes routine probe activity from drift."
+                ),
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "attempted_auth",
+                    "parent_vertex": {
+                        "type": "endpoint",
+                        "classification": "monitoring-host",
+                    },
+                },
+                "predictions": [{
+                    "id": "p1",
+                    "subject": "proposed_parent",
+                    "kind": "cadence",
+                    "from_story_link": "s1",
+                    "claim": "foreground cadence stays within the documented probe baseline",
+                    "comparison": {
+                        "selector_kind": "historical-self",
+                        "selector": "src=<source_ip> rule=5710 72h",
+                        "dimension": "inter-arrival-distribution",
+                    },
+                }],
+            },
+        ])
+        + "\n```"
+    )
+    predict_loop2 = (
+        "```invlang\n"
+        + emit_hypothesize_state_dense([
+            {
+                "id": "h-001",
+                "name": "?monitoring-probe",
+                "story": (
+                    "s1. The source host emits the alert at a documented probe cadence.\n"
+                    "s2. The baseline distinguishes routine probe activity from drift."
+                ),
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "attempted_auth",
+                    "parent_vertex": {
+                        "type": "endpoint",
+                        "classification": "monitoring-host",
+                    },
+                },
+                "predictions": [{
+                    "id": "p1",
+                    "subject": "proposed_parent",
+                    "kind": "cadence",
+                    "from_story_link": "s1",
+                    "claim": "foreground cadence stays within the documented probe baseline",
+                    "comparison": {
+                        "selector_kind": "historical-self",
+                        "selector": "src=<source_ip> rule=5710 72h",
+                        "dimension": "inter-arrival-distribution",
+                    },
+                }],
+                "weight": "++",
+                "status": "confirmed",
+            },
+            {
+                "id": "h-002",
+                "name": "?service-account-use",
+                "story": (
+                    "s1. A service account on the source could be driving the repeated SSH attempts.\n"
+                    "s2. Process lineage resolves whether the parent process is the scheduled service wrapper."
+                ),
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "attempted_auth",
+                    "parent_vertex": {
+                        "type": "identity",
+                        "classification": "service-account",
+                    },
+                },
+                "predictions": [{
+                    "id": "p1",
+                    "subject": "proposed_parent",
+                    "kind": "absolute",
+                    "from_story_link": "s2",
+                    "claim": "process lineage names the scheduled service wrapper as the initiating parent",
+                }],
+                "weight": "+",
+                "status": "active",
+            },
+        ])
+        + "\n```"
+    )
+
+    return (
+        "## CONTEXTUALIZE\n"
+        "candidate archetype: X\n"
+        + companion_to_invlang_fence({
+            "prologue": {
+                "vertices": [
+                    {
+                        "id": "v-001",
+                        "type": "endpoint",
+                        "classification": "monitoring-host",
+                        "identifier": "10.0.0.1",
+                    },
+                ],
+                "edges": [],
+            },
+        })
+        + "\n"
+        "## PREDICT (loop 1)\n"
+        "**Selected lead:** authentication-history\n"
+        + predict_loop1
+        + "\n"
+        "## GATHER (loop 1)\n"
+        "**Lead:** authentication-history\n"
+        "**Raw observation:**\n"
+        "- bulky loop-1 observation\n"
+        "## ANALYZE (loop 1)\n"
+        "**Assessment:** old prose\n"
+        + companion_to_invlang_fence({
+            "findings": [{
+                "id": "l-001",
+                "name": "authentication-history",
+                "loop": 1,
+                "target": "v-001",
+                "resolutions": [{"hypothesis": "h-001", "after": "+"}],
+            }],
+        })
+        + "\n"
+        "## Self-report\n"
+        "- anomaly note\n"
+        "## PREDICT (loop 2)\n"
+        "**Selected lead:** process-lineage\n"
+        + predict_loop2
+        + "\n"
+        "## GATHER (loop 2)\n"
+        "**Lead:** process-lineage\n"
+        "**Raw observation:**\n"
+        "- bulky loop-2 observation\n"
+        "## ANALYZE (loop 2)\n"
+        "**Assessment:** latest prose\n"
+        + companion_to_invlang_fence({
+            "findings": [{
+                "id": "l-002",
+                "name": "process-lineage",
+                "loop": 2,
+                "target": "v-001",
+                "resolutions": [
+                    {"hypothesis": "h-001", "after": "++"},
+                    {"hypothesis": "h-002", "after": "+"},
+                ],
+            }],
+        })
+        + "\n"
+    )
 
 
 def _synthetic_companion():
@@ -362,33 +581,28 @@ class TestPriorsIntegration:
         assert "auth-history" in prompt
         assert "n=1" in prompt
 
-    def test_assemble_prompt_loop1_empty_corpus_renders_no_match_banner(self, tmp_path, monkeypatch):
-        # Only CONTEXTUALIZE written — no prior hypothesize block yet.
-        prologue_only = textwrap.dedent("""
-            ## CONTEXTUALIZE
-
-            ```yaml
-            prologue:
-              vertices: []
-              edges: []
-            ```
-        """).strip() + "\n"
-        ctx = make_ctx(tmp_path, existing_investigation=prologue_only)
+    def test_assemble_prompt_loop1_empty_corpus_omits_no_match_priors(self, tmp_path, monkeypatch):
+        ctx = make_ctx(tmp_path, existing_investigation=_build_prologue_only_investigation())
         import invlang
         # Empty corpus → prologue retrieval returns no matches at any tier.
         monkeypatch.setattr(invlang, "load_corpus", lambda *a, **k: [])
 
         prompt = predict_handler._assemble_prompt(ctx)
-        # Loop-1 takes the prologue-keyed retrieval path. With an empty
-        # corpus, priors fall through to the sparse-prior fallback —
-        # "scaffold from first principles per PREDICT's ASSESS gate."
-        assert "## Past-investigation priors" in prompt
-        assert "Prologue topology" in prompt
-        assert "tier 3: no match" in prompt
-        assert "sparse" in prompt
-        assert "first principles" in prompt
-        # Sentinel: the loop-2+ per-seed frontier path would emit this.
-        assert "(no frontier extracted)" not in prompt
+        assert "## Past-investigation priors" not in prompt
+
+    def test_sparse_priors_are_omitted(self, tmp_path, monkeypatch):
+        ctx = make_ctx(tmp_path, existing_investigation=_build_prologue_only_investigation())
+        monkeypatch.setattr(
+            predict_handler,
+            "safe_priors_section",
+            lambda _ctx: (
+                "## Past-investigation priors\n\n"
+                "Priors at this topology are sparse — scaffold from first principles."
+            ),
+        )
+
+        prompt = predict_handler._assemble_prompt(ctx)
+        assert "## Past-investigation priors" not in prompt
 
     def test_priors_failure_is_non_fatal(self, tmp_path, monkeypatch):
         ctx = make_ctx(
@@ -403,8 +617,7 @@ class TestPriorsIntegration:
         monkeypatch.setattr(invlang, "load_corpus", _boom)
 
         prompt = predict_handler._assemble_prompt(ctx)
-        assert "## Past-investigation priors" in prompt
-        assert "(priors unavailable" in prompt
+        assert "## Past-investigation priors" not in prompt
         # Handler still dispatches cleanly when priors fail.
         captured: list[str] = []
         monkeypatch.setattr(predict_handler, "_invoke_subagent",
@@ -413,75 +626,7 @@ class TestPriorsIntegration:
                             stub_validator([[]]))
         result = predict_handler.handle(ctx)
         assert result.next_phase == Phase.GATHER
-        assert "(priors unavailable" in captured[0]
-
-
-# ---------------------------------------------------------------------------
-# Environment-memory integration
-# ---------------------------------------------------------------------------
-
-
-class TestEnvMemoryIntegration:
-    def test_env_memory_block_appears_when_atoms_match(self, tmp_path, monkeypatch):
-        """When env-memory retrieval returns matched atoms, the rendered block
-        is appended to the assembled prompt — between the priors section and
-        the alert block."""
-        ctx = make_ctx(tmp_path, existing_investigation=_INVESTIGATION_WITH_PREDICT)
-        from scripts.handlers import env_memory
-
-        fake_atom = env_memory.Atom(
-            id="test-atom",
-            body="this atom should appear in the prompt",
-            anchors={"mechanic": ("authentication",)},
-            valid_from=date(2026, 1, 1),
-            valid_to=date(2027, 1, 1),
-            status="live",
-            source_file=tmp_path / "fake.md",
-        )
-        monkeypatch.setattr(
-            env_memory, "retrieve",
-            lambda *a, **k: [(fake_atom, {"stale": False, "pre_window": False})],
-        )
-
-        prompt = predict_handler._assemble_prompt(ctx)
-        assert "## Environment memory" in prompt
-        assert "this atom should appear in the prompt" in prompt
-        assert 'atom_id="test-atom"' in prompt
-
-    def test_no_env_memory_block_when_empty(self, tmp_path, monkeypatch):
-        """Empty match → block omitted entirely (no header, no banner)."""
-        ctx = make_ctx(tmp_path, existing_investigation=_INVESTIGATION_WITH_PREDICT)
-        from scripts.handlers import env_memory
-        monkeypatch.setattr(env_memory, "retrieve", lambda *a, **k: [])
-        prompt = predict_handler._assemble_prompt(ctx)
-        # No env-memory section header, no degraded banner.
-        assert "## Environment memory" not in prompt
-        # Sanity: priors section still present.
-        assert "## Past-investigation priors" in prompt
-
-    def test_env_memory_failure_is_non_fatal(self, tmp_path, monkeypatch):
-        """Broken env_memory.retrieve → degrade-to-banner; prompt assembles,
-        handler still dispatches."""
-        ctx = make_ctx(tmp_path, existing_investigation=_INVESTIGATION_WITH_PREDICT)
-        from scripts.handlers import env_memory
-
-        def _boom(*a, **k):
-            raise RuntimeError("knowledge dir missing")
-
-        monkeypatch.setattr(env_memory, "retrieve", _boom)
-
-        prompt = predict_handler._assemble_prompt(ctx)
-        assert "## Environment memory" in prompt
-        assert "(env-memory unavailable" in prompt
-        # Handler still dispatches cleanly when env-memory fails.
-        captured: list[str] = []
-        monkeypatch.setattr(predict_handler, "_invoke_subagent",
-                            stub_invoke(captured, [_FORK_RESPONSE]))
-        monkeypatch.setattr(predict_handler, "_validate_companion_proposed",
-                            stub_validator([[]]))
-        result = predict_handler.handle(ctx)
-        assert result.next_phase == Phase.GATHER
-        assert "(env-memory unavailable" in captured[0]
+        assert "(priors unavailable" not in captured[0]
 
 
 # ---------------------------------------------------------------------------
@@ -634,9 +779,96 @@ class TestHandleHappyPaths:
         assert "## PREDICT (loop 1)" in written
         assert "```invlang" in written
         assert ":H hypothesize.hypotheses" in written
+        assert "### story h-001" in written
+        assert ":P h-001.preds" in written
         # Terminal trailer must not land in investigation.md.
         assert ":R routing" not in written
         assert "selected_lead         authentication-history" not in written
+
+    def test_loop2_persisted_section_materializes_full_frontier(self, tmp_path, monkeypatch):
+        from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
+
+        existing_investigation = (
+            "## CONTEXTUALIZE\n\nexisting.\n\n"
+            "## PREDICT (loop 1)\n\n"
+            "```invlang\n"
+            + emit_hypothesize_state_dense([{
+                "id": "h-001",
+                "name": "?monitoring-probe",
+                "story": (
+                    "s1. The source host emits the alert at a documented probe cadence.\n"
+                    "s2. The baseline distinguishes routine probe activity from drift."
+                ),
+                "attached_to_vertex": "v-001",
+                "proposed_edge": {
+                    "relation": "attempted_auth",
+                    "parent_vertex": {
+                        "type": "endpoint",
+                        "classification": "monitoring-host",
+                    },
+                },
+                "predictions": [{
+                    "id": "p1",
+                    "subject": "proposed_parent",
+                    "kind": "cadence",
+                    "from_story_link": "s1",
+                    "claim": "foreground cadence stays within the documented probe baseline",
+                    "comparison": {
+                        "selector_kind": "historical-self",
+                        "selector": "src=<source_ip> rule=5710 72h",
+                        "dimension": "inter-arrival-distribution",
+                    },
+                }],
+                "weight": "+",
+                "status": "active",
+            }])
+            + "\n```\n"
+        )
+        ctx = make_ctx(
+            tmp_path,
+            history=[
+                Phase.CONTEXTUALIZE.value,
+                Phase.PREDICT.value,
+                Phase.GATHER.value,
+                Phase.ANALYZE.value,
+                Phase.PREDICT.value,
+            ],
+            existing_investigation=existing_investigation,
+        )
+        response = textwrap.dedent("""
+            predict loop=2 shape=A
+
+            ### story h-002
+            s1. A service account on the source could be driving the repeated SSH attempts.
+            s2. Process lineage resolves whether the parent process is the scheduled service wrapper.
+
+            :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+            h-002|?service-account-use|v-001|attempted_auth|identity|service-account|||null|active
+
+            :P h-002.preds [id|subject|kind|from_story|claim]
+            p1|proposed_parent|absolute|s2|"process lineage names the scheduled service wrapper as the initiating parent"
+
+            :P h-002.refuts [id|refutes|kind|claim]
+            r1|p1|absolute|"process lineage names a different initiating parent"
+
+            :R routing
+            selected_lead         process-lineage
+            composite_secondary   -
+            override_data_source  -
+            rationale             "process lineage discriminates the new service-account branch"
+        """).strip()
+        monkeypatch.setattr(predict_handler, "_invoke_subagent", stub_invoke([], [response]))
+        monkeypatch.setattr(predict_handler, "_validate_companion_proposed", stub_validator([[]]))
+
+        predict_handler.handle(ctx)
+        written = (ctx.run_dir / "investigation.md").read_text()
+        latest = written.rsplit("## PREDICT (loop 2)", 1)[1]
+        assert "?monitoring-probe" in latest
+        assert "?service-account-use" in latest
+        assert "### story h-001" in latest
+        assert "### story h-002" in latest
+        assert ":P h-001.preds" in latest
+        assert ":P h-002.preds" in latest
 
     def test_unresolved_prescribed_set_threaded_as_remediation_note(
         self, tmp_path, monkeypatch,
@@ -872,6 +1104,8 @@ class TestCheckpointRecovery:
         assert "existing." in written
         assert "## PREDICT (loop 1)" in written
         assert "?scheduled-automation-health-check" in written
+        assert "### story h-001" in written
+        assert ":P h-001.preds" in written
 
     def test_incomplete_checkpoint_falls_through_to_retry(self, tmp_path, monkeypatch):
         """Checkpoint with status != 'complete' should NOT synthesize — the

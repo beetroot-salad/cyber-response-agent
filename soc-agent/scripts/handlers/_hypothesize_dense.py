@@ -1,29 +1,19 @@
-"""Dense-format emitter for the on-disk PREDICT `hypothesize:` block.
+"""Dense-format emitters for hypothesis state.
 
-Parallel to `_gather_dense.py` / `_analyze_dense.py` / `_conclude_dense.py`.
-The on-disk surface produced by `emit_hypothesize_dense(hypotheses)` is a
-single `:H hypothesize.hypotheses` row block plus packed sub-cells per
-hypothesis — exactly the shape that `scripts.handlers._dense_parser` reads
-back via `_hypothesis_record`.
+Two surfaces exist side-by-side:
 
-Surface produced (column order matches `_COLS` below):
+- `emit_hypothesize_dense(...)` keeps the historical packed `:H
+  hypothesize.hypotheses` row block used by older fixtures and compatibility
+  readers.
+- `emit_hypothesize_state_dense(...)` renders the same canonical hypothesis
+  list as an expanded full-state block: metadata rows plus per-hypothesis
+  story / prediction / refutation / authz sub-blocks. That fuller surface is
+  what the predict handler now writes back to `investigation.md` and what the
+  prompt renderer shows to the LLM.
 
-    :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
-    h-001|?monitoring-probe|v-001|attempted_auth|endpoint|monitoring-host||p1:proposed_parent:"…";p2:…|...|r1[p1]:"…"|ac1:proposed:approved-monitoring-sources:"is on approved list":esc/esc||null|active
-
-Sub-cell grammars (semicolon-separated, quote-aware via
-`_dense_primitives.split_subcells`):
-
-    preds:      `<id>:<subject>:"<claim>"`
-    attr_preds: `<id>:<target>:<attribute>:"<claim>"`
-    refuts:     `<id>[refs?]:"<claim>"`        (refs = comma-joined prediction ids)
-    authz:      `<id>:<edge_ref>:<anchor_kind>:"<predicate>":<on_unauth>/<on_indet>`
-
-Lossy with respect to subagent-side prediction `kind` and `from_story_link`
-slots — those live in `:P h-<id>.preds` sub-blocks consumed by
-`_predict_dense.parse_predict_dense` for envelope validation only, and no
-downstream phase or validator rule reads them off-disk (verified: only
-`scripts/invlang/queries.py` touches `kind`, and only at the lead level).
+The expanded surface preserves queryability because the metadata spine stays
+in `:H hypothesize.hypotheses`; the extra `:P h-...` blocks simply carry the
+detail that the packed row form used to discard.
 """
 
 from __future__ import annotations
@@ -41,6 +31,12 @@ _COLS = [
     "id", "name", "attached_to", "rel",
     "parent_type", "parent_class", "parent_attrs",
     "preds", "attr_preds", "refuts", "authz",
+    "integrity_waived", "weight", "status",
+]
+
+_STATE_COLS = [
+    "id", "name", "attached_to", "rel",
+    "parent_type", "parent_class", "parent_attrs",
     "integrity_waived", "weight", "status",
 ]
 
@@ -64,6 +60,45 @@ def emit_hypothesize_dense(hypotheses: list[dict[str, Any]]) -> str:
         ":H hypothesize.hypotheses [" + "|".join(_COLS) + "]",
         *rows,
     ])
+
+
+def emit_hypothesize_state_dense(
+    hypotheses: list[dict[str, Any]],
+    *,
+    block_name: str = "hypothesize.hypotheses",
+) -> str:
+    """Render hypotheses as an expanded full-state surface.
+
+    Layout:
+      - one metadata `:H` block covering all hypotheses
+      - optional `### story h-...` prose blocks
+      - optional per-hypothesis `:P h-...` sub-blocks
+
+    The emitted rows are tolerant of legacy hypotheses that were persisted
+    before `kind`, `from_story_link`, `comparison`, or `story` were stored:
+    missing fields are emitted as empty cells or omitted blocks rather than
+    raising.
+    """
+    if not hypotheses:
+        return ""
+    if not isinstance(hypotheses, list):
+        raise HypothesizeDenseEmitError(
+            f"emit_hypothesize_state_dense: expected list, got "
+            f"{type(hypotheses).__name__}"
+        )
+
+    parts = [
+        "\n".join([
+            ":H " + block_name + " [" + "|".join(_STATE_COLS) + "]",
+            *[_render_state_row(h) for h in hypotheses],
+        ])
+    ]
+    for h in hypotheses:
+        story = _render_story_block(h)
+        if story:
+            parts.append(story)
+        parts.extend(_render_state_subblocks(h))
+    return "\n\n".join(parts)
 
 
 def _render_row(h: dict[str, Any]) -> str:
@@ -106,6 +141,40 @@ def _render_row(h: dict[str, Any]) -> str:
     return "|".join(cell(cells[c]) for c in _COLS)
 
 
+def _render_state_row(h: dict[str, Any]) -> str:
+    if not isinstance(h, dict):
+        raise HypothesizeDenseEmitError(
+            f"hypothesis entry must be a dict, got {type(h).__name__}"
+        )
+    if not h.get("id") or not h.get("name"):
+        raise HypothesizeDenseEmitError(
+            f"hypothesis row missing id/name: {h!r}"
+        )
+    hid = h["id"]
+    proposed = h.get("proposed_edge") or {}
+    if not isinstance(proposed, dict):
+        raise HypothesizeDenseEmitError(
+            f"hypothesis {hid!r}.proposed_edge must be a dict (got "
+            f"{type(proposed).__name__})"
+        )
+    parent_vertex = proposed.get("parent_vertex") or {}
+    if not isinstance(parent_vertex, dict):
+        parent_vertex = {}
+    cells = {
+        "id": hid,
+        "name": h["name"],
+        "attached_to": h.get("attached_to_vertex", ""),
+        "rel": proposed.get("relation", ""),
+        "parent_type": parent_vertex.get("type", ""),
+        "parent_class": parent_vertex.get("classification", ""),
+        "parent_attrs": serialize_attrs(parent_vertex.get("attributes") or {}),
+        "integrity_waived": h.get("integrity_waived", ""),
+        "weight": _weight_cell(h.get("weight", "")),
+        "status": h.get("status", ""),
+    }
+    return "|".join(cell(cells[c]) for c in _STATE_COLS)
+
+
 def _require_list(hid: str, field: str, value: Any) -> list[Any]:
     """Coerce a missing/None field to []; reject non-list scalars loudly so
     a stray string doesn't get iterated character-by-character.
@@ -138,6 +207,125 @@ def _quote_claim(claim: Any) -> str:
         return '""'
     s = str(claim).replace("\\", "\\\\").replace('"', '\\"')
     return f'"{s}"'
+
+
+def _render_story_block(h: dict[str, Any]) -> str:
+    story = h.get("story")
+    hid = h.get("id", "")
+    if not isinstance(story, str) or not story.strip() or not hid:
+        return ""
+    return "\n".join([f"### story {hid}", story.strip()])
+
+
+def _render_state_subblocks(h: dict[str, Any]) -> list[str]:
+    hid = h.get("id")
+    if not isinstance(hid, str) or not hid:
+        raise HypothesizeDenseEmitError(
+            f"hypothesis row missing id/name: {h!r}"
+        )
+    out: list[str] = []
+
+    preds = _require_list(hid, "predictions", h.get("predictions"))
+    if preds:
+        rows: list[str] = []
+        for p in preds:
+            rows.append("|".join([
+                cell(p.get("id", "")),
+                cell(p.get("subject", "")),
+                cell(p.get("kind", "")),
+                cell(p.get("from_story_link", "")),
+                cell(_quote_claim(p.get("claim"))),
+            ]))
+        out.append("\n".join([
+            f":P {hid}.preds [id|subject|kind|from_story|claim]",
+            *rows,
+        ]))
+
+    attr_preds = _require_list(
+        hid, "attribute_predictions", h.get("attribute_predictions")
+    )
+    if attr_preds:
+        rows = []
+        for p in attr_preds:
+            rows.append("|".join([
+                cell(p.get("id", "")),
+                cell(p.get("target", "")),
+                cell(p.get("attribute", "")),
+                cell(p.get("kind", "")),
+                cell(_quote_claim(p.get("claim"))),
+            ]))
+        out.append("\n".join([
+            f":P {hid}.attr_preds [id|target|attribute|kind|claim]",
+            *rows,
+        ]))
+
+    refuts = _require_list(hid, "refutation_shape", h.get("refutation_shape"))
+    if refuts:
+        rows = []
+        for r in refuts:
+            rows.append("|".join([
+                cell(r.get("id", "")),
+                cell(",".join(str(x) for x in (r.get("refutes_predictions") or []))),
+                cell(r.get("kind", "")),
+                cell(_quote_claim(r.get("claim"))),
+            ]))
+        out.append("\n".join([
+            f":P {hid}.refuts [id|refutes|kind|claim]",
+            *rows,
+        ]))
+
+    authz = _require_list(
+        hid, "authorization_contract", h.get("authorization_contract")
+    )
+    if authz:
+        rows = []
+        for c in authz:
+            rows.append("|".join([
+                cell(c.get("id", "")),
+                cell(c.get("edge_ref", "proposed") or "proposed"),
+                cell(c.get("anchor_kind", "")),
+                cell(_quote_claim(c.get("predicate"))),
+                cell(c.get("on_unauthorized", "esc") or "esc"),
+                cell(c.get("on_indeterminate", "esc") or "esc"),
+            ]))
+        out.append("\n".join([
+            f":P {hid}.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]",
+            *rows,
+        ]))
+
+    comparison_rows = _render_comparison_rows(hid, preds, refuts)
+    if comparison_rows:
+        out.append("\n".join([
+            f":P {hid}.comparisons [pred_ref|selector_kind|selector|dimension]",
+            *comparison_rows,
+        ]))
+
+    return out
+
+
+def _render_comparison_rows(
+    hid: str,
+    preds: list[dict[str, Any]],
+    refuts: list[dict[str, Any]],
+) -> list[str]:
+    rows: list[str] = []
+    for bucket in (preds, refuts):
+        for entry in bucket:
+            comp = entry.get("comparison")
+            if not isinstance(comp, dict) or not comp:
+                continue
+            pred_ref = entry.get("id")
+            if not pred_ref:
+                raise HypothesizeDenseEmitError(
+                    f"hypothesis {hid!r} comparison row missing pred/ref id: {entry!r}"
+                )
+            rows.append("|".join([
+                cell(pred_ref),
+                cell(comp.get("selector_kind", "")),
+                cell(_quote_claim(comp.get("selector"))),
+                cell(comp.get("dimension", "")),
+            ]))
+    return rows
 
 
 def _pack_preds(hid: str, preds: list[dict[str, Any]]) -> str:

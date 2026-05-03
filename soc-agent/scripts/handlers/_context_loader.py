@@ -342,6 +342,39 @@ def _inject_comment(rendered_alert_block: str, salt: str, comment: str) -> str:
     )
 
 
+def _append_investigation_manifest_lines(
+    lines: list[str],
+    inv_path: Path,
+    investigation_md: str,
+) -> None:
+    size = inv_path.stat().st_size
+    body_lines = investigation_md.splitlines()
+    lines.append(
+        f"  investigation: {inv_path} ({size} bytes, {len(body_lines)} lines)"
+    )
+    if not investigation_md.strip():
+        lines.append("    (empty — no prior phases recorded)")
+        return
+
+    # Walk the file to identify ## headers + their line ranges.
+    # Fence-aware — `##` inside ```yaml/```invlang fences is body, not a header.
+    in_fence = False
+    entries: list[tuple[int, str]] = []  # (1-indexed line, header text)
+    for idx, line in enumerate(body_lines, start=1):
+        if line.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence and line.startswith("## "):
+            entries.append((idx, line[3:].rstrip()))
+    for i, (start, header) in enumerate(entries):
+        end = (entries[i + 1][0] - 1) if i + 1 < len(entries) else len(body_lines)
+        lines.append(f"    {header} — lines {start}-{end}")
+    lines.append(
+        "    Read targeted line ranges via Read(file_path, offset, limit) "
+        "when grading needs a specific phase block."
+    )
+
+
 def format_run_manifest(run_dir: Path, investigation_md: str) -> str:
     """Render an `<available_context>` manifest naming on-disk artifacts the
     subagent can Read on demand.
@@ -368,26 +401,97 @@ def format_run_manifest(run_dir: Path, investigation_md: str) -> str:
 
     inv_path = run_dir / "investigation.md"
     if inv_path.exists():
-        size = inv_path.stat().st_size
-        body_lines = investigation_md.splitlines()
-        lines.append(f"  investigation: {inv_path} ({size} bytes, {len(body_lines)} lines)")
-        if not investigation_md.strip():
-            lines.append("    (empty — no prior phases recorded)")
-        else:
-            # Walk the file to identify ## headers + their line ranges.
-            # Fence-aware — `##` inside ```yaml fences is body, not a header.
-            in_fence = False
-            entries: list[tuple[int, str]] = []  # (1-indexed line, header text)
-            for idx, line in enumerate(body_lines, start=1):
-                if line.startswith("```"):
-                    in_fence = not in_fence
-                    continue
-                if not in_fence and line.startswith("## "):
-                    entries.append((idx, line[3:].rstrip()))
-            for i, (start, header) in enumerate(entries):
-                end = (entries[i + 1][0] - 1) if i + 1 < len(entries) else len(body_lines)
-                lines.append(f"    {header} — lines {start}-{end}")
-            lines.append("    Read targeted line ranges via Read(file_path, offset, limit) when grading needs a specific phase block.")
+        _append_investigation_manifest_lines(lines, inv_path, investigation_md)
+    lines.append("</available_context>")
+    return "\n".join(lines)
+
+
+def format_predict_available_context_block(
+    run_dir: Path,
+    investigation_md: str,
+    signature_id: str,
+    vendor: str,
+    *,
+    soc_agent_root: Path,
+) -> str:
+    """Render PREDICT's retrieval-on-demand context manifest.
+
+    PREDICT gets only the minimal state inline. Signature docs, lead
+    definitions, the full alert, and environment knowledge stay on disk and
+    are surfaced here as explicit Read targets.
+    """
+    lines = ["<available_context>"]
+
+    alert_path = run_dir / "alert.json"
+    if alert_path.exists():
+        size = alert_path.stat().st_size
+        lines.append(f"  alert: {alert_path} ({size} bytes)")
+        lines.append(
+            "    Read for the full alert JSON when the summary omits a field "
+            "you need."
+        )
+
+    inv_path = run_dir / "investigation.md"
+    if inv_path.exists():
+        _append_investigation_manifest_lines(lines, inv_path, investigation_md)
+
+    signature_root = soc_agent_root / "knowledge" / "signatures" / signature_id
+    field_quirks = signature_root / "field-quirks.md"
+    if field_quirks.exists():
+        lines.append(f"  signature_field_quirks: {field_quirks}")
+        lines.append(
+            "    Read first for signature-specific telemetry pitfalls and "
+            "interpretation quirks."
+        )
+
+    playbook = signature_root / "playbook.md"
+    if playbook.exists():
+        lines.append(f"  playbook: {playbook}")
+        lines.append(
+            "    Retrieval target for starter leads and signature-specific "
+            "decision guidance."
+        )
+
+    context = signature_root / "context.md"
+    if context.exists():
+        lines.append(f"  context: {context}")
+        lines.append(
+            "    Retrieval target for signature-local background that is not "
+            "already in the structured state."
+        )
+
+    system_root = soc_agent_root / "knowledge" / "environment" / "systems" / vendor
+    system_field_quirks = system_root / "field-quirks.md"
+    if system_field_quirks.exists():
+        lines.append(f"  system_field_quirks: {system_field_quirks}")
+        lines.append(
+            "    Vendor/system field semantics live here when alert fields are "
+            "ambiguous."
+        )
+
+    leads_root = soc_agent_root / "knowledge" / "common-investigation" / "leads"
+    tags = leads_root / "TAGS.md"
+    if tags.exists():
+        lines.append(f"  lead_tags: {tags}")
+        lines.append(
+            "    Start lead discovery here, then Read only the specific "
+            "lead's definition.md you need."
+        )
+    if leads_root.exists():
+        lines.append(f"  leads_root: {leads_root}")
+        lines.append(
+            "    Common lead definitions live under "
+            "`{lead-name}/definition.md`."
+        )
+
+    environment_root = soc_agent_root / "knowledge" / "environment"
+    if environment_root.exists():
+        lines.append(f"  environment_root: {environment_root}")
+        lines.append(
+            "    Optional retrieval surface for environment memory, "
+            "operations, data-source, fleet, and system context."
+        )
+
     lines.append("</available_context>")
     return "\n".join(lines)
 
