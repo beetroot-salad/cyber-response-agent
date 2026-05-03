@@ -28,7 +28,6 @@ from hooks.scripts.invlang_validate import (
     YAML_BLOCK_RE,
     _check_append_only,
     _check_route_compliance,
-    _merge_blocks,
     collect_warnings,
     validate_companion,
 )

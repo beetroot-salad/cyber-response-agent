@@ -14,7 +14,7 @@ from __future__ import annotations
 import sys
 import textwrap
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -22,7 +22,6 @@ import pytest
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from scripts.handlers import env_memory  # noqa: E402
 from scripts.handlers.env_memory import (  # noqa: E402
     Atom,
     AtomParseError,

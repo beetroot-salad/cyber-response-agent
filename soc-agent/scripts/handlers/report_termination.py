@@ -198,7 +198,7 @@ def _compose_termination_rationale(
         )
     if category == "trust-root":
         return (
-            f"Authority verdict closed the question"
+            "Authority verdict closed the question"
             + (f" for archetype {matched_archetype}" if matched_archetype else "")
             + "."
         )

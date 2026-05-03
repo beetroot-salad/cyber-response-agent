@@ -4,10 +4,8 @@ Defines the legal phases and transitions for an investigation run.
 Used by hooks/scripts/infer_state.py to enforce state machine integrity.
 """
 
-import json
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
-from typing import Optional
 
 
 class Phase(str, Enum):
@@ -50,7 +48,7 @@ INITIAL_PHASE = Phase.CONTEXTUALIZE
 MAX_LOOPS = 12
 
 
-def validate_transition(current: Optional[str], proposed: str) -> tuple[bool, str]:
+def validate_transition(current: str | None, proposed: str) -> tuple[bool, str]:
     """Validate a state transition.
 
     Args:
@@ -103,7 +101,7 @@ def make_state(
     run_id: str,
     ticket_id: str = "",
     signature_id: str = "",
-    history: Optional[list[str]] = None,
+    history: list[str] | None = None,
 ) -> dict:
     """Create a state.json dict."""
     return {
@@ -112,5 +110,5 @@ def make_state(
         "signature_id": signature_id,
         "phase": phase,
         "history": history or [],
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }

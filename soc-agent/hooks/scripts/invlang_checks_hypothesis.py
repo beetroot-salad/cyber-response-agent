@@ -23,7 +23,6 @@ from hooks.scripts.invlang_walkers import (
     compute_final_status,
     compute_final_weight,
     iter_hypotheses,
-    iter_siblings,
     parent_hypothesis_id,
 )
 

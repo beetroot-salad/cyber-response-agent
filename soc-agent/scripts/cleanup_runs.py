@@ -33,7 +33,7 @@ import json
 import os
 import shutil
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
@@ -67,13 +67,13 @@ def get_run_timestamp(dir_path: Path) -> datetime:
             if ts_str:
                 dt = datetime.fromisoformat(ts_str)
                 if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
+                    dt = dt.replace(tzinfo=UTC)
                 return dt
         except Exception:
             pass
     # Fallback: directory mtime.  Less reliable (resets on any child write)
     # but always available for runs that predate created_at.
-    return datetime.fromtimestamp(dir_path.stat().st_mtime, tz=timezone.utc)
+    return datetime.fromtimestamp(dir_path.stat().st_mtime, tz=UTC)
 
 
 def is_dir_expired(dir_path: Path, cutoff: datetime) -> bool:
@@ -95,7 +95,7 @@ def parse_jsonl_timestamp(line: str) -> datetime | None:
             return None
         dt = datetime.fromisoformat(ts_str)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt
     except Exception:
         return None
@@ -221,7 +221,7 @@ def clean_jsonl(
             print(f"warning: could not rewrite {path.name}: {e}", file=sys.stderr)
             return len(kept) - dropped, 0  # report as if nothing dropped
 
-    kept_count = sum(1 for l in kept if l.strip())  # blank lines excluded from count
+    kept_count = sum(1 for line in kept if line.strip())  # blank lines excluded from count
     return kept_count, dropped
 
 
@@ -251,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
         args = parse_args(argv)
         policy = load_retention_policy()  # exits 1 on bad config
         runs_dir = get_runs_dir()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         run_cutoff   = now - timedelta(days=policy.run_max_age_days)
         audit_cutoff = now - timedelta(days=policy.audit_max_age_days)

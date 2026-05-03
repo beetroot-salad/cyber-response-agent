@@ -23,12 +23,10 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -158,7 +156,7 @@ def _read_meta(fixture_dir: Path) -> tuple[str, int]:
     return sid, loop_n
 
 
-def _discover_fixtures(filter_name: Optional[str]) -> list[Path]:
+def _discover_fixtures(filter_name: str | None) -> list[Path]:
     if not FIXTURES_DIR.exists():
         return []
     out = []

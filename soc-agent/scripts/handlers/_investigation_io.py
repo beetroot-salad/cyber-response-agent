@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from scripts.orchestrate import OrchestrationError
 
@@ -48,7 +48,7 @@ def append_and_validate(
     new_section: str,
     *,
     phase: str,
-    first_write_prefix: Optional[Callable[[], str]] = None,
+    first_write_prefix: Callable[[], str] | None = None,
 ) -> None:
     """Append `new_section` to investigation.md after running `validate_companion`.
 

@@ -24,3 +24,70 @@ jobs:
 
       - name: Run unit tests
         run: uv run pytest soc-agent/tests/ -v -m "not llm"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Create venv and install dependencies
+        run: uv venv && uv pip install -e "soc-agent[dev]"
+
+      # Hard gate — blocks CI. Keeps the baseline (pyflakes + pycodestyle E)
+      # clean; extra rule sets are reported in the code-smells job, not here.
+      - name: Ruff (hard gate — E + F)
+        run: uv run ruff check . --select E,F --ignore E402,E501
+
+      - name: Mock-usage ratchet
+        run: uv run python soc-agent/scripts/lint_mock_usage.py
+
+  code-smells:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Create venv and install dev deps
+        run: uv venv && uv pip install -e "soc-agent[dev]"
+
+      - name: Set up Node (for jscpd)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install jscpd
+        run: npm install -g jscpd
+
+      # Code-smell signals are reported, not enforced — surface trends in the
+      # job log without blocking PRs. Tighten thresholds incrementally.
+      - name: Ruff (extended — bugbear, simplify, complexity, pyupgrade, pytest-style)
+        run: uv run ruff check . --statistics || true
+
+      - name: Mypy (type-check, soft-launch)
+        run: uv run mypy || true
+
+      - name: Vulture (dead code)
+        run: uv run vulture soc-agent --min-confidence 80 --exclude 'soc-agent/.venv,soc-agent/tests' --ignore-names 'key_field,key_value' || true
+
+      - name: Radon — cyclomatic complexity (B and worse)
+        run: uv run radon cc soc-agent -a -nb || true
+
+      - name: Radon — maintainability index (B and worse)
+        run: uv run radon mi soc-agent -nb || true
+
+      - name: Radon — raw size metrics
+        run: uv run radon raw soc-agent -s || true
+
+      - name: jscpd (copy-paste detection)
+        run: jscpd soc-agent --min-tokens 60 --reporters consoleFull --ignore "**/.venv/**,**/runs/**" || true

@@ -19,7 +19,7 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 import yaml
@@ -85,7 +85,7 @@ def _scalar(v):
 
 
 def iso_utc(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def run_query(query: str, start: str, end: str, run_dir: str) -> tuple[str, list[dict], str | None]:
@@ -135,7 +135,6 @@ def extract_observables_from_event(event: dict, observables: list[dict]) -> dict
 def cluster_events(
     all_events: dict[str, dict],
     current_obs: dict,
-    current_alert_id: str,
     observables: list[dict],
 ) -> tuple[list[dict], list[dict]]:
     """Group dedup'd events into repeats + related clusters per ticket-context.md."""
@@ -379,8 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         print(emit_yaml(out))
         return 0
 
-    current_id = alert.get("id") or ""
-    repeats, related = cluster_events(all_events, current_obs, current_id, observables)
+    repeats, related = cluster_events(all_events, current_obs, observables)
     high_vol = compute_high_volume(all_events, observables)
     _dbg(f"clusters: repeats={len(repeats)} related_groups={len(related)} high_volume={len(high_vol)}")
 

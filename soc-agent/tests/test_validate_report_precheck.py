@@ -18,7 +18,6 @@ SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from hooks.scripts.investigation_parse import (
-    has_report_header,
     is_screen_resolved,
 )
 from hooks.scripts.validate_report_precheck import (

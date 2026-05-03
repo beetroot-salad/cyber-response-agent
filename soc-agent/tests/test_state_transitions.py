@@ -6,17 +6,14 @@ Tests the state.py schema, write_state.py logic, and infer_state_pre.py hook.
 import json
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
-import pytest
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 from schemas.state import (
     MAX_LOOPS,
-    TRANSITIONS,
     Phase,
     count_loops,
     make_state,

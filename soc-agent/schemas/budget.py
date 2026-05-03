@@ -4,7 +4,7 @@ Defines the budget state (per-run counters) and default limits for
 resource consumption. Used by hooks/scripts/budget_enforcer.py.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 
 # Default limits — overridable via config/budget-defaults.yaml and
@@ -25,5 +25,5 @@ def make_budget_state(run_id: str) -> dict:
         "run_id": run_id,
         "tool_calls": 0,
         "subagent_spawns": 0,
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
     }

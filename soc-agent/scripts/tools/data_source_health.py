@@ -35,8 +35,8 @@ from __future__ import annotations
 import random
 import statistics
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Callable
+from datetime import datetime, timedelta, UTC
+from collections.abc import Callable
 
 CountFn = Callable[[datetime, datetime], int]
 
@@ -82,7 +82,7 @@ def _hours(delta: timedelta) -> float:
 
 
 def _iso(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _sample_windows(

@@ -30,7 +30,7 @@ import urllib.request
 from collections import Counter
 
 RAW_SAMPLE_COUNT = 3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 try:
@@ -152,7 +152,7 @@ def compute_time_range(args):
     if args.start and args.end:
         return args.start, args.end
 
-    end = datetime.now(timezone.utc) if not args.end else datetime.fromisoformat(
+    end = datetime.now(UTC) if not args.end else datetime.fromisoformat(
         args.end.replace("Z", "+00:00")
     )
     window = parse_duration(args.window)

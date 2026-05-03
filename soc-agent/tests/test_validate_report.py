@@ -13,7 +13,6 @@ import pytest
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from schemas.enums import VALID_CONFIDENCES, VALID_DISPOSITIONS, VALID_STATUSES
 from schemas.report_frontmatter import (
     ReportFrontmatter,
     parse_frontmatter,
@@ -259,7 +258,7 @@ Screen-resolved monitoring probe.
 # --- Precedent content validation ---
 
 
-@pytest.fixture()
+@pytest.fixture
 def fake_root(tmp_path, monkeypatch):
     """Redirect SOC_AGENT_ROOT to a temp dir and restore after test."""
     monkeypatch.setattr(vr, "SOC_AGENT_ROOT", tmp_path)

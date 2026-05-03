@@ -1,0 +1,10 @@
+# Test files currently allowed to use unittest.mock.
+# Project preference is fixtures + fakes — shrink this list over time by
+# rewriting these tests, then deleting the line. Adding a new line requires
+# justification (no in-memory fake feasible, mocking a third-party SDK, etc.).
+soc-agent/tests/test_audit_hooks.py
+soc-agent/tests/test_budget_enforcer.py
+soc-agent/tests/test_cleanup_runs.py
+soc-agent/tests/test_host_query.py
+soc-agent/tests/test_subagent_wrapper.py
+soc-agent/tests/test_wazuh_cli.py

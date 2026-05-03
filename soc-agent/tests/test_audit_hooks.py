@@ -170,7 +170,7 @@ class TestAuditToolCallsMain:
         assert not (tmp_path / "tool_audit.jsonl").exists()
 
     def test_trace_tools_constant(self):
-        assert TRACE_TOOLS == {"Read", "Glob", "Grep"}
+        assert {"Read", "Glob", "Grep"} == TRACE_TOOLS
 
     def test_invalid_stdin_exits_zero(self, tmp_path):
         with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):

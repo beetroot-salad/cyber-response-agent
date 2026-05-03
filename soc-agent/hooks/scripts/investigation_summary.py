@@ -12,7 +12,7 @@ Exit codes:
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -171,7 +171,7 @@ def main(payload: dict | None = None) -> None:
         "matched_ticket_id": frontmatter.get("matched_ticket_id"),
         "leads_pursued": frontmatter.get("leads_pursued", 0),
         "start_timestamp": start_timestamp,
-        "end_timestamp": datetime.now(timezone.utc).isoformat(),
+        "end_timestamp": datetime.now(UTC).isoformat(),
         **stats,
     }
 

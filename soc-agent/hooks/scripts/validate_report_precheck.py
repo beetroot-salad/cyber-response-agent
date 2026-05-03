@@ -64,7 +64,6 @@ from hooks.scripts.judge_runner import (
     parse_verdict,
     wrap_untrusted,
 )
-from hooks.scripts.run_context import extract_run_dir_from_path
 
 JUDGE_A_PROMPT_PATH = Path(__file__).resolve().parent / "report_judge_A_prompt.md"
 JUDGE_B_PROMPT_PATH = Path(__file__).resolve().parent / "report_judge_B_prompt.md"

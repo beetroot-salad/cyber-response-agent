@@ -26,7 +26,7 @@ import argparse
 import json
 import sys
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -35,7 +35,7 @@ from data_source_health import HealthVerdict, _iso, assess_health  # noqa: E402
 
 
 def _parse_iso(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+    return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(UTC)
 
 
 def _build_wazuh_count_fn(query_string: str):

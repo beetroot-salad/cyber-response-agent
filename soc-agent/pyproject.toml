@@ -23,10 +23,14 @@ wazuh = [
 dev = [
     "pytest>=9.0",
     "pytest-asyncio",
+    "pytest-cov",
     "black",
     "isort",
     "flake8",
     "mypy",
+    "ruff",
+    "vulture",
+    "radon",
     "ipython",
     "debugpy",
     "httpx",
@@ -40,3 +44,57 @@ dev = [
 ]
 [tool.setuptools]
 packages = []  # Not a traditional package — scripts are invoked directly
+
+[tool.ruff.lint]
+# Hard gate (CI-blocking) is `select = ["E","F"]` minus E402. The extra rule
+# sets below are layered in via `extend-select` and reported in CI as a
+# code-smell signal (non-blocking) until the codebase is cleaned up enough
+# to enforce them. To run only the hard gate locally:
+#   ruff check . --select E,F --ignore E402
+# To run the full smell sweep:
+#   ruff check .
+select = ["E", "F"]
+extend-select = [
+    "B",             # flake8-bugbear: real bug patterns (mutable defaults, etc.)
+    "SIM",           # flake8-simplify: redundant logic
+    "C901",          # mccabe complexity
+    "PLR0912",       # too-many-branches
+    "PLR0913",       # too-many-arguments
+    "PLR0915",       # too-many-statements
+    "PT",            # flake8-pytest-style
+    "UP",            # pyupgrade
+]
+# E402: tests/scripts intentionally do sys.path.insert(...) before imports.
+# E501: line length is enforced by formatter, not lint.
+ignore = ["E402", "E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-branches = 15
+max-args = 8
+max-statements = 60
+
+[tool.mypy]
+python_version = "3.11"
+files = ["soc-agent"]
+exclude = ["soc-agent/tests/", "soc-agent/.venv/"]
+ignore_missing_imports = true
+follow_imports = "silent"
+# Soft-launch posture: surface type errors without blocking on every
+# untyped def. Tighten incrementally.
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[tool.vulture]
+paths = ["soc-agent"]
+exclude = ["soc-agent/tests/", "soc-agent/.venv/"]
+min_confidence = 80
+# key_field, key_value: abstract-method params on AdapterContract.lookup
+# (vulture can't see subclass usage).
+ignore_names = ["key_field", "key_value"]
+
+# Pytest markers ("llm", "live") are registered in soc-agent/tests/conftest.py.
+# Coverage (pytest-cov) is opt-in; invoke with `pytest --cov=soc-agent` when needed.

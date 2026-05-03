@@ -25,7 +25,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from invlang.corpus import Companion, _looks_like_companion
 from invlang.queries import (
-    anchor_calibration,
     coarse_case_lookup,
     dead_lead_lookup,
     enumerate_hypothesis_tree,

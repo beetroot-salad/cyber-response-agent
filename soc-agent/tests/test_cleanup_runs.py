@@ -3,7 +3,7 @@
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,7 +37,7 @@ def _make_run_dir(runs_dir: Path, name: str, age_days: float) -> Path:
     d = runs_dir / name
     d.mkdir(parents=True)
     (d / "alert.json").write_text("{}")
-    created_at = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
+    created_at = (datetime.now(UTC) - timedelta(days=age_days)).isoformat()
     (d / "meta.json").write_text(json.dumps({"run_id": name, "created_at": created_at}))
     return d
 
@@ -47,14 +47,14 @@ def _make_run_dir_no_meta(runs_dir: Path, name: str, age_days: float) -> Path:
     d = runs_dir / name
     d.mkdir(parents=True)
     (d / "alert.json").write_text("{}")
-    mtime = (datetime.now(timezone.utc) - timedelta(days=age_days)).timestamp()
+    mtime = (datetime.now(UTC) - timedelta(days=age_days)).timestamp()
     os.utime(d, (mtime, mtime))
     return d
 
 
 def _make_jsonl_line(age_days: float, **extra) -> str:
     """Return a JSONL line whose timestamp is age_days in the past."""
-    ts = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
+    ts = (datetime.now(UTC) - timedelta(days=age_days)).isoformat()
     entry = {"timestamp": ts, "run_id": "test-run"}
     entry.update(extra)
     return json.dumps(entry) + "\n"
@@ -65,7 +65,7 @@ def _write_jsonl(path: Path, lines: list[str]) -> None:
 
 
 def _cutoff(days: float) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days)
+    return datetime.now(UTC) - timedelta(days=days)
 
 
 # ---------------------------------------------------------------------------
@@ -146,33 +146,33 @@ class TestGetRunTimestamp:
         d = _make_run_dir(tmp_path, "run", age_days=50)
         ts = get_run_timestamp(d)
         # Should be ~50 days ago; allow a few seconds of test execution slack.
-        age = (datetime.now(timezone.utc) - ts).total_seconds()
+        age = (datetime.now(UTC) - ts).total_seconds()
         assert 49.9 * 86400 < age < 50.1 * 86400
 
     def test_falls_back_to_mtime_when_no_meta(self, tmp_path):
         d = _make_run_dir_no_meta(tmp_path, "run", age_days=50)
         ts = get_run_timestamp(d)
-        age = (datetime.now(timezone.utc) - ts).total_seconds()
+        age = (datetime.now(UTC) - ts).total_seconds()
         assert 49.9 * 86400 < age < 50.1 * 86400
 
     def test_falls_back_to_mtime_on_corrupt_meta(self, tmp_path):
         d = _make_run_dir_no_meta(tmp_path, "run", age_days=50)
         (d / "meta.json").write_text("not json")
         # Writing meta.json updated the dir mtime — reset it so fallback is testable.
-        mtime = (datetime.now(timezone.utc) - timedelta(days=50)).timestamp()
+        mtime = (datetime.now(UTC) - timedelta(days=50)).timestamp()
         os.utime(d, (mtime, mtime))
         ts = get_run_timestamp(d)
-        age = (datetime.now(timezone.utc) - ts).total_seconds()
+        age = (datetime.now(UTC) - ts).total_seconds()
         assert 49.9 * 86400 < age < 50.1 * 86400
 
     def test_meta_takes_precedence_over_mtime(self, tmp_path):
         # meta.json says 100 days old; mtime says 1 day old.
         # get_run_timestamp should return the meta.json value.
         d = _make_run_dir(tmp_path, "run", age_days=100)
-        recent_mtime = (datetime.now(timezone.utc) - timedelta(days=1)).timestamp()
+        recent_mtime = (datetime.now(UTC) - timedelta(days=1)).timestamp()
         os.utime(d, (recent_mtime, recent_mtime))
         ts = get_run_timestamp(d)
-        age_days = (datetime.now(timezone.utc) - ts).days
+        age_days = (datetime.now(UTC) - ts).days
         assert age_days >= 99  # meta.json wins, not the recent mtime
 
     def test_old_dir_is_expired(self, tmp_path):
@@ -227,7 +227,7 @@ class TestParseJsonlTimestamp:
         line = json.dumps({"timestamp": "2026-01-01T00:00:00"})
         dt = parse_jsonl_timestamp(line)
         assert dt is not None
-        assert dt.tzinfo == timezone.utc
+        assert dt.tzinfo == UTC
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +281,7 @@ class TestCleanRunDirs:
     def test_dotfiles_are_skipped(self, tmp_path):
         d = tmp_path / ".sessions"
         d.mkdir()
-        mtime = (datetime.now(timezone.utc) - timedelta(days=200)).timestamp()
+        mtime = (datetime.now(UTC) - timedelta(days=200)).timestamp()
         os.utime(d, (mtime, mtime))
         deleted, skipped = clean_run_dirs(tmp_path, _cutoff(90), dry_run=False, verbose=False)
         assert deleted == 0
@@ -291,7 +291,7 @@ class TestCleanRunDirs:
         # JSONL files sit directly in runs_dir; they should not be touched here.
         f = tmp_path / "audit.jsonl"
         f.write_text("{}\n")
-        mtime = (datetime.now(timezone.utc) - timedelta(days=200)).timestamp()
+        mtime = (datetime.now(UTC) - timedelta(days=200)).timestamp()
         os.utime(f, (mtime, mtime))
         deleted, skipped = clean_run_dirs(tmp_path, _cutoff(90), dry_run=False, verbose=False)
         assert deleted == 0
@@ -314,7 +314,7 @@ class TestCleanJsonl:
         kept, dropped = clean_jsonl(path, _cutoff(90), dry_run=False, verbose=False)
         assert dropped == 2
         assert kept == 2
-        lines = [l for l in path.read_text().splitlines() if l.strip()]
+        lines = [line for line in path.read_text().splitlines() if line.strip()]
         assert len(lines) == 2
 
     def test_keeps_malformed_timestamp_lines(self, tmp_path):
@@ -336,7 +336,7 @@ class TestCleanJsonl:
         ])
         kept, dropped = clean_jsonl(path, _cutoff(90), dry_run=False, verbose=False)
         assert dropped == 1
-        lines = [l for l in path.read_text().splitlines() if l.strip()]
+        lines = [line for line in path.read_text().splitlines() if line.strip()]
         assert "not json at all" in lines
 
     def test_dry_run_does_not_rewrite(self, tmp_path):
@@ -428,7 +428,7 @@ class TestMainIntegration:
         assert rc == 0
         assert not (tmp_path / "old-run").exists()
         assert (tmp_path / "new-run").exists()
-        audit_lines = [l for l in (tmp_path / "audit.jsonl").read_text().splitlines() if l.strip()]
+        audit_lines = [line for line in (tmp_path / "audit.jsonl").read_text().splitlines() if line.strip()]
         assert len(audit_lines) == 1  # old line filtered
 
     def test_dry_run_touches_nothing(self, tmp_path):
@@ -456,9 +456,8 @@ class TestMainIntegration:
         with patch.dict("os.environ", {
             "SOC_AGENT_RUNS_DIR": str(tmp_path),
             "SOC_AGENT_RUN_MAX_AGE_DAYS": "garbage",
-        }):
-            with pytest.raises(SystemExit) as exc:
-                main([])
+        }), pytest.raises(SystemExit) as exc:
+            main([])
         assert exc.value.code == 1
 
     def test_missing_runs_dir_exits_0(self, tmp_path):

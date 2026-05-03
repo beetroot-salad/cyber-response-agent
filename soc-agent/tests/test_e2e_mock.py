@@ -22,7 +22,7 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from schemas.state import Phase, validate_transition
+from schemas.state import validate_transition
 from schemas.report_frontmatter import parse_frontmatter
 from hooks.scripts.validate_report import parse_yaml_frontmatter, validate_tier1
 from conftest import FIXTURES, run_investigation_mock

@@ -16,7 +16,8 @@ grading.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
+from collections.abc import Iterable
 
 from scripts.handlers._markdown import iter_companion_dicts
 from scripts.invlang import (
@@ -63,7 +64,7 @@ def _merge_companion_blocks(text: str) -> dict[str, Any]:
     # replaces an older copy of the same hypothesis. Insertion order is
     # preserved on first sight so the rendered list still reflects the
     # order PREDICT introduced the hypotheses in.
-    hyps_by_id: "dict[str, dict[str, Any]]" = {}
+    hyps_by_id: dict[str, dict[str, Any]] = {}
     hyp_order: list[str] = []
     for doc in iter_companion_dicts(text):
         if isinstance(doc.get("prologue"), dict):

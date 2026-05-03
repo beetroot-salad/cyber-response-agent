@@ -69,7 +69,7 @@ will reach for the right call.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ class HealthResult:
     """
 
     connected: bool
-    error: Optional[str] = None
+    error: str | None = None
     detail: dict[str, Any] = field(default_factory=dict)
 
 
@@ -109,7 +109,7 @@ class QueryResult:
     """
 
     raw: list[dict[str, Any]]
-    total_hits: Optional[int] = None
+    total_hits: int | None = None
     truncated: bool = False
     query_echo: str = ""
 
@@ -134,7 +134,7 @@ class ActionResult:
     target: str
     dry_run: bool
     success: bool
-    error: Optional[str] = None
+    error: str | None = None
     detail: dict[str, Any] = field(default_factory=dict)
 
 
@@ -152,10 +152,10 @@ class LookupResult:
     """
 
     found: bool
-    record: Optional[dict[str, Any]] = None
+    record: dict[str, Any] | None = None
     key_field: str = ""
     key_value: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -196,8 +196,8 @@ class AdapterContract(ABC):
     def query(
         self,
         native_query: str,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
         limit: int = 500,
     ) -> QueryResult:
         """Execute a query in the system's native language.

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Iterator
+from typing import Any
+from collections.abc import Iterable, Iterator
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token

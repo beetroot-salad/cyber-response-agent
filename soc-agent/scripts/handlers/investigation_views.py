@@ -103,10 +103,7 @@ def _trim_gather_section(section: dict) -> str:
             # End drop mode when we hit a new bolded field or a blank-then-
             # bolded pattern. Conservative: any `**...` line out of fence
             # ends the drop.
-            if stripped.startswith("**") and stripped.endswith("**"):
-                dropping_raw = False
-                kept.append(line)
-            elif stripped.startswith("**") and ":**" in stripped:
+            if stripped.startswith("**") and stripped.endswith("**") or stripped.startswith("**") and ":**" in stripped:
                 dropping_raw = False
                 kept.append(line)
             # else: skip the observation bullet
@@ -241,9 +238,7 @@ def format_investigation_block(
         )
         parts: list[str] = []
         for i, s in enumerate(sections):
-            if s["phase"] == "contextualize":
-                parts.append(_section_text(s))
-            elif s["phase"] == "predict":
+            if s["phase"] == "contextualize" or s["phase"] == "predict":
                 parts.append(_section_text(s))
             elif s["phase"] == "gather":
                 parts.append(_trim_gather_section(s))
@@ -282,9 +277,7 @@ def format_investigation_block(
     latest_ana = analyze_sections[-1] if analyze_sections else None
     parts = []
     for s in sections:
-        if s["phase"] == "contextualize":
-            parts.append(_section_text(s))
-        elif s is latest_hyp or s is latest_ana:
+        if s["phase"] == "contextualize" or s is latest_hyp or s is latest_ana:
             parts.append(_section_text(s))
         # Everything else (GATHER, self-report, prior PREDICT/ANALYZE) dropped.
     body = "\n\n".join(p.rstrip() for p in parts if p.strip())

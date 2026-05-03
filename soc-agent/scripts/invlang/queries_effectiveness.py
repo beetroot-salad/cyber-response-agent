@@ -18,7 +18,7 @@ import sys
 from math import log1p
 from typing import Any
 
-from .corpus import Companion, conclude_field, hypothesis_topology
+from .corpus import Companion, hypothesis_topology
 from ._shared import (
     _WEIGHT_BUCKETS,
     _abs_delta,
@@ -391,6 +391,31 @@ def _collect_topology_ids(
     return out
 
 
+def _accumulate_peer(
+    sib: dict[str, Any],
+    seen: set[str],
+    last_weight: dict[str, Any],
+    peer_counts: dict[str, int],
+    peer_weights: dict[str, dict[str, int]],
+) -> None:
+    """Update peer-hypothesis tallies for one sibling-hypothesis dict.
+
+    Skips sibs missing a classification or id, or already counted in `seen`
+    for the current case. Mutates `seen`, `peer_counts`, and `peer_weights`
+    in place.
+    """
+    classification = _hypothesis_name(sib)
+    sib_id = sib.get("id")
+    if not classification or not sib_id or classification in seen:
+        return
+    seen.add(classification)
+    peer_counts[classification] = peer_counts.get(classification, 0) + 1
+    bucket_key = "null" if last_weight.get(sib_id) is None else str(last_weight[sib_id])
+    hist = peer_weights.setdefault(classification, {b: 0 for b in _WEIGHT_BUCKETS})
+    if bucket_key in hist:
+        hist[bucket_key] += 1
+
+
 def _walk_tiers(
     corpus: list[Companion],
     fp_query: dict[str, Any],
@@ -456,16 +481,7 @@ def peer_hypothesis_distribution_for_topology(
         last_weight = _last_weight_map(c)
         seen_this_case: set[str] = set()
         for sib in c.hypotheses:
-            classification = _hypothesis_name(sib)
-            sib_id = sib.get("id")
-            if not classification or not sib_id or classification in seen_this_case:
-                continue
-            seen_this_case.add(classification)
-            peer_counts[classification] = peer_counts.get(classification, 0) + 1
-            bucket_key = "null" if last_weight.get(sib_id) is None else str(last_weight[sib_id])
-            hist = peer_weights.setdefault(classification, {b: 0 for b in _WEIGHT_BUCKETS})
-            if bucket_key in hist:
-                hist[bucket_key] += 1
+            _accumulate_peer(sib, seen_this_case, last_weight, peer_counts, peer_weights)
 
     hits = _build_peer_hits(peer_counts, peer_weights)
     return {
@@ -639,16 +655,7 @@ def peer_hypothesis_distribution_for_prologue(
         last_weight = _last_weight_map(c)
         seen: set[str] = set()
         for sib in c.iter_new_hypotheses():
-            classification = _hypothesis_name(sib)
-            sib_id = sib.get("id")
-            if not classification or not sib_id or classification in seen:
-                continue
-            seen.add(classification)
-            peer_counts[classification] = peer_counts.get(classification, 0) + 1
-            bucket_key = "null" if last_weight.get(sib_id) is None else str(last_weight[sib_id])
-            hist = peer_weights.setdefault(classification, {b: 0 for b in _WEIGHT_BUCKETS})
-            if bucket_key in hist:
-                hist[bucket_key] += 1
+            _accumulate_peer(sib, seen, last_weight, peer_counts, peer_weights)
     hits = _build_peer_hits(peer_counts, peer_weights)
     return {
         "hits": hits,

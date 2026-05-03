@@ -20,9 +20,8 @@ Exit codes:
 
 import fcntl
 import json
-import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -117,7 +116,7 @@ def update_budget_locked(run_dir: Path, run_id: str, tool_name: str) -> dict:
 def check_budgets(budget: dict, limits: dict) -> list[str]:
     """Check budget counters against limits. Returns warning messages."""
     warnings = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Wall-clock timeout
     max_seconds = limits.get("wall_clock_timeout", DEFAULT_LIMITS["wall_clock_timeout"])

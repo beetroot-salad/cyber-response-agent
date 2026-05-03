@@ -13,7 +13,8 @@ Classes:
 from __future__ import annotations
 
 import fnmatch
-from typing import Any, Iterator
+from typing import Any
+from collections.abc import Iterator
 
 import polars as pl
 
@@ -21,7 +22,6 @@ from .corpus import Companion, conclude_field
 from ._shared import (
     _CONFIDENCE_ORDER,
     _FINAL_WEIGHT_SORT,
-    _hypothesis_name,
     _lead_kind,
     _parse_hypothesis_chain,
 )

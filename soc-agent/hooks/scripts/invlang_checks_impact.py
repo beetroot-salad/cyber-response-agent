@@ -13,7 +13,6 @@ primitive:
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from hooks.scripts.invlang_common import (

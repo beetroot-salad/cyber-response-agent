@@ -22,9 +22,9 @@ import sys
 import tempfile
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import yaml
 
@@ -150,7 +150,7 @@ def _inject_env_context(subagent_name: str, prompt: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_run_context() -> tuple[Optional[Path], str]:
+def _resolve_run_context() -> tuple[Path | None, str]:
     """Read the current run_dir / signature_id from env.
 
     Set by `orchestrate.run()` at state-machine startup so every
@@ -168,9 +168,9 @@ def invoke_subagent(
     agent: str,
     prompt: str,
     *,
-    model: Optional[str] = None,
+    model: str | None = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
 ) -> str:
     """Run a subagent by name (e.g. "archetype-match") and return its stdout.
 
@@ -328,8 +328,8 @@ def make_invoker(
     def _invoke(
         prompt: str,
         *,
-        timeout: Optional[int] = None,
-        session_id: Optional[str] = None,
+        timeout: int | None = None,
+        session_id: str | None = None,
     ) -> str:
         return invoke_subagent(
             agent, prompt,
@@ -347,12 +347,12 @@ def make_invoker(
 
 
 def _iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _ts_filename() -> str:
     # Sortable UTC timestamp safe for filenames.
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
 
 
 def _append_subagent_log(
@@ -429,7 +429,7 @@ def extract_terminal_yaml(raw: str) -> dict:
     subagent might accidentally emit (their contracts forbid it — defense in
     depth).
     """
-    block: Optional[str] = None
+    block: str | None = None
     for body in iter_yaml_fences(raw):
         block = body
 

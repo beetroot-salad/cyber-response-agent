@@ -31,7 +31,7 @@ from hooks.scripts.judge_runner import (
     wrap_untrusted,
 )
 from hooks.scripts.run_context import get_runs_dir
-from schemas.precedent import check_recency, DEFAULT_MAX_AGE_DAYS
+from schemas.precedent import check_recency
 from schemas.report_frontmatter import parse_frontmatter
 
 JUDGE_PROMPT_PATH = Path(__file__).resolve().parent / "judge_prompt.md"

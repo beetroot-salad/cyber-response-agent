@@ -757,7 +757,7 @@ class TestParallelSingletons:
         # Failed lead is preserved in the structured envelope (carried into
         # ANALYZE via payload.leads) with its original status + trigger intact —
         # no silent drop, no fallback rewrite.
-        leads_by_name = {l.get("name"): l for l in result.payload["leads"]}
+        leads_by_name = {lead.get("name"): lead for lead in result.payload["leads"]}
         assert set(leads_by_name) == {"authentication-history", "source-reputation"}
         failed = leads_by_name["source-reputation"]
         assert failed["status"] == "error"

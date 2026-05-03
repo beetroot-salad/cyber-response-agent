@@ -59,14 +59,12 @@ Files written:
 from __future__ import annotations
 
 import os
-import re
-import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import frontmatter
 import yaml
@@ -173,7 +171,7 @@ def _derive_vendor(signature_id: str) -> str:
     return signature_id.split("-", 1)[0]
 
 
-def _alert_dot_path(alert: dict, path: str) -> Optional[str]:
+def _alert_dot_path(alert: dict, path: str) -> str | None:
     """Walk `path` (dotted) through `alert`; return the string value or None."""
     cur: Any = alert
     for key in path.split("."):
@@ -200,7 +198,7 @@ def _derive_reporting_agent(alert: dict) -> str:
 
 
 def _derive_incident_window(
-    alert: dict, scope_override: Optional[dict] = None,
+    alert: dict, scope_override: dict | None = None,
 ) -> tuple[str, str]:
     """Return (incident_start, incident_end) ISO-8601 UTC strings.
 
@@ -227,7 +225,7 @@ def _derive_incident_window(
         if anchor_override in ("alert", "now"):
             anchor = anchor_override
 
-    end: Optional[datetime] = None
+    end: datetime | None = None
     if anchor == "alert":
         raw = _alert_dot_path(alert, "@timestamp") or _alert_dot_path(alert, "timestamp")
         if raw:
@@ -235,17 +233,17 @@ def _derive_incident_window(
                 # Wazuh `@timestamp` is ISO-8601 with a trailing `Z` or offset.
                 end = datetime.fromisoformat(raw.replace("Z", "+00:00"))
                 if end.tzinfo is None:
-                    end = end.replace(tzinfo=timezone.utc)
+                    end = end.replace(tzinfo=UTC)
             except ValueError:
                 end = None
     if end is None:
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
     start = end - window
     return _iso(start), _iso(end)
 
 
 def _iso(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _derive_entity_bindings(
@@ -279,7 +277,7 @@ def _derive_entity_bindings(
 
 
 def _resolve_scope(
-    ctx: Context, lead_name: str, *, scope_override: Optional[dict] = None,
+    ctx: Context, lead_name: str, *, scope_override: dict | None = None,
 ) -> Scope:
     vendor = _derive_vendor(ctx.signature_id)
     reporting_agent = _derive_reporting_agent(ctx.alert)
@@ -334,7 +332,7 @@ def _assemble_prompt_single(
     loop_n: int,
     *,
     resume: bool = False,
-    lead_hint: Optional[str] = None,
+    lead_hint: str | None = None,
 ) -> str:
     lines = [
         f"run_dir={ctx.run_dir}",
@@ -391,8 +389,8 @@ yaml.SafeDumper.add_representer(_LiteralStr, _literal_str_representer)
 def _build_lead_spec(
     scope: Scope,
     *,
-    override_data_source: Optional[str] = None,
-    lead_hint: Optional[str] = None,
+    override_data_source: str | None = None,
+    lead_hint: str | None = None,
 ) -> dict:
     spec = {
         "lead_name": scope.lead_name,
@@ -419,9 +417,9 @@ def _assemble_prompt_composite(
     *,
     mode: str,
     resume: bool = False,
-    override_data_source: Optional[str] = None,
-    lead_hints: Optional[dict[str, str]] = None,
-    secondary_scopes: Optional[list[Scope]] = None,
+    override_data_source: str | None = None,
+    lead_hints: dict[str, str] | None = None,
+    secondary_scopes: list[Scope] | None = None,
 ) -> str:
     hints = lead_hints or {}
     primary_spec = _build_lead_spec(
@@ -457,7 +455,7 @@ def _assemble_prompt_composite(
 # ---------------------------------------------------------------------------
 
 
-def _try_extract_terminal_yaml(raw: str) -> Optional[dict]:
+def _try_extract_terminal_yaml(raw: str) -> dict | None:
     """Return the terminal YAML block parsed as a mapping, or None on miss.
 
     Retained for checkpoint recovery paths that still want a best-effort
@@ -568,7 +566,7 @@ def _merge_manifest_into_envelope(
 
 def _parse_envelope_response(
     raw: str, *, loop_n: int, mode: str,
-) -> Optional[GatherEnvelope]:
+) -> GatherEnvelope | None:
     """Parse a gather / gather-composite envelope from subagent stdout.
 
     Returns None on truncation / unparseable output so the caller can route
@@ -608,7 +606,7 @@ def _checkpoint_path_composite(ctx: Context, loop_n: int) -> Path:
     )
 
 
-def _load_checkpoint(path: Path) -> Optional[dict]:
+def _load_checkpoint(path: Path) -> dict | None:
     try:
         return yaml.safe_load(path.read_text())
     except FileNotFoundError:
@@ -709,8 +707,8 @@ def _dispatch_single_raw(
     scope: Scope,
     loop_n: int,
     *,
-    session_id: Optional[str] = None,
-    lead_hints: Optional[dict[str, str]] = None,
+    session_id: str | None = None,
+    lead_hints: dict[str, str] | None = None,
 ) -> GatherEnvelope:
     """Invoke the single-gather subagent and parse its envelope, falling
     back to checkpoint recovery on truncation. **Does not** merge manifest
@@ -741,7 +739,7 @@ def _dispatch_single(
     scope: Scope,
     loop_n: int,
     *,
-    lead_hints: Optional[dict[str, str]] = None,
+    lead_hints: dict[str, str] | None = None,
 ) -> GatherEnvelope:
     """Serial single-lead dispatch: subagent invoke + parse + recover, then
     manifest-merge and composite-fallback on recoverable escalate triggers.
@@ -776,8 +774,8 @@ def _recover_single(
     scope: Scope,
     loop_n: int,
     *,
-    session_id: Optional[str] = None,
-    lead_hints: Optional[dict[str, str]] = None,
+    session_id: str | None = None,
+    lead_hints: dict[str, str] | None = None,
 ) -> GatherEnvelope:
     ckpt_path = _checkpoint_path_single(ctx, loop_n, scope.lead_name)
     ckpt = _load_checkpoint(ckpt_path)
@@ -806,9 +804,9 @@ def _recover_single(
 
 def _dispatch_composite(
     ctx: Context, scope: Scope, loop_n: int, *, mode: str,
-    override_data_source: Optional[str] = None,
-    lead_hints: Optional[dict[str, str]] = None,
-    secondary_scopes: Optional[list[Scope]] = None,
+    override_data_source: str | None = None,
+    lead_hints: dict[str, str] | None = None,
+    secondary_scopes: list[Scope] | None = None,
 ) -> GatherEnvelope:
     prompt = _assemble_prompt_composite(
         ctx, scope, loop_n, mode=mode,
@@ -836,9 +834,9 @@ def _dispatch_composite(
 def _recover_composite(
     ctx: Context, scope: Scope, loop_n: int, mode: str,
     *,
-    override_data_source: Optional[str] = None,
-    lead_hints: Optional[dict[str, str]] = None,
-    secondary_scopes: Optional[list[Scope]] = None,
+    override_data_source: str | None = None,
+    lead_hints: dict[str, str] | None = None,
+    secondary_scopes: list[Scope] | None = None,
 ) -> GatherEnvelope:
     ckpt_path = _checkpoint_path_composite(ctx, loop_n)
     ckpt = _load_checkpoint(ckpt_path)
@@ -883,7 +881,7 @@ def _dispatch_parallel_singletons(
     secondary_scopes: list[Scope],
     loop_n: int,
     *,
-    lead_hints: Optional[dict[str, str]] = None,
+    lead_hints: dict[str, str] | None = None,
 ) -> GatherEnvelope:
     """Dispatch N singleton `gather` (Haiku) calls in parallel and concat
     their envelopes.
@@ -1438,7 +1436,7 @@ def _append_lead_pick_findings(
 class _PredictPayload:
     selected_lead: str
     loop_n: int
-    override_data_source: Optional[str]
+    override_data_source: str | None
     # Per-lead PREDICT→GATHER prose, keyed by lead name. Keys are a subset of
     # `{selected_lead, *composite_secondary}` (validated in the predict output
     # parser). Empty dict when PREDICT supplied no hints.
@@ -1455,7 +1453,7 @@ class _PredictPayload:
     #   anchor: 'alert' | 'now' — window anchor point (default 'alert')
     # None when PREDICT did not override (use the default 1h alert-anchored
     # window).
-    scope_override: Optional[dict]
+    scope_override: dict | None
 
 
 def _read_predict_payload(ctx: Context) -> _PredictPayload:

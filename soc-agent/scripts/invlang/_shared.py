@@ -6,7 +6,7 @@ specific query submodules, not directly from here.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from .corpus import Companion

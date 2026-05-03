@@ -105,7 +105,7 @@ def _render_prompt(
 ) -> str:
     template = template_path.read_text()
     leads_yaml = yaml.safe_dump(
-        [asdict(l) for l in leads],
+        [asdict(lead) for lead in leads],
         sort_keys=False,
         allow_unicode=True,
     )
@@ -325,7 +325,7 @@ def _committed_paths(worktree_path: Path, base_ref: str) -> list[str]:
             f"git diff --name-only failed in {worktree_path} "
             f"(rc={proc.returncode}): {proc.stderr.strip()}"
         )
-    return [l for l in proc.stdout.splitlines() if l.strip()]
+    return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
 def _out_of_scope(paths: list[str]) -> list[str]:
@@ -464,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
                     "branch": branch_name,
                     "worktree": str(worktree_path),
                     "committed_paths": committed,
-                    "leads": [asdict(l) for l in leads],
+                    "leads": [asdict(lead) for lead in leads],
                 },
             )
             return 0
@@ -477,7 +477,7 @@ def main(argv: list[str] | None = None) -> int:
                 "branch": branch_name,
                 "worktree": str(worktree_path),
                 "pr_url": pr_url,
-                "leads": [asdict(l) for l in leads],
+                "leads": [asdict(lead) for lead in leads],
             },
         )
         return 0

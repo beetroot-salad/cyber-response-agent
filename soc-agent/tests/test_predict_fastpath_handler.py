@@ -11,11 +11,9 @@ from __future__ import annotations
 import json
 import sys
 import textwrap
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
-from typing import Any
 
-import pytest
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
@@ -129,7 +127,7 @@ def _make_ctx(
 
 
 def _companion(case_id: str, primary_lead: str, *, age_days: int = 30) -> Companion:
-    iso = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
+    iso = (datetime.now(UTC) - timedelta(days=age_days)).isoformat()
     body = {
         "prologue": {
             "vertices": [

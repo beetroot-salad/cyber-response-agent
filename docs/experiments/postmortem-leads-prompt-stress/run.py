@@ -24,11 +24,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import shlex
 import shutil
 import subprocess
 import sys
-import textwrap
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -113,7 +111,7 @@ def _render_prompt(
     leads: list[AdHocLead],
 ) -> str:
     leads_yaml = yaml.safe_dump(
-        [asdict(l) for l in leads], sort_keys=False, allow_unicode=True
+        [asdict(lead) for lead in leads], sort_keys=False, allow_unicode=True
     )
     return template.format(
         worktree_path=str(worktree_path),
@@ -209,7 +207,7 @@ def _git_log_commits(worktree: Path, base_ref: str) -> list[str]:
     )
     if proc.returncode != 0:
         return []
-    return [l for l in proc.stdout.splitlines() if l.strip()]
+    return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
 def _git_diff(worktree: Path, base_ref: str) -> str:
@@ -235,7 +233,7 @@ def _staged_paths(worktree: Path, base_ref: str) -> list[str]:
     )
     if proc.returncode != 0:
         return []
-    return [l for l in proc.stdout.splitlines() if l.strip()]
+    return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -23,10 +23,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from scripts.postmortem.leads.extract import (
-    AdHocLead,
     extract_ad_hoc_leads,
     has_ad_hoc_leads,
 )
@@ -56,7 +54,7 @@ class TestExtractAdHocLeads:
         run_dir = _run_dir_with("inv_with_adhoc.md", tmp_path)
         leads = extract_ad_hoc_leads(run_dir, vendor="wazuh")
         assert len(leads) == 3
-        assert [l.finding_id for l in leads] == ["l-001", "l-002", "l-003"]
+        assert [lead.finding_id for lead in leads] == ["l-001", "l-002", "l-003"]
 
     def test_explicit_adhoc_template_is_classified(self, tmp_path: Path) -> None:
         run_dir = _run_dir_with("inv_with_adhoc.md", tmp_path)
@@ -77,7 +75,7 @@ class TestExtractAdHocLeads:
     def test_literal_adhoc_name_supported(self, tmp_path: Path) -> None:
         run_dir = _run_dir_with("inv_with_adhoc.md", tmp_path)
         leads = extract_ad_hoc_leads(run_dir, vendor="wazuh")
-        l3 = next(l for l in leads if l.finding_id == "l-003")
+        l3 = next(lead for lead in leads if lead.finding_id == "l-003")
         assert l3.lead_name == "ad-hoc"
         assert l3.data_source == "deploy-runs"
 
@@ -156,7 +154,7 @@ class TestExtractAdHocLeads:
         leads = extract_ad_hoc_leads(run_dir, vendor="wazuh")
         # l-001 is `authentication-history` with template: wazuh, and
         # the catalog ships templates/wazuh.md for it.
-        assert all(l.lead_name != "authentication-history" for l in leads)
+        assert all(lead.lead_name != "authentication-history" for lead in leads)
 
     def test_template_missing_routes_to_ad_hoc(self, tmp_path: Path) -> None:
         # `process-lineage` has a definition.md but ships no
@@ -177,14 +175,14 @@ class TestExtractAdHocLeads:
         run_dir = _run_dir_with("inv_with_adhoc.md", tmp_path)
         leads = extract_ad_hoc_leads(run_dir, vendor="wazuh")
         # l-001 has attribute_updates → useful
-        l1 = next(l for l in leads if l.finding_id == "l-001")
+        l1 = next(lead for lead in leads if lead.finding_id == "l-001")
         assert l1.result_shape == "useful"
 
     def test_result_shape_errored_on_failure_reason(self, tmp_path: Path) -> None:
         run_dir = _run_dir_with("inv_with_adhoc.md", tmp_path)
         leads = extract_ad_hoc_leads(run_dir, vendor="wazuh")
         # l-003 has failure_reason: adapter-error
-        l3 = next(l for l in leads if l.finding_id == "l-003")
+        l3 = next(lead for lead in leads if lead.finding_id == "l-003")
         assert l3.result_shape == "errored"
 
 
