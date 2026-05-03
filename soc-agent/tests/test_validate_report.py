@@ -159,7 +159,7 @@ class TestValidateFixtures:
     def test_invalid_missing_fields(self):
         passed, errors, _ = validate_tier1(FIXTURES / "invalid_missing_fields.md")
         assert not passed
-        assert any("missing required field" in e for e in errors)
+        assert any("required field" in e for e in errors)
 
     def test_invalid_no_precedent(self):
         passed, errors, _ = validate_tier1(FIXTURES / "invalid_no_precedent.md")

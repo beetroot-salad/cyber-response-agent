@@ -330,7 +330,7 @@ class TestCheckAuthorizationResolutionProvenance:
         for field in ("anchor_kind", "anchor_id", "as_of"):
             edge["authorization_resolutions"][0].pop(field, None)
         errors = _check_authorization_resolution_provenance(merged)
-        assert any("missing required field" in e for e in errors)
+        assert any("required field" in e for e in errors)
         joined = " ".join(errors)
         assert "anchor_kind" in joined
         assert "anchor_id" in joined
@@ -387,7 +387,7 @@ class TestCheckAnchorConsultationProvenance:
         cons.pop("result")
         cons.pop("anchor_id")
         errors = _check_anchor_consultation_provenance(merged)
-        assert any("missing required field" in e for e in errors)
+        assert any("required field" in e for e in errors)
         joined = " ".join(errors)
         assert "result" in joined
         assert "anchor_id" in joined

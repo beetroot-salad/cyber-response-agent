@@ -24,6 +24,13 @@ from hooks.scripts.invlang_common import (
     _IMPACT_SEVERITIES,
     _IMPACT_VERDICTS,
     _collect_impact_prediction_refs,
+    missing_or_empty_fields,
+)
+
+
+_EMPTY_CELL_HINT = (
+    "(dense parser drops empty cells; check for `||` between cells in the "
+    "source row — every required column needs a non-empty value)"
 )
 
 # Required fields on every impact_predictions[] entry.
@@ -75,9 +82,12 @@ def _check_impact_prediction_structure(merged: dict[str, Any]) -> list[str]:
                 errors.append(f"{ctx}: entry must be a mapping")
                 continue
 
-            missing = [f for f in _IMPACT_PRED_REQUIRED_FIELDS if f not in pred]
+            missing = missing_or_empty_fields(pred, _IMPACT_PRED_REQUIRED_FIELDS)
             if missing:
-                errors.append(f"{ctx}: missing required field(s): {sorted(missing)}")
+                errors.append(
+                    f"{ctx}: missing or empty required field(s): "
+                    f"{sorted(missing)} {_EMPTY_CELL_HINT}"
+                )
 
             ipid = pred.get("id")
             if isinstance(ipid, str):
@@ -167,9 +177,12 @@ def _check_impact_resolution_backrefs(merged: dict[str, Any]) -> list[str]:
                 errors.append(f"{ctx}: entry must be a mapping")
                 continue
 
-            missing = [f for f in _IMPACT_RES_REQUIRED_FIELDS if f not in r]
+            missing = missing_or_empty_fields(r, _IMPACT_RES_REQUIRED_FIELDS)
             if missing:
-                errors.append(f"{ctx}: missing required field(s): {sorted(missing)}")
+                errors.append(
+                    f"{ctx}: missing or empty required field(s): "
+                    f"{sorted(missing)} {_EMPTY_CELL_HINT}"
+                )
 
             pref = r.get("prediction_ref")
             qualified: str | None = None
