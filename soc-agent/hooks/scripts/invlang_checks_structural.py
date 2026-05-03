@@ -23,6 +23,13 @@ from hooks.scripts.invlang_common import (
     _collect_declared_ids,
     _is_valid_id,
     _iter_resolutions,
+    missing_or_empty_fields,
+)
+
+
+_EMPTY_CELL_HINT = (
+    "(dense parser drops empty cells; check for `||` between cells in the "
+    "source row — every required column needs a non-empty value)"
 )
 
 
@@ -220,9 +227,12 @@ def _check_lead_predictions(merged: dict[str, Any]) -> list[str]:
                 errors.append(f"{ctx}: entry must be a mapping")
                 continue
 
-            missing = _LEAD_PREDICTION_REQUIRED - pred.keys()
+            missing = missing_or_empty_fields(pred, tuple(_LEAD_PREDICTION_REQUIRED))
             if missing:
-                errors.append(f"{ctx}: missing required field(s): {sorted(missing)}")
+                errors.append(
+                    f"{ctx}: missing or empty required field(s): "
+                    f"{sorted(missing)} {_EMPTY_CELL_HINT}"
+                )
 
             pid = pred.get("id")
             if isinstance(pid, str):
@@ -264,11 +274,11 @@ def _check_authorization_resolution_provenance(merged: dict[str, Any]) -> list[s
     """
     errors: list[str] = []
     for location, _target_id, r, _li, _ei in _iter_resolutions(merged):
-        missing = [f for f in _AUTHZ_REQUIRED_FIELDS if f not in r]
+        missing = missing_or_empty_fields(r, _AUTHZ_REQUIRED_FIELDS)
         if missing:
             errors.append(
-                f"{location}: authorization_resolutions entry missing "
-                f"required field(s): {sorted(missing)}"
+                f"{location}: authorization_resolutions entry missing or empty "
+                f"required field(s): {sorted(missing)} {_EMPTY_CELL_HINT}"
             )
         grounding = r.get("grounding_kind")
         if grounding is not None and grounding not in _AUTHZ_GROUNDING_KINDS:
@@ -315,10 +325,11 @@ def _check_anchor_consultation_provenance(merged: dict[str, Any]) -> list[str]:
             if not isinstance(entry, dict):
                 errors.append(f"{ctx}: entry must be a mapping")
                 continue
-            missing = [f for f in _CONSULTATION_REQUIRED_FIELDS if f not in entry]
+            missing = missing_or_empty_fields(entry, _CONSULTATION_REQUIRED_FIELDS)
             if missing:
                 errors.append(
-                    f"{ctx}: missing required field(s): {sorted(missing)}"
+                    f"{ctx}: missing or empty required field(s): "
+                    f"{sorted(missing)} {_EMPTY_CELL_HINT}"
                 )
             grounding = entry.get("grounding_kind")
             if grounding is not None and grounding not in _CONSULTATION_GROUNDING_KINDS:

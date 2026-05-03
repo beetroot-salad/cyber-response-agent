@@ -118,6 +118,23 @@ _IMPACT_RES_REQUIRED_FIELDS = (
     "reasoning",
 )
 
+def missing_or_empty_fields(
+    entry: dict,
+    fields: tuple[str, ...] | list[str],
+) -> list[str]:
+    """Return the names from `fields` that are absent from `entry` OR map to a
+    falsy value (empty string, None, empty list/dict).
+
+    Treats absent and empty identically because the dense parser's
+    `_resolution_row` silently strips empty cells from rows like
+    `a||b` (`as_of` blank) — by the time the dict reaches the validator,
+    an empty cell looks the same as a missing key. Either shape signals
+    the same authoring problem (a required column was not populated), so
+    the validator should reject both with one message.
+    """
+    return [f for f in fields if not entry.get(f)]
+
+
 # Acting-entity vertex types (rule #32).
 _ACTING_ENTITY_TYPES = {"session", "identity", "process"}
 

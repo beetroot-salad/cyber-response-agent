@@ -144,7 +144,7 @@ Pipe-delimited. Header line required (column-spec).
 - **`grounding`** ∈ `{org-authority, past-case}` — `telemetry-baseline` is **rejected** here (validator rule #11). Baselines belong on `:R consultations`. When a contract's verdict is `indeterminate` because a baseline lookup is missing or null, **omit the `:R authz` row** (the contract carries over) and emit a `:R consultations` row recording the baseline outcome.
 - **`authority`** ∈ `{full, partial}`.
 - **`fulfills`** = `h-NNN.acN` (dotted form).
-- **`as_of`** = ISO-8601 or empty.
+- **`as_of`** = ISO-8601 timestamp; **required (non-empty)**. For `org-authority` use the registry-snapshot timestamp; for `telemetry-baseline` use the end of the queried window. The dense parser drops empty cells silently — the validator then reports the field as missing.
 - **`reasoning`** = one short clause; `;` and `|` allowed inside (the column count fixes the boundary).
 
 ### `:R consultations` row grammar
@@ -157,7 +157,19 @@ Pipe-delimited. Header line required (column-spec).
 - **`lead`** = the `l-NNN` whose query consulted this anchor.
 - **`grounding`** ∈ `{org-authority, telemetry-baseline}` — both admissible here.
 - **`result`** ∈ `{confirmed, refuted, partial, no-data}` — the consultation outcome (per invlang schema rule #11). Authorization verdicts (`authorized | unauthorized | indeterminate`) belong on `:R authz`, not here; if you reach for an authz verdict on `:R consultations`, you probably want `:R authz` instead.
+- **`as_of`** = ISO-8601; **required (non-empty)**. For `telemetry-baseline` use the end of the queried window (e.g. the `--end` timestamp on a wazuh_cli query). For `org-authority` use the registry/anchor-snapshot timestamp. **Never leave empty** — see the `:R authz` `as_of` note above for why empty cells silently disappear.
+- **`authority`** = the source-of-truth label (e.g. `wazuh.manager`, `playground-ticket`, `full`); **required (non-empty)**.
 - One row per lead. Multi-anchor leads collapse into one row using the dominant anchor; if anchors materially diverge, escalate via `:A anomalies`.
+
+**Examples** (every required cell populated):
+
+```
+:R consultations [lead|anchor_id|anchor_kind|grounding|result|as_of|authority|reasoning]
+l-002|playground-ticket|org-authority|org-authority|confirmed|2026-05-03T05:35:00Z|playground-ticket|ticket_count=0 globally; no CM ticket authorizes exec
+l-003|wazuh.manager|telemetry-datasource|telemetry-baseline|partial|2026-05-03T05:04:00Z|wazuh.manager|38 rule:100002 events in 04:04–05:04Z window at/below ~56/hr baseline rate
+```
+
+Note both rows fill all 8 cells. The `||` shape (an empty cell) is the most common authoring bug here.
 
 ### `:R impact` row grammar
 
