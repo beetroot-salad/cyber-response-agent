@@ -1,6 +1,6 @@
 ---
 name: ticket-context
-description: Run the 4-hour correlation script and return its raw output plus a dedup verdict. Used by the investigate skill's CONTEXTUALIZE phase.
+description: Run the 4-hour correlation script and return its raw output plus a dedup verdict. Dispatched by the CONTEXTUALIZE phase handler.
 tools: Read, Bash
 model: haiku
 ---

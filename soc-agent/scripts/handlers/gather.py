@@ -1,7 +1,6 @@
 """GATHER phase handler.
 
-Replaces the GATHER section of `skills/investigate/SKILL.md` with a Python
-orchestration that dispatches either the `gather` (Haiku, single template lead)
+Dispatches either the `gather` (Haiku, single template lead)
 or `gather-composite` (Sonnet, composite / ad-hoc) subagent, transcribes the
 subagent's characterization into an `## GATHER (loop N)` markdown section, and
 routes to ANALYZE.

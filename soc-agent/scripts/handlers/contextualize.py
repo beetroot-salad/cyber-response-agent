@@ -1,7 +1,6 @@
 """CONTEXTUALIZE phase handler.
 
-Replaces the CONTEXTUALIZE section of `skills/investigate/SKILL.md`. Dispatches
-two subagents in parallel:
+Dispatches two subagents in parallel:
 
     - ticket-context        — runs the 4-hour correlation script + emits dedup verdict
     - contextualize-prologue — builds the prologue YAML (vertices + edges)

@@ -1,14 +1,12 @@
 """Investigation orchestrator — Python state machine that drives phase transitions.
 
-Replaces the main-LLM-agent loop in skills/investigate/SKILL.md. Each phase is a
-pure function: it receives the accumulated context, returns a next-phase decision
-and an opaque payload. The orchestrator validates transitions against
-schemas/state.py, persists state.json, enforces the loop cap, and loops until a
-terminal phase (REPORT) or an error.
+Each phase is a pure function: it receives the accumulated context, returns a
+next-phase decision and an opaque payload. The orchestrator validates
+transitions against schemas/state.py, persists state.json, enforces the loop
+cap, and loops until a terminal phase (REPORT) or an error.
 
-At this skeleton stage, phase handlers are stub functions passed in by the caller
-(typically a test). Real handlers that shell out to `claude --print` subagents
-come later, one phase at a time.
+Phase handlers live under scripts/handlers/ and shell out to per-phase
+subagents (defined in soc-agent/agents/) via `claude --print`.
 """
 
 from __future__ import annotations
