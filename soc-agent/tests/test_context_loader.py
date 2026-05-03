@@ -20,6 +20,7 @@ from scripts.handlers._context_loader import (  # noqa: E402
     format_archetype_shapes_block,
     format_lead_definitions_block,
     format_lead_definitions_summary_block,
+    format_predict_available_context_block,
     format_run_manifest,
     format_signature_text_block,
     load_alert,
@@ -32,6 +33,7 @@ from scripts.handlers._context_loader import (  # noqa: E402
 )
 from scripts.handlers.investigation_views import (  # noqa: E402
     format_investigation_block,
+    format_predict_state_block,
 )
 
 
@@ -379,6 +381,31 @@ class TestFormatRunManifest:
         assert "investigation.md" not in block
 
 
+class TestFormatPredictAvailableContextBlock:
+    def test_lists_signature_lead_and_environment_pointers(self, tmp_path):
+        (tmp_path / "alert.json").write_text('{"id":"a"}')
+        inv = "## CONTEXTUALIZE\n\nbody\n"
+        (tmp_path / "investigation.md").write_text(inv)
+
+        block = format_predict_available_context_block(
+            tmp_path,
+            inv,
+            "wazuh-rule-5710",
+            "wazuh",
+            soc_agent_root=SOC_AGENT_ROOT,
+        )
+
+        assert "<available_context>" in block
+        assert "alert.json" in block
+        assert "investigation.md" in block
+        assert "field-quirks.md" in block
+        assert "playbook.md" in block
+        assert "context.md" in block
+        assert "TAGS.md" in block
+        assert "common-investigation/leads" in block
+        assert "knowledge/environment" in block
+
+
 class TestFormatInvestigationBlock:
     def test_wraps_content(self):
         block = format_investigation_block("## A\n\nbody\n")
@@ -534,6 +561,180 @@ class TestFormatInvestigationBlock:
         assert "hypothesize:" not in block
         # Markdown prose still stripped
         assert "**Alert:**" not in block
+
+
+class TestFormatPredictStateBlock:
+    @staticmethod
+    def _loop1_fixture() -> str:
+        from tests._dense_fixture_helpers import companion_to_invlang_fence
+
+        return (
+            "## CONTEXTUALIZE\n"
+            "candidate archetype: X\n"
+            + companion_to_invlang_fence({
+                "prologue": {
+                    "vertices": [
+                        {
+                            "id": "v-001",
+                            "type": "endpoint",
+                            "classification": "host",
+                            "identifier": "h1",
+                        },
+                    ],
+                    "edges": [],
+                },
+            })
+            + "\n"
+        )
+
+    @staticmethod
+    def _loop2_fixture() -> str:
+        from tests._dense_fixture_helpers import companion_to_invlang_fence
+
+        return (
+            "## CONTEXTUALIZE\n"
+            "**Alert:** test\n"
+            "candidate archetype: X\n"
+            + companion_to_invlang_fence({
+                "prologue": {
+                    "vertices": [
+                        {
+                            "id": "v-001",
+                            "type": "endpoint",
+                            "classification": "host",
+                            "identifier": "h1",
+                        },
+                    ],
+                    "edges": [],
+                },
+            })
+            + "\n"
+            "## PREDICT (loop 1)\n"
+            "**Selected lead:** l1\n"
+            + companion_to_invlang_fence({
+                "hypothesize": {
+                    "hypotheses": [
+                        {
+                            "id": "h-001",
+                            "name": "?monitoring-probe",
+                            "attached_to_vertex": "v-001",
+                            "proposed_edge": {
+                                "relation": "attempted_auth",
+                                "parent_vertex": {
+                                    "type": "endpoint",
+                                    "classification": "monitoring-host",
+                                },
+                            },
+                        },
+                        {
+                            "id": "h-003",
+                            "name": "?discard-me",
+                            "attached_to_vertex": "v-001",
+                            "proposed_edge": {
+                                "relation": "attempted_auth",
+                                "parent_vertex": {
+                                    "type": "endpoint",
+                                    "classification": "stale-host",
+                                },
+                            },
+                        },
+                    ],
+                },
+            })
+            + "\n"
+            "## GATHER (loop 1)\n"
+            "**Lead:** l1\n"
+            "**Raw observation:**\n"
+            "- bulky line\n"
+            "## ANALYZE (loop 1)\n"
+            "**Assessment:** old prose\n"
+            + companion_to_invlang_fence({
+                "findings": [
+                    {
+                        "id": "l-001",
+                        "name": "authentication-history",
+                        "loop": 1,
+                        "target": "v-001",
+                        "resolutions": [
+                            {"hypothesis": "h-001", "after": "+"},
+                        ],
+                    },
+                ],
+            })
+            + "\n"
+            "## Self-report\n"
+            "- anomaly note\n"
+            "## PREDICT (loop 2)\n"
+            "**Selected lead:** l2\n"
+            + companion_to_invlang_fence({
+                "hypothesize": {
+                    "hypotheses": [
+                        {
+                            "id": "h-002",
+                            "name": "?service-account-use",
+                            "attached_to_vertex": "v-001",
+                            "proposed_edge": {
+                                "relation": "attempted_auth",
+                                "parent_vertex": {
+                                    "type": "identity",
+                                    "classification": "service-account",
+                                },
+                            },
+                        },
+                    ],
+                },
+            })
+            + "\n"
+            "## GATHER (loop 2)\n"
+            "**Lead:** l2\n"
+            "**Raw observation:**\n"
+            "- newer bulky line\n"
+            "## ANALYZE (loop 2)\n"
+            "**Assessment:** latest prose\n"
+            + companion_to_invlang_fence({
+                "findings": [
+                    {
+                        "id": "l-002",
+                        "name": "process-lineage",
+                        "loop": 2,
+                        "target": "v-001",
+                        "resolutions": [
+                            {"hypothesis": "h-001", "after": "++"},
+                            {"hypothesis": "h-002", "after": "+"},
+                        ],
+                        "shelved": ["h-003"],
+                    },
+                ],
+            })
+            + "\n"
+        )
+
+    def test_loop1_surfaces_only_structured_prologue(self):
+        block = format_predict_state_block(self._loop1_fixture())
+        assert "<investigation_state>" in block
+        assert ":V prologue.vertices" in block
+        assert "candidate archetype:" not in block
+        assert "## Active Hypothesis Frontier" not in block
+        assert "## ANALYZE" not in block
+
+    def test_loop2_surfaces_prologue_frontier_and_latest_analyze_only(self):
+        block = format_predict_state_block(self._loop2_fixture())
+
+        assert "<investigation_state>" in block
+        assert "## CONTEXTUALIZE" in block
+        assert ":V prologue.vertices" in block
+        assert "## Active Hypothesis Frontier" in block
+        assert "?monitoring-probe" in block
+        assert "?service-account-use" in block
+        assert "?discard-me" not in block
+        assert "|++|confirmed" in block
+        assert "## ANALYZE (loop 2)" in block
+        assert "process-lineage" in block
+        assert "## ANALYZE (loop 1)" not in block
+        assert "**Selected lead:**" not in block
+        assert "bulky line" not in block
+        assert "latest prose" not in block
+        assert "anomaly note" not in block
 
 
 class TestLoadSignatureText:

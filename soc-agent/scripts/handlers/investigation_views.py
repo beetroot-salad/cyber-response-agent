@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import re
 
+from scripts.handlers._hypothesize_dense import emit_hypothesize_dense
+from scripts.handlers._markdown import iter_companion_dicts
+
 _PHASE_HEADER_RE = re.compile(
     r"^##\s+(?P<phase>[A-Za-z][A-Za-z\- ]*?)(?:\s*\(loop\s*(?P<loop>\d+)\))?\s*$"
 )
@@ -171,6 +174,152 @@ def _analyze_grade_summary(section: dict) -> str:
     if not kept:
         return header + "\n[analyze block — no grade lines parsed]"
     return header + "\n" + "\n".join(kept)
+
+
+def _first_structured_section(sections: list[dict], phase: str) -> dict | None:
+    for section in sections:
+        if section["phase"] != phase:
+            continue
+        if _section_yaml_fences(section).strip():
+            return section
+    return None
+
+
+def _latest_structured_section(sections: list[dict], phase: str) -> dict | None:
+    for section in reversed(sections):
+        if section["phase"] != phase:
+            continue
+        if _section_yaml_fences(section).strip():
+            return section
+    return None
+
+
+def _predict_frontier_hypotheses(sections: list[dict]) -> list[dict]:
+    """Materialize the currently-active hypothesis frontier.
+
+    The predict prompt needs the live frontier, not just the latest
+    `## PREDICT` markdown section. We therefore accumulate hypotheses across
+    all structured fences, then apply later ANALYZE findings' `resolutions`
+    and `shelved` signals to suppress refuted / shelved entries and surface
+    the latest known weight on the survivors.
+    """
+    hypotheses_by_id: dict[str, dict] = {}
+    weights_by_id: dict[str, str] = {}
+    refuted_ids: set[str] = set()
+    shelved_ids: set[str] = set()
+
+    for section in sections:
+        fences = _section_yaml_fences(section)
+        if not fences.strip():
+            continue
+        for parsed in iter_companion_dicts(fences):
+            hypothesize = parsed.get("hypothesize")
+            if isinstance(hypothesize, dict):
+                for h in hypothesize.get("hypotheses") or []:
+                    if not isinstance(h, dict):
+                        continue
+                    hid = h.get("id")
+                    if isinstance(hid, str) and hid:
+                        hypotheses_by_id[hid] = h
+
+            findings = parsed.get("findings")
+            if not isinstance(findings, list):
+                continue
+            for lead in findings:
+                if not isinstance(lead, dict):
+                    continue
+                for h in lead.get("new_hypotheses") or []:
+                    if not isinstance(h, dict):
+                        continue
+                    hid = h.get("id")
+                    if isinstance(hid, str) and hid:
+                        hypotheses_by_id[hid] = h
+                for resolution in lead.get("resolutions") or []:
+                    if not isinstance(resolution, dict):
+                        continue
+                    hid = resolution.get("hypothesis")
+                    after = resolution.get("after")
+                    if not isinstance(hid, str) or not hid:
+                        continue
+                    if isinstance(after, str) and after:
+                        weights_by_id[hid] = after
+                        if after == "--":
+                            refuted_ids.add(hid)
+                        else:
+                            refuted_ids.discard(hid)
+                for hid in lead.get("shelved") or []:
+                    if isinstance(hid, str) and hid:
+                        shelved_ids.add(hid)
+
+    frontier: list[dict] = []
+    for hid, hypothesis in hypotheses_by_id.items():
+        if hid in shelved_ids or hid in refuted_ids:
+            continue
+        current = dict(hypothesis)
+        if hid in weights_by_id:
+            current["weight"] = weights_by_id[hid]
+            if weights_by_id[hid] == "++":
+                current["status"] = "confirmed"
+        frontier.append(current)
+    return frontier
+
+
+def format_predict_state_block(investigation_md: str) -> str:
+    """Render the compact predict-time investigation state block.
+
+    This is intentionally state-oriented rather than history-oriented:
+      - the prologue fence from CONTEXTUALIZE
+      - the currently-active hypothesis frontier
+      - the latest ANALYZE section's structured fence
+
+    Markdown prose, GATHER observations, prior-loop narrative, and
+    self-report text are excluded. The resulting block is the minimal
+    structured state PREDICT needs before it reads additional files on
+    demand via `available_context`.
+    """
+    body_raw = investigation_md.rstrip()
+    if not body_raw:
+        return (
+            "<investigation_state>\n"
+            "(empty — no prior phases recorded)\n"
+            "</investigation_state>"
+        )
+
+    sections = _parse_investigation_sections(body_raw)
+    if not sections:
+        return (
+            "<investigation_state>\n"
+            "(no structured investigation state parsed)\n"
+            "</investigation_state>"
+        )
+
+    parts: list[str] = []
+
+    prologue_section = _first_structured_section(sections, "contextualize")
+    if prologue_section is not None:
+        prologue_fences = _section_yaml_fences(prologue_section)
+        if prologue_fences.strip():
+            parts.append(prologue_section["header"] + "\n" + prologue_fences)
+
+    frontier = _predict_frontier_hypotheses(sections)
+    if frontier:
+        parts.append(
+            "## Active Hypothesis Frontier\n"
+            "```invlang\n"
+            f"{emit_hypothesize_dense(frontier)}\n"
+            "```"
+        )
+
+    latest_analyze = _latest_structured_section(sections, "analyze")
+    if latest_analyze is not None:
+        analyze_fences = _section_yaml_fences(latest_analyze)
+        if analyze_fences.strip():
+            parts.append(latest_analyze["header"] + "\n" + analyze_fences)
+
+    body = "\n\n".join(p.rstrip() for p in parts if p.strip())
+    if not body:
+        body = "(no structured investigation state available)"
+    return f"<investigation_state>\n{body}\n</investigation_state>"
 
 
 def format_investigation_block(
