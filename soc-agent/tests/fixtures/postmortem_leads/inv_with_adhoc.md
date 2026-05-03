@@ -1,97 +1,55 @@
-<!-- Trimmed from /workspace/runs/20260419-074823-rule100001/runs/3d5bc4b0-7514-4c71-b046-9ec0084a421e/investigation.md -->
+<!-- Trimmed; rule100001 ad-hoc leads in dense format with ANALYZE prose. -->
 
 ## CONTEXTUALIZE
 
-```yaml
-prologue:
-  vertices:
-    - id: v-001
-      type: alert
-      identifier: "wazuh-rule-100001"
-  edges: []
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs]
+v-001|alert|wazuh-alert|wazuh-rule-100001|
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs]
+
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
+h-002|?ci-pipeline-exec||||||||||||
+
+:L findings [id|name|loop|target|mode|system|template|query|window|status|fail_reason]
+l-001|correlated-falco-events|1|v-002|analyze|wazuh-indexer|ad-hoc|rule.groups:falco AND agent.name:wazuh.manager AND data.output_fields.container.id:2427c46c4575 AND rule.id:(100002 OR 100006 OR 100001)|2026-04-18T20:22Z–2026-04-18T20:52Z|active|
+l-002|container-baseline|1|v-002|analyze|wazuh-indexer|ad-hoc|rule.id:100001 AND data.output_fields.container.image.repository:cyber-response-agent_devcontainer-target-endpoint|2026-03-19T00:00Z–2026-04-18T20:22Z|active|
+
+:L l-001.substitutions [key|value]
+container_id|2427c46c4575
+
+:L l-002.substitutions [key|value]
+image_repository|cyber-response-agent_devcontainer-target-endpoint
+
+:R attr_updates [resolved_by|target|key|value]
+l-001|v-002|correlated_100002_count_in_15min_window|24
+l-002|v-002|image_baseline_prior_100001_count|11
+
+:L findings [id|name|loop|target|mode|system|template|query|window|status|tests|fail_reason]
+l-003|ad-hoc|2|v-003|gather|deploy-runs|ad-hoc|find CI/CD job records correlated to container a3b274907152_target-endpoint within ±5 minutes of 2026-04-18T20:37Z|2026-04-18T20:32Z–2026-04-18T20:42Z|||adapter-error
+
+:L l-003.substitutions [key|value]
+container_name|a3b274907152_target-endpoint
+timestamp|2026-04-18T20:37Z
 ```
 
-## PREDICT (loop 1)
+## ANALYZE (loop 2)
 
-```yaml
-hypothesize:
-  hypotheses:
-    - id: h-002
-      classification: "?ci-pipeline-exec"
-```
+**Lead:** correlated-falco-events
 
-## GATHER (loop 1)
+**Query:** `rule.groups:falco AND agent.name:wazuh.manager AND data.output_fields.container.id:2427c46c4575 AND rule.id:(100002 OR 100006 OR 100001)`
 
-```yaml
-gather:
-  - id: l-001
-    loop: 1
-    name: correlated-falco-events
-    target: v-002
-    selection_rationale: "Primary composition-rule check: tests whether 100002/100006 events overlap the shell event at 20:37Z within ±15 minutes — the key discriminator for h-003."
-    tests: [h-003]
-    query_details:
-      system: wazuh-indexer
-      template: ad-hoc
-      query: "rule.groups:falco AND agent.name:wazuh.manager AND data.output_fields.container.id:2427c46c4575 AND rule.id:(100002 OR 100006 OR 100001)"
-      time_window: "2026-04-18T20:22Z–2026-04-18T20:52Z"
-      substitutions:
-        container_id: "2427c46c4575"
-    outcome:
-      attribute_updates:
-        - target: v-002
-          updates:
-            correlated_100002_count_in_15min_window: 24
-      observations:
-        vertices: []
-        edges: []
-    resolutions: []
+**Selection rationale:** Primary composition-rule check: tests whether 100002/100006 events overlap the shell event at 20:37Z within ±15 minutes — the key composition-rule check discriminator for h-003.
 
-  - id: l-002
-    loop: 1
-    name: container-baseline
-    target: v-002
-    selection_rationale: "Tests h-003's p2 (no prior runc-parented shell history on this image) and establishes behavioral baseline."
-    query_details:
-      system: wazuh-indexer
-      template: ad-hoc
-      query: "rule.id:\"100001\" AND data.output_fields.container.image.repository:cyber-response-agent_devcontainer-target-endpoint"
-      time_window: "2026-03-19T00:00Z–2026-04-18T20:22Z"
-      substitutions:
-        image_repository: "cyber-response-agent_devcontainer-target-endpoint"
-    outcome:
-      attribute_updates:
-        - target: v-002
-          updates:
-            image_baseline_prior_100001_count: 11
-      observations:
-        vertices: []
-        edges: []
-    resolutions: []
-```
+**Lead:** container-baseline
 
-## GATHER (loop 2)
+**Query:** `rule.id:100001 AND data.output_fields.container.image.repository:cyber-response-agent_devcontainer-target-endpoint`
 
-```yaml
-gather:
-  - id: l-003
-    loop: 2
-    name: ad-hoc
-    target: v-003
-    selection_rationale: "Resolves legitimacy_contract lc1 on h-002: queries the deploy-runs anchor for a CI/CD job record correlated to container a3b274907152_target-endpoint."
-    query_details:
-      system: deploy-runs
-      template: ad-hoc
-      query: "find CI/CD job records correlated to container a3b274907152_target-endpoint within ±5 minutes of 2026-04-18T20:37Z"
-      time_window: "2026-04-18T20:32Z–2026-04-18T20:42Z"
-      substitutions:
-        container_name: "a3b274907152_target-endpoint"
-        timestamp: "2026-04-18T20:37Z"
-    outcome:
-      attribute_updates: []
-      observations:
-        vertices: []
-        edges: []
-      failure_reason: "adapter-error"
-    resolutions: []
-```
+**Selection rationale:** Tests h-003's p2 baseline for this image.
+
+**Lead:** ad-hoc
+
+**Query:** `find CI/CD job records correlated to container a3b274907152_target-endpoint within ±5 minutes of 2026-04-18T20:37Z`
+
+**Selection rationale:** Resolves lc1 on h-002 by querying deploy-runs for a CI/CD job correlated to a3b274907152_target-endpoint.
+

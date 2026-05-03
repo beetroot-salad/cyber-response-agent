@@ -32,6 +32,11 @@ from __future__ import annotations
 from typing import Any
 
 from scripts.handlers import _dense_primitives as _prim
+from scripts.handlers._dense_emit_common import (
+    block,
+    render_edge_row,
+    render_vertex_row,
+)
 
 
 class PrologueOutputError(ValueError):
@@ -168,3 +173,24 @@ def parse_prologue_dense(stdout: str) -> dict[str, Any]:
         )
 
     return {"prologue": {"vertices": vertices, "edges": edges}}
+
+
+def emit_prologue_dense_body(prologue: dict[str, Any]) -> str:
+    """Render a parsed prologue dict as the dense `:V`/`:E` body (no fence).
+
+    Inverse of `parse_prologue_dense` — round-trips the canonical
+    companion shape `{"vertices": [...], "edges": [...]}` back into the
+    on-disk dense surface. Used by the SCREEN handler to embed the
+    prologue into the screen subagent prompt as ```invlang.
+    """
+    vertices = prologue.get("vertices") or []
+    edges = prologue.get("edges") or []
+    v_block = block(
+        ":V prologue.vertices [" + "|".join(_VERTEX_COLS) + "]",
+        [render_vertex_row(v) for v in vertices],
+    )
+    e_block = block(
+        ":E prologue.edges [" + "|".join(_EDGE_COLS) + "]",
+        [render_edge_row(e, PrologueOutputError) for e in edges],
+    )
+    return f"{v_block}\n\n{e_block}"

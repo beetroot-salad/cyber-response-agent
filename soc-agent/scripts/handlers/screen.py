@@ -35,14 +35,13 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
 from schemas.state import Phase
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 
 from scripts.handlers._investigation_io import append_and_validate
 from scripts.handlers._markdown import iter_companion_dicts
 from scripts.handlers._playbook import load_screen_rows
+from scripts.handlers._prologue_dense import emit_prologue_dense_body
 from scripts.handlers._screen_dense import emit_screen_findings_dense
 from scripts.handlers._subagent import (
     extract_terminal_yaml,
@@ -94,12 +93,12 @@ def _parse_leads_column(leads_cell: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _extract_prologue_yaml(run_dir: Path) -> str:
-    """Return the prologue block from `investigation.md` as a YAML string.
+def _extract_prologue_dense(run_dir: Path) -> str:
+    """Return the prologue from `investigation.md` as a dense ```invlang body.
 
-    Walks the dense ```invlang surface (the only on-disk format
-    post-cutover) via `iter_companion_dicts`. The screen subagent prompt
-    still embeds YAML, so the parsed prologue is re-serialized.
+    Walks the dense surface via `iter_companion_dicts`, then re-emits
+    the parsed prologue dict as `:V prologue.vertices` + `:E prologue.edges`
+    rows for embedding into the screen subagent prompt.
 
     Raises OrchestrationError if `investigation.md` is missing or has no
     prologue — the SCREEN handler cannot run before CONTEXTUALIZE has written
@@ -113,7 +112,7 @@ def _extract_prologue_yaml(run_dir: Path) -> str:
     for parsed in iter_companion_dicts(inv_path.read_text()):
         prologue = parsed.get("prologue")
         if isinstance(prologue, dict):
-            return yaml.safe_dump({"prologue": prologue}, sort_keys=False)
+            return emit_prologue_dense_body(prologue)
     raise OrchestrationError(
         f"investigation.md at {inv_path} has no prologue block"
     )
@@ -127,13 +126,13 @@ def _extract_prologue_yaml(run_dir: Path) -> str:
 _VALID_SCREEN_RESULTS = {"match", "no_match", "error"}
 
 
-def _assemble_screen_prompt(ctx: Context, prologue_yaml: str) -> str:
+def _assemble_screen_prompt(ctx: Context, prologue_dense: str) -> str:
     return (
         f"run_dir={ctx.run_dir}\n"
         f"signature_id={ctx.signature_id}\n\n"
-        "prologue_yaml:\n"
-        "```yaml\n"
-        f"{prologue_yaml.rstrip()}\n"
+        "prologue_dense:\n"
+        "```invlang\n"
+        f"{prologue_dense.rstrip()}\n"
         "```\n"
     )
 
@@ -315,8 +314,8 @@ def handle(ctx: Context) -> PhaseResult:
     # Step 1: dispatch the merged screen subagent. Prologue is inlined so the
     # subagent can pick `target: v-*` / `e-*` for each lead without reading
     # investigation.md.
-    prologue_yaml = _extract_prologue_yaml(ctx.run_dir)
-    screen_prompt = _assemble_screen_prompt(ctx, prologue_yaml)
+    prologue_dense = _extract_prologue_dense(ctx.run_dir)
+    screen_prompt = _assemble_screen_prompt(ctx, prologue_dense)
     screen_raw = _invoke_screen(screen_prompt)
     parsed = _validate_screen_result(extract_terminal_yaml(screen_raw))
 

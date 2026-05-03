@@ -51,6 +51,7 @@ class GatherDenseEmitError(ValueError):
 _LEAD_COLS = [
     "id", "name", "loop", "target", "mode",
     "system", "template", "query", "window", "status", "tests",
+    "fail_reason",
 ]
 
 
@@ -115,18 +116,21 @@ def _render_lead_row(entry: dict[str, Any]) -> str:
         raise GatherDenseEmitError(
             f"gather findings row missing id/name: {entry!r}"
         )
+    outcome = entry.get("outcome") or {}
+    fail_reason = outcome.get("failure_reason") if isinstance(outcome, dict) else ""
     cells = {
-        "id":       entry["id"],
-        "name":     entry["name"],
-        "loop":     entry.get("loop", ""),
-        "target":   entry.get("target", ""),
-        "mode":     entry.get("mode", ""),
-        "system":   qd.get("system", ""),
-        "template": qd.get("template", ""),
-        "query":    qd.get("query", ""),
-        "window":   flatten_window(qd.get("time_window", "")),
-        "status":   entry.get("status", ""),
-        "tests":    _join_csv(entry.get("tests_hypotheses")),
+        "id":          entry["id"],
+        "name":        entry["name"],
+        "loop":        entry.get("loop", ""),
+        "target":      entry.get("target", ""),
+        "mode":        entry.get("mode", ""),
+        "system":      qd.get("system", ""),
+        "template":    qd.get("template", ""),
+        "query":       qd.get("query", ""),
+        "window":      flatten_window(qd.get("time_window", "")),
+        "status":      entry.get("status", ""),
+        "tests":       _join_csv(entry.get("tests_hypotheses")),
+        "fail_reason": fail_reason or "",
     }
     return "|".join(cell(cells[c]) for c in _LEAD_COLS)
 

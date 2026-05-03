@@ -32,6 +32,7 @@ from scripts.handlers.env_memory import (  # noqa: E402
     parse_atoms_from_file,
     retrieve,
 )
+from tests._dense_fixture_helpers import companion_to_invlang_fence  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -205,24 +206,22 @@ class TestExtractAnchors:
         assert a["signature_id"] == {"custom-no-digits"}
 
     def test_pulls_prologue_vertices(self, tmp_path: Path):
-        inv = textwrap.dedent("""\
-            ## CONTEXTUALIZE
-
-            ```yaml
-            prologue:
-              vertices:
-                - id: v-001
-                  type: endpoint
-                  classification: host-with-wazuh-indexer-jdk
-                  identifier: tgt-01
-                - id: v-002
-                  type: process
-                  classification: shell-process
-                  identifier: bash-pid-1234
-              edges: []
-            ```
-        """)
-        (tmp_path / "investigation.md").write_text(inv)
+        fence = companion_to_invlang_fence({
+            "prologue": {
+                "vertices": [
+                    {"id": "v-001", "type": "endpoint",
+                     "classification": "host-with-wazuh-indexer-jdk",
+                     "identifier": "tgt-01"},
+                    {"id": "v-002", "type": "process",
+                     "classification": "shell-process",
+                     "identifier": "bash-pid-1234"},
+                ],
+                "edges": [],
+            },
+        })
+        (tmp_path / "investigation.md").write_text(
+            "## CONTEXTUALIZE\n\n" + fence + "\n"
+        )
         ctx = FakeCtx(run_dir=tmp_path)
         a = extract_anchors(ctx)
         assert "host-with-wazuh-indexer-jdk" in a["vertex_classification"]
@@ -231,35 +230,34 @@ class TestExtractAnchors:
         assert "bash-pid-1234" in a["vertex_identifier"]
 
     def test_derives_mechanic_from_hypothesis_triple(self, tmp_path: Path):
-        inv = textwrap.dedent("""\
-            ## CONTEXTUALIZE
-
-            ```yaml
-            prologue:
-              vertices:
-                - id: v-001
-                  type: process
-                  classification: shell-process
-                  identifier: bash-1
-              edges: []
-            ```
-
-            ## PREDICT (loop 1)
-
-            ```yaml
-            hypothesize:
-              hypotheses:
-                - id: h-001
-                  name: "?spawned-by-cron"
-                  attached_to_vertex: v-001
-                  proposed_edge:
-                    relation: spawned
-                    parent_vertex:
-                      type: process
-                      classification: cron-daemon
-                  weight: null
-            ```
-        """)
+        inv = (
+            "## CONTEXTUALIZE\n\n"
+            + companion_to_invlang_fence({
+                "prologue": {
+                    "vertices": [{
+                        "id": "v-001", "type": "process",
+                        "classification": "shell-process",
+                        "identifier": "bash-1",
+                    }],
+                    "edges": [],
+                },
+            })
+            + "\n\n## PREDICT (loop 1)\n\n"
+            + companion_to_invlang_fence({
+                "hypothesize": {"hypotheses": [{
+                    "id": "h-001", "name": "?spawned-by-cron",
+                    "attached_to_vertex": "v-001",
+                    "proposed_edge": {
+                        "relation": "spawned",
+                        "parent_vertex": {
+                            "type": "process",
+                            "classification": "cron-daemon",
+                        },
+                    },
+                }]},
+            })
+            + "\n"
+        )
         (tmp_path / "investigation.md").write_text(inv)
         ctx = FakeCtx(run_dir=tmp_path)
         a = extract_anchors(ctx)
@@ -348,42 +346,40 @@ class TestRetrieve:
         run_dir.mkdir(parents=True, exist_ok=True)
         if with_process_exec:
             # Hypothesis whose triple maps to process-exec
-            inv = textwrap.dedent("""\
-                ```yaml
-                prologue:
-                  vertices:
-                    - id: v-001
-                      type: process
-                      classification: host-with-wazuh-indexer-jdk
-                      identifier: p1
-                  edges: []
-                ```
-
-                ```yaml
-                hypothesize:
-                  hypotheses:
-                    - id: h-001
-                      attached_to_vertex: v-001
-                      proposed_edge:
-                        relation: spawned
-                        parent_vertex: {type: process, classification: cron-daemon}
-                      weight: null
-                ```
-            """)
+            companion = {
+                "prologue": {
+                    "vertices": [{
+                        "id": "v-001", "type": "process",
+                        "classification": "host-with-wazuh-indexer-jdk",
+                        "identifier": "p1",
+                    }],
+                    "edges": [],
+                },
+                "hypothesize": {"hypotheses": [{
+                    "id": "h-001", "name": "?spawned-by-cron",
+                    "attached_to_vertex": "v-001",
+                    "proposed_edge": {
+                        "relation": "spawned",
+                        "parent_vertex": {
+                            "type": "process",
+                            "classification": "cron-daemon",
+                        },
+                    },
+                }]},
+            }
         else:
             # Loop-1 case: prologue only, no hypothesis yet
-            inv = textwrap.dedent("""\
-                ```yaml
-                prologue:
-                  vertices:
-                    - id: v-001
-                      type: endpoint
-                      classification: host-with-wazuh-indexer-jdk
-                      identifier: ep1
-                  edges: []
-                ```
-            """)
-        (run_dir / "investigation.md").write_text(inv)
+            companion = {
+                "prologue": {
+                    "vertices": [{
+                        "id": "v-001", "type": "endpoint",
+                        "classification": "host-with-wazuh-indexer-jdk",
+                        "identifier": "ep1",
+                    }],
+                    "edges": [],
+                },
+            }
+        (run_dir / "investigation.md").write_text(companion_to_invlang_fence(companion) + "\n")
         return FakeCtx(run_dir=run_dir)
 
     def test_returns_matched_atom_with_flags(self, tmp_path: Path):

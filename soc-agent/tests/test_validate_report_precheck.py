@@ -24,11 +24,12 @@ from hooks.scripts.investigation_parse import (
 from hooks.scripts.validate_report_precheck import (
     check_frontier_closure,
     check_termination_vs_verdict,
-    extract_conclude_yaml,
+    extract_conclude_dense,
     extract_status,
     load_archetype_description,
     load_sibling_archetypes,
 )
+from tests._dense_fixture_helpers import companion_to_invlang_fence
 
 HOOK_SCRIPT = SOC_AGENT_ROOT / "hooks" / "scripts" / "validate_report_precheck.py"
 
@@ -60,59 +61,40 @@ class TestExtractStatus:
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: extract_conclude_yaml
+# Unit tests: extract_conclude_dense
 # ---------------------------------------------------------------------------
 
 
-class TestExtractConcludeYaml:
+class TestExtractConcludeDense:
     def test_extracts_conclude_block(self):
-        text = textwrap.dedent("""\
-            ## REPORT
-            text
-
-            ```yaml
-            conclude:
-              disposition: benign
-              matched_archetype: monitoring-probe
-              confidence: high
-              summary: ok
-            ```
-            """)
-        result = extract_conclude_yaml(text)
+        fence = companion_to_invlang_fence({
+            "conclude": {
+                "termination": {"category": "adversarial-refuted",
+                                "rationale": "tests refuted"},
+                "disposition": "benign",
+                "matched_archetype": "monitoring-probe",
+                "confidence": "high",
+                "summary": "ok",
+            },
+        })
+        text = "## REPORT\ntext\n\n" + fence + "\n"
+        result = extract_conclude_dense(text)
         assert result is not None
         assert result["matched_archetype"] == "monitoring-probe"
         assert result["disposition"] == "benign"
 
-    def test_no_yaml_block(self):
+    def test_no_conclude_block(self):
         text = "## REPORT\n**Verdict:** resolved — foo\n"
-        assert extract_conclude_yaml(text) is None
+        assert extract_conclude_dense(text) is None
 
-    def test_other_yaml_block_only(self):
-        # A non-conclude yaml block (e.g., a findings: block earlier in
-        # the file) does not satisfy the gate.
-        text = textwrap.dedent("""\
-            ```yaml
-            findings:
-              - id: l-1
-                name: foo
-            ```
-            """)
-        assert extract_conclude_yaml(text) is None
-
-    def test_skips_unparseable_block_finds_next(self):
-        text = textwrap.dedent("""\
-            ```yaml
-            : invalid : yaml :
-            ```
-
-            ```yaml
-            conclude:
-              matched_archetype: foo
-            ```
-            """)
-        result = extract_conclude_yaml(text)
-        assert result is not None
-        assert result["matched_archetype"] == "foo"
+    def test_other_block_only(self):
+        # A non-conclude block (e.g., a findings: block earlier in the
+        # file) does not satisfy the gate.
+        fence = companion_to_invlang_fence({
+            "findings": [{"id": "l-1", "loop": 1, "name": "foo", "target": "v-001"}],
+        })
+        text = "## REPORT\n" + fence + "\n"
+        assert extract_conclude_dense(text) is None
 
 
 # ---------------------------------------------------------------------------
@@ -120,38 +102,34 @@ class TestExtractConcludeYaml:
 # ---------------------------------------------------------------------------
 
 
-def _companion_md(yaml_blocks: list[str]) -> str:
-    """Wrap raw YAML strings into ```yaml blocks inside a minimal investigation.md."""
-    parts = ["## CONTEXTUALIZE\n"]
-    for block in yaml_blocks:
-        parts.append("\n```yaml\n" + block + "\n```\n")
-    parts.append("\n## REPORT\n\n**Verdict:** resolved\n")
-    return "".join(parts)
+def _companion_md(companion: dict) -> str:
+    """Wrap a companion dict into a minimal investigation.md with one
+    ```invlang fence followed by a ## REPORT verdict line."""
+    fence = companion_to_invlang_fence(companion)
+    return (
+        "## CONTEXTUALIZE\n\n"
+        + fence + "\n\n"
+        + "## REPORT\n\n**Verdict:** resolved\n"
+    )
 
 
-_RESOLVING_CONCLUDE = (
-    "conclude:\n"
-    "  termination:\n"
-    "    category: adversarial-refuted\n"
-    "    rationale: \"tests refuted\"\n"
-    "  disposition: benign\n"
-    "  confidence: high\n"
-    "  summary: \"test\"\n"
-)
+_RESOLVING_CONCLUDE = {
+    "termination": {"category": "adversarial-refuted",
+                    "rationale": "tests refuted"},
+    "disposition": "benign",
+    "confidence": "high",
+    "summary": "test",
+}
 
-_ESCALATION_CONCLUDE = (
-    "conclude:\n"
-    "  termination:\n"
-    "    category: severity-ceiling\n"
-    "    rationale: \"tool-unavailable\"\n"
-    "  disposition: unclear\n"
-    "  confidence: medium\n"
-    "  ceiling_test:\n"
-    "    kind: tool-unavailable\n"
-    "    subject: \"vpn-audit\"\n"
-    "  ceiling_rationale: \"no vpn audit source\"\n"
-    "  summary: \"escalated\"\n"
-)
+_ESCALATION_CONCLUDE = {
+    "termination": {"category": "severity-ceiling",
+                    "rationale": "tool-unavailable"},
+    "disposition": "unclear",
+    "confidence": "medium",
+    "ceiling_test": {"kind": "tool-unavailable", "subject": "vpn-audit"},
+    "ceiling_rationale": "no vpn audit source",
+    "summary": "escalated",
+}
 
 
 class TestCheckFrontierClosure:
@@ -159,58 +137,29 @@ class TestCheckFrontierClosure:
         assert check_frontier_closure("## REPORT\nprose only\n") is None
 
     def test_all_resolved_passes(self):
-        hypothesize = (
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?scanner\"\n"
-        )
-        lead = (
-            "findings:\n"
-            "  - id: l-001\n"
-            "    loop: 1\n"
-            "    name: t\n"
-            "    target: v-001\n"
-            "    query_details: {}\n"
-            "    outcome:\n"
-            "      observations:\n"
-            "        vertices: []\n"
-            "        edges: []\n"
-            "    resolutions:\n"
-            "      - hypothesis: h-001\n"
-            "        after: \"++\"\n"
-            "        supporting_edges: []\n"
-        )
-        text = _companion_md([hypothesize, lead, _RESOLVING_CONCLUDE])
+        text = _companion_md({
+            "hypothesize": {"hypotheses": [{"id": "h-001", "name": "?scanner"}]},
+            "findings": [{
+                "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+                "resolutions": [{"hypothesis": "h-001", "after": "++"}],
+            }],
+            "conclude": _RESOLVING_CONCLUDE,
+        })
         assert check_frontier_closure(text) is None
 
     def test_active_hypothesis_in_resolving_investigation_fails(self):
-        hypothesize = (
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?scanner\"\n"
-            "    - id: h-002\n"
-            "      name: \"?credential-stuffing\"\n"
-        )
         # Only h-001 gets a resolution; h-002 remains active.
-        lead = (
-            "findings:\n"
-            "  - id: l-001\n"
-            "    loop: 1\n"
-            "    name: t\n"
-            "    target: v-001\n"
-            "    query_details: {}\n"
-            "    outcome:\n"
-            "      observations:\n"
-            "        vertices: []\n"
-            "        edges: []\n"
-            "    resolutions:\n"
-            "      - hypothesis: h-001\n"
-            "        after: \"++\"\n"
-            "        supporting_edges: []\n"
-        )
-        text = _companion_md([hypothesize, lead, _RESOLVING_CONCLUDE])
+        text = _companion_md({
+            "hypothesize": {"hypotheses": [
+                {"id": "h-001", "name": "?scanner"},
+                {"id": "h-002", "name": "?credential-stuffing"},
+            ]},
+            "findings": [{
+                "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+                "resolutions": [{"hypothesis": "h-001", "after": "++"}],
+            }],
+            "conclude": _RESOLVING_CONCLUDE,
+        })
         err = check_frontier_closure(text)
         assert err is not None
         assert "h-002" in err
@@ -218,126 +167,80 @@ class TestCheckFrontierClosure:
 
     def test_active_hypothesis_in_escalation_passes(self):
         """severity-ceiling escalations legitimately hand off active hypotheses."""
-        hypothesize = (
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?scanner\"\n"
-            "    - id: h-002\n"
-            "      name: \"?credential-stuffing\"\n"
-        )
-        text = _companion_md([hypothesize, _ESCALATION_CONCLUDE])
+        text = _companion_md({
+            "hypothesize": {"hypotheses": [
+                {"id": "h-001", "name": "?scanner"},
+                {"id": "h-002", "name": "?credential-stuffing"},
+            ]},
+            "conclude": _ESCALATION_CONCLUDE,
+        })
         assert check_frontier_closure(text) is None
 
     def test_active_hypothesis_in_exhaustion_escalation_passes(self):
-        hypothesize = (
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?scanner\"\n"
-        )
-        conclude = (
-            "conclude:\n"
-            "  termination:\n"
-            "    category: exhaustion-escalation\n"
-            "    rationale: \"loop budget exhausted\"\n"
-            "  disposition: unclear\n"
-            "  confidence: low\n"
-            "  summary: \"out of loops\"\n"
-        )
-        text = _companion_md([hypothesize, conclude])
+        text = _companion_md({
+            "hypothesize": {"hypotheses": [{"id": "h-001", "name": "?scanner"}]},
+            "conclude": {
+                "termination": {"category": "exhaustion-escalation",
+                                "rationale": "loop budget exhausted"},
+                "disposition": "unclear",
+                "confidence": "low",
+                "summary": "out of loops",
+            },
+        })
         assert check_frontier_closure(text) is None
 
     def test_no_conclude_block_passes(self):
         """Without termination.category, structural validation owns the error."""
-        hypothesize = (
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?scanner\"\n"
-        )
-        text = _companion_md([hypothesize])
+        text = _companion_md({
+            "hypothesize": {"hypotheses": [{"id": "h-001", "name": "?scanner"}]},
+        })
         assert check_frontier_closure(text) is None
 
     def test_shelved_hypothesis_in_resolving_passes(self):
-        hypothesize = (
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?scanner\"\n"
-        )
-        lead = (
-            "findings:\n"
-            "  - id: l-001\n"
-            "    loop: 1\n"
-            "    name: t\n"
-            "    target: v-001\n"
-            "    query_details: {}\n"
-            "    outcome:\n"
-            "      observations:\n"
-            "        vertices: []\n"
-            "        edges: []\n"
-            "    shelved: [h-001]\n"
-            "    resolutions: []\n"
-        )
-        text = _companion_md([hypothesize, lead, _RESOLVING_CONCLUDE])
+        text = _companion_md({
+            "hypothesize": {"hypotheses": [{"id": "h-001", "name": "?scanner"}]},
+            "findings": [{
+                "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+                "shelved": ["h-001"],
+            }],
+            "conclude": _RESOLVING_CONCLUDE,
+        })
         assert check_frontier_closure(text) is None
 
     def test_refuted_via_minus_minus_in_resolving_passes(self):
-        hypothesize = (
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?scanner\"\n"
-        )
-        lead = (
-            "findings:\n"
-            "  - id: l-001\n"
-            "    loop: 1\n"
-            "    name: t\n"
-            "    target: v-001\n"
-            "    query_details: {}\n"
-            "    outcome:\n"
-            "      observations:\n"
-            "        vertices: []\n"
-            "        edges: []\n"
-            "    resolutions:\n"
-            "      - hypothesis: h-001\n"
-            "        after: \"--\"\n"
-            "        matched_refutation_ids: [r1]\n"
-            "        supporting_edges: []\n"
-        )
-        text = _companion_md([hypothesize, lead, _RESOLVING_CONCLUDE])
+        text = _companion_md({
+            "hypothesize": {"hypotheses": [{"id": "h-001", "name": "?scanner"}]},
+            "findings": [{
+                "id": "l-001", "loop": 1, "name": "t", "target": "v-001",
+                "resolutions": [{
+                    "hypothesis": "h-001", "after": "--",
+                    "matched_refutation_ids": ["r1"],
+                }],
+            }],
+            "conclude": _RESOLVING_CONCLUDE,
+        })
         assert check_frontier_closure(text) is None
 
     def test_explicit_status_refuted_in_resolving_passes(self):
-        hypothesize = (
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?scanner\"\n"
-            "      status: refuted\n"
-        )
-        text = _companion_md([hypothesize, _RESOLVING_CONCLUDE])
+        text = _companion_md({
+            "hypothesize": {"hypotheses": [
+                {"id": "h-001", "name": "?scanner", "status": "refuted"},
+            ]},
+            "conclude": _RESOLVING_CONCLUDE,
+        })
         assert check_frontier_closure(text) is None
 
     def test_trust_root_category_also_gates(self):
-        hypothesize = (
-            "hypothesize:\n"
-            "  hypotheses:\n"
-            "    - id: h-001\n"
-            "      name: \"?scanner\"\n"
-        )
-        conclude = (
-            "conclude:\n"
-            "  termination:\n"
-            "    category: trust-root\n"
-            "    rationale: \"reached trust root\"\n"
-            "  disposition: benign\n"
-            "  confidence: high\n"
-            "  summary: \"resolved at trust root\"\n"
-        )
-        text = _companion_md([hypothesize, conclude])
+        text = _companion_md({
+            "hypothesize": {"hypotheses": [{"id": "h-001", "name": "?scanner"}]},
+            "conclude": {
+                "termination": {"category": "trust-root",
+                                "rationale": "reached trust root"},
+                "disposition": "benign",
+                "confidence": "high",
+                "summary": "resolved at trust root",
+            },
+        })
         err = check_frontier_closure(text)
         assert err is not None
         assert "h-001" in err
@@ -433,76 +336,65 @@ class TestIsScreenResolved:
 # ---------------------------------------------------------------------------
 
 
-VALID_INVESTIGATION = """\
-## CONTEXTUALIZE
-
-**Alert:** SEC-001
-**Source entity:** 10.0.1.50
-**Playbook hypotheses:** ?monitoring-probe, ?brute-force
-
-## PREDICT (loop 1)
-
-**Selected lead:** authentication-history
-
-## GATHER (loop 1)
-
-**Lead:** authentication-history
-**Raw observation:** 1 authentication attempt from 10.0.1.50
-
-## ANALYZE (loop 1)
-
-hypotheses:
-  ?monitoring-probe:
-    weight: "++"
-    reasoning: matches monitoring cadence
-  ?brute-force:
-    weight: "--"
-    reasoning: single attempt contradicts brute-force prediction of >50
-
-## REPORT
-
-**Verdict:** resolved — monitoring probe from approved source
-**Confirmed hypothesis:** ?monitoring-probe
-
-```yaml
-conclude:
-  termination:
-    category: trust-root
-    rationale: anchor confirmed
-  disposition: benign
-  confidence: high
-  matched_archetype: monitoring-probe
-  summary: monitoring probe from approved-monitoring-sources entry
-```
-"""
+def _build_valid_investigation() -> str:
+    fence = companion_to_invlang_fence({
+        "hypothesize": {"hypotheses": [
+            {"id": "h-001", "name": "?monitoring-probe"},
+            {"id": "h-002", "name": "?brute-force"},
+        ]},
+        "findings": [{
+            "id": "l-001", "loop": 1, "name": "authentication-history",
+            "target": "v-001",
+            "resolutions": [
+                {"hypothesis": "h-001", "after": "++"},
+                {"hypothesis": "h-002", "after": "--",
+                 "matched_refutation_ids": ["r1"]},
+            ],
+        }],
+        "conclude": {
+            "termination": {"category": "trust-root",
+                            "rationale": "anchor confirmed"},
+            "disposition": "benign",
+            "confidence": "high",
+            "matched_archetype": "monitoring-probe",
+            "summary": "monitoring probe from approved-monitoring-sources entry",
+        },
+    })
+    return (
+        "## CONTEXTUALIZE\n\n**Alert:** SEC-001\n\n"
+        "## PREDICT (loop 1)\n\n## GATHER (loop 1)\n\n## ANALYZE (loop 1)\n\n"
+        "## REPORT\n\n"
+        "**Verdict:** resolved — monitoring probe from approved source\n\n"
+        + fence + "\n"
+    )
 
 
-SCREEN_RESOLVED_INVESTIGATION = """\
-## CONTEXTUALIZE
+VALID_INVESTIGATION = _build_valid_investigation()
 
-**Alert:** SEC-003
 
-## SCREEN
+def _build_screen_resolved_investigation() -> str:
+    fence = companion_to_invlang_fence({
+        "conclude": {
+            "termination": {"category": "trust-root",
+                            "rationale": "screen match"},
+            "disposition": "benign",
+            "confidence": "high",
+            "matched_archetype": "monitoring-probe",
+            "summary": "screen pattern match",
+        },
+    })
+    return (
+        "## CONTEXTUALIZE\n\n**Alert:** SEC-003\n\n"
+        "## SCREEN\n\n**Result:** match\n"
+        "**Leads run:** authentication-history (no anomalies)\n"
+        "**Outcome:** proceeding to REPORT\n\n"
+        "## REPORT\n\n"
+        "**Verdict:** resolved — known monitoring probe pattern\n\n"
+        + fence + "\n"
+    )
 
-**Result:** match
-**Leads run:** authentication-history (no anomalies)
-**Outcome:** proceeding to REPORT
 
-## REPORT
-
-**Verdict:** resolved — known monitoring probe pattern
-
-```yaml
-conclude:
-  termination:
-    category: trust-root
-    rationale: screen match
-  disposition: benign
-  confidence: high
-  matched_archetype: monitoring-probe
-  summary: screen pattern match
-```
-"""
+SCREEN_RESOLVED_INVESTIGATION = _build_screen_resolved_investigation()
 
 
 def _setup_run(
@@ -718,13 +610,13 @@ class TestScreenResolved:
         assert "ticket-context" in result.stderr
 
 
-class TestPreYamlConcludeWrite:
-    """First REPORT write (header + prose only, no yaml block yet) is
-    a deferred-pass — wait for the conclude: yaml block before judging."""
+class TestPreConcludeWrite:
+    """First REPORT write (header + prose only, no conclude block yet) is
+    a deferred-pass — wait for the conclude block before judging."""
 
     def test_header_only_passes(self, tmp_path):
-        # Strip the yaml block — leaves just ## REPORT + verdict prose.
-        text = VALID_INVESTIGATION.split("```yaml", 1)[0]
+        # Strip the dense conclude fence — leaves just ## REPORT + verdict prose.
+        text = VALID_INVESTIGATION.split("```invlang", 1)[0]
         runs_dir, run_dir = _setup_run(tmp_path, investigation_text=text)
         # No fake claude — must not invoke a judge.
         event = _make_hook_event(str(run_dir / "investigation.md"))
@@ -832,24 +724,19 @@ class TestTicketContextGate:
 
 
 def _conclude_md(verdict: str, category: str, matched_archetype: str | None) -> str:
-    ma_line = (
-        f"  matched_archetype: {matched_archetype}\n"
-        if matched_archetype is not None
-        else "  matched_archetype: null\n"
-    )
+    conclude: dict = {
+        "termination": {"category": category, "rationale": "test"},
+        "disposition": "benign",
+        "confidence": "high",
+        "summary": "test",
+    }
+    if matched_archetype is not None:
+        conclude["matched_archetype"] = matched_archetype
+    fence = companion_to_invlang_fence({"conclude": conclude})
     return (
         "## REPORT\n\n"
         f"**Verdict:** {verdict} — test\n\n"
-        "```yaml\n"
-        "conclude:\n"
-        "  termination:\n"
-        f"    category: {category}\n"
-        "    rationale: \"test\"\n"
-        "  disposition: benign\n"
-        "  confidence: high\n"
-        f"{ma_line}"
-        "  summary: \"test\"\n"
-        "```\n"
+        + fence + "\n"
     )
 
 
@@ -897,13 +784,15 @@ class TestCheckTerminationVsVerdict:
         assert err is not None
         assert "exhaustion-escalation" in err
 
-    def test_no_conclude_yaml_passes(self):
+    def test_no_conclude_block_passes(self):
         text = "## REPORT\n\n**Verdict:** resolved\n"
         assert check_termination_vs_verdict(text) is None
 
     def test_missing_termination_category_passes(self):
-        text = (
-            "## REPORT\n\n**Verdict:** resolved\n"
-            "```yaml\nconclude:\n  disposition: benign\n```\n"
-        )
+        # `conclude` without termination.category — structural validation
+        # owns that error; check_termination_vs_verdict must pass through.
+        # Note: the dense `:T conclude` block requires at least one scalar,
+        # so use `disposition` as a stand-in.
+        fence = companion_to_invlang_fence({"conclude": {"disposition": "benign"}})
+        text = "## REPORT\n\n**Verdict:** resolved\n\n" + fence + "\n"
         assert check_termination_vs_verdict(text) is None

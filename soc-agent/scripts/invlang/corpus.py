@@ -1,17 +1,10 @@
 """Investigation-language companion loader.
 
-Two source shapes are supported:
-
-1. Live investigation.md (default). A single markdown file containing one or
-   more ```yaml fenced blocks — one per phase (prologue, hypothesize, gather,
-   conclude). Blocks are merged into a single companion body. This is the
-   canonical source for the query tool: it walks SOC_AGENT_RUNS_DIR for
-   `**/investigation.md` and loads every finished (prologue + gather +
-   conclude) investigation it finds.
-
-2. Hand-curated companion YAML (allowlist). A single .yaml file holding the
-   full four-phase companion body. Used for the pilot corpus; callers pass
-   an explicit (root, paths) allowlist.
+Walks `**/investigation.md` under the corpus root and parses each file's
+`​```invlang` dense fences into a single companion body. The ```invlang
+surface is the only on-disk format post-cutover (the validator rejects
+yaml fences); every block tag projects to the canonical companion dict
+via `scripts/handlers/_dense_parser.py`.
 """
 
 from __future__ import annotations
@@ -23,8 +16,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator
-
-import yaml
 
 
 # ---------------------------------------------------------------------------
@@ -55,19 +46,6 @@ def _corpus_root() -> Path:
 COMPANION_TOP_LEVEL = {"prologue", "hypothesize", "findings", "conclude"}
 # v2.6: hypothesize is optional when screen_result: match short-circuits the loop.
 _COMPANION_REQUIRED_KEYS = {"prologue", "findings", "conclude"}
-
-YAML_BLOCK_RE = re.compile(r"```yaml\n(.*?)\n```", re.DOTALL)
-
-# Pilot corpus allowlist — deliberate: only finalized v2.5/v2.6 translations.
-# Update when a new case lands. Paths are relative to the corpus root.
-PILOT_CORPUS_FILES: tuple[str, ...] = (
-    "case-a1/walk-a1-v2.5.yaml",
-    "case-a4/walk-a4-v2.5.yaml",
-    "case-m365/walk-m365-v2.5.yaml",
-    "case-real-rule5710/companion-v2.5.yaml",
-    "case-ssh-brute/companion-v2.5.yaml",
-    "case-ssh-cron/companion-v2.5.yaml",
-)
 
 
 # ---------------------------------------------------------------------------
@@ -149,117 +127,34 @@ def signature_id_from_path(path: Path) -> str | None:
     return f"wazuh-rule-{m.group(1)}" if m else None
 
 
-def _merge_md_blocks(text: str) -> dict[str, Any]:
-    """Merge every ```yaml block in an investigation.md into one companion body.
-
-    Live investigations write one block per phase (prologue at CONTEXTUALIZE,
-    hypothesize at PREDICT, gather lead at ANALYZE, conclude at REPORT);
-    gather blocks may appear multiple times. This mirrors the merge in cli.py's
-    `--ids` handler.
-
-    Both `findings:` (current spec) and `gather:` (older on-disk shape) are
-    accepted as aliases for the lead-block list. They merge into the same
-    `findings` key in the returned dict.
-
-    REPORT phase emits its `conclude` block in **dense format** (see
-    `scripts/handlers/_conclude_dense.py`). The dense block sits outside
-    any ```yaml fence; we parse it separately and merge into `conclude`.
-    The YAML branch is preserved as a fallback for archived corpora that
-    predate the migration.
-    """
-    merged: dict[str, Any] = {}
-    for match in YAML_BLOCK_RE.finditer(text):
-        try:
-            doc = yaml.safe_load(match.group(1))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
-        for key in ("prologue", "hypothesize", "conclude"):
-            if key in doc:
-                merged[key] = doc[key]
-        for findings_key in ("findings", "gather"):
-            entries = doc.get(findings_key)
-            if isinstance(entries, list):
-                merged.setdefault("findings", [])
-                merged["findings"].extend(entries)
-
-    # ```invlang fenced blocks (Foundation-onward dense surface). Walked
-    # via the unified parser, projected to the canonical companion dict,
-    # and merged in last-wins order (matches the on-disk write convention:
-    # newer dense emissions override older YAML fences for the same key).
-    # Old corpus files without invlang fences are unaffected — this path
-    # is a no-op when no fence is present.
-    dense_doc = _parse_dense_companion(text)
-    if dense_doc:
-        for key in ("prologue", "hypothesize", "conclude"):
-            if key in dense_doc:
-                merged[key] = dense_doc[key]
-        if isinstance(dense_doc.get("findings"), list):
-            merged.setdefault("findings", [])
-            merged["findings"].extend(dense_doc["findings"])
-
-    # Legacy bare `:T conclude` (no fence) — pre-Foundation on-disk shape.
-    # Skip if a ```invlang fence already produced a conclude.
-    if "conclude" not in merged:
-        dense_conclude = _parse_dense_conclude(text)
-        if dense_conclude is not None:
-            merged["conclude"] = dense_conclude
-
-    return merged
-
-
 _SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_SOC_AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(_SOC_AGENT_ROOT))
 
 
-def _parse_dense_conclude(text: str) -> dict[str, Any] | None:
-    """Parse the REPORT-phase dense `:T conclude` block from `text`.
+def _merge_md_blocks(text: str) -> dict[str, Any]:
+    """Parse every ```invlang fence in an investigation.md into one companion body.
 
-    SOC_AGENT_ROOT is added to sys.path at module top so the import
-    resolves under every entrypoint that reaches corpus.py.
-
-    A malformed dense block emits a stderr warning and returns None —
-    the precise error surfaces from the invlang validator at write time,
-    but we shouldn't swallow it silently during a corpus walk.
-    """
-    from scripts.handlers._conclude_dense import (  # type: ignore
-        ConcludeOutputError,
-        parse_conclude_dense,
-    )
-    try:
-        return parse_conclude_dense(text)
-    except ConcludeOutputError as e:
-        print(
-            f"[invlang.corpus] warning: malformed dense :T conclude block "
-            f"during corpus walk — skipping conclude. Error: {e}",
-            file=sys.stderr,
-        )
-        return None
-
-
-def _parse_dense_companion(text: str) -> dict[str, Any] | None:
-    """Walk ```invlang fences in `text` via the unified dense parser.
-
-    Returns the canonical companion dict (matches the YAML-fence dict
-    shape) or None if no fences are present. Malformed dense content
-    emits a stderr warning and returns None — corpus walks should not
-    crash on a single bad investigation.
+    The dense parser projects all fences in the document into a single
+    canonical companion dict (prologue, hypothesize, findings, conclude).
+    Returns an empty dict when no fences are present or the dense surface
+    is malformed — a stderr warning is emitted in the malformed case so
+    corpus walks don't crash on a single bad file.
     """
     from scripts.handlers._dense_parser import (  # type: ignore
         DenseParseError,
         parse_dense_companion,
     )
     try:
-        return parse_dense_companion(text)
+        dense_doc = parse_dense_companion(text)
     except DenseParseError as e:
         print(
             f"[invlang.corpus] warning: malformed ```invlang block "
             f"during corpus walk — skipping dense surface. Error: {e}",
             file=sys.stderr,
         )
-        return None
+        return {}
+    return dense_doc or {}
 
 
 _CREATED_HEADER_RE = re.compile(
@@ -289,34 +184,28 @@ def write_created_header(now_iso: str) -> str:
 
 
 def _load_from_path(path: Path) -> list[Companion]:
-    """Parse a file and return every companion it contains (0 or more).
+    """Parse an investigation.md and return the companion it contains (0 or 1).
 
-    .yaml  — one companion per file (whole document is the body).
-    .md    — merge every ```yaml block into a single companion body.
+    Walks every ```invlang fence in the file via `_merge_md_blocks` into a
+    single canonical companion body.
     """
     results: list[Companion] = []
-    if path.suffix == ".yaml":
-        try:
-            doc = yaml.safe_load(path.read_text())
-        except yaml.YAMLError:
-            return results
-        if _looks_like_companion(doc):
-            results.append(Companion(_case_id_from_path(path), path, doc))
-    elif path.suffix == ".md":
-        try:
-            text = path.read_text()
-        except OSError:
-            return results
-        merged = _merge_md_blocks(text)
-        if _looks_like_companion(merged):
-            results.append(
-                Companion(
-                    case_id=_case_id_from_path(path),
-                    source_path=path,
-                    body=merged,
-                    created_at=_read_created_header(text),
-                )
+    if path.suffix != ".md":
+        return results
+    try:
+        text = path.read_text()
+    except OSError:
+        return results
+    merged = _merge_md_blocks(text)
+    if _looks_like_companion(merged):
+        results.append(
+            Companion(
+                case_id=_case_id_from_path(path),
+                source_path=path,
+                body=merged,
+                created_at=_read_created_header(text),
             )
+        )
     return results
 
 
@@ -431,51 +320,31 @@ def discover_run_investigations(root: Path) -> list[Companion]:
 
 
 @lru_cache(maxsize=16)
-def _load_corpus_cached(
-    effective_root: Path,
-    paths: tuple[str, ...] | None,
-) -> tuple[Companion, ...]:
-    """Memoized core: same `(effective_root, paths)` returns the same tuple.
+def _load_corpus_cached(effective_root: Path) -> tuple[Companion, ...]:
+    """Memoized core: same `effective_root` returns the same tuple.
 
-    Cached because corpus scans are filesystem-heavy (~17s for ~40
-    companions) and both live orchestrator runs and tests call this many
-    times per session against an unchanging corpus. Returns a tuple so the
-    cache entry is immutable — callers materialize to a list.
+    Cached because corpus scans are filesystem-heavy and both live
+    orchestrator runs and tests call this many times per session against
+    an unchanging corpus. Returns a tuple so the cache entry is immutable
+    — callers materialize to a list.
     """
-    if paths is None:
-        return tuple(discover_run_investigations(effective_root))
-
-    companions: list[Companion] = []
-    for rel in paths:
-        abs_path = effective_root / rel
-        if not abs_path.exists():
-            print(f"warning: {rel} not found under {effective_root}, skipping", file=sys.stderr)
-            continue
-        companions.extend(_load_from_path(abs_path))
-    return tuple(companions)
+    return tuple(discover_run_investigations(effective_root))
 
 
-def load_corpus(
-    root: Path | None = None,
-    paths: tuple[str, ...] | None = None,
-) -> list[Companion]:
-    """Load companions.
+def load_corpus(root: Path | None = None) -> list[Companion]:
+    """Load every finished `investigation.md` under `root` (or _corpus_root()).
 
-    Default (paths=None): walk `root` (or _corpus_root()) for
-    `**/investigation.md` and merge each file's yaml blocks into one
-    companion. This is the live-investigation source.
+    Each file's ```invlang fences are merged into one companion body via
+    `_merge_md_blocks`. Files that don't yield a finished companion
+    (missing prologue / findings / conclude) are skipped.
 
-    Allowlist mode (paths is a tuple): load exactly those relative paths
-    from `root`. Used for the hand-curated pilot corpus; pass
-    `paths=PILOT_CORPUS_FILES` and `root=<pilot dir>` explicitly.
-
-    Results are memoized per (effective_root, paths) via `_load_corpus_cached`
-    — clear with `load_corpus.cache_clear()` (a thin wrapper is exposed
-    below) when callers need to see fresh corpus state (e.g. after a run
-    writes a new investigation.md in the same process).
+    Results are memoized per `effective_root` via `_load_corpus_cached`
+    — clear with `clear_corpus_cache()` when callers need to see fresh
+    corpus state (e.g. after a run writes a new investigation.md in the
+    same process).
     """
     effective_root = root if root is not None else _corpus_root()
-    return list(_load_corpus_cached(effective_root, paths))
+    return list(_load_corpus_cached(effective_root))
 
 
 def clear_corpus_cache() -> None:

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Iterator
 
-import yaml
-
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
@@ -18,7 +16,12 @@ def parse_markdown(text: str) -> list[Token]:
 
 
 def iter_yaml_fences(raw: str) -> Iterator[str]:
-    """Yield body text of every fenced block whose info string starts with ``yaml``."""
+    """Yield body text of every fenced block whose info string starts with ``yaml``.
+
+    Used for parsing **subagent stdout** (still a yaml contract) — not
+    for `investigation.md`, which post-cutover only carries ```invlang
+    fences.
+    """
     for tok in parse_markdown(raw):
         if tok.type != "fence":
             continue
@@ -28,35 +31,16 @@ def iter_yaml_fences(raw: str) -> Iterator[str]:
 
 
 def iter_companion_dicts(raw: str) -> Iterator[dict[str, Any]]:
-    """Yield parsed companion-shape dicts from every structured fence in `raw`.
+    """Yield the parsed companion-shape dict from every ```invlang fence in `raw`.
 
-    Walks both ```yaml fences (one dict per fence via `yaml.safe_load`) and
-    the unified ```invlang dense surface (one combined dict via
-    `parse_dense_companion`). Non-dict YAML documents, malformed YAML, and
-    malformed dense blocks are silently skipped — this is a permissive
-    walker, not a substitute for the invlang validator (callers that need
-    parse errors must go through `invlang_validate.py`).
-
-    Ordering and merge semantics — important for callers that care about
-    "first" or "last":
-    - YAML fences are yielded first, in document order (one dict per fence).
-    - The dense surface is yielded last as a single combined dict
-      aggregating every ```invlang fence in the document, regardless of
-      where those fences sit physically.
-    During the strict-cutover migration both fence types coexist; in steady
-    state only the dense fence will remain, so this ordering quirk is
-    transient and does not affect call sites today.
+    Post-cutover the validator rejects ```yaml fences in `investigation.md`,
+    so the dense surface is the only structured shape on disk. The dense
+    parser projects every ```invlang fence in `raw` to one combined
+    canonical companion dict, which is yielded once. Malformed dense
+    blocks are silently skipped — this is a permissive walker, not a
+    substitute for the invlang validator (callers that need parse errors
+    must go through `invlang_validate.py`).
     """
-    for body in iter_yaml_fences(raw):
-        try:
-            doc = yaml.safe_load(body)
-        except yaml.YAMLError:
-            continue
-        if isinstance(doc, dict):
-            yield doc
-
-    # Lazy import — `_dense_parser` is heavier than `_markdown` consumers
-    # who only want yaml fences should not pay for it on import.
     try:
         from scripts.handlers._dense_parser import (  # type: ignore
             parse_dense_companion,

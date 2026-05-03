@@ -203,8 +203,10 @@ def test_project_hypothesis_with_predictions_and_refutations():
         "attached_to_vertex": "v-001",
         "proposed_edge": {
             "relation": "initiated_by",
-            "parent_type": "identity",
-            "parent_class": "approved-monitoring-service-account",
+            "parent_vertex": {
+                "type": "identity",
+                "classification": "approved-monitoring-service-account",
+            },
         },
         "predictions": [{
             "id": "p1",

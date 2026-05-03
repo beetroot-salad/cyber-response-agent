@@ -16,9 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from .corpus import Companion, load_corpus, PILOT_CORPUS_FILES, _corpus_root, YAML_BLOCK_RE, extract_ids
+from .corpus import Companion, load_corpus, _corpus_root, _merge_md_blocks, extract_ids
 from .queries import (
     ENUM_CHOICES,
     _parse_vertex_where_spec,
@@ -215,8 +213,8 @@ GLOBAL OPTIONS
 
 CORPUS
   Default: walks $SOC_AGENT_RUNS_DIR for **/investigation.md and merges each
-  file's ```yaml blocks into one companion. Finished investigations only
-  (prologue + gather + conclude required).
+  file's ```invlang fences into one companion. Finished investigations only
+  (prologue + findings + conclude required).
   Override: set INVLANG_CORPUS_ROOT env var to point at a different runs tree.
 
 OUTPUT
@@ -532,22 +530,7 @@ def _run_ids(path_str: str) -> int:
             print(f"{kind + ':':<12} (none)")
         return 0
 
-    text = path.read_text()
-    merged: dict[str, Any] = {}
-    for match in YAML_BLOCK_RE.finditer(text):
-        try:
-            doc = yaml.safe_load(match.group(1))
-        except Exception:
-            continue
-        if not isinstance(doc, dict):
-            continue
-        for key in ("prologue", "hypothesize", "conclude"):
-            if key in doc:
-                merged[key] = doc[key]
-        if "findings" in doc:
-            merged.setdefault("findings", [])
-            merged["findings"].extend(doc["findings"])
-
+    merged = _merge_md_blocks(path.read_text())
     ids = extract_ids(merged)
     for kind, id_list in ids.items():
         val = "  ".join(id_list) if id_list else "(none)"

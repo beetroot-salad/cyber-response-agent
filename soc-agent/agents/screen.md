@@ -19,7 +19,9 @@ You are **read-only**. You emit one YAML block carrying both verdicts, then stop
 
 - `run_dir` — absolute path to the run directory (contains `alert.json`)
 - `signature_id` — e.g. `wazuh-rule-5710`
-- `prologue_yaml` — the investigation's `prologue:` YAML block (from `investigation.md`), inlined in the prompt. Use it to pick each lead's `target: v-{id}` or `e-{id}`. **Do not read investigation.md to recover it.**
+- `prologue_dense` — the investigation's prologue as dense `​```invlang` (the on-disk surface), inlined in the prompt. Use it to pick each lead's `target: v-{id}` or `e-{id}`. **Do not read investigation.md to recover it.**
+
+  Reading the dense prologue: each `:V prologue.vertices` row has columns `[id|type|class|ident|attrs]`; each `:E prologue.edges` row has `[id|rel|src|tgt|when|auth_kind:source|attrs]`. To target a vertex, copy the `id` (e.g. `v-001`) from a row whose `ident` matches the alert field. To target an edge, copy the `id` (e.g. `e-001`) from a row whose `rel` matches the lead's relation.
 
 If any substitution is missing, emit `screen_result: error` with `reason: "missing required substitution: <name>"` and stop. Do not guess.
 
@@ -86,7 +88,7 @@ Never set `tests`, `observes`, `predictions`, `selection_rationale`, or `new_hyp
 
 ## Target selection
 
-Decide `target` from the lead's name + what the `prologue_yaml` contains:
+Decide `target` from the lead's name + what `prologue_dense` contains:
 
 - **`source-classification`** → source endpoint vertex (the `v-*` whose `identifier` equals the alert's `data.srcip` per the prologue).
 - **`username-classification`** → identity vertex (the `v-*` with `type: identity`).

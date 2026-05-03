@@ -1,27 +1,12 @@
-<!-- Lead `process-lineage` exists in the catalog but has no templates/wazuh.md.
-     The agent declared template: wazuh; the per-vendor template is missing.
-     Per gather's _lead_template_path rule, this routes to ad-hoc. -->
+<!-- process-lineage is in the catalog but ships no templates/wazuh.md;
+     gather routes the missing template to ad-hoc. -->
 
 ## GATHER (loop 1)
 
-```yaml
-gather:
-  - id: l-001
-    loop: 1
-    name: process-lineage
-    target: v-001
-    selection_rationale: "Walk the parent chain of the suspect process."
-    query_details:
-      system: host-query
-      template: wazuh
-      query: "process-list --pid 12345"
-      time_window: "2026-04-18T20:00Z–2026-04-18T21:00Z"
-      substitutions:
-        pid: "12345"
-    outcome:
-      attribute_updates: []
-      observations:
-        vertices: []
-        edges: []
-    resolutions: []
+```invlang
+:L findings [id|name|loop|target|mode|system|template|query|window|status|tests|fail_reason]
+l-001|process-lineage|1|v-001|gather|host-query|wazuh|process-list --pid 12345|2026-04-18T20:00Z–2026-04-18T21:00Z|||
+
+:L l-001.substitutions [key|value]
+pid|12345
 ```

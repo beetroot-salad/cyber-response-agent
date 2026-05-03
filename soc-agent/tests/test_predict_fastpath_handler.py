@@ -75,20 +75,33 @@ rationale             "cadence baseline partitions both hypotheses"
 # ---------------------------------------------------------------------------
 
 
-_PROLOGUE_MARKDOWN = """## CONTEXTUALIZE
+def _build_prologue_markdown() -> str:
+    from tests._dense_fixture_helpers import companion_to_invlang_fence
+    fence = companion_to_invlang_fence({
+        "prologue": {
+            "vertices": [
+                {"id": "v-src", "type": "endpoint",
+                 "classification": "internal-monitoring-host",
+                 "identifier": "172.22.0.5"},
+                {"id": "v-user", "type": "identity",
+                 "classification": "monitoring-pattern",
+                 "identifier": "nagios"},
+                {"id": "v-target", "type": "endpoint",
+                 "classification": "internal-server",
+                 "identifier": "host-001"},
+            ],
+            "edges": [{
+                "id": "e-001", "relation": "attempted_auth",
+                "source_vertex": "v-src", "target_vertex": "v-target",
+                "authority": {"kind": "siem-event",
+                              "source": "wazuh-rule-5710"},
+            }],
+        },
+    })
+    return "## CONTEXTUALIZE\n\nTest header.\n\n" + fence + "\n"
 
-Test header.
 
-```yaml
-prologue:
-  vertices:
-    - {id: v-src, type: endpoint, classification: internal-monitoring-host, identifier: 172.22.0.5}
-    - {id: v-user, type: identity, classification: monitoring-pattern, identifier: nagios}
-    - {id: v-target, type: endpoint, classification: internal-server, identifier: host-001}
-  edges:
-    - {id: e-001, relation: attempted_auth, source_vertex: v-src, target_vertex: v-target}
-```
-"""
+_PROLOGUE_MARKDOWN = _build_prologue_markdown()
 
 
 def _make_ctx(

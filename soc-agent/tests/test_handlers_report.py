@@ -17,6 +17,7 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 from schemas.state import Phase  # noqa: E402
 from scripts.handlers import report as report_handler  # noqa: E402
 from scripts.orchestrate import Context, OrchestrationError, PhaseResult, run  # noqa: E402
+from tests._dense_fixture_helpers import companion_to_invlang_fence  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -1056,37 +1057,50 @@ findings:
 
 class TestMechanicalAnalyzeCompose:
     def test_extract_findings_blocks_merges_across_loops(self, tmp_path):
+        # The dense parser merges every ```invlang fence in the file into
+        # one combined companion dict, so emitting findings across two
+        # fences should collapse to a single ordered findings list.
+        fence_a = companion_to_invlang_fence({
+            "findings": [{
+                "id": "l-001", "loop": 1, "name": "source-classification",
+                "target": "v-001",
+            }],
+        })
+        fence_b = companion_to_invlang_fence({
+            "findings": [
+                {"id": "l-002", "loop": 2, "name": "authentication-history",
+                 "target": "v-001"},
+                {"id": "l-003", "loop": 2, "name": "host-query",
+                 "target": "v-001"},
+            ],
+        })
         md = (
-            "## CONTEXTUALIZE\n\n"
-            "```yaml\n"
-            "findings:\n"
-            "- id: l-001\n"
-            "  name: source-classification\n"
-            "```\n\n"
-            "## GATHER (loop 2)\n\n"
-            "```yaml\n"
-            "findings:\n"
-            "- id: l-002\n"
-            "  name: authentication-history\n"
-            "- id: l-003\n"
-            "  name: host-query\n"
-            "```\n"
+            "## CONTEXTUALIZE\n\n" + fence_a + "\n\n"
+            "## GATHER (loop 2)\n\n" + fence_b + "\n"
         )
         gather = report_handler._extract_findings_blocks(md)
         assert [g["id"] for g in gather] == ["l-001", "l-002", "l-003"]
 
-    def test_extract_findings_blocks_skips_non_gather_yaml(self, tmp_path):
+    def test_extract_findings_blocks_skips_non_finding_blocks(self, tmp_path):
+        # A non-finding block (e.g. a prologue-only fence) does not
+        # contribute findings.
+        prologue_fence = companion_to_invlang_fence({
+            "prologue": {
+                "vertices": [
+                    {"id": "v-001", "type": "endpoint",
+                     "classification": "internal", "identifier": "1.2.3.4"},
+                ],
+                "edges": [],
+            },
+        })
+        findings_fence = companion_to_invlang_fence({
+            "findings": [{
+                "id": "l-001", "loop": 1, "name": "foo", "target": "v-001",
+            }],
+        })
         md = (
-            "## CONTEXTUALIZE\n\n"
-            "```yaml\n"
-            "prologue:\n"
-            "  vertices: []\n"
-            "```\n\n"
-            "```yaml\n"
-            "findings:\n"
-            "- id: l-001\n"
-            "  name: foo\n"
-            "```\n"
+            "## CONTEXTUALIZE\n\n" + prologue_fence + "\n\n"
+            + findings_fence + "\n"
         )
         gather = report_handler._extract_findings_blocks(md)
         assert [g["id"] for g in gather] == ["l-001"]

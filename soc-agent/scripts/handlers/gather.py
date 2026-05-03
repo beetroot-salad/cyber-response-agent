@@ -49,9 +49,11 @@ dropped_attempt). A prescribed lead that's entirely absent from output is a
 silent-drop bug and raises.
 
 Files written:
-    {run_dir}/investigation.md — appends `## GATHER (loop N)` prose; no
-    invlang YAML block (the full `gather[]` entry is composed at ANALYZE per
-    the invlang schema's Phase-to-block map).
+    {run_dir}/investigation.md — appends `## GATHER (loop N)` prose plus a
+    minimal `​```invlang` block recording the lead-pick (id, loop, name,
+    target, mode: lead-pick, query_details, outcome). ANALYZE later
+    composes the full graded `findings[]` entry per the invlang schema's
+    Phase-to-block map.
 """
 
 from __future__ import annotations
@@ -75,7 +77,10 @@ from scripts.orchestrate import Context, OrchestrationError, PhaseResult
 from scripts.handlers._context_loader import load_lead_definition
 from scripts.handlers._gather_dense import emit_gather_findings_dense
 from scripts.handlers._investigation_io import append_and_validate
-from scripts.handlers._markdown import first_prologue_vertex_id
+from scripts.handlers._markdown import (
+    first_prologue_vertex_id,
+    iter_companion_dicts,
+)
 from scripts.handlers._output_parser import (
     GatherEnvelope,
     GatherOutputError,
@@ -1356,9 +1361,9 @@ def _compose_markdown(payload: dict, loop_n: int) -> str:
 def _append_to_investigation(ctx: Context, section: str) -> None:
     """Append a new markdown section to investigation.md, validating invlang.
 
-    Appending prose only leaves the accumulated invlang YAML unchanged, but we
-    still invoke `validate_companion` as a belt-and-suspenders check against
-    any accidental YAML-fence contamination in the section.
+    Pure-prose sections leave the accumulated dense companion unchanged,
+    but we still invoke `validate_companion` as a belt-and-suspenders
+    check — the validator rejects any stray ```yaml fence in the section.
     """
     append_and_validate(ctx.run_dir, section, phase="GATHER")
 
@@ -1366,10 +1371,12 @@ def _append_to_investigation(ctx: Context, section: str) -> None:
 def _append_lead_pick_findings(
     ctx: Context, envelope: GatherEnvelope, loop_n: int,
 ) -> None:
-    """Write a minimal `findings:` YAML block recording which leads PREDICT
-    picked at loop N. Distinct from ANALYZE's later graded findings entry —
-    this one carries `mode: lead-pick`, empty `query_details/outcome`, and
-    empty `resolutions`.
+    """Write a minimal `findings:` entry into a ```invlang block recording
+    which leads PREDICT picked at loop N. Distinct from ANALYZE's later
+    graded findings entry — this one carries `mode: lead-pick`, the
+    envelope's `query_details` (carried through post-hydration), the
+    envelope's `outcome` (typically empty pre-ANALYZE), and empty
+    `resolutions`.
 
     Why: the corpus loader's `_primary_lead_at_loop(c, loop=N)` returns the
     first `findings[*]` entry whose `loop` field equals N. Without this write,
@@ -1624,41 +1631,24 @@ def handle(ctx: Context) -> PhaseResult:
     return PhaseResult(next_phase=Phase.ANALYZE, payload=payload)
 
 
-_HYP_FENCE_RE = re.compile(r"```(?:yaml|invlang)\n(?P<body>.*?)\n```", re.DOTALL)
-
-
 def _any_hypotheses_declared(ctx: Context) -> bool:
-    """True when any predict block in investigation.md carries a non-empty
-    `hypotheses[]` list. Handles both legacy ```yaml fences and the
-    ```invlang dense fences PR #167 introduced. Scans every fence so a
-    shape-E block after a prior shape-A/M doesn't falsely look empty."""
+    """True when investigation.md declares any hypothesis — either a
+    top-level `hypothesize.hypotheses[]` row or an in-loop
+    `findings[*].new_hypotheses[]` row.
+
+    Why both: ANALYZE grades observations against the live hypothesis
+    set, which includes anything PREDICT seeded *and* anything ANALYZE
+    promoted in earlier loops via `new_hypotheses`. A run with an empty
+    initial frontier but accumulated in-loop hypotheses still has a
+    real frontier to grade against, so the shape-E skip should not fire.
+    """
     inv = ctx.run_dir / "investigation.md"
     if not inv.exists():
         return False
-    for m in _HYP_FENCE_RE.finditer(inv.read_text()):
-        body = m.group("body")
-        # Legacy yaml shape: top-level `hypothesize.hypotheses[]` list.
-        try:
-            parsed = yaml.safe_load(body)
-        except yaml.YAMLError:
-            parsed = None
-        if isinstance(parsed, dict):
-            hyp = parsed.get("hypothesize")
-            if isinstance(hyp, dict) and hyp.get("hypotheses"):
+    for doc in iter_companion_dicts(inv.read_text()):
+        if (doc.get("hypothesize") or {}).get("hypotheses"):
+            return True
+        for lead in doc.get("findings") or []:
+            if isinstance(lead, dict) and lead.get("new_hypotheses"):
                 return True
-        # Dense invlang shape: a `:H hypothesize.hypotheses` block (the
-        # on-disk projection name; subagent stdout uses bare `:H hypotheses`
-        # but the persister normalizes it) with at least one `h-*` data row
-        # signals declared hypotheses.
-        m_h = re.search(
-            r"^:H\s+(?:hypothesize\.)?hypotheses\b", body, re.MULTILINE,
-        )
-        if m_h:
-            after = body[m_h.end():]
-            for line in after.splitlines()[1:]:
-                stripped = line.strip()
-                if not stripped or stripped.startswith(":"):
-                    break
-                if stripped.startswith("h-"):
-                    return True
     return False

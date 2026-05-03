@@ -82,14 +82,19 @@ def _render_row(h: dict[str, Any]) -> str:
             f"hypothesis {hid!r}.proposed_edge must be a dict (got "
             f"{type(proposed).__name__})"
         )
+    # Canonical companion shape: `proposed_edge.parent_vertex.{type,
+    # classification, attributes}` (nested). Project to the dense cells.
+    parent_vertex = proposed.get("parent_vertex") or {}
+    if not isinstance(parent_vertex, dict):
+        parent_vertex = {}
     cells = {
         "id":               hid,
         "name":             h["name"],
         "attached_to":      h.get("attached_to_vertex", ""),
         "rel":              proposed.get("relation", ""),
-        "parent_type":      proposed.get("parent_type", ""),
-        "parent_class":     proposed.get("parent_class", ""),
-        "parent_attrs":     serialize_attrs(proposed.get("parent_attributes") or {}),
+        "parent_type":      parent_vertex.get("type", ""),
+        "parent_class":     parent_vertex.get("classification", ""),
+        "parent_attrs":     serialize_attrs(parent_vertex.get("attributes") or {}),
         "preds":            _pack_preds(hid, _require_list(hid, "predictions", h.get("predictions"))),
         "attr_preds":       _pack_attr_preds(hid, _require_list(hid, "attribute_predictions", h.get("attribute_predictions"))),
         "refuts":           _pack_refuts(hid, _require_list(hid, "refutation_shape", h.get("refutation_shape"))),
