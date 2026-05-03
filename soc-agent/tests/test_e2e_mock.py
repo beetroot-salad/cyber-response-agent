@@ -1,16 +1,10 @@
-"""End-to-end integration tests with mock SIEM.
+"""End-to-end structural tests with mock SIEM fixtures.
 
-Two test tiers:
-1. Structural tests (no LLM) — validate artifacts, state machine, fixture well-formedness
-2. LLM integration tests (@pytest.mark.llm) — invoke the investigate skill via claude CLI
-   and validate the output structure
-
-Run structural tests: pytest soc-agent/tests/test_e2e_mock.py -v
-Run LLM tests:        pytest soc-agent/tests/test_e2e_mock.py -v -m llm
+Validates artifacts, state machine, and fixture well-formedness. Does not
+invoke an LLM.
 """
 
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -23,9 +17,8 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from schemas.state import validate_transition
-from schemas.report_frontmatter import parse_frontmatter
 from hooks.scripts.validate_report import parse_yaml_frontmatter, validate_tier1
-from conftest import FIXTURES, run_investigation_mock
+from conftest import FIXTURES
 
 
 # ---------------------------------------------------------------------------
@@ -200,165 +193,3 @@ class TestWriteStateIntegration:
         assert state["history"] == phases
         assert state["ticket_id"] == "TEST-001"
         assert state["signature_id"] == "wazuh-rule-5710"
-
-
-# ---------------------------------------------------------------------------
-# LLM integration tests — require Claude CLI and API access
-# Run with: pytest soc-agent/tests/test_e2e_mock.py -v -m llm
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def llm_investigation_run(tmp_path_factory):
-    """Run the investigator once and share the results across all LLM tests.
-
-    This avoids invoking claude multiple times (expensive + slow).
-    Uses the shared run_investigation_mock() helper from conftest.
-    """
-    run_dir = tmp_path_factory.mktemp("llm-run") / "investigation"
-    run_dir.mkdir()
-
-    alert = json.loads(
-        (FIXTURES / "alerts" / "benign-monitoring-probe.json").read_text()
-    )
-
-    result = run_investigation_mock(run_dir, alert, timeout=300)
-
-    return {
-        "run_dir": result.run_dir,
-        "alert": alert,
-        "output": result.stdout,
-    }
-
-
-@pytest.mark.llm
-class TestLLMInvestigation:
-    """Tests that invoke the actual LLM and validate output structure.
-
-    These tests require:
-    - Claude CLI installed and authenticated
-    - API access with sufficient credits
-    - Run with: pytest -m llm -v
-
-    All tests share a single investigation run (module-scoped fixture)
-    to minimize API cost.
-    """
-
-    def test_investigation_produces_state_json(self, llm_investigation_run):
-        """The investigator must write state.json with valid transitions."""
-        run_dir = llm_investigation_run["run_dir"]
-
-        state_file = run_dir / "state.json"
-        assert state_file.exists(), "state.json was not created"
-
-        state = json.loads(state_file.read_text())
-        assert "phase" in state
-        assert "history" in state
-        history = state["history"]
-
-        # Validate minimum length based on actual path taken
-        if "SCREEN" in history and "PREDICT" not in history:
-            # Screen-resolved path: C -> SCREEN -> REPORT
-            assert len(history) >= 3, (
-                f"Screen-resolved path needs >= 3 phases, got {history}"
-            )
-        elif "SCREEN" in history:
-            # Screen fallthrough + full loop: C -> SCREEN -> H -> G -> A -> REPORT
-            assert len(history) >= 6, (
-                f"Screen-fallthrough path needs >= 6 phases, got {history}"
-            )
-        else:
-            # No screen (skip path): C -> H -> G -> A -> REPORT
-            assert len(history) >= 5, (
-                f"Full investigation path needs >= 5 phases, got {history}"
-            )
-
-        # Verify all transitions were legal
-        current = None
-        for phase in history:
-            valid, error = validate_transition(current, phase)
-            assert valid, f"Illegal transition {current} -> {phase}: {error}"
-            current = phase
-
-    def test_investigation_produces_report(self, llm_investigation_run):
-        """The investigator must write report.md with valid frontmatter."""
-        run_dir = llm_investigation_run["run_dir"]
-
-        report_file = run_dir / "report.md"
-        assert report_file.exists(), "report.md was not created"
-
-        content = report_file.read_text()
-        fields = parse_yaml_frontmatter(content)
-        assert fields, "report.md has no YAML frontmatter"
-
-        # Check required fields are present
-        required = ["ticket_id", "signature_id", "status", "disposition",
-                     "confidence", "leads_pursued"]
-        for field in required:
-            assert field in fields, f"Missing field in report: {field}"
-
-        # Validate via the schema — all errors, not just structural ones
-        report, errors = parse_frontmatter(fields)
-        assert not errors, f"Report validation errors: {errors}"
-
-    def test_investigation_produces_investigation_md(self, llm_investigation_run):
-        """investigation.md must have phase headers and hypothesis references."""
-        run_dir = llm_investigation_run["run_dir"]
-
-        inv_file = run_dir / "investigation.md"
-        assert inv_file.exists(), "investigation.md was not created"
-
-        content = inv_file.read_text()
-
-        # Must have phase headers
-        assert "CONTEXTUALIZE" in content, "Missing CONTEXTUALIZE phase"
-        assert "PREDICT" in content, "Missing PREDICT phase"
-        assert "GATHER" in content, "Missing GATHER phase"
-        assert "ANALYZE" in content, "Missing ANALYZE phase"
-
-        # Must reference hypotheses with ? prefix
-        assert re.search(r'\?[\w-]+', content), (
-            "No ?hypothesis references found in investigation.md"
-        )
-
-    def test_investigation_has_structured_analysis(self, llm_investigation_run):
-        """ANALYZE phase should contain assessment weights."""
-        run_dir = llm_investigation_run["run_dir"]
-
-        inv_file = run_dir / "investigation.md"
-        if not inv_file.exists():
-            pytest.skip("investigation.md not created")
-
-        content = inv_file.read_text()
-
-        has_weights = any(
-            marker in content
-            for marker in ["++", "--", "strongly supports", "strongly refutes"]
-        )
-        assert has_weights, "No structured assessment weights found in ANALYZE phase"
-
-    def test_report_passes_validation_hook(self, llm_investigation_run):
-        """The report should pass the validate_report.py hook checks."""
-        run_dir = llm_investigation_run["run_dir"]
-
-        report_file = run_dir / "report.md"
-        if not report_file.exists():
-            pytest.skip("report.md not created")
-
-        passed, errors, _ = validate_tier1(report_file)
-        assert passed, f"Report validation errors: {errors}"
-
-    def test_no_hallucinated_tools(self, llm_investigation_run):
-        """Investigation should not reference non-existent tools or files."""
-        run_dir = llm_investigation_run["run_dir"]
-
-        inv_file = run_dir / "investigation.md"
-        if not inv_file.exists():
-            pytest.skip("investigation.md not created")
-
-        content = inv_file.read_text()
-
-        # Should not reference the deleted siem-mapping.json
-        assert "siem-mapping.json" not in content, (
-            "investigation.md references removed siem-mapping.json"
-        )

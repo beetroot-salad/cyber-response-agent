@@ -1,6 +1,6 @@
 ---
 name: gather-composite
-description: Execute a composite or ad-hoc GATHER sequence — multiple leads scoped to the same entities and window, or a single lead with no vendor template. Runs per-lead health probes, constructs queries (template or ad-hoc), and returns cross-lead observations. Used by the investigate skill's GATHER phase when the main agent selects composite dispatch or an ad-hoc lead.
+description: Execute a composite or ad-hoc GATHER sequence — multiple leads scoped to the same entities and window, or a single lead with no vendor template. Runs per-lead health probes, constructs queries (template or ad-hoc), and returns cross-lead observations. Dispatched by the GATHER phase handler when the routing payload selects composite dispatch or an ad-hoc lead.
 tools: Read, Bash, Write
 model: sonnet
 effort: low

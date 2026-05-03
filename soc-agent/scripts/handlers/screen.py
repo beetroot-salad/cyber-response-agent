@@ -1,7 +1,6 @@
 """SCREEN phase handler.
 
-Replaces the SCREEN section of `skills/investigate/SKILL.md` with a Python
-orchestration that dispatches one merged Sonnet subagent (`screen`). The
+Dispatches one merged Sonnet subagent (`screen`). The
 subagent emits a single terminal YAML block carrying both the pattern-match
 verdict and the invlang `findings:` transcription — replacing the previous
 Haiku screen + Haiku screen-invlang split.
@@ -192,10 +191,7 @@ def _structural_verify(
 def _compose_markdown(
     screen_result: dict, downgrade_reason: str | None,
 ) -> str:
-    """Append a `## SCREEN` human-readable section.
-
-    Template mirrors `skills/investigate/SKILL.md:322-329`.
-    """
+    """Append a `## SCREEN` human-readable section."""
     result_tag = screen_result.get("screen_result", "error")
     if downgrade_reason:
         result_tag = "error (structural downgrade)"

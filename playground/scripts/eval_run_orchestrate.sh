@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
 # Run the soc-agent Python state-machine orchestrator (scripts/orchestrate.py)
-# against a real alert from the playground. Counterpart to eval_run.sh — that
-# script invokes the main-agent /investigate skill; this one invokes the
-# Python orchestrator directly.
+# against a real alert from the playground.
 #
-# Differences from eval_run.sh:
+# Shape:
 #   - No main-agent `claude --print` invocation. The Python driver drives the
-#     state machine; subagents are still spawned via `claude -p` by
+#     state machine; subagents are spawned via `claude -p` by
 #     `scripts/handlers/_subagent.py`.
 #   - No plugin snapshot. The orchestrator imports from /workspace/soc-agent
 #     directly; subagents are dispatched with `--plugin-dir /workspace/soc-agent`
 #     by the shared wrapper.
-#   - No transcript.jsonl. Per-subagent transcripts land under
-#     {run_dir}/subagent_outputs/*.txt and subagent_audit.jsonl.
-#   - No main-agent allowlist. Subagent tool allowlists come from their
-#     frontmatter.
+#   - Per-subagent transcripts land under {run_dir}/subagent_outputs/*.txt
+#     and subagent_audit.jsonl.
+#   - Subagent tool allowlists come from each agent's frontmatter.
 #
 # Usage:
 #   playground/scripts/eval_run_orchestrate.sh <rule_id> [--window 4h] [--offset 0]

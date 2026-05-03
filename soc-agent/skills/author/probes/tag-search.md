@@ -9,8 +9,8 @@ Spawn **two** Haiku subagents in parallel via `Task` (`subagent_type="general-pu
 For each spawn:
 
 1. **Pick a scenario.** Two plausible cases in which a runtime agent would need this template. Vary the entity type, phase, or pivot direction — e.g., one scenario pivoting on a source IP in GATHER, one pivoting on a username in a follow-up loop. Ground both in the lead's declared purpose; do not invent scenarios the template wasn't built for.
-2. **Fabricate a memory dummy.** A short block of what the investigation agent "remembers" at that point: current hypothesis (prefixed `?`), one or two prior lead outcomes with assessments (`++/+/-/--`), and any scratch notes. Keep it tight — the goal is to mimic the shape of the investigate skill's mid-loop context, not to write a full trace.
-3. **Fabricate on-the-fly context.** The alert JSON skeleton, the current investigation phase, and the open hypotheses. Match the shape the investigate skill sees at runtime.
+2. **Fabricate a memory dummy.** A short block of what the investigation agent "remembers" at that point: current hypothesis (prefixed `?`), one or two prior lead outcomes with assessments (`++/+/-/--`), and any scratch notes. Keep it tight — the goal is to mimic the shape of an investigation agent's mid-loop context, not to write a full trace.
+3. **Fabricate on-the-fly context.** The alert JSON skeleton, the current investigation phase, and the open hypotheses. Match the shape the investigation agent sees at runtime.
 4. **Frame the task as a search**, not as a tagging question. Use wording like *"search for queries you need for your next step"* or *"find the query templates relevant to this pivot."* **Never** write *"what tags would you pick"*, *"what tags should this template have"*, or anything that cues the subagent to reason about the tagging system. Framing is the whole point of the probe — cueing tag-reasoning contaminates the sample.
 5. **Vary framing across the two spawns.** Different scenario, different wording, different pivot. Two independent draws from the reader-vocabulary distribution.
 

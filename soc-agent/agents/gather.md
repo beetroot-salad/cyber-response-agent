@@ -1,6 +1,6 @@
 ---
 name: gather
-description: Execute one template-driven lead against the SIEM. Runs a data-source health probe first, then the lead query, and characterizes the raw observation without interpretation. Escalates on probe breakage, missing templates, binding mismatches, or follow-up needs. Used by the investigate skill's GATHER phase for the single-lead common case.
+description: Execute one template-driven lead against the SIEM. Runs a data-source health probe first, then the lead query, and characterizes the raw observation without interpretation. Escalates on probe breakage, missing templates, binding mismatches, or follow-up needs. Dispatched by the GATHER phase handler for the single-lead common case.
 tools: Read, Bash, Write
 model: haiku
 ---
