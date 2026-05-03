@@ -67,7 +67,6 @@ from scripts.handlers._dense_primitives import (
     split_csv_or_semi as _split_csv_or_semi,
     split_subcells as _split_subcells,
     split_cells as _split_cells,
-    tokenize_blocks,
     unquote as _unquote,
 )
 
