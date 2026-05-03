@@ -110,13 +110,14 @@ def _derive_result_shape(finding: dict[str, Any]) -> ResultShape:
         return "unknown"
     if outcome.get("failure_reason"):
         return "errored"
-    obs = outcome.get("observations") if isinstance(outcome.get("observations"), dict) else {}
-    verts = obs.get("vertices") or []
-    edges = obs.get("edges") or []
+    obs_raw = outcome.get("observations")
+    obs = obs_raw if isinstance(obs_raw, dict) else None
+    verts = (obs or {}).get("vertices") or []
+    edges = (obs or {}).get("edges") or []
     attr_updates = outcome.get("attribute_updates") or []
     if verts or edges or attr_updates:
         return "useful"
-    if isinstance(outcome.get("observations"), dict):
+    if obs is not None:
         return "empty"
     return "unknown"
 
