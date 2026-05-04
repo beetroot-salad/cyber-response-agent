@@ -37,7 +37,7 @@ from invlang.queries import (
     refinement_chain_shapes,
     weight_reversal_mining,
 )
-from invlang.cli import _apply_top, _run_class
+from invlang.cli import _apply_top, _print_result, _print_section, _run_class, _run_ids
 
 
 # ---------------------------------------------------------------------------
@@ -1399,3 +1399,138 @@ class TestCliDispatchNewClasses:
         result = _run_class(15, [], args)
         assert result["distribution"] == {}
         assert "telemetry" in result
+
+
+# ---------------------------------------------------------------------------
+# CLI: _print_result formatter (covers the 71–114 missing chunk)
+# ---------------------------------------------------------------------------
+
+class TestPrintResult:
+    def test_json_mode_dumps_raw(self, capsys):
+        _print_result("ignored-label", {"count": 2, "hits": [1, 2]}, as_json=True)
+        out = capsys.readouterr().out.strip()
+        # Single-line JSON dump, label and decoration suppressed.
+        import json as _json
+        assert _json.loads(out) == {"count": 2, "hits": [1, 2]}
+
+    def test_hits_list_under_limit(self, capsys):
+        _print_result("L", {"count": 2, "hits": ["a", "b"]}, limit=10)
+        out = capsys.readouterr().out
+        assert "L → 2 hit(s)" in out
+        assert "a" in out and "b" in out
+        assert "more)" not in out
+
+    def test_hits_truncated_to_limit_shows_remaining(self, capsys):
+        _print_result("L", {"count": 5, "hits": list(range(5))}, limit=2)
+        out = capsys.readouterr().out
+        assert "... (3 more)" in out
+
+    def test_top_slice_header_suffix(self, capsys):
+        _print_result("L", {"count": 10, "hits": [1, 2, 3]}, limit=10)
+        # hits shorter than count → "[showing top 3 of 10]" header.
+        out = capsys.readouterr().out
+        assert "[showing top 3 of 10]" in out
+
+    def test_distribution_dict_renders_kv(self, capsys):
+        _print_result("L", {"count": 3, "distribution": {"a": 1, "b": 2}}, limit=10)
+        out = capsys.readouterr().out
+        assert "a: 1" in out
+        assert "b: 2" in out
+
+    def test_distribution_empty_dict_marked(self, capsys):
+        _print_result("L", {"count": 0, "distribution": {}}, limit=10)
+        assert "(empty)" in capsys.readouterr().out
+
+    def test_distribution_dict_truncated(self, capsys):
+        d = {f"k{i}": i for i in range(8)}
+        _print_result("L", {"count": 8, "distribution": d}, limit=3)
+        out = capsys.readouterr().out
+        assert "... (5 more)" in out
+
+    def test_tree_section(self, capsys):
+        result = {
+            "count": 1,
+            "tree": {"h-001": [{"id": "h-001-001"}, {"id": "h-001-002"}]},
+        }
+        _print_result("L", result)
+        out = capsys.readouterr().out
+        assert "Tree (1 root(s)" in out
+        assert "h-001-001" in out
+
+    def test_tree_leaf_marker(self, capsys):
+        _print_result("L", {"count": 1, "tree": {"h-001": []}})
+        assert "(leaf)" in capsys.readouterr().out
+
+    def test_summary_block(self, capsys):
+        _print_result("L", {"count": 1, "summary": {"avg": 0.5, "n": 4}})
+        out = capsys.readouterr().out
+        assert "Summary:" in out
+        assert "avg: 0.5" in out
+
+    def test_exemplars_block(self, capsys):
+        _print_result("L", {"count": 1, "exemplars": {"++": ["row-1"], "--": []}})
+        out = capsys.readouterr().out
+        assert "++ (1):" in out
+        assert "row-1" in out
+        assert "-- (0):" in out
+
+    def test_matched_contracts_block(self, capsys):
+        _print_result("L", {"count": 1, "matched_contracts": ["c-1", "c-2"]})
+        out = capsys.readouterr().out
+        assert "Matched contracts (2):" in out
+        assert "c-1" in out
+
+    def test_telemetry_and_surprises(self, capsys):
+        _print_result("L", {
+            "count": 1, "surprises": ["x"], "telemetry": {"runtime_ms": 12},
+        })
+        out = capsys.readouterr().out
+        assert "Surprises:" in out
+        assert "runtime_ms: 12" in out
+
+    def test_matched_case_ids(self, capsys):
+        ids = [f"case-{i}" for i in range(15)]
+        _print_result("L", {"count": 15, "matched_case_ids": ids})
+        out = capsys.readouterr().out
+        assert "Matched case ids (15):" in out
+        # First 10 only.
+        assert "case-0" in out
+        assert "case-9" in out
+
+    def test_print_section_header(self, capsys):
+        _print_section("Header Text")
+        out = capsys.readouterr().out
+        assert "Header Text" in out
+        assert "=" * 72 in out
+
+
+# ---------------------------------------------------------------------------
+# CLI: _run_ids entry point (covers the 524–538 missing chunk)
+# ---------------------------------------------------------------------------
+
+class TestRunIds:
+    def test_missing_file_emits_empty_stub(self, tmp_path, capsys):
+        rc = _run_ids(str(tmp_path / "nope.md"))
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "(file not yet created" in out.err
+        for kind in ("vertices", "edges", "hypotheses", "leads"):
+            assert f"{kind}:" in out.out
+
+    def test_existing_file_prints_grouped_ids(self, tmp_path, capsys):
+        inv = tmp_path / "investigation.md"
+        inv.write_text(
+            "## CONTEXTUALIZE\n\n"
+            "```invlang\n"
+            ":V prologue.vertices [id|type|class|ident]\n"
+            "v-001|endpoint|internal|1.2.3.4\n"
+            "v-002|user|internal|alice\n"
+            "```\n"
+        )
+        rc = _run_ids(str(inv))
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "v-001" in out
+        assert "v-002" in out
+        # Groups for which there are no IDs render as "(none)".
+        assert "(none)" in out

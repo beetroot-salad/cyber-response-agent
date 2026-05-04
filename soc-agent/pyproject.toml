@@ -114,6 +114,16 @@ source = ["hooks", "schemas", "scripts"]
 omit = [
     ".venv/*",
     "tests/*",
+    # Dev / human-driven CLIs without test coverage — exercised manually or
+    # via integration only. Pulling them into the baseline drives the wrong
+    # incentive (write smoke tests that import-but-don't-assert). Files with
+    # actual tests (preflight, cleanup_runs, env_memory_lint, postmortem/*)
+    # stay in.
+    "scripts/observe.py",          # live observability HTTP server
+    "scripts/fetch_alert.py",      # manual playground utility
+    "scripts/lint_mock_usage.py",  # standalone lint, run by CI separately
+    "scripts/run_orchestrator.py", # entry point — covered by `-m llm` only
+    "scripts/query.py",            # ad-hoc query wrapper
 ]
 
 [tool.coverage.paths]
