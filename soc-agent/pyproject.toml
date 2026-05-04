@@ -79,9 +79,11 @@ max-statements = 60
 [tool.mypy]
 python_version = "3.11"
 files = ["soc-agent"]
-exclude = ["soc-agent/tests/", "soc-agent/.venv/"]
+exclude = ["soc-agent/tests/", "soc-agent/.venv/", "soc-agent/knowledge/", "knowledge/"]
 ignore_missing_imports = true
 follow_imports = "silent"
+explicit_package_bases = true
+mypy_path = "soc-agent"
 # Soft-launch posture: surface type errors without blocking on every
 # untyped def. Tighten incrementally.
 check_untyped_defs = true
