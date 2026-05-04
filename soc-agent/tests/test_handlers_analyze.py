@@ -158,6 +158,11 @@ class TestPromptAssembly:
         assert "alert.json" in prompt
         assert "## CONTEXTUALIZE" in prompt or "CONTEXTUALIZE" in prompt
         assert "PREDICT (loop 1)" in prompt
+        # The compact grading frontier is present inline so ANALYZE does not
+        # need to retrieve the current PREDICT block just to enumerate
+        # hypotheses/contracts.
+        assert "<analysis_frontier>" in prompt
+        assert "active_hypotheses" in prompt
 
         # Archetype block explicitly absent — REPORT picks archetype, not ANALYZE
         assert "<archetypes>" not in prompt

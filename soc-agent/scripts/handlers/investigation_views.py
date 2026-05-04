@@ -14,6 +14,8 @@ prompt-tag formatting for non-investigation surfaces) stay there.
 from __future__ import annotations
 
 import re
+from pathlib import Path
+from typing import Any
 
 from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
 from scripts.handlers._markdown import iter_companion_dicts
@@ -40,7 +42,7 @@ def _parse_investigation_sections(text: str) -> list[dict]:
     sections: list[dict] = []
     current: dict | None = None
     in_fence = False
-    for line in lines:
+    for idx, line in enumerate(lines, start=1):
         if line.startswith("```"):
             in_fence = not in_fence
             if current is not None:
@@ -50,18 +52,21 @@ def _parse_investigation_sections(text: str) -> list[dict]:
             m = _PHASE_HEADER_RE.match(line)
             if m:
                 if current is not None:
+                    current["end_line"] = idx - 1
                     sections.append(current)
                 phase = m.group("phase").strip().lower().replace(" ", "-")
                 current = {
                     "header": line,
                     "phase": phase,
                     "loop_n": int(m.group("loop")) if m.group("loop") else None,
+                    "start_line": idx,
                     "body_lines": [],
                 }
                 continue
         if current is not None:
             current["body_lines"].append(line)
     if current is not None:
+        current["end_line"] = len(lines)
         sections.append(current)
     return sections
 
@@ -192,6 +197,466 @@ def _latest_structured_section(sections: list[dict], phase: str) -> dict | None:
         if _section_yaml_fences(section).strip():
             return section
     return None
+
+
+def _section_for_loop(
+    sections: list[dict],
+    phase: str,
+    loop_n: int,
+) -> dict | None:
+    """Return the structured section for a specific phase/loop, falling back
+    to the latest structured section for the phase.
+
+    ANALYZE should not have to read the current PREDICT block just to recover
+    the canonical hypothesis set. This helper lets the frontier prefer the
+    current loop's PREDICT fence, but still emits useful state for malformed
+    legacy runs where loop numbers are missing.
+    """
+    for section in reversed(sections):
+        if section["phase"] != phase:
+            continue
+        if section.get("loop_n") != loop_n:
+            continue
+        if _section_yaml_fences(section).strip():
+            return section
+    return _latest_structured_section(sections, phase)
+
+
+def _section_line_ranges(sections: list[dict]) -> dict[int, tuple[int, int]]:
+    """Return inclusive 1-indexed line ranges for parsed sections.
+
+    `_parse_investigation_sections` intentionally stores only section bodies.
+    The frontier needs cheap pointers back to the source sections, so recompute
+    ranges from body length. This is close enough because parsed sections always
+    render as one header line plus the captured body lines.
+    """
+    ranges: dict[int, tuple[int, int]] = {}
+    for section in sections:
+        start = section.get("start_line")
+        end = section.get("end_line")
+        if isinstance(start, int) and isinstance(end, int):
+            ranges[id(section)] = (start, end)
+            continue
+        line_count = 1 + len(section.get("body_lines") or [])
+        prior_ranges = list(ranges.values())
+        cursor = (prior_ranges[-1][1] + 1) if prior_ranges else 1
+        ranges[id(section)] = (cursor, cursor + line_count - 1)
+    return ranges
+
+
+def _section_pointer(
+    section: dict | None,
+    ranges: dict[int, tuple[int, int]],
+    inv_path: Path | None,
+) -> dict[str, Any] | None:
+    if section is None:
+        return None
+    start, end = ranges.get(id(section), (None, None))
+    out: dict[str, Any] = {
+        "section": section.get("header", "").removeprefix("## ").strip(),
+    }
+    if inv_path is not None:
+        out["path"] = str(inv_path)
+    if start is not None and end is not None:
+        out["lines"] = f"{start}-{end}"
+    return out
+
+
+def _companion_doc_from_section(section: dict | None) -> dict[str, Any]:
+    if section is None:
+        return {}
+    fences = _section_yaml_fences(section)
+    if not fences.strip():
+        return {}
+    for doc in iter_companion_dicts(fences):
+        return doc
+    return {}
+
+
+def _short_text(value: Any, *, max_len: int = 260) -> str:
+    text = "" if value is None else str(value)
+    text = " ".join(text.split())
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1].rstrip() + "…"
+
+
+def _compact_query_details(query_details: Any) -> dict[str, Any]:
+    if not isinstance(query_details, dict):
+        return {}
+    keep = {}
+    for key in ("system", "template", "query", "time_window", "substitutions"):
+        if key not in query_details:
+            continue
+        value = query_details[key]
+        if isinstance(value, str):
+            keep[key] = _short_text(value, max_len=240)
+        else:
+            keep[key] = value
+    return keep
+
+
+def _compact_hypothesis(hypothesis: dict[str, Any]) -> dict[str, Any]:
+    """Keep the contract/prediction surface ANALYZE grades against.
+
+    Full `story` prose stays in the PREDICT section pointer. The frontier
+    carries enough to make the next comparison mechanical: hypothesis id/name,
+    current weight/status, p/r literals, and open contracts.
+    """
+    out: dict[str, Any] = {}
+    for key in ("id", "name", "weight", "status"):
+        if key in hypothesis:
+            out[key] = hypothesis[key]
+
+    for src_key, dst_key in (
+        ("predictions", "predictions"),
+        ("attribute_predictions", "attribute_predictions"),
+        ("refutation_shape", "refutations"),
+        ("authorization_contract", "authorization_contracts"),
+        ("impact_predictions", "impact_predictions"),
+    ):
+        entries = hypothesis.get(src_key)
+        if not isinstance(entries, list) or not entries:
+            continue
+        compact_entries: list[dict[str, Any]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            compact: dict[str, Any] = {}
+            for key in (
+                "id",
+                "subject",
+                "kind",
+                "claim",
+                "refutes_predictions",
+                "edge_ref",
+                "anchor_kind",
+                "predicate",
+                "on_unauthorized",
+                "on_indeterminate",
+                "dimension",
+            ):
+                if key not in entry:
+                    continue
+                value = entry[key]
+                compact[key] = _short_text(value) if isinstance(value, str) else value
+            compact_entries.append(compact)
+        if compact_entries:
+            out[dst_key] = compact_entries
+    return out
+
+
+def _compact_resolution(resolution: Any) -> dict[str, Any] | None:
+    if not isinstance(resolution, dict):
+        return None
+    out: dict[str, Any] = {}
+    for src, dst in (
+        ("hypothesis", "hypothesis"),
+        ("hypothesis_id", "hypothesis"),
+        ("before", "before"),
+        ("before_weight", "before"),
+        ("after", "after"),
+        ("severity_of_test", "severity"),
+        ("severity", "severity"),
+        ("matched_prediction_ids", "matched_predictions"),
+        ("matched_refutation_ids", "matched_refutations"),
+        ("supporting_marker", "supporting_marker"),
+    ):
+        if dst in out or src not in resolution:
+            continue
+        out[dst] = resolution[src]
+    if resolution.get("reasoning"):
+        out["reasoning"] = _short_text(resolution["reasoning"], max_len=320)
+    return out or None
+
+
+def _compact_consultation(consultation: Any) -> dict[str, Any] | None:
+    if not isinstance(consultation, dict):
+        return None
+    out: dict[str, Any] = {}
+    for key in (
+        "anchor_id",
+        "anchor_kind",
+        "grounding_kind",
+        "result",
+        "authority_for_question",
+        "as_of",
+        "anchor_query",
+        "reasoning",
+    ):
+        if key not in consultation:
+            continue
+        value = consultation[key]
+        out[key] = _short_text(value) if isinstance(value, str) else value
+    return out or None
+
+
+def _compact_attr_update(update: Any) -> dict[str, Any] | None:
+    if not isinstance(update, dict):
+        return None
+    out: dict[str, Any] = {}
+    if update.get("target"):
+        out["target"] = update["target"]
+    updates = update.get("updates")
+    if isinstance(updates, dict) and updates:
+        out["updates"] = {
+            str(k): _short_text(v, max_len=160) if isinstance(v, str) else v
+            for k, v in updates.items()
+        }
+    return out or None
+
+
+def _compact_finding(finding: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key in ("id", "loop", "name", "mode", "status", "screen_result", "target"):
+        if key in finding:
+            out[key] = finding[key]
+    query_details = _compact_query_details(finding.get("query_details"))
+    if query_details:
+        out["query"] = query_details
+
+    outcome = finding.get("outcome") if isinstance(finding.get("outcome"), dict) else {}
+    consultations = [
+        c for c in (
+            _compact_consultation(c)
+            for c in outcome.get("anchor_consultations", [])
+        )
+        if c
+    ]
+    if consultations:
+        out["consultations"] = consultations
+
+    attr_updates = [
+        a for a in (
+            _compact_attr_update(a)
+            for a in outcome.get("attribute_updates", [])
+        )
+        if a
+    ]
+    if attr_updates:
+        out["attribute_updates"] = attr_updates
+
+    resolutions = [
+        r for r in (
+            _compact_resolution(r)
+            for r in finding.get("resolutions", [])
+        )
+        if r
+    ]
+    if resolutions:
+        out["resolutions"] = resolutions
+    return out
+
+
+def _finding_is_negative_or_gap(finding: dict[str, Any]) -> bool:
+    if finding.get("screen_result") == "no_match":
+        return True
+    status = finding.get("status")
+    if isinstance(status, str) and status not in {"ok", "complete", "active"}:
+        return True
+    outcome = finding.get("outcome")
+    if isinstance(outcome, dict):
+        for c in outcome.get("anchor_consultations", []) or []:
+            if not isinstance(c, dict):
+                continue
+            if c.get("result") in {"refuted", "partial", "no-data"}:
+                return True
+    for r in finding.get("resolutions", []) or []:
+        if isinstance(r, dict) and r.get("after") in {"-", "--"}:
+            return True
+    return False
+
+
+def _gather_frontier(gather_out: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(gather_out, dict):
+        return {}
+    out: dict[str, Any] = {}
+
+    prescribed = gather_out.get("prescribed_leads")
+    executed = gather_out.get("executed_leads")
+    if isinstance(prescribed, list):
+        out["prescribed_leads"] = prescribed
+    if isinstance(executed, list):
+        out["executed_leads"] = executed
+    if isinstance(prescribed, list) and isinstance(executed, list):
+        executed_set = set(x for x in executed if isinstance(x, str))
+        missing = [x for x in prescribed if isinstance(x, str) and x not in executed_set]
+        if missing:
+            out["unresolved_prescribed_leads"] = missing
+
+    raw_paths = gather_out.get("raw_details_paths")
+    if isinstance(raw_paths, list) and raw_paths:
+        out["raw_detail_paths"] = [str(p) for p in raw_paths]
+
+    leads = gather_out.get("leads")
+    if isinstance(leads, list) and leads:
+        lead_digests: list[dict[str, Any]] = []
+        for lead in leads:
+            if not isinstance(lead, dict):
+                continue
+            digest: dict[str, Any] = {}
+            for key in ("id", "name", "status", "status_detail", "target"):
+                if key in lead:
+                    digest[key] = lead[key]
+            query = _compact_query_details(lead.get("query"))
+            if query:
+                digest["query"] = query
+            characterization = lead.get("characterization")
+            if isinstance(characterization, dict) and characterization:
+                digest["characterization"] = {
+                    str(k): _short_text(v, max_len=200) if isinstance(v, str) else v
+                    for k, v in characterization.items()
+                }
+            consultations = [
+                c for c in (
+                    _compact_consultation(c)
+                    for c in lead.get("consultations", [])
+                )
+                if c
+            ]
+            if consultations:
+                digest["consultations"] = consultations
+            lead_digests.append(digest)
+        if lead_digests:
+            out["current_leads"] = lead_digests
+    return out
+
+
+def format_analyze_frontier_block(
+    investigation_md: str,
+    loop_n: int,
+    *,
+    run_dir: Path | None = None,
+    gather_out: dict[str, Any] | None = None,
+) -> str:
+    """Render a compact, state-oriented frontier for ANALYZE.
+
+    ANALYZE previously received `<current_gather>` plus a manifest and was
+    instructed to Read the current PREDICT block. That kept the prompt small
+    but made the next logical step expensive and error-prone: the subagent had
+    to retrieve history, identify the canonical hypothesis set, remember prior
+    refutations/gaps, and only then grade.
+
+    This block keeps the immediate grading frontier inline while leaving long
+    prose and raw payloads as pointers:
+      - current loop's declared hypotheses/predictions/refutations/contracts
+      - compact current gather digest
+      - compact prior findings, including failed/refuted/partial leads
+      - section pointers for targeted Read when details are genuinely needed
+    """
+    body_raw = investigation_md.rstrip()
+    inv_path = (run_dir / "investigation.md") if run_dir is not None else None
+    frontier: dict[str, Any] = {
+        "loop_n": loop_n,
+        "objective": (
+            "Grade current_gather against active_hypotheses, close any "
+            "contracts this lead actually resolves, then route halt/continue."
+        ),
+        "discipline": [
+            (
+                "active_hypotheses is the canonical grading set; do not grade "
+                "hypothesis names seen only in prose."
+            ),
+            (
+                "prior_findings includes successes and failures; do not rerun "
+                "or reinterpret a resolved authority unless current_gather "
+                "directly changes it."
+            ),
+            (
+                "authorization_contract anchor_kind is load-bearing for "
+                "sanction; classification/context anchors do not override a "
+                "full sanction-anchor result."
+            ),
+        ],
+    }
+
+    if not body_raw:
+        frontier["pointers"] = {"investigation": "empty"}
+    else:
+        sections = _parse_investigation_sections(body_raw)
+        ranges = _section_line_ranges(sections)
+        predict_section = _section_for_loop(sections, "predict", loop_n)
+        prologue_section = _first_structured_section(sections, "contextualize")
+        latest_analyze = _latest_structured_section(sections, "analyze")
+
+        pointers: dict[str, Any] = {}
+        prologue_ptr = _section_pointer(prologue_section, ranges, inv_path)
+        if prologue_ptr:
+            pointers["prologue"] = prologue_ptr
+        predict_ptr = _section_pointer(predict_section, ranges, inv_path)
+        if predict_ptr:
+            pointers["current_predict"] = predict_ptr
+        analyze_ptr = _section_pointer(latest_analyze, ranges, inv_path)
+        if analyze_ptr:
+            pointers["latest_prior_analyze"] = analyze_ptr
+        if pointers:
+            frontier["pointers"] = pointers
+
+        predict_doc = _companion_doc_from_section(predict_section)
+        hypotheses = (
+            (predict_doc.get("hypothesize") or {}).get("hypotheses")
+            if isinstance(predict_doc.get("hypothesize"), dict)
+            else None
+        )
+        if isinstance(hypotheses, list) and hypotheses:
+            frontier["active_hypotheses"] = [
+                _compact_hypothesis(h)
+                for h in hypotheses
+                if isinstance(h, dict)
+            ]
+        else:
+            fallback = predict_frontier_hypotheses(investigation_md)
+            if fallback:
+                frontier["active_hypotheses"] = [
+                    _compact_hypothesis(h)
+                    for h in fallback
+                    if isinstance(h, dict)
+                ]
+            else:
+                frontier["active_hypotheses"] = []
+                frontier.setdefault("gaps", []).append(
+                    "No structured active hypotheses parsed; read current_predict pointer."
+                )
+
+        for doc in iter_companion_dicts(investigation_md):
+            findings = doc.get("findings")
+            if not isinstance(findings, list):
+                continue
+            prior = [
+                _compact_finding(f)
+                for f in findings
+                if isinstance(f, dict)
+                and (
+                    not isinstance(f.get("loop"), int)
+                    or f.get("loop") < loop_n
+                )
+            ]
+            if prior:
+                frontier["prior_findings"] = prior[-24:]
+            gaps = [
+                _compact_finding(f)
+                for f in findings
+                if isinstance(f, dict)
+                and (
+                    not isinstance(f.get("loop"), int)
+                    or f.get("loop") < loop_n
+                )
+                and _finding_is_negative_or_gap(f)
+            ]
+            if gaps:
+                frontier["prior_failures_or_gaps"] = gaps[-12:]
+            break
+
+    gather_digest = _gather_frontier(gather_out)
+    if gather_digest:
+        frontier["current_gather_digest"] = gather_digest
+
+    try:
+        import yaml  # Local import: handler-side dependency
+    except ImportError:
+        return f"<analysis_frontier>\n{frontier!r}\n</analysis_frontier>"
+    body = yaml.safe_dump(frontier, sort_keys=False).rstrip()
+    return f"<analysis_frontier>\n{body}\n</analysis_frontier>"
 
 
 def _predict_frontier_hypotheses(sections: list[dict]) -> list[dict]:
