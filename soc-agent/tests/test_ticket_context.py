@@ -10,6 +10,7 @@ Coverage targets:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -19,12 +20,14 @@ import yaml
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT / "scripts" / "tools"))
 
+import ticket_context  # noqa: E402
 from ticket_context import (  # noqa: E402
     _scalar,
     cluster_events,
     compute_high_volume,
     emit_yaml,
     extract_json_path,
+    main,
     parse_key_observables,
 )
 
@@ -283,3 +286,133 @@ def test_emit_yaml_repeat_cluster_shape():
     tc = parsed["ticket_context"]
     assert tc["repeats"][0]["alert_ids"] == ["e1", "e2"]
     assert tc["high_volume_dimensions"][0]["total_count"] == 120
+
+
+# ---------------------------------------------------------------------------
+# main() — argparse + ThreadPoolExecutor dispatch + YAML emission. Patches
+# run_query in-place so the test never shells out to wazuh_cli.
+# ---------------------------------------------------------------------------
+
+
+def _seed_signature_dir(repo_root: Path, signature_id: str) -> None:
+    """Drop a minimal field-quirks.md under knowledge/signatures/{id}/ so
+    main() can resolve observables. Mirrors the real on-disk layout that
+    ticket_context.py reads.
+    """
+    sig_dir = repo_root / "knowledge" / "signatures" / signature_id
+    sig_dir.mkdir(parents=True, exist_ok=True)
+    (sig_dir / "field-quirks.md").write_text(
+        "## Key observables\n\n"
+        "| Observable | JSON path | Notes |\n"
+        "| --- | --- | --- |\n"
+        "| source IP | `data.srcip` | n/a |\n"
+        "| user | `data.user` | n/a |\n"
+    )
+
+
+def _seed_alert(run_dir: Path, *, srcip="1.2.3.4", user="alice", ts="2026-04-19T10:00:00Z", rule_id="5710") -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    alert = {
+        "timestamp": ts,
+        "rule": {"id": rule_id, "description": "ssh-invalid-user"},
+        "data": {"srcip": srcip, "user": user},
+    }
+    (run_dir / "alert.json").write_text(json.dumps(alert))
+
+
+def test_main_emits_repeats_when_observables_match(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "soc-agent"
+    _seed_signature_dir(repo, "wazuh-rule-5710")
+    monkeypatch.setattr(ticket_context, "REPO_ROOT", repo)
+
+    run_dir = tmp_path / "run"
+    _seed_alert(run_dir)
+
+    # Two events with matching observables → repeats cluster.
+    def fake_run_query(query, start, end, run_dir_str):
+        if "rule.id" in query:
+            return query, [
+                {"id": "e1", "timestamp": "2026-04-19T09:30:00Z",
+                 "rule": {"id": "5710", "description": "ssh-invalid-user"},
+                 "data": {"srcip": "1.2.3.4", "user": "alice"}},
+                {"id": "e2", "timestamp": "2026-04-19T09:45:00Z",
+                 "rule": {"id": "5710", "description": "ssh-invalid-user"},
+                 "data": {"srcip": "1.2.3.4", "user": "alice"}},
+            ], None
+        return query, [], None
+
+    monkeypatch.setattr(ticket_context, "run_query", fake_run_query)
+    rc = main(["--run-dir", str(run_dir), "--signature-id", "wazuh-rule-5710"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    parsed = yaml.safe_load(out.split("```yaml")[1].split("```")[0])["ticket_context"]
+    assert parsed["entities"]["data.srcip"] == "1.2.3.4"
+    assert parsed["repeats"][0]["count"] == 2
+    assert parsed["repeats"][0]["alert_ids"] == ["e1", "e2"]
+
+
+def test_main_invalid_signature_id_returns_2(tmp_path, monkeypatch, capsys):
+    rc = main(["--run-dir", str(tmp_path), "--signature-id", "../escape"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "invalid signature_id" in err
+
+
+def test_main_missing_timestamp_returns_2(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "soc-agent"
+    _seed_signature_dir(repo, "wazuh-rule-5710")
+    monkeypatch.setattr(ticket_context, "REPO_ROOT", repo)
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "alert.json").write_text(json.dumps({"rule": {"id": "5710"}, "data": {}}))
+
+    rc = main(["--run-dir", str(run_dir), "--signature-id", "wazuh-rule-5710"])
+    assert rc == 2
+    assert "no timestamp" in capsys.readouterr().err
+
+
+def test_main_all_queries_failed_emits_queries_failed(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "soc-agent"
+    _seed_signature_dir(repo, "wazuh-rule-5710")
+    monkeypatch.setattr(ticket_context, "REPO_ROOT", repo)
+
+    run_dir = tmp_path / "run"
+    _seed_alert(run_dir)
+
+    monkeypatch.setattr(
+        ticket_context, "run_query",
+        lambda query, *_: (query, [], "rc=1: timeout"),
+    )
+    rc = main(["--run-dir", str(run_dir), "--signature-id", "wazuh-rule-5710"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    parsed = yaml.safe_load(out.split("```yaml")[1].split("```")[0])["ticket_context"]
+    assert "queries_failed" in parsed
+    assert "rc=1: timeout" in parsed["queries_failed"]
+    assert parsed["repeats"] == []
+
+
+def test_main_partial_failure_records_queries_partial(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "soc-agent"
+    _seed_signature_dir(repo, "wazuh-rule-5710")
+    monkeypatch.setattr(ticket_context, "REPO_ROOT", repo)
+
+    run_dir = tmp_path / "run"
+    _seed_alert(run_dir)
+
+    def fake(query, *_):
+        if "rule.id" in query:
+            return query, [
+                {"id": "e1", "timestamp": "2026-04-19T09:30:00Z",
+                 "rule": {"id": "5710"}, "data": {"srcip": "1.2.3.4", "user": "alice"}},
+            ], None
+        return query, [], "boom"
+
+    monkeypatch.setattr(ticket_context, "run_query", fake)
+    rc = main(["--run-dir", str(run_dir), "--signature-id", "wazuh-rule-5710"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    parsed = yaml.safe_load(out.split("```yaml")[1].split("```")[0])["ticket_context"]
+    assert "queries_partial" in parsed
+    assert "boom" in parsed["queries_partial"]
