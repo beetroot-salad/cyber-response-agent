@@ -1,11 +1,15 @@
-"""Tests for scripts/cleanup_runs.py and schemas/retention.py."""
+"""Tests for scripts/cleanup_runs.py and schemas/retention.py.
+
+The retention loader and `cleanup_runs.main()` accept their config as
+parameters (`env=...` mapping, `runs_dir=...` Path) so tests pass them
+directly instead of patching `os.environ`.
+"""
 
 import json
 import os
 import sys
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -97,43 +101,34 @@ class TestRetentionSchema:
         assert any(fragment in e for e in errors), errors
 
     def test_load_uses_defaults_when_env_unset(self):
-        clean = {
-            k: v for k, v in os.environ.items()
-            if k not in {"SOC_AGENT_RUN_MAX_AGE_DAYS",
-                         "SOC_AGENT_AUDIT_MAX_AGE_DAYS",
-                         "SOC_AGENT_TRACE_MAX_AGE_DAYS"}
-        }
-        with patch.dict("os.environ", clean, clear=True):
-            policy = load_retention_policy()
+        policy = load_retention_policy(env={})
         assert policy.run_max_age_days   == DEFAULT_RUN_MAX_AGE_DAYS
         assert policy.audit_max_age_days == DEFAULT_AUDIT_MAX_AGE_DAYS
         assert policy.trace_max_age_days == DEFAULT_TRACE_MAX_AGE_DAYS
 
     def test_load_reads_env_vars(self):
-        with patch.dict("os.environ", {"SOC_AGENT_RUN_MAX_AGE_DAYS": "45"}):
-            policy = load_retention_policy()
+        policy = load_retention_policy(env={"SOC_AGENT_RUN_MAX_AGE_DAYS": "45"})
         assert policy.run_max_age_days == 45
 
     @pytest.mark.parametrize("bad_value", ["not-a-number", "1.5", "abc", ""],
                               ids=["word", "float", "letters", "empty-non-issue"])
     def test_load_exits_on_non_integer(self, bad_value):
+        env = {"SOC_AGENT_RUN_MAX_AGE_DAYS": bad_value}
         if bad_value == "":
             # empty string means unset → uses default, not an error
-            with patch.dict("os.environ", {"SOC_AGENT_RUN_MAX_AGE_DAYS": bad_value}):
-                policy = load_retention_policy()
+            policy = load_retention_policy(env=env)
             assert policy.run_max_age_days == DEFAULT_RUN_MAX_AGE_DAYS
         else:
-            with patch.dict("os.environ", {"SOC_AGENT_RUN_MAX_AGE_DAYS": bad_value}):
-                with pytest.raises(SystemExit) as exc:
-                    load_retention_policy()
+            with pytest.raises(SystemExit) as exc:
+                load_retention_policy(env=env)
             assert exc.value.code == 1
 
     @pytest.mark.parametrize("bad_value", ["0", "-1", "-100"],
                               ids=["zero", "neg-one", "large-neg"])
     def test_load_exits_on_nonpositive(self, bad_value):
-        with patch.dict("os.environ", {"SOC_AGENT_AUDIT_MAX_AGE_DAYS": bad_value}):
-            with pytest.raises(SystemExit) as exc:
-                load_retention_policy()
+        env = {"SOC_AGENT_AUDIT_MAX_AGE_DAYS": bad_value}
+        with pytest.raises(SystemExit) as exc:
+            load_retention_policy(env=env)
         assert exc.value.code == 1
 
 
@@ -423,8 +418,7 @@ class TestMainIntegration:
     def test_full_run(self, tmp_path):
         from scripts.cleanup_runs import main
         self._setup_runs_dir(tmp_path)
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            rc = main([])
+        rc = main([], runs_dir=tmp_path, env={})
         assert rc == 0
         assert not (tmp_path / "old-run").exists()
         assert (tmp_path / "new-run").exists()
@@ -435,8 +429,7 @@ class TestMainIntegration:
         from scripts.cleanup_runs import main
         paths = self._setup_runs_dir(tmp_path)
         audit_before = paths["audit"].read_text()
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            rc = main(["--dry-run"])
+        rc = main(["--dry-run"], runs_dir=tmp_path, env={})
         assert rc == 0
         assert (tmp_path / "old-run").exists()
         assert paths["audit"].read_text() == audit_before
@@ -444,8 +437,7 @@ class TestMainIntegration:
     def test_summary_output(self, tmp_path, capsys):
         from scripts.cleanup_runs import main
         self._setup_runs_dir(tmp_path)
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            main([])
+        main([], runs_dir=tmp_path, env={})
         out = capsys.readouterr().out
         assert "Deleted" in out
         assert "skipped" in out
@@ -453,16 +445,12 @@ class TestMainIntegration:
 
     def test_bad_env_var_exits_1(self, tmp_path):
         from scripts.cleanup_runs import main
-        with patch.dict("os.environ", {
-            "SOC_AGENT_RUNS_DIR": str(tmp_path),
-            "SOC_AGENT_RUN_MAX_AGE_DAYS": "garbage",
-        }), pytest.raises(SystemExit) as exc:
-            main([])
+        with pytest.raises(SystemExit) as exc:
+            main([], runs_dir=tmp_path, env={"SOC_AGENT_RUN_MAX_AGE_DAYS": "garbage"})
         assert exc.value.code == 1
 
     def test_missing_runs_dir_exits_0(self, tmp_path):
         from scripts.cleanup_runs import main
         missing = tmp_path / "no_such_dir"
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(missing)}):
-            rc = main([])
+        rc = main([], runs_dir=missing, env={})
         assert rc == 0

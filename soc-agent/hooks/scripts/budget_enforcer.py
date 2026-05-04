@@ -41,12 +41,16 @@ def parse_yaml_config(path: Path) -> dict:
     return parse_yaml_frontmatter(wrapped)
 
 
-def load_limits(signature_id: str) -> dict:
-    """Load budget limits: defaults overlaid with per-signature overrides."""
+def load_limits(signature_id: str, soc_agent_root: Path | None = None) -> dict:
+    """Load budget limits: defaults overlaid with per-signature overrides.
+
+    `soc_agent_root` overrides the module-level constant — used by tests so
+    they can build a throwaway config tree under tmp_path."""
+    root = soc_agent_root if soc_agent_root is not None else SOC_AGENT_ROOT
     limits = dict(DEFAULT_LIMITS)
 
     # Layer 1: config/budget-defaults.yaml
-    defaults_path = SOC_AGENT_ROOT / "config" / "budget-defaults.yaml"
+    defaults_path = root / "config" / "budget-defaults.yaml"
     defaults = parse_yaml_config(defaults_path)
     for key in limits:
         if key in defaults and isinstance(defaults[key], int):
@@ -55,7 +59,7 @@ def load_limits(signature_id: str) -> dict:
     # Layer 2: per-signature permissions.yaml budget section
     if signature_id:
         perms_path = (
-            SOC_AGENT_ROOT / "config" / "signatures" / signature_id / "permissions.yaml"
+            root / "config" / "signatures" / signature_id / "permissions.yaml"
         )
         perms = parse_yaml_config(perms_path)
         budget_overrides = perms.get("budget")
@@ -172,21 +176,29 @@ def check_budgets(budget: dict, limits: dict) -> list[str]:
     return warnings
 
 
-def main():
+def main(
+    *,
+    stdin=None,
+    runs_dir: Path | None = None,
+    soc_agent_root: Path | None = None,
+) -> int:
+    """Entry point. All boundaries (stdin, runs dir, plugin root) are
+    parameters with sensible defaults so tests don't have to patch globals."""
     try:
-        raw = sys.stdin.read()
+        raw = (stdin or sys.stdin).read()
         hook_data = json.loads(raw)
     except Exception:
-        sys.exit(0)
+        return 0
 
     session_id = hook_data.get("session_id")
     if not session_id:
-        sys.exit(0)
+        return 0
 
-    runs_dir = get_runs_dir()
+    if runs_dir is None:
+        runs_dir = get_runs_dir()
     run_dir, signature_id = resolve_run_dir(session_id, runs_dir)
     if run_dir is None:
-        sys.exit(0)
+        return 0
 
     # Atomically increment counters under file lock.
     run_id = run_dir.name
@@ -194,13 +206,13 @@ def main():
     budget = update_budget_locked(run_dir, run_id, tool_name)
 
     # Check limits and print warnings.
-    limits = load_limits(signature_id)
+    limits = load_limits(signature_id, soc_agent_root=soc_agent_root)
     warnings = check_budgets(budget, limits)
     for warning in warnings:
         print(f"\u26a0 {warning}", file=sys.stderr)
 
-    sys.exit(0)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

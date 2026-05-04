@@ -171,6 +171,7 @@ def invoke_subagent(
     model: str | None = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     session_id: str | None = None,
+    _runner: Callable[..., subprocess.CompletedProcess] | None = None,
 ) -> str:
     """Run a subagent by name (e.g. "archetype-match") and return its stdout.
 
@@ -254,6 +255,7 @@ def invoke_subagent(
         env["VIRTUAL_ENV"] = str(SOC_AGENT_ROOT / ".venv")
 
     started = time.monotonic()
+    runner = _runner if _runner is not None else subprocess.run
     try:
         # Pin cwd to the plugin root so relative tool paths the subagent
         # constructs from `knowledge/environment/systems/{vendor}/SKILL.md`
@@ -262,7 +264,7 @@ def invoke_subagent(
         # often `/workspace`, where the same relative paths fail with
         # `[Errno 2]` and the subagent burns turns recovering with
         # `soc-agent/` prefixes or `cd ... && ...` rewrites.
-        result = subprocess.run(
+        result = runner(
             argv,
             input=final_prompt,
             capture_output=True, text=True,

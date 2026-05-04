@@ -1,6 +1,9 @@
 """Tests for budget enforcement hook.
 
 Tests the budget_enforcer.py PostToolUse hook and schemas/budget.py.
+
+The hook entry point (`main`) accepts stdin / runs_dir / soc_agent_root as
+parameters, so tests pass them directly instead of patching globals.
 """
 
 import json
@@ -10,7 +13,6 @@ import time
 from datetime import datetime, timedelta, UTC
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -21,6 +23,7 @@ from hooks.scripts.budget_enforcer import (
     check_budgets,
     load_limits,
     load_or_create_budget,
+    main as budget_main,
     parse_yaml_config,
     resolve_run_dir,
     update_budget_locked,
@@ -177,10 +180,7 @@ class TestResolveRunDir:
 
 class TestLoadLimits:
     def test_defaults_when_no_config(self, tmp_path):
-        with patch(
-            "hooks.scripts.budget_enforcer.SOC_AGENT_ROOT", tmp_path
-        ):
-            limits = load_limits("")
+        limits = load_limits("", soc_agent_root=tmp_path)
         assert limits == DEFAULT_LIMITS
 
     def test_defaults_yaml_overrides(self, tmp_path):
@@ -188,10 +188,7 @@ class TestLoadLimits:
         (tmp_path / "config" / "budget-defaults.yaml").write_text(
             "max_tool_calls: 200\n"
         )
-        with patch(
-            "hooks.scripts.budget_enforcer.SOC_AGENT_ROOT", tmp_path
-        ):
-            limits = load_limits("")
+        limits = load_limits("", soc_agent_root=tmp_path)
         assert limits["max_tool_calls"] == 200
         assert limits["max_subagent_spawns"] == DEFAULT_LIMITS["max_subagent_spawns"]
 
@@ -205,10 +202,7 @@ class TestLoadLimits:
         (sig_dir / "permissions.yaml").write_text(
             "budget:\n  max_tool_calls: 75\n"
         )
-        with patch(
-            "hooks.scripts.budget_enforcer.SOC_AGENT_ROOT", tmp_path
-        ):
-            limits = load_limits("sig-1")
+        limits = load_limits("sig-1", soc_agent_root=tmp_path)
         assert limits["max_tool_calls"] == 75
         assert limits["max_subagent_spawns"] == 10
 
@@ -364,55 +358,36 @@ class TestUpdateBudgetLocked:
 # ---------------------------------------------------------------------------
 
 
-class TestBudgetEnforcerMain:
-    def _run_hook(self, tmp_path, hook_input, soc_root=None):
-        """Run the budget_enforcer main() with patched env and stdin."""
-        env = {"SOC_AGENT_RUNS_DIR": str(tmp_path)}
-        patches = [
-            patch.dict("os.environ", env),
-            patch("sys.stdin", StringIO(json.dumps(hook_input))),
-        ]
-        if soc_root:
-            patches.append(
-                patch("hooks.scripts.budget_enforcer.SOC_AGENT_ROOT", soc_root)
-            )
-        with pytest.raises(SystemExit) as exc_info:
-            for p in patches:
-                p.start()
-            try:
-                from hooks.scripts.budget_enforcer import main
-                main()
-            finally:
-                for p in patches:
-                    p.stop()
-        return exc_info.value.code
+def _run_main(runs_dir, hook_input, soc_agent_root=None) -> int:
+    """Invoke the hook entry point with a synthetic stdin and explicit runs dir."""
+    return budget_main(
+        stdin=StringIO(json.dumps(hook_input)),
+        runs_dir=runs_dir,
+        soc_agent_root=soc_agent_root,
+    )
 
+
+class TestBudgetEnforcerMain:
     def test_increments_tool_calls(self, tmp_path):
         _make_run(tmp_path, "run-1")
         hook_input = {"session_id": "sess-1", "tool_name": "Bash", "tool_input": {}}
-
-        self._run_hook(tmp_path, hook_input)
-
+        assert _run_main(tmp_path, hook_input) == 0
         budget = json.loads((tmp_path / "run-1" / "budget.json").read_text())
         assert budget["tool_calls"] == 1
 
     def test_agent_increments_both_counters(self, tmp_path):
         _make_run(tmp_path, "run-1")
         hook_input = {"session_id": "sess-1", "tool_name": "Agent", "tool_input": {}}
-
-        self._run_hook(tmp_path, hook_input)
-
+        assert _run_main(tmp_path, hook_input) == 0
         budget = json.loads((tmp_path / "run-1" / "budget.json").read_text())
         assert budget["tool_calls"] == 1
         assert budget["subagent_spawns"] == 1
 
     def test_accumulates_across_calls(self, tmp_path):
         _make_run(tmp_path, "run-1")
-
-        for i in range(5):
+        for _ in range(5):
             hook_input = {"session_id": "sess-1", "tool_name": "Bash", "tool_input": {}}
-            self._run_hook(tmp_path, hook_input)
-
+            assert _run_main(tmp_path, hook_input) == 0
         budget = json.loads((tmp_path / "run-1" / "budget.json").read_text())
         assert budget["tool_calls"] == 5
 
@@ -424,8 +399,7 @@ class TestBudgetEnforcerMain:
             "started_at": "2020-01-01T00:00:00+00:00",
         }))
         hook_input = {"session_id": "sess-1", "tool_name": "Bash", "tool_input": {}}
-        code = self._run_hook(tmp_path, hook_input)
-        assert code == 0
+        assert _run_main(tmp_path, hook_input) == 0
 
     def test_prints_warning_at_threshold(self, tmp_path, capsys):
         # Use a small limit so we can trigger warning easily.
@@ -445,7 +419,7 @@ class TestBudgetEnforcerMain:
         ))
 
         hook_input = {"session_id": "sess-1", "tool_name": "Bash", "tool_input": {}}
-        self._run_hook(runs_dir, hook_input, soc_root=soc_root)
+        _run_main(runs_dir, hook_input, soc_agent_root=soc_root)
 
         captured = capsys.readouterr()
         assert "tool_calls" in captured.err
@@ -453,22 +427,17 @@ class TestBudgetEnforcerMain:
 
     def test_no_active_run_exits_zero(self, tmp_path):
         hook_input = {"session_id": "sess-1", "tool_name": "Bash", "tool_input": {}}
-        code = self._run_hook(tmp_path, hook_input)
-        assert code == 0
+        assert _run_main(tmp_path, hook_input) == 0
 
     def test_no_session_id_exits_zero(self, tmp_path):
         hook_input = {"tool_name": "Bash", "tool_input": {}}
-        code = self._run_hook(tmp_path, hook_input)
-        assert code == 0
+        assert _run_main(tmp_path, hook_input) == 0
 
     def test_malformed_stdin_exits_zero(self, tmp_path):
-        env = {"SOC_AGENT_RUNS_DIR": str(tmp_path)}
-        with patch.dict("os.environ", env):
-            with patch("sys.stdin", StringIO("not json")):
-                with pytest.raises(SystemExit) as exc_info:
-                    from hooks.scripts.budget_enforcer import main
-                    main()
-                assert exc_info.value.code == 0
+        assert budget_main(
+            stdin=StringIO("not json"),
+            runs_dir=tmp_path,
+        ) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -510,3 +479,8 @@ class TestBudgetEnforcerScript:
             text=True,
         )
         assert result.returncode == 0
+
+
+# pytest stays referenced for the SystemExit-based tests above (none anymore,
+# but pytest fixtures still in use).
+_ = pytest

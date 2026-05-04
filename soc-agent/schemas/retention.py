@@ -71,12 +71,17 @@ class RetentionPolicy:
 # Loader
 # ---------------------------------------------------------------------------
 
-def load_retention_policy() -> RetentionPolicy:
+def load_retention_policy(env=None) -> RetentionPolicy:
     """Load retention config from environment variables with defaults.
+
+    `env` is the mapping to read from; defaults to `os.environ`. Tests pass a
+    dict directly so they don't need to mutate process env.
 
     Exits with code 1 and a clear message if any variable is set to a
     non-positive-integer value — bad config is a fatal startup error.
     """
+    if env is None:
+        env = os.environ
     _ENV_DEFAULTS = {
         "SOC_AGENT_RUN_MAX_AGE_DAYS":   DEFAULT_RUN_MAX_AGE_DAYS,
         "SOC_AGENT_AUDIT_MAX_AGE_DAYS": DEFAULT_AUDIT_MAX_AGE_DAYS,
@@ -84,7 +89,7 @@ def load_retention_policy() -> RetentionPolicy:
     }
     values = {}
     for env_var, default in _ENV_DEFAULTS.items():
-        raw = os.environ.get(env_var, "").strip()
+        raw = env.get(env_var, "").strip()
         if not raw:
             values[env_var] = default
             continue

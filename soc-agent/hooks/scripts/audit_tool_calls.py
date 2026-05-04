@@ -52,13 +52,15 @@ def sanitize_tool_input(tool_input: dict) -> dict:
     return sanitized
 
 
-def main():
+def main(stdin=None, runs_dir=None) -> int:
+    """Entry point. Tests pass `stdin` and `runs_dir` directly to avoid
+    patching globals."""
     try:
-        raw = sys.stdin.read()
+        raw = (stdin or sys.stdin).read()
         hook_data = json.loads(raw)
     except Exception:
         # If we can't parse input, silently exit — never block the agent.
-        sys.exit(0)
+        return 0
 
     entry = {
         "timestamp": datetime.now(UTC).isoformat(),
@@ -85,13 +87,14 @@ def main():
 
     tool_name = hook_data.get("tool_name", "")
     filename = "tool_trace.jsonl" if tool_name in TRACE_TOOLS else "tool_audit.jsonl"
-    out_path = get_runs_dir() / filename
+    base = runs_dir if runs_dir is not None else get_runs_dir()
+    out_path = base / filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "a") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    sys.exit(0)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

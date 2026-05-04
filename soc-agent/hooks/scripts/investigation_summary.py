@@ -113,18 +113,22 @@ def extract_transcript_stats(transcript_path: str) -> dict:
     return stats
 
 
-def main(payload: dict | None = None) -> None:
+def main(payload: dict | None = None, *, runs_dir: Path | None = None, env=None) -> None:
     """Append an audit entry for the current run. Never raises.
 
-    Accepts the Stop payload dict. When called directly from __main__,
-    the payload is read from stdin. Either way, session_id anchors the
-    run-directory resolution so concurrent runs don't cross-contaminate.
+    Accepts the Stop payload dict. `runs_dir` and `env` (the mapping consulted
+    for `SOC_AGENT_TRANSCRIPT_PATH`) default to live values; tests pass them
+    explicitly. session_id anchors run-directory resolution so concurrent
+    runs don't cross-contaminate.
     """
     if payload is None:
         payload = {}
+    if env is None:
+        env = os.environ
 
     session_id = payload.get("session_id") if isinstance(payload, dict) else None
-    runs_dir = get_runs_dir()
+    if runs_dir is None:
+        runs_dir = get_runs_dir()
 
     run_dir: Path | None = None
     if session_id:
@@ -157,7 +161,7 @@ def main(payload: dict | None = None) -> None:
     # SOC_AGENT_TRANSCRIPT_PATH takes precedence so eval_run.sh can point at
     # the tee'd full transcript — under --no-session-persistence, the Stop
     # hook payload's transcript_path is a 1-line ai-title stub.
-    transcript_path = os.environ.get("SOC_AGENT_TRANSCRIPT_PATH") or payload.get("transcript_path")
+    transcript_path = env.get("SOC_AGENT_TRANSCRIPT_PATH") or payload.get("transcript_path")
     stats = extract_transcript_stats(transcript_path) if transcript_path else _empty_stats()
 
     entry = {

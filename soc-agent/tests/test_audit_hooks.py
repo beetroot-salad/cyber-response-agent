@@ -9,9 +9,6 @@ import subprocess
 import sys
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
@@ -92,12 +89,9 @@ class TestAuditToolCallsMain:
             "tool_use_id": "toolu_abc",
         }
 
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            with patch("sys.stdin", StringIO(json.dumps(hook_input))):
-                with pytest.raises(SystemExit) as exc_info:
-                    from hooks.scripts.audit_tool_calls import main
-                    main()
-                assert exc_info.value.code == 0
+        from hooks.scripts.audit_tool_calls import main
+        rc = main(stdin=StringIO(json.dumps(hook_input)), runs_dir=tmp_path)
+        assert rc == 0
 
         audit_file = tmp_path / "tool_audit.jsonl"
         assert audit_file.exists()
@@ -119,11 +113,8 @@ class TestAuditToolCallsMain:
             "agent_type": "Explore",
         }
 
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            with patch("sys.stdin", StringIO(json.dumps(hook_input))):
-                with pytest.raises(SystemExit):
-                    from hooks.scripts.audit_tool_calls import main
-                    main()
+        from hooks.scripts.audit_tool_calls import main
+        main(stdin=StringIO(json.dumps(hook_input)), runs_dir=tmp_path)
 
         entry = json.loads(
             (tmp_path / "tool_audit.jsonl").read_text().strip().split("\n")[-1]
@@ -139,11 +130,8 @@ class TestAuditToolCallsMain:
             "tool_use_id": "toolu_ghi",
         }
 
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            with patch("sys.stdin", StringIO(json.dumps(hook_input))):
-                with pytest.raises(SystemExit):
-                    from hooks.scripts.audit_tool_calls import main
-                    main()
+        from hooks.scripts.audit_tool_calls import main
+        main(stdin=StringIO(json.dumps(hook_input)), runs_dir=tmp_path)
 
         assert not (tmp_path / "tool_audit.jsonl").exists()
         trace_file = tmp_path / "tool_trace.jsonl"
@@ -159,11 +147,8 @@ class TestAuditToolCallsMain:
                 "tool_input": {"pattern": "*.py"},
                 "tool_use_id": f"toolu_{tool.lower()}",
             }
-            with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-                with patch("sys.stdin", StringIO(json.dumps(hook_input))):
-                    with pytest.raises(SystemExit):
-                        from hooks.scripts.audit_tool_calls import main
-                        main()
+            from hooks.scripts.audit_tool_calls import main
+            main(stdin=StringIO(json.dumps(hook_input)), runs_dir=tmp_path)
 
         lines = (tmp_path / "tool_trace.jsonl").read_text().strip().split("\n")
         assert len(lines) == 2
@@ -173,12 +158,9 @@ class TestAuditToolCallsMain:
         assert {"Read", "Glob", "Grep"} == TRACE_TOOLS
 
     def test_invalid_stdin_exits_zero(self, tmp_path):
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            with patch("sys.stdin", StringIO("not json")):
-                with pytest.raises(SystemExit) as exc_info:
-                    from hooks.scripts.audit_tool_calls import main
-                    main()
-                assert exc_info.value.code == 0
+        from hooks.scripts.audit_tool_calls import main
+        rc = main(stdin=StringIO("not json"), runs_dir=tmp_path)
+        assert rc == 0
 
     def test_appends_multiple_entries(self, tmp_path):
         for i in range(3):
@@ -188,11 +170,8 @@ class TestAuditToolCallsMain:
                 "tool_input": {"command": f"echo {i}"},
                 "tool_use_id": f"toolu_{i}",
             }
-            with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-                with patch("sys.stdin", StringIO(json.dumps(hook_input))):
-                    with pytest.raises(SystemExit):
-                        from hooks.scripts.audit_tool_calls import main
-                        main()
+            from hooks.scripts.audit_tool_calls import main
+            main(stdin=StringIO(json.dumps(hook_input)), runs_dir=tmp_path)
 
         lines = (tmp_path / "tool_audit.jsonl").read_text().strip().split("\n")
         assert len(lines) == 3
@@ -411,9 +390,7 @@ leads_pursued: 4
 
     def _invoke_main(self, tmp_path, payload_dict):
         from hooks.scripts.investigation_summary import main
-
-        with patch.dict("os.environ", {"SOC_AGENT_RUNS_DIR": str(tmp_path)}):
-            main(payload_dict)
+        main(payload_dict, runs_dir=tmp_path, env={})
 
     def test_writes_summary_entry(self, tmp_path):
         self._make_run(tmp_path)
@@ -524,12 +501,11 @@ leads_pursued: 4
         )
 
         from hooks.scripts.investigation_summary import main
-
-        with patch.dict("os.environ", {
-            "SOC_AGENT_RUNS_DIR": str(tmp_path),
-            "SOC_AGENT_TRANSCRIPT_PATH": str(full),
-        }):
-            main({"session_id": "sess-env", "transcript_path": str(stub)})
+        main(
+            {"session_id": "sess-env", "transcript_path": str(stub)},
+            runs_dir=tmp_path,
+            env={"SOC_AGENT_TRANSCRIPT_PATH": str(full)},
+        )
 
         entry = json.loads((tmp_path / "audit.jsonl").read_text().strip())
         assert entry["input_tokens"] == 777
