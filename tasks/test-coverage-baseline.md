@@ -17,7 +17,41 @@ soc-agent/.venv/bin/pytest soc-agent/tests/ -m "not llm" \
     --cov=soc-agent --cov-report=term-missing --cov-report=json:/tmp/coverage.json
 ```
 
-Result: **87% line coverage** across 24,550 lines, 3,110 uncovered.
+Result: **87% line coverage** across 24,550 lines, 3,110 uncovered. This
+number was **misleading**: hooks/CLIs that tests exercise via `subprocess`
+were untracked. With subprocess coverage enabled (see "Subprocess coverage"
+below) the baseline jumps significantly. Any decision on a floor should be
+made against the post-fix re-baseline, not against this number.
+
+## Subprocess coverage (2026-05-04)
+
+Pre-fix, the largest "uncovered" files were almost all subprocess-driven —
+`infer_state.py` showed 19% coverage despite 34 tests exercising it via
+`subprocess.run`. With the shim wired up, `infer_state.py` measured 90%,
+`resolve_imports.py` 93%. Expect comparable jumps for the other subprocess-
+heavy modules (`validate_report*`, `setup_run`, `wazuh_cli`, `host_query`,
+`ticket_context`, the `invlang` CLI, etc.) on the next full re-baseline.
+
+How it's wired:
+- `pyproject.toml` `[tool.coverage.run]` sets `parallel = true` and lists
+  `source = ["hooks", "schemas", "scripts"]`. The earlier
+  `source = ["soc-agent"]` was broken — coverage treats `source` as
+  importable package names, and `soc-agent` (with a hyphen) is not.
+- `tests/conftest.py` writes a `coverage_subprocess.pth` file into the
+  venv's site-packages on first import and points
+  `COVERAGE_PROCESS_START` at the project's `pyproject.toml`. Every
+  child Python under that venv now starts coverage automatically.
+- The `.pth` exits cheaply when `COVERAGE_PROCESS_START` is unset, so
+  normal `pytest` runs (no `--cov`) pay no subprocess overhead.
+
+Recommended invocation post-fix:
+
+```
+.venv/bin/pytest tests/ -m "not llm" \
+    --cov --cov-report=term-missing --cov-report=json:/tmp/coverage.json
+```
+
+Drop `--cov=soc-agent`; let the config-defined `source` apply.
 
 ## Suggested follow-ups (do not enforce yet — investigate first)
 

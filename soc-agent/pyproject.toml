@@ -98,3 +98,32 @@ ignore_names = ["key_field", "key_value"]
 
 # Pytest markers ("llm", "live") are registered in soc-agent/tests/conftest.py.
 # Coverage (pytest-cov) is opt-in; invoke with `pytest --cov=soc-agent` when needed.
+
+[tool.coverage.run]
+# Many hooks and CLIs are exercised by tests via subprocess. Without
+# parallel mode + a process-startup shim, those code paths look uncovered
+# even though hundreds of tests run them. tests/conftest.py installs a
+# .pth shim into the venv on import and points COVERAGE_PROCESS_START at
+# this config so child processes record coverage too.
+parallel = true
+sigterm = true
+# Coverage matches `source` against importable package names; "soc-agent"
+# (with a hyphen) is not importable, so we list the top-level packages we
+# actually ship instead.
+source = ["hooks", "schemas", "scripts"]
+omit = [
+    ".venv/*",
+    "tests/*",
+]
+
+[tool.coverage.paths]
+# Collapse subprocess-recorded paths onto a single canonical form so
+# combine() merges parent + child data files even when one side recorded
+# absolute paths.
+hooks = ["hooks", "*/soc-agent/hooks"]
+schemas = ["schemas", "*/soc-agent/schemas"]
+scripts = ["scripts", "*/soc-agent/scripts"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
