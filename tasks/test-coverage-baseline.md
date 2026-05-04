@@ -1,6 +1,6 @@
 ---
 title: Use pytest-cov to drive coverage decisions (baseline 87%)
-status: backlog
+status: doing
 groups: testing, code-quality
 ---
 

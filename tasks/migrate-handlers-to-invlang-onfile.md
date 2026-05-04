@@ -1,6 +1,6 @@
 ---
 title: Migrate handler on-disk format from yaml fences to ```invlang
-status: doing
+status: done
 groups: invlang, dense-onfile
 ---
 
