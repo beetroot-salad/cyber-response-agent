@@ -9,7 +9,6 @@ import subprocess
 import sys
 from io import StringIO
 from pathlib import Path
-import pytest
 
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOC_AGENT_ROOT))
