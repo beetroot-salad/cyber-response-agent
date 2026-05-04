@@ -1,6 +1,6 @@
 ---
 title: Environment memory retrieval — anchor-tagged atoms across knowledge/environment/, preloaded into every phase by mechanic + entity + signature anchors
-status: doing
+status: done
 groups: knowledge-base, predict, gather, analyze, infrastructure
 ---
 

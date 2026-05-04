@@ -1,6 +1,6 @@
 ---
 title: Drive mypy from soft-launch to hard gate
-status: backlog
+status: doing
 groups: lint, typing, code-quality
 ---
 
