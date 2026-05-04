@@ -1193,6 +1193,156 @@ class TestMechanicalAnalyzeCompose:
         cat = report_handler._derive_termination_category({}, [], "no markers here")
         assert cat == "exhaustion-escalation"
 
+    def test_compose_key_evidence_authz_verdict_with_as_of(self):
+        findings = [{
+            "name": "host-query",
+            "outcome": {
+                "observations": {
+                    "edges": [{"authorization_resolutions": [
+                        {"anchor_id": "cmdb", "verdict": "authorized",
+                         "as_of": "2026-01-02T03:04:05Z"}
+                    ]}],
+                },
+            },
+        }]
+        md = report_handler._compose_key_evidence_md(findings)
+        assert "host-query" in md
+        assert "anchor `cmdb` → `authorized`" in md
+        assert "(as of 2026-01-02T03:04:05Z)" in md
+
+    def test_compose_key_evidence_anchor_consultation(self):
+        findings = [{
+            "name": "registry-lookup",
+            "outcome": {
+                "anchor_consultations": [
+                    {"anchor_id": "user-registry", "result": "confirmed"}
+                ],
+            },
+        }]
+        md = report_handler._compose_key_evidence_md(findings)
+        assert "anchor `user-registry` → `confirmed`" in md
+        assert "(as of" not in md
+
+    def test_compose_key_evidence_attribute_update_kv(self):
+        findings = [{
+            "name": "source-classification",
+            "outcome": {
+                "attribute_updates": [
+                    {"target": "v-001", "updates": {"classification": "internal"}}
+                ],
+            },
+        }]
+        md = report_handler._compose_key_evidence_md(findings)
+        assert "`v-001.classification` = `internal`" in md
+
+    def test_compose_key_evidence_attribute_update_empty_dict(self):
+        findings = [{
+            "name": "source-classification",
+            "outcome": {
+                "attribute_updates": [{"target": "v-001", "updates": {}}],
+            },
+        }]
+        md = report_handler._compose_key_evidence_md(findings)
+        assert "attribute update on `v-001`" in md
+
+    def test_compose_key_evidence_attribute_update_empty_list(self):
+        findings = [{
+            "name": "source-classification",
+            "outcome": {"attribute_updates": []},
+            "status": "active",
+        }]
+        # Empty list is falsy → falls through to status fallback.
+        md = report_handler._compose_key_evidence_md(findings)
+        assert "lead completed (status: `active`)" in md
+
+    def test_compose_key_evidence_resolutions_count(self):
+        findings = [{
+            "name": "host-query",
+            "resolutions": [
+                {"hypothesis_id": "h-001", "after": "++"},
+                {"hypothesis_id": "h-002", "after": "--"},
+            ],
+        }]
+        md = report_handler._compose_key_evidence_md(findings)
+        assert "2 hypothesis resolution(s) recorded" in md
+
+    def test_compose_key_evidence_fallback_to_status(self):
+        findings = [{"name": "noop-lead", "outcome": {}, "status": "deferred"}]
+        md = report_handler._compose_key_evidence_md(findings)
+        assert "lead completed (status: `deferred`)" in md
+
+    def test_compose_key_evidence_empty_findings(self):
+        md = report_handler._compose_key_evidence_md([])
+        assert md == "- (no findings leads recorded)"
+
+    def test_compose_trace_analyze_authz_verdict(self):
+        findings = [{
+            "name": "host-query",
+            "outcome": {
+                "observations": {
+                    "edges": [{"authorization_resolutions": [
+                        {"anchor_id": "cmdb", "verdict": "authorized"}
+                    ]}],
+                },
+            },
+        }]
+        trace = report_handler._compose_trace_analyze(
+            findings, disposition="benign",
+            surviving_hypotheses=None, matched_archetype="planned-maintenance",
+        )
+        assert trace == "host-query(authorized) → benign:planned-maintenance"
+
+    def test_compose_trace_analyze_consultation_result(self):
+        findings = [{
+            "name": "registry",
+            "outcome": {"anchor_consultations": [{"result": "confirmed"}]},
+        }]
+        trace = report_handler._compose_trace_analyze(
+            findings, disposition="benign",
+            surviving_hypotheses=["?monitoring-probe"], matched_archetype=None,
+        )
+        # surviving_hypotheses chosen over disposition when no archetype.
+        assert trace == "registry(confirmed) → benign:?monitoring-probe"
+
+    def test_compose_trace_analyze_resolution_after_field(self):
+        findings = [{
+            "name": "host-query",
+            "resolutions": [{"hypothesis_id": "h-001", "after": "++"}],
+        }]
+        trace = report_handler._compose_trace_analyze(
+            findings, disposition="escalated",
+            surviving_hypotheses=None, matched_archetype=None,
+        )
+        assert trace == "host-query(++) → escalated"
+
+    def test_compose_trace_analyze_attribute_update_classified(self):
+        findings = [{
+            "name": "source-classification",
+            "outcome": {
+                "attribute_updates": [{"target": "v-001", "updates": {"x": "y"}}]
+            },
+        }]
+        trace = report_handler._compose_trace_analyze(
+            findings, disposition="escalated",
+            surviving_hypotheses=None, matched_archetype=None,
+        )
+        assert "(classified)" in trace
+
+    def test_compose_trace_analyze_observed_fallback(self):
+        findings = [{"name": "noop", "outcome": {}}]
+        trace = report_handler._compose_trace_analyze(
+            findings, disposition="escalated",
+            surviving_hypotheses=None, matched_archetype=None,
+        )
+        assert trace == "noop(observed) → escalated"
+
+    def test_compose_trace_analyze_no_findings_returns_tail_only(self):
+        trace = report_handler._compose_trace_analyze(
+            [], disposition="escalated",
+            surviving_hypotheses=None, matched_archetype=None,
+        )
+        assert trace == "escalated"
+
 
 class TestBenignActionShortCircuit:
     """Regression tests for the CONCLUDE-time benign-action override.
