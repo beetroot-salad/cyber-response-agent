@@ -135,8 +135,10 @@ class TestPromptAssembly:
         report_handler.handle(ctx)
         prompt = captured[0]
         # All three tagged blocks present (alert tag is salted)
-        assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
-        assert "<investigation>" in prompt and "signature analysis" in prompt
+        assert "<alert-test-salt>" in prompt
+        assert "</alert-test-salt>" in prompt
+        assert "<investigation>" in prompt
+        assert "signature analysis" in prompt
         assert "<archetypes>" in prompt
         # Matched archetype shape inlined
         assert 'name="monitoring-probe"' in prompt
@@ -778,7 +780,8 @@ class TestMechanicalScreenCompose:
         inv = (ctx.run_dir / "investigation.md").read_text()
         assert "## REPORT" in inv
         assert ":T conclude" in inv
-        assert "termination.category" in inv and "trust-root" in inv
+        assert "termination.category" in inv
+        assert "trust-root" in inv
 
     def test_mechanical_path_falls_back_to_anchor_leg_when_precedent_missing(
         self, tmp_path, monkeypatch,

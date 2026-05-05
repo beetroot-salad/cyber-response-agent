@@ -251,7 +251,8 @@ class TestFormatAlertSummaryBlock:
         assert "# no schemas.py for vendor=acme" in block
         assert "falling back to full envelope" in block
         # Full JSON is emitted.
-        assert '"rule"' in block and '"5710"' in block
+        assert '"rule"' in block
+        assert '"5710"' in block
         assert '"srcip"' in block
 
     def test_no_match_falls_back_with_loud_comment(self, tmp_path):
@@ -262,7 +263,8 @@ class TestFormatAlertSummaryBlock:
             alert, "acme", salt="x", soc_agent_root=tmp_path,
         )
         assert "# schemas.py present (vendor=acme) but none matched: " in block
-        assert "rule-alert" in block and "vuln-alert" in block
+        assert "rule-alert" in block
+        assert "vuln-alert" in block
         assert "falling back to full envelope" in block
         assert '"unknown_envelope"' in block
 
@@ -885,8 +887,11 @@ class TestFormatSignatureTextBlock:
             "context_md": "# Context\nbody2",
         })
         assert "<signature-knowledge>" in out
-        assert "<playbook>" in out and "# Playbook" in out and "</playbook>" in out
-        assert "<context>" in out and "# Context" in out
+        assert "<playbook>" in out
+        assert "# Playbook" in out
+        assert "</playbook>" in out
+        assert "<context>" in out
+        assert "# Context" in out
 
     def test_missing_files_self_closing_tags(self):
         out = format_signature_text_block({"playbook_md": "", "context_md": ""})
@@ -932,7 +937,8 @@ class TestFormatLeadDefinitionsBlock:
         assert "<lead-catalog>" in out
         assert '<lead name="a">' in out
         assert '<lead name="b">' in out
-        assert "body-a" in out and "body-b" in out
+        assert "body-a" in out
+        assert "body-b" in out
 
 
 class TestFormatArchetypeShapesBlock:
@@ -947,8 +953,11 @@ class TestFormatArchetypeShapesBlock:
         }]
         out = format_archetype_shapes_block(shapes)
         assert '<archetype name="x">' in out
-        assert "<story>" in out and "story body" in out and "</story>" in out
-        assert "<trust-anchors>" in out and "anchor body" in out
+        assert "<story>" in out
+        assert "story body" in out
+        assert "</story>" in out
+        assert "<trust-anchors>" in out
+        assert "anchor body" in out
 
     def test_precedents_gated_by_flag(self):
         shapes = [{

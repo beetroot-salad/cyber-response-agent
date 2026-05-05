@@ -250,7 +250,7 @@ class TestInputValidation:
         assert td.total_seconds() == 3600
 
     def test_parse_duration_invalid(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"Invalid duration"):
             wazuh_cli.parse_duration("abc")
 
 

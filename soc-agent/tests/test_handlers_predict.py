@@ -194,7 +194,8 @@ class TestPromptAssembly:
         prompt = captured[0]
 
         # Alert is summarized, not preloaded as raw JSON.
-        assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
+        assert "<alert-test-salt>" in prompt
+        assert "</alert-test-salt>" in prompt
         assert 'rule.id: "5710"' in prompt
         assert '"id": "alert-1"' not in prompt
 

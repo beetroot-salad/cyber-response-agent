@@ -701,7 +701,8 @@ class TestHookIntegration:
         content = "## CONTEXTUALIZE\n\n```yaml\nprologue: {}\n```\n"
         result = _run_hook(content, tmp_path=tmp_path)
         assert result.returncode == 2
-        assert "```yaml" in result.stderr and "no longer accepted" in result.stderr
+        assert "```yaml" in result.stderr
+        assert "no longer accepted" in result.stderr
 
     def test_dangling_id_reference_fails(self, tmp_path):
         # Lead targets a non-existent vertex (v-999) — rule rejecting

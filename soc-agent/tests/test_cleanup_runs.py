@@ -85,7 +85,7 @@ class TestRetentionSchema:
     def test_validate_returns_empty_for_valid(self):
         assert RetentionPolicy(90, 365, 30).validate() == []
 
-    @pytest.mark.parametrize("field,value,fragment", [
+    @pytest.mark.parametrize(("field", "value", "fragment"), [
         ("run",   0,  "run_max_age_days"),
         ("audit", 0,  "audit_max_age_days"),
         ("trace", 0,  "trace_max_age_days"),

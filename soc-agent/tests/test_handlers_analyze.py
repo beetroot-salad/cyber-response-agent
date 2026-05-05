@@ -140,7 +140,8 @@ class TestPromptAssembly:
         prompt = captured[0]
 
         # Tagged alert summary is present (salted for injection safety).
-        assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
+        assert "<alert-test-salt>" in prompt
+        assert "</alert-test-salt>" in prompt
         # The alert's load-bearing rule id reaches the prompt regardless of
         # whether a vendor schemas.py is present (schema-selected → key=value
         # lines; fallback path → full envelope JSON).
@@ -153,7 +154,8 @@ class TestPromptAssembly:
         # The full <investigation> block is gone; agent Reads it on demand.
         assert "<investigation" not in prompt
         # Manifest is present and names investigation.md + section line ranges.
-        assert "<available_context>" in prompt and "</available_context>" in prompt
+        assert "<available_context>" in prompt
+        assert "</available_context>" in prompt
         assert "investigation.md" in prompt
         assert "alert.json" in prompt
         assert "## CONTEXTUALIZE" in prompt or "CONTEXTUALIZE" in prompt

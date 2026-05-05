@@ -286,8 +286,10 @@ class TestEmitter:
             "summary": "two words",
         }
         out = emit_conclude_dense(d)
-        assert "disposition" in out and " benign" in out
-        assert "matched_archetype" in out and " monitoring-probe" in out
+        assert "disposition" in out
+        assert " benign" in out
+        assert "matched_archetype" in out
+        assert " monitoring-probe" in out
         # Multi-word string is quoted; single-token bare.
         assert '"two words"' in out
 
@@ -298,7 +300,8 @@ class TestEmitter:
             "summary": "x",
         }
         out = emit_conclude_dense(d)
-        assert "matched_archetype" in out and " null" in out
+        assert "matched_archetype" in out
+        assert " null" in out
 
     def test_rejects_non_dict_input(self):
         with pytest.raises(ConcludeOutputError):

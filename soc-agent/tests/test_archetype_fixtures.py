@@ -50,7 +50,7 @@ EXPECTED_MATRIX = [
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("alert_name,siem_name", EXPECTED_MATRIX)
+@pytest.mark.parametrize(("alert_name", "siem_name"), EXPECTED_MATRIX)
 class TestPerFixture:
     def test_alert_file_exists_and_parses(self, alert_name, siem_name):
         path = ALERTS_DIR / f"{alert_name}.json"

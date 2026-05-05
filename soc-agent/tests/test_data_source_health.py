@@ -243,7 +243,8 @@ def test_to_dict_round_trips_via_json():
     payload = _json.loads(_json.dumps(v.to_dict()))
     assert payload["reporting_agent"] == "agent-001"
     assert payload["incident_window"]["start"].endswith("Z")
-    assert "verdict" in payload and "trigger" in payload
+    assert "verdict" in payload
+    assert "trigger" in payload
 
 
 def test_sampled_windows_present_for_audit():
@@ -259,5 +260,6 @@ def test_sampled_windows_present_for_audit():
     assert "sampled_windows" in payload
     assert len(payload["sampled_windows"]) == 4
     for w in payload["sampled_windows"]:
-        assert w["start"].endswith("Z") and w["end"].endswith("Z")
+        assert w["start"].endswith("Z")
+        assert w["end"].endswith("Z")
         assert w["start"] < w["end"]
