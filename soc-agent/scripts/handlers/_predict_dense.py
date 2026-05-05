@@ -84,6 +84,11 @@ def _strip_envelope(stdout: str, error_cls: type[Exception]) -> str:
     return text
 
 
+def _flush_story(stories: dict[str, list[str]], cur_story: tuple[str, list[str]] | None) -> None:
+    if cur_story:
+        stories[cur_story[0]] = cur_story[1]
+
+
 def _tokenize(
     text: str, error_cls: type[Exception]
 ) -> tuple[dict[str, Any], list[_Block], dict[str, list[str]]]:
@@ -114,17 +119,15 @@ def _tokenize(
 
         m_story = _STORY_HEADER_RE.match(stripped)
         if m_story:
-            if cur_story:
-                stories[cur_story[0]] = cur_story[1]
+            _flush_story(stories, cur_story)
             cur_story = (m_story.group(1), [])
             cur_block = None
             continue
 
         m_block = _prim.HEADER_RE.match(stripped)
         if m_block:
-            if cur_story:
-                stories[cur_story[0]] = cur_story[1]
-                cur_story = None
+            _flush_story(stories, cur_story)
+            cur_story = None
             cols_raw = m_block.group("cols") or ""
             cols = (
                 [c.strip().rstrip("?") for c in cols_raw.split("|")]
@@ -151,8 +154,7 @@ def _tokenize(
         # Blank line: tolerated inside both story and block — they stay open
         # until the next `###`/`:` header (or EOF).
 
-    if cur_story:
-        stories[cur_story[0]] = cur_story[1]
+    _flush_story(stories, cur_story)
 
     if "loop" not in header:
         raise error_cls(
@@ -198,35 +200,16 @@ def _row_to_rec(
 
 
 # ---------------------------------------------------------------------------
-# Public entry point
+# Parse helpers (one per pass)
 # ---------------------------------------------------------------------------
 
 
-def parse_predict_dense(
-    stdout: str, error_cls: type[Exception]
-) -> dict[str, Any]:
-    """Parse the dense PREDICT envelope. Returns a dict mirroring the YAML
-    `predict:` envelope shape. Raises `error_cls` on first structural error.
-
-    `error_cls` is `PredictOutputError` in production; passing it as a
-    parameter avoids an import cycle with `_output_parser.py`.
-    """
-    text = _strip_envelope(stdout, error_cls)
-    header, blocks, stories = _tokenize(text, error_cls)
-
-    pred: dict[str, Any] = {
-        "loop": header["loop"],
-        "shape": header["shape"],
-    }
+def _parse_hypotheses_block(
+    blocks: list, stories: dict, error_cls: type[Exception]
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Pass 1: parse :H hypotheses → (hypotheses list, by_id lookup)."""
     hypotheses: list[dict[str, Any]] = []
     by_id: dict[str, dict[str, Any]] = {}
-    routing_block: dict[str, str] = {}
-    routing_lead_hints: dict[str, str] = {}
-    routing_scope_override: dict[str, Any] = {}
-    lead_pred_rows: list[dict[str, Any]] = []
-    lp_comparisons: dict[str, dict[str, str]] = {}
-
-    # Pass 1: `:H hypotheses` (DB grammar — metadata only on the row).
     for blk in blocks:
         if blk.tag != "H" or blk.name != "hypotheses":
             continue
@@ -267,12 +250,92 @@ def parse_predict_dense(
                 hyp["story"] = "\n".join(stories[hid])
             hypotheses.append(hyp)
             by_id[hid] = hyp
+    return hypotheses, by_id
 
-    # Pass 2: per-hypothesis sub-blocks (`:P h-NNN.<kind>`).
-    # Done in two phases so `comparisons` rows can reference `p*`/`r*` IDs
-    # regardless of the order the agent emitted blocks in. Phase 2a collects
-    # preds/attr_preds/refuts/authz; phase 2b attaches comparisons against the
-    # now-complete prediction/refutation buckets.
+
+def _apply_pred_row(
+    hyp: dict, hid: str, rec: dict, error_cls: type[Exception]
+) -> None:
+    k = rec.get("kind", "")
+    if k not in ALL_KINDS:
+        raise error_cls(
+            f"{hid}.{rec.get('id')}: unknown kind {k!r} "
+            f"(must be one of {sorted(ALL_KINDS)})"
+        )
+    hyp["predictions"].append({
+        "id": rec["id"],
+        "subject": rec.get("subject", ""),
+        "kind": k,
+        "from_story_link": rec.get("from_story", ""),
+        "claim": _unquote(rec.get("claim", "")),
+    })
+
+
+def _apply_attr_pred_row(
+    hyp: dict, hid: str, rec: dict, error_cls: type[Exception]
+) -> None:
+    k = rec.get("kind", "")
+    if k not in ALL_KINDS:
+        raise error_cls(f"{hid}.{rec.get('id')}: unknown kind {k!r}")
+    hyp["attribute_predictions"].append({
+        "id": rec["id"],
+        "target": rec.get("target", ""),
+        "attribute": rec.get("attribute", ""),
+        "kind": k,
+        "claim": _unquote(rec.get("claim", "")),
+    })
+
+
+def _apply_refut_row(
+    hyp: dict, hid: str, rec: dict, error_cls: type[Exception]
+) -> None:
+    k = rec.get("kind", "")
+    if k == "presence":
+        raise error_cls(
+            f"{hid}.{rec.get('id')}: kind=presence is forbidden "
+            f"on refutations (presence-test refutation anti-pattern)"
+        )
+    if k not in ALL_KINDS:
+        raise error_cls(f"{hid}.{rec.get('id')}: unknown kind {k!r}")
+    refs = [r.strip() for r in (rec.get("refutes") or "").split(",") if r.strip()]
+    hyp["refutation_shape"].append({
+        "id": rec["id"],
+        "refutes_predictions": refs,
+        "kind": k,
+        "claim": _unquote(rec.get("claim", "")),
+    })
+
+
+def _apply_authz_row(
+    hyp: dict, hid: str, rec: dict, error_cls: type[Exception]  # noqa: ARG001
+) -> None:
+    hyp["authorization_contract"].append({
+        "id": rec["id"],
+        "edge_ref": rec.get("edge_ref", "proposed") or "proposed",
+        "anchor_kind": rec.get("anchor_kind", ""),
+        "predicate": _unquote(rec.get("predicate", "")),
+        "on_unauthorized": rec.get("on_unauth", "esc") or "esc",
+        "on_indeterminate": rec.get("on_indet", "esc") or "esc",
+    })
+
+
+_P_KIND_HANDLERS: dict = {
+    "preds": _apply_pred_row,
+    "attr_preds": _apply_attr_pred_row,
+    "refuts": _apply_refut_row,
+    "authz": _apply_authz_row,
+}
+
+
+def _parse_per_hypothesis_blocks(
+    blocks: list, by_id: dict[str, dict[str, Any]], error_cls: type[Exception]
+) -> None:
+    """Pass 2: parse :P h-NNN.{kind} blocks, updating by_id hypotheses in place.
+
+    Done in two phases so `comparisons` rows can reference p*/r* IDs regardless
+    of block order. Phase 2a collects preds/attr_preds/refuts/authz; phase 2b
+    attaches comparisons once all prediction/refutation buckets are complete.
+    """
     deferred_comparisons: list[tuple[str, str, dict]] = []
     for blk in blocks:
         if blk.tag != "P":
@@ -291,77 +354,24 @@ def parse_predict_dense(
         hyp = by_id[hid]
         for row in blk.rows:
             rec = _row_to_rec(blk, row, error_cls)
-            if kind == "preds":
-                k = rec.get("kind", "")
-                if k not in ALL_KINDS:
-                    raise error_cls(
-                        f"{hid}.{rec.get('id')}: unknown kind {k!r} "
-                        f"(must be one of {sorted(ALL_KINDS)})"
-                    )
-                hyp["predictions"].append({
-                    "id": rec["id"],
-                    "subject": rec.get("subject", ""),
-                    "kind": k,
-                    "from_story_link": rec.get("from_story", ""),
-                    "claim": _unquote(rec.get("claim", "")),
-                })
-            elif kind == "attr_preds":
-                k = rec.get("kind", "")
-                if k not in ALL_KINDS:
-                    raise error_cls(
-                        f"{hid}.{rec.get('id')}: unknown kind {k!r}"
-                    )
-                hyp["attribute_predictions"].append({
-                    "id": rec["id"],
-                    "target": rec.get("target", ""),
-                    "attribute": rec.get("attribute", ""),
-                    "kind": k,
-                    "claim": _unquote(rec.get("claim", "")),
-                })
-            elif kind == "refuts":
-                k = rec.get("kind", "")
-                if k == "presence":
-                    raise error_cls(
-                        f"{hid}.{rec.get('id')}: kind=presence is forbidden "
-                        f"on refutations (presence-test refutation anti-pattern)"
-                    )
-                if k not in ALL_KINDS:
-                    raise error_cls(
-                        f"{hid}.{rec.get('id')}: unknown kind {k!r}"
-                    )
-                refs = [
-                    r.strip() for r in (rec.get("refutes") or "").split(",") if r.strip()
-                ]
-                hyp["refutation_shape"].append({
-                    "id": rec["id"],
-                    "refutes_predictions": refs,
-                    "kind": k,
-                    "claim": _unquote(rec.get("claim", "")),
-                })
-            elif kind == "authz":
-                hyp["authorization_contract"].append({
-                    "id": rec["id"],
-                    "edge_ref": rec.get("edge_ref", "proposed") or "proposed",
-                    "anchor_kind": rec.get("anchor_kind", ""),
-                    "predicate": _unquote(rec.get("predicate", "")),
-                    "on_unauthorized": rec.get("on_unauth", "esc") or "esc",
-                    "on_indeterminate": rec.get("on_indet", "esc") or "esc",
-                })
+            if kind in _P_KIND_HANDLERS:
+                _P_KIND_HANDLERS[kind](hyp, hid, rec, error_cls)
             elif kind == "comparisons":
-                pred_ref = rec.get("pred_ref", "")
-                comp = {
+                deferred_comparisons.append((hid, rec.get("pred_ref", ""), {
                     "selector_kind": rec.get("selector_kind", ""),
                     "selector": _unquote(rec.get("selector", "")),
                     "dimension": rec.get("dimension", ""),
-                }
-                deferred_comparisons.append((hid, pred_ref, comp))
-
-    # Phase 2b: attach deferred comparisons now that all p*/r*/ap* are
-    # collected on each hypothesis.
+                }))
     for hid, pred_ref, comp in deferred_comparisons:
         _attach_comparison(by_id[hid], pred_ref, comp, error_cls)
 
-    # Pass 3: branch_plan (`:L lead_preds` + optional `:L lead_preds.comparisons`).
+
+def _parse_branch_plan(
+    blocks: list, error_cls: type[Exception]
+) -> list[dict[str, Any]]:
+    """Pass 3: parse :L lead_preds[.comparisons] → lead_pred_rows with comparisons."""
+    lead_pred_rows: list[dict[str, Any]] = []
+    lp_comparisons: dict[str, dict[str, str]] = {}
     for blk in blocks:
         if blk.tag != "L":
             continue
@@ -373,14 +383,13 @@ def parse_predict_dense(
                     raise error_cls(
                         f":L lead_preds {rec.get('id')!r}: unknown kind {k!r}"
                     )
-                lp: dict[str, Any] = {
+                lead_pred_rows.append({
                     "id": rec["id"],
                     "kind": k,
                     "if": _unquote(rec.get("if", "")),
                     "read_as": _unquote(rec.get("read_as", "")),
                     "advance_to": rec.get("advance_to", ""),
-                }
-                lead_pred_rows.append(lp)
+                })
         elif blk.name == "lead_preds.comparisons":
             for row in blk.rows:
                 rec = _row_to_rec(blk, row, error_cls)
@@ -391,130 +400,158 @@ def parse_predict_dense(
                 }
         else:
             raise error_cls(f"unknown :L block name: {blk.name!r}")
-
     for lp in lead_pred_rows:
         if lp["id"] in lp_comparisons:
             lp["comparison"] = lp_comparisons[lp["id"]]
+    return lead_pred_rows
 
-    # Pass 4: routing.
-    for blk in blocks:
-        if blk.tag != "R":
-            continue
-        if blk.name == "routing":
-            for row in blk.rows:
-                m = re.match(r"^(\S+)\s+(.+)$", row)
-                if not m:
-                    raise error_cls(f":R routing bad row: {row!r}")
-                key, value = m.group(1), m.group(2).strip()
-                routing_block[key] = value
-        elif blk.name == "routing.lead_hints":
-            for row in blk.rows:
-                rec = _row_to_rec(blk, row, error_cls)
-                lead = rec.get("lead", "")
-                hint = _unquote(rec.get("hint", ""))
-                if lead:
-                    routing_lead_hints[lead] = hint
-        elif blk.name == "routing.scope_override":
-            for row in blk.rows:
-                rec = _row_to_rec(blk, row, error_cls)
-                key = rec.get("key", "")
-                value = rec.get("value", "")
-                if key == "window_hours":
-                    try:
-                        routing_scope_override[key] = int(value)
-                    except ValueError:
-                        raise error_cls(
-                            f":R routing.scope_override.window_hours must be an "
-                            f"integer, got {value!r}"
-                        ) from None
-                elif key == "anchor":
-                    routing_scope_override[key] = value
-                elif key:
-                    raise error_cls(
-                        f":R routing.scope_override: unknown key {key!r}"
-                    )
-        else:
-            raise error_cls(f"unknown :R block name: {blk.name!r}")
 
-    # Assemble routing dict in the YAML envelope's expected shape so the
-    # caller's _extract_routing helper can validate it.
+def _parse_routing_kv_block(blk: Any, error_cls: type[Exception]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for row in blk.rows:
+        m = re.match(r"^(\S+)\s+(.+)$", row)
+        if not m:
+            raise error_cls(f":R routing bad row: {row!r}")
+        result[m.group(1)] = m.group(2).strip()
+    return result
+
+
+def _parse_routing_lead_hints(blk: Any, error_cls: type[Exception]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for row in blk.rows:
+        rec = _row_to_rec(blk, row, error_cls)
+        lead = rec.get("lead", "")
+        if lead:
+            result[lead] = _unquote(rec.get("hint", ""))
+    return result
+
+
+def _parse_scope_override_block(blk: Any, error_cls: type[Exception]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for row in blk.rows:
+        rec = _row_to_rec(blk, row, error_cls)
+        key = rec.get("key", "")
+        value = rec.get("value", "")
+        if key == "window_hours":
+            try:
+                result[key] = int(value)
+            except ValueError:
+                raise error_cls(
+                    f":R routing.scope_override.window_hours must be an "
+                    f"integer, got {value!r}"
+                ) from None
+        elif key == "anchor":
+            result[key] = value
+        elif key:
+            raise error_cls(f":R routing.scope_override: unknown key {key!r}")
+    return result
+
+
+def _assemble_routing(
+    routing_block: dict[str, str],
+    lead_hints: dict[str, str],
+    scope_override: dict[str, Any],
+) -> dict[str, Any]:
     routing: dict[str, Any] = {}
     if routing_block:
-        sel = routing_block.get("selected_lead", "")
-        routing["selected_lead"] = sel
+        routing["selected_lead"] = routing_block.get("selected_lead", "")
         cs_raw = routing_block.get("composite_secondary", "-")
-        if cs_raw == "-" or not cs_raw:
-            routing["composite_secondary"] = []
-        else:
-            routing["composite_secondary"] = [
-                s.strip() for s in cs_raw.split(",") if s.strip()
-            ]
+        routing["composite_secondary"] = (
+            [] if (cs_raw == "-" or not cs_raw)
+            else [s.strip() for s in cs_raw.split(",") if s.strip()]
+        )
         ods = routing_block.get("override_data_source", "-")
         if ods != "-" and ods:
             routing["override_data_source"] = ods
         rationale = routing_block.get("rationale", "")
         if rationale:
             routing["rationale"] = _unquote(rationale)
-    if routing_lead_hints:
-        routing["lead_hints"] = routing_lead_hints
-    if routing_scope_override:
-        routing["scope_override"] = routing_scope_override
+    if lead_hints:
+        routing["lead_hints"] = lead_hints
+    if scope_override:
+        routing["scope_override"] = scope_override
+    return routing
 
-    pred["hypotheses"] = hypotheses
-    if lead_pred_rows:
-        primary = routing.get("selected_lead") if routing else None
-        pred["branch_plan"] = {
-            "primary_lead": primary,
-            "predictions": lead_pred_rows,
-        }
-    pred["routing"] = routing
 
-    # Story / sentence-ID consistency for declared hypotheses.
-    shape = pred["shape"]
-    if shape in ("A", "M"):
-        for h in hypotheses:
-            if not h.get("story"):
-                raise error_cls(
-                    f"{h['id']}: missing story prose block "
-                    f"(`### story {h['id']}` heading + `s1.`/`s2.` lines)"
-                )
-            story_ids = set(
-                _SENTENCE_ID_RE.match(line).group(1)
-                for line in h["story"].splitlines()
-                if _SENTENCE_ID_RE.match(line)
+def _parse_routing_section(
+    blocks: list, error_cls: type[Exception]
+) -> dict[str, Any]:
+    """Pass 4: parse :R routing.* blocks and assemble the routing dict."""
+    routing_block: dict[str, str] = {}
+    lead_hints: dict[str, str] = {}
+    scope_override: dict[str, Any] = {}
+    for blk in blocks:
+        if blk.tag != "R":
+            continue
+        if blk.name == "routing":
+            routing_block = _parse_routing_kv_block(blk, error_cls)
+        elif blk.name == "routing.lead_hints":
+            lead_hints = _parse_routing_lead_hints(blk, error_cls)
+        elif blk.name == "routing.scope_override":
+            scope_override = _parse_scope_override_block(blk, error_cls)
+        else:
+            raise error_cls(f"unknown :R block name: {blk.name!r}")
+    return _assemble_routing(routing_block, lead_hints, scope_override)
+
+
+def _validate_story_and_sentence_refs(
+    hypotheses: list[dict[str, Any]], shape: str, error_cls: type[Exception]
+) -> None:
+    """Validate story prose presence and from_story_link refs for shapes A and M."""
+    if shape not in ("A", "M"):
+        return
+    for h in hypotheses:
+        if not h.get("story"):
+            raise error_cls(
+                f"{h['id']}: missing story prose block "
+                f"(`### story {h['id']}` heading + `s1.`/`s2.` lines)"
             )
-            for p in h["predictions"]:
-                link = p.get("from_story_link", "")
-                if link and link not in story_ids:
-                    raise error_cls(
-                        f"{h['id']}.{p['id']}: from_story_link={link!r} not in "
-                        f"story sentence IDs {sorted(story_ids)}"
-                    )
+        story_ids = {
+            _SENTENCE_ID_RE.match(line).group(1)
+            for line in h["story"].splitlines()
+            if _SENTENCE_ID_RE.match(line)
+        }
+        for p in h["predictions"]:
+            link = p.get("from_story_link", "")
+            if link and link not in story_ids:
+                raise error_cls(
+                    f"{h['id']}.{p['id']}: from_story_link={link!r} not in "
+                    f"story sentence IDs {sorted(story_ids)}"
+                )
 
-    # Comparison-required-on-deviation check (predictions + attr_preds + refuts).
+
+def _check_pred_entry_comparison(
+    hid: str, entry: dict, bucket: str, error_cls: type[Exception]
+) -> None:
+    k = entry.get("kind", "")
+    has_comp = "comparison" in entry
+    if bucket == "attribute_predictions":
+        if has_comp:
+            raise error_cls(
+                f"{hid}.{entry['id']}: attribute_predictions must not carry comparison"
+            )
+        return
+    if k in DEVIATION_KINDS and not has_comp:
+        raise error_cls(
+            f"{hid}.{entry['id']}: kind={k!r} requires a "
+            f"comparison row in :P {hid}.comparisons"
+        )
+    if k in NON_DEVIATION_KINDS and has_comp:
+        raise error_cls(
+            f"{hid}.{entry['id']}: kind={k!r} must not carry a comparison row"
+        )
+
+
+def _validate_comparison_requirements(
+    hypotheses: list[dict[str, Any]],
+    lead_pred_rows: list[dict[str, Any]],
+    error_cls: type[Exception],
+) -> None:
+    """Check deviation-kind predictions carry a comparison row, and vice versa."""
     for h in hypotheses:
         for bucket in ("predictions", "attribute_predictions", "refutation_shape"):
             for entry in h[bucket]:
-                k = entry.get("kind", "")
-                has_comp = "comparison" in entry
-                # attribute_predictions never carry comparison (per grammar).
-                if bucket == "attribute_predictions":
-                    if has_comp:
-                        raise error_cls(
-                            f"{h['id']}.{entry['id']}: attribute_predictions "
-                            f"must not carry comparison"
-                        )
-                    continue
-                if k in DEVIATION_KINDS and not has_comp:
-                    raise error_cls(
-                        f"{h['id']}.{entry['id']}: kind={k!r} requires a "
-                        f"comparison row in :P {h['id']}.comparisons"
-                    )
-                if k in NON_DEVIATION_KINDS and has_comp:
-                    raise error_cls(
-                        f"{h['id']}.{entry['id']}: kind={k!r} must not carry "
-                        f"a comparison row"
-                    )
+                _check_pred_entry_comparison(h["id"], entry, bucket, error_cls)
     for lp in lead_pred_rows:
         k = lp.get("kind", "")
         has_comp = "comparison" in lp
@@ -528,6 +565,38 @@ def parse_predict_dense(
                 f"lead_pred {lp['id']!r}: kind={k!r} must not carry a comparison row"
             )
 
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
+def parse_predict_dense(
+    stdout: str, error_cls: type[Exception]
+) -> dict[str, Any]:
+    """Parse the dense PREDICT envelope. Returns a dict mirroring the YAML
+    `predict:` envelope shape. Raises `error_cls` on first structural error.
+
+    `error_cls` is `PredictOutputError` in production; passing it as a
+    parameter avoids an import cycle with `_output_parser.py`.
+    """
+    text = _strip_envelope(stdout, error_cls)
+    header, blocks, stories = _tokenize(text, error_cls)
+    pred: dict[str, Any] = {"loop": header["loop"], "shape": header["shape"]}
+
+    hypotheses, by_id = _parse_hypotheses_block(blocks, stories, error_cls)
+    _parse_per_hypothesis_blocks(blocks, by_id, error_cls)
+    lead_pred_rows = _parse_branch_plan(blocks, error_cls)
+    routing = _parse_routing_section(blocks, error_cls)
+
+    pred["hypotheses"] = hypotheses
+    if lead_pred_rows:
+        primary = routing.get("selected_lead") if routing else None
+        pred["branch_plan"] = {"primary_lead": primary, "predictions": lead_pred_rows}
+    pred["routing"] = routing
+
+    _validate_story_and_sentence_refs(hypotheses, pred["shape"], error_cls)
+    _validate_comparison_requirements(hypotheses, lead_pred_rows, error_cls)
     return pred
 
 

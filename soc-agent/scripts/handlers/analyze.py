@@ -281,45 +281,35 @@ def _backfill_unresolved_prescribed_set(
 _WEIGHT_ORDER = {"++": 0, "+": 1, "-": 2, "--": 3}
 
 
-def _compose_section(envelope: AnalyzeEnvelope, loop_n: int) -> str:
-    """Render the envelope as a `## ANALYZE (loop N)` prose section.
-
-    Resolutions render as an assessment list keyed by hypothesis id; the
-    `reasoning` string on each resolution is the human-readable rationale.
-    Anomalies + data_wishes replace the old prose Self-report block.
-    """
-    lines = [f"## ANALYZE (loop {loop_n})", ""]
-
-    # Collect all resolution entries across leads; order by hypothesis id.
-    # Assessments read better flat (one entry per hypothesis) than grouped
-    # by lead — a hypothesis graded on multiple leads shows up as multiple
-    # lines with distinct lead_refs, which matches the audit-trail intent.
-    lines.append("**Assessment:**")
+def _compose_assessment_lines(envelope: AnalyzeEnvelope) -> list[str]:
+    lines = ["**Assessment:**"]
     assessment_lines: list[str] = []
     for lead_ref, entries in envelope.resolutions_by_lead.items():
         for e in entries:
             hid = e.get("hypothesis_id", "?")
             w = e.get("weight", "?")
             reasoning = e.get("reasoning", "")
-            assessment_lines.append(
-                f"- {hid} ({w}) via {lead_ref} — {reasoning}"
-            )
+            assessment_lines.append(f"- {hid} ({w}) via {lead_ref} — {reasoning}")
     if not assessment_lines:
         assessment_lines.append("- (no resolutions this loop)")
     lines.extend(assessment_lines)
+    return lines
 
-    # Authority verdicts, when any.
-    if envelope.trust_anchor_by_lead:
-        lines.append("")
-        lines.append("**Authority verdicts:**")
-        for lead_ref, r in envelope.trust_anchor_by_lead.items():
-            verdict = r.get("verdict", "?")
-            reasoning = r.get("reasoning", "")
-            lines.append(f"- {lead_ref}: {verdict} — {reasoning}")
 
-    # Routing.
+def _compose_authority_lines(envelope: AnalyzeEnvelope) -> list[str]:
+    if not envelope.trust_anchor_by_lead:
+        return []
+    lines = ["", "**Authority verdicts:**"]
+    for lead_ref, r in envelope.trust_anchor_by_lead.items():
+        verdict = r.get("verdict", "?")
+        reasoning = r.get("reasoning", "")
+        lines.append(f"- {lead_ref}: {verdict} — {reasoning}")
+    return lines
+
+
+def _compose_routing_lines(envelope: AnalyzeEnvelope) -> list[str]:
     r = envelope.routing
-    lines.append("")
+    lines = [""]
     if r["decision"] == "halt":
         lines.append(
             f"**Route:** halt → termination_category: {r['termination_category']}, "
@@ -333,20 +323,31 @@ def _compose_section(envelope: AnalyzeEnvelope, loop_n: int) -> str:
         ups = r.get("unresolved_prescribed_set") or []
         if ups:
             lines.append(f"**Unresolved prescribed:** {', '.join(ups)}")
+    return lines
 
-    # Anomalies + data wishes (replacing the old Self-report block).
-    if envelope.anomalies or envelope.data_wishes:
-        lines.append("")
-        lines.append("**Self-report:**")
-        if envelope.anomalies:
-            lines.append("- Anomalies:")
-            for a in envelope.anomalies:
-                lines.append(f"  - {a}")
-        if envelope.data_wishes:
-            lines.append("- Data wishes:")
-            for d in envelope.data_wishes:
-                lines.append(f"  - {d}")
 
+def _compose_self_report_lines(envelope: AnalyzeEnvelope) -> list[str]:
+    if not (envelope.anomalies or envelope.data_wishes):
+        return []
+    lines = ["", "**Self-report:**"]
+    if envelope.anomalies:
+        lines.append("- Anomalies:")
+        for a in envelope.anomalies:
+            lines.append(f"  - {a}")
+    if envelope.data_wishes:
+        lines.append("- Data wishes:")
+        for d in envelope.data_wishes:
+            lines.append(f"  - {d}")
+    return lines
+
+
+def _compose_section(envelope: AnalyzeEnvelope, loop_n: int) -> str:
+    """Render the envelope as a `## ANALYZE (loop N)` prose section."""
+    lines = [f"## ANALYZE (loop {loop_n})", ""]
+    lines.extend(_compose_assessment_lines(envelope))
+    lines.extend(_compose_authority_lines(envelope))
+    lines.extend(_compose_routing_lines(envelope))
+    lines.extend(_compose_self_report_lines(envelope))
     return "\n".join(lines) + "\n"
 
 
@@ -439,6 +440,135 @@ def _prologue_authoritative_edges(investigation_md: str) -> list[str]:
     return edge_ids
 
 
+def _build_legitimacy_attribute_updates(
+    lead_id: str, envelope: AnalyzeEnvelope,
+) -> list[dict[str, Any]]:
+    """Translate per-lead legitimacy closures to attribute_update dicts."""
+    result = []
+    for legit in envelope.legitimacy_by_lead.get(lead_id, []):
+        if not isinstance(legit, dict):
+            continue
+        edge_id = legit.get("edge_id")
+        if not isinstance(edge_id, str):
+            continue
+        authz_entry: dict[str, Any] = {
+            "verdict": legit.get("verdict", "indeterminate"),
+            "fulfills_contract": legit.get("contract_id", ""),
+            "anchor_kind": "policy",
+            "anchor_id": legit.get("authority_for_question", "unspecified"),
+            "grounding_kind": legit.get("grounding_kind", "org-authority"),
+            "authority_for_question": "full",
+            "as_of": legit.get("as_of"),
+            "resolved_by_lead": lead_id,
+        }
+        if legit.get("reasoning"):
+            authz_entry["reasoning"] = legit["reasoning"]
+        result.append({
+            "target": edge_id,
+            "updates": {"authorization_resolutions": [authz_entry]},
+        })
+    return result
+
+
+def _build_impact_resolutions(
+    lead_id: str, envelope: AnalyzeEnvelope,
+) -> list[dict[str, Any]]:
+    """Translate per-lead impact grades to impact_resolution dicts."""
+    result = []
+    for ir in envelope.impact_by_lead.get(lead_id, []):
+        if not isinstance(ir, dict):
+            continue
+        result.append({
+            "prediction_ref": ir.get("prediction_ref"),
+            "dimension": ir.get("dimension"),
+            "verdict": ir.get("verdict", "indeterminate"),
+            "grounded_by_lead": lead_id,
+            "grounding_kind": ir.get("grounding_kind", "telemetry-baseline"),
+            "authority_for_question": ir.get("authority_for_question", "full"),
+            "as_of": ir.get("as_of"),
+            "reasoning": ir.get("reasoning"),
+        })
+    return result
+
+
+def _build_lead_outcome(
+    lead_id: str, lead: dict[str, Any], envelope: AnalyzeEnvelope,
+) -> dict[str, Any]:
+    """Build the outcome dict for one gather lead."""
+    outcome: dict[str, Any] = {}
+    obs = lead.get("observations")
+    if isinstance(obs, dict):
+        outcome["observations"] = obs
+    attr_updates = lead.get("attribute_updates")
+    if isinstance(attr_updates, list) and attr_updates:
+        outcome["attribute_updates"] = attr_updates
+    consultations = lead.get("consultations")
+    if isinstance(consultations, list) and consultations:
+        outcome["anchor_consultations"] = consultations
+    trust = envelope.trust_anchor_by_lead.get(lead_id)
+    if isinstance(trust, dict):
+        consult = _translate_trust_anchor_to_consultation(trust)
+        if consult is not None:
+            outcome.setdefault("anchor_consultations", []).append(consult)
+    for upd in _build_legitimacy_attribute_updates(lead_id, envelope):
+        outcome.setdefault("attribute_updates", []).append(upd)
+    impact = _build_impact_resolutions(lead_id, envelope)
+    if impact:
+        outcome["impact_resolutions"] = impact
+    return outcome
+
+
+def _build_lead_resolutions(
+    lead_id: str,
+    envelope: AnalyzeEnvelope,
+    id_map: dict[str, str],
+    default_supporting_edges: list[str] | None,
+) -> list[dict[str, Any]]:
+    """Translate hypothesis grades for one lead into resolution dicts.
+
+    `hypothesis_id` translation — the analyze subagent is observed to emit
+    playbook names (e.g. `?monitoring-probe`) instead of declared h-ids when
+    PREDICT didn't create a matching record. Resolve via the companion-derived
+    name→id map; drop resolutions whose reference doesn't land on any declared
+    hypothesis (silently — they'd fail rule-#?-id-references at validate time).
+    """
+    resolutions: list[dict[str, Any]] = []
+    for r in envelope.resolutions_by_lead.get(lead_id, []):
+        if not isinstance(r, dict):
+            continue
+        raw_ref = r.get("hypothesis_id", "")
+        resolved_id = id_map.get(raw_ref) if id_map else raw_ref
+        if not resolved_id:
+            continue
+        weight = r.get("weight", "")
+        res: dict[str, Any] = {
+            "hypothesis": resolved_id,
+            "before_weight": r.get("before_weight", "∅"),
+            "after": weight,
+            "severity": r.get("severity"),
+            "matched_prediction_ids": r.get("matched_prediction_ids", []),
+            "reasoning": r.get("reasoning", ""),
+        }
+        if r.get("supporting_edges_marker"):
+            res["supporting_marker"] = r["supporting_edges_marker"]
+        mrefs = r.get("matched_refutation_ids")
+        if mrefs:
+            res["matched_refutation_ids"] = mrefs
+        load_bearing = r.get("load_bearing")
+        if isinstance(load_bearing, list) and load_bearing:
+            res["load_bearing"] = [lb for lb in load_bearing if isinstance(lb, dict)]
+        # invlang structural rule: ++/-- grades require supporting_edges with
+        # at least one authoritative edge. Default to the prologue's list.
+        if weight in ("++", "--"):
+            supplied = r.get("supporting_edges") or []
+            if not supplied and default_supporting_edges:
+                res["supporting_edges"] = list(default_supporting_edges)
+            elif supplied:
+                res["supporting_edges"] = list(supplied)
+        resolutions.append(res)
+    return resolutions
+
+
 def _synthesize_findings_block(
     envelope: AnalyzeEnvelope,
     gather_leads: list[dict[str, Any]],
@@ -447,171 +577,32 @@ def _synthesize_findings_block(
     hypothesis_name_to_id: dict[str, str] | None = None,
     default_supporting_edges: list[str] | None = None,
 ) -> str:
-    """Build the `findings:` invlang YAML block for this loop, combining
-    gather's envelope leads with analyze's per-lead interpretation.
-
-    Required lead fields per validator: id, loop, name, target,
-    query_details, outcome, resolutions. `outcome: {}` and `resolutions: []`
-    are valid when empty — this keeps the synthesis simple for leads with
-    no structured observations.
+    """Build the `findings:` invlang block for this loop.
 
     Returns an empty string when there are no gather leads to ground
     (SCREEN-matched flow or missing gather envelope).
     """
     if not gather_leads:
         return ""
-
+    id_map = hypothesis_name_to_id or {}
     findings: list[dict[str, Any]] = []
     for lead in gather_leads:
         lead_id = lead.get("id")
         if not isinstance(lead_id, str):
             continue
-
         query = lead.get("query") or {}
-        # The envelope `query` carries {system, template, query, time_window,
-        # substitutions} — which matches the schema's `query_details` shape
-        # (see schema §Lead). Pass through as-is.
         query_details = query if isinstance(query, dict) else {}
-
-        # Per-lead outcome: start with any structured observations gather
-        # emitted, then overlay analyze's interpretation fields.
-        outcome: dict[str, Any] = {}
-        obs = lead.get("observations")
-        if isinstance(obs, dict):
-            outcome["observations"] = obs
-        attr_updates = lead.get("attribute_updates")
-        if isinstance(attr_updates, list) and attr_updates:
-            outcome["attribute_updates"] = attr_updates
-        consultations = lead.get("consultations")
-        if isinstance(consultations, list) and consultations:
-            outcome["anchor_consultations"] = consultations
-
-        # Analyze-authored: trust-anchor verdicts → anchor_consultations[].
-        trust = envelope.trust_anchor_by_lead.get(lead_id)
-        if isinstance(trust, dict):
-            consult = _translate_trust_anchor_to_consultation(trust)
-            if consult is not None:
-                outcome.setdefault("anchor_consultations", []).append(consult)
-
-        # Analyze-authored: legitimacy closures → attribute_updates on the
-        # edge with authorization_resolutions[]. The envelope's per-lead
-        # entries carry {edge_id, contract_id, verdict, grounding_kind,
-        # authority_for_question, as_of, reasoning}. We translate to
-        # invlang's authorization_resolutions shape and stash under
-        # attribute_updates targeting the edge.
-        for legit in envelope.legitimacy_by_lead.get(lead_id, []):
-            if not isinstance(legit, dict):
-                continue
-            edge_id = legit.get("edge_id")
-            if not isinstance(edge_id, str):
-                continue
-            authz_entry = {
-                "verdict": legit.get("verdict", "indeterminate"),
-                "fulfills_contract": legit.get("contract_id", ""),
-                "anchor_kind": "policy",
-                "anchor_id": legit.get("authority_for_question", "unspecified"),
-                "grounding_kind": legit.get("grounding_kind", "org-authority"),
-                "authority_for_question": "full",
-                "as_of": legit.get("as_of"),
-                "resolved_by_lead": lead_id,
-            }
-            if legit.get("reasoning"):
-                authz_entry["reasoning"] = legit["reasoning"]
-            attr_upd = {
-                "target": edge_id,
-                "updates": {"authorization_resolutions": [authz_entry]},
-            }
-            outcome.setdefault("attribute_updates", []).append(attr_upd)
-
-        # Analyze-authored: impact grades → outcome.impact_resolutions.
-        for ir in envelope.impact_by_lead.get(lead_id, []):
-            if not isinstance(ir, dict):
-                continue
-            # Map envelope shape (prediction_ref, dimension, verdict,
-            # grounding_kind, authority_for_question, as_of, reasoning)
-            # onto schema shape. The schema's `matched_predicate` +
-            # `observed_value` aren't in the envelope; omit.
-            outcome.setdefault("impact_resolutions", []).append({
-                "prediction_ref": ir.get("prediction_ref"),
-                "dimension": ir.get("dimension"),
-                "verdict": ir.get("verdict", "indeterminate"),
-                "grounded_by_lead": lead_id,
-                "grounding_kind": ir.get("grounding_kind", "telemetry-baseline"),
-                "authority_for_question": ir.get(
-                    "authority_for_question", "full",
-                ),
-                "as_of": ir.get("as_of"),
-                "reasoning": ir.get("reasoning"),
-            })
-
-        # Analyze-authored: top-level resolutions (hypothesis grades).
-        # Envelope entries carry {hypothesis_id, weight,
-        # matched_prediction_ids, matched_refutation_ids, reasoning}.
-        # Schema expects {hypothesis, before, after, matched_prediction_ids,
-        # matched_refutation_ids, reasoning, ...}. Translate.
-        #
-        # `hypothesis_id` translation — the analyze subagent is observed to
-        # emit playbook names (e.g. `?monitoring-probe`) instead of declared
-        # h-ids when PREDICT didn't create a matching record. Resolve via
-        # the companion-derived name→id map; drop resolutions whose
-        # reference doesn't land on any declared hypothesis (silently —
-        # they'd fail rule-#?-id-references at validate time otherwise).
-        id_map = hypothesis_name_to_id or {}
-        resolutions: list[dict[str, Any]] = []
-        for r in envelope.resolutions_by_lead.get(lead_id, []):
-            if not isinstance(r, dict):
-                continue
-            raw_ref = r.get("hypothesis_id", "")
-            resolved_id = id_map.get(raw_ref) if id_map else raw_ref
-            if not resolved_id:
-                # Unknown reference — skip rather than poison the findings
-                # block with an undeclared hypothesis id.
-                continue
-            weight = r.get("weight", "")
-            res: dict[str, Any] = {
-                "hypothesis": resolved_id,
-                "before_weight": r.get("before_weight", "∅"),
-                "after": weight,
-                "severity": r.get("severity"),
-                "matched_prediction_ids": r.get(
-                    "matched_prediction_ids", [],
-                ),
-                "reasoning": r.get("reasoning", ""),
-            }
-            if r.get("supporting_edges_marker"):
-                res["supporting_marker"] = r["supporting_edges_marker"]
-            mrefs = r.get("matched_refutation_ids")
-            if mrefs:
-                res["matched_refutation_ids"] = mrefs
-            load_bearing = r.get("load_bearing")
-            if isinstance(load_bearing, list) and load_bearing:
-                res["load_bearing"] = [
-                    lb for lb in load_bearing if isinstance(lb, dict)
-                ]
-            # invlang structural rule: ++/-- grades require supporting_edges
-            # with at least one authoritative edge. The subagent does not
-            # name specific edges (that's graph-level plumbing, not weighing
-            # evidence), so the handler defaults to the prologue's
-            # authoritative edge list when the grade is committed.
-            if weight in ("++", "--"):
-                supplied = r.get("supporting_edges") or []
-                if not supplied and default_supporting_edges:
-                    res["supporting_edges"] = list(default_supporting_edges)
-                elif supplied:
-                    res["supporting_edges"] = list(supplied)
-            resolutions.append(res)
-
-        entry: dict[str, Any] = {
+        findings.append({
             "id": lead_id,
             "loop": loop_n,
             "name": lead.get("name", ""),
             "target": lead.get("target") or default_target,
             "query_details": query_details,
-            "outcome": outcome,
-            "resolutions": resolutions,
-        }
-        findings.append(entry)
-
+            "outcome": _build_lead_outcome(lead_id, lead, envelope),
+            "resolutions": _build_lead_resolutions(
+                lead_id, envelope, id_map, default_supporting_edges,
+            ),
+        })
     body = emit_analyze_findings_dense(findings)
     return "```invlang\n" + body + "\n```\n"
 
