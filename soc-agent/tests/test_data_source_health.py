@@ -146,7 +146,7 @@ def test_sample_windows_dont_overlap_incident_buffer():
         rng=rng,
     )
     cutoff = incident_start - timedelta(hours=24)
-    for ws, we in windows:
+    for _, we in windows:
         assert we <= cutoff
 
 

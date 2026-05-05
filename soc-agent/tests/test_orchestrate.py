@@ -58,7 +58,7 @@ def scripted_handler(*next_phases: Phase):
         try:
             return PhaseResult(next_phase=next(it))
         except StopIteration:
-            raise AssertionError("scripted_handler called more times than expected")
+            raise AssertionError("scripted_handler called more times than expected") from None
 
     return handler
 
