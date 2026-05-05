@@ -53,85 +53,90 @@ that matched.
 
 | Archetype | One-line description | Directory |
 |---|---|---|
-| `monitoring-probe` | Internal monitoring host running a sanctioned single-attempt probe using a sentinel username | `archetypes/monitoring-probe/` |
-| `service-account-rotation` | Internal automation whose credentials were rotated but whose config wasn't updated — broken benign automation | `archetypes/service-account-rotation/` |
-| `credential-stuffing` | External actor submitting real-looking usernames from a breach dump — escalation outcome | `archetypes/credential-stuffing/` |
-| `external-bruteforce` | External actor iterating a wordlist of common usernames at high volume — escalation outcome | `archetypes/external-bruteforce/` |
+| `monitoring-probe` | Single-attempt failure from a registered source at the source's documented periodic cadence; no forward success | `archetypes/monitoring-probe/` |
+| `service-account-rotation` | Failure stream from an internal source after a credential change, tied to a scheduled job whose config lags rotation | `archetypes/service-account-rotation/` |
+| `credential-stuffing` | Failure stream targeting real-looking usernames that match a breach-dump pattern | `archetypes/credential-stuffing/` |
+| `external-bruteforce` | High-volume username-iteration from one source against many candidate accounts | `archetypes/external-bruteforce/` |
 
-Both benign archetypes require trust-anchor confirmation to resolve:
-`monitoring-probe` is anchored by `approved-monitoring-sources`,
-`service-account-rotation` is anchored by `scheduled-jobs`. Both
-escalation archetypes have no anchor — they are adversarial by
-construction, and the report's job is to ground the escalation in the
-volume/source/username shape that distinguishes them from the benign
-paths.
+Archetype membership is observable-shape-determined at REPORT time. Reaching an archetype is downstream of resolving the open questions below — do not pre-commit to an archetype before the questions that would discriminate among them are answered. Registration in an authority anchor (`approved-monitoring-sources`, `scheduled-jobs`) is necessary but NOT sufficient for the corresponding archetype: registration confirms the triple *can* be used by the registered automation; it does NOT confirm the registered automation *did* use it on this specific alert. Identity-of-use is its own question.
 
-## Hypothesis seeds
+## Open questions the agent must determine
 
-At loop 1 there is typically no fork to articulate. The alert
+This signature does not pre-name hypotheses for the agent. The alert
 confirms an `attempted_auth` edge from `v-src-ip` to `v-dst-host`
 with identity `v-attempted-user` and outcome `failed`; the process
 that initiated it on the source endpoint is not named in the event.
-The starter leads below are attribute-enrichment on those
-already-confirmed vertices (source classification, username
-classification, auth-history around the event) — not
-topology-extending proposals. Stay in the mechanical / interpretive
-lane per §ASSESS.
+What follows is the list of unknowns the investigation has to
+resolve — the agent picks the next-cheapest unknown each loop and
+authors hypotheses against it, rather than starting from a
+pre-committed mechanism story.
 
-Most investigations resolve through enrichment alone: the archetype
-catalog above captures the cross-product of (source sanctioned?) ×
-(username class) × (volume shape) × (forward success?) that these
-leads discriminate.
+### Unknowns
 
-### Fork structure when enrichment leaves disposition ambiguous
+1. **Source classification** — what kind of host produced
+   `data.srcip`? (internal-monitoring-host, internal-other, external,
+   unclassified.) Resolved by `source-classification` lead against
+   `environment/context/ip-ranges.md`.
+2. **Username classification** — what kind of identity is
+   `data.srcuser`? (monitoring-pattern, real-account, common-default,
+   leaked-dump, random-string.) Resolved by `username-classification`
+   lead against `environment/context/identity-patterns.md`.
+3. **Volume / cadence shape** — does the alert window plus its
+   neighborhood read as a single attempt, a brute-force volume, a
+   burst cluster, or a steady periodic cadence? Resolved by
+   `authentication-history` over a window that brackets the alert
+   plus enough history to characterize baseline.
+4. **Triple registration** — is the `(srcip, srcuser, target)`
+   triple recorded in `approved-monitoring-sources` or
+   `scheduled-jobs` as an authorized automation? An `org-authority`
+   anchor consultation answers registration; it does **not** answer
+   identity-of-use.
+5. **Identity-of-use (only if registration is `present`)** — was
+   the registered automation the actor on this specific alert, or
+   did some other process on the same host produce the wire-side
+   triple? The registry confirms the triple *can* be used by the
+   automation; it does not confirm the automation *did* use it
+   here. Anyone with shell access on the source host (a different
+   script, a manual operator, a compromised process) can produce
+   the same `(srcip, srcuser, target)` string on the wire.
+6. **Forward outcome** — was there a `successful_login` from the
+   same source/user within ~60s? An auth-success after the failure
+   stream upgrades severity regardless of the other answers.
 
-If the starter leads leave disposition ambiguous **and the source is
-internal-monitoring-host with a monitoring-pattern username**, the
-approved-monitoring-sources anchor will typically confirm the triple
-is registered. That confirms the triple *could* be used by the
-monitoring system — it does **not** confirm the monitoring system
-was the actor on this specific alert. Anyone with shell access to
-the monitoring host (a different script, a manual operator, a
-compromised process) can produce the same `(srcip, srcuser, target)`
-string on the wire. The anchor answers registration, not
-identity-of-use.
+### How to use these unknowns at PREDICT time
 
-**Root fork is identity-of-use, not mechanism.** Fork into:
+Pick the cheapest unresolved unknown that discriminates the most
+remaining outcomes given what you have so far. Author the hypothesis
+or lead-level prediction against THAT question — name the question,
+not a mechanism. For example, when unknown 5 (identity-of-use) is
+the next cheapest:
 
-- `?monitoring-system-is-the-actor` — the registered monitoring
-  tool itself produced this attempt. Predictions: the monitoring
-  system's own audit/output channel records a scheduled action at
-  t-0 ±jitter; the observed (srcport, cadence, cluster-shape)
-  matches the historical baseline for this tool's traffic to this
-  target; the tool's process on monitoring-host is alive and
-  scheduled around t-0.
-- `?credentials-used-outside-registered-actor` — some other actor
-  on monitoring-host (or spoofing its identity) produced the
-  attempt using the registered credential string. Predictions:
-  no matching monitoring-system audit entry at t-0; observed shape
-  deviates from the tool's historical baseline (burst, off-cadence,
-  unfamiliar srcport pattern); the monitoring tool's own process
-  is idle or running a separate cycle at t-0.
+> The registry confirms the triple is present, so unknown 4 is
+> resolved. Identity-of-use (unknown 5) is the next discriminator
+> — it splits between "registered automation produced this attempt"
+> and "different process on the same host produced this attempt".
+> The two branches diverge on whether the automation's own
+> audit/output channel records an action at t-0 and on whether the
+> observed (srcport, cadence, cluster-shape) matches the
+> automation's historical baseline. Predictions live on those
+> observable fields.
 
-These siblings share the registered triple. Their discriminators
-are **correlation queries on adjacent systems**, not process-lineage
-on the source host (which is typically unavailable — the monitoring
-host often has no endpoint agent). See the new-lead suggestions
-below the starter lead order.
+Whether you carry both branches as one hypothesis-with-contract or
+as a peer-fork is a Shape A vs Shape M call per `predict.md` — the
+choice depends on whether the contract anchor (registry) attests to
+identity-of-use or only to registration. For monitoring-pattern
+sources where the anchor is registration-only, the discriminating
+evidence sits on the automation's own audit channel, not on the
+contract — that's Shape M (mechanism fork on identity-of-use), not
+Shape A (single hypothesis closed by contract).
 
-**Refinement after identity-of-use resolves.** Only after the root
-fork resolves `++` on one side do mechanism-layer children register:
+### Loop 1 default
 
-- Children of `?monitoring-system-is-the-actor`: `?scheduled-retry-
-  misfire`, `?scheduled-behavior-drift`, `?operator-manual-probe`
-  (an operator ran a sibling monitoring-class script whose shape
-  differs from the approved tool's — e.g., a test/bait variant).
-- Children of `?credentials-used-outside-registered-actor`:
-  `?local-process-credential-reuse`, `?tunnel-hijack`,
-  `?source-spoofed-from-elsewhere`.
-
-Do not register these at loop 1 — they depend on the root fork
-having resolved. Identity-of-use first, mechanism second.
+Loop 1 is typically attribute-enrichment on the already-confirmed
+vertices (resolves unknowns 1, 2, 3, 6 in one composite). The
+starter leads below are scoped to that. Stay in the mechanical /
+interpretive lane per §ASSESS — author hypotheses only when an
+unresolved unknown forces a topology-extending decision.
 
 ### Authorization-contract case (when the triple is NOT registered)
 
