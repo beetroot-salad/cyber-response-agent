@@ -44,6 +44,7 @@ def _check_prediction_coverage(merged: dict[str, Any]) -> list[str]:
 
     # Aggregate covered IDs and track which hypotheses reached ++.
     covered: dict[str, set[str]] = {}
+    per_row: dict[str, list[tuple[str, list[str]]]] = {}  # h_id → [(lead, matched)]
     reached_pp: dict[str, str] = {}  # h_id → lead_id where ++ first seen
     for lead in merged.get("findings", []) or []:
         if not isinstance(lead, dict):
@@ -57,9 +58,9 @@ def _check_prediction_coverage(merged: dict[str, Any]) -> list[str]:
                 continue
             matched = res.get("matched_prediction_ids") or []
             if isinstance(matched, list):
-                covered.setdefault(hid, set()).update(
-                    m for m in matched if isinstance(m, str)
-                )
+                matched_strs = [m for m in matched if isinstance(m, str)]
+                covered.setdefault(hid, set()).update(matched_strs)
+                per_row.setdefault(hid, []).append((lid, matched_strs))
             if res.get("after") == "++" and hid not in reached_pp:
                 reached_pp[hid] = lid
 
@@ -75,12 +76,24 @@ def _check_prediction_coverage(merged: dict[str, Any]) -> list[str]:
         got = covered.get(hid, set())
         missing = sorted(required - got)
         if missing:
+            rows = per_row.get(hid, [])
+            row_summary = (
+                "; ".join(
+                    f"{rl} matched={rm or '[]'}" for rl, rm in rows
+                )
+                or "(no rows touching this hypothesis)"
+            )
             errors.append(
-                f"lead {lid}: resolution for {hid} has after: \"++\" but "
-                f"matched_prediction_ids across all resolutions touching {hid} "
-                f"does not cover the full prediction set "
+                f"lead {lid}: resolution for {hid} has after: \"++\" but the "
+                f"union of matched_prediction_ids across all resolutions "
+                f"touching {hid} is incomplete "
                 f"(declared: {sorted(required)}, missing: {missing}). "
-                f"Partial coverage caps at \"+\"."
+                f"Per-row matched_prediction_ids: {row_summary}. "
+                f"matched_prediction_ids are derived from the iff RHS "
+                f"literal set in each row's annotation (e.g. `... ⟺ p1 ∧ ¬r1` "
+                f"contributes p1) — confirm every declared prediction "
+                f"appears on the iff RHS of at least one row, or cap the "
+                f"grade at \"+\"."
             )
 
     return errors

@@ -64,6 +64,16 @@ available" or "not observed." Omission is ambiguous to the main agent.
   rotation — looks like low-frequency brute force but isn't.
 - Time windows matter: always state the window you queried.
   Missing events outside your window can change the interpretation.
+- **Bracket the alert, don't just look back.** When the lead is
+  evaluating a cluster or burst pattern around the alert event T0,
+  query a window that extends a small interval *forward* of T0 (e.g.
+  `--start (T0 - lookback) --end (T0 + 60s)`), not just backward.
+  If T0 is the first event of a same-second burst, follow-ups land
+  *after* T0 and a strictly-backward window misses them — the cluster
+  containing T0 then under-reports its size and burst patterns slip
+  through cadence checks. Forward lookahead of 30-60s is enough to
+  absorb same-second bursts without bleeding into independent later
+  activity.
 - **Same connection vs distinct connections.** When N events look
   identical in the summary (same srcip, srcuser, host, timestamp to
   the second), the source port is the discriminator: distinct source

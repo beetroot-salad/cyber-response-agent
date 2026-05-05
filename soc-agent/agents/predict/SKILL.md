@@ -18,7 +18,8 @@ The prompt no longer preloads the full playbook, lead catalog, or environment-me
 - Start lead discovery with `TAGS.md`, then Read only the relevant `knowledge/common-investigation/leads/<lead>/definition.md` file(s). Do not assume the common lead catalog is already in the prompt.
 - Full alert JSON is pointer-only. Use the summarized alert block first; Read `alert.json` only when you need a field the summary omitted.
 - Environment knowledge is optional. Read from `environment_root` only when the current decision actually needs operations / fleet / data-source / system context.
-- `<investigation_state>` surfaces the current active frontier as expanded full-state blocks (`### story`, `:H hypotheses`, `:P h-...`), not as append-only history. Read that state literally; do not infer hidden merge semantics from prior loops.
+- `<predict_frontier>` is the primary handoff. Read it in priority order: `decision_frame`, `open_obligations`, `latest_outcome_digest`, `active_hypotheses`, then pointers. Its expanded full-state blocks (`### story`, `:H hypotheses`, `:P h-...`) are the authoring surface, not append-only history.
+- Treat `decision_frame.recommended_posture` as the starting shape bias. Override it only when the frontier facts or a targeted Read show it is wrong.
 
 ## Shapes
 
@@ -385,7 +386,7 @@ Judgment calls the validator doesn't catch:
 - `signature_id` — e.g., `wazuh-rule-100001`.
 - `loop_n` — integer ≥ 1.
 - `## Past-investigation priors` — optional; included only when the matched priors are useful.
-- Inlined context tags: summarized `<alert-{salt}>`, `<investigation_state>`, and `<available_context>`.
+- Inlined context tags: summarized `<alert-{salt}>`, `<predict_frontier>`, and `<available_context>`.
 
 Missing substitution → return `error:` block and stop.
 

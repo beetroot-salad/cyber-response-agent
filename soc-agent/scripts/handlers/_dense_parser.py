@@ -990,6 +990,43 @@ _RESOLUTION_LINE_RE = re.compile(
 )
 
 
+# iff RHS literals: `p1`, `ap2`, `r3`, optionally negated. Polarity is
+# reasoning-narrative; both polarities count as "the literal was tested".
+_IFF_LITERAL_RE = re.compile(r"\b(ap\d+|p\d+|r\d+)\b")
+
+
+def _extract_iff_literals(annotation: str) -> tuple[list[str], list[str]]:
+    """Extract (pred_ids, refut_ids) from the iff RHS literal set.
+
+    The annotation may contain multiple iffs separated by `;`. For each iff,
+    the RHS is everything after the iff connective (`⟺` or its ASCII
+    fallback `<=>`). Literals on the LHS are not extracted — only the RHS
+    declares matched predictions / refutations.
+    """
+    if not annotation:
+        return [], []
+    pred_ids: list[str] = []
+    refut_ids: list[str] = []
+    seen_pred: set[str] = set()
+    seen_refut: set[str] = set()
+    # Normalize ASCII fallback before splitting.
+    normalized = annotation.replace("<=>", "⟺")
+    for clause in normalized.split(";"):
+        if "⟺" not in clause:
+            continue
+        _lhs, rhs = clause.split("⟺", 1)
+        for token in _IFF_LITERAL_RE.findall(rhs):
+            if token.startswith("r"):
+                if token not in seen_refut:
+                    seen_refut.add(token)
+                    refut_ids.append(token)
+            else:
+                if token not in seen_pred:
+                    seen_pred.add(token)
+                    pred_ids.append(token)
+    return pred_ids, refut_ids
+
+
 def _parse_resolution_line(row: str) -> dict[str, Any]:
     m = _RESOLUTION_LINE_RE.match(row)
     if not m:
@@ -1024,6 +1061,16 @@ def _parse_resolution_line(row: str) -> dict[str, Any]:
     severity = head_tokens[-1]
     pred_tokens = head_tokens[1:-1]
     supp_text = supp.strip()
+    # `matched_prediction_ids` / `matched_refutation_ids` are derived from the
+    # iff RHS literal set in the annotation (per agents/analyze.md row grammar:
+    # "the literals on the iff RHS *are* the matched-prediction / matched-
+    # refutation set"). Polarity is reasoning-narrative only — both `p1` and
+    # `¬p1` count as "p1 was tested by this resolution". Pre-iff positional
+    # tokens in the head (between lead-id and severity) remain accepted as a
+    # legacy fallback for rows that omit the iff annotation.
+    iff_pred_ids, iff_refut_ids = _extract_iff_literals(annotation)
+    matched_pred_ids = iff_pred_ids or [t for t in pred_tokens if t.startswith("p")]
+    matched_refut_ids = iff_refut_ids or [t for t in pred_tokens if t.startswith("r")]
     record: dict[str, Any] = {
         # Spec-canonical field name is `hypothesis` (the yaml surface used
         # this; validator/walkers index on it). Keep `hypothesis_id` as an
@@ -1034,8 +1081,8 @@ def _parse_resolution_line(row: str) -> dict[str, Any]:
         "after": m.group("after"),
         "severity_of_test": severity,
         "supporting_edges": [t for t in re.findall(r"e-[A-Za-z0-9]+", supp_text)],
-        "matched_prediction_ids": [t for t in pred_tokens if t.startswith("p")],
-        "matched_refutation_ids": [t for t in pred_tokens if t.startswith("r")],
+        "matched_prediction_ids": matched_pred_ids,
+        "matched_refutation_ids": matched_refut_ids,
     }
     # `supporting_marker` is only present when supp is a non-edge marker
     # (e.g. `no-authority`). When supp lists edge ids, the edges live in

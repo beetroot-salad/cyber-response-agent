@@ -199,9 +199,10 @@ class TestPromptAssembly:
         assert 'rule.id: "5710"' in prompt
         assert '"id": "alert-1"' not in prompt
 
-        # Investigation context is the compact structured state, not the
+        # Investigation context is the computed predict frontier, not the
         # broad history replay.
-        assert "<investigation_state>" in prompt
+        assert "<predict_frontier>" in prompt
+        assert "decision_frame:" in prompt
         assert ":V prologue.vertices" in prompt
         assert "<investigation mode=\"predict\">" not in prompt
 
@@ -235,7 +236,9 @@ class TestPromptAssembly:
         )
 
         prompt = predict_handler._assemble_prompt(ctx)
-        assert "<investigation_state>" in prompt
+        assert "<predict_frontier>" in prompt
+        assert "decision_frame:" in prompt
+        assert "latest_outcome_digest:" in prompt
         assert "## Active Hypothesis Frontier" in prompt
         assert "?monitoring-probe" in prompt
         assert "?service-account-use" in prompt

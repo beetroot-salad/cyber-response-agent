@@ -95,7 +95,7 @@ from scripts.handlers.predict_priors import (
     parse_prologue_and_last_hypothesize,
     safe_priors_section,
 )
-from scripts.handlers.investigation_views import format_predict_state_block
+from scripts.handlers.investigation_views import format_predict_frontier_block
 from scripts.handlers.investigation_views import predict_frontier_hypotheses
 from scripts.handlers._subagent import (
     make_invoker,
@@ -157,7 +157,8 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
       - run metadata
       - matched priors (when useful)
       - a summarized alert block
-      - compact structured investigation state
+      - compact predict frontier: next-decision frame, open obligations,
+        latest outcome digest, active state, and retrieval pointers
       - explicit on-disk retrieval pointers in `<available_context>`
 
     Full alert JSON, signature docs, lead definitions, and environment
@@ -189,7 +190,16 @@ def _assemble_prompt(ctx: Context, *, remediation_notes: list[str] | None = None
         format_alert_summary_block(
             alert, vendor, salt, soc_agent_root=SOC_AGENT_ROOT
         ),
-        format_predict_state_block(investigation_md),
+        format_predict_frontier_block(
+            investigation_md,
+            loop_n,
+            run_dir=ctx.run_dir,
+            analyze_out=(
+                ctx.outputs.get(Phase.ANALYZE)
+                if isinstance(ctx.outputs.get(Phase.ANALYZE), dict)
+                else None
+            ),
+        ),
         format_predict_available_context_block(
             ctx.run_dir,
             investigation_md,
