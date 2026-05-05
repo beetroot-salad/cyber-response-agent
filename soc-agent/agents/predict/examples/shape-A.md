@@ -2,6 +2,8 @@
 
 You've already decided Shape A: mechanism is pinned, authorization is the open question. The craft questions are **anchor selection** (which authority's record actually answers the predicate?), **predicate phrasing** (one observable check the anchor can categorically resolve), and **integrity bundling** (does the anchor's verdict cover identity-of-use too, or do you need a peer hypothesis?).
 
+Shape A is wrong when the focus unknown is still mechanism-shaped. If SCREEN or a prior loop surfaced an unmodeled event-shape dimension (burst geometry, process lineage, session-origin, source-port/session geometry), first cover that dimension with Shape E readings or include it as a prediction on the story. An authorization anchor confirms permission for a proposed edge; it does not prove that the alert-time event shape came from that edge.
+
 The dense form for Shape A is one or more `:H` rows (metadata-only — id, name, attached_to, edge geometry, parent attrs, integrity_waived rationale, weight=null, status=active), per-hypothesis sub-blocks `:P h-{id}.preds` / `.refuts` / `.authz` (and `.attr_preds`, `.comparisons` when relevant), the matching `### story h-{id}` prose with sentence IDs (`s1.`, `s2.`, ...), and the always-required `:R routing` block. No `:L lead_preds`.
 
 ### Example 1 — IAM policy modification by a service account
