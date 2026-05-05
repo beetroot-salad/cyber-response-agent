@@ -108,6 +108,27 @@ for the next question.
 at loop 1. Form the immediate discrimination question; deepen only
 when a lead confirms the current anchor and opens the next layer.
 
+### Unknowns and focus questions
+
+An investigation always has more open questions than the next loop can
+reasonably test. Treat these as unknowns: immediate mechanism,
+immediate actor, upstream actor, authorization, actor integrity,
+impact, scope, observability gaps, and any case-specific dimension
+that a prior phase surfaced.
+
+Unknowns are not hypotheses. An unknown names what is not solved; a
+hypothesis is one candidate answer with predictions and refutations.
+PREDICT should pick the one current focus question that is reducible by
+the next lead, preferring mechanism-shaped questions close to the alert
+over upstream or authorization questions unless the alert authority has
+already pinned the mechanism.
+
+In the current dense format this is a prompt discipline, not a stored
+schema surface. The focus question is expressed through existing
+fields: Shape E lead-level readings, Shape A/M stories and predictions,
+and routing rationale. A future schema may make focus questions
+explicit, but omitted unknowns are not structurally solved today.
+
 ### Scale of reasoning
 
 Model at the granularity the investigation reasons at, not finer.

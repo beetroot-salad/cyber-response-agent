@@ -83,6 +83,50 @@ anchor|alert
 - Don't omit `scope_override` — historical baselines need 24h+, GATHER's 1h default would return noise.
 - **Don't drop `lp4`.** Without an `absence`-kind reading for the empty-baseline case, accounts with no recorded prior auth silently fall through every other reading and the lead has no reading to grade against. `kind=absence` still names a selector — declare *what* historical query is expected to return non-zero before claiming its absence (see the `lp4` row's comparison entry).
 
+---
+
+### Example 3 — object-store export with a SCREEN-blocking data-shape deviation
+
+**Alert:** A cloud object-store audit rule fired because service account `svc-report-export` read many objects from a sensitive bucket. The identity and bucket are both used by a registered nightly reporting export, but SCREEN refused the export fast path because the alert-window object-prefix set included data categories outside the job's usual export envelope. The pipeline registry may still list `(svc-report-export, bucket, job-runner)` as approved, but the current focus unknown is mechanism-shaped: **whether this alert-window read set is the registered export job's expected data shape or another job/session using the same service account**.
+
+**Lead-selection reasoning.** Do not jump straight to the pipeline registry. The registry answers whether the service account may export from this bucket; it does not answer whether the specific object-prefix set and volume came from the registered export mechanism. `object-access-history-baseline` is the cheapest discriminator because it returns the alert-window read set plus the same service account's recurring export baseline, including prefix geometry, object-count/byte-volume distribution, and job-run correlation.
+
+**Reading geometry.** The readings partition the focus unknown. If the read set matches the recurring export geometry, the next loop can move to authorization. If it deviates on the SCREEN-blocking data-shape dimension or lacks job-run correlation, the next loop must investigate service-account integrity / alternate export mechanism before authorization can settle disposition.
+
+```
+predict loop=1 shape=E
+
+:L lead_preds [id|kind|if|read_as|advance_to]
+lp1|geometry|"alert-window object-prefix set and byte-volume distribution match the service account's recurring export baseline, including the SCREEN-blocking data-category dimension"|registered-export-shaped-read|fork-at-authorization
+lp2|novel-artifact|"alert-window object-prefix set introduces a data category absent from the service account's recurring export baseline"|novel-data-category|fork-at-export-mechanism
+lp3|geometry|"alert-window byte-volume distribution materially deviates from the service account's recurring export baseline while the prefix set remains familiar"|known-prefix-abnormal-volume|fork-at-job-state
+lp4|absolute|"no registered pipeline run has an execution window overlapping the alert-window reads"|no-job-run-correlation|escalate
+
+:L lead_preds.comparisons [pred_ref|selector_kind|selector|dimension]
+lp1|historical-self|"identity=svc-report-export AND bucket=<bucket> [prior scheduled export windows, excluding alert window]"|object_prefix_set_and_byte_volume_distribution
+lp2|historical-self|"identity=svc-report-export AND bucket=<bucket> [prior scheduled export windows, excluding alert window]"|object_prefix_set
+lp3|historical-self|"identity=svc-report-export AND bucket=<bucket> [prior scheduled export windows, excluding alert window]"|byte_volume_distribution
+
+:R routing
+selected_lead         object-access-history-baseline
+composite_secondary   pipeline-run-correlation
+override_data_source  -
+rationale             "SCREEN already exposed the data-shape dimension as the current focus unknown; object-access-history-baseline must compare prefix/volume geometry before any registry-only authorization anchor can settle the case"
+
+:R routing.lead_hints [lead|hint]
+object-access-history-baseline|"Return alert-window object prefixes, object count, byte volume, and the same fields for prior scheduled export windows by this service account."
+pipeline-run-correlation|"Report whether a registered export run overlaps the alert-window reads; do not use registry membership alone as run correlation."
+
+:R routing.scope_override [key|value]
+window_hours|72
+anchor|alert
+```
+
+**Pitfalls:**
+- Don't write a single Shape A hypothesis whose only prediction is pipeline registry membership. That confirms the service account is allowed for some exports, not whether this read set is the registered export's data shape.
+- Don't add a ceremonial `?stolen-service-account` peer if the only prediction is "registry absent" or "volume high." The integrity question becomes real only when a lead can read different data-shape, job-run, device, or session-origin evidence.
+- Don't treat a familiar bucket as enough. The object-prefix/data-category dimension that blocked SCREEN has to appear in a reading or prediction.
+
 ### When to skip `:L lead_preds.comparisons`
 
 Only when *every* reading is `kind=absolute` or `kind=presence` — i.e., a direct field-read on the gather output (Example 1's parent-process category). Any single deviation kind on any single row pulls the comparisons block back in.

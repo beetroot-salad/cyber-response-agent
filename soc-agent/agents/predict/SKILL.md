@@ -21,6 +21,29 @@ The prompt no longer preloads the full playbook, lead catalog, or environment-me
 - `<predict_frontier>` is the primary handoff. Read it in priority order: `decision_frame`, `open_obligations`, `latest_outcome_digest`, `active_hypotheses`, then pointers. Its expanded full-state blocks (`### story`, `:H hypotheses`, `:P h-...`) are the authoring surface, not append-only history.
 - Treat `decision_frame.recommended_posture` as the starting shape bias. Override it only when the frontier facts or a targeted Read show it is wrong.
 
+## Focused unknowns discipline
+
+Before choosing a shape, spend a short scratch pass naming what the case has not solved yet. Do not emit this list; the dense grammar has no `unknowns`, `focus_unknowns`, or `story_target` fields in this phase. Express the chosen question through the existing shape output: Shape E `lp*` readings, Shape A/M stories and predictions, and the routing rationale.
+
+Use this internal checklist only to keep the loop honest:
+
+- `immediate_mechanism` — what directly produced the alert/event?
+- `immediate_actor` — what process/session/identity/service performed it?
+- `ultimate_actor` — what human/system/automation is upstream of the immediate actor?
+- `authorization` — was the actor/action permitted by the relevant authority?
+- `actor_integrity` — is the named actor/source trustworthy, or could it be impersonated/controlled?
+- `impact` / `scope` — what consequence or affected set matters for disposition?
+- `observability` — what can the available tools not see that would change interpretation?
+- case-specific gaps surfaced by SCREEN, ANALYZE, or the alert itself.
+
+Pick at most one focus unknown for the loop; use two only when one composite lead can reduce both. Prefer the unknown closest to the alert in the causal chain and mechanism-shaped ("what produced this?") over upstream actor, authorization, or impact questions. Exception: if the alert's own authority already pins the mechanism, the focus may move directly to authorization or actor integrity.
+
+An unknown is focus-worthy only when an available lead can reduce it in this loop and the answer would change the next lead, candidate story, disposition, confidence, or report handoff. Generic questions like "who is the ultimate actor?" are not focus-worthy until they are the current bottleneck and a lead can reduce them.
+
+SCREEN-blocking and prior-loop-blocking dimensions are load-bearing. If SCREEN refused a fast path because one dimension failed (for example, an alert-time burst exceeded the monitoring-probe cluster shape), that dimension is the default focus until a lead, prediction, or explicit routing rationale accounts for it. Do not skip to a registry/authorization anchor when the current unknown is whether the observed event shape belongs to the registered mechanism at all.
+
+The negative-space question is required for fork shapes: what would we expect to see if this mechanism were true that we do not see yet? The answer should become a prediction, a refutation, or a Shape E reading. Unknowns replace ceremonial peers, not real mechanism forks: do not create an `?adversary-controlled-*` peer whose predictions only negate or duplicate the main story; do create a peer when the alternate mechanism has different observable predictions.
+
 ## Shapes
 
 Three shapes. Pick one; commit to it in the literal first field of your output.
@@ -36,7 +59,7 @@ Use when:
 - A single lead's outcome directly selects the next lead.
 - A discriminating field is null/truncated and you need to refill it before forking.
 
-*Typical:* rule-5710 SSH reject, loop 1. Lead = `authentication-history`. Readings: `lp1` forward-success → escalate; `lp2` periodic cadence → next loop forks on identity; `lp3` non-periodic → next loop forks on identity with cadence-anomaly signal.
+*Typical:* an SSH-style auth-failure signature, loop 1. Lead = `authentication-history`. Readings: `lp1` forward-success → escalate; `lp2` periodic cadence → next loop forks on identity; `lp3` non-periodic → next loop forks on identity with cadence-anomaly signal.
 
 Output: `shape: E` + `branch_plan` (readings) + `routing`. No `hypotheses`.
 
@@ -44,15 +67,17 @@ Output: `shape: E` + `branch_plan` (readings) + `routing`. No `hypotheses`.
 
 One or more hypotheses, at least one carrying an `authorization_contract` on its proposed edge. The contract anchors against policy (IAM record, registry, change-management, deploy-runs, approved-source list, audit correlation); resolving it closes the authorization question.
 
-**Integrity is an attribute, not a separate vertex.** Most of the time, one hypothesis with an `authorization_contract` is all you need — the contract's anchor (IAM / registry / audit correlation) answers both "authorized?" and "who actually did it?" in one resolution. A peer hypothesis is justified only when **integrity implies a different upstream mechanism** — different process ancestry, different session origin, different audit trail — i.e., the adversarial variant has predictions that diverge on observable fields the main hypothesis doesn't already cover. If you're not confident those observable differences exist and are testable with available leads, keep it as one hypothesis and let upstream loops diverge if evidence forces it. Don't emit a peer whose predictions are just negations or duplicates of the main hypothesis's — that's the invoker-identity anti-pattern (§Disciplines), and the validator will reject it.
+**Integrity is an attribute of the parent vertex.** In many cases, one hypothesis with an `authorization_contract` is enough — the contract's anchor (IAM / registry / audit correlation) answers both "authorized?" and "who actually did it?" in one resolution. A peer hypothesis on actor identity is permitted when integrity-of-use is genuinely an open question, even if the divergence is on a single observable field (process ancestry, session origin, parent uid, audit trail kind, `proc.name`). The agent's discipline is to keep peer predictions concrete — name the field that distinguishes the two — and to avoid emitting peers whose predictions you cannot test against any available lead. The validator no longer rejects this shape structurally; emit a peer when it earns its keep, keep it as one hypothesis when it would only restate a verdict.
 
 Use when:
 - Mechanism is pinned by the alert's own fields; only authorization is open.
 - Observed-vertex identity is pattern-inferred (sentinel username, naming convention, IP-range guess) and authority confirmation is the next step.
 
+Do not use Shape A just because an authority anchor is available. If a mechanism-shaped focus unknown remains (especially one carried from a SCREEN refusal or prior ANALYZE anomaly), either stay Shape E to characterize it or include a prediction/refutation in the Shape A story that tests the mechanism dimension. Registry membership is not evidence that the alert-time event shape came from the registered mechanism.
+
 *Typical:* Falco container-exec with parent `runc`. Mechanism = host-side exec crossed the container boundary (pinned). Open = was this under an approved deploy run? Contract anchors `change-management` / `deploy-runs`. Integrity waiver: `"change-management ticket IDs are tied to the operator identity that opened them; confirming the ticket authorizes both the action and identifies the actor."`
 
-Also typical: rule-5710 SSH reject, loop 2 post-enrichment. A single hypothesis `?registered-actor-initiated` with a contract against `approved-monitoring-sources` — the registered triple's authority answers both "is this triple allowed" and "was the registered actor the user here". Full worked example below.
+Shape A is the right call when the relevant authority anchor attests to identity-of-use as well as authorization (IAM record, audit-correlation, principal-attestation). When the anchor only attests to registration — not to which process actually used the registered credential — Shape A under-constrains the answer; that's a Shape M call (mechanism fork on identity-of-use), not Shape A. The "registered + we don't yet know who actually did it" gap is the textbook trap: the registry says yes, the contract resolves authorized, but the agent has not proven the registered actor was the actor here.
 
 ### Shape M — mechanism fork (contract-free)
 
@@ -68,7 +93,7 @@ When the lead measures an impact-relevant observable (upload volume, blast-radiu
 
 ## Decision procedure
 
-Short. Walk in order; stop at the first match.
+Short. First identify the focus unknown from the frontier/open obligations, then walk in order and stop at the first match.
 
 1. No prior-loop enrichment of the observed vertex, or a field gap to fill, or a single lead that routes the next loop? → **E**.
 2. The open question is authorization (mechanism pinned, or identity needs authority confirmation)? → **A**.
@@ -89,6 +114,8 @@ Each example is a full case at the relevant loop position (alert → state → d
 
 **Story first, predictions second.** Write the story in 2–4 sentences before writing the `predictions` list. Each prediction cites a specific story sentence via `from_story_link`. A hypothesis without a concrete causal story is a label; labels max out at `+` regardless of evidence.
 
+**Story answers the focus unknown.** The story is one candidate answer to the loop's focus unknown, not a generic case explanation. If the focus unknown is "whether the alert-time burst was produced by the registered monitoring probe or another colocated source," the story must say how the registered probe produced that burst, and at least one prediction/refutation must test burst shape, source-port/session geometry, process ancestry, or another observable that bears on that question.
+
 **One hop.** Story starts at `proposed_edge.parent_vertex`, ends at `attached_to_vertex`. Each sentence describes how the parent, under its proposed classification, produced or relates to the observed vertex through the proposed edge. Attributes of the parent (subtype, schedule, identity, ancestry shape) and edge attributes (timing, count, outcome) are fair game.
 
 Not in scope:
@@ -96,7 +123,7 @@ Not in scope:
 - **Downstream consequences** — incident response, not triage.
 - **Disposition claims** — "this is authorized" is a verdict, not a causal link. The evidence that demonstrates authorization (anchor consultation, audit correlation) belongs in predictions and refutation shapes.
 
-**Baseline grounds predictions.** When the observed vertex has prior history (prior alerts on same host/user, established cadence, prior classification), name it in one story sentence — *"source 172.22.0.10 has emitted rule-5710 at ~10-min cadence for the past 72 hours; this alert is on-cadence with that baseline."* When no baseline exists, say so — *"source has no prior rule-5710 in the 30-day window."* Baseline-grounded stories produce falsifiable predictions; baseline-less stories produce narrative. Optional only if CONTEXTUALIZE's ticket-context is empty AND no related leads in investigation state mention prior observations.
+**Baseline grounds predictions.** When the observed vertex has prior history (prior alerts on same host/user, established cadence, prior classification), name it in one story sentence — *"source `<src>` has emitted `<rule_id>` at ~N-min cadence for the past 72 hours; this alert is on-cadence with that baseline."* When no baseline exists, say so — *"source has no prior `<rule_id>` in the 30-day window."* Baseline-grounded stories produce falsifiable predictions; baseline-less stories produce narrative. Optional only if CONTEXTUALIZE's ticket-context is empty AND no related leads in investigation state mention prior observations. Note: cadence claims must specify the granularity at which the comparison holds — per-hour aggregate match does not entail per-second cluster-shape match; if the alert's deviating signal is sub-hour, the baseline must be at sub-hour resolution.
 
 Predictions built on the baseline **name the deviation by role, not by value**. Say *"foreground matches the recurring baseline geometry"* / refutation *"deviates from the baseline geometry on at least one recorded dimension"* — don't name specific field values, thresholds, or enumerations. Specific values are GATHER's output, not PREDICT's input; the lead's `## Baseline Query` section commits the lead to returning concrete structure, and ANALYZE compares foreground to it dimension-by-dimension. Writing values in the predicate pins PREDICT to a guess and bypasses the lead's own data. This rule applies uniformly across every predicate surface — `p*` predictions, `r*` refutations, `ap*` attribute predictions, and Shape E `lp*` branch_plan readings — and to parenthetical clarifications inside them (*"non-inbound geometry (field X not value Y)"* is still a leak). Canonical deviation shapes: **geometry** (matches / deviates from recurring baseline geometry), **cadence** (within / materially outside baseline distribution), **novel artifact** (introduces / doesn't introduce a kind absent from baseline), **absence from zero-count baseline** (*"any deviation from the zero-count baseline"* when baseline is structurally zero for that artifact kind).
 
@@ -138,6 +165,8 @@ Emit a **dense block-shape envelope** to stdout. No prose framing, no YAML fence
 **Shape commitment is the literal first field.** Decide the shape per §Decision procedure before authoring anything else; the `predict` header line carries it.
 
 **PREDICT always selects a lead.** Halting is ANALYZE's job. There is no halt / null-lead path.
+
+**No unknown fields in phase 1.** Do not emit `unknowns`, `focus_unknowns`, `story_target`, or any `:U` block. Focus unknowns are prompt discipline only until the dense schema grows a storage surface.
 
 ### Block grammar
 
@@ -193,7 +222,7 @@ Violations are rejected by the dense parser before the invlang validator runs.
 
 ```
 :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
-h-001|?registered-actor-initiated|v-001|initiated_by|identity|approved-monitoring-service-account|kind=service-account|"registry anchor names the registered actor"|null|active
+h-001|?<mechanism-class>-initiated|v-001|<rel>|<parent-type>|<parent-class>|<key>=<value>|"<rationale for one-hypothesis shape>"|null|active
 ```
 
 `weight` is always the literal token `null` on hypotheses you author (ANALYZE grades; you propose). `parent_attrs` packs `key=value` pairs separated by `;`.
@@ -202,16 +231,16 @@ h-001|?registered-actor-initiated|v-001|initiated_by|identity|approved-monitorin
 
 ```
 :P h-001.preds [id|subject|kind|from_story|claim]
-p1|proposed_parent|absolute|s2|"triple listed in approved-monitoring-sources"
+p1|proposed_parent|absolute|s2|"<absolute observable claim — e.g. principal listed in <registry>>"
 
 :P h-001.attr_preds [id|target|attribute|kind|claim]
 # OPTIONAL — omit the block entirely when no attribute predictions
 
 :P h-001.refuts [id|refutes|kind|claim]
-r1|p1|absolute|"triple absent or revoked"
+r1|p1|absolute|"<refutation of p1>"
 
 :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
-ac1|proposed|approved-monitoring-sources|"triple listed as active"|esc|esc
+ac1|proposed|<anchor-kind>|"<anchor predicate>"|esc|esc
 ```
 
 - **`subject`** on `:P preds`: `{proposed_edge, proposed_parent, attached_vertex}`.
@@ -225,7 +254,7 @@ For every prediction or refutation row whose `kind ∈ {geometry, cadence, novel
 
 ```
 :P h-001.comparisons [pred_ref|selector_kind|selector|dimension]
-p1|historical-self|"src=172.22.0.10 AND rule=5710 over 72h"|inter-event-gap-distribution
+p1|historical-self|"src=<src> AND rule=<rule_id> over 72h"|inter-event-gap-distribution
 ```
 
 `selector_kind` ∈ `{historical-self, peer-class, population, cross-rule}`. Mismatch (deviation kind without comparison, or non-deviation kind with one) is a parse error.
@@ -239,7 +268,7 @@ lp2|novel-artifact|"foreground introduces forward-success not in 30d baseline"|e
 lp3|absence|"selector returns zero events (no baseline established for this image — first occurrence)"|first-occurrence|escalate
 
 :L lead_preds.comparisons [pred_ref|selector_kind|selector|dimension]
-lp1|historical-self|"src=<source_ip> AND rule=5710 OR rule=5715 over 72h"|inter-event-gap-distribution
+lp1|historical-self|"src=<source_ip> AND rule=<rule_id> over 72h"|inter-event-gap-distribution
 lp2|historical-self|"src=<source_ip> 30d"|forward-auth-success
 lp3|historical-self|"image=<image> AND rule=<this_rule> over 168h"|event-count
 ```
@@ -270,34 +299,38 @@ anchor|alert
 
 `anchor` is `alert` (default — window ends at alert @timestamp) or `now` (window ends at wall-clock time).
 
-### Worked example — Shape A, single hypothesis (rule-5710 loop 2 post-enrichment)
+### Worked example — Shape A, single hypothesis with anchor that attests to identity-of-use
+
+This is a generic Shape A worked example. The crucial property is that the contract anchor attests to identity-of-use as well as authorization — a registry-only anchor (which says "this credential is registered") does NOT meet this bar and falls into Shape M, not Shape A.
 
 ```
 predict loop=2 shape=A
 
 ### story h-001
-s1. Source 172.22.0.10 has emitted rule-5710 at periodic ~10min cadence for 72h, consistent with a registered monitoring probe.
-s2. The approved-monitoring-sources registry is the authoritative source for whether the (src, user, dst) triple is sanctioned.
-s3. If the triple is listed active, both 'is this allowed' and 'who initiated this' resolve to the registered actor.
+s1. Prior enrichment resolved the SCREEN-blocking attribute (e.g. an event-shape unknown) so the discriminating question reduces to "did the registered principal initiate this".
+s2. The chosen anchor (e.g. an IAM principal-attestation log, or an authoritative audit-correlation source) attests to BOTH the authorization predicate AND identity-of-use within a single resolution.
+s3. If the anchor confirms the principal initiated the action, both authorization and identity-of-use resolve in one consultation.
 
 :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
-h-001|?registered-actor-initiated|v-001|initiated_by|identity|approved-monitoring-service-account|kind=service-account|"registry anchor names the registered actor; resolves both authorization and identity-of-use"|null|active
+h-001|?<mechanism-class>-initiated|v-001|<rel>|<parent-type>|<parent-class>|<key>=<value>|"<rationale: anchor attests to identity-of-use, not just registration>"|null|active
 
 :P h-001.preds [id|subject|kind|from_story|claim]
-p1|proposed_parent|absolute|s2|"triple (172.22.0.10,sensu,target-endpoint) listed in approved-monitoring-sources"
+p1|proposed_parent|absolute|s2|"<absolute observable claim about the anchor's attestation>"
 
 :P h-001.refuts [id|refutes|kind|claim]
-r1|p1|absolute|"triple absent or revoked"
+r1|p1|absolute|"<refutation: anchor does not attest>"
 
 :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
-ac1|proposed|approved-monitoring-sources|"triple listed as active"|esc|esc
+ac1|proposed|<anchor-kind>|"<predicate covering authorization AND identity-of-use>"|esc|esc
 
 :R routing
-selected_lead         approved-monitoring-sources-lookup
+selected_lead         <anchor-consult-lead>
 composite_secondary   -
 override_data_source  -
-rationale             "registry consult is the cheapest disposition-settling discriminator; identity-of-use rides the same anchor (integrity waived)"
+rationale             "prior enrichment reduced the event-shape unknown; the chosen anchor attests to identity-of-use as well as authorization, so a single consultation closes both questions; if instead the available anchor were registry-only, this would be Shape M not Shape A"
 ```
+
+**Anti-pattern (do NOT do this).** Authoring Shape A with a registry-only anchor that does not attest to identity-of-use, then grading the hypothesis `++` on registry-presence alone — this is the "registered ≠ used by registered" trap. The triple's registered status confirms the mechanism *can* run; it does not confirm the mechanism *did* run on this alert. Use Shape M when the available anchor is registration-only.
 
 ### Attribute predictions
 
@@ -352,7 +385,7 @@ Do not cite corpus results in `predictions` or `refutation_shape` text — those
 Judgment calls the validator doesn't catch:
 
 - **Names and classifications describe mechanism only — never verdict.** Hypothesis `name`, `proposed_edge.parent_vertex.classification`, and `attribute_predictions[].claim` all describe the parent's role or what it DOES — not whether it's good or bad. Evaluation-packed prefixes are rejected by the validator: `?authorized-`, `?legitimate-`, `?benign-`, `?malicious-`, `?adversary-`, `?compromised-`, and their classification analogues (`authorized-X`, `malicious-Y`, `adversary-controlled-Z`, ...). Verdicts live in `authorization_contract` resolutions, `integrity_waived` rationales, and ANALYZE grades — not in vertex names. If you catch yourself writing `?legitimate-foo` vs `?malicious-foo`, stop: these are one mechanism with two verdicts; collapse to one hypothesis with a contract.
-- **Invoker-identity-as-classification is an anti-pattern.** A peer fork whose two hypotheses share `proposed_edge` structure AND whose prediction claims are subsets of one another is one mechanism under two verdicts — collapse to one hypothesis + contract. Rule #32 rejects this shape. A peer hypothesis is valid when its predictions diverge on observable fields the contract-carrier doesn't already cover (e.g., different process ancestry, different session origin, different audit trail). If you're unsure whether the divergence is real and testable with available leads, default to one hypothesis and let upstream loops fork if evidence forces it.
+- **Actor-identity peers are permitted; keep predictions concrete.** A peer hypothesis on actor identity is fine when its predictions name an observable field (process ancestry, session origin, parent uid, audit trail kind, `proc.name`) that distinguishes the two actors. What earns its keep is divergence on a queryable observable, not a relabeled verdict. If the only difference between the two hypotheses is the verdict their contract resolution would produce — same predictions, different name — collapse to one hypothesis with a contract; the verdict belongs in the contract resolution and ANALYZE grade, not in a parallel hypothesis name.
 - **Prior-loop ANALYZE resolutions are settled for their lead scope.** Do not re-evaluate them — cite them if relevant. If loop 1's ANALYZE graded a hypothesis or characterized evidence, build on that in your reasoning; re-litigating it wastes thinking on a question already answered.
 - **Weight is null on hypotheses you author.** ANALYZE grades; you propose.
 - **One observable per claim — always split compound OR/AND.** Each `prediction.claim`, `refutation_shape.claim`, and lead-level `if` clause names exactly one observable condition. Compound claims can't be pivoted on partial evidence and trip validator rule 26. Split instead:
@@ -361,9 +394,9 @@ Judgment calls the validator doesn't catch:
        `p2: "attempt is off the 72h cadence baseline"` (two predictions; `refutation_shape` refutes each)
   - ❌ `"cluster_count ≥ 3 AND max_cluster_size ≤ 3 AND inter-cluster gaps consistent with a single schedule"` (one claim, three observables)
   - ✅ Three separate predictions — or, if the conjunction is actually what matters, pick the single most-discriminating component and drop the rest (typically `max_cluster_size ≤ 3` for cadence questions).
-- **Hypotheses are mechanisms, not verdicts.** If removing an `authorization_contract` makes two hypotheses indistinguishable on every forward-looking prediction, it's an authorization fork — collapse to Shape A.
+- **Hypotheses are mechanisms, not verdicts.** If removing an `authorization_contract` makes two hypotheses indistinguishable on every forward-looking prediction, it's an authorization fork — collapse to one hypothesis with a contract. If they remain distinguishable on at least one observable field, the peer is real and welcome.
 - **Downstream-event signals are not hypotheses.** `?post-failure-success` / `?compromise-followup` as peers to mechanism hypotheses are composition-rule checks on subsequent events. Put them in GATHER as unconditional leads; ANALYZE's escalation logic reads them.
-- **Authorization vs integrity.** Authorization contracts answer *policy* — anchor-backed categorical verdict. Integrity is an attribute of the parent vertex, resolved by the same anchor in the common case (IAM / registry / audit-correlation anchors attest to identity-of-use alongside authorization). An optional `integrity_waived: <rationale>` field may document WHY the anchor covers both — useful in escalation reports but not required. A separate peer hypothesis is justified only when integrity implies a testably-different upstream mechanism (see invoker-identity anti-pattern above).
+- **Authorization vs integrity.** Authorization contracts answer *policy* — anchor-backed categorical verdict. Integrity is an attribute of the parent vertex; in the common case the contract's anchor attests to identity-of-use as well, and one hypothesis carries both questions. A separate integrity peer is welcome when the agent expects observable divergence on at least one queryable field — name the field in the peer's predictions so it's clear what would distinguish the actors.
 - **Refinement via hierarchical IDs.** When a confirmed parent forces sub-mechanism distinctions on the same vertex (subtype, schedule, mechanism-internal variant), shelve the parent and emit children as `h-{parent}-{ordinal}` with independent weights. Sub-mechanism only — actor / orchestrator / configuration / session questions are upstream-fork (next bullet), not refinement.
 - **Upstream-fork IDs are fresh, not hierarchical.** When the next question introduces a new vertex (`actor`, `orchestrator`, `session`, `configuration`, `policy`) attached upstream of a `++` parent, emit a fresh `h-{n}` id — `h-002`, `h-003`, never `h-{parent}-{ordinal}`. The new vertex is not a child of the parent's grade; its weight is independent. Hierarchical IDs on an upstream vertex trip the rollup-grading rule (parent's `++` cannot derive from an unweighted child).
 - **Append-only.** Never mutate prior entries. Correct prior grading by adding a new weight with rationale; don't rewrite.
