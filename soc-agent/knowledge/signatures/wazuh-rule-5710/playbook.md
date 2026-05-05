@@ -239,7 +239,13 @@ success, both of which the anchor's confirmation shape depends on.
   for the exact `(srcip, srcuser, target)` triple. See
   `environment/operations/approved-monitoring-sources.md`.
 - **cadence_shape** — from `authentication-history` cluster stats over
-  a **1h backward window** scoped to the `(srcip, srcuser)` pair.
+  a window scoped to the `(srcip, srcuser)` pair that brackets the
+  alert: **1h before T0 plus 60s after T0**. The forward look-ahead
+  is load-bearing for first-of-burst bait detection — without it, when
+  the alert itself is the first event of a same-second burst, the
+  follow-up attempts land outside the lookup window and
+  `max_cluster_size` reports 1 instead of N. Use `--start (T0 - 1h)
+  --end (T0 + 60s)` or equivalent.
   Fast-path passes when ALL of:
   - `cluster_count ≥ 3` — at least three distinct probe attempts in
     the window (fewer = insufficient evidence of periodicity, fall

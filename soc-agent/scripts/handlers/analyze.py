@@ -66,6 +66,7 @@ from scripts.handlers._context_loader import (
     load_investigation_md,
     load_run_salt,
 )
+from scripts.handlers.investigation_views import format_analyze_frontier_block
 from scripts.handlers._output_parser import (
     AnalyzeEnvelope,
     AnalyzeOutputError,
@@ -156,6 +157,9 @@ def _assemble_prompt(ctx: Context) -> str:
       - run identifiers (run_dir, loop_n, signature_id)
       - `<alert-{salt}>` flat field summary — the ~15 fields predictions'
         claims typically reference
+      - `<analysis_frontier>` — compact state for the current grading step:
+        active hypotheses/contracts, prior successes/failures, current gather
+        digest, and pointers for targeted retrieval
       - `<available_context>` manifest — paths and section index for
         alert.json (full) and investigation.md (per-section line ranges)
       - `<current_gather>` — this loop's evidence, which IS what's being
@@ -180,12 +184,20 @@ def _assemble_prompt(ctx: Context) -> str:
     investigation_md = load_investigation_md(ctx.run_dir)
 
     vendor = ctx.signature_id.split("-", 1)[0] if "-" in ctx.signature_id else ctx.signature_id
+    gather_out = ctx.outputs.get(Phase.GATHER)
+    gather_for_frontier = gather_out if isinstance(gather_out, dict) else None
+
     blocks = [
         f"run_dir={ctx.run_dir}\nloop_n={loop_n}\nsignature_id={ctx.signature_id}",
         format_alert_summary_block(alert, vendor, salt, soc_agent_root=SOC_AGENT_ROOT),
+        format_analyze_frontier_block(
+            investigation_md,
+            loop_n,
+            run_dir=ctx.run_dir,
+            gather_out=gather_for_frontier,
+        ),
         format_run_manifest(ctx.run_dir, investigation_md),
     ]
-    gather_out = ctx.outputs.get(Phase.GATHER)
     if isinstance(gather_out, dict):
         current_gather = format_current_gather_block(gather_out.get("leads") or [])
         if current_gather:

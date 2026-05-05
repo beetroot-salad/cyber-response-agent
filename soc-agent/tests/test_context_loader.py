@@ -32,8 +32,9 @@ from scripts.handlers._context_loader import (  # noqa: E402
     load_signature_text,
 )
 from scripts.handlers.investigation_views import (  # noqa: E402
+    format_analyze_frontier_block,
     format_investigation_block,
-    format_predict_state_block,
+    format_predict_frontier_block,
 )
 
 
@@ -563,6 +564,145 @@ class TestFormatInvestigationBlock:
         assert "**Alert:**" not in block
 
 
+class TestFormatAnalyzeFrontierBlock:
+    def test_preserves_prediction_comparison_metadata(self):
+        from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
+
+        inv = (
+            "## PREDICT (loop 1)\n\n"
+            "```invlang\n"
+            + emit_hypothesize_state_dense([
+                {
+                    "id": "h-001",
+                    "name": "?baseline-cadence",
+                    "status": "active",
+                    "predictions": [
+                        {
+                            "id": "p1",
+                            "subject": "proposed_parent",
+                            "kind": "cadence",
+                            "claim": "foreground cadence stays within baseline",
+                            "comparison": {
+                                "selector_kind": "historical-self",
+                                "selector": "src=<source_ip> rule=5710 72h",
+                                "dimension": "inter-arrival-distribution",
+                            },
+                        }
+                    ],
+                    "refutation_shape": [
+                        {
+                            "id": "r1",
+                            "kind": "cadence",
+                            "claim": "foreground cadence falls outside baseline",
+                            "refutes_predictions": ["p1"],
+                            "comparison": {
+                                "selector_kind": "historical-self",
+                                "selector": "src=<source_ip> rule=5710 72h",
+                                "dimension": "inter-arrival-distribution",
+                            },
+                        }
+                    ],
+                }
+            ])
+            + "\n```\n"
+        )
+
+        block = format_analyze_frontier_block(inv, 1)
+
+        assert "comparison:" in block
+        assert "selector_kind: historical-self" in block
+        assert "dimension: inter-arrival-distribution" in block
+
+    def test_surfaces_active_contracts_prior_gaps_and_current_gather(self, tmp_path):
+        from tests._dense_fixture_helpers import companion_to_invlang_fence
+
+        predict = companion_to_invlang_fence({
+            "hypothesize": {
+                "hypotheses": [
+                    {
+                        "id": "h-001",
+                        "name": "?registered-monitoring-triple",
+                        "weight": None,
+                        "status": "active",
+                        "predictions": [
+                            {
+                                "id": "p1",
+                                "subject": "proposed_parent",
+                                "kind": "absolute",
+                                "claim": "triple listed in approved-monitoring-sources as active",
+                            }
+                        ],
+                        "refutation_shape": [
+                            {
+                                "id": "r1",
+                                "kind": "absolute",
+                                "claim": "triple absent from approved-monitoring-sources",
+                                "refutes_predictions": ["p1"],
+                            }
+                        ],
+                        "authorization_contract": [
+                            {
+                                "id": "ac1",
+                                "edge_ref": "proposed",
+                                "anchor_kind": "approved-monitoring-sources",
+                                "predicate": "triple listed as active",
+                                "on_unauthorized": "esc",
+                                "on_indeterminate": "esc",
+                            }
+                        ],
+                    }
+                ]
+            }
+        })
+        inv = (
+            "## SCREEN\n\n"
+            "```invlang\n"
+            ":L findings [id|name|loop|target|mode|system|template|screen_result]\n"
+            "l-004|approved-monitoring-sources|0|e-001|screen|authority-consult|knowledge/environment/operations/approved-monitoring-sources.md|no_match\n\n"
+            ":R consultations [resolved_by|result|grounding|anchor_kind|anchor_id|authority|as_of|anchor_query]\n"
+            "l-004|refuted|org-authority|approved-monitoring-sources|approved-monitoring-sources|full|2026-05-04T01:12:47Z|Is this approved?\n"
+            "```\n\n"
+            "## PREDICT (loop 2)\n\n"
+            f"{predict}\n"
+        )
+        gather_out = {
+            "prescribed_leads": ["approved-monitoring-sources"],
+            "executed_leads": ["approved-monitoring-sources"],
+            "raw_details_paths": [str(tmp_path / "raw_details" / "l-001.yaml")],
+            "leads": [
+                {
+                    "id": "l-001",
+                    "name": "approved-monitoring-sources",
+                    "status": "ok",
+                    "query": {
+                        "system": "authority-consult",
+                        "query": "lookup triple",
+                    },
+                    "characterization": {
+                        "result": "refuted",
+                    },
+                }
+            ],
+        }
+
+        block = format_analyze_frontier_block(
+            inv,
+            2,
+            run_dir=tmp_path,
+            gather_out=gather_out,
+        )
+
+        assert "<analysis_frontier>" in block
+        assert "active_hypotheses:" in block
+        assert "h-001" in block
+        assert "authorization_contracts:" in block
+        assert "approved-monitoring-sources" in block
+        assert "prior_failures_or_gaps:" in block
+        assert "result: refuted" in block
+        assert "current_gather_digest:" in block
+        assert "raw_detail_paths:" in block
+
+
 class TestFormatPredictStateBlock:
     @staticmethod
     def _loop1_fixture() -> str:
@@ -803,17 +943,23 @@ class TestFormatPredictStateBlock:
         )
 
     def test_loop1_surfaces_only_structured_prologue(self):
-        block = format_predict_state_block(self._loop1_fixture())
-        assert "<investigation_state>" in block
+        block = format_predict_frontier_block(self._loop1_fixture(), 1)
+        assert "<predict_frontier>" in block
+        assert "decision_frame:" in block
+        assert "recommended_posture: enrich_observed_vertex" in block
         assert ":V prologue.vertices" in block
         assert "candidate archetype:" not in block
         assert "## Active Hypothesis Frontier" not in block
         assert "## ANALYZE" not in block
 
     def test_loop2_surfaces_prologue_frontier_and_latest_analyze_only(self):
-        block = format_predict_state_block(self._loop2_fixture())
+        block = format_predict_frontier_block(self._loop2_fixture(), 3)
 
-        assert "<investigation_state>" in block
+        assert "<predict_frontier>" in block
+        assert "attention_priority:" in block
+        assert "decision_frame:" in block
+        assert "latest_outcome_digest:" in block
+        assert "active_hypotheses:" in block
         assert "## CONTEXTUALIZE" in block
         assert ":V prologue.vertices" in block
         assert "## Active Hypothesis Frontier" in block
@@ -832,6 +978,22 @@ class TestFormatPredictStateBlock:
         assert "bulky line" not in block
         assert "latest prose" not in block
         assert "anomaly note" not in block
+
+    def test_predict_frontier_surfaces_analyze_payload_obligations(self):
+        block = format_predict_frontier_block(
+            self._loop2_fixture(),
+            3,
+            analyze_out={
+                "route": "continue",
+                "unresolved_prescribed_set": ["process-lineage"],
+                "data_wishes": ["need process ancestry"],
+            },
+        )
+
+        assert "recommended_posture: re_prescribe_unresolved" in block
+        assert "unresolved_prescribed_leads:" in block
+        assert "- process-lineage" in block
+        assert "data_wishes:" in block
 
 
 class TestLoadSignatureText:
