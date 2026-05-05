@@ -799,6 +799,7 @@ class TestCheckRefutationPredictionLinks:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Rule #32 disabled (return [] short-circuit); tests preserved for one-line revert")
 class TestCheckIntegrityPeerDiscipline:
     """Rule #32 (v2.12 narrowed) — reject invoker-identity anti-pattern.
 
@@ -1123,6 +1124,7 @@ class TestCompoundAttributePredictionClaim:
         assert errors and "ap1" in errors[0] and "'AND'" in errors[0]
 
 
+@pytest.mark.skip(reason="Rule #35 disabled (return [] short-circuit); tests preserved for one-line revert")
 class TestSiblingPredictionDivergence:
     """Rule #35 — siblings must differ on at least one prediction signature."""
 
