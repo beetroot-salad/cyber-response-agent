@@ -484,7 +484,7 @@ class TestSpawnDetached:
             monkeypatch.setenv("SOC_AGENT_POSTMORTEM_LEADS_ENABLED", v)
             monkeypatch.setattr(
                 run_module.subprocess, "Popen",
-                lambda *a, **kw: called.append("popen") or type("P", (), {"pid": 1})(),
+                lambda *a, _called=called, **kw: _called.append("popen") or type("P", (), {"pid": 1})(),
             )
             run_module.spawn_detached(run_dir)
             assert called == ["popen"], f"value {v!r} should enable the gate"
@@ -496,7 +496,7 @@ class TestSpawnDetached:
             monkeypatch.setenv("SOC_AGENT_POSTMORTEM_LEADS_ENABLED", v)
             monkeypatch.setattr(
                 run_module.subprocess, "Popen",
-                lambda *a, **kw: called.append("popen"),
+                lambda *a, _called=called, **kw: _called.append("popen"),
             )
             run_module.spawn_detached(run_dir)
             assert called == [], f"value {v!r} should leave the gate closed"
