@@ -34,7 +34,7 @@ from scripts.handlers._context_loader import (  # noqa: E402
 from scripts.handlers.investigation_views import (  # noqa: E402
     format_analyze_frontier_block,
     format_investigation_block,
-    format_predict_state_block,
+    format_predict_frontier_block,
 )
 
 
@@ -565,6 +565,54 @@ class TestFormatInvestigationBlock:
 
 
 class TestFormatAnalyzeFrontierBlock:
+    def test_preserves_prediction_comparison_metadata(self):
+        from scripts.handlers._hypothesize_dense import emit_hypothesize_state_dense
+
+        inv = (
+            "## PREDICT (loop 1)\n\n"
+            "```invlang\n"
+            + emit_hypothesize_state_dense([
+                {
+                    "id": "h-001",
+                    "name": "?baseline-cadence",
+                    "status": "active",
+                    "predictions": [
+                        {
+                            "id": "p1",
+                            "subject": "proposed_parent",
+                            "kind": "cadence",
+                            "claim": "foreground cadence stays within baseline",
+                            "comparison": {
+                                "selector_kind": "historical-self",
+                                "selector": "src=<source_ip> rule=5710 72h",
+                                "dimension": "inter-arrival-distribution",
+                            },
+                        }
+                    ],
+                    "refutation_shape": [
+                        {
+                            "id": "r1",
+                            "kind": "cadence",
+                            "claim": "foreground cadence falls outside baseline",
+                            "refutes_predictions": ["p1"],
+                            "comparison": {
+                                "selector_kind": "historical-self",
+                                "selector": "src=<source_ip> rule=5710 72h",
+                                "dimension": "inter-arrival-distribution",
+                            },
+                        }
+                    ],
+                }
+            ])
+            + "\n```\n"
+        )
+
+        block = format_analyze_frontier_block(inv, 1)
+
+        assert "comparison:" in block
+        assert "selector_kind: historical-self" in block
+        assert "dimension: inter-arrival-distribution" in block
+
     def test_surfaces_active_contracts_prior_gaps_and_current_gather(self, tmp_path):
         from tests._dense_fixture_helpers import companion_to_invlang_fence
 
@@ -895,17 +943,23 @@ class TestFormatPredictStateBlock:
         )
 
     def test_loop1_surfaces_only_structured_prologue(self):
-        block = format_predict_state_block(self._loop1_fixture())
-        assert "<investigation_state>" in block
+        block = format_predict_frontier_block(self._loop1_fixture(), 1)
+        assert "<predict_frontier>" in block
+        assert "decision_frame:" in block
+        assert "recommended_posture: enrich_observed_vertex" in block
         assert ":V prologue.vertices" in block
         assert "candidate archetype:" not in block
         assert "## Active Hypothesis Frontier" not in block
         assert "## ANALYZE" not in block
 
     def test_loop2_surfaces_prologue_frontier_and_latest_analyze_only(self):
-        block = format_predict_state_block(self._loop2_fixture())
+        block = format_predict_frontier_block(self._loop2_fixture(), 3)
 
-        assert "<investigation_state>" in block
+        assert "<predict_frontier>" in block
+        assert "attention_priority:" in block
+        assert "decision_frame:" in block
+        assert "latest_outcome_digest:" in block
+        assert "active_hypotheses:" in block
         assert "## CONTEXTUALIZE" in block
         assert ":V prologue.vertices" in block
         assert "## Active Hypothesis Frontier" in block
@@ -924,6 +978,22 @@ class TestFormatPredictStateBlock:
         assert "bulky line" not in block
         assert "latest prose" not in block
         assert "anomaly note" not in block
+
+    def test_predict_frontier_surfaces_analyze_payload_obligations(self):
+        block = format_predict_frontier_block(
+            self._loop2_fixture(),
+            3,
+            analyze_out={
+                "route": "continue",
+                "unresolved_prescribed_set": ["process-lineage"],
+                "data_wishes": ["need process ancestry"],
+            },
+        )
+
+        assert "recommended_posture: re_prescribe_unresolved" in block
+        assert "unresolved_prescribed_leads:" in block
+        assert "- process-lineage" in block
+        assert "data_wishes:" in block
 
 
 class TestLoadSignatureText:

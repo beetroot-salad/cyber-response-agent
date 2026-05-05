@@ -89,6 +89,7 @@ p2 (cadence-deviation predicate on h-001) unresolvable this loop: l-001b baselin
 h-001  ∅ → ++   [l-001 severe ⟂ e-010 :: pname-geometry(12/12)=null ⟺ p1]    # WRONG: claims ++ but p2 not addressed; coverage incomplete
 ```
 
+
 ## Output envelope (dense block format)
 
 The envelope is a sequence of `:A` / `:T` / `:R` blocks. **No YAML, no fences, no preamble, no trailing prose.** The handler parses the block tags directly.
@@ -340,13 +341,43 @@ Failure modes seen in prior runs. Each is a hard rule in context; check your dra
 
 ## Examples
 
-### Example 1 — halt `++` with failed refutation
+### Example 1 — halt `++` covering a prediction grounded in a prior loop
+
+**Frontier given to ANALYZE (loop 1):**
+
+`<analysis_frontier>.active_hypotheses[]` carries one declared hypothesis:
 
 ```
-:A loop  2
+- id: h-001
+  name: ?registered-monitoring-probe
+  predictions:
+    - id: p1  claim: triple (src,user,host) listed active in approved-monitoring-sources
+    - id: p2  claim: foreground cadence within source's recurring baseline distribution
+  refutations:
+    - id: r1  refutes: p1
+    - id: r2  refutes: p2
+```
+
+`prior_findings[]` includes a SCREEN-phase consultation `l-003` (loop 0) that already grounded p1 — `approved-monitoring-sources` returned the triple as present.
+
+`<current_gather>.leads[]` contains one current-loop lead, `l-001` (authentication-history), whose characterization + baseline let ANALYZE evaluate the cadence-vs-baseline predicate (p2 / r2).
+
+**How ANALYZE reasons about coverage.**
+
+p1 is grounded by prior evidence (`l-003` screen consultation). p2 is grounded by current evidence (`l-001` cadence comparison). Both are needed to cover h-001's full prediction set for a `++` transition. `<lead-id>` must reference a current-loop lead from `<current_gather>.leads[]` — naming `l-003` directly would silently drop the row. Instead, ANALYZE folds the prior-loop grounding into `l-001`'s iff RHS as an additional `;`-separated clause; the parser derives `matched_prediction_ids` from the union of literals across all clauses, so one `∅ → ++` row covers `{p1, p2}` in a single transition.
+
+Splitting into `∅ → +` (citing `l-003`) followed by `+ → ++` (citing `l-001`) is the wrong shape — the first row gets dropped (non-current lead), and the validator rejects the second on partial coverage (`missing: ['p1']`).
+
+**Output emitted:**
+
+```
+:A loop  1
 
 :T resolutions
-h-001  ∅ → ++   [l-002 severe ⟂ e-005 :: cadence-check returned 4 prior rule-5710 alerts from 10.0.1.99 for monitorprobe at 60s intervals (max drift 2s) ⟺ p3 ∧ ¬r3]
+h-001  ∅ → ++   [l-001 severe ⟂ e-001 :: cadence(src,user)=within-baseline (216 events/72h vs 178; matching distribution dimensions) ⟺ p2 ∧ ¬r2; registry_lookup(src,user,host)=present (resolved by l-003 in screen) ⟺ p1 ∧ ¬r1]
+
+:R consultations [lead|anchor_id|anchor_kind|grounding|result|as_of|authority|reasoning]
+l-001|wazuh.manager|telemetry-datasource|telemetry-baseline|confirmed|2026-05-04T16:14:35Z|wazuh.manager|216/72h foreground vs 178/72h baseline; rate range 1-9/hr both; same identity/outcome profile
 
 :A routing
 decision               halt

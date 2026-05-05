@@ -2,7 +2,8 @@
 name: gather
 description: Execute one template-driven lead against the SIEM. Runs a data-source health probe first, then the lead query, and characterizes the raw observation without interpretation. Escalates on probe breakage, missing templates, binding mismatches, or follow-up needs. Dispatched by the GATHER phase handler for the single-lead common case.
 tools: Read, Bash, Write
-model: haiku
+model: sonnet
+effort: low
 ---
 
 # Gather: Single-Lead Execution
@@ -50,6 +51,8 @@ If the lead has empty `data_tags` (lookup-only, ad-hoc, debug), **skip the probe
 ### 2. Lead execution
 
 Plug `entity_bindings` into the template's base query and execute it against the SIEM CLI for the incident time range. Always pass `--run-dir {run_dir}` so output is wrapped in untrusted-data delimiters.
+
+**Bracket the alert, don't just look back.** When the lead is evaluating a cluster, burst, or co-fire pattern around the alert event T0, query a window that extends a small interval *forward* of T0 (e.g. `--start (T0 - lookback) --end (T0 + 60s)`), not just backward. If T0 is the first event of a same-second burst, follow-ups land *after* T0 and a strictly-backward window misses them — the cluster containing T0 then under-reports its size and burst patterns slip through cadence/co-fire checks. Forward lookahead of 30-60s is enough to absorb same-second bursts without bleeding into independent later activity.
 
 ### 3. Baseline query (when the lead declares one)
 
