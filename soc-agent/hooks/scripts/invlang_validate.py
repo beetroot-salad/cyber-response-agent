@@ -40,6 +40,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -525,10 +526,8 @@ def main() -> None:
     inv_path = run_dir / "investigation.md"
     current_text: str | None = None
     if inv_path.exists():
-        try:
+        with contextlib.suppress(OSError):
             current_text = inv_path.read_text()
-        except OSError:
-            pass
 
     errors = validate_companion(proposed_text, current_text)
     if errors:

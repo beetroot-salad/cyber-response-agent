@@ -14,6 +14,7 @@ Also centralizes:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -209,12 +210,10 @@ def invoke_subagent(
         session_id = str(uuid.uuid4())
     run_dir, signature_id = _resolve_run_context()
     if run_dir is not None and run_dir.exists():
-        try:
+        with contextlib.suppress(Exception):
             write_session_mapping(
                 session_id, run_dir, signature_id, run_dir.parent
             )
-        except Exception:
-            pass  # advisory — mapping is best-effort
 
     # Write body to a temp file so `--system-prompt-file` can read it.
     with tempfile.NamedTemporaryFile(
@@ -279,10 +278,8 @@ def invoke_subagent(
             f"subagent {agent} timed out after {timeout}s"
         ) from exc
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass
     duration_ms = int((time.monotonic() - started) * 1000)
 
     if run_dir is not None and run_dir.exists():

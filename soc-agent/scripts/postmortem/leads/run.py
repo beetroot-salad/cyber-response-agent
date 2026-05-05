@@ -22,6 +22,7 @@ component, scoped to classify→edit→commit.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -220,10 +221,8 @@ def _spawn_agent(
         return 1
     finally:
         if sys_prompt_path:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(sys_prompt_path)
-            except OSError:
-                pass
 
 
 def spawn_detached(run_dir: Path) -> None:
@@ -261,20 +260,20 @@ def spawn_detached(run_dir: Path) -> None:
 
     out_dir = run_dir.parent / "postmortem" / run_dir.name / "leads"
     out_dir.mkdir(parents=True, exist_ok=True)
-    log_handle = open(out_dir / "run.log", "ab")
-    subprocess.Popen(
-        [
-            sys.executable,
-            "-m", "scripts.postmortem.leads.run",
-            "--run-dir", str(run_dir),
-            "--out-dir", str(out_dir),
-        ],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        close_fds=True,
-        cwd=str(SOC_AGENT_ROOT),
-    )
+    with open(out_dir / "run.log", "ab") as log_handle:
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-m", "scripts.postmortem.leads.run",
+                "--run-dir", str(run_dir),
+                "--out-dir", str(out_dir),
+            ],
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+            cwd=str(SOC_AGENT_ROOT),
+        )
 
 
 def _has_new_commit(worktree_path: Path, base_ref: str) -> bool:

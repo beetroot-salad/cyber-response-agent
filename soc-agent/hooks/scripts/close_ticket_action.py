@@ -20,6 +20,7 @@ investigation_summary.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -209,13 +210,11 @@ def main(payload: dict) -> None:
     try:
         _main(payload)
     except Exception as exc:  # noqa: BLE001 — top-level safety net
-        try:
+        with contextlib.suppress(Exception):
             _log_event(
                 "failure",
                 error=f"close_ticket_action exception (session={session_id}): {exc!r}"[:200],
             )
-        except Exception:
-            pass
 
 
 def _main(payload: dict) -> None:

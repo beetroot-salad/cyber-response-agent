@@ -396,9 +396,8 @@ def format_investigation_block(
                     parts.append(_section_text(s))
                 # else: drop older ANALYZE narrative (its grades are already
                 # rolled into the downstream predict/gather YAML state)
-            elif s["phase"] == "self-report":
-                if i == latest_selfreport_idx:
-                    parts.append(_section_text(s))
+            elif s["phase"] == "self-report" and i == latest_selfreport_idx:
+                parts.append(_section_text(s))
             # Unknown phase sections are dropped.
         body = "\n\n".join(p.rstrip() for p in parts if p.strip())
         return f"<investigation mode=\"predict\">\n{body}\n</investigation>"

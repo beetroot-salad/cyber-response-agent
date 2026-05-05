@@ -194,7 +194,7 @@ def _row_to_rec(
         raise error_cls(
             f":{blk.tag} {blk.name}: row has more cells than columns: {row!r}"
         )
-    return dict(zip(cols, cells))
+    return dict(zip(cols, cells, strict=False))
 
 
 # ---------------------------------------------------------------------------

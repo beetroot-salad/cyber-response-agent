@@ -1137,7 +1137,7 @@ def _project_conclude(block: DenseBlock, out: dict[str, Any]) -> None:
                 )
             bucket.append(hyp_id)
         else:
-            entry = dict(zip(expected_cols, cells))
+            entry = dict(zip(expected_cols, cells, strict=False))
             for col in expected_cols:
                 if not entry.get(col):
                     raise DenseParseError(
