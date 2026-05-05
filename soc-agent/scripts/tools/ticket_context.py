@@ -144,7 +144,7 @@ def cluster_events(
 
     key_paths = [o["json_path"] for o in observables if o["name"].lower() != "timestamp"]
 
-    for alert_id, ev in all_events.items():
+    for _, ev in all_events.items():
         event_obs = extract_observables_from_event(ev, observables)
         # Which key dims (excluding timestamp) match the current alert?
         shared = {

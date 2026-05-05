@@ -50,7 +50,7 @@ EXPECTED_MATRIX = [
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("alert_name,siem_name", EXPECTED_MATRIX)
+@pytest.mark.parametrize(("alert_name", "siem_name"), EXPECTED_MATRIX)
 class TestPerFixture:
     def test_alert_file_exists_and_parses(self, alert_name, siem_name):
         path = ALERTS_DIR / f"{alert_name}.json"
@@ -113,7 +113,7 @@ class TestAnchorReferencesResolve:
         ops_names = self._operations_anchor_names()
         for fixture_path in ANCHOR_DIR.glob("*.json"):
             data = json.loads(fixture_path.read_text())
-            for anchor_name in data.get("anchors", {}).keys():
+            for anchor_name in data.get("anchors", {}):
                 assert anchor_name in ops_names, (
                     f"{fixture_path.name} references anchor '{anchor_name}' "
                     f"but no operation file under "

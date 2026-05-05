@@ -103,7 +103,7 @@ def validate_phase_sequence(
         )
         sys.exit(2)
 
-    for i, (hist, obs) in enumerate(zip(history, observed_phases)):
+    for i, (hist, obs) in enumerate(zip(history, observed_phases, strict=False)):
         if hist != obs:
             print(
                 f"Phase history mismatch at position {i}: "

@@ -24,6 +24,7 @@ query string isn't a clean substring, etc.).
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
@@ -64,10 +65,8 @@ def _read_manifest_tail(run_dir: Path) -> tuple[Path, str, int]:
 
 
 def _advance_cursor(cursor: Path, new_offset: int) -> None:
-    try:
+    with contextlib.suppress(OSError):
         cursor.write_text(str(new_offset))
-    except OSError:
-        pass
 
 
 def consume_new_entries(run_dir: Path) -> list[dict[str, Any]]:

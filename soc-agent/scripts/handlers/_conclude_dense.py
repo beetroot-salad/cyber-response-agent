@@ -447,7 +447,7 @@ def _absorb_sub(
                 f"got {len(rows)}"
             )
         cells = _split_row(rows[0], expected_cols, sub)
-        out[dict_key] = dict(zip(expected_cols, cells))
+        out[dict_key] = dict(zip(expected_cols, cells, strict=False))
         return
 
     bucket: list[Any] = []
@@ -463,7 +463,7 @@ def _absorb_sub(
                 )
             bucket.append(hyp_id)
         else:
-            entry = dict(zip(expected_cols, cells))
+            entry = dict(zip(expected_cols, cells, strict=False))
             for col in expected_cols:
                 if not entry.get(col):
                     raise ConcludeOutputError(

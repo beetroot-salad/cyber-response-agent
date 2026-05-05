@@ -50,68 +50,100 @@ def _print_section(title: str) -> None:
     print(f"\n{'=' * 72}\n{title}\n{'=' * 72}")
 
 
+def _render_list_or_dict_key(key: str, val: Any, limit: int) -> None:
+    if isinstance(val, dict):
+        print(f"\n  {key}:")
+        if not val:
+            print("    (empty)")
+            return
+        for k, v in list(val.items())[:limit]:
+            print(f"    {k}: {v}")
+        if len(val) > limit:
+            print(f"    ... ({len(val) - limit} more)")
+        return
+    items = val[:limit]
+    for item in items:
+        print(f"  {item}")
+    if len(val) > limit:
+        print(f"  ... ({len(val) - limit} more)")
+
+
+def _render_tree(tree: dict, count_val: Any) -> None:
+    print(f"\n  Tree ({len(tree)} root(s), {count_val} total hypotheses):")
+    for root_id, children in tree.items():
+        print(f"    {root_id}: {[c['id'] for c in children] or '(leaf)'}")
+
+
+def _render_summary(summary: dict) -> None:
+    print("\n  Summary:")
+    for k, v in summary.items():
+        print(f"    {k}: {v}")
+
+
+def _render_exemplars(exemplars: dict) -> None:
+    print("\n  Exemplars by verdict:")
+    for verdict, rows in exemplars.items():
+        print(f"    {verdict} ({len(rows)}):")
+        for row in rows:
+            print(f"      {row}")
+
+
+def _render_contracts(contracts: list) -> None:
+    print(f"\n  Matched contracts ({len(contracts)}):")
+    for c in contracts[:10]:
+        print(f"    {c}")
+
+
+def _render_telemetry(telemetry: dict) -> None:
+    print("\n  Telemetry:")
+    for k, v in telemetry.items():
+        print(f"    {k}: {v}")
+
+
+def _render_case_ids(case_ids: list) -> None:
+    print(f"\n  Matched case ids ({len(case_ids)}):")
+    for cid in case_ids[:10]:
+        print(f"    {cid}")
+
+
+def _render_result_body(result: dict[str, Any], count_val: Any, limit: int) -> None:
+    for key in ("hits", "distribution", "values"):
+        if key in result:
+            _render_list_or_dict_key(key, result[key], limit)
+    if "tree" in result:
+        _render_tree(result["tree"], count_val)
+    summary = result.get("summary")
+    if isinstance(summary, dict):
+        _render_summary(summary)
+    exemplars = result.get("exemplars")
+    if isinstance(exemplars, dict):
+        _render_exemplars(exemplars)
+    contracts = result.get("matched_contracts")
+    if isinstance(contracts, list):
+        _render_contracts(contracts)
+    if "surprises" in result:
+        print(f"\n  Surprises: {result['surprises']}")
+    telemetry = result.get("telemetry")
+    if isinstance(telemetry, dict):
+        _render_telemetry(telemetry)
+    case_ids = result.get("matched_case_ids")
+    if isinstance(case_ids, list):
+        _render_case_ids(case_ids)
+
+
 def _print_result(label: str, result: dict[str, Any], limit: int = 6, as_json: bool = False) -> None:
     if as_json:
         print(json.dumps(result))
         return
     count_val = result.get("count", "?")
-    # When --top sliced the hits below count, note it in the header.
     hits = result.get("hits", [])
-    if isinstance(count_val, int) and len(hits) < count_val:
-        header_suffix = f" [showing top {len(hits)} of {count_val}]"
-    else:
-        header_suffix = ""
+    header_suffix = (
+        f" [showing top {len(hits)} of {count_val}]"
+        if isinstance(count_val, int) and len(hits) < count_val
+        else ""
+    )
     print(f"\n--- {label} → {count_val} hit(s){header_suffix} ---")
-    for key in ("hits", "distribution", "values"):
-        if key not in result:
-            continue
-        val = result[key]
-        if isinstance(val, dict):
-            # class 15 returns `distribution` as dict[str, int] — render directly.
-            print(f"\n  {key}:")
-            if not val:
-                print("    (empty)")
-                continue
-            for k, v in list(val.items())[:limit]:
-                print(f"    {k}: {v}")
-            if len(val) > limit:
-                print(f"    ... ({len(val) - limit} more)")
-            continue
-        items = val[:limit]
-        for item in items:
-            print(f"  {item}")
-        if len(val) > limit:
-            print(f"  ... ({len(val) - limit} more)")
-    if "tree" in result:
-        tree = result["tree"]
-        print(f"\n  Tree ({len(tree)} root(s), {count_val} total hypotheses):")
-        for root_id, children in tree.items():
-            print(f"    {root_id}: {[c['id'] for c in children] or '(leaf)'}")
-    if "summary" in result and isinstance(result["summary"], dict):
-        print("\n  Summary:")
-        for k, v in result["summary"].items():
-            print(f"    {k}: {v}")
-    if "exemplars" in result and isinstance(result["exemplars"], dict):
-        print("\n  Exemplars by verdict:")
-        for verdict, rows in result["exemplars"].items():
-            print(f"    {verdict} ({len(rows)}):")
-            for row in rows:
-                print(f"      {row}")
-    if "matched_contracts" in result and isinstance(result["matched_contracts"], list):
-        print(f"\n  Matched contracts ({len(result['matched_contracts'])}):")
-        for c in result["matched_contracts"][:10]:
-            print(f"    {c}")
-    if "surprises" in result:
-        print(f"\n  Surprises: {result['surprises']}")
-    if "telemetry" in result and isinstance(result["telemetry"], dict):
-        print("\n  Telemetry:")
-        for k, v in result["telemetry"].items():
-            print(f"    {k}: {v}")
-    if "matched_case_ids" in result and isinstance(result["matched_case_ids"], list):
-        ids = result["matched_case_ids"]
-        print(f"\n  Matched case ids ({len(ids)}):")
-        for cid in ids[:10]:
-            print(f"    {cid}")
+    _render_result_body(result, count_val, limit)
 
 
 def _apply_top(result: dict[str, Any], top: int | None) -> dict[str, Any]:
@@ -337,107 +369,151 @@ OUTPUT
 
 
 # ---------------------------------------------------------------------------
+# Per-class runner functions
+# ---------------------------------------------------------------------------
+
+def _class_1(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    return coarse_case_lookup(
+        corpus,
+        disposition=args.disposition,
+        termination_category=args.termination_category,
+        confidence=args.confidence,
+        matched_archetype=args.matched_archetype,
+        ceiling_test_kind=args.ceiling_test_kind,
+    )
+
+
+def _class_2(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    return anchor_calibration(
+        corpus,
+        anchor_id=args.anchor_id,
+        result=args.result,
+        authority_for_question=args.authority_for_question,
+    )
+
+
+def _class_3(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    return refinement_chain_shapes(corpus)
+
+
+def _class_4(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    return dead_lead_lookup(corpus, system=args.system, failure_reason=args.failure_reason)
+
+
+def _class_5(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    return lead_sequence_pattern(corpus, contains=args.contains)
+
+
+def _class_6(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    if not args.pattern:
+        print("error: --class 6 requires --pattern", file=sys.stderr)
+        sys.exit(1)
+    return hypothesis_name_wildcard(corpus, args.pattern, final_weight=args.final_weight, disposition=args.disposition)
+
+
+def _class_7(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    if not args.phrase:
+        print("error: --class 7 requires --phrase", file=sys.stderr)
+        sys.exit(1)
+    return prose_substring(corpus, args.phrase, case_sensitive=args.case_sensitive)
+
+
+def _class_8(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    if args.discriminate_between:
+        p1, p2 = args.discriminate_between
+        return lead_discrimination_score(corpus, p1, p2)
+    if args.hypothesis_patterns:
+        return lead_effectiveness_for_hypothesis(corpus, *args.hypothesis_patterns)
+    return lead_effectiveness(corpus)
+
+
+def _class_9(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    if getattr(args, "hypothesis_patterns", None):
+        print(
+            "note: --hypothesis is the class 8 flag. "
+            "Use --hyp-pattern to filter hypothesis names in class 9.",
+            file=sys.stderr,
+        )
+    return weight_reversal_mining(
+        corpus,
+        hypothesis_pattern=getattr(args, "hyp_pattern", None),
+        reversals_only=getattr(args, "reversals_only", False),
+    )
+
+
+def _class_10(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    return lead_pair_synergy(corpus)
+
+
+def _class_11(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    return post_failure_recovery(corpus, system=args.system, failure_reason=args.failure_reason)
+
+
+def _class_12(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    return independent_datasource_metric(corpus, disposition=args.disposition)
+
+
+def _class_13(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    if not args.lead_pattern:
+        print("error: --class 13 requires --lead-pattern", file=sys.stderr)
+        sys.exit(1)
+    return lead_exemplars(
+        corpus,
+        args.lead_pattern,
+        vertex_where=_parse_vertex_where_args(args.vertex_where),
+        vertex_scope=args.vertex_scope,
+        limit=args.top,
+    )
+
+
+def _class_14(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    if not args.contract_pattern:
+        print("error: --class 14 requires --contract-pattern", file=sys.stderr)
+        sys.exit(1)
+    return authorization_calibration(
+        corpus,
+        args.contract_pattern,
+        vertex_where=_parse_vertex_where_args(args.vertex_where),
+        vertex_scope=args.vertex_scope,
+    )
+
+
+def _class_15(corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
+    if args.loop is None:
+        print("error: --class 15 requires --loop N", file=sys.stderr)
+        sys.exit(1)
+    # Class 15 is a cache-key lookup keyed on the *current* alert's
+    # signature + prologue. The CLI form runs against an empty signature
+    # filter — useful for ad-hoc inspection of the corpus's per-loop lead
+    # distribution. Call sites that have a real prologue should call
+    # `loop_lead_distribution` directly.
+    scoped = _apply_vertex_where_filter(corpus, args)
+    return loop_lead_distribution(
+        scoped,
+        signature_id="",
+        prologue={"vertices": [], "edges": []},
+        discriminating_classifications={},
+        loop=args.loop,
+        max_age_days=args.max_age_days,
+    )
+
+
+_CLASS_RUNNERS: dict[int, Any] = {
+    1: _class_1, 2: _class_2, 3: _class_3, 4: _class_4, 5: _class_5,
+    6: _class_6, 7: _class_7, 8: _class_8, 9: _class_9, 10: _class_10,
+    11: _class_11, 12: _class_12, 13: _class_13, 14: _class_14, 15: _class_15,
+}
+
+
+# ---------------------------------------------------------------------------
 # Class dispatch
 # ---------------------------------------------------------------------------
 
 def _run_class(n: int, corpus: list[Companion], args: argparse.Namespace) -> dict[str, Any]:
-    if n == 1:
-        return coarse_case_lookup(
-            corpus,
-            disposition=args.disposition,
-            termination_category=args.termination_category,
-            confidence=args.confidence,
-            matched_archetype=args.matched_archetype,
-            ceiling_test_kind=args.ceiling_test_kind,
-        )
-    if n == 2:
-        return anchor_calibration(
-            corpus,
-            anchor_id=args.anchor_id,
-            result=args.result,
-            authority_for_question=args.authority_for_question,
-        )
-    if n == 3:
-        return refinement_chain_shapes(corpus)
-    if n == 4:
-        return dead_lead_lookup(corpus, system=args.system, failure_reason=args.failure_reason)
-    if n == 5:
-        return lead_sequence_pattern(corpus, contains=args.contains)
-    if n == 6:
-        if not args.pattern:
-            print("error: --class 6 requires --pattern", file=sys.stderr)
-            sys.exit(1)
-        return hypothesis_name_wildcard(corpus, args.pattern, final_weight=args.final_weight, disposition=args.disposition)
-    if n == 7:
-        if not args.phrase:
-            print("error: --class 7 requires --phrase", file=sys.stderr)
-            sys.exit(1)
-        return prose_substring(corpus, args.phrase, case_sensitive=args.case_sensitive)
-    if n == 8:
-        if args.discriminate_between:
-            p1, p2 = args.discriminate_between
-            return lead_discrimination_score(corpus, p1, p2)
-        if args.hypothesis_patterns:
-            return lead_effectiveness_for_hypothesis(corpus, *args.hypothesis_patterns)
-        return lead_effectiveness(corpus)
-    if n == 9:
-        if getattr(args, "hypothesis_patterns", None):
-            print(
-                "note: --hypothesis is the class 8 flag. "
-                "Use --hyp-pattern to filter hypothesis names in class 9.",
-                file=sys.stderr,
-            )
-        return weight_reversal_mining(
-            corpus,
-            hypothesis_pattern=getattr(args, "hyp_pattern", None),
-            reversals_only=getattr(args, "reversals_only", False),
-        )
-    if n == 10:
-        return lead_pair_synergy(corpus)
-    if n == 11:
-        return post_failure_recovery(corpus, system=args.system, failure_reason=args.failure_reason)
-    if n == 12:
-        return independent_datasource_metric(corpus, disposition=args.disposition)
-    if n == 13:
-        if not args.lead_pattern:
-            print("error: --class 13 requires --lead-pattern", file=sys.stderr)
-            sys.exit(1)
-        return lead_exemplars(
-            corpus,
-            args.lead_pattern,
-            vertex_where=_parse_vertex_where_args(args.vertex_where),
-            vertex_scope=args.vertex_scope,
-            limit=args.top,
-        )
-    if n == 14:
-        if not args.contract_pattern:
-            print("error: --class 14 requires --contract-pattern", file=sys.stderr)
-            sys.exit(1)
-        return authorization_calibration(
-            corpus,
-            args.contract_pattern,
-            vertex_where=_parse_vertex_where_args(args.vertex_where),
-            vertex_scope=args.vertex_scope,
-        )
-    if n == 15:
-        if args.loop is None:
-            print("error: --class 15 requires --loop N", file=sys.stderr)
-            sys.exit(1)
-        # Class 15 is a cache-key lookup keyed on the *current* alert's
-        # signature + prologue. The CLI form runs against an empty signature
-        # filter — useful for ad-hoc inspection of the corpus's per-loop lead
-        # distribution. Call sites that have a real prologue should call
-        # `loop_lead_distribution` directly.
-        scoped = _apply_vertex_where_filter(corpus, args)
-        return loop_lead_distribution(
-            scoped,
-            signature_id="",
-            prologue={"vertices": [], "edges": []},
-            discriminating_classifications={},
-            loop=args.loop,
-            max_age_days=args.max_age_days,
-        )
-    raise ValueError(f"unknown class {n}")
+    runner = _CLASS_RUNNERS.get(n)
+    if runner is None:
+        raise ValueError(f"unknown class {n}")
+    return runner(corpus, args)
 
 
 def _parse_vertex_where_args(specs: list[str] | None) -> list[tuple[str, dict[str, str]]] | None:

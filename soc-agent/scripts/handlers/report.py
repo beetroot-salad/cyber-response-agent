@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -360,6 +361,47 @@ def _annotate_archetype_failure(payload: dict, failure_reason: str | None) -> No
         payload["archetype_match_failure_reason"] = failure_reason
 
 
+@dataclass
+class _ScreenGroundingCtx:
+    anchor_leg_grounded: bool
+    precedent_leg_grounded: bool
+    matched_pattern: str
+    archetype: str
+    screen_confidence: str
+    confirmed_anchor_ids: set
+    required_anchors: list
+    missing_anchors: list
+    precedent_missing: bool
+    original_ticket_id: str | None
+
+
+def _select_screen_compose_params(g: _ScreenGroundingCtx) -> tuple[str, str, str, str, list[str]]:
+    """Returns (compose_mode, status, confidence, termination_category, rationale_parts)."""
+    if g.anchor_leg_grounded or g.precedent_leg_grounded:
+        rationale_parts: list[str] = [f"SCREEN fast-path matched {g.matched_pattern}"]
+        if g.anchor_leg_grounded:
+            rationale_parts.append(
+                f"confirmed {len(g.confirmed_anchor_ids)}/{len(g.required_anchors)} required anchor(s)"
+            )
+        if g.precedent_leg_grounded:
+            rationale_parts.append(f"cited precedent {g.original_ticket_id}")
+        return "screen_mechanical_grounded", "resolved", g.screen_confidence, "trust-root", rationale_parts
+    gap_notes: list[str] = []
+    if g.missing_anchors:
+        gap_notes.append(f"required anchors unconfirmed: {g.missing_anchors}")
+    if g.precedent_missing:
+        gap_notes.append(
+            f"precedent '{g.original_ticket_id}' not found under {g.archetype}/"
+        )
+    if not g.required_anchors and not g.original_ticket_id:
+        gap_notes.append(
+            f"archetype '{g.archetype}' declares no required_anchors and SCREEN "
+            f"named no precedent — no grounding leg available"
+        )
+    rationale_parts = [f"SCREEN matched {g.matched_pattern} but grounding incomplete", *gap_notes]
+    return "screen_mechanical_partial", "escalated", "medium", "exhaustion-escalation", rationale_parts
+
+
 # ---------------------------------------------------------------------------
 # Mechanical REPORT composer (SCREEN-match fast-path)
 # ---------------------------------------------------------------------------
@@ -426,45 +468,20 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
     precedent_leg_grounded = bool(matched_ticket_id)
 
     # Level selection.
-    if anchor_leg_grounded or precedent_leg_grounded:
-        compose_mode = "screen_mechanical_grounded"
-        status = "resolved"
-        confidence = screen_confidence
-        termination_category = "trust-root"
-        rationale_parts = [
-            f"SCREEN fast-path matched {matched_pattern}",
-        ]
-        if anchor_leg_grounded:
-            rationale_parts.append(
-                f"confirmed {len(confirmed_anchor_ids)}/{len(required_anchors)} required anchor(s)"
-            )
-        if precedent_leg_grounded:
-            rationale_parts.append(f"cited precedent {screen_payload.get('matched_ticket_id')}")
-    else:
-        compose_mode = "screen_mechanical_partial"
-        status = "escalated"
-        # Preserve SCREEN's disposition — we still believe the mechanism call,
-        # we just can't ground it. Downgrade confidence to medium so the
-        # analyst sees mechanical-without-grounding signal.
-        confidence = "medium"
-        termination_category = "exhaustion-escalation"
-        gap_notes = []
-        if missing_anchors:
-            gap_notes.append(f"required anchors unconfirmed: {missing_anchors}")
-        if precedent_missing:
-            gap_notes.append(
-                f"precedent '{screen_payload.get('matched_ticket_id')}' not found under "
-                f"{archetype_dir.name}/"
-            )
-        if not required_anchors and not screen_payload.get("matched_ticket_id"):
-            gap_notes.append(
-                f"archetype '{archetype}' declares no required_anchors and SCREEN "
-                f"named no precedent — no grounding leg available"
-            )
-        rationale_parts = [
-            f"SCREEN matched {matched_pattern} but grounding incomplete",
-            *gap_notes,
-        ]
+    compose_mode, status, confidence, termination_category, rationale_parts = (
+        _select_screen_compose_params(_ScreenGroundingCtx(
+            anchor_leg_grounded=anchor_leg_grounded,
+            precedent_leg_grounded=precedent_leg_grounded,
+            matched_pattern=matched_pattern,
+            archetype=archetype,
+            screen_confidence=screen_confidence,
+            confirmed_anchor_ids=confirmed_anchor_ids,
+            required_anchors=required_anchors,
+            missing_anchors=missing_anchors,
+            precedent_missing=precedent_missing,
+            original_ticket_id=screen_payload.get("matched_ticket_id"),
+        ))
+    )
 
     trace = _compose_trace(matched_pattern, leads_run, disposition)
     summary = evidence_summary or (
@@ -497,19 +514,12 @@ def _compose_screen_match(ctx: Context, screen_payload: dict) -> dict:
         "",
     ]
 
-    report_text = _compose_report_md_screen(
-        ctx=ctx,
-        status=status,
-        disposition=disposition,
-        confidence=confidence,
-        matched_archetype=archetype,
-        matched_ticket_id=matched_ticket_id,
-        trust_anchors=trust_anchors,
-        leads_run=leads_run,
-        trace=trace,
-        summary=summary,
-        matched_pattern=matched_pattern,
-    )
+    report_text = _compose_report_md_screen(_ScreenReportArgs(
+        ctx=ctx, status=status, disposition=disposition, confidence=confidence,
+        matched_archetype=archetype, matched_ticket_id=matched_ticket_id,
+        trust_anchors=trust_anchors, leads_run=leads_run, trace=trace,
+        summary=summary, matched_pattern=matched_pattern,
+    ))
 
     # Snapshot for rollback: Tier-1 can still reject a mechanically-composed
     # report if a schema assumption is violated. We want the subagent fallback
@@ -695,20 +705,27 @@ def _run_tier1_validation(report_path: Path) -> None:
         )
 
 
-def _compose_report_md_screen(
-    *,
-    ctx: Context,
-    status: str,
-    disposition: str,
-    confidence: str,
-    matched_archetype: str,
-    matched_ticket_id: str | None,
-    trust_anchors: list[dict],
-    leads_run: list[dict],
-    trace: str,
-    summary: str,
-    matched_pattern: str,
-) -> str:
+@dataclass
+class _ScreenReportArgs:
+    ctx: Context
+    status: str
+    disposition: str
+    confidence: str
+    matched_archetype: str
+    matched_ticket_id: str | None
+    trust_anchors: list
+    leads_run: list
+    trace: str
+    summary: str
+    matched_pattern: str
+
+
+def _compose_report_md_screen(a: _ScreenReportArgs) -> str:
+    ctx, status, disposition, confidence = a.ctx, a.status, a.disposition, a.confidence
+    matched_archetype, matched_ticket_id = a.matched_archetype, a.matched_ticket_id
+    trust_anchors, leads_run, trace, summary, matched_pattern = (
+        a.trust_anchors, a.leads_run, a.trace, a.summary, a.matched_pattern
+    )
     fm = {
         "ticket_id": ctx.ticket_id,
         "signature_id": ctx.signature_id,
@@ -819,30 +836,11 @@ _GATHER_HEADER_RE = None
 _LEAD_FIELD_RE = None
 
 
-def _extract_findings_blocks_prose(investigation_md: str) -> list[dict]:
-    """Parse prose-form `## GATHER (loop N)` sections into lead entries.
-
-    Each GATHER section is assumed to have a `**Lead:** <name>` line and
-    optional `**Status:** <status>` line. Multiple Lead entries within a
-    single GATHER (composite dispatch) are each returned as separate
-    entries.
-    """
-    import re  # local
-    global _GATHER_HEADER_RE, _LEAD_FIELD_RE
-    if _GATHER_HEADER_RE is None:
-        _GATHER_HEADER_RE = re.compile(
-            r"^## GATHER(?:\s*\(loop\s*(\d+)\))?\s*$", re.MULTILINE,
-        )
-        _LEAD_FIELD_RE = re.compile(
-            r"^\*\*(?P<key>Lead|Status|Query):\*\*\s*(?P<value>.+?)\s*$",
-            re.MULTILINE,
-        )
-
-    entries: list[dict] = []
-    lines = investigation_md.splitlines()
-    in_fence = False
-    # Collect (start_line, loop_n, end_line) for each GATHER section.
+def _collect_gather_section_ranges(
+    lines: list[str],
+) -> list[tuple[int, int | None, int]]:
     section_ranges: list[tuple[int, int | None, int]] = []
+    in_fence = False
     cur_start: int | None = None
     cur_loop: int | None = None
     for i, line in enumerate(lines):
@@ -862,7 +860,14 @@ def _extract_findings_blocks_prose(investigation_md: str) -> list[dict]:
                 cur_loop = int(m.group(1)) if m.group(1) else None
     if cur_start is not None:
         section_ranges.append((cur_start, cur_loop, len(lines)))
+    return section_ranges
 
+
+def _extract_lead_entries(
+    lines: list[str],
+    section_ranges: list[tuple[int, int | None, int]],
+) -> list[dict]:
+    entries: list[dict] = []
     for start, loop, end in section_ranges:
         body = "\n".join(lines[start + 1:end])
         current: dict | None = None
@@ -878,6 +883,29 @@ def _extract_findings_blocks_prose(investigation_md: str) -> list[dict]:
         if current is not None:
             entries.append(current)
     return entries
+
+
+def _extract_findings_blocks_prose(investigation_md: str) -> list[dict]:
+    """Parse prose-form `## GATHER (loop N)` sections into lead entries.
+
+    Each GATHER section is assumed to have a `**Lead:** <name>` line and
+    optional `**Status:** <status>` line. Multiple Lead entries within a
+    single GATHER (composite dispatch) are each returned as separate
+    entries.
+    """
+    import re  # local
+    global _GATHER_HEADER_RE, _LEAD_FIELD_RE
+    if _GATHER_HEADER_RE is None:
+        _GATHER_HEADER_RE = re.compile(
+            r"^## GATHER(?:\s*\(loop\s*(\d+)\))?\s*$", re.MULTILINE,
+        )
+        _LEAD_FIELD_RE = re.compile(
+            r"^\*\*(?P<key>Lead|Status|Query):\*\*\s*(?P<value>.+?)\s*$",
+            re.MULTILINE,
+        )
+    lines = investigation_md.splitlines()
+    section_ranges = _collect_gather_section_ranges(lines)
+    return _extract_lead_entries(lines, section_ranges)
 
 
 def _extract_final_analyze_section(investigation_md: str) -> str:
@@ -1176,28 +1204,35 @@ def _dispatch_narrative_subagent(
     return _parse_narrative_tags(raw)
 
 
-def _compose_report_md_analyze(
-    *,
-    ctx: Context,
-    status: str,
-    disposition: str,
-    confidence: str,
-    matched_archetype: str | None,
-    matched_ticket_id: str | None,
-    trust_anchors: list[dict],
-    leads_pursued: int,
-    trace: str,
-    hypothesis_outcomes_md: str,
-    key_evidence_md: str,
-    summary_md: str,
-    analyst_md: str | None,
-) -> str:
+@dataclass
+class _AnalyzeReportArgs:
+    ctx: Context
+    status: str
+    disposition: str
+    confidence: str
+    matched_archetype: str | None
+    matched_ticket_id: str | None
+    trust_anchors: list
+    leads_pursued: int
+    trace: str
+    hypothesis_outcomes_md: str
+    key_evidence_md: str
+    summary_md: str
+    analyst_md: str | None
+
+
+def _compose_report_md_analyze(a: _AnalyzeReportArgs) -> str:
     """Assemble report.md for the ANALYZE-routed mechanical path.
 
     Structural fields come from the ANALYZE payload + parsed findings blocks.
     `summary_md` and `analyst_md` come from the narrative subagent. Section
     order is fixed to match agents/report.md §6 exactly so Tier-1 passes.
     """
+    ctx, status, disposition, confidence = a.ctx, a.status, a.disposition, a.confidence
+    matched_archetype, matched_ticket_id = a.matched_archetype, a.matched_ticket_id
+    trust_anchors, leads_pursued, trace = a.trust_anchors, a.leads_pursued, a.trace
+    hypothesis_outcomes_md, key_evidence_md = a.hypothesis_outcomes_md, a.key_evidence_md
+    summary_md, analyst_md = a.summary_md, a.analyst_md
     fm = {
         "ticket_id": ctx.ticket_id,
         "signature_id": ctx.signature_id,
@@ -1256,6 +1291,38 @@ def _compose_report_md_analyze(
             )
 
     return "\n".join(sections) + "\n"
+
+
+def _resolve_analyze_grounding(
+    disposition: str,
+    matched_archetype: str | None,
+    matched_ticket_id: str | None,
+    trust_anchors: list[dict],
+    signature_id: str,
+) -> tuple[str, str | None]:
+    """Returns (status, matched_ticket_id) after applying grounding rules."""
+    status = "escalated"
+    if disposition == "benign" and matched_archetype:
+        archetype_dir = (
+            SOC_AGENT_ROOT / "knowledge" / "signatures" / signature_id / "archetypes" / matched_archetype
+        )
+        if archetype_dir.exists():
+            required = _load_required_anchors(archetype_dir)
+            confirmed = {(a.get("anchor") or "") for a in trust_anchors if a.get("result") == "confirmed"}
+            anchor_grounded = bool(required) and all(r in confirmed for r in required)
+            precedent_grounded = False
+            if matched_ticket_id:
+                precedent_grounded = (archetype_dir / f"{matched_ticket_id}.json").exists()
+            if anchor_grounded or precedent_grounded:
+                status = "resolved"
+            elif matched_ticket_id and not precedent_grounded:
+                matched_ticket_id = None
+        # If archetype dir missing, fall through to escalated with
+        # matched_archetype preserved for the report body. Tier-1 will
+        # catch this if it's incompatible with status=resolved.
+    if disposition != "benign":
+        status = "escalated"
+    return status, matched_ticket_id
 
 
 def _compose_analyze_routed(
@@ -1327,44 +1394,11 @@ def _compose_analyze_routed(
     )
     key_evidence_md = _compose_key_evidence_md(findings)
 
-    # Resolve grounding status. The ANALYZE disposition steers, but
-    # `resolved` requires either (a) required_anchors all confirmed or
-    # (b) a matched_ticket_id pointing at an on-disk precedent.
+    # Resolve grounding status.
     matched_ticket_id = analyze_payload.get("matched_ticket_id")
-    status = "escalated"
-    if disposition == "benign" and matched_archetype:
-        archetype_dir = (
-            SOC_AGENT_ROOT
-            / "knowledge" / "signatures" / ctx.signature_id
-            / "archetypes" / matched_archetype
-        )
-        if archetype_dir.exists():
-            required = _load_required_anchors(archetype_dir)
-            confirmed = {
-                (a.get("anchor") or "") for a in trust_anchors
-                if a.get("result") == "confirmed"
-            }
-            anchor_grounded = bool(required) and all(
-                r in confirmed for r in required
-            )
-            precedent_grounded = False
-            if matched_ticket_id:
-                precedent_path = archetype_dir / f"{matched_ticket_id}.json"
-                precedent_grounded = precedent_path.exists()
-            if anchor_grounded or precedent_grounded:
-                status = "resolved"
-            elif matched_ticket_id and not precedent_grounded:
-                # SCREEN-style recovery: drop the invalid cite, keep trying.
-                matched_ticket_id = None
-        # If archetype dir missing, fall through to escalated with
-        # matched_archetype preserved for the report body. Tier-1 will
-        # catch this if it's incompatible with status=resolved.
-
-    # Non-benign dispositions (true_positive, unclear) always escalate —
-    # matches the authorization-gated-disposition rule (invlang v2.11, rule
-    # #21): only `benign` can resolve, and only with archetype grounding.
-    if disposition != "benign":
-        status = "escalated"
+    status, matched_ticket_id = _resolve_analyze_grounding(
+        disposition, matched_archetype, matched_ticket_id, trust_anchors, ctx.signature_id,
+    )
 
     # Dispatch narrative subagent (BEFORE writing anything — on failure we
     # haven't touched disk yet, no rollback needed).
@@ -1415,21 +1449,13 @@ def _compose_analyze_routed(
         "",
     ]
 
-    report_text = _compose_report_md_analyze(
-        ctx=ctx,
-        status=status,
-        disposition=disposition,
-        confidence=confidence,
-        matched_archetype=matched_archetype,
-        matched_ticket_id=matched_ticket_id,
-        trust_anchors=trust_anchors,
-        leads_pursued=leads_pursued,
-        trace=trace,
-        hypothesis_outcomes_md=hypothesis_outcomes_md,
-        key_evidence_md=key_evidence_md,
-        summary_md=summary_md,
-        analyst_md=analyst_md,
-    )
+    report_text = _compose_report_md_analyze(_AnalyzeReportArgs(
+        ctx=ctx, status=status, disposition=disposition, confidence=confidence,
+        matched_archetype=matched_archetype, matched_ticket_id=matched_ticket_id,
+        trust_anchors=trust_anchors, leads_pursued=leads_pursued, trace=trace,
+        hypothesis_outcomes_md=hypothesis_outcomes_md, key_evidence_md=key_evidence_md,
+        summary_md=summary_md, analyst_md=analyst_md,
+    ))
 
     # Snapshot before touching disk so Tier-1 failure rolls back cleanly.
     inv_path = ctx.run_dir / "investigation.md"

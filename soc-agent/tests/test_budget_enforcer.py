@@ -57,7 +57,7 @@ class TestDefaultLimits:
         assert "wall_clock_timeout" in DEFAULT_LIMITS
 
     def test_values_are_positive_ints(self):
-        for key, value in DEFAULT_LIMITS.items():
+        for _, value in DEFAULT_LIMITS.items():
             assert isinstance(value, int)
             assert value > 0
 

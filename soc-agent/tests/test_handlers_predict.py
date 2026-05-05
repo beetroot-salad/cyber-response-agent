@@ -64,7 +64,7 @@ def stub_invoke(captured: list[str], responses: list[str]):
             return next(iterator)
         except StopIteration:
             raise AssertionError("stub_invoke exhausted — handler called subagent "
-                                 "more times than the test scripted")
+                                 "more times than the test scripted") from None
     return fn
 
 
@@ -76,7 +76,7 @@ def stub_validator(results: list[list[str]]):
         try:
             return next(iterator)
         except StopIteration:
-            raise AssertionError("stub_validator exhausted")
+            raise AssertionError("stub_validator exhausted") from None
     return fn
 
 
@@ -194,7 +194,8 @@ class TestPromptAssembly:
         prompt = captured[0]
 
         # Alert is summarized, not preloaded as raw JSON.
-        assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
+        assert "<alert-test-salt>" in prompt
+        assert "</alert-test-salt>" in prompt
         assert 'rule.id: "5710"' in prompt
         assert '"id": "alert-1"' not in prompt
 
