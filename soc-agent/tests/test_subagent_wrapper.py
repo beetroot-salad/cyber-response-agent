@@ -63,7 +63,8 @@ def test_argv_includes_plugin_dir_and_session_id(run_dir_env):
     assert "--session-id" in argv
     session_id = argv[argv.index("--session-id") + 1]
     # UUID4 shape
-    assert len(session_id) == 36 and session_id.count("-") == 4
+    assert len(session_id) == 36
+    assert session_id.count("-") == 4
 
 
 def test_subagent_cwd_pinned_to_plugin_root(run_dir_env):

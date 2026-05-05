@@ -56,6 +56,7 @@ allow malformed dense content to escape validation.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 
@@ -379,7 +380,7 @@ _EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
 def _vertex_record(block: DenseBlock, row: str) -> dict[str, Any]:
     cells = _row_cells(block, row)
     cols = block.columns or _VERTEX_COLS
-    rec = dict(zip(cols, cells))
+    rec = dict(zip(cols, cells, strict=False))
     if not rec.get("id") or not rec.get("type") or not rec.get("class") or not rec.get("ident"):
         raise DenseParseError(
             f":V {block.name}: vertex row missing required cell "
@@ -403,7 +404,7 @@ def _vertex_record(block: DenseBlock, row: str) -> dict[str, Any]:
 def _edge_record(block: DenseBlock, row: str) -> dict[str, Any]:
     cells = _row_cells(block, row)
     cols = block.columns or _EDGE_COLS
-    rec = dict(zip(cols, cells))
+    rec = dict(zip(cols, cells, strict=False))
     auth_col = _find_col(cols, "auth_kind:source")
     if not rec.get("id") or not rec.get("rel") or not rec.get("src") or not rec.get("tgt"):
         raise DenseParseError(
@@ -754,10 +755,8 @@ def _lead_header_record(
         if rec.get(k_in):
             value = rec[k_in]
             if k_in == "loop":
-                try:
+                with contextlib.suppress(ValueError):
                     value = int(value)
-                except ValueError:
-                    pass
             identity[k_out] = value
     if rec.get("tests"):
         identity["tests_hypotheses"] = _split_csv(rec["tests"])
@@ -1171,7 +1170,7 @@ def _project_conclude(block: DenseBlock, out: dict[str, Any]) -> None:
                 f"got {len(block.rows)}"
             )
         cells = _row_cells(block, block.rows[0])
-        conclude[dict_key] = dict(zip(expected_cols, cells))
+        conclude[dict_key] = dict(zip(expected_cols, cells, strict=False))
         return
 
     bucket: list[Any] = []
@@ -1185,7 +1184,7 @@ def _project_conclude(block: DenseBlock, out: dict[str, Any]) -> None:
                 )
             bucket.append(hyp_id)
         else:
-            entry = dict(zip(expected_cols, cells))
+            entry = dict(zip(expected_cols, cells, strict=False))
             for col in expected_cols:
                 if not entry.get(col):
                     raise DenseParseError(

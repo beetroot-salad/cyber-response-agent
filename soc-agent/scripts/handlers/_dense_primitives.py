@@ -258,7 +258,7 @@ def row_record(
 ) -> dict[str, str]:
     """Return `{column: cell}` for a row. Pads short rows with empty cells."""
     cells = row_cells(block, row, error_cls)
-    return dict(zip(block.columns or [], cells))
+    return dict(zip(block.columns or [], cells, strict=False))
 
 
 # ---------------------------------------------------------------------------

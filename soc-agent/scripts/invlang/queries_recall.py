@@ -239,9 +239,8 @@ def lead_exemplars(
     surprises = 0
 
     for c in corpus:
-        if not _vertex_where_match(c, vertex_where, vertex_scope):
-            if vertex_scope != "target":
-                continue
+        if not _vertex_where_match(c, vertex_where, vertex_scope) and vertex_scope != "target":
+            continue
         h_names: dict[str, str] = {h["id"]: h.get("name", "") for h in c.iter_new_hypotheses()}
         for lead in c.leads:
             name = lead.get("name") or ""

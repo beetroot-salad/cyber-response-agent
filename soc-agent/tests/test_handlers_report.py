@@ -135,8 +135,10 @@ class TestPromptAssembly:
         report_handler.handle(ctx)
         prompt = captured[0]
         # All three tagged blocks present (alert tag is salted)
-        assert "<alert-test-salt>" in prompt and "</alert-test-salt>" in prompt
-        assert "<investigation>" in prompt and "signature analysis" in prompt
+        assert "<alert-test-salt>" in prompt
+        assert "</alert-test-salt>" in prompt
+        assert "<investigation>" in prompt
+        assert "signature analysis" in prompt
         assert "<archetypes>" in prompt
         # Matched archetype shape inlined
         assert 'name="monitoring-probe"' in prompt
@@ -778,7 +780,8 @@ class TestMechanicalScreenCompose:
         inv = (ctx.run_dir / "investigation.md").read_text()
         assert "## REPORT" in inv
         assert ":T conclude" in inv
-        assert "termination.category" in inv and "trust-root" in inv
+        assert "termination.category" in inv
+        assert "trust-root" in inv
 
     def test_mechanical_path_falls_back_to_anchor_leg_when_precedent_missing(
         self, tmp_path, monkeypatch,
@@ -974,85 +977,43 @@ def _seed_ctx_for_analyze_mechanical(
     )
 
 
-_INV_RESOLVED_ANCHOR = """## CONTEXTUALIZE
-
-**Alert:** SEC-2026-042 — wazuh-rule-5710
-
-```yaml
-prologue:
-  vertices:
-  - id: v-001
-    type: endpoint
-    classification: internal-monitoring-host
-  edges: []
-```
-
-## PREDICT (loop 1)
-
-?monitoring-probe — approved cron probe.
-
-```yaml
-hypothesize:
-  hypotheses:
-  - id: h-001
-    name: monitoring-probe
-```
-
-## GATHER (loop 1)
-
-**Lead:** approved-monitoring-sources
-
-```yaml
-findings:
-- id: l-001
-  loop: 1
-  name: source-classification
-  target: v-001
-  mode: screen
-  outcome:
-    attribute_updates:
-    - target: v-001
-      updates:
-        classification: internal-monitoring-host
-- id: l-002
-  loop: 1
-  name: approved-monitoring-sources
-  target: e-001
-  mode: screen
-  outcome:
-    anchor_consultations:
-      - anchor_id: approved-monitoring-sources
-        anchor_kind: approved-monitoring-sources
-        grounding_kind: org-authority
-        result: confirmed
-        as_of: '2026-04-22T07:00:00Z'
-        authority_for_question: full
-    observations:
-      edges:
-        - id: e-001
-          authorization_resolutions:
-            - verdict: authorized
-              anchor_id: approved-monitoring-sources
-              anchor_kind: approved-monitoring-sources
-              grounding_kind: org-authority
-              authority_for_question: full
-              as_of: '2026-04-22T07:00:00Z'
-              resolved_by_lead: l-002
-              fulfills_contract: h-001.ac1
-    resolutions:
-    - hypothesis: h-001
-      weight: ++
-```
-
-## ANALYZE (loop 1)
-
-**Assessment:**
-- ?monitoring-probe (h-001): `++` — anchor confirmed authorized triple.
-
-**Surviving hypotheses:** h-001
-
-**Next action:** REPORT → disposition: benign, confidence: high, matched_archetype: monitoring-probe.
-"""
+_INV_RESOLVED_ANCHOR = (
+    "## CONTEXTUALIZE\n\n"
+    + companion_to_invlang_fence({
+        "prologue": {
+            "vertices": [{"id": "v-001", "type": "endpoint",
+                          "classification": "internal-monitoring-host",
+                          "identifier": "ssh-target"}],
+            "edges": [],
+        },
+        "hypothesize": {"hypotheses": [{"id": "h-001", "name": "monitoring-probe"}]},
+        "findings": [
+            {
+                "id": "l-002", "loop": 1, "name": "approved-monitoring-sources",
+                "target": "v-001",
+                "outcome": {
+                    "anchor_consultations": [
+                        {
+                            "anchor_id": "approved-monitoring-sources",
+                            "anchor_kind": "approved-monitoring-sources",
+                            "grounding_kind": "org-authority",
+                            "result": "confirmed",
+                            "as_of": "2026-04-22T07:00:00Z",
+                            "authority_for_question": "full",
+                        },
+                    ],
+                    "observations": {"vertices": [], "edges": []},
+                },
+                "resolutions": [{"hypothesis": "h-001", "after": "++"}],
+            },
+        ],
+    })
+    + "\n\n## ANALYZE (loop 1)\n\n"
+    "**Assessment:**\n"
+    "- ?monitoring-probe (h-001): `++` — anchor confirmed authorized triple.\n\n"
+    "**Surviving hypotheses:** h-001\n\n"
+    "**Next action:** REPORT → disposition: benign, confidence: high, matched_archetype: monitoring-probe.\n"
+)
 
 
 class TestMechanicalAnalyzeCompose:
@@ -1486,6 +1447,619 @@ class TestBenignActionShortCircuit:
         assert "inconclusive" in rationale.lower()
 
 
+def test_mechanical_analyze_path_writes_report_and_invokes_narrative(
+    tmp_path, monkeypatch,
+):
+    """Happy path: ANALYZE routes benign/high/monitoring-probe; gather YAML
+    carries anchor confirmation. Handler composes structured fields,
+    invokes narrative subagent once for Summary, writes report, passes
+    Tier-1. No conclude-subagent call."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "benign",
+            "confidence": "high",
+            "matched_archetype": "monitoring-probe",
+            "surviving_hypotheses": ["h-001"],
+        },
+        investigation_md=_INV_RESOLVED_ANCHOR,
+    )
+    captured_narr: list[str] = []
+
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "archetype-match":
+            return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
+        assert agent == "report_narrative"
+        captured_narr.append(prompt)
+        return (
+            "<summary>\n"
+            "The alert fired on an approved monitoring probe; "
+            "anchor authorization confirmed.\n"
+            "</summary>"
+        )
+
+    monkeypatch.setattr(
+        report_handler, "_shared_invoke", fake_narrative,
+    )
+    monkeypatch.setattr(
+        report_handler, "_invoke_archetype_match",
+        lambda _p, **_kw: "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```",
+    )
+    # _invoke_subagent (the full-fallback dispatcher) must NOT fire.
+    captured_full: list[str] = []
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent",
+        stub_invoke(captured_full, "UNEXPECTED"),
+    )
+
+    result = report_handler.handle(ctx)
+
+    assert captured_full == [], "full-context subagent must not fire"
+    assert len(captured_narr) == 1
+    assert result.payload["status"] == "written"
+    assert result.payload["compose_mode"] == "analyze_mechanical"
+    assert result.payload["status_frontmatter"] == "resolved"
+    assert result.payload["matched_archetype"] == "monitoring-probe"
+
+    report = (ctx.run_dir / "report.md").read_text()
+    assert "status: resolved" in report
+    assert "disposition: benign" in report
+    assert "confidence: high" in report
+    assert "## Summary" in report
+    assert "approved monitoring probe" in report
+    assert "## Hypothesis Outcomes" in report
+    # Anchor confirmation is derived into trust_anchors_consulted
+    assert "approved-monitoring-sources" in report
+    # No For Analyst section on resolved
+    assert "## For Analyst" not in report
+
+    inv = (ctx.run_dir / "investigation.md").read_text()
+    assert "## REPORT" in inv
+    assert "trust-root" in inv
+    assert "approved monitoring probe" in inv
+
+def test_mechanical_analyze_preload_omits_archetypes_when_null(
+    tmp_path, monkeypatch,
+):
+    """archetype-match returns null → narrative preload carries no
+    <archetypes> or <archetype ...> block, saving the ~15KB per-archetype
+    bulk."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "unclear",
+            "confidence": "medium",
+            "matched_archetype": None,
+            "surviving_hypotheses": ["h-003"],
+        },
+        investigation_md=_INV_RESOLVED_ANCHOR,
+    )
+    captured_narr: list[str] = []
+
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "archetype-match":
+            return "```yaml\nmatched_archetype: null\njustification: stub\n```"
+        captured_narr.append(prompt)
+        return (
+            "<summary>\nEscalated with unresolved anchor.\n</summary>\n\n"
+            "<for-analyst>\n- Check deploy-runs.\n- Verify jumphost.\n</for-analyst>"
+        )
+
+    monkeypatch.setattr(
+        report_handler, "_shared_invoke", fake_narrative,
+    )
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
+    )
+
+    result = report_handler.handle(ctx)
+    assert result.payload["compose_mode"] == "analyze_mechanical"
+    assert result.payload["status_frontmatter"] == "escalated"
+
+    prompt = captured_narr[0]
+    # Null-archetype path must not load any archetype shapes.
+    assert "<archetypes>" not in prompt
+    assert "<archetype " not in prompt
+    # But the alert and trimmed investigation must be there.
+    assert "<alert-test-salt>" in prompt
+    assert 'mode="report-narrative"' in prompt
+
+    # Preload size floor — ANALYZE with no archetype block should come in
+    # well under the full-context 50KB.
+    assert len(prompt) < 16 * 1024, f"preload too large: {len(prompt)} bytes"
+
+    report = (ctx.run_dir / "report.md").read_text()
+    # For Analyst section appears on escalated with the narrative-authored text.
+    assert "## For Analyst" in report
+    assert "Check deploy-runs" in report
+    assert "Verify jumphost" in report
+
+def test_mechanical_analyze_preload_loads_single_archetype_when_named(
+    tmp_path, monkeypatch,
+):
+    """matched_archetype set → narrative preload loads exactly that one
+    archetype's story/trust-anchors, not all signature archetypes."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "benign",
+            "confidence": "high",
+            "matched_archetype": "monitoring-probe",
+            "surviving_hypotheses": ["h-001"],
+        },
+        investigation_md=_INV_RESOLVED_ANCHOR,
+    )
+    captured_narr: list[str] = []
+
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "archetype-match":
+            return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
+        captured_narr.append(prompt)
+        return "<summary>\nResolved.\n</summary>"
+
+    monkeypatch.setattr(
+        report_handler, "_shared_invoke", fake_narrative,
+    )
+    monkeypatch.setattr(
+        report_handler, "_invoke_archetype_match",
+        lambda _p, **_kw: "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```",
+    )
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
+    )
+    report_handler.handle(ctx)
+
+    prompt = captured_narr[0]
+    assert 'name="monitoring-probe"' in prompt
+    # Other 5710 archetypes must NOT be bundled (e.g. testuser-bruteforce).
+    assert 'name="brute-force"' not in prompt
+    assert 'name="credential-reuse"' not in prompt
+
+def test_narrative_subagent_missing_summary_tag_falls_back(
+    tmp_path, monkeypatch,
+):
+    """Narrative stdout without `<summary>...</summary>` raises
+    `_MechanicalFallback` → full-context subagent fires."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "benign",
+            "confidence": "high",
+            "matched_archetype": "monitoring-probe",
+            "surviving_hypotheses": ["h-001"],
+        },
+        investigation_md=_INV_RESOLVED_ANCHOR,
+    )
+
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "archetype-match":
+            return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
+        return "I forgot the tags."
+
+    monkeypatch.setattr(
+        report_handler, "_shared_invoke", fake_narrative,
+    )
+    fallback_response = textwrap.dedent("""
+    ```yaml
+    status: written
+    report_path: /tmp/report.md
+    disposition: benign
+    confidence: high
+    matched_archetype: monitoring-probe
+    status_frontmatter: resolved
+    ```
+    """).strip()
+    captured_full: list[str] = []
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent",
+        stub_invoke(captured_full, fallback_response),
+    )
+
+    result = report_handler.handle(ctx)
+    assert len(captured_full) == 1  # fallback fired
+    assert result.payload["compose_mode"] == "subagent"
+    assert "no <summary> block" in result.payload["mechanical_fallback_reason"]
+
+def test_narrative_subagent_insufficient_context_falls_back(
+    tmp_path, monkeypatch,
+):
+    """Narrative returned the insufficient-context sentinel → fallback."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "benign",
+            "confidence": "high",
+            "matched_archetype": "monitoring-probe",
+            "surviving_hypotheses": ["h-001"],
+        },
+        investigation_md=_INV_RESOLVED_ANCHOR,
+    )
+
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "archetype-match":
+            return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
+        return "<summary>\n(insufficient-context: missing routing block)\n</summary>"
+
+    monkeypatch.setattr(
+        report_handler, "_shared_invoke", fake_narrative,
+    )
+    fallback_response = textwrap.dedent("""
+    ```yaml
+    status: written
+    report_path: /tmp/report.md
+    disposition: benign
+    confidence: high
+    matched_archetype: monitoring-probe
+    status_frontmatter: resolved
+    ```
+    """).strip()
+    captured_full: list[str] = []
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent",
+        stub_invoke(captured_full, fallback_response),
+    )
+    result = report_handler.handle(ctx)
+    assert len(captured_full) == 1
+    assert "insufficient" in result.payload["mechanical_fallback_reason"].lower()
+
+def test_tier1_failure_on_analyze_mechanical_rolls_back(
+    tmp_path, monkeypatch,
+):
+    """If Tier-1 rejects the mechanically-composed analyze report, roll
+    back both writes before dispatching the full-context subagent."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "benign",
+            "confidence": "high",
+            "matched_archetype": "monitoring-probe",
+            "surviving_hypotheses": ["h-001"],
+        },
+        investigation_md=_INV_RESOLVED_ANCHOR,
+    )
+    inv_before = (ctx.run_dir / "investigation.md").read_text()
+
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "archetype-match":
+            return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
+        return "<summary>\nResolved.\n</summary>"
+
+    def fail_tier1(_path):
+        from scripts.orchestrate import OrchestrationError
+        raise OrchestrationError("simulated tier-1 rejection")
+
+    monkeypatch.setattr(
+        report_handler, "_shared_invoke", fake_narrative,
+    )
+    monkeypatch.setattr(
+        report_handler, "_run_tier1_validation", fail_tier1,
+    )
+    fallback_response = textwrap.dedent("""
+    ```yaml
+    status: written
+    report_path: /tmp/report.md
+    disposition: benign
+    confidence: high
+    matched_archetype: monitoring-probe
+    status_frontmatter: resolved
+    ```
+    """).strip()
+    captured_full: list[str] = []
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent",
+        stub_invoke(captured_full, fallback_response),
+    )
+
+    result = report_handler.handle(ctx)
+    assert len(captured_full) == 1  # fallback fired
+    assert result.payload["compose_mode"] == "subagent"
+    assert "Tier-1" in result.payload["mechanical_fallback_reason"]
+    # Rollback invariants.
+    assert (ctx.run_dir / "investigation.md").read_text() == inv_before
+    assert not (ctx.run_dir / "report.md").exists()
+
+def test_forced_report_skips_analyze_mechanical(
+    tmp_path, monkeypatch,
+):
+    """ctx.forced_report=True means ANALYZE never ran coherently; the
+    mechanical path must be bypassed. The full-context subagent fires
+    with routing_source=forced_exhaustion."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "benign",
+            "confidence": "high",
+            "matched_archetype": "monitoring-probe",
+            "surviving_hypotheses": ["h-001"],
+        },
+        investigation_md=_INV_RESOLVED_ANCHOR,
+    )
+    ctx.forced_report = True
+
+    # Narrative MUST NOT fire.
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "archetype-match":
+            return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
+        raise AssertionError("narrative subagent must not fire on forced_report")
+
+    monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
+
+    fallback_response = textwrap.dedent("""
+    ```yaml
+    status: written
+    report_path: /tmp/report.md
+    disposition: unclear
+    confidence: low
+    matched_archetype: null
+    status_frontmatter: escalated
+    ```
+    """).strip()
+    captured_full: list[str] = []
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent",
+        stub_invoke(captured_full, fallback_response),
+    )
+    report_handler.handle(ctx)
+    assert len(captured_full) == 1
+    assert "routing_source=forced_exhaustion" in captured_full[0]
+
+def test_adversarial_disposition_forces_escalation_even_with_archetype(
+    tmp_path, monkeypatch,
+):
+    """disposition=true_positive or unclear must NOT resolve, even
+    if matched_archetype is set and anchors are confirmed. Mirrors the
+    legitimacy-gated-disposition rule in invlang v2.9."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "true_positive",
+            "confidence": "high",
+            "matched_archetype": "monitoring-probe",
+            "surviving_hypotheses": ["h-003"],
+        },
+        investigation_md=_INV_RESOLVED_ANCHOR,
+    )
+
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "archetype-match":
+            return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
+        return (
+            "<summary>\nAdversarial grade confirmed.\n</summary>\n\n"
+            "<for-analyst>\n- Isolate host.\n</for-analyst>"
+        )
+
+    monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
+    )
+
+    result = report_handler.handle(ctx)
+    assert result.payload["compose_mode"] == "analyze_mechanical"
+    assert result.payload["status_frontmatter"] == "escalated"
+    assert result.payload["disposition"] == "true_positive"
+
+def test_prose_form_gather_fallback_parser(tmp_path):
+    """When investigation.md has no `findings:` YAML fences but has
+    prose-form `## GATHER` sections with `**Lead:**` / `**Status:**`
+    lines (the shape ANALYZE currently produces), the parser falls back
+    to prose extraction and returns lead entries with name + status +
+    loop. This is the real-world shape from orchestrator eval runs."""
+    md = (
+        "## CONTEXTUALIZE\n\nobserved.\n\n"
+        "## GATHER (loop 1)\n\n"
+        "**Lead:** container-baseline\n"
+        "**Status:** ok\n"
+        "**Query:** `rule.id:100001 --window 7d`\n\n"
+        "**Raw observation:**\n- 35 events over 7 days\n\n"
+        "## ANALYZE (loop 1)\n\nassessment.\n\n"
+        "## GATHER (loop 2)\n\n"
+        "**Lead:** deploy-runs-anchor\n"
+        "**Status:** data_missing\n\n"
+        "## ANALYZE (loop 2)\n\nfinal routing.\n"
+    )
+    gather = report_handler._extract_findings_blocks(md)
+    assert len(gather) == 2
+    assert gather[0]["name"] == "container-baseline"
+    assert gather[0]["loop"] == 1
+    assert gather[0]["status"] == "ok"
+    assert gather[1]["name"] == "deploy-runs-anchor"
+    assert gather[1]["status"] == "data_missing"
+
+def test_invlang_gather_block_preferred_over_prose(tmp_path):
+    """When both invlang and prose forms are present, invlang wins — its
+    structured outcome fields are needed for trust_anchors derivation."""
+    invlang_fence = companion_to_invlang_fence({
+        "findings": [
+            {
+                "id": "l-001", "loop": 1, "name": "invlang-form-lead",
+                "target": "v-001",
+                "outcome": {
+                    "anchor_consultations": [
+                        {"anchor_id": "x", "anchor_kind": "org-authority",
+                         "result": "confirmed", "as_of": "2026-01-01T00:00:00Z",
+                         "authority_for_question": "full"},
+                    ],
+                    "observations": {"vertices": [], "edges": []},
+                },
+                "resolutions": [{"hypothesis": "h-001", "after": "++"}],
+            },
+        ],
+    })
+    md = (
+        "## GATHER (loop 1)\n\n"
+        "**Lead:** prose-form-lead\n\n"
+        + invlang_fence + "\n"
+    )
+    gather = report_handler._extract_findings_blocks(md)
+    assert len(gather) == 1
+    assert gather[0]["name"] == "invlang-form-lead"
+    assert gather[0]["outcome"]["anchor_consultations"][0]["result"] == "confirmed"
+
+def test_analyze_unclear_disposition_passes_through(
+    tmp_path, monkeypatch,
+):
+    """v2.11: ANALYZE emits disposition ∈ {benign, true_positive, unclear}
+    directly — no handler-side remap. Non-benign dispositions always
+    escalate; unclear specifically surfaces to frontmatter unchanged."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "unclear",
+            "confidence": "medium",
+            "matched_archetype": None,
+            "surviving_hypotheses": ["h-001", "h-002"],
+        },
+        investigation_md=(
+            "## CONTEXTUALIZE\n\n**Alert:** test\n\n"
+            "## GATHER (loop 1)\n\n**Lead:** test-lead\n**Status:** ok\n\n"
+            "## ANALYZE (loop 1)\n\nEscalation rationale.\n"
+        ),
+    )
+
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "archetype-match":
+            return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
+        return (
+            "<summary>\nEscalated for analyst review.\n</summary>\n\n"
+            "<for-analyst>\n- Verify X.\n</for-analyst>"
+        )
+
+    monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
+    )
+
+    result = report_handler.handle(ctx)
+    assert result.payload["compose_mode"] == "analyze_mechanical"
+    assert result.payload["status_frontmatter"] == "escalated"
+    assert result.payload["disposition"] == "unclear"
+
+    report = (ctx.run_dir / "report.md").read_text()
+    assert "status: escalated" in report
+    assert "disposition: unclear" in report
+    # `escalated` is a status, never a disposition.
+    assert "disposition: escalated" not in report
+
+def test_archetype_match_is_invoked_on_analyze_routed_path(
+    tmp_path, monkeypatch,
+):
+    """REPORT handler must invoke archetype-match at dispatch time (the
+    CONTEXTUALIZE→REPORT dispatch move). The matched_archetype in the
+    written report must come from archetype-match's stub, not from
+    analyze_payload."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "benign",
+            "confidence": "high",
+            # Deliberately set to a value archetype-match will override.
+            "matched_archetype": "analyze-was-authoritative-ignore-me",
+            "surviving_hypotheses": ["h-001"],
+        },
+        investigation_md=_INV_RESOLVED_ANCHOR,
+    )
+    archetype_match_prompts: list[str] = []
+
+    def fake_archetype(prompt, *, timeout=None, session_id=None):
+        archetype_match_prompts.append(prompt)
+        return "```yaml\nmatched_archetype: monitoring-probe\njustification: picked at REPORT time\n```"
+
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "report_narrative":
+            return "<summary>\nResolved via anchor.\n</summary>"
+        raise AssertionError(f"unexpected subagent: {agent}")
+
+    monkeypatch.setattr(report_handler, "_invoke_archetype_match", fake_archetype)
+    monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
+    )
+
+    result = report_handler.handle(ctx)
+    assert len(archetype_match_prompts) == 1, (
+        "archetype-match must fire exactly once on the ANALYZE-routed path"
+    )
+    # The archetype-match stub's answer drives the report, not ANALYZE's.
+    assert result.payload["matched_archetype"] == "monitoring-probe"
+    # Prompt carries the confirmed evidence inputs (not just the alert).
+    prompt = archetype_match_prompts[0]
+    assert "disposition=benign" in prompt
+    assert "confidence=high" in prompt
+    assert "mechanism_summary=" in prompt
+    assert "trust_anchors_confirmed:" in prompt
+
+def test_mechanism_summary_uses_analyze_rationale_when_present(
+    tmp_path, monkeypatch,
+):
+    """ANALYZE's optional `rationale` field (one-line mechanism summary
+    from the terminal YAML) flows into archetype-match's
+    `mechanism_summary` input. Without it, the summary falls back to
+    `surviving: <ids>` which is anemic."""
+    ctx = _seed_ctx_for_analyze_mechanical(
+        tmp_path,
+        analyze_payload={
+            "disposition": "benign",
+            "confidence": "high",
+            "rationale": "cadenced monitoring probe; anchor authorized",
+            "surviving_hypotheses": ["h-001"],
+        },
+        investigation_md=_INV_RESOLVED_ANCHOR,
+    )
+    archetype_match_prompts: list[str] = []
+
+    def fake_archetype(prompt, *, timeout=None, session_id=None):
+        archetype_match_prompts.append(prompt)
+        return (
+            "```yaml\nmatched_archetype: monitoring-probe\n"
+            "justification: stub\n```"
+        )
+
+    def fake_narrative(agent, prompt, *, model=None, timeout=None):
+        if agent == "report_narrative":
+            return "<summary>\nResolved.\n</summary>"
+        raise AssertionError(f"unexpected subagent: {agent}")
+
+    monkeypatch.setattr(report_handler, "_invoke_archetype_match", fake_archetype)
+    monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
+    )
+
+    report_handler.handle(ctx)
+    prompt = archetype_match_prompts[0]
+    assert (
+        "mechanism_summary=cadenced monitoring probe; anchor authorized"
+        in prompt
+    ), f"rationale not threaded into archetype-match prompt: {prompt}"
+    # The fallback shape must not appear when rationale is present.
+    assert "mechanism_summary=surviving: h-001" not in prompt
+
+def test_no_analyze_payload_skips_mechanical_path(
+    tmp_path, monkeypatch,
+):
+    """Missing ANALYZE output → no mechanical attempt, fall through."""
+    ctx = make_ctx(tmp_path, ticket_id="SEC-2026-042")
+    # No ANALYZE or SCREEN output. Handler routes to forced_exhaustion.
+    response = textwrap.dedent("""
+    ```yaml
+    status: written
+    report_path: /tmp/report.md
+    disposition: unclear
+    confidence: low
+    matched_archetype: null
+    status_frontmatter: escalated
+    ```
+    """).strip()
+    captured: list[str] = []
+    monkeypatch.setattr(
+        report_handler, "_invoke_subagent", stub_invoke(captured, response),
+    )
+    report_handler.handle(ctx)
+    assert len(captured) == 1
+    # mechanical_fallback_reason should NOT be set — we never attempted
+    # a mechanical compose.
+    # (The test covers the "no preconditions met" branch.)
+
 def _make_ctx_for_shortcircuit(
     tmp_path: Path, *, cmdline: str, signature_id: str = "wazuh-rule-100001",
 ) -> Context:
@@ -1509,599 +2083,3 @@ def _make_ctx_for_shortcircuit(
         ticket_id="0",
         alert=alert,
     )
-
-    def test_mechanical_analyze_path_writes_report_and_invokes_narrative(
-        self, tmp_path, monkeypatch,
-    ):
-        """Happy path: ANALYZE routes benign/high/monitoring-probe; gather YAML
-        carries anchor confirmation. Handler composes structured fields,
-        invokes narrative subagent once for Summary, writes report, passes
-        Tier-1. No conclude-subagent call."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "benign",
-                "confidence": "high",
-                "matched_archetype": "monitoring-probe",
-                "surviving_hypotheses": ["h-001"],
-            },
-            investigation_md=_INV_RESOLVED_ANCHOR,
-        )
-        captured_narr: list[str] = []
-
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
-            assert agent == "report_narrative"
-            captured_narr.append(prompt)
-            return (
-                "<summary>\n"
-                "The alert fired on an approved monitoring probe; "
-                "anchor authorization confirmed.\n"
-                "</summary>"
-            )
-
-        monkeypatch.setattr(
-            report_handler, "_shared_invoke", fake_narrative,
-        )
-        # _invoke_subagent (the full-fallback dispatcher) must NOT fire.
-        captured_full: list[str] = []
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent",
-            stub_invoke(captured_full, "UNEXPECTED"),
-        )
-
-        result = report_handler.handle(ctx)
-
-        assert captured_full == [], "full-context subagent must not fire"
-        assert len(captured_narr) == 1
-        assert result.payload["status"] == "written"
-        assert result.payload["compose_mode"] == "analyze_mechanical"
-        assert result.payload["status_frontmatter"] == "resolved"
-        assert result.payload["matched_archetype"] == "monitoring-probe"
-
-        report = (ctx.run_dir / "report.md").read_text()
-        assert "status: resolved" in report
-        assert "disposition: benign" in report
-        assert "confidence: high" in report
-        assert "## Summary" in report
-        assert "approved monitoring probe" in report
-        assert "## Hypothesis Outcomes" in report
-        # Anchor confirmation is derived into trust_anchors_consulted
-        assert "approved-monitoring-sources" in report
-        # No For Analyst section on resolved
-        assert "## For Analyst" not in report
-
-        inv = (ctx.run_dir / "investigation.md").read_text()
-        assert "## REPORT" in inv
-        assert "category: trust-root" in inv
-        assert "approved monitoring probe" in inv
-
-    def test_mechanical_analyze_preload_omits_archetypes_when_null(
-        self, tmp_path, monkeypatch,
-    ):
-        """archetype-match returns null → narrative preload carries no
-        <archetypes> or <archetype ...> block, saving the ~15KB per-archetype
-        bulk."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "unclear",
-                "confidence": "medium",
-                "matched_archetype": None,
-                "surviving_hypotheses": ["h-003"],
-            },
-            investigation_md=_INV_RESOLVED_ANCHOR,
-        )
-        captured_narr: list[str] = []
-
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return "```yaml\nmatched_archetype: null\njustification: stub\n```"
-            captured_narr.append(prompt)
-            return (
-                "<summary>\nEscalated with unresolved anchor.\n</summary>\n\n"
-                "<for-analyst>\n- Check deploy-runs.\n- Verify jumphost.\n</for-analyst>"
-            )
-
-        monkeypatch.setattr(
-            report_handler, "_shared_invoke", fake_narrative,
-        )
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
-        )
-
-        result = report_handler.handle(ctx)
-        assert result.payload["compose_mode"] == "analyze_mechanical"
-        assert result.payload["status_frontmatter"] == "escalated"
-
-        prompt = captured_narr[0]
-        # Null-archetype path must not load any archetype shapes.
-        assert "<archetypes>" not in prompt
-        assert "<archetype " not in prompt
-        # But the alert and trimmed investigation must be there.
-        assert "<alert-test-salt>" in prompt
-        assert 'mode="report-narrative"' in prompt
-
-        # Preload size floor — ANALYZE with no archetype block should come in
-        # well under the full-context 50KB.
-        assert len(prompt) < 16 * 1024, f"preload too large: {len(prompt)} bytes"
-
-        report = (ctx.run_dir / "report.md").read_text()
-        # For Analyst section appears on escalated with the narrative-authored text.
-        assert "## For Analyst" in report
-        assert "Check deploy-runs" in report
-        assert "Verify jumphost" in report
-
-    def test_mechanical_analyze_preload_loads_single_archetype_when_named(
-        self, tmp_path, monkeypatch,
-    ):
-        """matched_archetype set → narrative preload loads exactly that one
-        archetype's story/trust-anchors, not all signature archetypes."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "benign",
-                "confidence": "high",
-                "matched_archetype": "monitoring-probe",
-                "surviving_hypotheses": ["h-001"],
-            },
-            investigation_md=_INV_RESOLVED_ANCHOR,
-        )
-        captured_narr: list[str] = []
-
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
-            captured_narr.append(prompt)
-            return "<summary>\nResolved.\n</summary>"
-
-        monkeypatch.setattr(
-            report_handler, "_shared_invoke", fake_narrative,
-        )
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
-        )
-        report_handler.handle(ctx)
-
-        prompt = captured_narr[0]
-        assert 'name="monitoring-probe"' in prompt
-        # Other 5710 archetypes must NOT be bundled (e.g. testuser-bruteforce).
-        assert 'name="brute-force"' not in prompt
-        assert 'name="credential-reuse"' not in prompt
-
-    def test_narrative_subagent_missing_summary_tag_falls_back(
-        self, tmp_path, monkeypatch,
-    ):
-        """Narrative stdout without `<summary>...</summary>` raises
-        `_MechanicalFallback` → full-context subagent fires."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "benign",
-                "confidence": "high",
-                "matched_archetype": "monitoring-probe",
-                "surviving_hypotheses": ["h-001"],
-            },
-            investigation_md=_INV_RESOLVED_ANCHOR,
-        )
-
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
-            return "I forgot the tags."
-
-        monkeypatch.setattr(
-            report_handler, "_shared_invoke", fake_narrative,
-        )
-        fallback_response = textwrap.dedent("""
-        ```yaml
-        status: written
-        report_path: /tmp/report.md
-        disposition: benign
-        confidence: high
-        matched_archetype: monitoring-probe
-        status_frontmatter: resolved
-        ```
-        """).strip()
-        captured_full: list[str] = []
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent",
-            stub_invoke(captured_full, fallback_response),
-        )
-
-        result = report_handler.handle(ctx)
-        assert len(captured_full) == 1  # fallback fired
-        assert result.payload["compose_mode"] == "subagent"
-        assert "no <summary> block" in result.payload["mechanical_fallback_reason"]
-
-    def test_narrative_subagent_insufficient_context_falls_back(
-        self, tmp_path, monkeypatch,
-    ):
-        """Narrative returned the insufficient-context sentinel → fallback."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "benign",
-                "confidence": "high",
-                "matched_archetype": "monitoring-probe",
-                "surviving_hypotheses": ["h-001"],
-            },
-            investigation_md=_INV_RESOLVED_ANCHOR,
-        )
-
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
-            return "<summary>\n(insufficient-context: missing routing block)\n</summary>"
-
-        monkeypatch.setattr(
-            report_handler, "_shared_invoke", fake_narrative,
-        )
-        fallback_response = textwrap.dedent("""
-        ```yaml
-        status: written
-        report_path: /tmp/report.md
-        disposition: benign
-        confidence: high
-        matched_archetype: monitoring-probe
-        status_frontmatter: resolved
-        ```
-        """).strip()
-        captured_full: list[str] = []
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent",
-            stub_invoke(captured_full, fallback_response),
-        )
-        result = report_handler.handle(ctx)
-        assert len(captured_full) == 1
-        assert "insufficient" in result.payload["mechanical_fallback_reason"].lower()
-
-    def test_tier1_failure_on_analyze_mechanical_rolls_back(
-        self, tmp_path, monkeypatch,
-    ):
-        """If Tier-1 rejects the mechanically-composed analyze report, roll
-        back both writes before dispatching the full-context subagent."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "benign",
-                "confidence": "high",
-                "matched_archetype": "monitoring-probe",
-                "surviving_hypotheses": ["h-001"],
-            },
-            investigation_md=_INV_RESOLVED_ANCHOR,
-        )
-        inv_before = (ctx.run_dir / "investigation.md").read_text()
-
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
-            return "<summary>\nResolved.\n</summary>"
-
-        def fail_tier1(_path):
-            from scripts.orchestrate import OrchestrationError
-            raise OrchestrationError("simulated tier-1 rejection")
-
-        monkeypatch.setattr(
-            report_handler, "_shared_invoke", fake_narrative,
-        )
-        monkeypatch.setattr(
-            report_handler, "_run_tier1_validation", fail_tier1,
-        )
-        fallback_response = textwrap.dedent("""
-        ```yaml
-        status: written
-        report_path: /tmp/report.md
-        disposition: benign
-        confidence: high
-        matched_archetype: monitoring-probe
-        status_frontmatter: resolved
-        ```
-        """).strip()
-        captured_full: list[str] = []
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent",
-            stub_invoke(captured_full, fallback_response),
-        )
-
-        result = report_handler.handle(ctx)
-        assert len(captured_full) == 1  # fallback fired
-        assert result.payload["compose_mode"] == "subagent"
-        assert "Tier-1" in result.payload["mechanical_fallback_reason"]
-        # Rollback invariants.
-        assert (ctx.run_dir / "investigation.md").read_text() == inv_before
-        assert not (ctx.run_dir / "report.md").exists()
-
-    def test_forced_report_skips_analyze_mechanical(
-        self, tmp_path, monkeypatch,
-    ):
-        """ctx.forced_report=True means ANALYZE never ran coherently; the
-        mechanical path must be bypassed. The full-context subagent fires
-        with routing_source=forced_exhaustion."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "benign",
-                "confidence": "high",
-                "matched_archetype": "monitoring-probe",
-                "surviving_hypotheses": ["h-001"],
-            },
-            investigation_md=_INV_RESOLVED_ANCHOR,
-        )
-        ctx.forced_report = True
-
-        # Narrative MUST NOT fire.
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
-            raise AssertionError("narrative subagent must not fire on forced_report")
-
-        monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
-
-        fallback_response = textwrap.dedent("""
-        ```yaml
-        status: written
-        report_path: /tmp/report.md
-        disposition: unclear
-        confidence: low
-        matched_archetype: null
-        status_frontmatter: escalated
-        ```
-        """).strip()
-        captured_full: list[str] = []
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent",
-            stub_invoke(captured_full, fallback_response),
-        )
-        report_handler.handle(ctx)
-        assert len(captured_full) == 1
-        assert "routing_source=forced_exhaustion" in captured_full[0]
-
-    def test_adversarial_disposition_forces_escalation_even_with_archetype(
-        self, tmp_path, monkeypatch,
-    ):
-        """disposition=true_positive or unclear must NOT resolve, even
-        if matched_archetype is set and anchors are confirmed. Mirrors the
-        legitimacy-gated-disposition rule in invlang v2.9."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "true_positive",
-                "confidence": "high",
-                "matched_archetype": "monitoring-probe",
-                "surviving_hypotheses": ["h-003"],
-            },
-            investigation_md=_INV_RESOLVED_ANCHOR,
-        )
-
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
-            return (
-                "<summary>\nAdversarial grade confirmed.\n</summary>\n\n"
-                "<for-analyst>\n- Isolate host.\n</for-analyst>"
-            )
-
-        monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
-        )
-
-        result = report_handler.handle(ctx)
-        assert result.payload["compose_mode"] == "analyze_mechanical"
-        assert result.payload["status_frontmatter"] == "escalated"
-        assert result.payload["disposition"] == "true_positive"
-
-    def test_prose_form_gather_fallback_parser(self, tmp_path):
-        """When investigation.md has no `findings:` YAML fences but has
-        prose-form `## GATHER` sections with `**Lead:**` / `**Status:**`
-        lines (the shape ANALYZE currently produces), the parser falls back
-        to prose extraction and returns lead entries with name + status +
-        loop. This is the real-world shape from orchestrator eval runs."""
-        md = (
-            "## CONTEXTUALIZE\n\nobserved.\n\n"
-            "## GATHER (loop 1)\n\n"
-            "**Lead:** container-baseline\n"
-            "**Status:** ok\n"
-            "**Query:** `rule.id:100001 --window 7d`\n\n"
-            "**Raw observation:**\n- 35 events over 7 days\n\n"
-            "## ANALYZE (loop 1)\n\nassessment.\n\n"
-            "## GATHER (loop 2)\n\n"
-            "**Lead:** deploy-runs-anchor\n"
-            "**Status:** data_missing\n\n"
-            "## ANALYZE (loop 2)\n\nfinal routing.\n"
-        )
-        gather = report_handler._extract_findings_blocks(md)
-        assert len(gather) == 2
-        assert gather[0]["name"] == "container-baseline"
-        assert gather[0]["loop"] == 1
-        assert gather[0]["status"] == "ok"
-        assert gather[1]["name"] == "deploy-runs-anchor"
-        assert gather[1]["status"] == "data_missing"
-
-    def test_yaml_gather_block_preferred_over_prose(self, tmp_path):
-        """When both YAML and prose forms are present, YAML wins — its
-        structured outcome fields are needed for trust_anchors derivation."""
-        md = (
-            "## GATHER (loop 1)\n\n"
-            "**Lead:** prose-form-lead\n\n"
-            "```yaml\n"
-            "findings:\n"
-            "- id: l-001\n"
-            "  name: yaml-form-lead\n"
-            "  outcome:\n"
-            "    anchor_consultations:\n"
-            "      - anchor_id: x\n"
-            "        result: confirmed\n"
-            "```\n"
-        )
-        gather = report_handler._extract_findings_blocks(md)
-        assert len(gather) == 1
-        assert gather[0]["name"] == "yaml-form-lead"
-        assert gather[0]["outcome"]["anchor_consultations"][0]["result"] == "confirmed"
-
-    def test_analyze_unclear_disposition_passes_through(
-        self, tmp_path, monkeypatch,
-    ):
-        """v2.11: ANALYZE emits disposition ∈ {benign, true_positive, unclear}
-        directly — no handler-side remap. Non-benign dispositions always
-        escalate; unclear specifically surfaces to frontmatter unchanged."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "unclear",
-                "confidence": "medium",
-                "matched_archetype": None,
-                "surviving_hypotheses": ["h-001", "h-002"],
-            },
-            investigation_md=(
-                "## CONTEXTUALIZE\n\n**Alert:** test\n\n"
-                "## GATHER (loop 1)\n\n**Lead:** test-lead\n**Status:** ok\n\n"
-                "## ANALYZE (loop 1)\n\nEscalation rationale.\n"
-            ),
-        )
-
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "archetype-match":
-                return "```yaml\nmatched_archetype: monitoring-probe\njustification: stub\n```"
-            return (
-                "<summary>\nEscalated for analyst review.\n</summary>\n\n"
-                "<for-analyst>\n- Verify X.\n</for-analyst>"
-            )
-
-        monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
-        )
-
-        result = report_handler.handle(ctx)
-        assert result.payload["compose_mode"] == "analyze_mechanical"
-        assert result.payload["status_frontmatter"] == "escalated"
-        assert result.payload["disposition"] == "unclear"
-
-        report = (ctx.run_dir / "report.md").read_text()
-        assert "status: escalated" in report
-        assert "disposition: unclear" in report
-        # `escalated` is a status, never a disposition.
-        assert "disposition: escalated" not in report
-
-    def test_archetype_match_is_invoked_on_analyze_routed_path(
-        self, tmp_path, monkeypatch,
-    ):
-        """REPORT handler must invoke archetype-match at dispatch time (the
-        CONTEXTUALIZE→REPORT dispatch move). The matched_archetype in the
-        written report must come from archetype-match's stub, not from
-        analyze_payload."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "benign",
-                "confidence": "high",
-                # Deliberately set to a value archetype-match will override.
-                "matched_archetype": "analyze-was-authoritative-ignore-me",
-                "surviving_hypotheses": ["h-001"],
-            },
-            investigation_md=_INV_RESOLVED_ANCHOR,
-        )
-        archetype_match_prompts: list[str] = []
-
-        def fake_archetype(prompt, *, timeout=None, session_id=None):
-            archetype_match_prompts.append(prompt)
-            return "```yaml\nmatched_archetype: monitoring-probe\njustification: picked at REPORT time\n```"
-
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "report_narrative":
-                return "<summary>\nResolved via anchor.\n</summary>"
-            raise AssertionError(f"unexpected subagent: {agent}")
-
-        monkeypatch.setattr(report_handler, "_invoke_archetype_match", fake_archetype)
-        monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
-        )
-
-        result = report_handler.handle(ctx)
-        assert len(archetype_match_prompts) == 1, (
-            "archetype-match must fire exactly once on the ANALYZE-routed path"
-        )
-        # The archetype-match stub's answer drives the report, not ANALYZE's.
-        assert result.payload["matched_archetype"] == "monitoring-probe"
-        # Prompt carries the confirmed evidence inputs (not just the alert).
-        prompt = archetype_match_prompts[0]
-        assert "disposition=benign" in prompt
-        assert "confidence=high" in prompt
-        assert "mechanism_summary=" in prompt
-        assert "trust_anchors_confirmed:" in prompt
-
-    def test_mechanism_summary_uses_analyze_rationale_when_present(
-        self, tmp_path, monkeypatch,
-    ):
-        """ANALYZE's optional `rationale` field (one-line mechanism summary
-        from the terminal YAML) flows into archetype-match's
-        `mechanism_summary` input. Without it, the summary falls back to
-        `surviving: <ids>` which is anemic."""
-        ctx = _seed_ctx_for_analyze_mechanical(
-            tmp_path,
-            analyze_payload={
-                "disposition": "benign",
-                "confidence": "high",
-                "rationale": "cadenced monitoring probe; anchor authorized",
-                "surviving_hypotheses": ["h-001"],
-            },
-            investigation_md=_INV_RESOLVED_ANCHOR,
-        )
-        archetype_match_prompts: list[str] = []
-
-        def fake_archetype(prompt, *, timeout=None, session_id=None):
-            archetype_match_prompts.append(prompt)
-            return (
-                "```yaml\nmatched_archetype: monitoring-probe\n"
-                "justification: stub\n```"
-            )
-
-        def fake_narrative(agent, prompt, *, model=None, timeout=None):
-            if agent == "report_narrative":
-                return "<summary>\nResolved.\n</summary>"
-            raise AssertionError(f"unexpected subagent: {agent}")
-
-        monkeypatch.setattr(report_handler, "_invoke_archetype_match", fake_archetype)
-        monkeypatch.setattr(report_handler, "_shared_invoke", fake_narrative)
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent", stub_invoke([], "UNEXPECTED"),
-        )
-
-        report_handler.handle(ctx)
-        prompt = archetype_match_prompts[0]
-        assert (
-            "mechanism_summary=cadenced monitoring probe; anchor authorized"
-            in prompt
-        ), f"rationale not threaded into archetype-match prompt: {prompt}"
-        # The fallback shape must not appear when rationale is present.
-        assert "mechanism_summary=surviving: h-001" not in prompt
-
-    def test_no_analyze_payload_skips_mechanical_path(
-        self, tmp_path, monkeypatch,
-    ):
-        """Missing ANALYZE output → no mechanical attempt, fall through."""
-        ctx = make_ctx(tmp_path, ticket_id="SEC-2026-042")
-        # No ANALYZE or SCREEN output. Handler routes to forced_exhaustion.
-        response = textwrap.dedent("""
-        ```yaml
-        status: written
-        report_path: /tmp/report.md
-        disposition: unclear
-        confidence: low
-        matched_archetype: null
-        status_frontmatter: escalated
-        ```
-        """).strip()
-        captured: list[str] = []
-        monkeypatch.setattr(
-            report_handler, "_invoke_subagent", stub_invoke(captured, response),
-        )
-        report_handler.handle(ctx)
-        assert len(captured) == 1
-        # mechanical_fallback_reason should NOT be set — we never attempted
-        # a mechanical compose.
-        # (The test covers the "no preconditions met" branch.)

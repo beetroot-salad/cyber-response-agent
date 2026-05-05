@@ -5,10 +5,10 @@ Used by hooks/scripts/infer_state.py to enforce state machine integrity.
 """
 
 from datetime import datetime, UTC
-from enum import Enum
+from enum import StrEnum
 
 
-class Phase(str, Enum):
+class Phase(StrEnum):
     CONTEXTUALIZE = "CONTEXTUALIZE"
     SCREEN = "SCREEN"
     PREDICT = "PREDICT"

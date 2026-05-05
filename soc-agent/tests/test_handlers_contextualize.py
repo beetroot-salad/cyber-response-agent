@@ -270,7 +270,8 @@ class TestPreflightIntegration:
         ctx_handler.handle(ctx)
         inv = (ctx.run_dir / "investigation.md").read_text()
         assert "all systems reachable" in inv
-        assert "wazuh" in inv and "host_query" in inv
+        assert "wazuh" in inv
+        assert "host_query" in inv
 
     def test_degraded_system_named(self, tmp_path, monkeypatch):
         _wire_subagents(monkeypatch, preflight={

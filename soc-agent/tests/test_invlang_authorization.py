@@ -403,13 +403,16 @@ class TestCheckAffirmativeTruePositive:
             resolutions=[("h-001", "+")],
         )
         errors = _check_affirmative_true_positive(merged)
-        assert errors and "true_positive" in errors[0] and "h-001" in errors[0]
+        assert errors
+        assert "true_positive" in errors[0]
+        assert "h-001" in errors[0]
 
     def test_survivor_with_no_resolution_fails(self):
         # Hypothesis declared but never graded.
         merged = _tp_fixture(surviving=["h-001"])
         errors = _check_affirmative_true_positive(merged)
-        assert errors and "++" in errors[0]
+        assert errors
+        assert "++" in errors[0]
 
     def test_benign_named_survivor_at_pp_passes(self):
         # v2.16: classification/name no longer matter; ++ is sufficient.
@@ -476,7 +479,9 @@ class TestCheckAffirmativeTruePositive:
             resolutions=[("h-001", "++")],
         )
         errors = _check_affirmative_true_positive(merged)
-        assert errors and "undeclared" in errors[0].lower() and "h-999" in errors[0]
+        assert errors
+        assert "undeclared" in errors[0].lower()
+        assert "h-999" in errors[0]
 
     def test_empty_surviving_falls_back_to_all_hypotheses(self):
         # surviving_hypotheses absent → scan all declared; ++ on any passes.

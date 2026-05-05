@@ -1470,9 +1470,8 @@ def _validate_cross_block_invariants(
     # is intentionally NOT checked here — see validator rule #36 (v2.16) for
     # the rationale; the lexical token list was brittle and desynced from
     # playbook-canonical hypothesis names.
-    if routing.get("disposition") == "true_positive":
-        if not any(final_after.get(hid) == "++" for hid in surviving):
-            raise AnalyzeOutputError(
+    if routing.get("disposition") == "true_positive" and not any(final_after.get(hid) == "++" for hid in surviving):
+        raise AnalyzeOutputError(
                 f"analyze :A routing disposition=true_positive requires at "
                 f"least one surviving hypothesis whose final weight is ++ "
                 f"(X5, validator rule #36); "

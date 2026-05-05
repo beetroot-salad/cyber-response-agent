@@ -29,6 +29,7 @@ Known limitation — JSONL race window:
 """
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -214,10 +215,8 @@ def clean_jsonl(
             os.replace(tmp, path)
         except OSError as e:
             # Clean up tmp if the replace failed; original file is untouched.
-            try:
+            with contextlib.suppress(OSError):
                 tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
             print(f"warning: could not rewrite {path.name}: {e}", file=sys.stderr)
             return len(kept) - dropped, 0  # report as if nothing dropped
 

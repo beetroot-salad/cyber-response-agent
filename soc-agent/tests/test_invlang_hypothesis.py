@@ -60,7 +60,8 @@ class TestHypothesisForkDistinctness:
         ]}}
         errors = _check_hypothesis_fork_distinctness(merged)
         assert len(errors) == 1
-        assert "h-001" in errors[0] and "h-002" in errors[0]
+        assert "h-001" in errors[0]
+        assert "h-002" in errors[0]
         assert "runtime-descendant" in errors[0]
 
     def test_same_classification_different_vertex_passes(self):
@@ -84,7 +85,8 @@ class TestHypothesisForkDistinctness:
         ]}}
         errors = _check_hypothesis_fork_distinctness(merged)
         assert len(errors) == 1
-        assert "h-001-001" in errors[0] and "h-001-002" in errors[0]
+        assert "h-001-001" in errors[0]
+        assert "h-001-002" in errors[0]
 
     def test_missing_classification_skipped(self):
         merged = {"hypothesize": {"hypotheses": [
@@ -416,7 +418,8 @@ class TestCheckCompoundPredictionClaim:
         ]}}
         errors = _check_compound_prediction_claim(merged)
         assert len(errors) == 1
-        assert "h-001" in errors[0] and "p1" in errors[0]
+        assert "h-001" in errors[0]
+        assert "p1" in errors[0]
         assert "semicolon" in errors[0]
 
     def test_uppercase_AND_fails(self):
@@ -524,7 +527,8 @@ class TestCheckClassificationEvaluationPrefix:
         ]}}
         errors = _check_classification_evaluation_prefix(merged)
         assert len(errors) == 1
-        assert "?authorized-" in errors[0] and "h-001" in errors[0]
+        assert "?authorized-" in errors[0]
+        assert "h-001" in errors[0]
 
     def test_adversary_controlled_not_flagged(self):
         merged = {"hypothesize": {"hypotheses": [
@@ -584,7 +588,8 @@ class TestCheckPredictionsLeanness:
         merged = {"hypothesize": {"hypotheses": [self._h("h-001", 3)]}}
         errors = _check_predictions_leanness(merged)
         assert len(errors) == 1
-        assert "h-001" in errors[0] and "3 predictions" in errors[0]
+        assert "h-001" in errors[0]
+        assert "3 predictions" in errors[0]
 
     def test_zero_predictions_passes(self):
         merged = {"hypothesize": {"hypotheses": [self._h("h-001", 0)]}}
@@ -662,7 +667,8 @@ class TestCheckPredictionSubjectScope:
         ]}}
         errors = _check_prediction_subject_scope(merged)
         assert len(errors) == 1
-        assert "v-042" in errors[0] and "outside the hypothesis's one-hop" in errors[0]
+        assert "v-042" in errors[0]
+        assert "outside the hypothesis's one-hop" in errors[0]
 
     def test_multiple_predictions_each_checked(self):
         merged = {"hypothesize": {"hypotheses": [
@@ -878,7 +884,8 @@ class TestCheckIntegrityPeerDiscipline:
         ]}}
         errors = _check_integrity_peer_discipline(merged)
         assert len(errors) == 1
-        assert "h-001" in errors[0] and "h-002" in errors[0]
+        assert "h-001" in errors[0]
+        assert "h-002" in errors[0]
         assert "invoker-identity anti-pattern" in errors[0]
 
     def test_peer_with_subset_predictions_flagged(self):
@@ -981,7 +988,8 @@ class TestAttributePredictionStructure:
             {"id": "attr-1", "target": "proposed_parent", "attribute": "cmdline", "claim": "x"},
         ])
         errors = _check_attribute_prediction_structure(merged)
-        assert errors and "ap\\d+" in errors[0]
+        assert errors
+        assert "ap\\d+" in errors[0]
 
     def test_duplicate_id_fails(self):
         merged = self._h_with_attr_preds([
@@ -989,28 +997,32 @@ class TestAttributePredictionStructure:
             {"id": "ap1", "target": "proposed_parent", "attribute": "pname", "claim": "y"},
         ])
         errors = _check_attribute_prediction_structure(merged)
-        assert errors and "duplicate" in errors[0]
+        assert errors
+        assert "duplicate" in errors[0]
 
     def test_bad_target_fails(self):
         merged = self._h_with_attr_preds([
             {"id": "ap1", "target": "random_thing", "attribute": "cmdline", "claim": "x"},
         ])
         errors = _check_attribute_prediction_structure(merged)
-        assert errors and "target" in errors[0]
+        assert errors
+        assert "target" in errors[0]
 
     def test_missing_attribute_fails(self):
         merged = self._h_with_attr_preds([
             {"id": "ap1", "target": "proposed_parent", "claim": "x"},
         ])
         errors = _check_attribute_prediction_structure(merged)
-        assert errors and "attribute" in errors[0]
+        assert errors
+        assert "attribute" in errors[0]
 
     def test_empty_claim_fails(self):
         merged = self._h_with_attr_preds([
             {"id": "ap1", "target": "proposed_parent", "attribute": "cmdline", "claim": ""},
         ])
         errors = _check_attribute_prediction_structure(merged)
-        assert errors and "claim" in errors[0]
+        assert errors
+        assert "claim" in errors[0]
 
     def test_non_list_attribute_predictions_fails(self):
         merged = {"hypothesize": {"hypotheses": [{
@@ -1020,7 +1032,8 @@ class TestAttributePredictionStructure:
             "attribute_predictions": "not-a-list",
         }]}}
         errors = _check_attribute_prediction_structure(merged)
-        assert errors and "must be a list" in errors[0]
+        assert errors
+        assert "must be a list" in errors[0]
 
 
 class TestRefutationCitesAttributePrediction:
@@ -1068,7 +1081,8 @@ class TestRefutationCitesAttributePrediction:
             ],
         }]}}
         errors = _check_refutation_prediction_links(merged)
-        assert errors and "ap99" in errors[0]
+        assert errors
+        assert "ap99" in errors[0]
 
 
 class TestResolutionCitesAttributePrediction:
@@ -1103,7 +1117,8 @@ class TestResolutionCitesAttributePrediction:
 
     def test_matched_foreign_ap_id_fails(self):
         errors = _check_prediction_id_hypothesis_scope(self._merged_with_res(["ap99"]))
-        assert errors and "ap99" in errors[0]
+        assert errors
+        assert "ap99" in errors[0]
 
 
 class TestCompoundAttributePredictionClaim:
@@ -1120,7 +1135,9 @@ class TestCompoundAttributePredictionClaim:
             ],
         }]}}
         errors = _check_compound_prediction_claim(merged)
-        assert errors and "ap1" in errors[0] and "'AND'" in errors[0]
+        assert errors
+        assert "ap1" in errors[0]
+        assert "'AND'" in errors[0]
 
 
 class TestSiblingPredictionDivergence:
@@ -1172,7 +1189,8 @@ class TestSiblingPredictionDivergence:
         ]}, "findings": []}
         errors = _check_sibling_prediction_divergence(merged)
         assert errors
-        assert "h-001" in errors[0] and "h-002" in errors[0]
+        assert "h-001" in errors[0]
+        assert "h-002" in errors[0]
         assert "identical prediction signatures" in errors[0]
 
     def test_case_insensitive_paraphrase_fails(self):
@@ -1275,4 +1293,5 @@ class TestSiblingPredictionDivergence:
         ]}, "findings": []}
         errors = _check_sibling_prediction_divergence(merged)
         assert errors
-        assert "h-001-001" in errors[0] and "h-001-002" in errors[0]
+        assert "h-001-001" in errors[0]
+        assert "h-001-002" in errors[0]

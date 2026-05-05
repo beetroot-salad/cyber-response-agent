@@ -13,6 +13,7 @@ hook stays well clear of ARG_MAX on any platform.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import secrets
@@ -95,10 +96,8 @@ def _run_one_judge(prompt: str, deadline: float, total_timeout: int) -> tuple[st
         return (stdout or "").strip(), p.returncode
     except subprocess.TimeoutExpired:
         p.kill()
-        try:
+        with contextlib.suppress(Exception):
             p.communicate(timeout=5)
-        except Exception:
-            pass
         return f"judge timed out after {total_timeout}s", 1
 
 

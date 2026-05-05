@@ -553,7 +553,8 @@ class TestEnvelope:
         # lines closed the story prematurely.
         result = parse_predict_output(_d(body))
         story = result.invlang_delta["hypotheses"][0]["story"]
-        assert "s1." in story and "s2." in story
+        assert "s1." in story
+        assert "s2." in story
 
     def test_attr_pred_in_comparisons_diagnoses_specifically(self):
         # An ap* id in a comparisons row gets a targeted error mentioning

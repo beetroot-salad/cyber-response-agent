@@ -102,7 +102,7 @@ def stub_invoke(captured: list[str], responses: list[str]):
         except StopIteration:
             raise AssertionError(
                 "stub exhausted — handler called subagent more times than scripted"
-            )
+            ) from None
     return fn
 
 

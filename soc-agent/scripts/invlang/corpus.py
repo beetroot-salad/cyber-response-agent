@@ -88,8 +88,7 @@ class Companion:
         any new_hypotheses spawned in leads."""
         yield from self.hypotheses
         for lead in self.leads:
-            for h in lead.get("new_hypotheses", []) or []:
-                yield h
+            yield from lead.get("new_hypotheses", []) or []
 
 
 # ---------------------------------------------------------------------------

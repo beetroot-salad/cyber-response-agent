@@ -1071,7 +1071,7 @@ class TestVertexWhereParser:
         assert _parse_vertex_where_spec("endpoint:*") == ("endpoint", {})
 
     def test_malformed_pair_raises(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"--vertex-where"):
             _parse_vertex_where_spec("endpoint:classificationonly")
 
     def test_match_kind_only(self):
@@ -1417,7 +1417,8 @@ class TestPrintResult:
         _print_result("L", {"count": 2, "hits": ["a", "b"]}, limit=10)
         out = capsys.readouterr().out
         assert "L → 2 hit(s)" in out
-        assert "a" in out and "b" in out
+        assert "a" in out
+        assert "b" in out
         assert "more)" not in out
 
     def test_hits_truncated_to_limit_shows_remaining(self, capsys):

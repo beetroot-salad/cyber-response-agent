@@ -408,10 +408,8 @@ class TestRetrieve:
         # Pin "today" before the live window's start
         results = retrieve(tmp_path, ctx, today=date(2025, 6, 1))
         for atom, flags in results:
-            if atom.id in ("pe-baseline", "net-baseline", "tombstoned-atom"):
-                # tombstoned excluded; the live ones flag pre_window
-                if atom.id != "tombstoned-atom":
-                    assert flags["pre_window"] is True
+            if atom.id in ("pe-baseline", "net-baseline", "tombstoned-atom") and atom.id != "tombstoned-atom":
+                assert flags["pre_window"] is True
 
     def test_top_k_truncation(self, tmp_path: Path):
         self._setup_corpus(tmp_path)

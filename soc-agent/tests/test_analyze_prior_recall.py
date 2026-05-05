@@ -217,7 +217,8 @@ def test_lead_name_wrapped_in_wildcards_to_match_naming_drift():
     # wildcarding, exact match returns zero (run #52 finding).
     corpus = [_make_companion("c1", lead_name="approved-monitoring-sources-anchor")]
     out = pr._recall_lead(corpus, "approved-monitoring-sources-lookup", [])
-    assert out is not None and out["count"] == 1
+    assert out is not None
+    assert out["count"] == 1
 
 
 def test_unscoped_used_when_corpus_too_small_to_narrow(monkeypatch):

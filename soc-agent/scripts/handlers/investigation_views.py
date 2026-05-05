@@ -199,6 +199,80 @@ def _latest_structured_section(sections: list[dict], phase: str) -> dict | None:
     return None
 
 
+def _collect_hypotheses_from_parsed(
+    parsed: dict, hypotheses_by_id: dict[str, dict]
+) -> None:
+    """Merge hypotheses from one parsed companion dict into hypotheses_by_id."""
+    hypothesize = parsed.get("hypothesize")
+    if isinstance(hypothesize, dict):
+        for h in hypothesize.get("hypotheses") or []:
+            if not isinstance(h, dict):
+                continue
+            hid = h.get("id")
+            if isinstance(hid, str) and hid:
+                hypotheses_by_id[hid] = h
+
+
+def _apply_resolution_signal(
+    resolution: dict,
+    weights_by_id: dict[str, str],
+    refuted_ids: set[str],
+) -> None:
+    if not isinstance(resolution, dict):
+        return
+    hid = resolution.get("hypothesis")
+    after = resolution.get("after")
+    if not isinstance(hid, str) or not hid:
+        return
+    if isinstance(after, str) and after:
+        weights_by_id[hid] = after
+        if after == "--":
+            refuted_ids.add(hid)
+        else:
+            refuted_ids.discard(hid)
+
+
+def _collect_findings_signals(
+    lead: dict,
+    hypotheses_by_id: dict[str, dict],
+    weights_by_id: dict[str, str],
+    refuted_ids: set[str],
+    shelved_ids: set[str],
+) -> None:
+    """Apply one lead's signals (new_hypotheses, resolutions, shelved) to state."""
+    for h in lead.get("new_hypotheses") or []:
+        if not isinstance(h, dict):
+            continue
+        hid = h.get("id")
+        if isinstance(hid, str) and hid:
+            hypotheses_by_id[hid] = h
+    for resolution in lead.get("resolutions") or []:
+        _apply_resolution_signal(resolution, weights_by_id, refuted_ids)
+    for hid in lead.get("shelved") or []:
+        if isinstance(hid, str) and hid:
+            shelved_ids.add(hid)
+
+
+def _materialize_frontier(
+    hypotheses_by_id: dict[str, dict],
+    weights_by_id: dict[str, str],
+    refuted_ids: set[str],
+    shelved_ids: set[str],
+) -> list[dict]:
+    """Filter and decorate survivors into the active frontier."""
+    frontier: list[dict] = []
+    for hid, hypothesis in hypotheses_by_id.items():
+        if hid in shelved_ids or hid in refuted_ids:
+            continue
+        current = dict(hypothesis)
+        if hid in weights_by_id:
+            current["weight"] = weights_by_id[hid]
+            if weights_by_id[hid] == "++":
+                current["status"] = "confirmed"
+        frontier.append(current)
+    return frontier
+
+
 def _section_for_loop(
     sections: list[dict],
     phase: str,
@@ -773,55 +847,16 @@ def _predict_frontier_hypotheses(sections: list[dict]) -> list[dict]:
         if not fences.strip():
             continue
         for parsed in iter_companion_dicts(fences):
-            hypothesize = parsed.get("hypothesize")
-            if isinstance(hypothesize, dict):
-                for h in hypothesize.get("hypotheses") or []:
-                    if not isinstance(h, dict):
-                        continue
-                    hid = h.get("id")
-                    if isinstance(hid, str) and hid:
-                        hypotheses_by_id[hid] = h
-
+            _collect_hypotheses_from_parsed(parsed, hypotheses_by_id)
             findings = parsed.get("findings")
-            if not isinstance(findings, list):
-                continue
-            for lead in findings:
-                if not isinstance(lead, dict):
-                    continue
-                for h in lead.get("new_hypotheses") or []:
-                    if not isinstance(h, dict):
-                        continue
-                    hid = h.get("id")
-                    if isinstance(hid, str) and hid:
-                        hypotheses_by_id[hid] = h
-                for resolution in lead.get("resolutions") or []:
-                    if not isinstance(resolution, dict):
-                        continue
-                    hid = resolution.get("hypothesis")
-                    after = resolution.get("after")
-                    if not isinstance(hid, str) or not hid:
-                        continue
-                    if isinstance(after, str) and after:
-                        weights_by_id[hid] = after
-                        if after == "--":
-                            refuted_ids.add(hid)
-                        else:
-                            refuted_ids.discard(hid)
-                for hid in lead.get("shelved") or []:
-                    if isinstance(hid, str) and hid:
-                        shelved_ids.add(hid)
-
-    frontier: list[dict] = []
-    for hid, hypothesis in hypotheses_by_id.items():
-        if hid in shelved_ids or hid in refuted_ids:
-            continue
-        current = dict(hypothesis)
-        if hid in weights_by_id:
-            current["weight"] = weights_by_id[hid]
-            if weights_by_id[hid] == "++":
-                current["status"] = "confirmed"
-        frontier.append(current)
-    return frontier
+            if isinstance(findings, list):
+                for lead in findings:
+                    if isinstance(lead, dict):
+                        _collect_findings_signals(
+                            lead, hypotheses_by_id, weights_by_id,
+                            refuted_ids, shelved_ids,
+                        )
+    return _materialize_frontier(hypotheses_by_id, weights_by_id, refuted_ids, shelved_ids)
 
 
 def _first_companion_doc(raw: str) -> dict[str, Any]:
@@ -1285,6 +1320,53 @@ def format_predict_state_block(investigation_md: str) -> str:
     return f"<investigation_state>\n{body}\n</investigation_state>"
 
 
+def _format_predict_mode(sections: list[dict]) -> str:
+    """Emit CONTEXTUALIZE + all PREDICT + trimmed GATHER + latest ANALYZE/Self-report."""
+    analyze_sections = [s for s in sections if s["phase"] == "analyze"]
+    selfreport_sections = [s for s in sections if s["phase"] == "self-report"]
+    latest_analyze_idx = sections.index(analyze_sections[-1]) if analyze_sections else -1
+    latest_selfreport_idx = (
+        sections.index(selfreport_sections[-1]) if selfreport_sections else -1
+    )
+    parts: list[str] = []
+    for i, s in enumerate(sections):
+        if s["phase"] in ("contextualize", "predict"):
+            parts.append(_section_text(s))
+        elif s["phase"] == "gather":
+            parts.append(_trim_gather_section(s))
+        elif s["phase"] == "analyze" and i == latest_analyze_idx:
+            parts.append(_section_text(s))
+        elif s["phase"] == "self-report" and i == latest_selfreport_idx:
+            parts.append(_section_text(s))
+    body = "\n\n".join(p.rstrip() for p in parts if p.strip())
+    return f"<investigation mode=\"predict\">\n{body}\n</investigation>"
+
+
+def _format_analyze_mode(sections: list[dict]) -> str:
+    """Emit structured fences only — drop all prose to prevent grading confusion."""
+    parts = []
+    for s in sections:
+        fences = _section_yaml_fences(s)
+        if fences.strip():
+            parts.append(s["header"] + "\n" + fences)
+    body = "\n\n".join(parts)
+    return f"<investigation mode=\"analyze\">\n{body}\n</investigation>"
+
+
+def _format_report_narrative_mode(sections: list[dict]) -> str:
+    """Emit CONTEXTUALIZE + latest PREDICT + latest ANALYZE only."""
+    predict_sections = [s for s in sections if s["phase"] == "predict"]
+    analyze_sections = [s for s in sections if s["phase"] == "analyze"]
+    latest_hyp = predict_sections[-1] if predict_sections else None
+    latest_ana = analyze_sections[-1] if analyze_sections else None
+    parts = []
+    for s in sections:
+        if s["phase"] == "contextualize" or s is latest_hyp or s is latest_ana:
+            parts.append(_section_text(s))
+    body = "\n\n".join(p.rstrip() for p in parts if p.strip())
+    return f"<investigation mode=\"report-narrative\">\n{body}\n</investigation>"
+
+
 def format_investigation_block(
     investigation_md: str,
     *,
@@ -1338,62 +1420,10 @@ def format_investigation_block(
         return f"<investigation>\n{body_raw}\n</investigation>"
 
     if mode == "predict":
-        # Latest ANALYZE + Self-report carry the routing rationale for why
-        # we're back in PREDICT — always include those in full.
-        analyze_sections = [s for s in sections if s["phase"] == "analyze"]
-        selfreport_sections = [s for s in sections if s["phase"] == "self-report"]
-        latest_analyze_idx = (
-            sections.index(analyze_sections[-1]) if analyze_sections else -1
-        )
-        latest_selfreport_idx = (
-            sections.index(selfreport_sections[-1]) if selfreport_sections else -1
-        )
-        parts: list[str] = []
-        for i, s in enumerate(sections):
-            if s["phase"] == "contextualize" or s["phase"] == "predict":
-                parts.append(_section_text(s))
-            elif s["phase"] == "gather":
-                parts.append(_trim_gather_section(s))
-            elif s["phase"] == "analyze":
-                if i == latest_analyze_idx:
-                    parts.append(_section_text(s))
-                # else: drop older ANALYZE narrative (its grades are already
-                # rolled into the downstream predict/gather YAML state)
-            elif s["phase"] == "self-report":
-                if i == latest_selfreport_idx:
-                    parts.append(_section_text(s))
-            # Unknown phase sections are dropped.
-        body = "\n\n".join(p.rstrip() for p in parts if p.strip())
-        return f"<investigation mode=\"predict\">\n{body}\n</investigation>"
-
+        return _format_predict_mode(sections)
     if mode == "analyze":
-        # Structured-fence-only: drop every markdown-prose surface that
-        # could be mistaken for a grading target. The canonical hypothesis
-        # set lives inside `hypothesize.hypotheses[]` in the PREDICT
-        # ```invlang fence; archetype catalogs and playbook-hypothesis
-        # enumerations that appear in prose must not be visible to the
-        # analyze subagent. Prior-loop grades live inside prior
-        # `findings[]` ```invlang fences — those are kept.
-        parts = []
-        for s in sections:
-            fences = _section_yaml_fences(s)
-            if fences.strip():
-                parts.append(s["header"] + "\n" + fences)
-        body = "\n\n".join(parts)
-        return f"<investigation mode=\"analyze\">\n{body}\n</investigation>"
-
-    # mode == "report-narrative"
-    predict_sections = [s for s in sections if s["phase"] == "predict"]
-    analyze_sections = [s for s in sections if s["phase"] == "analyze"]
-    latest_hyp = predict_sections[-1] if predict_sections else None
-    latest_ana = analyze_sections[-1] if analyze_sections else None
-    parts = []
-    for s in sections:
-        if s["phase"] == "contextualize" or s is latest_hyp or s is latest_ana:
-            parts.append(_section_text(s))
-        # Everything else (GATHER, self-report, prior PREDICT/ANALYZE) dropped.
-    body = "\n\n".join(p.rstrip() for p in parts if p.strip())
-    return f"<investigation mode=\"report-narrative\">\n{body}\n</investigation>"
+        return _format_analyze_mode(sections)
+    return _format_report_narrative_mode(sections)
 
 
 def predict_frontier_hypotheses(investigation_md: str) -> list[dict]:

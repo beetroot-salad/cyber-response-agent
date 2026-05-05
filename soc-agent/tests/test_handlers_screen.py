@@ -429,7 +429,8 @@ class TestGatherExtraction:
         }
         out = screen_handler._extract_findings_dense_from_parsed(parsed)
         assert out.startswith(":L findings ")
-        assert "l-001" in out and "l-002" in out
+        assert "l-001" in out
+        assert "l-002" in out
 
     def test_empty_when_gather_absent(self):
         assert screen_handler._extract_findings_dense_from_parsed({}) == ""

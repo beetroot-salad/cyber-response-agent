@@ -12,6 +12,7 @@ Then open http://127.0.0.1:8765/.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import html
 import json
 import re
@@ -409,10 +410,8 @@ def main():
     print(f"observe: http://{args.host}:{args.port}/")
     for p in parents:
         print(f"  scanning: {p}")
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":
