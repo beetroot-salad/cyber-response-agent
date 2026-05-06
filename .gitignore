@@ -82,3 +82,6 @@ temp/
 # Scratch dir for ephemeral experiment outputs, golden-reference drafts,
 # forensic notes — not meant to ship
 /tasks-scratch/
+
+# Local experiment scratch — design drafts get extracted to docs/ before shipping
+/experiments/
