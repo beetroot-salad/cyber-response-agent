@@ -118,11 +118,11 @@ for learning.
 
 ## Deliverables
 
-1. `experiments/critic-architecture/defender/SKILL.md` — the single-agent
+1. `defender/SKILL.md` — the single-agent
    skill prompt (top-level skill the user invokes). Principles + phase prose +
    two or three worked examples (cherry-pick from existing `runs/` — bait,
    cron-noise, real brute force). Examples carry the shape; no checklists.
-2. `experiments/critic-architecture/defender/skills/` — domain knowledge as
+2. `defender/skills/` — domain knowledge as
    loadable skills. At minimum:
    - `gather/SKILL.md` — gather subagent prompt: take a lead description,
      pick the right query template, run it, summarize for the parent, write
@@ -133,18 +133,18 @@ for learning.
      defender when authoring the investigation log.
    - Stubs for whatever environment skills the pilot fixtures need (e.g.
      `wazuh/SKILL.md`, `host-query/SKILL.md`).
-3. `experiments/critic-architecture/defender/run.sh` — wrapper that takes
+3. `defender/run.sh` — wrapper that takes
    `alert.json`, sets up a run dir, invokes the defender, and captures
    `investigation.md` + `lead_sequence.yaml` + `report.md` +
    `tool_trace.jsonl` + `gather_raw/`.
-4. `experiments/critic-architecture/defender/lead_sequence_schema.md` — minimal
+4. `defender/lead_sequence_schema.md` — minimal
    yaml schema (mirror `actor_reviewer_design.md` §"Lead set projection",
    stripped of catalog-slug fields since we're not using a shared lead
    catalog).
 5. Pilot runs against existing fixtures from
    `experiments/critic-architecture/fixtures/` plus 2–3 hard cases from
    `soc-agent/runs/` (bait, ambiguous, true-malicious-with-subtle-tell).
-   Transcripts under `experiments/critic-architecture/defender/results/`.
+   Transcripts under `defender/results/`.
 
 ## Out of scope (explicit)
 

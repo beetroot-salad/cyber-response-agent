@@ -138,7 +138,7 @@ lead_sequence:
 
 The cross-case key is `(query_template.id, params)`. Templates minted in
 one run are written back to the per-system catalog (under
-`experiments/critic-architecture/defender/skills/gather/queries/{system}/`
+`defender/skills/gather/queries/{system}/`
 in the POC), so the catalog grows organically with usage — early
 near-duplicates are accepted and normalized downstream when patterns
 stabilize.
@@ -155,7 +155,7 @@ than asking the actor to infer the lead set from prose.
 > slug catalog (used by the production `soc-agent/` investigate loop) is
 > unchanged; production runs continue to project a slug-keyed
 > `selected_lead`. The query-template keying above is the contract for
-> the `experiments/critic-architecture/defender/` POC and any future
+> the `defender/` POC and any future
 > defender that drops the slug catalog. The learning-loop tooling treats
 > `query_template.id` and `selected_lead` as parallel cross-case keys
 > during the transition.
