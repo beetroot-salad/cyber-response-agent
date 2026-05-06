@@ -45,14 +45,30 @@ first; harden later.
    query-shaped, not intent-shaped, so aligning the key with the executed
    template makes the live and learning loops speak the same language.
 
-   For **novel/inline leads with no matching template**, GATHER mints a new
-   template id on the fly (kebab-case, system-prefixed, e.g.
-   `wazuh.auth-events-by-host`) and writes the template back to the
-   catalog. The catalog grows organically with usage; we accept some
-   near-duplicate slugs early and normalize downstream when patterns
-   stabilize. This keeps every executed query addressable by id from day
-   one — the alternative ("uncategorized" tail) was simpler but pushed the
-   problem onto the actor-reviewer corpus.
+   For **novel leads with no matching template**, GATHER authors a new
+   template inline (kebab-case, system-prefixed, e.g.
+   `wazuh.auth-events-by-host`), runs it, and writes the template back to
+   the catalog before the run ends. The catalog grows organically with
+   usage; we accept some near-duplicate templates early and normalize
+   downstream when patterns stabilize. This keeps every executed query
+   addressable by id from day one — the alternative ("uncategorized" tail)
+   was simpler but pushed the problem onto the actor-reviewer corpus.
+
+   Two things the catalog earns its keep on: (a) cutting data-source
+   debugging out of the loop — which index holds auth events, field names,
+   timestamp formats, NAT collapse, plus non-trivial shapes (joins,
+   aggregations, regex pitfalls) — so the agent doesn't re-derive plumbing
+   under time pressure; (b) anchoring reproducibility for the learning
+   loop, since cases join cross-run on `(template id, bound params)` and
+   ad-hoc one-off queries would not be corpus-queryable by what was
+   actually measured.
+
+   The lead-sequence schema does *not* carry a `source: catalog | minted`
+   distinction or a per-dispatch `mode: single | composite` flag — both
+   are factually derivable but serve no purpose in the gray-box flow.
+   Per-dispatch `gather_status` is also dropped; what the gray-box actor
+   needs is the dispatch (lead description) and the queries that ran,
+   nothing more.
 5. **Schemas only where the learning loop reads them.** PLAN must emit the
    ordered lead-contract sequence (the actor-reviewers replay this). Beyond
    that, drop schema scaffolding — no extraction contracts, no analyze grading

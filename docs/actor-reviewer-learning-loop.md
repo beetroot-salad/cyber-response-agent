@@ -102,14 +102,14 @@ Gray-box is the primary mode because it directly tests whether the lead set is
 
 ### Lead set projection
 
-The "lead set" is the ordered set of PLAN → GATHER lead contracts used in
+The "lead set" is the ordered set of defender→gather dispatches used in
 the investigation, not a loose prose summary of what the investigator did.
-Each entry pairs a free-form lead description (PLAN's intent: goal + what
-to characterize) with the **query template** GATHER actually ran. The
-template id + bound parameters are the cross-case key the learning loop
-joins on — not a lead slug. PLAN does not pick from a slugged lead
-catalog; GATHER picks (or mints) a query template per lead, and the
-template id is what makes a lead addressable across cases.
+Each entry pairs the free-form lead description the defender sent gather
+(goal + what to characterize) with the **queries** gather actually ran.
+The cross-case join key is `(query.id, query.params)` — not a lead slug.
+The defender does not pick from a slugged lead catalog; gather picks (or
+authors) a query template per dispatch, and the template id is what makes
+a lead addressable across cases.
 
 The learning job materializes that ordered contract as:
 
@@ -118,47 +118,38 @@ lead_sequence:
   case_id: <run id>
   entries:
     - position: 0
-      mode: single | composite
       lead_description:
-        goal: <PLAN's measurement contract>
+        goal: <defender's measurement contract>
         what_to_characterize:
           - <dimension the gather result must characterize>
-        emphasis: <optional PLAN emphasis, or null>
-        scope: <window / anchor scope, if present>
-      query_template:
-        id: <system-prefixed kebab, e.g. wazuh.auth-events-by-host>
-        source: catalog | minted    # `minted` = GATHER created it on the fly
-        params: {<param>: <bound value>}
-      legs:                          # populated only when mode == composite
-        - lead_description: {...}
-          query_template: {...}
-      gather_status: <ok | partial | data_missing | empty | error>
+      queries:
+        - id: <system-prefixed kebab, e.g. wazuh.auth-events-by-host>
+          params: {<param>: <bound value>}
       result_ref: <citation to actual result, hidden during gray-box story phase>
 ```
 
-The cross-case key is `(query_template.id, params)`. Templates minted in
-one run are written back to the per-system catalog (under
-`defender/skills/gather/queries/{system}/`
-in the POC), so the catalog grows organically with usage — early
-near-duplicates are accepted and normalized downstream when patterns
-stabilize.
+When gather fans a single dispatch out into multiple queries, each is an
+entry in the same `queries` list — there is no separate composite mode.
+Templates authored during a run are written back to the per-system
+catalog (`defender/skills/gather/queries/{system}/`), so the catalog
+grows organically with usage; early near-duplicates are accepted and
+normalized downstream when patterns stabilize.
 
 For gray-box adversarial runs, the actor first sees `alert.json` plus the
-answer-redacted lead contracts: `position`, `mode`, `lead_description`,
-`query_template` (id + params — the actor sees *what query ran*, not what
-it returned), and composite `legs`. The `gather_status` and `result_ref`
-material are revealed only after the story is written. If the PLAN/GATHER
-contract cannot be projected cleanly, the learning run is rejected rather
-than asking the actor to infer the lead set from prose.
+answer-redacted lead contracts: `position`, `lead_description`, and
+`queries` (id + params — the actor sees *what queries ran*, not what they
+returned). The `result_ref` material is revealed only after the story is
+written. If the dispatch contract cannot be projected cleanly, the
+learning run is rejected rather than asking the actor to infer the lead
+set from prose.
 
 > **Production note.** The legacy `knowledge/common-investigation/leads/`
 > slug catalog (used by the production `soc-agent/` investigate loop) is
 > unchanged; production runs continue to project a slug-keyed
 > `selected_lead`. The query-template keying above is the contract for
-> the `defender/` POC and any future
-> defender that drops the slug catalog. The learning-loop tooling treats
-> `query_template.id` and `selected_lead` as parallel cross-case keys
-> during the transition.
+> the `defender/` agent and any future defender that drops the slug
+> catalog. The learning-loop tooling treats `query.id` and
+> `selected_lead` as parallel cross-case keys during the transition.
 
 ### Schema
 
