@@ -38,12 +38,3 @@ Per-field quirks and authentication query patterns are documented at:
 
 Load them when authoring a query template that touches an unfamiliar
 field.
-
-## Fixture-backed mode
-
-When the run is against a synthetic fixture from
-`experiments/critic-architecture/fixtures/`, gather looks up tool
-results in the fixture's `{NN}.tool_facts.json` keyed by
-`{tool}:{param=value|...}` rather than hitting live Wazuh. The fixture
-file documents the keying convention. The defender does not need to
-care which mode it's in — gather hides the difference.

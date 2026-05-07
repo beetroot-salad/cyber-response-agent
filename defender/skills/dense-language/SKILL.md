@@ -32,10 +32,10 @@ blocks live underneath them.
 - **`:H`** — hypotheses. Row shape:
   `[id|name|attached_to|preds|refuts?|weight|status]`
   `id` like `h-monitoring-probe`. `attached_to` is the vertex the
-  hypothesis predicts an upstream cause for. `preds` is a list of
-  prediction ids defined inline (or referenced from per-lead
-  `lead_preds` blocks). `weight` is one of `unweighted`, `weak`,
-  `strong`. `status` is `live`, `shelved`, or `refuted`.
+  hypothesis predicts an upstream cause for. `preds` is a
+  comma-separated list of prediction ids defined inline in the same
+  `:H` row. `weight` is one of `unweighted`, `weak`, `strong`.
+  `status` is `live`, `shelved`, or `refuted`.
 
 - **`:L`** — lead headers. Row shape:
   `[id|loop|name|goal|what_to_characterize]`

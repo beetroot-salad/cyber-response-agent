@@ -1,6 +1,8 @@
 ---
 name: defender
 description: Investigate a security alert through a single-agent ReAct loop with phase discipline. Outputs a dense investigation log, a lead-sequence contract for the offline learning loop, and a minimal disposition report.
+# allowed-tools below is documentation only — Skill frontmatter does not enforce
+# a tool allowlist. Treat as a reader hint, not a security boundary.
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash, Task, Skill
 ---
 
@@ -21,10 +23,11 @@ uncertain.
    contextualize / predict / analyze / report. The phases below are
    prompt-level discipline, not separate subagents.
 2. **Gather is the only delegation.** Every data-source query goes
-   through the gather subagent (`Task` with the body of
-   `defender/skills/gather/SKILL.md`). Gather returns a summary; raw
-   query output stays out of your context — it is written to
-   `gather_raw/{position}.json` for you to Read on demand.
+   through the gather subagent. You `Read defender/skills/gather/SKILL.md`
+   and pass its contents as the prompt body to a `Task` dispatch (see
+   GATHER below). Gather returns a summary; raw query output stays out
+   of your context — it is written to `gather_raw/{position}.json` for
+   you to Read on demand.
 3. **No preload.** Domain knowledge lives as on-disk skills. Load them
    when you need them via `Skill`, not up front.
 4. **The query template is the cross-case key.** You write free-form
@@ -78,16 +81,17 @@ prediction.
 
 ### GATHER
 
-For each lead, dispatch the gather subagent:
+For each lead, dispatch the gather subagent. The dispatch pattern is:
 
-```
-Task(
-  subagent_type=general-purpose,
-  prompt=<contents of defender/skills/gather/SKILL.md> +
-         <lead description> +
-         <run dir path so gather can write raw + new templates>
-)
-```
+1. `Read defender/skills/gather/SKILL.md` — once per loop is fine; it
+   doesn't change mid-run.
+2. `Task(subagent_type=general-purpose, prompt=<gather SKILL body> +
+   "\n\n## Dispatch\n" + <lead description, run_dir, position>)`
+
+`general-purpose` is the temporary carrier — gather is not yet
+registered as its own subagent. The SKILL body on disk is the single
+source of truth for gather's prompt; do not paraphrase or trim it
+before passing it through.
 
 Gather picks a query template from
 `defender/skills/gather/queries/{system}/`, or authors a new one and
@@ -117,20 +121,18 @@ before deciding.
 
 Author `report.md`: one-line disposition + one paragraph reason citing
 the leads that resolved it. Author the corresponding `:T` block in
-`investigation.md`. Then project `lead_sequence.yaml` from the run per
-`defender/lead_sequence_schema.md`.
+`investigation.md`. Then run the projection script to emit
+`lead_sequence.yaml` from your `investigation.md` + `gather_raw/`:
 
-## Lead sequence projection
+```bash
+python3 defender/scripts/project_lead_sequence.py {run_dir}
+```
 
-End-of-run, walk your `:L` / `:R` blocks in dispatch order and emit
-one entry per gather dispatch. Every entry must have at least one
-`queries[]` element with an `id`. Dispatches that died before running
-anything do not appear in the sequence — the investigation log carries
-the dead-end story, but the sequence surface is "what actually ran."
-
-If your summary of a gather call is too thin to project the entry
-faithfully, Read `gather_raw/{position}.json`; it is the source of
-truth for `params`.
+The script is the single source of truth for projection rules (which
+dispatches count, how composite calls collapse, where `params` come
+from). Don't hand-author `lead_sequence.yaml` — if the script can't
+project it, the investigation log is the bug, not the schema.
+*(Script lands in the run.sh follow-up batch.)*
 
 ## Skills
 
