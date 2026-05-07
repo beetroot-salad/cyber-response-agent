@@ -54,11 +54,29 @@ returned `queries[]` list.
 ### 3. Run the queries
 
 Substitute bound params into each template's `## Query` body and
-execute via the system's CLI (`Bash`). The system CLIs (e.g.
-`wazuh_cli.py --run-dir ${run_dir}`) persist raw output to
-`{run_dir}/gather_raw/` themselves — you do not capture stdout
-manually. Note the path the CLI wrote so you can return it to the
-defender.
+execute via the system's CLI (`Bash`). Pass `--run-dir ${run_dir}`
+and `--position ${position}` — the CLI writes the formatted (or
+`--raw`) output to `{run_dir}/gather_raw/{position}.json` itself; do
+not redirect stdout manually. For multi-query dispatches at the same
+position, suffix `--position` with a single lowercase letter (`0a`,
+`0b`, `0c`) per `defender/skills/gather/queries/SCHEMA.md`
+§Multi-query dispatches.
+
+**Aggregate at the source, not in your head.** When the lead asks for
+counts, distributions, or top-N over a population that may exceed the
+CLI's `--limit` cap, pass a JSON search body to `--query` with an
+`aggs` clause (OpenSearch terms / date_histogram / cardinality / etc.)
+rather than a Lucene string. Server-side aggs return true totals over
+the *full* match set; the default Lucene-string + Count-Breakdown path
+is a Counter over the limit-capped sample and will silently mislead
+when match_count > limit. The CLI labels its breakdown clearly when
+truncated, but the structural fix is: ask for the aggregation you
+actually need.
+
+Also reach for aggs whenever you need an axis the default breakdown
+does not cover — `syscheck.path`, `data.srcuser` over a 7d span, an
+hourly histogram, a cardinality estimate. One Bash invocation, one
+trip to the indexer.
 
 ### 4. Characterize
 

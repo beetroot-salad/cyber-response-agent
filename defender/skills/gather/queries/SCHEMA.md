@@ -72,6 +72,23 @@ companion query. Omit this section entirely when the measurement is
 self-contained.
 ```
 
+## Multi-query dispatches and `gather_raw/` naming
+
+A dispatch at sequence `position` typically runs one query and persists raw
+to `{run_dir}/gather_raw/{position}.json`. When the lead requires more than
+one query at the same position (composition leads, foreground+baseline,
+multi-system comparisons), suffix each query's position with a single
+lowercase letter so the run dir stays unambiguous:
+
+- `gather_raw/0.json` — single-query dispatch at position 0
+- `gather_raw/0a.json`, `gather_raw/0b.json`, `gather_raw/0c.json` — three
+  queries at position 0
+- `gather_raw/1.json` — single-query dispatch at position 1
+
+System CLIs accept `--position <pos>` (in addition to `--run-dir`) and write
+the file themselves; gather does not redirect stdout. The `lead_sequence`
+projection groups files back under one `position` regardless of suffix.
+
 ## What is *not* a template
 
 Templates measure **primitives** — a single dataset, a single filter shape,

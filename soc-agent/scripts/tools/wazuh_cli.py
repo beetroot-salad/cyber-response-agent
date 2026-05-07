@@ -170,43 +170,65 @@ def compute_time_range(args):
 PAGE_SIZE = 500
 
 
-def query_alerts(client, config, query_string, time_start, time_end, limit=500):
-    """Query Wazuh alerts via the indexer. Returns (hits_list, total_count).
+def query_alerts(client, config, query_input, time_start, time_end, limit=500):
+    """Query Wazuh alerts via the indexer. Returns (hits_list, total_count, agg_results).
 
-    Automatically paginates using search_after when limit exceeds PAGE_SIZE.
+    `query_input` is either a Lucene string (CLI wraps it in a bool with a
+    time-range filter) or a parsed dict representing a full OpenSearch search
+    body. In dict mode the caller owns `query` (and optional `aggs`); the CLI
+    pulls them out and manages `size`, `sort`, and pagination via
+    search_after. The parsed `aggregations` response is returned as
+    `agg_results` whenever the caller's body declared an `aggs` clause.
+    Aggregations run server-side over the full match set, independent of
+    `limit`.
     """
-    query = {
-        "bool": {
-            "must": [
-                {"query_string": {"query": query_string}} if query_string else {"match_all": {}},
-            ],
-            "filter": [
-                {"range": {"timestamp": {"gte": time_start, "lte": time_end}}},
-            ],
+    if isinstance(query_input, dict):
+        if "query" not in query_input:
+            raise ValueError("JSON query body must contain a top-level `query` key")
+        query = query_input["query"]
+        aggs = query_input.get("aggs")
+    else:
+        query = {
+            "bool": {
+                "must": [
+                    {"query_string": {"query": query_input}} if query_input else {"match_all": {}},
+                ],
+                "filter": [
+                    {"range": {"timestamp": {"gte": time_start, "lte": time_end}}},
+                ],
+            }
         }
-    }
+        aggs = None
     sort = [{"timestamp": {"order": "desc"}}, {"_id": {"order": "desc"}}]
 
     # limit=0 means "count only, no results"
     if limit == 0:
         body = {"size": 0, "query": query}
+        if aggs:
+            body["aggs"] = aggs
         try:
             resp = client.search(index=config["WAZUH_INDEX"], body=body)
         except Exception as e:
             print(f"error: Indexer query failed: {e}", file=sys.stderr)
             sys.exit(2)
         total = resp.get("hits", {}).get("total", {}).get("value", 0)
-        return [], total
+        agg_results = resp.get("aggregations") if aggs else None
+        return [], total, agg_results
 
     all_items = []
     total = 0
     search_after = None
+    agg_results = None
 
     while len(all_items) < limit:
         page_size = min(PAGE_SIZE, limit - len(all_items))
         body = {"size": page_size, "sort": sort, "query": query}
         if search_after is not None:
             body["search_after"] = search_after
+        # attach aggs only on the first page — server-side aggs already cover
+        # the full match set, no point recomputing them per page
+        if aggs and search_after is None:
+            body["aggs"] = aggs
 
         try:
             resp = client.search(index=config["WAZUH_INDEX"], body=body)
@@ -218,6 +240,8 @@ def query_alerts(client, config, query_string, time_start, time_end, limit=500):
         page_total = hits.get("total", {}).get("value", 0)
         if search_after is None:
             total = page_total
+            if aggs:
+                agg_results = resp.get("aggregations")
         page_hits = hits.get("hits", [])
 
         if not page_hits:
@@ -227,7 +251,7 @@ def query_alerts(client, config, query_string, time_start, time_end, limit=500):
         all_items.extend(h["_source"] for h in page_hits[:remaining])
         search_after = page_hits[-1]["sort"]
 
-    return all_items, total
+    return all_items, total, agg_results
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +336,51 @@ def wrap_with_salt(content: str, salt: str) -> str:
     return f"<run-{salt}-siem-data>\n{content}\n</run-{salt}-siem-data>"
 
 
-def format_output(query_string, time_start, time_end, config, items, match_count, index_count):
+def format_aggregations(agg_results: dict) -> str:
+    """Render an OpenSearch aggregations response as readable markdown.
+
+    Walks each top-level agg, formats `terms`/`date_histogram` buckets, and
+    surfaces nested aggs by indent. Bucket counts are server-side true totals
+    over the full match set, not the limit-capped sample.
+    """
+    if not agg_results:
+        return "(no aggregations)"
+
+    lines = []
+
+    def render_buckets(buckets, indent="  "):
+        out = []
+        for b in buckets:
+            key = b.get("key_as_string") or b.get("key")
+            count = b.get("doc_count", 0)
+            out.append(f"{indent}{key}: {count}")
+            for sub_name, sub in b.items():
+                if isinstance(sub, dict) and "buckets" in sub:
+                    out.append(f"{indent}  ↳ {sub_name}:")
+                    out.extend(render_buckets(sub["buckets"], indent + "    "))
+        return out
+
+    for name, agg in agg_results.items():
+        if not isinstance(agg, dict):
+            continue
+        if "buckets" in agg:
+            buckets = agg["buckets"]
+            other = agg.get("sum_other_doc_count", 0)
+            header = f"**{name}** ({len(buckets)} buckets"
+            if other:
+                header += f", +{other} in tail"
+            header += "):"
+            lines.append(header)
+            lines.extend(render_buckets(buckets))
+        elif "value" in agg:
+            lines.append(f"**{name}**: {agg['value']}")
+        else:
+            lines.append(f"**{name}**: {json.dumps(agg)[:200]}")
+
+    return "\n".join(lines) if lines else "(empty aggregation response)"
+
+
+def format_output(query_string, time_start, time_end, config, items, match_count, index_count, agg_results=None):
     latest_ts = items[0].get("timestamp", "none") if items else "no matching events"
 
     if not items:
@@ -334,6 +402,14 @@ def format_output(query_string, time_start, time_end, config, items, match_count
         breakdown_text = "(no data)"
     else:
         parts = []
+        truncated = match_count > len(items)
+        if truncated:
+            parts.append(
+                f"⚠ counts below are over the returned sample (n={len(items)}); "
+                f"matching events: {match_count}. "
+                f"For true totals at scale, pass a JSON search body to --query "
+                f"with an `aggs` clause (server-side aggregation)."
+            )
 
         rules = Counter(e.get("rule", {}).get("id", "?") for e in items)
         parts.append("By rule:")
@@ -375,6 +451,13 @@ def format_output(query_string, time_start, time_end, config, items, match_count
     else:
         raw_text = json.dumps(items[:RAW_SAMPLE_COUNT], indent=2)
 
+    aggs_section = ""
+    if agg_results:
+        aggs_section = (
+            "\n### Aggregations (server-side, true totals over full match set)\n"
+            f"{format_aggregations(agg_results)}\n"
+        )
+
     return f"""## Query Results
 **Query:** {query_string}
 **Time range:** {time_start} to {time_end}
@@ -386,7 +469,7 @@ def format_output(query_string, time_start, time_end, config, items, match_count
 
 ### Summary
 - **Matching events:** {match_count}
-
+{aggs_section}
 ### Sample Events (first 5)
 {sample_text}
 
@@ -448,13 +531,46 @@ def build_parser():
         "query",
         help="Run a Lucene query against the Wazuh indexer",
     )
-    q.add_argument("--query", "-q", required=True, help="Lucene query string (OpenSearch syntax)")
+    q.add_argument(
+        "--query", "-q", required=True,
+        help=(
+            "Either a Lucene string (OpenSearch query_string syntax) — the CLI "
+            "wraps it in a bool with a time-range filter — OR a full JSON "
+            "search body (`{\"query\": {...}, \"aggs\": {...}}`). In JSON mode "
+            "the agent owns the query (including any time filtering); the CLI "
+            "only manages `size`, `sort`, and pagination. Use JSON mode when "
+            "you need server-side aggregations for true totals over the full "
+            "match set, regardless of `--limit`."
+        ),
+    )
     q.add_argument("--start", help="Start time (ISO 8601 UTC)")
     q.add_argument("--end", help="End time (ISO 8601 UTC, defaults to now)")
     q.add_argument("--window", default="1h", help="Time window duration (e.g. 1h, 30m, 7d). Used when --end is omitted.")
-    q.add_argument("--limit", type=int, default=500, help="Max events to return (default: 500, max: 10000)")
+    q.add_argument("--limit", type=int, default=500, help="Max events to return (default: 500, max: 10000). Use 0 for count+aggs only.")
     q.add_argument("--raw", action="store_true", help="Output raw JSON instead of formatted text")
     q.add_argument("--run-dir", help="Investigation run directory (reads salt from meta.json to wrap output in untrusted-data delimiters)")
+    q.add_argument(
+        "--position",
+        help=(
+            "Sequence position of this dispatch in the run (e.g. '0', '0a', "
+            "'0b'). When --run-dir is also set, the formatted (or --raw) "
+            "output is persisted to {run_dir}/gather_raw/{position}.json in "
+            "addition to stdout. For multi-query dispatches at one position, "
+            "use a sub-suffix (0a / 0b / 0c)."
+        ),
+    )
+
+    q.add_argument(
+        "--no-time-filter",
+        action="store_true",
+        help=(
+            "Allow a JSON --query body that contains no time-range filter on "
+            "`timestamp` / `@timestamp`. Without this flag, JSON-mode bodies "
+            "without a time filter are rejected — the most common failure "
+            "mode is silent scope inflation (lifetime totals reported as "
+            "windowed). Pass this only when you genuinely want all-time."
+        ),
+    )
 
     sub.add_parser(
         "health-check",
@@ -462,6 +578,29 @@ def build_parser():
     )
 
     return p
+
+
+def has_time_range_filter(body: dict) -> bool:
+    """Recursively walk the search body looking for a `range` clause on
+    `timestamp` or `@timestamp`. Returns True if at least one such clause
+    exists anywhere in the structure."""
+    TIME_FIELDS = {"timestamp", "@timestamp"}
+
+    def walk(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "range" and isinstance(v, dict):
+                    if any(field in v for field in TIME_FIELDS):
+                        return True
+                if walk(v):
+                    return True
+        elif isinstance(node, list):
+            for item in node:
+                if walk(item):
+                    return True
+        return False
+
+    return walk(body)
 
 
 def main():
@@ -476,22 +615,80 @@ def main():
     # query subcommand
     args.limit = min(args.limit, 10000)
 
-    time_start, time_end = compute_time_range(args)
+    # --query polymorphism: if the value parses as a JSON object, treat it
+    # as a full search body (with `query` and optional `aggs`). Otherwise
+    # it's a Lucene string that the CLI wraps with the time-range filter.
+    raw_query = args.query.strip()
+    query_input = raw_query
+    query_display = raw_query
+    json_mode = False
+    if raw_query.startswith("{"):
+        try:
+            parsed = json.loads(raw_query)
+        except json.JSONDecodeError as e:
+            print(f"error: --query starts with '{{' but is not valid JSON: {e}", file=sys.stderr)
+            sys.exit(2)
+        if not isinstance(parsed, dict):
+            print("error: --query JSON must be an object (search body)", file=sys.stderr)
+            sys.exit(2)
+        query_input = parsed
+        query_display = "<JSON body>"  # the formatter shows this; raw body is large
+        json_mode = True
+
+        if not args.no_time_filter and not has_time_range_filter(parsed):
+            print(
+                "error: JSON --query body has no time-range filter on "
+                "`timestamp`/`@timestamp`. This usually means scope inflation "
+                "— lifetime totals reported as windowed. Add a "
+                '`{"range": {"timestamp": {"gte": "...", "lte": "..."}}}` '
+                "clause inside `query.bool.filter`, or pass --no-time-filter "
+                "to opt into all-time results.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+    if json_mode:
+        # Agent owns time filtering inside the JSON body; CLI's --window/--start/--end are ignored.
+        time_start = "(JSON body owns time filter)"
+        time_end = "(JSON body owns time filter)"
+    else:
+        time_start, time_end = compute_time_range(args)
     client = get_indexer_client(config)
 
-    items, match_count = query_alerts(client, config, args.query, time_start, time_end, limit=args.limit)
+    items, match_count, agg_results = query_alerts(
+        client, config, query_input, time_start, time_end, limit=args.limit,
+    )
 
     salt = load_run_salt(args.run_dir)
 
     if args.raw:
-        raw_output = json.dumps(items, indent=2)
-        print(wrap_with_salt(raw_output, salt) if salt else raw_output)
-        return
+        raw_payload = {"hits": items}
+        if agg_results:
+            raw_payload["aggregations"] = agg_results
+            raw_payload["match_count"] = match_count
+        raw_output = json.dumps(raw_payload if agg_results else items, indent=2)
+        final_output = wrap_with_salt(raw_output, salt) if salt else raw_output
+    else:
+        if json_mode:
+            # Without a CLI-owned time window we can't compute "unfiltered events
+            # in the same window" — skip the second probe.
+            index_count = "n/a (JSON body owns time filter)"
+        else:
+            _, index_count, _ = query_alerts(client, config, "", time_start, time_end, limit=0)
 
-    _, index_count = query_alerts(client, config, "", time_start, time_end, limit=0)
+        formatted = format_output(
+            query_display, time_start, time_end, config, items, match_count, index_count,
+            agg_results=agg_results,
+        )
+        final_output = wrap_with_salt(formatted, salt) if salt else formatted
 
-    output = format_output(args.query, time_start, time_end, config, items, match_count, index_count)
-    print(wrap_with_salt(output, salt) if salt else output)
+    print(final_output)
+
+    if args.run_dir and args.position:
+        gather_raw = Path(args.run_dir) / "gather_raw"
+        gather_raw.mkdir(parents=True, exist_ok=True)
+        out_path = gather_raw / f"{args.position}.json"
+        out_path.write_text(final_output)
 
 
 if __name__ == "__main__":

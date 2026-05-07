@@ -75,6 +75,7 @@ temp/
 # Runtime investigation/triage runs (contain sensitive alert data)
 **/runs/*
 !**/runs/.gitkeep
+defender/results/
 
 # Generated kanban board (regenerate via `python3 tasks/build.py`)
 /board.html

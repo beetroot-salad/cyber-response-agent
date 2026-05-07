@@ -80,12 +80,13 @@ prediction.
 
 ### GATHER
 
-Dispatch the gather subagent with a prompt that points it at its own
-SKILL on disk plus the dispatch parameters. Don't inline the SKILL
-body — the file on disk is the single source of truth.
+Dispatch the gather subagent on **Haiku** with a prompt that points it
+at its own SKILL on disk plus the dispatch parameters. Don't inline
+the SKILL body — the file on disk is the single source of truth.
 
 ```
 Task(
+  model="haiku",
   prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
          "## Dispatch\n"
          "lead_description: ...\n"
@@ -93,6 +94,15 @@ Task(
          "position: N\n"
 )
 ```
+
+Haiku is the default because gather's job is mechanical — pick a
+template, bind params, run the CLI, summarize. Structural correctness
+is enforced by the system CLIs (e.g. `wazuh_cli.py` rejects JSON
+bodies missing a time-range filter), so the lighter model carries the
+load without losing rigor. Escalate to Sonnet only when a dispatch
+genuinely requires multi-step reasoning the SKILL doesn't already
+script — and prefer fixing the SKILL or the CLI's structural
+guardrails over routing more dispatches to the heavier model.
 
 Gather picks a query template from
 `defender/skills/gather/queries/{system}/`, or authors a new one and
@@ -187,7 +197,8 @@ l-001|1|apt-upgrade-correlation|v-001|h-001,h-002|host-query|apt-history-around|
 GATHER dispatch (single-lead, parallel-of-one):
 
 ```
-Task(prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
+Task(model="haiku",
+     prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
             "## Dispatch\n"
             "lead_description: Did the file modification at 02:14:01Z trace to a managed apt upgrade? Characterize the apt event window ±10m around the FIM timestamp and grade the resulting checksum against the published Ubuntu package SHA for nginx 1.24.0-2ubuntu7.5.\n"
             "run_dir: results/2026-05-05-A\n"
