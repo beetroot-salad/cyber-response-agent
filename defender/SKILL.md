@@ -141,7 +141,6 @@ The script is the single source of truth for projection rules (which
 dispatches count, how composite calls collapse, where `params` come
 from). Don't hand-author `lead_sequence.yaml` — if the script can't
 project it, the investigation log is the bug, not the schema.
-*(Script lands in the run.sh follow-up batch.)*
 
 ## Skills
 
