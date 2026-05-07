@@ -189,6 +189,22 @@ for learning.
   can normalize duplicates later. Watch for slug sprawl in the first
   pilots — if every run mints fresh ids, the catalog isn't actually
   growing, just accumulating.
+  - **Resolved (2026-05-07, Haiku probe @ 36-template synthetic catalog):**
+    models reuse cleanly when a template's `## Goal` describes the
+    measurement they want, even with different parameter bindings. They
+    reach for "author new" mainly on **correlation leads** that no single
+    primitive owns — handled now by an explicit §Composition leads
+    protocol in `gather/SKILL.md` (run the primitives, characterize the
+    join in the summary; do not mint a bridge template). Primitive
+    templates name what they measure (`auth-events`), not the axis they
+    happen to filter on (`auth-events-by-host`).
+- How does the catalog stay searchable as it scales? Probe results: at
+  ≤15 templates per system, read-all is fine. Past that, models grep —
+  on **concept words** in `## Goal` body, not on controlled `data_tags`
+  vocabulary (which they ignored even when the prompt highlighted it).
+  Conclusion: drop `data_tags` and `params` from frontmatter, optimize
+  `## Goal` body for keyword recall, keep per-system dirs as the routing
+  prefix. Reflected in `defender/skills/gather/queries/SCHEMA.md`.
 
 ## Success criteria for the POC
 

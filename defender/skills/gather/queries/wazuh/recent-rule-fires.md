@@ -1,8 +1,5 @@
 ---
 id: wazuh.recent-rule-fires
-params: [rule_id, window]
-data_tags: [rule-fires]
-baseline: not-applicable
 ---
 
 ## Goal
