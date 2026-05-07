@@ -1,0 +1,511 @@
+## Query Results
+**Query:** <JSON body>
+**Time range:** (JSON body owns time filter) to (JSON body owns time filter)
+
+### Data Source Health
+- **Source:** Wazuh Indexer (https://wazuh.indexer:9200)
+- **Most recent matching event:** 2026-05-07T10:55:02.478+0000
+- **Index event count (unfiltered, same window):** n/a (JSON body owns time filter)
+
+### Summary
+- **Matching events:** 2320
+
+### Aggregations (server-side, true totals over full match set)
+**total_events**: 2320
+**by_hour** (168 buckets):
+  2026-04-30T11:00:00.000Z: 22
+  2026-04-30T12:00:00.000Z: 22
+  2026-04-30T13:00:00.000Z: 22
+  2026-04-30T14:00:00.000Z: 27
+  2026-04-30T15:00:00.000Z: 22
+  2026-04-30T16:00:00.000Z: 22
+  2026-04-30T17:00:00.000Z: 22
+  2026-04-30T18:00:00.000Z: 22
+  2026-04-30T19:00:00.000Z: 6
+  2026-04-30T20:00:00.000Z: 0
+  2026-04-30T21:00:00.000Z: 0
+  2026-04-30T22:00:00.000Z: 0
+  2026-04-30T23:00:00.000Z: 0
+  2026-05-01T00:00:00.000Z: 0
+  2026-05-01T01:00:00.000Z: 16
+  2026-05-01T02:00:00.000Z: 22
+  2026-05-01T03:00:00.000Z: 22
+  2026-05-01T04:00:00.000Z: 22
+  2026-05-01T05:00:00.000Z: 22
+  2026-05-01T06:00:00.000Z: 22
+  2026-05-01T07:00:00.000Z: 22
+  2026-05-01T08:00:00.000Z: 22
+  2026-05-01T09:00:00.000Z: 22
+  2026-05-01T10:00:00.000Z: 22
+  2026-05-01T11:00:00.000Z: 22
+  2026-05-01T12:00:00.000Z: 27
+  2026-05-01T13:00:00.000Z: 22
+  2026-05-01T14:00:00.000Z: 10
+  2026-05-01T15:00:00.000Z: 0
+  2026-05-01T16:00:00.000Z: 0
+  2026-05-01T17:00:00.000Z: 0
+  2026-05-01T18:00:00.000Z: 0
+  2026-05-01T19:00:00.000Z: 0
+  2026-05-01T20:00:00.000Z: 12
+  2026-05-01T21:00:00.000Z: 0
+  2026-05-01T22:00:00.000Z: 0
+  2026-05-01T23:00:00.000Z: 0
+  2026-05-02T00:00:00.000Z: 0
+  2026-05-02T01:00:00.000Z: 0
+  2026-05-02T02:00:00.000Z: 18
+  2026-05-02T03:00:00.000Z: 27
+  2026-05-02T04:00:00.000Z: 22
+  2026-05-02T05:00:00.000Z: 22
+  2026-05-02T06:00:00.000Z: 27
+  2026-05-02T07:00:00.000Z: 32
+  2026-05-02T08:00:00.000Z: 24
+  2026-05-02T09:00:00.000Z: 7
+  2026-05-02T10:00:00.000Z: 12
+  2026-05-02T11:00:00.000Z: 22
+  2026-05-02T12:00:00.000Z: 22
+  2026-05-02T13:00:00.000Z: 22
+  2026-05-02T14:00:00.000Z: 22
+  2026-05-02T15:00:00.000Z: 27
+  2026-05-02T16:00:00.000Z: 22
+  2026-05-02T17:00:00.000Z: 22
+  2026-05-02T18:00:00.000Z: 22
+  2026-05-02T19:00:00.000Z: 22
+  2026-05-02T20:00:00.000Z: 22
+  2026-05-02T21:00:00.000Z: 22
+  2026-05-02T22:00:00.000Z: 22
+  2026-05-02T23:00:00.000Z: 22
+  2026-05-03T00:00:00.000Z: 22
+  2026-05-03T01:00:00.000Z: 22
+  2026-05-03T02:00:00.000Z: 22
+  2026-05-03T03:00:00.000Z: 14
+  2026-05-03T04:00:00.000Z: 22
+  2026-05-03T05:00:00.000Z: 22
+  2026-05-03T06:00:00.000Z: 17
+  2026-05-03T07:00:00.000Z: 0
+  2026-05-03T08:00:00.000Z: 0
+  2026-05-03T09:00:00.000Z: 0
+  2026-05-03T10:00:00.000Z: 22
+  2026-05-03T11:00:00.000Z: 22
+  2026-05-03T12:00:00.000Z: 22
+  2026-05-03T13:00:00.000Z: 22
+  2026-05-03T14:00:00.000Z: 22
+  2026-05-03T15:00:00.000Z: 22
+  2026-05-03T16:00:00.000Z: 22
+  2026-05-03T17:00:00.000Z: 22
+  2026-05-03T18:00:00.000Z: 22
+  2026-05-03T19:00:00.000Z: 22
+  2026-05-03T20:00:00.000Z: 1
+  2026-05-03T21:00:00.000Z: 0
+  2026-05-03T22:00:00.000Z: 0
+  2026-05-03T23:00:00.000Z: 0
+  2026-05-04T00:00:00.000Z: 0
+  2026-05-04T01:00:00.000Z: 25
+  2026-05-04T02:00:00.000Z: 22
+  2026-05-04T03:00:00.000Z: 22
+  2026-05-04T04:00:00.000Z: 22
+  2026-05-04T05:00:00.000Z: 22
+  2026-05-04T06:00:00.000Z: 22
+  2026-05-04T07:00:00.000Z: 22
+  2026-05-04T08:00:00.000Z: 22
+  2026-05-04T09:00:00.000Z: 22
+  2026-05-04T10:00:00.000Z: 3
+  2026-05-04T11:00:00.000Z: 0
+  2026-05-04T12:00:00.000Z: 0
+  2026-05-04T13:00:00.000Z: 0
+  2026-05-04T14:00:00.000Z: 0
+  2026-05-04T15:00:00.000Z: 30
+  2026-05-04T16:00:00.000Z: 32
+  2026-05-04T17:00:00.000Z: 0
+  2026-05-04T18:00:00.000Z: 0
+  2026-05-04T19:00:00.000Z: 0
+  2026-05-04T20:00:00.000Z: 0
+  2026-05-04T21:00:00.000Z: 0
+  2026-05-04T22:00:00.000Z: 0
+  2026-05-04T23:00:00.000Z: 0
+  2026-05-05T00:00:00.000Z: 0
+  2026-05-05T01:00:00.000Z: 0
+  2026-05-05T02:00:00.000Z: 13
+  2026-05-05T03:00:00.000Z: 22
+  2026-05-05T04:00:00.000Z: 27
+  2026-05-05T05:00:00.000Z: 27
+  2026-05-05T06:00:00.000Z: 31
+  2026-05-05T07:00:00.000Z: 22
+  2026-05-05T08:00:00.000Z: 27
+  2026-05-05T09:00:00.000Z: 32
+  2026-05-05T10:00:00.000Z: 27
+  2026-05-05T11:00:00.000Z: 23
+  2026-05-05T12:00:00.000Z: 22
+  2026-05-05T13:00:00.000Z: 22
+  2026-05-05T14:00:00.000Z: 22
+  2026-05-05T15:00:00.000Z: 22
+  2026-05-05T16:00:00.000Z: 22
+  2026-05-05T17:00:00.000Z: 22
+  2026-05-05T18:00:00.000Z: 18
+  2026-05-05T19:00:00.000Z: 15
+  2026-05-05T20:00:00.000Z: 22
+  2026-05-05T21:00:00.000Z: 2
+  2026-05-05T22:00:00.000Z: 0
+  2026-05-05T23:00:00.000Z: 0
+  2026-05-06T00:00:00.000Z: 0
+  2026-05-06T01:00:00.000Z: 0
+  2026-05-06T02:00:00.000Z: 0
+  2026-05-06T03:00:00.000Z: 0
+  2026-05-06T04:00:00.000Z: 0
+  2026-05-06T05:00:00.000Z: 0
+  2026-05-06T06:00:00.000Z: 0
+  2026-05-06T07:00:00.000Z: 0
+  2026-05-06T08:00:00.000Z: 0
+  2026-05-06T09:00:00.000Z: 0
+  2026-05-06T10:00:00.000Z: 0
+  2026-05-06T11:00:00.000Z: 0
+  2026-05-06T12:00:00.000Z: 0
+  2026-05-06T13:00:00.000Z: 0
+  2026-05-06T14:00:00.000Z: 10
+  2026-05-06T15:00:00.000Z: 22
+  2026-05-06T16:00:00.000Z: 22
+  2026-05-06T17:00:00.000Z: 22
+  2026-05-06T18:00:00.000Z: 11
+  2026-05-06T19:00:00.000Z: 0
+  2026-05-06T20:00:00.000Z: 0
+  2026-05-06T21:00:00.000Z: 0
+  2026-05-06T22:00:00.000Z: 0
+  2026-05-06T23:00:00.000Z: 0
+  2026-05-07T00:00:00.000Z: 0
+  2026-05-07T01:00:00.000Z: 0
+  2026-05-07T02:00:00.000Z: 12
+  2026-05-07T03:00:00.000Z: 22
+  2026-05-07T04:00:00.000Z: 22
+  2026-05-07T05:00:00.000Z: 22
+  2026-05-07T06:00:00.000Z: 22
+  2026-05-07T07:00:00.000Z: 22
+  2026-05-07T08:00:00.000Z: 22
+  2026-05-07T09:00:00.000Z: 22
+  2026-05-07T10:00:00.000Z: 23
+**auth_success_vs_fail** (2 buckets, +4640 in tail):
+  authentication_failed: 2320
+  invalid_login: 2320
+**top_hosts** (1 buckets):
+  target-endpoint: 2320
+**distinct_users**: 0
+**top_users** (0 buckets):
+**distinct_hosts**: 1
+
+### Sample Events (first 5)
+1. [2026-05-07T10:55:02.478+0000] rule:5710 srcip:172.22.0.10 srcuser:nagios agent:target-endpoint desc:sshd: Attempt to login using a non-existent user
+2. [2026-05-07T10:55:01.507+0000] rule:5710 srcip:172.22.0.10 srcuser:nagios agent:target-endpoint desc:sshd: Attempt to login using a non-existent user
+3. [2026-05-07T10:52:02.831+0000] rule:5710 srcip:172.22.0.10 srcuser:zabbix agent:target-endpoint desc:sshd: Attempt to login using a non-existent user
+4. [2026-05-07T10:52:02.787+0000] rule:5710 srcip:172.22.0.10 srcuser:healthcheck agent:target-endpoint desc:sshd: Attempt to login using a non-existent user
+5. [2026-05-07T10:50:02.316+0000] rule:5710 srcip:172.22.0.10 srcuser:nagios agent:target-endpoint desc:sshd: Attempt to login using a non-existent user
+
+### Count Breakdown
+⚠ counts below are over the returned sample (n=500); matching events: 2320. For true totals at scale, pass a JSON search body to --query with an `aggs` clause (server-side aggregation).
+By rule:
+  rule.id:5710 (sshd: Attempt to login using a non-existent user): 500
+By source IP (1 unique):
+  172.22.0.10: 500
+By username (3 unique):
+  nagios: 274
+  zabbix: 136
+  healthcheck: 90
+By source port (492 unique):
+  42850: 2
+  58884: 2
+  55134: 2
+  42386: 2
+  44528: 2
+  53700: 2
+  56174: 2
+  45314: 2
+  42840: 1
+  58880: 1
+By hour:
+  2026-05-05T10: 12
+  2026-05-05T11: 23
+  2026-05-05T12: 22
+  2026-05-05T13: 22
+  2026-05-05T14: 22
+  2026-05-05T15: 22
+  2026-05-05T16: 22
+  2026-05-05T17: 22
+  2026-05-05T18: 18
+  2026-05-05T19: 15
+  2026-05-05T20: 22
+  2026-05-05T21: 2
+  2026-05-06T14: 10
+  2026-05-06T15: 22
+  2026-05-06T16: 22
+  2026-05-06T17: 22
+  2026-05-06T18: 11
+  2026-05-07T02: 12
+  2026-05-07T03: 22
+  2026-05-07T04: 22
+  2026-05-07T05: 22
+  2026-05-07T06: 22
+  2026-05-07T07: 22
+  2026-05-07T08: 22
+  2026-05-07T09: 22
+  2026-05-07T10: 23
+
+### Raw Sample Events (first 3, full _source)
+Use these for field-level inspection when the summary lines above don't carry
+the discriminator you need (e.g. source port, process name, connection tuple).
+
+```json
+[
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 10:55:01"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "nagios",
+      "srcip": "172.22.0.10",
+      "srcport": "42850"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 23,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 10:55:01 target-endpoint sshd[57968]: Invalid user nagios from 172.22.0.10 port 42850",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T10:55:02.478Z",
+    "location": "/var/log/auth.log",
+    "id": "1778151302.17995241",
+    "timestamp": "2026-05-07T10:55:02.478+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 10:55:01"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "nagios",
+      "srcip": "172.22.0.10",
+      "srcport": "42840"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 22,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 10:55:01 target-endpoint sshd[57966]: Invalid user nagios from 172.22.0.10 port 42840",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T10:55:01.507Z",
+    "location": "/var/log/auth.log",
+    "id": "1778151301.17994702",
+    "timestamp": "2026-05-07T10:55:01.507+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 10:52:02"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "zabbix",
+      "srcip": "172.22.0.10",
+      "srcport": "58884"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 21,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 10:52:02 target-endpoint sshd[57413]: Invalid user zabbix from 172.22.0.10 port 58884",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T10:52:02.831Z",
+    "location": "/var/log/auth.log",
+    "id": "1778151122.17908098",
+    "timestamp": "2026-05-07T10:52:02.831+0000"
+  }
+]
+```

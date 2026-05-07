@@ -1,18 +1,22 @@
 # Run artifacts
 
 Each defender invocation produces one run dir under
-`defender/results/{run_id}/`. `run.sh` creates the dir and the defender
-writes the artifacts in the course of its phases.
+`$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`).
+`run.sh` creates the dir and the defender writes the artifacts in the
+course of its phases. Runs live outside the repo so transcripts stay
+out of git and the investigation has scratch space SIEM CLIs can
+write into freely.
 
 ## Layout
 
 ```
-results/{run_id}/
+{run_id}/
   alert.json                # input — copied from the fixture by run.sh
   investigation.md          # ORIENT/PLAN/GATHER/ANALYZE/REPORT log, dense invlang
   lead_sequence.yaml        # contract surface for the actor-reviewer learning loop
   report.md                 # disposition + one-paragraph reason
-  tool_trace.jsonl          # all subagent + tool calls (run.sh captures)
+  tool_trace.jsonl          # stream-json events captured by run.sh
+  transcript.html           # rendered transcript + artifact panel (run.sh post-step)
   gather_raw/
     {position}.json         # raw payload per gather call, keyed by lead_sequence position
 ```

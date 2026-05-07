@@ -1,0 +1,9 @@
+{
+  "goal": "Characterize SSH auth events from 172.22.0.10 to target-endpoint over 7 days to determine if pattern is periodic monitoring heartbeat or burst attack.",
+  "what_to_characterize": [
+    "Total event count and events/hour rate",
+    "Timing distribution — periodic or bursty",
+    "Username diversity — only nagios or others",
+    "Target host diversity — target-endpoint only or multiple hosts"
+  ]
+}

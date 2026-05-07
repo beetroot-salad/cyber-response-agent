@@ -1,0 +1,2 @@
+{"goal": "Pull all SSH authentication events from source IP 172.22.0.10 targeting host target-endpoint over the past 24h. Goal: characterize the full set of usernames attempted, count of attempts, timing spread (are they periodic or bursty?), and port(s) used. This discriminates between a single-username monitoring probe and a multi-username credential sweep.",
+ "what_to_characterize": ["full set of usernames attempted", "count of attempts", "timing spread (periodic vs bursty)", "port(s) used"]}

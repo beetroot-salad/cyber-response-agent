@@ -1,0 +1,325 @@
+## Query Results
+**Query:** rule.id:100002
+**Time range:** 2026-05-07T14:20:00Z to 2026-05-07T14:30:00Z
+
+### Data Source Health
+- **Source:** Wazuh Indexer (https://wazuh.indexer:9200)
+- **Most recent matching event:** 2026-05-07T14:25:03.809+0000
+- **Index event count (unfiltered, same window):** 113
+
+### Summary
+- **Matching events:** 8
+
+### Sample Events (first 5)
+1. [2026-05-07T14:25:03.809+0000] rule:100002 srcip:? srcuser:? agent:wazuh.manager desc:Falco: STDOUT/STDIN redirected to network connection (possible reverse shell)
+2. [2026-05-07T14:25:03.809+0000] rule:100002 srcip:? srcuser:? agent:wazuh.manager desc:Falco: STDOUT/STDIN redirected to network connection (possible reverse shell)
+3. [2026-05-07T14:22:03.696+0000] rule:100002 srcip:? srcuser:? agent:wazuh.manager desc:Falco: STDOUT/STDIN redirected to network connection (possible reverse shell)
+4. [2026-05-07T14:22:03.696+0000] rule:100002 srcip:? srcuser:? agent:wazuh.manager desc:Falco: STDOUT/STDIN redirected to network connection (possible reverse shell)
+5. [2026-05-07T14:22:03.696+0000] rule:100002 srcip:? srcuser:? agent:wazuh.manager desc:Falco: STDOUT/STDIN redirected to network connection (possible reverse shell)
+
+### Count Breakdown
+By rule:
+  rule.id:100002 (Falco: STDOUT/STDIN redirected to network connection (possible reverse shell)): 8
+By source IP (1 unique):
+  ?: 8
+By username (1 unique):
+  ?: 8
+By hour:
+  2026-05-07T14: 8
+
+### Raw Sample Events (first 3, full _source)
+Use these for field-level inspection when the summary lines above don't carry
+the discriminator you need (e.g. source port, process name, connection tuple).
+
+```json
+[
+  {
+    "agent": {
+      "name": "wazuh.manager",
+      "id": "000"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "output": "2026-05-07T14:25:18.174060443+0000: Notice Redirect stdout/stdin to network connection | gparent=<NA> ggparent=<NA> gggparent=<NA> fd.sip=172.22.0.13 connection=172.22.0.10:38078->172.22.0.13:22 lport=22 rport=38078 fd_type=ipv4 fd_proto=tcp evt_type=dup2 user=root user_uid=0 user_loginuid=-1 process=sshd proc_exepath= parent=<NA> command=sshd terminal=0 container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>",
+      "output_fields": {
+        "container": {
+          "image": {
+            "tag": "latest",
+            "repository": "cyber-response-agent_devcontainer-target-endpoint"
+          },
+          "name": "target-endpoint",
+          "id": "2a124a5fc6d9"
+        },
+        "evt": {
+          "time": {
+            "iso8601": "1778163918174060544.000000"
+          },
+          "type": "dup2"
+        },
+        "proc": {
+          "cmdline": "sshd",
+          "pname": "<NA>",
+          "name": "sshd",
+          "tty": "0",
+          "aname[4]": "null",
+          "aname[3]": "null",
+          "aname[2]": "null"
+        },
+        "k8s": {
+          "pod": {
+            "name": "null"
+          },
+          "ns": {
+            "name": "null"
+          }
+        },
+        "user": {
+          "uid": "0",
+          "loginuid": "-1",
+          "name": "root"
+        },
+        "fd": {
+          "name": "172.22.0.10:38078->172.22.0.13:22",
+          "rport": "38078",
+          "lport": "22",
+          "sip": "172.22.0.13",
+          "l4proto": "tcp",
+          "type": "ipv4"
+        }
+      },
+      "hostname": "falco",
+      "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+      "source": "syscall",
+      "time": "2026-05-07T14:25:18.174060443Z",
+      "priority": "Notice",
+      "tags": [
+        "T1059",
+        "container",
+        "maturity_stable",
+        "mitre_execution",
+        "network",
+        "process"
+      ]
+    },
+    "rule": {
+      "firedtimes": 22,
+      "mail": true,
+      "level": 12,
+      "description": "Falco: STDOUT/STDIN redirected to network connection (possible reverse shell)",
+      "groups": [
+        "falco",
+        "security",
+        "falco_reverse_shell",
+        "attack.execution",
+        "attack.command_and_control"
+      ],
+      "id": "100002"
+    },
+    "decoder": {
+      "name": "json"
+    },
+    "full_log": "{\"hostname\":\"falco\",\"output\":\"2026-05-07T14:25:18.174060443+0000: Notice Redirect stdout/stdin to network connection | gparent=<NA> ggparent=<NA> gggparent=<NA> fd.sip=172.22.0.13 connection=172.22.0.10:38078->172.22.0.13:22 lport=22 rport=38078 fd_type=ipv4 fd_proto=tcp evt_type=dup2 user=root user_uid=0 user_loginuid=-1 process=sshd proc_exepath= parent=<NA> command=sshd terminal=0 container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>\",\"output_fields\":{\"container.id\":\"2a124a5fc6d9\",\"container.image.repository\":\"cyber-response-agent_devcontainer-target-endpoint\",\"container.image.tag\":\"latest\",\"container.name\":\"target-endpoint\",\"evt.time.iso8601\":1.7781639181740605e+18,\"evt.type\":\"dup2\",\"fd.l4proto\":\"tcp\",\"fd.lport\":22,\"fd.name\":\"172.22.0.10:38078->172.22.0.13:22\",\"fd.rport\":38078,\"fd.sip\":\"172.22.0.13\",\"fd.type\":\"ipv4\",\"k8s.ns.name\":null,\"k8s.pod.name\":null,\"proc.aname[2]\":null,\"proc.aname[3]\":null,\"proc.aname[4]\":null,\"proc.cmdline\":\"sshd\",\"proc.exepath\":\"\",\"proc.name\":\"sshd\",\"proc.pname\":\"<NA>\",\"proc.tty\":0,\"user.loginuid\":-1,\"user.name\":\"root\",\"user.uid\":0},\"priority\":\"Notice\",\"rule\":\"Redirect STDOUT/STDIN to Network Connection in Container\",\"source\":\"syscall\",\"tags\":[\"T1059\",\"container\",\"maturity_stable\",\"mitre_execution\",\"network\",\"process\"],\"time\":\"2026-05-07T14:25:18.174060443Z\"}",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T14:25:03.809Z",
+    "location": "/var/log/falco/events.json",
+    "id": "1778163903.21408458",
+    "timestamp": "2026-05-07T14:25:03.809+0000"
+  },
+  {
+    "agent": {
+      "name": "wazuh.manager",
+      "id": "000"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "output": "2026-05-07T14:25:18.174060057+0000: Notice Redirect stdout/stdin to network connection | gparent=<NA> ggparent=<NA> gggparent=<NA> fd.sip=172.22.0.13 connection=172.22.0.10:38078->172.22.0.13:22 lport=22 rport=38078 fd_type=ipv4 fd_proto=tcp evt_type=dup2 user=root user_uid=0 user_loginuid=-1 process=sshd proc_exepath= parent=<NA> command=sshd terminal=0 container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>",
+      "output_fields": {
+        "container": {
+          "image": {
+            "tag": "latest",
+            "repository": "cyber-response-agent_devcontainer-target-endpoint"
+          },
+          "name": "target-endpoint",
+          "id": "2a124a5fc6d9"
+        },
+        "evt": {
+          "time": {
+            "iso8601": "1778163918174060032.000000"
+          },
+          "type": "dup2"
+        },
+        "proc": {
+          "cmdline": "sshd",
+          "pname": "<NA>",
+          "name": "sshd",
+          "tty": "0",
+          "aname[4]": "null",
+          "aname[3]": "null",
+          "aname[2]": "null"
+        },
+        "k8s": {
+          "pod": {
+            "name": "null"
+          },
+          "ns": {
+            "name": "null"
+          }
+        },
+        "user": {
+          "uid": "0",
+          "loginuid": "-1",
+          "name": "root"
+        },
+        "fd": {
+          "name": "172.22.0.10:38078->172.22.0.13:22",
+          "rport": "38078",
+          "lport": "22",
+          "sip": "172.22.0.13",
+          "l4proto": "tcp",
+          "type": "ipv4"
+        }
+      },
+      "hostname": "falco",
+      "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+      "source": "syscall",
+      "time": "2026-05-07T14:25:18.174060057Z",
+      "priority": "Notice",
+      "tags": [
+        "T1059",
+        "container",
+        "maturity_stable",
+        "mitre_execution",
+        "network",
+        "process"
+      ]
+    },
+    "rule": {
+      "firedtimes": 21,
+      "mail": true,
+      "level": 12,
+      "description": "Falco: STDOUT/STDIN redirected to network connection (possible reverse shell)",
+      "groups": [
+        "falco",
+        "security",
+        "falco_reverse_shell",
+        "attack.execution",
+        "attack.command_and_control"
+      ],
+      "id": "100002"
+    },
+    "decoder": {
+      "name": "json"
+    },
+    "full_log": "{\"hostname\":\"falco\",\"output\":\"2026-05-07T14:25:18.174060057+0000: Notice Redirect stdout/stdin to network connection | gparent=<NA> ggparent=<NA> gggparent=<NA> fd.sip=172.22.0.13 connection=172.22.0.10:38078->172.22.0.13:22 lport=22 rport=38078 fd_type=ipv4 fd_proto=tcp evt_type=dup2 user=root user_uid=0 user_loginuid=-1 process=sshd proc_exepath= parent=<NA> command=sshd terminal=0 container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>\",\"output_fields\":{\"container.id\":\"2a124a5fc6d9\",\"container.image.repository\":\"cyber-response-agent_devcontainer-target-endpoint\",\"container.image.tag\":\"latest\",\"container.name\":\"target-endpoint\",\"evt.time.iso8601\":1.77816391817406e+18,\"evt.type\":\"dup2\",\"fd.l4proto\":\"tcp\",\"fd.lport\":22,\"fd.name\":\"172.22.0.10:38078->172.22.0.13:22\",\"fd.rport\":38078,\"fd.sip\":\"172.22.0.13\",\"fd.type\":\"ipv4\",\"k8s.ns.name\":null,\"k8s.pod.name\":null,\"proc.aname[2]\":null,\"proc.aname[3]\":null,\"proc.aname[4]\":null,\"proc.cmdline\":\"sshd\",\"proc.exepath\":\"\",\"proc.name\":\"sshd\",\"proc.pname\":\"<NA>\",\"proc.tty\":0,\"user.loginuid\":-1,\"user.name\":\"root\",\"user.uid\":0},\"priority\":\"Notice\",\"rule\":\"Redirect STDOUT/STDIN to Network Connection in Container\",\"source\":\"syscall\",\"tags\":[\"T1059\",\"container\",\"maturity_stable\",\"mitre_execution\",\"network\",\"process\"],\"time\":\"2026-05-07T14:25:18.174060057Z\"}",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T14:25:03.809Z",
+    "location": "/var/log/falco/events.json",
+    "id": "1778163903.21405039",
+    "timestamp": "2026-05-07T14:25:03.809+0000"
+  },
+  {
+    "agent": {
+      "name": "wazuh.manager",
+      "id": "000"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "output": "2026-05-07T14:22:24.074145465+0000: Notice Redirect stdout/stdin to network connection | gparent=<NA> ggparent=<NA> gggparent=<NA> fd.sip=172.22.0.13 connection=172.22.0.10:60574->172.22.0.13:22 lport=22 rport=60574 fd_type=ipv4 fd_proto=tcp evt_type=dup2 user=root user_uid=0 user_loginuid=-1 process=sshd proc_exepath= parent=<NA> command=sshd terminal=0 container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>",
+      "output_fields": {
+        "container": {
+          "image": {
+            "tag": "latest",
+            "repository": "cyber-response-agent_devcontainer-target-endpoint"
+          },
+          "name": "target-endpoint",
+          "id": "2a124a5fc6d9"
+        },
+        "evt": {
+          "time": {
+            "iso8601": "1778163744074145536.000000"
+          },
+          "type": "dup2"
+        },
+        "proc": {
+          "cmdline": "sshd",
+          "pname": "<NA>",
+          "name": "sshd",
+          "tty": "0",
+          "aname[4]": "null",
+          "aname[3]": "null",
+          "aname[2]": "null"
+        },
+        "k8s": {
+          "pod": {
+            "name": "null"
+          },
+          "ns": {
+            "name": "null"
+          }
+        },
+        "user": {
+          "uid": "0",
+          "loginuid": "-1",
+          "name": "root"
+        },
+        "fd": {
+          "name": "172.22.0.10:60574->172.22.0.13:22",
+          "rport": "60574",
+          "lport": "22",
+          "sip": "172.22.0.13",
+          "l4proto": "tcp",
+          "type": "ipv4"
+        }
+      },
+      "hostname": "falco",
+      "rule": "Redirect STDOUT/STDIN to Network Connection in Container",
+      "source": "syscall",
+      "time": "2026-05-07T14:22:24.074145465Z",
+      "priority": "Notice",
+      "tags": [
+        "T1059",
+        "container",
+        "maturity_stable",
+        "mitre_execution",
+        "network",
+        "process"
+      ]
+    },
+    "rule": {
+      "firedtimes": 17,
+      "mail": true,
+      "level": 12,
+      "description": "Falco: STDOUT/STDIN redirected to network connection (possible reverse shell)",
+      "groups": [
+        "falco",
+        "security",
+        "falco_reverse_shell",
+        "attack.execution",
+        "attack.command_and_control"
+      ],
+      "id": "100002"
+    },
+    "decoder": {
+      "name": "json"
+    },
+    "full_log": "{\"hostname\":\"falco\",\"output\":\"2026-05-07T14:22:24.074145465+0000: Notice Redirect stdout/stdin to network connection | gparent=<NA> ggparent=<NA> gggparent=<NA> fd.sip=172.22.0.13 connection=172.22.0.10:60574->172.22.0.13:22 lport=22 rport=60574 fd_type=ipv4 fd_proto=tcp evt_type=dup2 user=root user_uid=0 user_loginuid=-1 process=sshd proc_exepath= parent=<NA> command=sshd terminal=0 container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>\",\"output_fields\":{\"container.id\":\"2a124a5fc6d9\",\"container.image.repository\":\"cyber-response-agent_devcontainer-target-endpoint\",\"container.image.tag\":\"latest\",\"container.name\":\"target-endpoint\",\"evt.time.iso8601\":1.7781637440741455e+18,\"evt.type\":\"dup2\",\"fd.l4proto\":\"tcp\",\"fd.lport\":22,\"fd.name\":\"172.22.0.10:60574->172.22.0.13:22\",\"fd.rport\":60574,\"fd.sip\":\"172.22.0.13\",\"fd.type\":\"ipv4\",\"k8s.ns.name\":null,\"k8s.pod.name\":null,\"proc.aname[2]\":null,\"proc.aname[3]\":null,\"proc.aname[4]\":null,\"proc.cmdline\":\"sshd\",\"proc.exepath\":\"\",\"proc.name\":\"sshd\",\"proc.pname\":\"<NA>\",\"proc.tty\":0,\"user.loginuid\":-1,\"user.name\":\"root\",\"user.uid\":0},\"priority\":\"Notice\",\"rule\":\"Redirect STDOUT/STDIN to Network Connection in Container\",\"source\":\"syscall\",\"tags\":[\"T1059\",\"container\",\"maturity_stable\",\"mitre_execution\",\"network\",\"process\"],\"time\":\"2026-05-07T14:22:24.074145465Z\"}",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T14:22:03.696Z",
+    "location": "/var/log/falco/events.json",
+    "id": "1778163723.21333154",
+    "timestamp": "2026-05-07T14:22:03.696+0000"
+  }
+]
+```

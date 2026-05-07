@@ -1,0 +1,331 @@
+## Query Results
+**Query:** rule.groups:(authentication_success OR authentication_failed) AND data.srcip:172.22.0.10
+**Time range:** 2026-04-30T13:51:20Z to 2026-05-07T13:51:20Z
+
+### Data Source Health
+- **Source:** Wazuh Indexer (https://wazuh.indexer:9200)
+- **Most recent matching event:** 2026-05-07T13:50:04.363+0000
+- **Index event count (unfiltered, same window):** 10000
+
+### Summary
+- **Matching events:** 2325
+
+### Sample Events (first 5)
+1. [2026-05-07T13:50:04.363+0000] rule:5710 srcip:172.22.0.10 srcuser:nagios agent:target-endpoint desc:sshd: Attempt to login using a non-existent user
+2. [2026-05-07T13:49:39.536+0000] rule:5710 srcip:172.22.0.10 srcuser:zabbix agent:target-endpoint desc:sshd: Attempt to login using a non-existent user
+3. [2026-05-07T13:49:39.536+0000] rule:5710 srcip:172.22.0.10 srcuser:zabbix agent:target-endpoint desc:sshd: Attempt to login using a non-existent user
+4. [2026-05-07T13:49:39.536+0000] rule:5710 srcip:172.22.0.10 srcuser:zabbix agent:target-endpoint desc:sshd: Attempt to login using a non-existent user
+5. [2026-05-07T13:49:39.536+0000] rule:5710 srcip:172.22.0.10 srcuser:zabbix agent:target-endpoint desc:sshd: Attempt to login using a non-existent user
+
+### Count Breakdown
+⚠ counts below are over the returned sample (n=500); matching events: 2325. For true totals at scale, pass a JSON search body to --query with an `aggs` clause (server-side aggregation).
+By rule:
+  rule.id:5710 (sshd: Attempt to login using a non-existent user): 500
+By source IP (1 unique):
+  172.22.0.10: 500
+By username (3 unique):
+  nagios: 271
+  zabbix: 140
+  healthcheck: 89
+By source port (485 unique):
+  38186: 2
+  34606: 2
+  33620: 2
+  46892: 2
+  49792: 2
+  46308: 2
+  33350: 2
+  42850: 2
+  58884: 2
+  55134: 2
+By hour:
+  2026-05-05T13: 11
+  2026-05-05T14: 22
+  2026-05-05T15: 22
+  2026-05-05T16: 22
+  2026-05-05T17: 22
+  2026-05-05T18: 18
+  2026-05-05T19: 15
+  2026-05-05T20: 22
+  2026-05-05T21: 2
+  2026-05-06T14: 10
+  2026-05-06T15: 22
+  2026-05-06T16: 22
+  2026-05-06T17: 22
+  2026-05-06T18: 11
+  2026-05-07T02: 12
+  2026-05-07T03: 22
+  2026-05-07T04: 22
+  2026-05-07T05: 22
+  2026-05-07T06: 22
+  2026-05-07T07: 22
+  2026-05-07T08: 22
+  2026-05-07T09: 22
+  2026-05-07T10: 23
+  2026-05-07T11: 22
+  2026-05-07T12: 22
+  2026-05-07T13: 24
+
+### Raw Sample Events (first 3, full _source)
+Use these for field-level inspection when the summary lines above don't carry
+the discriminator you need (e.g. source port, process name, connection tuple).
+
+```json
+[
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 13:50:03"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "nagios",
+      "srcip": "172.22.0.10",
+      "srcport": "38370"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 23,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 13:50:03 target-endpoint sshd[79623]: Invalid user nagios from 172.22.0.10 port 38370",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T13:50:04.363Z",
+    "location": "/var/log/auth.log",
+    "id": "1778161804.20845433",
+    "timestamp": "2026-05-07T13:50:04.363+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 13:49:39"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "zabbix",
+      "srcip": "172.22.0.10",
+      "srcport": "38222"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 22,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 13:49:39 target-endpoint sshd[79567]: Invalid user zabbix from 172.22.0.10 port 38222",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T13:49:39.536Z",
+    "location": "/var/log/auth.log",
+    "id": "1778161779.20774335",
+    "timestamp": "2026-05-07T13:49:39.536+0000"
+  },
+  {
+    "predecoder": {
+      "hostname": "target-endpoint",
+      "program_name": "sshd",
+      "timestamp": "May  7 13:49:38"
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "srcuser": "zabbix",
+      "srcip": "172.22.0.10",
+      "srcport": "38186"
+    },
+    "rule": {
+      "mail": false,
+      "level": 5,
+      "hipaa": [
+        "164.312.b"
+      ],
+      "pci_dss": [
+        "10.2.4",
+        "10.2.5",
+        "10.6.1"
+      ],
+      "tsc": [
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "sshd: Attempt to login using a non-existent user",
+      "groups": [
+        "syslog",
+        "sshd",
+        "authentication_failed",
+        "invalid_login"
+      ],
+      "nist_800_53": [
+        "AU.14",
+        "AC.7",
+        "AU.6"
+      ],
+      "gdpr": [
+        "IV_35.7.d",
+        "IV_32.2"
+      ],
+      "firedtimes": 21,
+      "mitre": {
+        "technique": [
+          "Password Guessing",
+          "SSH"
+        ],
+        "id": [
+          "T1110.001",
+          "T1021.004"
+        ],
+        "tactic": [
+          "Credential Access",
+          "Lateral Movement"
+        ]
+      },
+      "id": "5710",
+      "gpg13": [
+        "7.1"
+      ]
+    },
+    "decoder": {
+      "parent": "sshd",
+      "name": "sshd"
+    },
+    "full_log": "May  7 13:49:38 target-endpoint sshd[79561]: Invalid user zabbix from 172.22.0.10 port 38186",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T13:49:39.536Z",
+    "location": "/var/log/auth.log",
+    "id": "1778161779.20773796",
+    "timestamp": "2026-05-07T13:49:39.536+0000"
+  }
+]
+```

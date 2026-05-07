@@ -1,0 +1,38 @@
+case_id: real-03-low-shell
+alert_ref: alert.json
+entries:
+  - position: 0
+    lead_description:
+      goal: Query Wazuh for all rule 100001 (Falco terminal shell in container) events for container target-endpoint over the past 7 days to establish a baseline frequency.
+      what_to_characterize:
+        - count and timestamps of rule 100001 events for target-endpoint in the past 7d
+        - commands (proc.cmdline) seen across those events
+        - whether the pattern is regular/dev-cadence or sparse/anomalous
+    queries:
+      - id: wazuh.falco-container-shell-history
+        params: {container_name: target-endpoint, window: 7d}
+    result_ref: gather_raw/0.json
+  - position: 1
+    lead_description:
+      goal: "Determine whether the shell spawn at 14:25:22Z is surrounded by other anomalous alerts that would indicate an intrusion chain."
+      what_to_characterize:
+        - "all Wazuh alerts in the \u00b115m window around 2026-05-07T14:25:22Z for the falco agent or target-endpoint container"
+        - rule IDs and descriptions of co-occurring alerts
+        - "whether any alerts indicate recon, lateral movement, exploitation, or C2"
+    queries:
+      - id: wazuh.alerts-around-event
+        params: {container_name: target-endpoint, t0: "2026-05-07T14:25:22Z", window: ±15m}
+    result_ref: gather_raw/1.json
+  - position: 2
+    lead_description:
+      goal: Determine whether the 12 rule 100002 alerts surrounding the focal shell spawn are sshd false positives or a genuine stdio-redirect attack from another process.
+      what_to_characterize:
+        - process name (proc.name) responsible for the stdio redirect in each 100002 alert
+        - source and destination IPs and ports (which direction is the connection)
+        - whether the process is sshd or something else
+        - "whether there is a pattern (same process, same IPs across all 12 events)"
+        - what the full output/rule text says about the connection
+    queries:
+      - id: wazuh.falco-reverse-shell-events
+        params: {container_name: target-endpoint, rule_id: 100002, t0: "2026-05-07T14:25:18Z", window: ±5m}
+    result_ref: gather_raw/2.json
