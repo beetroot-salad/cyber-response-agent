@@ -5,8 +5,9 @@ description: Block surface for authoring investigation.md as dense invlang. Tags
 
 The defender authors `investigation.md` as dense invlang — fenced
 `​```invlang` blocks with tagged rows. The grammar is shared with
-production (`docs/dense-investigation-format.md` is the full spec); the
-defender uses a stripped subset and is not gated by the production
+production (`docs/dense-investigation-format.md` is the full spec; the
+agent runtime reference is `soc-agent/knowledge/invlang/schema.md`).
+The defender uses a stripped subset and is not gated by the production
 validator.
 
 Use markdown phase headers (`## ORIENT`, `## PLAN`, `## GATHER (loop N)`,
@@ -17,25 +18,42 @@ blocks live underneath them.
 
 - **`:V`** — vertices (entities). Row shape:
   `[id|type|class|ident|attrs?]`
-  Examples of `type`: `host`, `process`, `identity`, `session`,
-  `network-endpoint`, `event`. `class` is the subclass within a type
-  (e.g. `host:linux`, `identity:human`). `ident` is a stable identifier
-  (hostname, pid, username). `attrs` is `key=value;...`.
+  Types are *participants in the investigation*: `endpoint`,
+  `process`, `identity`, `session`, `file`, `command`, `socket`,
+  `storage`, `database`, `container`, `network-device`. Note
+  `endpoint` is unified — managed hosts and external IPs / FQDNs are
+  all endpoints, discriminated by class (`endpoint:linux`,
+  `endpoint:ipv4`, `endpoint:fqdn`, `endpoint:windows`). **Events are
+  not vertices** — a failed auth or a process spawn is an `:E` edge,
+  not a vertex with an `event` type. `class` is the subclass within a
+  type. `ident` is a stable human-readable identifier (hostname, pid,
+  username, IP literal). `attrs` is `key=value;...` for technical
+  properties intrinsic to the entity (kernel version, process pid).
 
-- **`:E`** — edges (relations / events). Row shape:
+- **`:E`** — edges (events / relations between entities). Row shape:
   `[id|rel|src|tgt|when|auth_kind:source|attrs?]`
-  `rel` is the relation (`logged-into`, `spawned`, `authenticated-as`).
-  `src` and `tgt` are vertex ids. `when` is ISO timestamp. `auth_kind:source`
-  is the observation authority (`siem-event:wazuh`,
-  `runtime-audit:falco`, `authoritative-source:directory`).
+  `rel` describes something that happened between two entities
+  (`spawned`, `authenticated_as`, `attempted_auth`, `connected_to`,
+  `runs_on`). `src` and `tgt` are vertex ids. `when` is ISO timestamp.
+  `auth_kind:source` is the observation authority — common kinds:
+  `siem-event:wazuh`, `runtime-audit:falco`,
+  `authoritative-source:directory`. The full enum (including
+  `client-asserted` and `inferred-structural`, which cap supported
+  resolutions at `+`/`-`) lives in the schema. The edge IS the event
+  — repeat occurrences of the same edge collapse into one row with
+  `count` and `window_*` in `attrs?`, not N rows.
 
 - **`:H`** — hypotheses. Row shape:
   `[id|name|attached_to|preds|refuts?|weight|status]`
-  `id` like `h-monitoring-probe`. `attached_to` is the vertex the
-  hypothesis predicts an upstream cause for. `preds` is a
-  comma-separated list of prediction ids defined inline in the same
-  `:H` row. `weight` is one of `unweighted`, `weak`, `strong`.
-  `status` is `live`, `shelved`, or `refuted`.
+  `id` like `h-001`. `name` is a `?descriptive-slug` like
+  `?monitoring-probe`. `attached_to` is the vertex id the hypothesis
+  predicts an upstream cause for. `preds` is a comma-separated list
+  of prediction ids defined inline. `weight` is one of `unweighted`,
+  `weak`, `strong`. `status` is `live`, `shelved`, or `refuted`.
+  *(Note: production's full `:H` row has additional structural cells
+  — `rel`, `parent_type`, `parent_class`, `authz?`, `attr_preds?` —
+  that the defender POC omits. See §Inconsistency vs production
+  schema for what we lose by stripping them.)*
 
 - **`:L`** — lead headers. Row shape:
   `[id|loop|name|goal|what_to_characterize]`
@@ -55,15 +73,16 @@ blocks live underneath them.
 
 ```invlang
 :V prologue.vertices
-v-host-1 | host | host:linux | bastion-01.corp | role=jump
-v-user-1 | identity | identity:human | jsmith | groups=infra-admins
+v-001 | endpoint | endpoint:linux | bastion-01.corp |
+v-002 | identity | identity:human | jsmith |
+v-003 | endpoint | endpoint:ipv4  | 10.42.7.183 |
 
 :E prologue.edges
-e-001 | logged-into | v-user-1 | v-host-1 | 2026-05-05T03:47:12Z | siem-event:wazuh
+e-001 | authenticated_as | v-002 | v-001 | 2026-05-05T03:47:12Z | siem-event:wazuh | src=v-003
 
 :H hypothesize.hypotheses
-h-routine-admin | routine-admin-login | v-host-1 | p-key-matches,p-source-known | weak | live
-h-pivoted-key   | pivoted-via-stolen-key | v-host-1 | p-source-novel,p-no-prior-bastion-auth | unweighted | live
+h-001 | ?routine-admin-login    | v-001 | p-key-matches,p-source-known            | weak       | live
+h-002 | ?pivoted-via-stolen-key | v-001 | p-source-novel,p-no-prior-bastion-auth  | unweighted | live
 ```
 
 After a gather dispatch:
@@ -73,7 +92,7 @@ After a gather dispatch:
 l-001 | 1 | auth-history-jsmith-bastion | "characterize jsmith's auth pattern on bastion-01 over last 30d" | "timing pattern, source diversity, success/failure ratio"
 
 :R l-001.resolutions
-p-source-novel | -- | matched | "jsmith authed from 4 corp IPs over 90d; src 10.42.7.183 unseen but in-corp"
+p-source-novel          | -- | matched | "jsmith authed from 4 corp IPs over 90d; src 10.42.7.183 unseen but in-corp"
 p-no-prior-bastion-auth | -- | matched | "142 prior logins this host, all from 10.42.5.0/24"
 ```
 
