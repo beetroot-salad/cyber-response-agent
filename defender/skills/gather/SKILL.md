@@ -68,6 +68,17 @@ returned `queries[]` list.
 
 ### 3. Run the queries
 
+**Validate every bound param against the template's declared shape
+before substitution.** Templates that filter on typed index fields
+(IPs, timestamps, port numbers, user IDs) call out the expected
+literal shape and the failure mode. Most SIEM indexes silently
+return zero matching events when the literal type doesn't match the
+field type — there is no error to read. Running the query anyway and
+reporting "0 events" produces a confidently-wrong observation that
+the defender will weigh as evidence. If a bound param violates the
+template's declared shape, refuse the dispatch with a
+"unrunnable: param shape mismatch" summary and stop.
+
 Substitute bound params into each template's `## Query` body and
 execute via the system's CLI (`Bash`). Pass `--run-dir ${run_dir}`
 and `--position ${position}` — the CLI writes the formatted (or

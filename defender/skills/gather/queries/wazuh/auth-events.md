@@ -44,18 +44,30 @@ fixes. Each filter takes a literal value of a specific shape:
 
 - `host` → `agent.name:<hostname>` (Wazuh agent name, e.g. `bastion-01.corp`).
 - `user` → `data.dstuser:<username>` (the destination/target username).
-- `srcip` → `data.srcip:<IPv4>` (a literal address, e.g. `10.42.7.183`).
-  **Never bind a hostname here** — `data.srcip` is indexed as IP, so a
-  hostname literal silently matches zero events. To answer "events
-  where the source is host X," resolve X to its IP first or filter on
-  `agent.name` if the question is about events recorded by host X's
-  agent.
+- `srcip` → `data.srcip:<IPv4 or IPv6 literal>` (e.g. `10.42.7.183` or
+  `2001:db8::1`).
 
-The template is for **inbound authentication events recorded by the
-target's agent**. Asking "did host X originate outbound auth" is a
-different measurement (process / sshd-client telemetry, not the
-alerts index) and is not in scope for this template — escalate as an
-unrunnable lead rather than misbinding `srcip` to host X.
+### REFUSE: hostname bound to `srcip`
+
+`data.srcip` is indexed as an IP-typed field. Wazuh silently returns
+zero events when the literal is not an IP — there is no error, no
+warning, no type-mismatch signal in the response. The empty result
+looks identical to "this IP genuinely had no auth activity," and the
+defender will read it that way.
+
+**If the lead's intent is "events where the source is host X":**
+1. If a separate template resolves X → IP, run that first and rebind
+   `srcip` to the resolved literal.
+2. If "host X originated outbound auth" is the actual measurement, this
+   is **not in scope for this template** — `auth-events` is the
+   inbound-auth alerts index. Outbound auth is process / sshd-client
+   telemetry, a different system. Refuse the dispatch and report
+   "unrunnable: outbound-auth-from-host is not measured by Wazuh
+   alerts; needs a different system or template."
+
+A value bound to `srcip` that is not a parseable IP literal is a
+configuration error — the gather subagent must refuse to run rather
+than executing the query and reporting "0 events."
 
 ## Common pitfalls
 
