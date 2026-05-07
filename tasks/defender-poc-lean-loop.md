@@ -205,6 +205,54 @@ for learning.
   Conclusion: drop `data_tags` and `params` from frontmatter, optimize
   `## Goal` body for keyword recall, keep per-system dirs as the routing
   prefix. Reflected in `defender/skills/gather/queries/SCHEMA.md`.
+- **Defender dense-language surface vs production invlang schema.**
+  `defender/skills/dense-language/SKILL.md` is a stripped subset of
+  `soc-agent/knowledge/invlang/schema.md`; PR #187 review surfaced
+  substantive divergences worth triaging. Open work:
+  1. **Add `template`/`system`/`query`/`window` cells to `:L findings`.**
+     Defender currently drops them, contradicting the PR-#187 premise that
+     `(query_template.id, params)` is the cross-case key. The keyed
+     projection runs through `defender/scripts/project_lead_sequence.py`
+     (TBD) reading gather's returned `queries[]`; a structural cell on
+     the lead row would carry the id without the indirection.
+  2. **Reintroduce `:H authz?` + `:R authz` rows.** Production legitimacy
+     mechanism: `ac<n>` contracts on `:H` declare authorization
+     preconditions (edge-coupled — legitimacy is a property of an
+     *interaction*, not an *entity*); `:R authz` rows resolve them with
+     `verdict` ∈ `{authorized, unauthorized, indeterminate}`, citing
+     `anchor_kind` + `anchor_id` + `grounding`. Validator rule #21 gates
+     `disposition: benign` on every contract resolving `authorized`.
+     Defender's stripped subset has no declaration or resolution site
+     for this — needs to come back.
+  3. **Make role grounding explicit on legitimacy resolutions.** Two
+     options surfaced; pick before implementing #2:
+     - **α — naming convention on `ac<n>` predicates.** Predicate text
+       names the role check explicitly: `"session.initiator member_of
+       identity:team:infra-admins AND target endpoint accepts ssh from
+       infra-admins"`. Zero schema change; SKILL.md guidance only.
+     - **β — `roles_relied_on?` cell on `:R authz`.** Semicolon-separated
+       `vertex_id.<key>=<value>` recording role/team facts the
+       resolution depended on, e.g.
+       `roles_relied_on?: v-002.team=infra-admins;v-001.role=jump-host`.
+       Indexable for corpus retrieval.
+     Trade-off: α cheaper (no schema change), β more retrievable. Lean
+     β if corpus-level "find investigations where role X was load-bearing
+     for an authz verdict" matters; α if predicate-grep is good enough.
+  4. **Triage other divergences:** `:R` shape (one defender block vs
+     four schema sub-types — `authz` / `consultations` / `impact` /
+     `attr_updates`); `:T conclude` structure (defender drops impact
+     axis, termination category, sub-tables); `:T resolutions` proof
+     trace (defender drops it entirely); weight enum
+     (`unweighted`/`weak`/`strong` vs `null`/`++`/`+`/`-`/`--`); status
+     enum (defender drops `confirmed`); relation catalog
+     (defender uses kebab-case ad-hoc names — `logged-into`,
+     `failed-auth-toward` — vs schema's snake_case closed catalog —
+     `authenticated_as`, `attempted_auth`); ID grammar (named slugs
+     vs strict-numeric); `auth_kind:source` enum (defender drops
+     `client-asserted` and `inferred-structural`).
+  Most appropriate as a single follow-up PR scoped to dense-language
+  schema alignment + legitimacy reintroduction. Item #3 (α vs β) is the
+  one open product call before that PR can start.
 
 ## Success criteria for the POC
 
