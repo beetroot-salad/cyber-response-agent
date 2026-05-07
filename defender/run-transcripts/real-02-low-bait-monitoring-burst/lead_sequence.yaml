@@ -1,0 +1,29 @@
+case_id: real-02-low-bait
+alert_ref: alert.json
+entries:
+  - position: 0
+    lead_description:
+      goal: "Pull all SSH authentication events from source IP 172.22.0.10 targeting host target-endpoint over the past 24h. Goal: characterize the full set of usernames attempted, count of attempts, timing spread (are they periodic or bursty?), and port(s) used. This discriminates between a single-username monitoring probe and a multi-username credential sweep."
+      what_to_characterize:
+        - full set of usernames attempted
+        - count of attempts
+        - timing spread (periodic vs bursty)
+        - port(s) used
+    queries:
+      - id: wazuh.auth-events
+        params: {srcip: 172.22.0.10, host: target-endpoint, window: 24h}
+    result_ref: gather_raw/0.json
+  - position: 1
+    lead_description:
+      goal: "Pull all Wazuh auth-event history for source IP 172.22.0.10 across all agents over the past 7 days. Goal: characterize what role this IP plays in the environment \u2014 is it a known monitoring server making consistent probe attempts across multiple hosts, or is it a novel/sparse source?"
+      what_to_characterize:
+        - which target hosts it contacts
+        - what usernames it uses
+        - whether the pattern is periodic
+        - source IP diversity (should be single point)
+        - success/failure ratio
+        - volume and timing distribution
+    queries:
+      - id: wazuh.auth-events
+        params: {srcip: 172.22.0.10, window: 7d}
+    result_ref: gather_raw/1.json
