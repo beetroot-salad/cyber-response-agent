@@ -148,22 +148,21 @@ Loaded on demand:
 
 ## Worked examples
 
-These are three abridged runs, drawn from
-`experiments/critic-architecture/fixtures/`, trimmed to the dispatches
-that actually moved belief. Real `investigation.md` files have more
-detail and more vertices; the goal here is to carry the *shape* — what
-each phase writes, what gather returns, how the sequence projects.
-The block schemas shown here use the leaner column set from the spec's
-reference example (`docs/dense-investigation-format.md`); the longer
-form in `defender/skills/dense-language/SKILL.md` is available when a
-case needs it.
+Three abridged runs, trimmed to the dispatches that actually moved
+belief. Real `investigation.md` files have more detail and more
+vertices; the goal here is to carry the *shape* — what each phase
+writes, what gather returns, how the sequence projects. The block
+schemas shown use the leaner column set from the spec's reference
+example (`docs/dense-investigation-format.md`); the longer form in
+`defender/skills/dense-language/SKILL.md` is available when a case
+needs it.
 
 ### Example A — FIM checksum change after apt upgrade
 
-Source: `experiments/critic-architecture/fixtures/02-fim-after-package-update`.
 The alert is `wazuh-rule-550` (file integrity changed) on
-`/usr/sbin/nginx`. The distinguishing question is whether the change
-is explained by a managed package upgrade.
+`/usr/sbin/nginx`. The question is whether the checksum change
+indicates binary tampering or is consistent with benign activity such
+as a managed package upgrade.
 
 `investigation.md` (excerpts):
 
@@ -252,10 +251,9 @@ the same single lead and miss it.
 
 ### Example B — Internal horizontal port scan
 
-Source: `experiments/critic-architecture/fixtures/04-vuln-scanner-port-scan`.
-A horizontal port scan from `vuln-scanner-02.sec`. The load-bearing
-question is whether the source host's role and the scan window match a
-documented change.
+A horizontal port scan from `vuln-scanner-02.sec`. The question is
+whether this is internal reconnaissance by an unauthorized source or
+sanctioned scanning by a documented tool on schedule.
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -309,7 +307,6 @@ authority chain is closed.
 
 ### Example C — Novel outbound DNS from a CI runner
 
-Source: `experiments/critic-architecture/fixtures/03-novel-outbound-dns`.
 The signature is behavioral — `egress-dns-query-to-rare-tld` fires on a
 domain (`telemetry-collect.live`) first observed org-wide 29h ago, with
 zero fleet peers querying it and a regular `~30 min ± 3 min` cadence
