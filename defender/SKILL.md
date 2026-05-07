@@ -149,19 +149,21 @@ Loaded on demand:
 ## Worked examples
 
 These are three abridged runs, drawn from
-`experiments/critic-architecture/fixtures/` and `soc-agent/runs/`,
-trimmed to the dispatches that actually moved belief. Real
-`investigation.md` files have more detail and more vertices; the goal
-here is to carry the *shape* — what each phase writes, what gather
-returns, how the sequence projects.
+`experiments/critic-architecture/fixtures/`, trimmed to the dispatches
+that actually moved belief. Real `investigation.md` files have more
+detail and more vertices; the goal here is to carry the *shape* — what
+each phase writes, what gather returns, how the sequence projects.
+The block schemas shown here use the leaner column set from the spec's
+reference example (`docs/dense-investigation-format.md`); the longer
+form in `defender/skills/dense-language/SKILL.md` is available when a
+case needs it.
 
-### Example A — FIM checksum change after apt upgrade (looks malicious, isn't)
+### Example A — FIM checksum change after apt upgrade
 
 Source: `experiments/critic-architecture/fixtures/02-fim-after-package-update`.
 The alert is `wazuh-rule-550` (file integrity changed) on
-`/usr/sbin/nginx`. Surface looks like binary tampering; the
-distinguishing question is whether the change is explained by a
-managed package upgrade.
+`/usr/sbin/nginx`. The distinguishing question is whether the change
+is explained by a managed package upgrade.
 
 `investigation.md` (excerpts):
 
@@ -175,12 +177,12 @@ e-001|modified|v-001|v-002|2026-05-05T02:14:01Z|siem-event:wazuh|checksum_before
 ```
 
 ```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
-h-001|?managed-package-upgrade|v-002|modified|process|package-manager||p1:proposed_parent:"upgrade event in apt history at modification time";p2:proposed_edge:"checksum_after matches upstream package SHA"||r1[p1,p2]:"no apt event near modification time, or checksum diverges from upstream"|||null|active
-h-002|?adversary-controlled-write|v-002|modified|process|adversary-shell||p1:proposed_parent:"write traces to interactive session or non-package process";p2:proposed_edge:"checksum_after diverges from any published package SHA"||r1[p1,p2]:"write traces to package-manager process tree, checksum matches upstream"|||null|active
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|preds|refuts|authz?|weight|status]
+h-001|?managed-package-upgrade|v-002|modified|process|package-manager|p1:proposed_parent:"upgrade event in apt history at modification time";p2:proposed_edge:"checksum_after matches upstream package SHA"|r1[p1,p2]:"no apt event near modification time, or checksum diverges from upstream"||null|active
+h-002|?adversary-controlled-write|v-002|modified|process|adversary-shell|p1:proposed_parent:"write traces to interactive session or non-package process";p2:proposed_edge:"checksum_after diverges from any published package SHA"|r1[p1,p2]:"write traces to package-manager process tree, checksum matches upstream"||null|active
 
-:L findings [id|loop|name|target|mode?|tests|system|template|query|window]
-l-001|1|apt-upgrade-correlation|v-001||h-001,h-002|host-query|apt-history-around|host=web-frontend-04.prod t0=2026-05-05T02:14:01Z|±10m
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|apt-upgrade-correlation|v-001|h-001,h-002|host-query|apt-history-around|host=web-frontend-04.prod t0=2026-05-05T02:14:01Z|±10m
 ```
 
 GATHER dispatch (single-lead, parallel-of-one):
@@ -208,10 +210,16 @@ h-001  null → ++    [l-001 p1,p2 severe ⟂ apt event + matching upstream SHA]
 h-002  null → --    [l-001 r1 severe ⟂ write came from systemd→unattended-upgrades→dpkg, checksum matches upstream]
 ```
 
-REPORT: one decisive lead, no second loop. Disposition `benign`,
-matched archetype `managed-package-upgrade`, summary "FIM fire
-explained by signed unattended-upgrade nginx 1.24.0-2ubuntu7.5;
-checksum matches upstream and fleet pattern."
+REPORT: one decisive lead, no second loop.
+
+```invlang
+:T conclude
+termination.category   adversarial-refuted
+disposition            benign
+confidence             high
+matched_archetype      managed-package-upgrade
+summary                "FIM fire explained by signed unattended-upgrade nginx 1.24.0-2ubuntu7.5; checksum matches upstream and fleet pattern."
+```
 
 `lead_sequence.yaml`:
 
@@ -232,23 +240,22 @@ entries:
     result_ref: gather_raw/0.json
 ```
 
-The bait variant of this fixture (`10-bait-mirror-postinst`) starts
-with the same dispatch and the same `++` on `?managed-package-upgrade`
-— the supply-chain integrity layer clears. The diverging move is a
-second PLAN turn that adds `?adversary-runtime-behavior` keyed off the
-post-upgrade outbound TLS to a host no fleet peer reaches. A defender
-that stops at example A's first dispatch on the bait fixture has
-followed the path of least resistance into the wrong disposition; the
-shape is identical, so the discipline gate is *whether the prediction
-set actually covered the runtime-behavior layer in PLAN*, not anything
-gather did.
+The companion fixture `10-bait-mirror-postinst` carries the same
+surface and would resolve identically through `l-001` — the
+supply-chain integrity layer clears in both cases. What differs is the
+*post-upgrade runtime behavior* (an outbound TLS connection no fleet
+peer makes), which `l-001` does not test. The discipline gate is
+whether PLAN's prediction set covers the runtime-behavior layer at
+all, not anything `l-001` returns. A defender whose `:H` set on the
+bait fixture only proposes upstream-of-write parents will close on
+the same single lead and miss it.
 
-### Example B — Internal port scan from CMDB-known scanner (fast benign)
+### Example B — Internal horizontal port scan
 
 Source: `experiments/critic-architecture/fixtures/04-vuln-scanner-port-scan`.
-A horizontal port scan from `vuln-scanner-02.sec`. Surface looks like
-internal recon; the load-bearing question is whether the source host's
-role and the scan window match a documented change.
+A horizontal port scan from `vuln-scanner-02.sec`. The load-bearing
+question is whether the source host's role and the scan window match a
+documented change.
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -258,12 +265,12 @@ v-002|endpoint|endpoint:network|10.0.0.0/8|
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
 e-001|scanned|v-001|v-002|2026-05-05T01:00:14Z..01:22:08Z|siem-event:wazuh|targets=1842;ports=top-100-tcp
 
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
-h-001|?scheduled-vuln-scan|v-001|scanned|process|tenable-scanner||p1:proposed_parent:"CMDB classifies source as trusted-scanner";p2:proposed_edge:"scan window matches a change calendar entry"||r1[p1,p2]:"source is unclassified or window has no change entry"|ac1:proposed:cmdb+change-cal:"source is documented scanner running an approved scan":escalate/escalate||null|active
-h-002|?adversary-internal-recon|v-001|scanned|identity|adversary-shell||p1:proposed_parent:"source has no documented scanner role";p2:proposed_edge:"scan timing is opportunistic, not on schedule"||r1[p1,p2]:"source is documented scanner and scan is on schedule"|||null|active
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|preds|refuts|authz?|weight|status]
+h-001|?scheduled-vuln-scan|v-001|scanned|process|tenable-scanner|p1:proposed_parent:"CMDB classifies source as trusted-scanner";p2:proposed_edge:"scan window matches a change calendar entry"|r1[p1,p2]:"source is unclassified or window has no change entry"|ac1:proposed:cmdb+change-cal:"source is documented scanner running an approved scan":escalate/escalate|null|active
+h-002|?adversary-internal-recon|v-001|scanned|identity|adversary-shell|p1:proposed_parent:"source has no documented scanner role";p2:proposed_edge:"scan timing is opportunistic, not on schedule"|r1[p1,p2]:"source is documented scanner and scan is on schedule"||null|active
 
-:L findings [id|loop|name|target|mode?|tests|system|template|query|window]
-l-001|1|scanner-role-and-change|v-001||h-001,h-002|host-query|cmdb+change-cal|host=vuln-scanner-02.sec t=2026-05-05T01:00:14Z|n/a
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|scanner-role-and-change|v-001|h-001,h-002|host-query|cmdb+change-cal|host=vuln-scanner-02.sec t=2026-05-05T01:00:14Z|n/a
 ```
 
 GATHER returned: CMDB role `tenable-scanner` (owner `infosec-vm-team`),
@@ -281,11 +288,18 @@ h-001  null → ++    [l-001 p1,p2,ac1 severe ⟂ CMDB + change calendar + scann
 h-002  null → --    [l-001 r1 severe ⟂ source is documented scanner running scheduled scan]
 ```
 
-REPORT: one dispatch, `++` on the legitimate path with all three
-authority signals (CMDB, change calendar, scanner-side audit) aligning,
-`--` on the adversarial alternative. Disposition `benign`, archetype
-`scheduled-vuln-scan`. The `ac1` legitimacy contract resolves
-`authorized` (rule-21 gating clean).
+REPORT: one dispatch, all three authority signals (CMDB, change
+calendar, scanner-side audit) aligning. The `ac1` legitimacy contract
+resolves `authorized`.
+
+```invlang
+:T conclude
+termination.category   adversarial-refuted
+disposition            benign
+confidence             high
+matched_archetype      scheduled-vuln-scan
+summary                "Horizontal scan traces to documented Tenable scanner running CHG-44120; CMDB role + change calendar + scanner audit all aligned."
+```
 
 This is the shape PLAN should aim for when the answer might be one
 dispatch away: write the prediction set such that a single
@@ -293,114 +307,108 @@ authority-aligned observation either confirms or refutes both
 hypotheses. Don't generate a second lead "to be sure" once the
 authority chain is closed.
 
-### Example C — SSH invalid-user fires, branching escalation
+### Example C — Novel outbound DNS from a CI runner
 
-Source shape: `soc-agent/runs/run-live-stub-1776238944` —
-`wazuh-rule-5710` (`Invalid user zabbix from 172.22.0.10`). A single
-fire is not a brute force; the question is whether this fire is the
-visible edge of one. The lead set must branch because there are two
-plausible non-malicious explanations (stale credential, internal
-monitoring probe) and one malicious one (external brute force / lateral
-spread), and one dispatch can't resolve them all.
+Source: `experiments/critic-architecture/fixtures/03-novel-outbound-dns`.
+The signature is behavioral — `egress-dns-query-to-rare-tld` fires on a
+domain (`telemetry-collect.live`) first observed org-wide 29h ago, with
+zero fleet peers querying it and a regular `~30 min ± 3 min` cadence
+from one process tree. This is not a known-pattern alert; the lead set
+has to enumerate the plausible parents.
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|endpoint|endpoint:linux|target-endpoint|
-v-002|endpoint|endpoint:ipv4|172.22.0.10|
-v-003|identity|identity:human|zabbix|kind=invalid-user-attempted
+v-001|endpoint|endpoint:linux|build-runner-07.ci|role=stateless-ci-runner
+v-002|process|process:node|node[2188]|cmdline_via=npm-exec
+v-003|endpoint|endpoint:dns-name|telemetry-collect.live|first_seen_org=2026-05-04T22:11Z
+v-004|package|package:npm|@quickmetrics/runtime-collector@0.1.2|published=2026-05-04T20:50Z
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|attempted_auth|v-002|v-001|2026-04-15T07:40:03Z|siem-event:wazuh|outcome=failed;reason=invalid-user;user=zabbix
+e-001|queried_dns|v-002|v-003|2026-05-05T...|siem-event:wazuh|cadence=~30min;count_24h=47
+e-002|loaded|v-002|v-004|2026-05-05T...|runtime-audit:github-runner|via=npm-install
 ```
 
-PLAN authors three competing topologies:
+PLAN authors three competing topologies under `v-002`'s `loaded`/`queried_dns` parents — they are mutually exclusive on parent class:
 
 ```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
-h-001|?stale-credential-monitoring|v-001|attempted_auth|endpoint|known-internal-monitor||p1:proposed_parent:"172.22.0.10 has prior successful auth to target-endpoint";p2:proposed_edge:"invalid-user fires are periodic, not bursting"||r1[p1,p2]:"172.22.0.10 has no prior successful auth, or fires are bursting"|ac1:proposed:cmdb:"source is a documented monitoring host":escalate/escalate||null|active
-h-002|?internal-lateral-spread|v-001|attempted_auth|endpoint|adversary-controlled-internal||p1:proposed_parent:"172.22.0.10 also probing other hosts in fleet";p2:proposed_edge:"username diversity from this source > 1"||r1[p1,p2]:"source touches only this host, single username"|||null|active
-h-003|?external-brute-force|v-001|attempted_auth|endpoint|external-source||p1:proposed_parent:"failed-auth fires from many distinct sources clustered around alert time";p2:proposed_edge:"username diversity across the cluster matches dictionary shape"||r1[p1,p2]:"only this source firing, only this username"|||null|active
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|preds|refuts|authz?|weight|status]
+h-001|?legitimate-dependency-telemetry|v-002|loaded|package|legitimate-published-library|p1:proposed_parent:"package source repo declares telemetry endpoint and opt-out"|r1[p1]:"no documented telemetry, or endpoint not declared in source"|ac1:proposed:org-policy:"CI runner egress to package telemetry endpoints permitted":escalate/escalate|null|active
+h-002|?developer-tooling-phone-home|v-002|queried_dns|process|build-tool|p1:proposed_parent:"node child of npm-exec under github-runner job, no other runtime in process tree";p2:proposed_edge:"queries cease when build job ends"|r1[p1,p2]:"queries persist past job lifetime, or process tree includes a non-build runtime"||null|active
+h-003|?malicious-dependency-c2|v-002|loaded|package|adversary-published-library|p1:proposed_parent:"maintainer published recently and has no other packages";p2:proposed_edge:"destination IP has no historical reputation and was registered shortly before package publication"|r1[p1,p2]:"maintainer has long publication history, or destination IP has prior reputation"||null|active
 
-:L findings [id|loop|name|target|mode?|tests|system|template|query|window]
-l-001|1|172.22.0.10-history|v-001||h-001,h-002|wazuh|wazuh.auth-events|host=target-endpoint srcip=172.22.0.10|90d
-l-002|1|target-endpoint-failed-auth-cluster|v-001||h-002,h-003|wazuh|wazuh.auth-events|host=target-endpoint outcome=failed|±1h
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|package-source-and-maintainer|v-004|h-001,h-003|host-query|npm-package-meta|name=@quickmetrics/runtime-collector version=0.1.2|n/a
+l-002|1|process-tree-and-job-correlation|v-002|h-002,h-003|host-query|process-tree-around|host=build-runner-07.ci pid=2188 t0=alert|±2h
+l-003|1|destination-ip-reputation|v-003|h-001,h-003|wazuh|dns-and-reputation-history|domain=telemetry-collect.live ip=203.0.113.42|90d
 ```
 
-PLAN issued two leads in one turn — `l-001` discriminates `?stale`
-vs `?lateral`, `l-002` discriminates `?lateral` vs `?external`.
-Dispatched as parallel `Task` calls. Both leads happen to use the same
-`wazuh.auth-events` template with different parameter bindings; the
-projection script renders them as two separate sequence entries.
+PLAN issued three leads in one turn — each discriminates a different pair, and together they triangulate the parent class. Dispatched as three parallel `Task` calls. `host-query.npm-package-meta` and `host-query.process-tree-around` are minted by gather (catalog had neither).
 
-ANALYZE on returned summaries:
+ANALYZE on returned summaries (`gather_raw/0..2.json`):
 
-- `l-001`: 172.22.0.10 has 24 prior **successful** auths to
-  target-endpoint as `monitoring`; the `zabbix` failures are periodic
-  (one every 15 min, every day for the past 7 days). Stale-credential
-  shape.
-- `l-002`: failed auths from 8 other distinct external sources in the
-  same hour, 47 distinct usernames, dictionary-shape (root, admin,
-  oracle, postgres, ...). Brute-force shape on the host.
+- `l-001`: maintainer profile shows zero other packages, account created 2026-04-19; package source repo (a single-commit GitHub repo) declares no telemetry mechanism and the binding to `telemetry-collect.live` is in a post-install script obfuscated via base64.
+- `l-002`: process tree confirms `node[2188]` is a child of the github-runner job, but the queries continue 17 minutes past job exit — the daemon does not terminate.
+- `l-003`: destination IP `203.0.113.42` registered 2026-04-21, two days after the maintainer account; no historical traffic from any corp host in 90d; SNI `metrics.nginx-cdn-collector.io` (a different domain than the DNS query, registered same week).
 
 ```invlang
 :T resolutions
-h-001  null → +     [l-001 p1,p2 weak ⟂ source has prior successful auth and fires are periodic, but ac1 not yet resolved — monitoring role unconfirmed]
-h-002  null → --    [l-001 r1 + l-002 r1 severe ⟂ source touches only this host, only this username]
-h-003  null → ++    [l-002 p1,p2 severe ⟂ 8 external sources, 47 dictionary usernames clustered ±1h]
+h-001  null → --   [l-001 r1 severe ⟂ source repo declares no telemetry; binding is in obfuscated post-install]
+h-002  null → -    [l-002 r1 weak ⟂ daemon outlives job, but a CI-tool phone-home that survives job exit is unusual rather than refuted outright]
+h-003  null → +    [l-001 p1 + l-003 p1,p2 moderate ⟂ recent maintainer with no other packages, IP registered just before publication, SNI/host mismatch — circumstantial pattern, no confirmed C2 channel observed]
 ```
 
-A second loop confirms `?stale-credential-monitoring` via
-`ac1` (CMDB lookup on 172.22.0.10) — the original `zabbix` fire is
-benign noise — *and* keeps `?external-brute-force` at `++`. The
-dispositions don't conflict: the alert under investigation traces to
-the stale-credential path, but the host is concurrently under brute
-force from unrelated sources.
+No single lead reaches `++` on `?malicious-dependency-c2`: confirming
+C2 would require sandbox detonation or traffic-content inspection, and
+neither is in the runtime tool surface. The path of least resistance
+(stop at three `+`/`-`) underweights the integration. REPORT escalates
+on the cumulative pattern.
 
-REPORT: disposition `escalate`, archetype `host-under-active-brute-force`,
-summary "Original `zabbix` fire is stale monitoring credential noise;
-investigation surfaced concurrent dictionary-shape brute force on the
-same host from 8 external sources requiring response." Two competing
-explanations survived for the original fire; the third is the reason
-for escalation. The branching lead set is what made the second finding
-visible — a single lead resolving the original fire would have closed
-benign and missed the brute force.
+```invlang
+:T conclude
+termination.category   exhaustion-escalation
+termination.rationale  "?malicious-dependency-c2 cannot be driven to -- with available tooling; circumstantial pattern is decision-relevant"
+disposition            escalate
+confidence             medium
+matched_archetype      novel-dependency-with-anomalous-egress
+summary                "build-runner-07.ci is making periodic queries to a recently-registered domain via a post-install daemon in a freshly-published npm package by a single-package maintainer. Legitimate-telemetry path is refuted; malicious-C2 path is supported circumstantially but cannot be confirmed in-loop. Hand off for sandbox detonation + maintainer review."
+```
 
 `lead_sequence.yaml` (abridged):
 
 ```yaml
-case_id: 2026-04-15-C
+case_id: 2026-05-05-C
 alert_ref: alert.json
 entries:
   - position: 0
     lead_description:
-      goal: Does 172.22.0.10 have a prior successful-auth history with target-endpoint, and what is its fire pattern?
+      goal: Characterize the npm package and its maintainer.
       what_to_characterize:
-        - prior successful auths from 172.22.0.10 to target-endpoint over 90d
-        - timing distribution of invalid-user fires from this source
-        - usernames attempted from this source
+        - maintainer publication history
+        - source repo declared telemetry mechanism
+        - post-install or lifecycle scripts touching network
     queries:
-      - id: wazuh.auth-events
-        params: {host: target-endpoint, srcip: 172.22.0.10, window: 90d}
+      - id: host-query.npm-package-meta
+        params: {name: '@quickmetrics/runtime-collector', version: 0.1.2}
     result_ref: gather_raw/0.json
   - position: 1
     lead_description:
-      goal: Is target-endpoint receiving failed auths from a cluster of sources around the alert time, and does username diversity match a brute-force shape?
+      goal: Trace the node[2188] process tree and check whether DNS queries are bounded by the github-runner job lifetime.
       what_to_characterize:
-        - distinct source IPs firing failed auth on target-endpoint in ±1h
-        - distinct usernames attempted across that cluster
-        - timing burst vs steady-state
+        - parent chain of pid 2188
+        - process exit time vs. last DNS query time
     queries:
-      - id: wazuh.auth-events
-        params: {host: target-endpoint, outcome: failed, window: ±1h}
+      - id: host-query.process-tree-around
+        params: {host: build-runner-07.ci, pid: 2188, t0: alert, window: ±2h}
     result_ref: gather_raw/1.json
   - position: 2
     lead_description:
-      goal: Confirm 172.22.0.10's role as a documented monitoring host (resolves ac1).
+      goal: Reputation and history for the queried domain and its resolved IP.
       what_to_characterize:
-        - CMDB record for 172.22.0.10
-        - documented monitoring jobs targeting target-endpoint as user 'zabbix' or 'monitoring'
+        - domain first-seen vs. resolved-IP registration date
+        - prior corp traffic to the IP
+        - SNI vs. queried domain alignment
     queries:
-      - id: host-query.cmdb-host-role
-        params: {host: 172.22.0.10}
+      - id: wazuh.dns-and-reputation-history
+        params: {domain: telemetry-collect.live, ip: 203.0.113.42, window: 90d}
     result_ref: gather_raw/2.json
 ```
