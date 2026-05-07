@@ -1,0 +1,46 @@
+{
+  "predecoder": {
+    "hostname": "target-endpoint",
+    "program_name": "dnsmasq",
+    "timestamp": "May  7 14:26:48"
+  },
+  "agent": {
+    "ip": "172.22.0.13",
+    "name": "target-endpoint",
+    "id": "002"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
+  "data": {
+    "srcip": "127.0.0.1",
+    "dns_query_type": "A",
+    "dns_domain": "c3Zjp9MCHnfKREE5.api.ghostnebula.net"
+  },
+  "rule": {
+    "firedtimes": 15,
+    "mail": true,
+    "level": 10,
+    "description": "DNS query to domain with high-entropy subdomain (possible DGA/tunneling)",
+    "groups": [
+      "dns",
+      "security",
+      "dns_suspicious",
+      "dns_dga",
+      "attack.command_and_control"
+    ],
+    "id": "100110"
+  },
+  "decoder": {
+    "parent": "dnsmasq",
+    "name": "dnsmasq"
+  },
+  "full_log": "May  7 14:26:48 target-endpoint dnsmasq[28]: query[A] c3Zjp9MCHnfKREE5.api.ghostnebula.net from 127.0.0.1",
+  "input": {
+    "type": "log"
+  },
+  "@timestamp": "2026-05-07T14:26:49.751Z",
+  "location": "/var/log/syslog",
+  "id": "1778164009.21422668",
+  "timestamp": "2026-05-07T14:26:49.751+0000"
+}

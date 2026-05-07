@@ -1,0 +1,310 @@
+## Query Results
+**Query:** <JSON body>
+**Time range:** (JSON body owns time filter) to (JSON body owns time filter)
+
+### Data Source Health
+- **Source:** Wazuh Indexer (https://wazuh.indexer:9200)
+- **Most recent matching event:** 2026-05-07T14:25:07.815+0000
+- **Index event count (unfiltered, same window):** n/a (JSON body owns time filter)
+
+### Summary
+- **Matching events:** 18
+
+### Sample Events (first 5)
+1. [2026-05-07T14:25:07.815+0000] rule:100001 srcip:? srcuser:? agent:wazuh.manager desc:Falco: Terminal shell spawned in container
+2. [2026-05-05T10:32:11.312+0000] rule:100001 srcip:? srcuser:? agent:wazuh.manager desc:Falco: Terminal shell spawned in container
+3. [2026-05-03T17:01:53.623+0000] rule:100001 srcip:? srcuser:? agent:wazuh.manager desc:Falco: Terminal shell spawned in container
+4. [2026-05-03T12:40:15.541+0000] rule:100001 srcip:? srcuser:? agent:wazuh.manager desc:Falco: Terminal shell spawned in container
+5. [2026-05-03T11:28:06.460+0000] rule:100001 srcip:? srcuser:? agent:wazuh.manager desc:Falco: Terminal shell spawned in container
+
+### Count Breakdown
+By rule:
+  rule.id:100001 (Falco: Terminal shell spawned in container): 18
+By source IP (1 unique):
+  ?: 18
+By username (1 unique):
+  ?: 18
+By hour:
+  2026-05-01T01: 4
+  2026-05-01T09: 1
+  2026-05-01T20: 1
+  2026-05-02T02: 1
+  2026-05-02T15: 1
+  2026-05-03T05: 1
+  2026-05-03T06: 1
+  2026-05-03T10: 1
+  2026-05-03T11: 3
+  2026-05-03T12: 1
+  2026-05-03T17: 1
+  2026-05-05T10: 1
+  2026-05-07T14: 1
+
+### Raw Sample Events (first 3, full _source)
+Use these for field-level inspection when the summary lines above don't carry
+the discriminator you need (e.g. source port, process name, connection tuple).
+
+```json
+[
+  {
+    "agent": {
+      "name": "wazuh.manager",
+      "id": "000"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "output": "2026-05-07T14:25:22.570026876+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=<NA> command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>",
+      "output_fields": {
+        "container": {
+          "image": {
+            "tag": "latest",
+            "repository": "cyber-response-agent_devcontainer-target-endpoint"
+          },
+          "name": "target-endpoint",
+          "id": "2a124a5fc6d9"
+        },
+        "evt": {
+          "arg": {
+            "flags": "EXE_WRITABLE|EXE_LOWER_LAYER"
+          },
+          "time": {
+            "iso8601": "1778163922570026752.000000"
+          },
+          "type": "execve"
+        },
+        "proc": {
+          "cmdline": "bash -c whoami",
+          "pname": "null",
+          "name": "bash",
+          "tty": "34816",
+          "exepath": "/usr/bin/bash"
+        },
+        "k8s": {
+          "pod": {
+            "name": "null"
+          },
+          "ns": {
+            "name": "null"
+          }
+        },
+        "user": {
+          "uid": "0",
+          "loginuid": "-1",
+          "name": "root"
+        }
+      },
+      "hostname": "falco",
+      "rule": "Terminal shell in container",
+      "source": "syscall",
+      "time": "2026-05-07T14:25:22.570026876Z",
+      "priority": "Notice",
+      "tags": [
+        "T1059",
+        "container",
+        "maturity_stable",
+        "mitre_execution",
+        "shell"
+      ]
+    },
+    "rule": {
+      "firedtimes": 1,
+      "mail": true,
+      "level": 10,
+      "description": "Falco: Terminal shell spawned in container",
+      "groups": [
+        "falco",
+        "security",
+        "falco_process_anomaly",
+        "attack.execution"
+      ],
+      "id": "100001"
+    },
+    "decoder": {
+      "name": "json"
+    },
+    "full_log": "{\"hostname\":\"falco\",\"output\":\"2026-05-07T14:25:22.570026876+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=<NA> command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>\",\"output_fields\":{\"container.id\":\"2a124a5fc6d9\",\"container.image.repository\":\"cyber-response-agent_devcontainer-target-endpoint\",\"container.image.tag\":\"latest\",\"container.name\":\"target-endpoint\",\"evt.arg.flags\":\"EXE_WRITABLE|EXE_LOWER_LAYER\",\"evt.time.iso8601\":1.7781639225700268e+18,\"evt.type\":\"execve\",\"k8s.ns.name\":null,\"k8s.pod.name\":null,\"proc.cmdline\":\"bash -c whoami\",\"proc.exepath\":\"/usr/bin/bash\",\"proc.name\":\"bash\",\"proc.pname\":null,\"proc.tty\":34816,\"user.loginuid\":-1,\"user.name\":\"root\",\"user.uid\":0},\"priority\":\"Notice\",\"rule\":\"Terminal shell in container\",\"source\":\"syscall\",\"tags\":[\"T1059\",\"container\",\"maturity_stable\",\"mitre_execution\",\"shell\"],\"time\":\"2026-05-07T14:25:22.570026876Z\"}",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T14:25:07.815Z",
+    "location": "/var/log/falco/events.json",
+    "id": "1778163907.21414463",
+    "timestamp": "2026-05-07T14:25:07.815+0000"
+  },
+  {
+    "agent": {
+      "name": "wazuh.manager",
+      "id": "000"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "output": "2026-05-05T10:46:13.549795826+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=<NA> command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>",
+      "output_fields": {
+        "container": {
+          "image": {
+            "tag": "latest",
+            "repository": "cyber-response-agent_devcontainer-target-endpoint"
+          },
+          "name": "target-endpoint",
+          "id": "2a124a5fc6d9"
+        },
+        "evt": {
+          "arg": {
+            "flags": "EXE_WRITABLE|EXE_LOWER_LAYER"
+          },
+          "time": {
+            "iso8601": "1777977973549795840.000000"
+          },
+          "type": "execve"
+        },
+        "proc": {
+          "cmdline": "bash -c whoami",
+          "pname": "null",
+          "name": "bash",
+          "tty": "34816",
+          "exepath": "/usr/bin/bash"
+        },
+        "k8s": {
+          "pod": {
+            "name": "null"
+          },
+          "ns": {
+            "name": "null"
+          }
+        },
+        "user": {
+          "uid": "0",
+          "loginuid": "-1",
+          "name": "root"
+        }
+      },
+      "hostname": "falco",
+      "rule": "Terminal shell in container",
+      "source": "syscall",
+      "time": "2026-05-05T10:46:13.549795826Z",
+      "priority": "Notice",
+      "tags": [
+        "T1059",
+        "container",
+        "maturity_stable",
+        "mitre_execution",
+        "shell"
+      ]
+    },
+    "rule": {
+      "firedtimes": 1,
+      "mail": true,
+      "level": 10,
+      "description": "Falco: Terminal shell spawned in container",
+      "groups": [
+        "falco",
+        "security",
+        "falco_process_anomaly",
+        "attack.execution"
+      ],
+      "id": "100001"
+    },
+    "decoder": {
+      "name": "json"
+    },
+    "full_log": "{\"hostname\":\"falco\",\"output\":\"2026-05-05T10:46:13.549795826+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=<NA> command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>\",\"output_fields\":{\"container.id\":\"2a124a5fc6d9\",\"container.image.repository\":\"cyber-response-agent_devcontainer-target-endpoint\",\"container.image.tag\":\"latest\",\"container.name\":\"target-endpoint\",\"evt.arg.flags\":\"EXE_WRITABLE|EXE_LOWER_LAYER\",\"evt.time.iso8601\":1.7779779735497958e+18,\"evt.type\":\"execve\",\"k8s.ns.name\":null,\"k8s.pod.name\":null,\"proc.cmdline\":\"bash -c whoami\",\"proc.exepath\":\"/usr/bin/bash\",\"proc.name\":\"bash\",\"proc.pname\":null,\"proc.tty\":34816,\"user.loginuid\":-1,\"user.name\":\"root\",\"user.uid\":0},\"priority\":\"Notice\",\"rule\":\"Terminal shell in container\",\"source\":\"syscall\",\"tags\":[\"T1059\",\"container\",\"maturity_stable\",\"mitre_execution\",\"shell\"],\"time\":\"2026-05-05T10:46:13.549795826Z\"}",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-05T10:32:11.312Z",
+    "location": "/var/log/falco/events.json",
+    "id": "1777977131.25349482",
+    "timestamp": "2026-05-05T10:32:11.312+0000"
+  },
+  {
+    "agent": {
+      "name": "wazuh.manager",
+      "id": "000"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "output": "2026-05-03T16:29:29.250099398+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=runc command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>",
+      "output_fields": {
+        "container": {
+          "image": {
+            "tag": "latest",
+            "repository": "cyber-response-agent_devcontainer-target-endpoint"
+          },
+          "name": "target-endpoint",
+          "id": "2a124a5fc6d9"
+        },
+        "evt": {
+          "arg": {
+            "flags": "EXE_WRITABLE|EXE_LOWER_LAYER"
+          },
+          "time": {
+            "iso8601": "1777825769250099456.000000"
+          },
+          "type": "execve"
+        },
+        "proc": {
+          "cmdline": "bash -c whoami",
+          "pname": "runc",
+          "name": "bash",
+          "tty": "34816",
+          "exepath": "/usr/bin/bash"
+        },
+        "k8s": {
+          "pod": {
+            "name": "null"
+          },
+          "ns": {
+            "name": "null"
+          }
+        },
+        "user": {
+          "uid": "0",
+          "loginuid": "-1",
+          "name": "root"
+        }
+      },
+      "hostname": "falco",
+      "rule": "Terminal shell in container",
+      "source": "syscall",
+      "time": "2026-05-03T16:29:29.250099398Z",
+      "priority": "Notice",
+      "tags": [
+        "T1059",
+        "container",
+        "maturity_stable",
+        "mitre_execution",
+        "shell"
+      ]
+    },
+    "rule": {
+      "firedtimes": 1,
+      "mail": true,
+      "level": 10,
+      "description": "Falco: Terminal shell spawned in container",
+      "groups": [
+        "falco",
+        "security",
+        "falco_process_anomaly",
+        "attack.execution"
+      ],
+      "id": "100001"
+    },
+    "decoder": {
+      "name": "json"
+    },
+    "full_log": "{\"hostname\":\"falco\",\"output\":\"2026-05-03T16:29:29.250099398+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=runc command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>\",\"output_fields\":{\"container.id\":\"2a124a5fc6d9\",\"container.image.repository\":\"cyber-response-agent_devcontainer-target-endpoint\",\"container.image.tag\":\"latest\",\"container.name\":\"target-endpoint\",\"evt.arg.flags\":\"EXE_WRITABLE|EXE_LOWER_LAYER\",\"evt.time.iso8601\":1.7778257692500995e+18,\"evt.type\":\"execve\",\"k8s.ns.name\":null,\"k8s.pod.name\":null,\"proc.cmdline\":\"bash -c whoami\",\"proc.exepath\":\"/usr/bin/bash\",\"proc.name\":\"bash\",\"proc.pname\":\"runc\",\"proc.tty\":34816,\"user.loginuid\":-1,\"user.name\":\"root\",\"user.uid\":0},\"priority\":\"Notice\",\"rule\":\"Terminal shell in container\",\"source\":\"syscall\",\"tags\":[\"T1059\",\"container\",\"maturity_stable\",\"mitre_execution\",\"shell\"],\"time\":\"2026-05-03T16:29:29.250099398Z\"}",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-03T17:01:53.623Z",
+    "location": "/var/log/falco/events.json",
+    "id": "1777827713.161238597",
+    "timestamp": "2026-05-03T17:01:53.623+0000"
+  }
+]
+```
