@@ -67,6 +67,11 @@ and lead_sequence.yaml all exist.
 EOF
 )
 
+SETTINGS_JSON=$(cat <<'EOF'
+{"permissions":{"allow":["Bash(*)","Read(*)","Write(*)","Edit(*)","Grep(*)","Glob(*)","Task(*)","Skill(*)"]}}
+EOF
+)
+
 echo "[run.sh] run_id=$RUN_ID model=$MODEL" >&2
 echo "[run.sh] run_dir=$RUN_DIR" >&2
 
@@ -77,6 +82,7 @@ printf '%s' "$PROMPT" | claude -p \
   --include-hook-events \
   --verbose \
   --permission-mode acceptEdits \
+  --settings "$SETTINGS_JSON" \
   --add-dir "$RUN_DIR" \
   > "$TRACE"
 

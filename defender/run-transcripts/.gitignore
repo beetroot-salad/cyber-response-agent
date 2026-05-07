@@ -1,0 +1,3 @@
+# Pilot runs are scratch — pin under a non-pilot name (or use `git add -f`)
+# when a run is worth keeping in tree.
+pilot-*/

@@ -28,6 +28,21 @@ Read `{run_dir}/{alert_ref}` and any environment skills you need
 (`defender/skills/{system}/SKILL.md`) to understand what data sources
 exist and what their CLIs look like.
 
+Then persist the lead description for the projection script:
+
+```bash
+cat > {run_dir}/gather_raw/{position}.lead.json <<JSON
+{"goal": "<dispatch goal verbatim>",
+ "what_to_characterize": ["<dim 1>", "<dim 2>", ...]}
+JSON
+```
+
+`project_lead_sequence.py` reads this sidecar to populate
+`lead_description` in `lead_sequence.yaml`. Without it the projection
+falls back to the `:L findings.name` cell, which loses the goal
+sentence and the dimension list. Write the sidecar before running
+queries so it survives an early gather error.
+
 ### 2. Find or author a query template
 
 Walk `{catalog_dir}/{system}/` for each plausible system. **At small

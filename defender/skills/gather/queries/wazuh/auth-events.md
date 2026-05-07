@@ -37,6 +37,26 @@ empty otherwise. Same shape for `${user_clause}` (`data.dstuser:<user>`)
 and `${srcip_clause}` (`data.srcip:<ip>`). Bind whichever the lead
 requires; leave the rest empty.
 
+## Filter binding
+
+Filters are mutually composable; bind only the ones the lead actually
+fixes. Each filter takes a literal value of a specific shape:
+
+- `host` → `agent.name:<hostname>` (Wazuh agent name, e.g. `bastion-01.corp`).
+- `user` → `data.dstuser:<username>` (the destination/target username).
+- `srcip` → `data.srcip:<IPv4>` (a literal address, e.g. `10.42.7.183`).
+  **Never bind a hostname here** — `data.srcip` is indexed as IP, so a
+  hostname literal silently matches zero events. To answer "events
+  where the source is host X," resolve X to its IP first or filter on
+  `agent.name` if the question is about events recorded by host X's
+  agent.
+
+The template is for **inbound authentication events recorded by the
+target's agent**. Asking "did host X originate outbound auth" is a
+different measurement (process / sshd-client telemetry, not the
+alerts index) and is not in scope for this template — escalate as an
+unrunnable lead rather than misbinding `srcip` to host X.
+
 ## Common pitfalls
 
 - NAT collapse: a single `data.srcip` may aggregate many real sources;
