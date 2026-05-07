@@ -22,19 +22,15 @@ Common subcommands:
 
 - `query` — Lucene against the alerts index. `--query`, `--start` /
   `--end` / `--window`, `--limit` (default 500), `--run-dir`
-  (wraps stdout in salted untrusted-data delimiters), `--raw` (rarely
-  needed; default already embeds first 3 events' `_source`).
+  (persists raw payload under `{run_dir}/gather_raw/` and wraps stdout
+  in salted untrusted-data delimiters), `--raw` (rarely needed; default
+  already embeds first 3 events' `_source`).
 - `health-check` — connectivity probe; the defender does not need to
   invoke this directly during a run.
 
 Lucene is OpenSearch syntax: `rule.groups:sshd AND data.srcip:10.0.0.5`.
 
-## Field reference
-
-Per-field quirks and authentication query patterns are documented at:
-
-- `soc-agent/knowledge/environment/systems/wazuh/auth-queries.md`
-- `soc-agent/knowledge/environment/systems/wazuh/field-quirks.md`
-
-Load them when authoring a query template that touches an unfamiliar
-field.
+Working query examples + field-level pitfalls live with the templates
+under `defender/skills/gather/queries/wazuh/`. Reach for those when
+authoring or grepping for a Wazuh measurement; this SKILL covers only
+the system surface.
