@@ -110,10 +110,41 @@ For every bullet in `what_to_characterize`, report a value — even if
 it is "not available" or "not observed." Be specific: exact IPs,
 counts, usernames, timestamps. Do not interpret.
 
-If a query returns no rows, that is itself an observation; report it
-plainly and escalate the empty result back to the defender. Do not
-loop into a debug protocol on a single-lead dispatch — that's the
-defender's call (see §Debug lead below for when it does apply).
+#### Smell test before reporting empty / sparse
+
+When a query returns no rows or far fewer than the lead expected, do
+not just report the empty result and stop. Take one round of self-
+reflection first — these are the smells that catch silent
+mis-queries:
+
+- **Does an empty result make sense for this lead?** A 90-day window
+  on a populated system showing zero auth events for a known-active
+  user is suspicious; an alert that just fired naming the entity
+  guarantees the index has *some* events for it. If the math doesn't
+  add up, the query is probably wrong.
+- **Does the unfiltered index have events in this window?** The
+  Wazuh CLI summary shows "Index event count (unfiltered, same
+  window)" alongside matching events. If unfiltered is non-zero
+  and your filter returns zero, your filter is the suspect, not the
+  data.
+- **Drop the most specific clause and re-run.** If the broader query
+  returns events that should have matched the original, one of the
+  filter values is mis-shaped (wrong field, wrong literal type, NAT
+  collapse, decoder version drift). Identify which clause was
+  load-bearing and report the differential.
+- **Is there a sibling field the data is actually under?** `data.srcip`
+  vs `data.src_ip`, `data.dstuser` vs `data.user`, `agent.name` vs
+  `agent.id` — decoder shifts move events between fields. If a query
+  returns zero on the named field but the unfiltered window is
+  populated, sample one raw event and check field placement.
+
+If after the smell test the empty result is genuine — index is
+populated, broader query also returns nothing relevant — report
+"empty (verified: broader-query also empty / unfiltered window
+populated but filter rules events out / etc.)" so the defender
+knows which kind of empty it is. Do not run the full debug protocol
+on your own (that's the defender's explicit dispatch — §Debug
+leads); one round of smell-check, then report.
 
 ### 5. Return
 
