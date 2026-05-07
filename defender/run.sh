@@ -44,6 +44,7 @@ cp "$ALERT_PATH" "$RUN_DIR/alert.json"
 
 TRACE="$RUN_DIR/tool_trace.jsonl"
 MODEL="${DEFENDER_MODEL:-claude-sonnet-4-6}"
+EFFORT="${DEFENDER_EFFORT:-}"
 
 PROMPT=$(cat <<EOF
 Read defender/SKILL.md and follow it end-to-end.
@@ -75,16 +76,22 @@ EOF
 echo "[run.sh] run_id=$RUN_ID model=$MODEL" >&2
 echo "[run.sh] run_dir=$RUN_DIR" >&2
 
+CLAUDE_ARGS=(
+  --model "$MODEL"
+  --output-format stream-json
+  --include-hook-events
+  --verbose
+  --permission-mode acceptEdits
+  --settings "$SETTINGS_JSON"
+  --add-dir "$RUN_DIR"
+)
+if [[ -n "$EFFORT" ]]; then
+  CLAUDE_ARGS+=(--effort "$EFFORT")
+  echo "[run.sh] effort=$EFFORT" >&2
+fi
+
 cd "$REPO_ROOT"
-printf '%s' "$PROMPT" | claude -p \
-  --model "$MODEL" \
-  --output-format stream-json \
-  --include-hook-events \
-  --verbose \
-  --permission-mode acceptEdits \
-  --settings "$SETTINGS_JSON" \
-  --add-dir "$RUN_DIR" \
-  > "$TRACE"
+printf '%s' "$PROMPT" | claude -p "${CLAUDE_ARGS[@]}" > "$TRACE"
 
 python3 defender/scripts/visualize_run.py "$RUN_DIR" >&2 || true
 
