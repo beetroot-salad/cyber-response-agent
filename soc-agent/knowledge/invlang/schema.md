@@ -1,32 +1,45 @@
 # Investigation Language — Agent Reference
 
-Schema v2.15. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes; 29 active rules across numbering 1–36 with seven preserved-as-redirect gaps). Full spec: `docs/investigation-language.md`. On-disk surface grammar: `docs/dense-investigation-format.md`.
+Schema v2.16 language model. Validator: `hooks/scripts/invlang_validate.py` (PreToolUse hook on investigation.md writes; 29 active rules across numbering 1–36 with seven preserved-as-redirect gaps). Full spec: `docs/investigation-language.md`. On-disk surface grammar: `docs/dense-investigation-format.md`.
 
 **Surface.** `investigation.md` is `​```invlang` blocks only — `​```yaml` fences are rejected by the validator. Every block tag below projects to a region of the canonical companion dict via `scripts/handlers/_dense_parser.py`; validators and corpus queries operate on the dict.
 
-Three orthogonal resolution axes:
+**Purpose.** invlang audits how an investigation unfolded. It is not only the incident's final attack graph; it is a process trace written for future analyst agents to read, retrieve, compare, and learn from. The graph is the substrate, while commitments, leads, and resolutions record the investigation method over that graph.
 
-- **Authorization** — *is this edge permitted by policy?* Categorical verdict, single-source-of-truth anchors. Declared as `ac<n>` on a `:H` row, resolved via `:R authz` rows.
-- **Integrity** — *is the acting entity what it claims to be?* Evidential, composed from observables. No contract; represented as peer mechanism hypotheses (`?adversary-controlled-*`) with predictions on discriminators.
-- **Impact** — *does this edge's effect matter enough to escalate?* Quantitative, threshold-gated. Declared as lead-level `:L l-{id}.impact_preds`, graded at ANALYZE into `:R impact` rows.
+Four language layers:
 
-CONCLUDE carries both the authz/mechanism axis (`disposition`) and the impact axis (`impact_verdict` + `impact_severity`). Integrity resolves through normal hypothesis weight machinery.
+- **Observed graph** — `:V` vertices are real-world entities; `:E` edges are observed state relations or event interactions between them.
+- **Commitments** — questions the investigation promises to test. Current dense surface spells topology commitments as `:H` hypotheses, authorization edge checks as `ac<n>`, and impact edge checks as `:L l-{id}.impact_preds`; conceptually these are one family of commitments.
+- **Procedure** — `:L` leads record what was run, against which target, with which query, and why.
+- **Results** — `:R` rows record anchor/check results and attribute enrichment; `:T resolutions` rows record belief movement caused by a lead; `:T conclude` records closure.
+
+Three commitment axes:
+
+- **Topology / mechanism** — *does this upstream entity/edge exist, and what mechanism explains the alert?* Current surface: `:H` rows with `p*` / `ap*` predictions and `r*` refutations.
+- **Authorization** — *is this interaction edge permitted by policy?* Edge-coupled, categorical verdict, single-source-of-truth anchors. Current surface: `ac<n>` on a `:H` row, resolved via `:R authz` rows.
+- **Impact** — *does this interaction edge's effect cross an escalation threshold?* Edge-coupled, quantitative or threshold-gated. Current surface: lead-level `:L l-{id}.impact_preds`, graded at ANALYZE into `:R impact` rows.
+
+Integrity is not a separate edge check. It is source-side graph work: follow the acting vertex down/upstream through session, identity, process, endpoint, baseline, and provenance until the source attribution is strong enough or remains unresolved. Current surface represents this through ordinary topology/mechanism hypotheses, often named `?adversary-controlled-*`, with predictions on discriminating observables.
+
+CONCLUDE carries the mechanism/authz disposition axis (`disposition`) and the impact axis (`impact_verdict` + `impact_severity`). Integrity resolves through normal topology commitment weight machinery.
 
 ---
 
 ## Principles
 
-**Graph discovery.** An investigation constructs a directed graph by working backward from the alert. Confirmed vertices and edges grow monotonically. The investigation halts when the frontier is empty (all active hypotheses resolved) or a trust root is reached — i.e. the lead reports `trust_root?: v-{id}` on its `:L findings` row and no live hypothesis can extend upstream.
+**Graph discovery.** An investigation constructs a directed graph by working backward from the alert. Confirmed vertices and edges grow monotonically. The investigation halts when the frontier is empty (all active topology commitments resolved) or a trust root is reached — i.e. the lead reports `trust_root?: v-{id}` on its `:L findings` row and no live commitment can extend upstream.
 
 **Entities as vertices.** Every observed entity (endpoint, process, identity, session, file…) becomes a typed vertex with a classification and identifier. Model at the resolution the investigation reasons at — don't decompose finer unless a lead forces it. When it does, append sub-vertices via `component_of` with hierarchical IDs (`v-{parent}-{nonce}`); the parent vertex remains valid.
 
-**Relations as edges.** Observed connections and events between entities become edges. Each edge carries observational authority (how reliably the source recorded it) and — when a contract fulfills against it — one or more `:R authz` rows.
+**Relations and interactions as edges.** Edges connect two vertices. Some edges are state relations (`runs_on`, `member_of`, `authenticated_as`); others are event interactions (`read`, `wrote`, `attempted_auth`, `modified`). An attempted interaction is still an edge; its non-success belongs in `attrs?` / `status?`. Each edge carries observational authority (how reliably the source recorded it) and edge-coupled checks such as authorization or impact may later resolve against it.
 
-**Hypotheses as proposed edges.** A hypothesis proposes that one specific upstream vertex exists, connected to a confirmed vertex by exactly one edge. Predictions describe what observable evidence would confirm or contradict it; keep to 1–2 predictions — the minimum that distinguishes this hypothesis from competing ones. **Prediction scope is unbounded** — predictions may reference observables from any system or time range. The one-hop discipline governs what extends the confirmed graph on `++`, not where evidence may be queried. Cardinality per PREDICT pass is 0–N (realistically ≤ 3); 0 is legal when the loop is enriching before a fork is possible.
+**Commitments.** A commitment is a question the investigation promises to test. Topology commitments propose that one specific upstream vertex exists, connected to a confirmed vertex by exactly one edge; current surface spells these as `:H` hypotheses. Edge-check commitments ask whether an observed/proposed interaction edge is authorized or impactful; current surface spells these as `ac<n>` and `ip<n>`. Predictions describe what observable evidence would confirm or contradict a topology commitment; edge checks carry predicates resolved by anchors or impact observations. Keep commitments lean: 1–2 discriminating predictions or one threshold predicate. **Prediction scope is unbounded** — predictions may reference observables from any system or time range. The one-hop discipline governs what extends the confirmed graph on `++`, not where evidence may be queried. Cardinality per PREDICT pass is 0–N (realistically ≤ 3); 0 is legal when the loop is enriching before a fork is possible.
 
-**Attributes.** Facts about a vertex that don't add topology stay in the `attrs?` cell of the vertex row, or as `:R attr_updates` rows in a lead outcome. Don't materialize a vertex just to carry an attribute.
+**Attributes and learned facts.** Inline `attrs?` cells are seed or identity-defining properties needed to understand a vertex/edge at declaration time. Facts learned later, corrected, disputed, time-bound, or evidence-backed are recorded as `:R attr_updates` under the lead that learned them. Do not materialize a vertex just to carry an attribute. Treat `:R attr_updates` as claims about an existing graph object, not as topology.
 
-**Leads.** A lead is a graph operation: topology-extending (new vertices/edges enter the confirmed graph via `:V`/`:E` observation sub-blocks under the lead) or attribute-refining (existing vertices/edges enriched via `:R attr_updates`), or both. The `tests` cell on `:L findings` declares which hypotheses it discriminates; `:T resolutions` rows record weight effects. A non-branching lead may pre-commit to a reading via `:L l-{id}.lead_preds` (conditional branch plans `if X → read_as Y → advance_to Z`). Leads that measure impact observables carry `:L l-{id}.impact_preds`; ANALYZE grades them into `:R impact` rows.
+**Leads.** A lead is an investigation procedure: topology-extending (new vertices/edges enter the confirmed graph via `:V`/`:E` observation sub-blocks under the lead), attribute-refining (existing vertices/edges enriched via `:R attr_updates`), check-resolving (`:R authz` / `:R impact`), or some combination. The `tests` cell on `:L findings` declares which topology commitments it discriminates; `:T resolutions` rows record weight effects. A non-branching lead may pre-commit to a route via `:L l-{id}.lead_preds` (conditional branch plans `if X → read_as Y → advance_to Z`). These are routing rules, not world-state predictions. Leads that measure impact observables carry `:L l-{id}.impact_preds`; ANALYZE grades them into `:R impact` rows.
+
+**Observations vs resolutions.** Adding `:V` / `:E` rows changes the observed graph. Writing `:T resolutions` changes the investigation state by saying how a lead's evidence affected a commitment's weight. A lead commonly does both, but they are distinct acts: observations are what was found; resolutions are what that finding did to a pending question.
 
 **Corpus.** Past investigations are queryable. Query before PREDICT to calibrate hypothesis names and weights; set `matched_archetype` at REPORT to connect this run.
 
@@ -38,7 +51,7 @@ CONCLUDE carries both the authz/mechanism axis (`disposition`) and the impact ax
 |---|---|---|
 | CONTEXTUALIZE | `:V prologue.vertices`, `:E prologue.edges` | end of CONTEXTUALIZE |
 | SCREEN | first lead row in `:L findings` with `mode: screen` | after screen subagent returns |
-| PREDICT | `:H hypothesize.hypotheses` (only when ≥ 1 new hypotheses); lead skeleton row in `:L findings` plus `:L l-{id}.impact_preds` when applicable | end of PREDICT |
+| PREDICT | `:H hypothesize.hypotheses` (current surface for topology commitments; only when ≥ 1 new commitments); lead skeleton row in `:L findings` plus `:L l-{id}.impact_preds` when applicable | end of PREDICT |
 | GATHER | `:L findings` row populated with query + observation sub-blocks (`:V`, `:E`, `:R consultations`, `:R attr_updates`); no `:T resolutions` yet | end of GATHER |
 | ANALYZE | same-lead merge: `:R authz`, `:R impact`, additional `:R attr_updates`; `:T resolutions`; optional `:T shelved` | end of ANALYZE |
 | REPORT | `:T conclude` + sub-tables (`:T conclude.surviving`, `:T conclude.deferred_authz`, `:T conclude.deferred_impact`, `:T conclude.deferred_preds`, `:T conclude.ceiling_test`) | after the `## REPORT` header + verdict line, before `report.md` |
@@ -63,7 +76,7 @@ These apply to every block tag below.
 ```
 :V prologue.vertices    — vertices derived from the alert
 :E prologue.edges       — edges derived from the alert
-:H hypothesize.hypotheses — initial proposed frontier (omit when PREDICT authors 0 new hypotheses)
+:H hypothesize.hypotheses — current surface for topology commitments (omit when PREDICT authors 0 new hypotheses)
 :L findings             — one row per lead; same id merges across GATHER/ANALYZE
   (per-lead sub-blocks: :V/:E/:R/:T scoped by l-{id})
 :T conclude (+ sub-tables) — REPORT termination, disposition, deferreds
@@ -72,6 +85,18 @@ These apply to every block tag below.
 Leads in the same iteration share a `loop` cell value; there is no grouping wrapper.
 
 `:H hypothesize.hypotheses` is omitted entirely when SCREEN matches (no fork is opened) or when a PREDICT pass authors 0 new hypotheses.
+
+Conceptual layer mapping:
+
+| Layer | Current surface | Role |
+|---|---|---|
+| observed graph | `:V`, `:E` | entities and state/event edges found by the investigation |
+| topology commitments | `:H` + `p*` / `ap*` / `r*` | proposed graph extension and discriminators |
+| edge-check commitments | `ac*`, `ip*` | authorization and impact questions coupled to an interaction edge |
+| procedure | `:L` | what was run and why |
+| results | `:R`, `:T resolutions`, `:T conclude` | check results, learned facts, belief transitions, closure |
+
+Target consolidation: future grammar should spell all commitment forms as `:C` rows with `kind ∈ {topology, authz, impact}`. Until the parser surface changes, read `:H`, `ac*`, and `ip*` as compatibility renderings of that commitment family.
 
 ---
 
@@ -125,7 +150,7 @@ Used by:
 | `src` | yes | `v-{id}` | source vertex |
 | `tgt` | yes | `v-{id}` | target vertex |
 | `when` | yes (or empty) | ISO timestamp | empty when not meaningful |
-| `auth_kind:source` | yes | `<kind>:<source>` packed | `kind ∈ {siem-event, runtime-audit, authoritative-source, client-asserted, inferred-structural}`. **Observational** authority — distinct from authz `grounding_kind` and from `:R consultations.grounding`. |
+| `auth_kind:source` | yes | `<kind>:<source>` packed | Current field name for observational authority. Read as `obs_kind:source`; `kind ∈ {siem-event, runtime-audit, authoritative-source, client-asserted, inferred-structural}`. Distinct from authz `grounding_kind` and from `:R consultations.grounding`. |
 | `attrs?` | no | `key=value;key=value` | edge attributes |
 | `status?` | no | `hypothesized` \| `refuted` | omit (defaults to `observed`) |
 | `trust_chain?` | no | `item;item` | when set, a `client-asserted` edge gets effective `authoritative-source` authority. |
@@ -133,7 +158,7 @@ Used by:
 
 Authority cap: `client-asserted` and `inferred-structural` cap resolutions citing this edge at `+`/`-`. `siem-event`, `runtime-audit`, `authoritative-source` support `++`/`--` (rule #4).
 
-**Authorization on edges.** Authorization verdicts live in `:R authz` rows (see §Resolutions below), not on the `:E` row itself. When a hypothesis declares an `ac<n>` and the resolving lead materializes the proposed edge, the new edge gets `:R authz` rows in the same lead's outcome. When a contract resolves against an *already-confirmed* edge, the resolving lead writes the verdict via a `:R attr_updates` row whose `value` cell points to a sibling `:R authz` row whose `edge` cell names the confirmed edge — never by mutating the original edge record.
+**Authorization on edges.** Authorization verdicts live in `:R authz` rows (see §Resolutions below), not on the `:E` row itself. When a topology commitment declares an `ac<n>` and the resolving lead materializes the proposed edge, the new edge gets `:R authz` rows in the same lead's outcome. When an authz check resolves against an *already-confirmed* edge, the resolving lead writes a `:R authz` row whose `edge` cell names that confirmed edge. Use `:R attr_updates` only for compact cross-reference or non-check enrichment; never mutate the original edge record.
 
 Example:
 
@@ -144,7 +169,9 @@ e-001|attempted_auth|v-001|v-002|2026-04-20T09:00:00Z|siem-event:wazuh-indexer|t
 
 ---
 
-## Hypothesis — `:H`
+## Topology commitment — `:H` today, `:C` conceptually
+
+Current wire surface uses `:H` because this primitive began as "hypothesis". In the language model, it is a **topology commitment**: a pending question about whether a proposed upstream vertex/edge exists and what mechanism it represents. A future consolidated grammar should render this as `:C kind=topology`; this section documents the current `:H` compatibility surface.
 
 ```
 :H <block> [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status|concerns?]
@@ -166,23 +193,23 @@ Used by:
 | `preds` | yes | `p<n>:<subject>:"<claim>"`, `;`-separated | `subject ∈ {proposed_parent, attached_vertex, proposed_edge}`. Source-agnostic claim about world state. |
 | `attr_preds?` | no | `ap<n>:<target>:<attribute>:"<claim>"`, `;`-separated | `target ∈ {proposed_parent, attached_vertex, proposed_edge}`. Per entry: one observable attribute (e.g. `cmdline`, `parent_pname`, `tty`). Claim is one assertion; compound AND/OR splits into separate entries. |
 | `refuts?` | no | `r<n>[<id>,<id>]:"<claim>"`, `;`-separated | bracketed list cites the `p<n>` / `ap<n>` IDs on this hypothesis that this refutation contradicts. Non-empty bracket required. |
-| `authz?` | no | `ac<n>:<edge_ref>:<anchor_kind>:"<predicate>":<on_unauth>/<on_indet>`, `;`-separated | `edge_ref ∈ {proposed, e-{id}}`. Predicate is natural-language (any AND/OR allowed). `on_unauth` / `on_indet` ∈ `{escalate}` today. |
-| `integrity_waived?` | no | string | rationale; required when `authz?` is set on a hypothesis whose `parent_type` is an acting-entity type (`session` / `identity` / `process`) AND no peer `?adversary-controlled-*` exists in the same sibling group (rule #32). |
+| `authz?` | no | `ac<n>:<edge_ref>:<anchor_kind>:"<predicate>":<on_unauth>/<on_indet>`, `;`-separated | Compatibility surface for edge-check commitment `kind=authz`. `edge_ref ∈ {proposed, e-{id}}`. Predicate is natural-language (any AND/OR allowed). `on_unauth` / `on_indet` ∈ `{escalate}` today. |
+| `integrity_waived?` | no | string | rationale when the investigation intentionally does not pursue source-side integrity beyond the authorization/mechanism commitment. |
 | `weight` | yes | `null` \| `++` \| `+` \| `-` \| `--` | `null` initial. |
 | `status` | yes | `active` \| `confirmed` \| `refuted` \| `shelved` | |
 | `concerns?` | no | `item;item` | residuals, unfalsifiability caveats. |
 
 **Lean means 1–2 predictions.** A single prediction captures the core discriminating claim. Add a second only when two independent facts each partially confirm the hypothesis and neither alone suffices. Three+ predictions usually signals either a non-lean hypothesis or a refinement that should be deferred.
 
-**Authorization contract semantics.** Declare `ac<n>` only when the mechanism is consistent with both benign and adversarial readings depending on authorization; when the adversarial reading IS the mechanism (e.g. `?adversary-controlled-process`), skip the contract — the classification already carries the claim. Mechanism-level adversarial variants stay separate hypotheses.
+**Authorization check semantics.** Declare `ac<n>` only when a specific interaction edge has benign and adversarial readings depending on policy permission. Authorization is coupled to an edge, not to a vertex in isolation. When the adversarial reading IS the mechanism (e.g. `?adversary-controlled-process`), skip the authz check — the topology commitment's classification already carries the claim. Mechanism-level adversarial variants stay separate topology commitments.
 
-**Behavioral-consistency prediction (optional).** A contract resolved `authorized` establishes policy compliance, not integrity. The hypothesis MAY carry one baseline-consistency `ap<n>` — positive ("expect corroborating activity X") or negative ("expect NOT to see >Nσ volume deviation"). Gates: baseline queryable, scoped to the alert's entities, weight-sensitive. Severity caps at `moderate`. Unavailable baseline → `indeterminate` in `concerns?`; do not confabulate.
+**Behavioral-consistency prediction (optional).** An authz check resolved `authorized` establishes policy compliance, not integrity. The topology commitment MAY carry one baseline-consistency `ap<n>` — positive ("expect corroborating activity X") or negative ("expect NOT to see >Nσ volume deviation"). Gates: baseline queryable, scoped to the alert's entities, weight-sensitive. Severity caps at `moderate`. Unavailable baseline → `indeterminate` in `concerns?`; do not confabulate.
 
 ### Integrity discipline
 
-When `authz?` is set and `parent_type` is an acting-entity type (`session`, `identity`, `process`), a peer integrity hypothesis (`?adversary-controlled-<entity>`) is expected — its predictions test whether the claimed entity is actually the one acting (application-layer correlation, query-shape template match, timing against baseline, device/geo consistency). The peer shares the authz contract's verdict (both `authorized` against IAM) and differs on observables that discriminate routine activity from impostor activity.
+Integrity asks whether the edge's acting source is what the graph says it is. Do not resolve integrity by making the authz predicate broader. Pursue it as source-side topology work: session → identity → endpoint → process → device posture → geo/baseline → provenance, as available. A peer commitment such as `?adversary-controlled-<entity>` is appropriate when the same interaction edge could have been produced by an impostor source; its predictions should discriminate on observables such as application-layer correlation, query-shape template match, timing against baseline, device/geo consistency, or process ancestry.
 
-Omit the peer only when the integrity premise is out of scope for the case; in that case, set `integrity_waived?` to the rationale.
+Omit the integrity path only when the premise is out of scope or inaccessible for the case; in that case, set `integrity_waived?` to the rationale.
 
 ---
 
@@ -240,7 +267,7 @@ All sub-block names are prefixed with the lead's `l-{id}.`.
 | `read_as` | quoted interpretation |
 | `advance_to` | a lead `name` in the companion, or `REPORT`, or `PREDICT` |
 
-Lead-level predictions are not a substitute for hypothesis-level predictions: hypothesis predictions test world models; lead-level `lp*` are decision rules on a shared next-step lead. Use when the same step-1 lead applies regardless of which hypothesis is true and the *reading* of the outcome determines step-2.
+Lead-level predictions are not a substitute for topology commitment predictions: `p*` / `ap*` predictions test world models; lead-level `lp*` are route rules on a shared next-step lead. Use when the same step-1 lead applies regardless of which commitment is true and the *reading* of the outcome determines step-2.
 
 **Impact predictions** (commit-before-evidence):
 
@@ -280,9 +307,9 @@ See §Resolutions — `:R` and §Proof trace — `:T resolutions` below.
 
 ## Resolutions — `:R`
 
-Four sub-types. The first three resolve grounding against an anchor; the fourth records vertex/edge enrichment. All belong under the resolving lead's phase block.
+`:R` rows record results learned by a lead. They do not add topology by themselves; topology enters through `:V` / `:E` observation rows. Four sub-types exist today. `:R authz` and `:R impact` resolve edge-check commitments; `:R consultations` records non-authz anchor/context results used by topology commitments; `:R attr_updates` records learned facts about existing vertices or edges. All belong under the resolving lead's phase block.
 
-### `:R authz` — authorization contract verdicts
+### `:R authz` — authorization edge-check verdicts
 
 ```
 :R authz [edge|verdict|anchor_kind|anchor_id|grounding|authority|as_of|effective_window?|fulfills|resolved_by|cites_past_case?|conditioning?|concerns?]
@@ -290,7 +317,7 @@ Four sub-types. The first three resolve grounding against an anchor; the fourth 
 
 | Cell | Required | Shape / enum | Notes |
 |---|---|---|---|
-| `edge` | yes | `e-{id}` | the resolved edge |
+| `edge` | yes | `e-{id}` | the interaction edge whose permission is being checked |
 | `verdict` | yes | `authorized` \| `unauthorized` \| `indeterminate` | |
 | `anchor_kind` | yes | string | authority surface: `iam-policy` \| `data-classification-policy` \| `oncall-schedule` \| `deploy-runs` \| `approved-monitoring-sources` \| … |
 | `anchor_id` | yes | string | concrete authority identifier |
@@ -298,17 +325,17 @@ Four sub-types. The first three resolve grounding against an anchor; the fourth 
 | `authority` | yes | `full` \| `partial` | `partial` caps weight effect at `+`/`-` (rule #14) |
 | `as_of` | yes | ISO | timestamp the answer is authoritative ABOUT |
 | `effective_window?` | no | `<iso>..<iso>` | when the authz grant has explicit time bounds |
-| `fulfills` | yes | `h-{id}.ac{n}` | back-reference to the declaring hypothesis's contract |
+| `fulfills` | yes | `h-{id}.ac{n}` | back-reference to the declaring authz commitment on the current `:H` surface |
 | `resolved_by` | yes | `l-{id}` | the resolving lead |
 | `cites_past_case?` | no | `<run-id>:h-{id}.ac{n}` | required when `grounding=past-case` |
 | `conditioning?` | no | `item;item` | then-true premises the verdict rests on (e.g. `CHG-2041 active`, `oncall X`) |
 | `concerns?` | no | `item;item` | snapshot freshness, partial coverage |
 
-Plural rows because real edges often face parallel policy layers (IAM × data-classification × time-of-day) — each resolved independently by a different anchor; any one can deny.
+Plural rows because real interaction edges often face parallel policy layers (IAM × data-classification × time-of-day) — each resolved independently by a different anchor; any one can deny.
 
 ### `:R consultations` — anchor consultations (non-authz)
 
-Used when a lead's anchor query informs hypothesis weight but does *not* fulfill an `ac<n>` (baseline lookups, registry membership checks, reference queries).
+Used when a lead's anchor query informs topology commitment weight but does *not* fulfill an `ac<n>` (baseline lookups, registry membership checks, reference queries).
 
 ```
 :R consultations [anchor_id|anchor_kind|grounding|result|as_of|authority|effective_window?|anchor_query?|conditioning?|concerns?]
@@ -327,9 +354,9 @@ Used when a lead's anchor query informs hypothesis weight but does *not* fulfill
 | `conditioning?` | no | `item;item` | |
 | `concerns?` | no | `item;item` | snapshot freshness, coverage caveats |
 
-### `:R impact` — impact prediction verdicts
+### `:R impact` — impact check verdicts
 
-ANALYZE emits one row per fulfilled `:L l-{id}.impact_preds` entry.
+ANALYZE emits one row per fulfilled `:L l-{id}.impact_preds` entry. Conceptually, this resolves `kind=impact` edge-check commitments. The current surface stores impact checks on a lead because the concrete threshold often becomes known when choosing the measurement lead; the check still answers a question about an interaction edge's effect.
 
 ```
 :R impact [pred_ref|dim|observed|verdict|matched_pred|grounding|anchor_id|anchor_kind|authority|as_of|effective_window?|conditioning?|reasoning]
@@ -337,7 +364,7 @@ ANALYZE emits one row per fulfilled `:L l-{id}.impact_preds` entry.
 
 | Cell | Required | Shape / enum | Notes |
 |---|---|---|---|
-| `pred_ref` | yes | `l-{id}.ip{n}` | back-reference to the lead's impact prediction |
+| `pred_ref` | yes | `l-{id}.ip{n}` | back-reference to the lead's impact check |
 | `dim` | yes | matches the `ip*` `dim` | |
 | `observed` | yes | string | quantitative or qualitative observation |
 | `verdict` | yes | `within` \| `exceeds` \| `indeterminate` | |
@@ -351,7 +378,7 @@ ANALYZE emits one row per fulfilled `:L l-{id}.impact_preds` entry.
 | `conditioning?` | no | `item;item` | |
 | `reasoning` | yes | quoted | why this verdict; not a field restatement |
 
-### `:R attr_updates` — vertex / edge enrichment
+### `:R attr_updates` — learned facts about a vertex / edge
 
 ```
 :R attr_updates [target|key|value]
@@ -361,18 +388,18 @@ ANALYZE emits one row per fulfilled `:L l-{id}.impact_preds` entry.
 |---|---|---|---|
 | `target` | yes | `v-{id}` \| `e-{id}` | exactly one |
 | `key` | yes | string | attribute name |
-| `value` | yes | string | when target is an edge and the update is an authorization resolution, emit a separate `:R authz` row whose `edge` cell points to the targeted edge and set this row's `value` to `<see :R authz row>` |
+| `value` | yes | string | learned value. For authorization or impact, prefer the dedicated `:R authz` / `:R impact` rows and use `attr_updates` only for compact cross-reference or non-check enrichment. |
 
-Use `:R attr_updates` when the lead enriches an already-confirmed vertex or edge without new topology. Use `:V` / `:E` observation sub-blocks when new topology enters the confirmed graph. Both may appear in the same lead.
+Use `:R attr_updates` when the lead enriches an already-confirmed vertex or edge without new topology. Inline `attrs?` are seed properties; `attr_updates` are facts learned during the investigation. Use `:V` / `:E` observation sub-blocks when new topology enters the confirmed graph. Both may appear in the same lead.
 
 ### Anchor consultation vs authorization resolution
 
 | Row | Where it lives | When to use |
 |---|---|---|
-| `:R authz` | under the lead that fulfilled the contract; `edge` cell names the resolved edge | the query produces a verdict that fulfills an `ac<n>` declared on some hypothesis |
-| `:R consultations` | under the resolving lead | the query informs hypothesis weight but does not fulfill a contract |
+| `:R authz` | under the lead that fulfilled the edge check; `edge` cell names the resolved interaction edge | the query produces a verdict that fulfills an `ac<n>` declared on the current `:H` surface |
+| `:R consultations` | under the resolving lead | the query informs topology commitment weight but does not fulfill an edge check |
 
-Authorization rows gate disposition (rule #21); consultations ground evidence weight via `:T resolutions` rows the same way any other observation does. Temporal validity (`as_of`, `effective_window?`), authority scope (`authority`), and conditioning (`conditioning?`) mean the same thing in both rows; only the verdict/contract-fulfillment machinery is authz-only.
+Authorization rows gate disposition (rule #21); consultations ground evidence weight via `:T resolutions` rows the same way any other observation does. Temporal validity (`as_of`, `effective_window?`), authority scope (`authority`), and conditioning (`conditioning?`) mean the same thing in both rows; only the verdict/check-fulfillment machinery is authz-only.
 
 `as_of` is the timestamp the answer is **authoritative about** — not the query time unless they coincide. Event anchors (did X happen at T?) → event timestamp. Current-state anchors (is property X true now?) → query / snapshot time. Slowly-changing references → last-modified time.
 
@@ -386,7 +413,7 @@ Authorization rows gate disposition (rule #21); consultations ground evidence we
 
 ## Proof trace — `:T resolutions`
 
-One line per hypothesis weight transition.
+One line per topology commitment weight transition. The current surface says "hypothesis" and uses `h-*` IDs; conceptually this is the result of applying a lead's observations/checks to a pending commitment. A `:V`/`:E` row says what was observed. A `:T resolutions` row says how that observation changed the investigation's belief state.
 
 ```
 :T resolutions
@@ -460,6 +487,8 @@ Sub-tables (one row per entry; render as a single `none` row when the underlying
 
 ## Observation conventions
 
+**State edges vs event edges.** Both are normal edges. State edges describe a relation that can persist (`runs_on`, `member_of`, `authenticated_as`). Event edges describe an interaction observed at a time (`read`, `wrote`, `attempted_auth`, `modified`). Attempted or failed interactions are still edges; record non-success in `attrs?` or `status?` rather than inventing a separate topology.
+
 **Lifecycle vs action.** Is the observation's natural noun an invocation? → `command` vertex with `executed_in → session` and `targeted → <thing>`. Is it an entity whose later state the investigation reasons about? → lifecycle (typed vertex + edge verb). CRUD operations (`CreateUser`, `DeleteObject`, `GetObject`) are uniformly action-shaped.
 
 **Aggregate observations.** N occurrences of the same thing → single edge with `count` and `window_*` in `attrs?`. Do not materialize one vertex per occurrence.
@@ -493,6 +522,8 @@ Use `unclassified-{type}` when unknown; `ambiguous-{a}-or-{b}` when genuinely in
 
 ## Relation catalog
 
+Relations include both state relations and event interactions. Use `attrs?` for outcome, count, resource path, bytes, method, and other observed details that do not change topology.
+
 | Relation | Source → Target | Notes |
 |---|---|---|
 | `spawned` | process → process | |
@@ -500,10 +531,10 @@ Use `unclassified-{type}` when unknown; `ambiguous-{a}-or-{b}` when genuinely in
 | `loaded_by` | process → file | Modules/libraries |
 | `opened` | process → socket | |
 | `connected_to` | socket → endpoint | Transport-layer only |
-| `read` / `wrote` | process → file | |
+| `read` / `wrote` | process → file | Event interaction; use attrs for bytes/path/outcome when needed |
 | `runs_in` | process → container | |
 | `runs_on` | process \| container \| database \| session → endpoint | Compute-substrate containment |
-| `authenticated_as` | session → identity | |
+| `authenticated_as` | session → identity | State relation asserted by an auth/session source |
 | `initiated_by` | session → identity \| endpoint | |
 | `triggered_by` | process \| session → process \| session | |
 | `escalated_privilege` | session → session | Self-edge |
@@ -512,16 +543,16 @@ Use `unclassified-{type}` when unknown; `ambiguous-{a}-or-{b}` when genuinely in
 | `member_of` | identity → identity | User→group, role→bundle |
 | `identified_as` | placeholder → real-vertex | Post-hoc attribution; never mutate the placeholder |
 | `component_of` | vertex → vertex | Part-of for inward decomposition; sub-entity → container |
-| `listed` | session \| process → storage \| database | Enumeration (provisional) |
-| `modified` | session \| process → storage \| database \| identity \| file | State change (provisional) |
-| `attempted_auth` | endpoint \| process \| session → endpoint | Auth attempt, may be failed (provisional) |
-| `classified_as` | vertex → classification-value | |
+| `listed` | session \| process → storage \| database | Event interaction: enumeration (provisional) |
+| `modified` | session \| process → storage \| database \| identity \| file | Event interaction: state change (provisional) |
+| `attempted_auth` | endpoint \| process \| session → endpoint | Event interaction; auth attempt, may be failed |
+| `classified_as` | vertex → classification-value | Prefer `class` / `:R attr_updates` for learned classification; relation retained for legacy companions |
 
 ---
 
 ## Examples
 
-A complete worked investigation showing the surface end-to-end. The case: a failed SSH brute-force from an external IP (`203.0.113.47`) against an internal web server, where `?opportunistic-scanner` is the sole hypothesis. The source-classification lead refutes the scanner reading (the IP authenticated successfully against the same target six hours prior), grading `h-001` to `--`. CONCLUDE lands `benign` with `adversarial-refuted` termination — no surviving hypothesis, no contract closure required.
+A complete worked investigation showing the surface end-to-end. The case: a failed SSH brute-force from an external IP (`203.0.113.47`) against an internal web server, where `?opportunistic-scanner` is the sole topology commitment on the current `h-*` surface. The source-classification lead refutes the scanner reading (the IP authenticated successfully against the same target six hours prior), grading `h-001` to `--`. CONCLUDE lands `benign` with `adversarial-refuted` termination — no surviving commitment, no authorization check closure required.
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs]
@@ -532,29 +563,30 @@ v-002|endpoint|internal-server|web-server-01|
 e-001|attempted_auth|v-001|v-002||siem-event:wazuh-indexer|
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
-h-001|?opportunistic-scanner|v-001|initiated_by|identity|automated-scanner||p1:proposed_parent:"source IP appears in threat-intel scanner list"||r1[p1]:"source IP authenticated previously in last 90d"|||null|
+h-001|?opportunistic-scanner|v-001|initiated_by|identity|automated-scanner||p1:proposed_parent:"source IP appears in threat-intel scanner list"||r1[p1]:"source IP authenticated previously in last 90d"|||null|active
 
-:L findings [id|name|loop|target|mode|system|template|query|window|status]
-l-001|source-classification|1|v-001|graded|wazuh-indexer|source-ip-lookup|src_ip:203.0.113.47|30d|
+:L findings [id|loop|name|target|mode|tests|system|template|query|window]
+l-001|1|source-classification|v-001||h-001|wazuh-indexer|source-ip-lookup|src_ip:203.0.113.47|30d
 
 :E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs]
-e-002|classified_as|v-001|v-002||siem-event:wazuh-indexer|
+e-002|attempted_auth|v-001|v-002|2026-04-20T03:00:00Z|siem-event:wazuh-indexer|outcome=success
 
 :R attr_updates [resolved_by|target|key|value]
-l-001|v-001|classification|external-unknown
+l-001|v-001|classification|prior-auth-source
 
 :T resolutions
-h-001  null → --    [l-001 r1 strong ⟂ e-001 :: source IP authenticated from web-server-01 six hours prior — refutation r1 matched]
+h-001  null → --    [l-001 r1 severe ⟂ e-002 :: source IP authenticated successfully to web-server-01 six hours prior — refutation r1 matched]
 
 :T conclude
 termination.category   adversarial-refuted
-termination.rationale  "All adversarial hypotheses refuted with -- evidence"
+termination.rationale  "All adversarial topology commitments refuted with -- evidence"
 disposition            benign
 impact_verdict         none
 impact_severity        null
 confidence             high
 matched_archetype      external-bruteforce
-summary                "SSH brute force from external scanner; no successful auth"
+ceiling_rationale      n/a
+summary                "Failed SSH attempt from a source that had prior successful authentication"
 
 :T conclude.surviving [hyp_id|final_weight]
 none
@@ -562,10 +594,10 @@ none
 
 Notes on this run:
 
-- The trace line `h-001  null → --    [l-001 r1 strong ⟂ e-001 :: …]` is the proof-trace canonical form: `<hyp> <before> → <after>    [<lead> <pred/refut-ids> <severity> ⟂ <supp-edges> :: <annotation>]`. `r1` is cited (rule #5 requires `--` rows to cite at least one refutation belonging to the target hypothesis); `e-001` is `siem-event` authority (rule #4 admits `++`/`--` only against `siem-event` / `runtime-audit` / `authoritative-source`).
-- `surviving: none` is correct here — `h-001` reached `--` so it is not a survivor. Rule #24 (hypothesis persistence) accepts this because every declared hypothesis was either graded `--` or listed.
-- No `authorization_contract` was declared (`?opportunistic-scanner` is an adversarial-mechanism hypothesis — the classification carries the claim per §Hypothesis), so rule #21 / rule #26 don't gate this disposition.
-- Companion examples covering the contract-resolution path (`:R authz` + an integrity peer), lead-level branch plans (`:L l-{id}.lead_preds`), and impact predictions (`:L l-{id}.impact_preds` + `:R impact`) live in `docs/dense-investigation-format.md`. When fulfilling a contract, write the verdict inline on the resolving edge's `authorization_resolutions[]` (or via `:R attr_updates` targeting an existing edge) so the validator's rule-#21 closure check sees it.
+- The trace line `h-001  null → --    [l-001 r1 severe ⟂ e-002 :: …]` is the proof-trace canonical form: `<hyp> <before> → <after>    [<lead> <pred/refut-ids> <severity> ⟂ <supp-edges> :: <annotation>]`. `r1` is cited (rule #5 requires `--` rows to cite at least one refutation belonging to the target topology commitment); `e-002` is `siem-event` authority (rule #4 admits `++`/`--` only against `siem-event` / `runtime-audit` / `authoritative-source`).
+- `surviving: none` is correct here — `h-001` reached `--` so it is not a survivor. Rule #24 accepts this because every declared topology commitment was either graded `--` or listed.
+- No authz edge check was declared (`?opportunistic-scanner` is an adversarial-mechanism commitment — the classification carries the claim per §Topology commitment), so rule #21 / rule #26 don't gate this disposition.
+- Companion examples covering the authz edge-check path (`:R authz` + source-side integrity work), route rules (`:L l-{id}.lead_preds`), and impact edge checks (`:L l-{id}.impact_preds` + `:R impact`) live in `docs/dense-investigation-format.md`. When fulfilling an authz check, write the verdict in `:R authz` with the resolved edge named in the `edge` cell so the disposition closure check sees it.
 
 ---
 

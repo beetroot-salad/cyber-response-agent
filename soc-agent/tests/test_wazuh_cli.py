@@ -166,7 +166,7 @@ class TestQueryAlertsPagination:
         ])
         config = {"WAZUH_INDEX": "alerts-*"}
 
-        items, total = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-05", limit=10)
+        items, total, _ = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-05", limit=10)
         assert len(items) == 3
         assert total == 3
         # First call returns 3 hits, second call returns empty → 2 calls total
@@ -178,7 +178,7 @@ class TestQueryAlertsPagination:
         ])
         config = {"WAZUH_INDEX": "alerts-*"}
 
-        items, total = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-05", limit=0)
+        items, total, _ = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-05", limit=0)
         assert items == []
         assert total == 42
         body = client.calls[0]["body"]
@@ -195,7 +195,7 @@ class TestQueryAlertsPagination:
         ])
         config = {"WAZUH_INDEX": "alerts-*"}
 
-        items, total = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-06", limit=5)
+        items, total, _ = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-06", limit=5)
         assert len(items) == 3
         assert total == 3
         # page1 (2 hits) + page2 (1 hit) + empty page = 3 calls
@@ -216,7 +216,7 @@ class TestQueryAlertsPagination:
         ])
         config = {"WAZUH_INDEX": "alerts-*"}
 
-        items, total = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-06", limit=3)
+        items, total, _ = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-06", limit=3)
         assert len(items) == 3
         # Second call should request size=1 (remaining)
         second_body = client.calls[1]["body"]
@@ -228,7 +228,7 @@ class TestQueryAlertsPagination:
         ])
         config = {"WAZUH_INDEX": "alerts-*"}
 
-        items, total = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-05", limit=10)
+        items, total, _ = wazuh_cli.query_alerts(client, config, "*", "2026-04-01", "2026-04-05", limit=10)
         assert items == []
         assert total == 0
 

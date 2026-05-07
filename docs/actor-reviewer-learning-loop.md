@@ -102,12 +102,14 @@ Gray-box is the primary mode because it directly tests whether the lead set is
 
 ### Lead set projection
 
-The "lead set" is the ordered set of PREDICT → GATHER lead contracts used in
+The "lead set" is the ordered set of defender→gather dispatches used in
 the investigation, not a loose prose summary of what the investigator did.
-Each entry is the lead object PREDICT selected and GATHER executed or declined:
-a catalog lead by slug, a composite lead with legs, or a missing/ad-hoc lead
-whose definition was written inline by PREDICT because no catalog definition
-existed.
+Each entry pairs the free-form lead description the defender sent gather
+(goal + what to characterize) with the **queries** gather actually ran.
+The cross-case join key is `(query.id, query.params)` — not a lead slug.
+The defender does not pick from a slugged lead catalog; gather picks (or
+authors) a query template per dispatch, and the template id is what makes
+a lead addressable across cases.
 
 The learning job materializes that ordered contract as:
 
@@ -116,35 +118,38 @@ lead_sequence:
   case_id: <run id>
   entries:
     - position: 0
-      mode: single | composite | missing-lead
-      selected_lead: <unique descriptive lead slug>
-      extended_definition:
-        source: catalog | inline
-        ref: <knowledge/common-investigation/leads/{lead}/definition.md, or null>
-        goal: <lead goal / measurement contract>
+      lead_description:
+        goal: <defender's measurement contract>
         what_to_characterize:
           - <dimension the gather result must characterize>
-        common_pitfalls: [<pitfalls from catalog or inline spec, if any>]
-        baseline: <baseline requirement / interpretation, if any>
-      emphasis: <optional predict emphasis, or null>
-      scope: <window / anchor scope, if present>
-      legs:
-        - selected_lead: <leg slug>
-          extended_definition: <same shape as above>
-      gather_status: <ok | partial | data_missing | missing_lead_unrunnable | ...>
+      queries:
+        - id: <system-prefixed kebab, e.g. wazuh.auth-events-by-host>
+          params: {<param>: <bound value>}
       result_ref: <citation to actual result, hidden during gray-box story phase>
 ```
 
+When gather fans a single dispatch out into multiple queries, each is an
+entry in the same `queries` list — there is no separate composite mode.
+Templates authored during a run are written back to the per-system
+catalog (`defender/skills/gather/queries/{system}/`), so the catalog
+grows organically with usage; early near-duplicates are accepted and
+normalized downstream when patterns stabilize.
+
 For gray-box adversarial runs, the actor first sees `alert.json` plus the
-answer-redacted lead contracts: `position`, `mode`, `selected_lead`,
-`extended_definition`, `emphasis`, `scope`, and composite `legs`. For catalog
-leads, `extended_definition` is rendered from the catalog `definition.md`; for
-missing/ad-hoc leads, it is the inline lead specification PREDICT emitted.
-The actor does not see GATHER's selected systems, concrete queries, or results.
-The `gather_status` and `result_ref` material are revealed only after the story
-is written. If the PREDICT/GATHER contract cannot be projected cleanly, the
-learning run is rejected rather than asking the actor to infer the lead set
-from prose.
+answer-redacted lead contracts: `position`, `lead_description`, and
+`queries` (id + params — the actor sees *what queries ran*, not what they
+returned). The `result_ref` material is revealed only after the story is
+written. If the dispatch contract cannot be projected cleanly, the
+learning run is rejected rather than asking the actor to infer the lead
+set from prose.
+
+> **Production note.** The legacy `knowledge/common-investigation/leads/`
+> slug catalog (used by the production `soc-agent/` investigate loop) is
+> unchanged; production runs continue to project a slug-keyed
+> `selected_lead`. The query-template keying above is the contract for
+> the `defender/` agent and any future defender that drops the slug
+> catalog. The learning-loop tooling treats `query.id` and
+> `selected_lead` as parallel cross-case keys during the transition.
 
 ### Schema
 

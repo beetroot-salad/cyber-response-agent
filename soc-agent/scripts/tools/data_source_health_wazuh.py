@@ -46,7 +46,7 @@ def _build_wazuh_count_fn(query_string: str):
     client = wazuh_cli.get_indexer_client(config)
 
     def count_fn(start: datetime, end: datetime) -> int:
-        _, total = wazuh_cli.query_alerts(
+        _, total, _ = wazuh_cli.query_alerts(
             client, config, query_string, _iso(start), _iso(end), limit=0
         )
         return int(total)

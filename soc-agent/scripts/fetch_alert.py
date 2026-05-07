@@ -82,7 +82,7 @@ def main():
 
     time_start, time_end = compute_time_range(_TimeArgs())
 
-    items, total = query_alerts(
+    items, total, _ = query_alerts(
         client,
         config,
         f"rule.id:{args.rule_id}",
