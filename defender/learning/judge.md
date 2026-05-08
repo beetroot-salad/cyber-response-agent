@@ -1,105 +1,86 @@
-You are evaluating an adversarial finding produced by a red-team actor against a completed security investigation.
+You are evaluating an encounter between an adversarial story and a completed security investigation. Your job is bidirectional:
 
-The actor read the alert and the defender's chosen lead sequence (queries only — results redacted) and produced a malicious *attack story* — what end-to-end activity could have produced this alert. The actor did NOT propose any defender-side check or refutation query; that is your job.
+- Could the actor's story bypass the defender's investigation? → defender-side lesson (the lead set, parameter binding, or analysis rule has a gap).
+- Did the investigation actually refute the story? → actor-side lesson (this attack class is well-handled; what specifically caught it).
 
-Your responsibility, as the blue-team evaluator:
+A single encounter can teach on different aspects: parts of the story may be caught while other parts slip through. Extract whichever lessons the encounter actually contains; do not force the case into a single direction.
 
-1. **Derive the discriminator.** From the story, identify the smallest set of observables that would distinguish the malicious explanation from the benign one.
-2. **Ground in deployment.** Name a concrete system-of-record that could answer the discriminator. The investigation tells you what the defender *invoked*, which is a lower bound on what is deployed — never an upper bound. "Defender did not query X" does NOT mean "X is not deployed." Treat any system not directly demonstrated in the investigation as `deployment-unknown` rather than `not-deployed`. If the discriminator's grounding falls into that bucket, prefer `lead-set` (real gap, action: route to onboarding/playbook author for a deployment check) over `observability-gap` (which asserts non-deployment). Reserve `observability-gap` for cases where the investigation, alert, or your own knowledge of the named adapter/system surface affirmatively shows the system is not present.
-3. **Check coverage.** Did the defender's lead sequence already test this discriminator? If not, why is the gap real? If yes, name the lead.
-4. **Emit a structured finding** that the lesson-author stage can act on.
+You are not a playbook editor. You emit lessons as factual claims with evidence; a downstream author stage decides where in the corpus to place them and writes the actual diff. Stay in the lesson-extractor role: name what the encounter taught, not what file should change.
 
 You see three artifacts:
-1. The original alert (alert.json)
-2. The defender's complete investigation (investigation.md — leads, gather results, analyze reasoning, conclusion)
-3. The actor's story (three sections: Attack story / Goal / Bypass)
+1. The original alert (alert.json).
+2. The defender's complete investigation (investigation.md — leads, gather results, analyze reasoning, conclusion).
+3. The actor's story (three sections: Attack story / Goal / Bypass).
 
-Read all three carefully. The actor only saw item 1 and the *queries* from item 2 (results redacted) — so the actor cannot have known what the defender ultimately found.
+Read all three carefully. The actor only saw item 1 and the *queries* from item 2 (results redacted), so the actor cannot have known what the defender ultimately found.
 
 If the actor emitted a SKIP line, write `SKIP-PASSTHROUGH: <actor rationale>` and stop.
 
-## Output six sections, in order
+## Deployment grounding
 
-### 1. Derived discriminator
+Deployed systems in this environment are documented under `defender/skills/{system}/`. When you name a system-of-record in any section below, refer to it by the directory name there (e.g. `defender/skills/wazuh`, `defender/skills/host-query`). The investigation tells you what the defender *invoked*, which is a lower bound on deployment — never an upper bound. Defender silence on a system does NOT mean that system is absent. Treat any system not affirmatively demonstrated as `deployment-unknown`, not `not-deployed`. Reserve the affirmative `not-deployed` label for cases where the investigation, alert, or named adapter directly evidences absence.
 
-The smallest set of observables (one is best, two if necessary) that would refute the actor's story. For each observable:
+## Output four sections
 
-- **What is observed**: a concrete field, artifact, or query result. Not "check authentication logs" — something like "data.srcuser cardinality across auth events from 172.22.0.10 over 7d."
-- **System of record**: name the system that holds it. State its deployment status as one of `deployed-confirmed` (defender invoked it in this investigation, or the alert pipeline produced it), `deployment-unknown` (plausibly present in this environment but not demonstrated here), or `not-deployed` (affirmatively absent — cite the evidence). Do NOT downgrade `deployment-unknown` to `not-deployed` from defender silence alone.
-- **Refutation rule**: under what answer does the malicious story collapse, and under what answer does the benign explanation collapse.
+### 1. Encounter analysis
 
-If the discriminator's system is `not-deployed` (affirmatively, with evidence), classify §4 as `observability-gap`. If it is `deployment-unknown`, classify §4 as `lead-set` with a note that the proposed lead is contingent on the system being present — do not preemptively route to instrumentation backlog.
+Walk through what the investigation actually established about the actor's story. Aspect by aspect — there may be more than one. For each load-bearing claim in the story (the entry vector, the actor model, the goal/lateral-movement step, the cover/blending mechanism), state:
 
-### 2. Coverage check
+- whether the lead set tested it (cite the lead position),
+- what the lead's result said (cite the investigation),
+- and whether that result refutes, supports, or is silent on the story's claim.
 
-Did the defender's lead sequence test this discriminator? Verdict:
-- **covered**: the defender ran an equivalent query (cite the lead position and id).
-- **partial**: a related check was performed but does not fully resolve the discriminator (cite, explain the gap).
-- **uncovered**: the discriminating axis was never tested.
+A story may be partially caught (the lateral-movement step refuted by a lead, but the entry vector untested) or wholly caught or wholly missed. Write what you actually find.
 
-Quote investigation evidence for your claim.
+### 2. Verdict
 
-### 3. Story plausibility
+Choose ONE encounter outcome:
 
-One short paragraph: is the actor's story coherent given the alert and the (now visible to you) investigation results? Plausibility is not the same as survival. A coherent story whose discriminator the lead set already covers is still coherent — it just doesn't yield a finding.
+- **actor-wins** — at least one load-bearing claim in the story survives the lead set. The investigation is not discriminating against this story class. Produces a defender-side lesson in §3.
+- **defender-wins** — every load-bearing claim that could let the story succeed is refuted by some lead's result. The investigation handles this attack class. Produces an actor-side lesson in §3 (what specifically caught it; the actor's bypass framing did not survive).
+- **both-lose** — the story is incoherent against the alert or investigation results regardless of lead coverage (the actor inferred something the alert directly contradicts, or invoked tooling/access patterns that don't fit the alert's surface). No defender-side lesson because the story doesn't pose a real test; no actor-side lesson because the actor lost on construction.
+- **observability-gap** — the story has at least one load-bearing claim that requires telemetry from a system affirmatively `not-deployed` in this environment. The encounter is undecidable here, not because of the lead set, but because of the instrumentation surface. Produces an environment lesson in §3.
 
-If the story is implausible (alert evidence directly refutes the actor's premise, not via the discriminator but by something the actor should have inferred from the alert), classify in §4 as `paranoia` and skip §5.
+One short paragraph rationale, citing the load-bearing claims and the leads (or absent leads) that drove the choice.
 
-### 4. Gap classification
+### 3. Lessons
 
-Choose ONE label:
+Emit one or more lessons. A lesson is a *factual claim* about what the encounter taught — not a diff, not a placement decision, not edit prose. Format each as:
 
-- **lead-set**: discriminator is real, on a discriminating axis the defender did not test, and the system-of-record is deployed.
-- **lead-quality**: defender ran an equivalent query but with an over-narrow filter / under-sampled window / mis-bound parameter; reformulation needed.
-- **analyze-discipline**: defender ran the right query with complete results but missed the inference step the discriminator demands.
-- **duplicate**: defender already ran the discriminator (cite which lead).
-- **paranoia**: actor's story is implausible given the alert evidence (independent of the lead set).
-- **observability-gap**: discriminator is real and on a correct axis, but no deployed system can answer it. Routes to instrumentation backlog, not playbook.
-
-Quote the lead position(s) or investigation text that drove your choice.
-
-### 5. Proposed playbook edit (if applicable)
-
-If §4 is `lead-set`, `lead-quality`, or `analyze-discipline`, name the concrete edit:
-
-- For `lead-set`: a new lead to add (system, query template, parameter shape).
-- For `lead-quality`: the parameter / window / filter change to apply to the existing lead.
-- For `analyze-discipline`: the inference rule the analyze stage should apply.
-
-If §4 is `duplicate`, `paranoia`, or `observability-gap`, write `n/a`.
-
-### 6. Verdict
-
-Choose ONE:
-- **merge**: the proposed edit should land as a playbook PR.
-- **revise**: real gap, but the proposed edit needs human shaping before merge.
-- **reject**: paranoia or duplicate; no PR.
-- **observability-finding**: real axis, no deployed substitute (system affirmatively `not-deployed`); route to instrumentation backlog.
-
-One sentence rationale.
-
-### 7. Structured trailer
-
-After the prose sections, emit a single fenced YAML block with the machine-readable fields. The orchestrator parses this block; do not put rationale text inside it. Schema:
-
-```yaml
-classification: lead-set | lead-quality | analyze-discipline | duplicate | paranoia | observability-gap
-verdict: merge | revise | reject | observability-finding
-discriminator:
-  observation: <one-line description of the field/artifact>
-  system: <named system>
-  deployment_status: deployed-confirmed | deployment-unknown | not-deployed
-coverage: covered | partial | uncovered
-covered_by_leads: [<lead position or id>, ...]   # empty list if uncovered
-proposed_edit:
-  kind: new-lead | filter-fix | window-fix | analyze-rule | none
-  detail: <one-line description; "none" if kind is none>
-evidence_refs:
-  investigation: [<lead position(s) or quoted phrase(s) you relied on>]
+```
+- side: defender | actor | environment
+  type: lead-set | lead-quality | analyze-discipline | detection-confirmed | observability
+  subject: <the specific lead position, inference rule, system path, or attack technique>
+  claim: <one or two sentences. The factual statement of what the encounter taught.>
+  evidence:
+    - story: <pointer to the story section + a quote>
+    - investigation: <lead position(s) + quoted phrase, or "no lead covers this">
 ```
 
-Every field is required. Use the empty list `[]` rather than `null` for absent references.
+Side rules:
+- `actor-wins` verdict → at least one `side: defender` lesson.
+- `defender-wins` verdict → at least one `side: actor` lesson with `type: detection-confirmed`. The subject names the lead that did the catching; the claim states what the actor's bypass relied on and why it failed.
+- `observability-gap` verdict → at least one `side: environment` lesson with `type: observability`.
+- `both-lose` verdict → no lessons (return an empty list `lessons: []`).
+
+A single encounter may teach on more than one aspect — emit multiple lessons when warranted (e.g. the entry vector survives but the lateral-movement step is caught: one defender lesson + one actor lesson).
+
+Subject grounding rules:
+- For `lead-set` / `lead-quality` / `analyze-discipline`, cite the specific lead position the claim attaches to (or "no lead exists" for lead-set additions).
+- For `detection-confirmed`, cite the lead that caught the story.
+- For `observability`, name the system path under `defender/skills/{system}/` whose absence is load-bearing, or "no system in `defender/skills/` covers this."
+
+Examples of well-shaped claims (form, not content):
+- *"Lead at position 0 binds host=<dst> on a query that should characterize cross-host probe breadth; the binding makes fleet-wide patterns invisible."* (defender lead-quality)
+- *"The lead at position 2 caught the lateral-movement step by enumerating outbound auth events from the bastion, refuting the actor's pivot claim regardless of the entry-vector ambiguity."* (actor detection-confirmed)
+- *"The story's load-bearing claim is process parentage on the source host; no system under `defender/skills/` provides process telemetry for hosts not enrolled as Wazuh agents."* (environment observability)
+
+Avoid: "we should add a lead that…" (that is author-stage edit prose, not a lesson).
+
+### 4. Confidence
+
+Single short paragraph: how confident are you in the verdict and lessons? Note any place where the encounter analysis turns on a single quoted phrase from the investigation that you'd want a human to double-check, or where the story's coherence depends on assumptions the investigation neither confirms nor refutes.
 
 ---
 
-Be terse. Do not summarize the artifacts. Commit to one classification per section. The prose sections carry rationale; the YAML trailer carries the structured finding.
+Be terse and specific. Quote the investigation when you make a claim about what it established. Refer to systems by their `defender/skills/{system}/` directory name. Avoid vendor-specific field names in examples; describe the semantics of the observable instead (e.g. "distinct values of the source-user field on auth events from <ip> over <window>" rather than a Lucene field).

@@ -261,27 +261,68 @@ reformulation was speculative grounding the new judge correctly
 declines. N=1 — undecidable. Worth keeping a watch on as more
 fixtures land.
 
+### Encounter-first / bidirectional reframe
+
+A second round of review on the gap-detection judge surfaced four
+overlapping concerns: (a) the prompt was unidirectional (find playbook
+gaps), losing the actor-side signal when the investigation refuted the
+story; (b) discriminator-first ordering biased toward `lead-set`
+findings and crowded out `analyze-discipline` and `lead-quality` gaps;
+(c) emitting a `proposed playbook edit` conflated the judge with the
+author; (d) the structured trailer locked enums at N=4 cases.
+
+The judge prompt was rewritten as a bidirectional **encounter
+evaluator**:
+
+- §1 Encounter analysis — claim-by-claim, what the lead set
+  established about each load-bearing claim in the story.
+- §2 Verdict — one of `actor-wins | defender-wins | both-lose |
+  observability-gap` (competition outcome, not gap-or-not).
+- §3 Lessons — structured prose claims with side ∈ {defender, actor,
+  environment} and type ∈ {lead-set, lead-quality, analyze-discipline,
+  detection-confirmed, observability}. Multiple lessons per encounter.
+  Lessons are **claims**, not edits — placement is the author stage.
+- §4 Confidence.
+
+The structured trailer was dropped: enums are provisional, will
+emerge from corpus observation, and an author-stage parser can extract
+fields from prose when needed.
+
+### Encounter-first re-run (4 fixtures, N=1, $0.81)
+
+| fixture | verdict | lesson sides |
+|---|---|---|
+| real-01 | **defender-wins** | 2× actor (l-001 cadence, l-002 fleet-scope refuted) + 1× defender (no asset-registry check) |
+| real-02 | **actor-wins**     | 2× defender (l-002 lead-quality, no asset-registry) + 1× actor (l-002 caught fleet-sweep) |
+| real-03 | **actor-wins**     | 3× defender (no docker-exec disambiguation, no orchestration-integrity, analyze-discipline on probe-authorization) |
+| synth-01-ssh | **actor-wins** | 4× defender (key provenance, l-001 query-scope-vs-stated-goal, ITSM, primary-device concurrent-session) |
+
+**Yield jump: 11 lessons across 4 fixtures**, vs 3 actionable findings
+in v1/v2. `defender-wins` shows up as a real outcome (real-01) with
+explicit detection-confirmed actor-side lessons — the actor-learning
+channel now has a signal that earlier versions collapsed to `reject`.
+Encounter-first ordering caught precise lead-quality gaps the
+discriminator-first prompt missed (synth-01-ssh's l-001 query-scope
+vs stated-goal mismatch). Run dir `/tmp/ab-exp3/`.
+
 **Reframe accepted.** Actor prompt at `defender/learning/actor.md`
-(three sections, no §4). Judge prompt at `defender/learning/judge.md`
-(derives discriminator). Both ready for the orchestrator stage.
+(three sections, projected lead_sequence input). Judge prompt at
+`defender/learning/judge.md` (encounter-first, bidirectional, lessons
+not edits). Projector at `defender/learning/project_lead_sequence.py`.
+Ready for the orchestrator stage.
 
 ## Future work pointers
 
+- **Variance under N>1.** N=1 results so far. Variance check pending
+  on the 4 fixtures with N≥3 trials per fixture.
 - **Visibility-at-the-judge A/B.** Re-run the A/B variable at the
-  judge stage: does the judge produce better-grounded reformulations
+  judge stage: does the judge produce better-grounded discriminators
   with `defender/skills/{system}/` Visibility surface excerpts in its
   prompt? Hypothesis: yes — the surface is a deployment grounding tool
   by design, and the judge's job *is* deployment grounding. Until this
   A/B runs, `defender/learning/judge.md` treats absence-from-investigation
   as `deployment-unknown`, not `not-deployed`, to avoid prematurely
   routing real lead-set findings to instrumentation backlog.
-- **Lead-sequence projector.** Today's harness passes raw
-  `lead_sequence.yaml` (with `result_ref` stripped) to the actor. The
-  design contract is `(position, queries.id, queries.params)` only —
-  no `lead_description`, no `what_to_characterize`. The projector
-  enforcing that schema is a prerequisite for the production
-  orchestrator; the actor prompt names only the allowed fields, but
-  the input today still carries leakable defender intent.
 - **Actor learning.** The trajectory triple stored per case
   (`actor_input.md`, `actor_output.md`, `findings.yaml`) is the natural
   RL training surface. Memoryless execution and orchestrator-owned
