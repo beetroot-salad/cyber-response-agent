@@ -311,10 +311,41 @@ vs stated-goal mismatch). Run dir `/tmp/ab-exp3/`.
 not edits). Projector at `defender/learning/project_lead_sequence.py`.
 Ready for the orchestrator stage.
 
-## Future work pointers
+### N=3 variance check (4 fixtures × 3 trials, $2.35)
 
-- **Variance under N>1.** N=1 results so far. Variance check pending
-  on the 4 fixtures with N≥3 trials per fixture.
+| fixture | t1 | t2 | t3 |
+|---|---|---|---|
+| real-01 | actor-wins | actor-wins | actor-wins |
+| real-02 | **defender-wins** | actor-wins | actor-wins |
+| real-03 | actor-wins | **defender-wins** | actor-wins |
+| synth-01-ssh | actor-wins | actor-wins | actor-wins |
+
+36 lessons across 12 trials. Three findings:
+
+1. **Verdict is per-trial, not per-fixture.** Different trials commit
+   to different load-bearing claims (real-02 trial 1 = horizontal
+   sweep, caught by l-002 → defender-wins; trials 2+3 = host-identity
+   exploitation, not caught → actor-wins). Verdict tracks the
+   encounter, not the alert. real-01's N=1 defender-wins was a sample,
+   not a fixture property.
+2. **Lesson cores converge across trials; framings vary.** Every
+   real-01 trial hits "source-host identity verification on .10"
+   and "ANALYZE inference from behavioral pattern to legitimacy" with
+   three different phrasings. Every real-02 trial hits "no
+   asset-registry / source-IP-identity-registration check." Strong
+   empirical support for the author-stage dedup design: lessons are
+   dedupable as claims, not as edits.
+3. **N>1 expands coverage on ambiguous fixtures.** synth-01-ssh
+   surfaced 9 distinct gaps across 3 trials spanning persistence,
+   device identity, ITSM corroboration, primary-device silence,
+   ticket-timing correlation. Clear fixtures (real-01, real-02)
+   plateau by N=2 on lesson types. Sampling implication: ambiguous
+   fixtures justify N>1; clear fixtures plateau quickly.
+
+`defender-wins` rate held: N=1 = 1/4 (25%), N=3 = 2/12 (17%).
+Most actor stories survive some aspect of a typical investigation.
+
+## Future work pointers
 - **Visibility-at-the-judge A/B.** Re-run the A/B variable at the
   judge stage: does the judge produce better-grounded discriminators
   with `defender/skills/{system}/` Visibility surface excerpts in its
