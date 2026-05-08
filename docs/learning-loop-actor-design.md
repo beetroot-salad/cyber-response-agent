@@ -152,7 +152,7 @@ Run-dir layout:
 runs/{case_id}/learning/
   lead_sequence.yaml      # projected, redacted contracts
   actor_input.md          # the exact prompt the actor saw (reproducibility)
-  actor_output.md         # free-text with the four sections
+  actor_output.md         # free-text: three sections (story / goal / bypass), or a single SKIP line
   actor_skip.txt          # alternative to actor_output.md
   findings.yaml           # judge output (omitted on skip)
   judge_input.md          # the exact prompt the judge saw
@@ -267,17 +267,21 @@ fixtures land.
 
 ## Future work pointers
 
-- **Judge prompt revision.** `judge_core_v2` was designed against a
-  4-section actor that emitted §4 breaking-evidence. Under the
-  reframe the judge no longer receives §4 and must derive the
-  discriminator itself. Needs a new prompt revision (call it `judge_v3`)
-  that takes `(alert, lead_sequence, story)` and produces
-  discriminator + classification + verdict.
 - **Visibility-at-the-judge A/B.** Re-run the A/B variable at the
   judge stage: does the judge produce better-grounded reformulations
   with `defender/skills/{system}/` Visibility surface excerpts in its
   prompt? Hypothesis: yes — the surface is a deployment grounding tool
-  by design, and the judge's job *is* deployment grounding.
+  by design, and the judge's job *is* deployment grounding. Until this
+  A/B runs, `defender/learning/judge.md` treats absence-from-investigation
+  as `deployment-unknown`, not `not-deployed`, to avoid prematurely
+  routing real lead-set findings to instrumentation backlog.
+- **Lead-sequence projector.** Today's harness passes raw
+  `lead_sequence.yaml` (with `result_ref` stripped) to the actor. The
+  design contract is `(position, queries.id, queries.params)` only —
+  no `lead_description`, no `what_to_characterize`. The projector
+  enforcing that schema is a prerequisite for the production
+  orchestrator; the actor prompt names only the allowed fields, but
+  the input today still carries leakable defender intent.
 - **Actor learning.** The trajectory triple stored per case
   (`actor_input.md`, `actor_output.md`, `findings.yaml`) is the natural
   RL training surface. Memoryless execution and orchestrator-owned

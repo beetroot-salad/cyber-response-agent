@@ -4,9 +4,10 @@ The actor read the alert and the defender's chosen lead sequence (queries only �
 
 Your responsibility, as the blue-team evaluator:
 
-1. **Derive the discriminator.** From the story, identify the smallest set of observables that would distinguish the malicious explanation from the benign one. Ground each observable in a system-of-record that is actually deployed in this environment (use the investigation as the authoritative source on what is and isn't deployed — which agents are enrolled, which tools the defender invoked).
-2. **Check coverage.** Did the defender's lead sequence already test this discriminator? If not, why is the gap real? If yes, name the lead.
-3. **Emit a structured finding** that the lesson-author stage can act on.
+1. **Derive the discriminator.** From the story, identify the smallest set of observables that would distinguish the malicious explanation from the benign one.
+2. **Ground in deployment.** Name a concrete system-of-record that could answer the discriminator. The investigation tells you what the defender *invoked*, which is a lower bound on what is deployed — never an upper bound. "Defender did not query X" does NOT mean "X is not deployed." Treat any system not directly demonstrated in the investigation as `deployment-unknown` rather than `not-deployed`. If the discriminator's grounding falls into that bucket, prefer `lead-set` (real gap, action: route to onboarding/playbook author for a deployment check) over `observability-gap` (which asserts non-deployment). Reserve `observability-gap` for cases where the investigation, alert, or your own knowledge of the named adapter/system surface affirmatively shows the system is not present.
+3. **Check coverage.** Did the defender's lead sequence already test this discriminator? If not, why is the gap real? If yes, name the lead.
+4. **Emit a structured finding** that the lesson-author stage can act on.
 
 You see three artifacts:
 1. The original alert (alert.json)
@@ -24,10 +25,10 @@ If the actor emitted a SKIP line, write `SKIP-PASSTHROUGH: <actor rationale>` an
 The smallest set of observables (one is best, two if necessary) that would refute the actor's story. For each observable:
 
 - **What is observed**: a concrete field, artifact, or query result. Not "check authentication logs" — something like "data.srcuser cardinality across auth events from 172.22.0.10 over 7d."
-- **System of record**: name the deployed system that holds it (per the investigation). If multiple are equivalent, pick the cheapest or most reliable.
+- **System of record**: name the system that holds it. State its deployment status as one of `deployed-confirmed` (defender invoked it in this investigation, or the alert pipeline produced it), `deployment-unknown` (plausibly present in this environment but not demonstrated here), or `not-deployed` (affirmatively absent — cite the evidence). Do NOT downgrade `deployment-unknown` to `not-deployed` from defender silence alone.
 - **Refutation rule**: under what answer does the malicious story collapse, and under what answer does the benign explanation collapse.
 
-If the smallest grounded discriminator requires a system that is NOT deployed in this environment, say so explicitly and proceed to §4 with classification `observability-gap`.
+If the discriminator's system is `not-deployed` (affirmatively, with evidence), classify §4 as `observability-gap`. If it is `deployment-unknown`, classify §4 as `lead-set` with a note that the proposed lead is contingent on the system being present — do not preemptively route to instrumentation backlog.
 
 ### 2. Coverage check
 
@@ -73,10 +74,32 @@ Choose ONE:
 - **merge**: the proposed edit should land as a playbook PR.
 - **revise**: real gap, but the proposed edit needs human shaping before merge.
 - **reject**: paranoia or duplicate; no PR.
-- **observability-finding**: real axis, no deployed substitute; route to instrumentation backlog.
+- **observability-finding**: real axis, no deployed substitute (system affirmatively `not-deployed`); route to instrumentation backlog.
 
 One sentence rationale.
 
+### 7. Structured trailer
+
+After the prose sections, emit a single fenced YAML block with the machine-readable fields. The orchestrator parses this block; do not put rationale text inside it. Schema:
+
+```yaml
+classification: lead-set | lead-quality | analyze-discipline | duplicate | paranoia | observability-gap
+verdict: merge | revise | reject | observability-finding
+discriminator:
+  observation: <one-line description of the field/artifact>
+  system: <named system>
+  deployment_status: deployed-confirmed | deployment-unknown | not-deployed
+coverage: covered | partial | uncovered
+covered_by_leads: [<lead position or id>, ...]   # empty list if uncovered
+proposed_edit:
+  kind: new-lead | filter-fix | window-fix | analyze-rule | none
+  detail: <one-line description; "none" if kind is none>
+evidence_refs:
+  investigation: [<lead position(s) or quoted phrase(s) you relied on>]
+```
+
+Every field is required. Use the empty list `[]` rather than `null` for absent references.
+
 ---
 
-Be terse. Do not summarize the artifacts. Commit to one classification per section.
+Be terse. Do not summarize the artifacts. Commit to one classification per section. The prose sections carry rationale; the YAML trailer carries the structured finding.
