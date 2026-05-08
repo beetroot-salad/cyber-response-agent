@@ -345,6 +345,45 @@ Ready for the orchestrator stage.
 `defender-wins` rate held: N=1 = 1/4 (25%), N=3 = 2/12 (17%).
 Most actor stories survive some aspect of a typical investigation.
 
+### Load-bearing lessons survive the verdict
+
+The most important finding from the N=3 sweep: each fixture has a
+structural defender gap that *every* trial hits, regardless of which
+verdict that trial produced. Concretely, all 3 trials of each real-*
+fixture surfaced the same load-bearing defender lesson:
+
+| fixture | load-bearing gap | t1 | t2 | t3 |
+|---|---|---|---|---|
+| real-01 | source-host identity verification on .10 | actor-wins ✓ | actor-wins ✓ | actor-wins ✓ |
+| real-02 | no asset-registry / CMDB / source-IP-identity check | **def-wins** ✓ | actor-wins ✓ | actor-wins ✓ |
+| real-03 | no lead covers orchestration-layer / docker-exec-API integrity | actor-wins ✓ | **def-wins** ✓ | actor-wins ✓ |
+
+The defender-wins trials (real-02 t1, real-03 t2) emitted the
+structural defender lesson *alongside* the actor-side
+`detection-confirmed` lessons. real-03 t2 produced 4 lessons total:
+2× actor (l-001 baseline + l-003 sshd characterization caught the
+supply-chain artifact) + 1× defender (orchestration-layer lesson) +
+1× defender (analyze-discipline on ORIENT not following up on the
+`EXE_WRITABLE` flag).
+
+Two implications:
+
+1. **The judge is not verdict-gated on defender lessons.** A
+   defender-wins encounter still produces defender-side lessons when
+   the actor's load-bearing claim points at a real gap, even if that
+   trial's tactical detail (sweep volume, supply-chain artifact, etc.)
+   was caught by the existing leads. The lesson stream is robust to
+   actor tactical noise.
+2. **Cross-trial dedup is well-defined.** Three trials produce three
+   different prose framings of "no source-host identity check"; they
+   map cleanly to one lesson with three evidence refs. Strong
+   empirical case for the separate author stage owning dedup.
+
+The actor's degrees of freedom (which CVE, which contractor model,
+which sweep volume) do not propagate up to the structural-gap layer.
+The alert's surface bounds the load-bearing claim; the lessons
+converge there even when the actor diverges everywhere else.
+
 ## Future work pointers
 - **Visibility-at-the-judge A/B.** Re-run the A/B variable at the
   judge stage: does the judge produce better-grounded discriminators
