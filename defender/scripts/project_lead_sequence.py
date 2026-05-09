@@ -125,6 +125,51 @@ def project(run_dir: Path) -> dict:
     }
 
 
+def project_actor(doc: dict) -> dict:
+    """Strip lead_description and result_ref for the actor projection.
+
+    The actor sees only `position` + `queries[].id` + `queries[].params`
+    per `defender/learning/actor.md` — what raw queries ran, nothing
+    about defender intent or what was found. Reasoning about lead
+    coverage is judge work; redacting at projection time enforces the
+    split structurally.
+    """
+    return {
+        "case_id": doc["case_id"],
+        "alert_ref": doc["alert_ref"],
+        "entries": [
+            {
+                "position": e["position"],
+                "queries": [
+                    {"id": q["id"], "params": q.get("params", {})}
+                    for q in e["queries"]
+                ],
+            }
+            for e in doc["entries"]
+        ],
+    }
+
+
+def dump_actor_yaml(doc: dict) -> str:
+    out: list[str] = []
+    out.append(f"case_id: {doc['case_id']}")
+    out.append(f"alert_ref: {doc['alert_ref']}")
+    out.append("entries:")
+    for entry in doc["entries"]:
+        out.append(f"  - position: {entry['position']}")
+        out.append("    queries:")
+        for q in entry["queries"]:
+            out.append(f"      - id: {q['id']}")
+            if q["params"]:
+                params_inline = ", ".join(
+                    f"{k}: {_yaml_scalar(v)}" for k, v in q["params"].items()
+                )
+                out.append(f"        params: {{{params_inline}}}")
+            else:
+                out.append("        params: {}")
+    return "\n".join(out) + "\n"
+
+
 def dump_yaml(doc: dict) -> str:
     """Tiny YAML dumper covering the shape lead_sequence emits.
 
@@ -168,10 +213,30 @@ def _yaml_scalar(value) -> str:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage: project_lead_sequence.py <run_dir>", file=sys.stderr)
+    args = argv[1:]
+    actor_out: Path | None = None
+    positional: list[str] = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--actor-out":
+            if i + 1 >= len(args):
+                print("--actor-out requires a path", file=sys.stderr)
+                return 64
+            actor_out = Path(args[i + 1]).resolve()
+            i += 2
+            continue
+        positional.append(a)
+        i += 1
+
+    if len(positional) != 1:
+        print(
+            "usage: project_lead_sequence.py <run_dir> [--actor-out <path>]",
+            file=sys.stderr,
+        )
         return 64
-    run_dir = Path(argv[1]).resolve()
+
+    run_dir = Path(positional[0]).resolve()
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
@@ -180,6 +245,12 @@ def main(argv: list[str]) -> int:
     out = run_dir / "lead_sequence.yaml"
     out.write_text(dump_yaml(doc))
     print(f"wrote {out}")
+
+    if actor_out is not None:
+        actor_out.parent.mkdir(parents=True, exist_ok=True)
+        actor_out.write_text(dump_actor_yaml(project_actor(doc)))
+        print(f"wrote {actor_out}")
+
     return 0
 
 

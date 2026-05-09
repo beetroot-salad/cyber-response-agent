@@ -1,6 +1,6 @@
 ---
 title: Defender learning loop V0 — orchestrator + stub author
-status: todo
+status: doing
 groups: defender, learning-loop
 ---
 
@@ -17,7 +17,6 @@ Today's `report.md` files are heterogeneous. Structure what already exists:
 case_id: <run id>
 disposition: benign | inconclusive | malicious
 confidence: high | medium | low
-matched_archetype: <slug or null>
 ---
 
 # Disposition: <human label>
@@ -27,34 +26,41 @@ matched_archetype: <slug or null>
 
 - `disposition` enum is closed. `benign` = confident clear. `inconclusive` = ran out of data, escalate (loop runs adversarial actor). `malicious` = confident escalate, story confirmed (loop skips at MVP).
 - Defender SKILL.md REPORT phase updated to require this frontmatter; gather/judge prompts unchanged.
-- Existing /tmp runs are not back-filled. Loop's normalizer is best-effort for legacy reports (frontmatter → `^#+\s*Disposition:` regex → fail-loud and skip).
+- Existing /tmp runs are not back-filled — they predate the schema and must be re-run before being fed to the loop. The normalizer parses YAML frontmatter only; missing/malformed frontmatter is a fail-loud error (no regex fallback).
 
 ## Prereq: judge YAML contract
 
-`defender/learning/judge.md` revised to emit strict YAML (no markdown headers, no YAML-in-code-fence). Top-level shape:
+`defender/learning/judge.md` revised to emit strict YAML (no markdown headers, no YAML-in-code-fence). Schema is a 1:1 mirror of the current judge sections — same field names, same semantics — with **one addition**: each `defender_findings` entry gains a `citations` list for downstream author repair. Outcome stays a single field whose first line is the enum keyword and subsequent lines are the rationale paragraph (no separate `outcome_rationale` key).
 
 ```yaml
-outcome: caught | survived | undecidable | incoherent | skip-passthrough
-outcome_rationale: <one paragraph>
-encounter_analysis: <multi-paragraph free text>
+outcome: |
+  <enum on first line; rationale paragraph below>
+encounter_analysis: |
+  <multi-paragraph>
 defender_findings:
   - type: lead-set | lead-quality | analyze-discipline | observability | detection-confirmed
-    subject: <as defined in judge.md §3>
-    finding: <one or two short paragraphs>
-    citations:
+    subject: <as defined in judge.md §subject rules>
+    finding: |
+      <one or two short paragraphs>
+    citations:                 # NEW — only delta from current judge.md
       - {source: investigation | actor | alert, quote: "..."}
-actor_observations: []   # optional, omit if empty
-confidence: <one short paragraph>
+actor_observations:            # optional, omit key entirely if empty
+  - type: misprediction | framing-choice | discarded-class
+    subject: ...
+    observation: |
+      ...
+confidence: |
+  <one short paragraph>
 ```
 
-Loop's parse step is plain `yaml.safe_load`. Citations are structured for downstream author repair.
+Loop's parse step is plain `yaml.safe_load`; outcome enum validation is `outcome.split('\n', 1)[0].strip()`. Citations are structured for downstream author repair.
 
 ## Wiring
 
 1. **`run.sh` stays scoped to defender runs only.**
 2. **New `defender/learning/loop.py`.** Per-run-dir API: `loop.py <run_dir>`. Steps:
-   - **Normalize disposition.** Parse `report.md` frontmatter; fall back to heading regex; fail-loud if neither resolves. Skip case if disposition ∉ {`benign`, `inconclusive`}.
-   - **Project actor input.** Strip `lead_description` and `result_ref` from `lead_sequence.yaml`; emit `actor_input.yaml` with `position + queries[].id + queries[].params` only (matches `defender/learning/actor.md`). The older `docs/actor-reviewer-learning-loop.md` text claiming `lead_description` is shown is stale — patched in this PR.
+   - **Normalize disposition.** Parse `report.md` YAML frontmatter; **no regex fallback**. Fail-loud if frontmatter is missing/malformed or disposition is not in the closed enum. Skip case if disposition ∉ {`benign`, `inconclusive`}.
+   - **Project actor input.** Invoke `defender/scripts/project_lead_sequence.py <run_dir> --actor-out <learning_run_dir>/actor_input.yaml` — the script projects `lead_sequence.yaml` down to `position + queries[].id + queries[].params` only (matches `defender/learning/actor.md`). The older `docs/actor-reviewer-learning-loop.md` text claiming `lead_description` is shown is stale — patched in this PR.
    - **Invoke actor.** Gray-box adversarial. Output → `actor_story.md`. If `SKIP:` line, persist it; loop continues to persistence, then exits this run with no findings.
    - **Invoke judge.** Inputs: `alert.json`, `investigation.md`, `actor_story.md`. Output → `judge_findings.yaml` (parsed against the YAML contract above; fail-loud on schema violation).
    - **Persist** per-run artifacts (see §Persistence).
@@ -147,7 +153,7 @@ Same as before — V0.5 split, V1 invlang retrieval, per-signature surface on re
 - `report.md` schema (frontmatter + closed enum) documented in `defender/SKILL.md` REPORT section and `defender/run_artifacts.md`.
 - `defender/learning/judge.md` revised to emit strict YAML per the contract above; loop parses it with `yaml.safe_load`.
 - `docs/actor-reviewer-learning-loop.md` patched so its lead-projection schema agrees with `defender/learning/actor.md`.
-- `defender/learning/loop.py` runs end-to-end on at least 3 of the existing /tmp runs whose disposition normalizes, producing per-run `defender/learning/runs/{run_id}/` artifacts and appending non-`detection-confirmed` findings to `_pending/findings.jsonl`.
+- `defender/learning/loop.py` runs end-to-end on at least 3 fresh defender runs (re-execute `defender/run.sh` against existing alert.json fixtures so report.md carries the new frontmatter), producing per-run `defender/learning/runs/{run_id}/` artifacts and appending non-`detection-confirmed` findings to `_pending/findings.jsonl`.
 - Stub author fires once with `LEARNING_AUTHOR_THRESHOLD=3`, logs the batch, exits cleanly, leaves the queue intact.
 - `_pending/` listed in `.gitignore`.
 - Follow-up task file opened for the real author PR.
