@@ -6,71 +6,139 @@ groups: defender, learning-loop
 
 **Goal.** Wire completed defender runs into the actor → judge → author pipeline and land robustness lessons back into the defender's knowledge surface. Improve robustness only — investigation-efficiency mechanics (e.g. gated lead-template additions vs ad-hoc query authoring, env caches, cost-shaping) are out of scope. Lead-execution *quality* lessons (too-narrow query, wrong window, missing dimension) are explicitly **in** scope — they're robustness-load-bearing.
 
-**Non-goals.** Per-signature playbook layer. Invlang-keyed lesson retrieval. Aggregation across runs. CI gating. Auto-PR. Benign-defender mode (only adversarial actor exists today).
+**Non-goals.** Per-signature playbook layer. Invlang-keyed lesson retrieval. Aggregation across runs. CI gating. Auto-PR. Benign-defender mode (only adversarial actor exists today). Sampling at the loop level (per-run API only — wrappers handle subset selection).
+
+## Prereq: report.md schema
+
+Today's `report.md` files are heterogeneous (some have YAML frontmatter, some emit `# Disposition:` headings, some `## Disposition:`, casing varies). Before the loop is implementable, structure what already exists:
+
+```yaml
+---
+case_id: <run id>
+disposition: benign | escalate_low_conf | escalate_resolved | malicious_resolved
+confidence: high | medium | low
+matched_archetype: <slug or null>
+---
+
+# Disposition: <human label>
+
+<one paragraph reason>
+```
+
+- `disposition` enum is closed and machine-checkable. `escalate_low_conf` = "ran out of data, escalate" (loop in scope). `escalate_resolved` / `malicious_resolved` = confident escalation (loop out of scope at MVP).
+- Defender SKILL.md REPORT phase updated to require this frontmatter; gather/judge prompts unchanged.
+- Existing /tmp runs are not back-filled — they're ephemeral. Loop's normalizer is best-effort for legacy reports (frontmatter → heading-regex → fail-loud and skip).
 
 ## Wiring
 
-1. **`run.sh` stays scoped to defender runs only.** No learning-side responsibilities.
-2. **New `defender/learning/loop.py` (or `loop.sh`, whichever is more convenient).** Takes a completed run dir (`alert.json` + `investigation.md` + `lead_sequence.yaml` + `report.md`) and:
-   - Gates on disposition: only runs when `report.md` disposition ∈ {benign, inconclusive/escalate-low-confidence}. Skip resolved-malicious cases at MVP.
-   - Sampling decision (run all vs subset) is made at loop-execution level, not per-run.
-   - Invokes the actor (gray-box adversarial, sees `alert.json` + lead_sequence with descriptions/results redacted per `defender/learning/actor.md`).
-   - If actor emits `SKIP`, stops.
-   - Invokes the judge (`defender/learning/judge.md`) on alert + investigation + actor story. Writes `findings.yaml` next to the run.
-   - Appends each finding to a checkpoint file: `defender/learning/_pending/findings.jsonl` (in-repo, survives /tmp eviction; the only durable artifact at MVP).
-   - Checks pending count. When ≥ N (start with N=5; tunable), invokes the author phase.
-3. **All run-side artifacts remain ephemeral in `/tmp/defender-runs/{run_id}/`.** Only `findings.jsonl` and the lessons file are repo-persistent. Replay of actor/judge requires the run dir still exist.
-4. **Sequential, one case at a time.** No concurrency at MVP.
+1. **`run.sh` stays scoped to defender runs only.** No learning-side responsibilities — the loop is invoked separately so judge replay doesn't require re-running the defender.
+2. **New `defender/learning/loop.py`** (Python — multi-stage state + git operations are awkward in bash). Per-run-dir API: `loop.py <run_dir>`. Steps:
+   - **Normalize disposition.** Parse `report.md` frontmatter; fall back to `^#+\s*Disposition:` regex; fail-loud if neither resolves. Skip case if disposition ∉ {`benign`, `escalate_low_conf`}.
+   - **Project lead sequence for actor.** Strip `lead_description` and `result_ref` from `lead_sequence.yaml`; emit `actor_input.yaml` with `position + queries[].id + queries[].params` only (matches `defender/learning/actor.md` §schema). The older `docs/actor-reviewer-learning-loop.md` text claiming `lead_description` is shown is stale — patch it in this PR.
+   - **Invoke actor.** Gray-box adversarial. Output → `actor_story.md`. If `SKIP:` line, persist it and stop (no judge, no findings).
+   - **Invoke judge.** Inputs: `alert.json`, `investigation.md`, `actor_story.md`. Output → `judge_findings.yaml` (judge's native output shape).
+   - **Persist** (see §Persistence below).
+   - **Append** each finding to `defender/learning/_pending/findings.jsonl` (see §Schema below).
+   - **Check pending count.** When ≥ `LEARNING_AUTHOR_THRESHOLD` (default 5; env override `LEARNING_AUTHOR_THRESHOLD` for tests / first exercise), invoke author phase.
+3. **Sequential, one case at a time.** No concurrency at MVP.
+
+## Persistence
+
+Per-run learning artifacts are persisted into the repo so author dedup and audit survive `/tmp` eviction:
+
+```
+defender/learning/runs/{run_id}/
+  actor_input.yaml        # projected lead sequence shown to actor
+  actor_story.md          # actor output (or SKIP line)
+  judge_findings.yaml     # judge output (full, native shape)
+  source_refs.yaml        # {alert_path, investigation_path, lead_sequence_path, normalized_disposition}
+```
+
+`alert.json`, `investigation.md`, `gather_raw/*` stay ephemeral in `/tmp` — they're large and the judge's `judge_findings.yaml` already quotes the load-bearing pieces. If a future audit needs raw evidence beyond what the judge quoted, the case is replayed by re-running the defender against the same fixture.
+
+## `_pending/findings.jsonl` schema
+
+One line per finding (judge may emit multiple per run):
+
+```json
+{
+  "schema_version": 1,
+  "finding_id": "<run_id>/<n>",
+  "run_id": "<run_id>",
+  "alert_rule_key": "wazuh-rule-5710",
+  "type": "lead-set | lead-quality | analyze-discipline | observability | detection-confirmed",
+  "subject": "<as emitted by judge — lead position / system path / inference rule>",
+  "finding": "<judge finding body, verbatim>",
+  "judge_outcome": "caught | survived | undecidable | incoherent",
+  "citations": ["<refs from judge §2 encounter analysis>"],
+  "source_run_dir": "defender/learning/runs/<run_id>/",
+  "batch_id": null,
+  "consumed_at": null,
+  "consumed_commit": null
+}
+```
+
+`batch_id`, `consumed_at`, `consumed_commit` are populated only on successful author commit (see §Author transaction). Author dedup keys on `(type, subject)` against current `lessons.md` and `defender/skills/{system}/SKILL.md` visibility sections.
 
 ## Author phase
 
-1. Triggered by loop when checkpoint count ≥ N.
-2. Reads `_pending/findings.jsonl` plus `git log -p` of recent edits to the lessons file (dedup context).
-3. Routes each finding by judge `type` (the 5-way split from `defender/learning/judge.md`):
-   - `observability` → edit `defender/skills/{system}/SKILL.md` visibility surface (already exists from PR #189). Names a system path; the system doc is the natural home.
-   - `lead-set` (gap — no lead exists) → append to **`defender/learning/lessons.md`**, per-rule section, "lead-selection rules" subsection.
-   - `lead-quality` (existing lead too weak — narrow query, wrong window, missing dimension) → append to `defender/learning/lessons.md`, per-rule section, "lead-execution rules" subsection. **Co-located with `lead-set` because they're authored against the same dispatch contract.**
-   - `analyze-discipline` (defender reasoning failure) → append to `defender/learning/lessons.md`, generic section if cross-signature; per-rule section if it only fires for that rule's archetype.
-   - `detection-confirmed` → drop at MVP (future: fixture-seed corpus).
-4. Author commits the edits and deletes consumed entries from `_pending/findings.jsonl`.
-5. No PR auto-open at MVP — author commits to the current branch and stops; human reviews via normal git workflow.
+Triggered by loop when pending count ≥ `LEARNING_AUTHOR_THRESHOLD`.
+
+### Routing
+
+| Judge type | Subject shape | Land where |
+|---|---|---|
+| `observability` | system path under `defender/skills/{system}/` | edit that system's SKILL.md visibility section |
+| `observability` | "no system covers this" + system is deployment-real | **fail-loud, queue for human review** — do not auto-create system docs |
+| `observability` | system is `not-deployed` / `deployment-unknown` | append to `lessons.md` generic "deployment gaps" section |
+| `lead-set` | lead position / "no lead exists" | `lessons.md`, per-rule, "lead-selection rules" subsection |
+| `lead-quality` | lead position | `lessons.md`, per-rule, "lead-execution rules" subsection |
+| `analyze-discipline` | inference rule | `lessons.md`, generic section if cross-signature; per-rule if narrow |
+| `detection-confirmed` | — | drop at MVP (future: fixture-seed corpus) |
+
+### Rule-key extraction
+
+Used to derive `alert_rule_key` and the per-rule lessons section. Fallback chain on `alert.json`:
+
+1. `rule.id` numeric + Wazuh-shaped alert → `wazuh-rule-{id}`
+2. `rule.id` present (any source) → `{source_slug}-rule-{id}` if source identifiable, else `rule-{id}`
+3. `signature` field → slugify
+4. top-level `id` → slugify
+5. otherwise → `unkeyed` (lessons land in generic section)
+
+### Author transaction
+
+1. Preflight: `git status --porcelain` must be empty for tracked files; fail-loud otherwise (refuses to commit unrelated dirty state).
+2. Read `_pending/findings.jsonl`, take the first batch (all pending findings up to a cap, e.g. 20).
+3. Read current `lessons.md` and any system SKILL.md files referenced in routing for dedup context.
+4. Read `git log -p` since the last learning commit (touching `defender/learning/lessons.md` or `defender/skills/*/SKILL.md`) for prior-edit context.
+5. Stage edits via `git add` of only the files written; no `git add -A`.
+6. `git commit` with batch_id in the message (`learning: batch <batch_id> — N findings`).
+7. **Only after commit returns 0**, mark consumed entries in `findings.jsonl` (rewrite the file with `batch_id`, `consumed_at`, `consumed_commit` filled). Crash before this step → idempotent retry on next loop tick (same findings re-batch, same edits — author prompt should be deterministic enough that the dedup re-converges; if not, human resolves).
+8. No PR auto-open. Author commits to current branch; human reviews via normal git workflow.
 
 ## Defender-side wiring of `lessons.md`
 
-- Flat markdown file at `defender/learning/lessons.md`. Sections keyed by `alert.rule.id` plus a top "generic" section for cross-signature analyze discipline.
-- `defender/SKILL.md` adds one bullet: at PLAN entry, `Skill` the lessons file (or Read it) — this is the only stage where lead-choosing lessons can change behavior. REPORT-time loading deferred.
-- Size budget: when the file exceeds ~30 sections or token cost becomes load-bearing, graduate to V0.5 (per-file `lessons/{slug}.md` + frontmatter + grep retrieval). Re-key empirically once we can read clusters off the existing corpus.
+- Flat markdown at `defender/learning/lessons.md`. Sections keyed by `alert_rule_key` (per the extraction chain above), plus a top "generic" section for cross-signature analyze discipline and a "deployment gaps" section.
+- `defender/SKILL.md` adds one bullet: at PLAN entry, `Skill` (or Read) the lessons file. Only PLAN-time loading at MVP — REPORT-time deferred.
+- Size budget: when the file exceeds ~30 sections or token cost becomes load-bearing, graduate to V0.5 (per-file `lessons/{slug}.md` + frontmatter + grep retrieval).
 
 ## Lesson taxonomy at V0
 
-Mirrors the judge's `type` field one-to-one (no re-bucketing — keeps the loop's emit/consume contract stable):
-
-| Judge type | Land where | Example from existing /tmp runs |
-|---|---|---|
-| `observability` | `defender/skills/{system}/SKILL.md` visibility section | bastion not Wazuh-enrolled (pilot-01/02); DNS srcip masked by dnsmasq (real-04) |
-| `lead-set` | `lessons.md`, per-rule, "lead-selection rules" | for bastion key-match, cross-host auth-history + outbound-pivot leads must run before any benign clearing |
-| `lead-quality` | `lessons.md`, per-rule, "lead-execution rules" | a 5710 monitoring-probe lead that pulls only the alert-time window misses the cadence pattern — needs ≥7d window with bucketing |
-| `analyze-discipline` | `lessons.md`, generic section (or per-rule if narrow) | `loginuid=-1` does not prove non-human; key-match + corp-internal is not sufficient to clear |
-| `detection-confirmed` | drop at MVP | (future: fixture-seed corpus) |
-
-`lead-set` and `lead-quality` are the most discriminating classes — they directly shape the next investigation's contract. They share the per-rule section in `lessons.md` because both are authored against the same dispatch contract (`lead_description` + bound `queries[]`).
+Mirrors the judge's `type` field one-to-one. See routing table above for surfaces.
 
 ## Graduation triggers (deferred work)
 
-- ≥ ~10 lessons in `lessons.md` and visible clustering by archetype/hypothesis-shape → split to per-file + frontmatter (V0.5).
-- ≥ ~30 lessons → introduce invlang-predicate top-k retrieval keyed off the current `investigation.md` state (V1).
-- Recurrent signature-specific lessons on a single rule → introduce `defender/skills/signatures/{rule-id}.md` and an ORIENT-time load-on-match.
-- Author dedup degradation → add a Haiku CI reviewer for dup/bloat checks on the lessons file.
-
-## Open questions
-
-- Does the loop run inline at the end of `run.sh` (one driver, simpler) or as a separate `loop.py` invocation against an existing run dir (better for replay)? Current preference: separate, so re-running judge with a new prompt doesn't require re-running defender.
-- Default checkpoint N (5? 10?) and where to set it — env var vs config constant.
-- Sampling at loop-execution level: process every benign/inconclusive run, or sample a fraction? Defer until volume forces it.
+- ≥ ~10 lessons + visible clustering by archetype/hypothesis-shape → V0.5 split.
+- ≥ ~30 lessons → invlang-predicate top-k retrieval (V1).
+- Recurrent signature-specific lessons on a single rule → `defender/skills/signatures/{rule_key}.md` + ORIENT-time load-on-match.
+- Author dedup degradation → Haiku CI reviewer for dup/bloat on `lessons.md`.
 
 ## Done when
 
-- `defender/learning/loop.py` (or `.sh`) runs end-to-end on at least 3 of the existing /tmp runs and produces `findings.yaml` per run + appends to `_pending/findings.jsonl`.
-- Author phase fires once on N=3 (lowered for first exercise) and produces a real edit to `defender/learning/lessons.md` and/or a `defender/skills/{system}/SKILL.md` visibility section.
+- `report.md` schema (frontmatter + closed disposition enum) documented in `defender/SKILL.md` REPORT section and in `defender/run_artifacts.md`.
+- `defender/learning/loop.py` runs end-to-end on at least 3 of the existing /tmp runs (those whose disposition normalizes), producing per-run `defender/learning/runs/{run_id}/` artifacts and appending to `_pending/findings.jsonl`.
+- Author phase fires once with `LEARNING_AUTHOR_THRESHOLD=3` and produces a real edit to `defender/learning/lessons.md` and/or a `defender/skills/{system}/SKILL.md` visibility section. Transaction contract (preflight + commit-before-mark) verified by a deliberate mid-author crash test.
 - `defender/SKILL.md` references `defender/learning/lessons.md` as a PLAN-time load.
+- `docs/actor-reviewer-learning-loop.md` updated so its lead-projection schema agrees with `defender/learning/actor.md` (drop `lead_description` from the gray-box reveal).
 - One end-to-end loop pass committed to a branch, ready for human review.
