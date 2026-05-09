@@ -1,8 +1,6 @@
 """Atomicity: agent crash / failure leaves queue intact, lock released."""
 from __future__ import annotations
 
-import json
-
 
 def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
