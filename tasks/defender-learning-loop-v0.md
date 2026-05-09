@@ -68,7 +68,7 @@ Loop's parse step is plain `yaml.safe_load`; outcome enum validation is `outcome
 
 ## Persistence
 
-Per-run learning artifacts persisted into the repo so author dedup and audit survive `/tmp` eviction:
+Per-run learning artifacts written to a local working directory, **git-ignored** (ephemeral; the V1 author derives what it needs from `_pending/findings.jsonl` citations + `source_run_dir` references):
 
 ```
 defender/learning/runs/{run_id}/

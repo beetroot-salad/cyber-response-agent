@@ -77,13 +77,9 @@ temp/
 !**/runs/.gitkeep
 defender/results/
 
-# Defender learning-loop persistent learning artifacts. The runs/ tree under
-# defender/learning/ is checked in (author dedup + audit must survive /tmp
-# eviction); the un-ignore re-includes it after the **/runs/* rule above.
-# _pending/ stays in the working tree but is never committed.
+# Defender learning-loop ephemeral state — never committed.
 defender/learning/_pending/
-!defender/learning/runs/
-!defender/learning/runs/**
+defender/learning/runs/
 
 # Generated kanban board (regenerate via `python3 tasks/build.py`)
 /board.html
