@@ -10,7 +10,10 @@ This enforces the gray-box contract specified in
 verbatim and never sees synthesized fields that would leak defender
 intent.
 """
-import sys, yaml, pathlib
+import pathlib
+import sys
+
+import yaml
 
 if len(sys.argv) < 2:
     sys.stderr.write("usage: project_lead_sequence.py <src.yaml> [<dst.yaml>]\n")
