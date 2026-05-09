@@ -19,8 +19,6 @@ disposition: benign | inconclusive | malicious
 confidence: high | medium | low
 ---
 
-# Disposition: <human label>
-
 <one paragraph reason>
 ```
 

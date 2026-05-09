@@ -1,0 +1,11 @@
+case_id: livetest-5710
+alert_ref: alert.json
+entries:
+  - position: 0
+    queries:
+      - id: wazuh.recent-rule-fires
+        params: {rule_id: 5710, window: 7d}
+  - position: 1
+    queries:
+      - id: wazuh.auth-events
+        params: {srcip: 172.22.0.10, window: 7d}

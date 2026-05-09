@@ -17,7 +17,7 @@ Deployed systems in this environment are documented under `defender/skills/{syst
 
 ## Output
 
-Emit a **single YAML document** — no markdown headers, no fenced code block, no preamble. The downstream loop parses the whole output with `yaml.safe_load`. Top-level keys, in order:
+Emit a **single YAML document** as your entire response. **Critical:** do **not** wrap it in a ```yaml … ``` (or any other) fenced code block, do not prefix it with a markdown header, and do not add any preamble or trailing commentary. Your first character is `o` (the start of `outcome:`). The downstream loop parses the whole output with `yaml.safe_load`; a leading fence is the most common failure mode. Top-level keys, in order:
 
 ```yaml
 outcome: |

@@ -128,8 +128,8 @@ narrow it down.
 
 ### REPORT
 
-Author `report.md` with this shape — YAML frontmatter, then a one-line
-disposition heading, then one paragraph citing the leads that resolved
+Author `report.md` with this shape — YAML frontmatter carrying the
+disposition signal, then one paragraph citing the leads that resolved
 it:
 
 ```
@@ -138,8 +138,6 @@ case_id: <run id>
 disposition: benign | inconclusive | malicious
 confidence: high | medium | low
 ---
-
-# Disposition: <human label>
 
 <one paragraph reason>
 ```

@@ -1,0 +1,28 @@
+case_id: livetest-5710
+alert_ref: alert.json
+entries:
+  - position: 0
+    lead_description:
+      goal: Characterize the full pattern of wazuh rule-5710 fires over the last 7 days to determine whether this is a narrow repeated probe from one source with a fixed username or a broad credential sweep.
+      what_to_characterize:
+        - total count
+        - distinct source IPs
+        - distinct usernames tried
+        - hosts targeted
+        - timing (burst vs regular cadence)
+    queries:
+      - id: wazuh.recent-rule-fires
+        params: {rule_id: 5710, window: 7d}
+    result_ref: gather_raw/0.json
+  - position: 1
+    lead_description:
+      goal: Retrieve all authentication events (success and failure) originating from source IP 172.22.0.10 against target-endpoint over the last 7 days.
+      what_to_characterize:
+        - username(s) attempted
+        - success/failure ratio
+        - timing cadence (regular vs bursty)
+        - whether any successful auth occurred from this source
+    queries:
+      - id: wazuh.auth-events
+        params: {srcip: 172.22.0.10, window: 7d}
+    result_ref: gather_raw/1.json

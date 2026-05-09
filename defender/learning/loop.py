@@ -213,6 +213,25 @@ def _outcome_keyword(outcome_value: Any) -> str:
     return first
 
 
+_FENCE_RE = None  # filled lazily; tiny stdlib re import kept local to use site
+
+
+def strip_yaml_fence(text: str) -> str:
+    """Strip a leading ```yaml ... ``` (or ``` ... ```) fence if present.
+
+    Models routinely wrap structured output in a code fence even when the
+    prompt forbids it; the loop accepts the fenced form rather than fail
+    on a deeply-ingrained LLM tic.
+    """
+    import re
+
+    s = text.strip()
+    m = re.match(r"\A```(?:yaml|yml)?\s*\n(.*?)\n```\s*\Z", s, re.DOTALL)
+    if m:
+        return m.group(1)
+    return text
+
+
 def validate_judge_doc(doc: Any) -> dict[str, Any]:
     if not isinstance(doc, dict):
         raise LoopError("judge YAML did not parse to a mapping")
@@ -422,7 +441,7 @@ def run_one(run_dir: Path) -> int:
         run_dir / "alert.json", run_dir / "investigation.md", actor_story_path
     )
     try:
-        judge_doc = yaml.safe_load(judge_yaml_text)
+        judge_doc = yaml.safe_load(strip_yaml_fence(judge_yaml_text))
         judge_doc = validate_judge_doc(judge_doc)
     except (yaml.YAMLError, LoopError) as e:
         # Still persist the raw output for debugging before failing.
