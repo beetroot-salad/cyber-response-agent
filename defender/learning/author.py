@@ -176,14 +176,48 @@ def existing_finding_ids() -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-_RESULT_RE = re.compile(r"^AUTHOR_RESULT:\s*(\{.*\})\s*$", re.MULTILINE)
+# Tolerate the agent wrapping the line in backticks / a code fence.
+_RESULT_RE = re.compile(r"AUTHOR_RESULT:\s*(\{.*?\})", re.DOTALL)
+
+
+def _resolve_verifier_python() -> Path:
+    """Locate a python interpreter that has pyyaml available.
+
+    Preference order: env override → ``soc-agent/.venv/bin/python3``
+    next to repo root → walking up the parents (so a git-worktree that
+    has no venv of its own resolves to the parent checkout's) →
+    ``sys.executable`` (the current process already imported yaml, so
+    it is a safe fallback).
+    """
+    env = os.environ.get("LEARNING_VERIFIER_PYTHON")
+    if env:
+        return Path(env).resolve()
+    candidates = [REPO_ROOT / "soc-agent" / ".venv" / "bin" / "python3"]
+    p = REPO_ROOT.resolve().parent
+    for _ in range(5):
+        cand = p / "soc-agent" / ".venv" / "bin" / "python3"
+        if cand.is_file():
+            candidates.append(cand)
+        if p.parent == p:
+            break
+        p = p.parent
+    for c in candidates:
+        if c.is_file():
+            # Do NOT resolve() — venv launchers are typically symlinks
+            # that point to the system interpreter, but pyyaml lives in
+            # the venv's site-packages reachable only via the venv path.
+            return c
+    return Path(sys.executable)
 
 
 def invoke_agent(findings: list[dict], batch_id: str) -> dict:
     """Spawn the curator agent. Returns parsed AUTHOR_RESULT dict."""
+    verifier_py = _resolve_verifier_python()
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: defender/lessons/\n"
+        f"verify_forward_command: {verifier_py} defender/learning/verify_forward.py "
+        f"<lesson_path> <run_id>\n"
         f"findings ({len(findings)}):\n"
         f"{json.dumps(findings, indent=2)}\n"
     )
@@ -194,8 +228,19 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         AUTHOR_MODEL,
         "--system-prompt-file",
         str(AUTHOR_PROMPT),
-        "--permission-mode",
-        "acceptEdits",
+        # Tight allowlist — Bash needs to run git add/commit and the
+        # forward-check wrapper. File edits inside defender/lessons/
+        # are allowed; everything else still prompts (and in --print
+        # mode therefore declines, which the post-flight catches).
+        "--allowed-tools",
+        (
+            "Read,Glob,Grep,"
+            "Edit(defender/lessons/**),Write(defender/lessons/**),"
+            "Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),"
+            "Bash(git rev-parse:*),Bash(git status:*),Bash(git diff:*),"
+            f"Bash({verifier_py} defender/learning/verify_forward.py:*),"
+            "Bash(rm defender/lessons/*.md)"
+        ),
     ]
     proc = subprocess.run(
         cmd,
@@ -249,7 +294,30 @@ def head_changed_only_lessons() -> bool:
     files = [f for f in proc.stdout.splitlines() if f.strip()]
     if not files:
         return False
-    return all(f.startswith("defender/lessons/") for f in files)
+    for f in files:
+        if not f.startswith("defender/lessons/"):
+            return False
+        # Lesson files only — agent improvisations like .py shims would
+        # land in scope but aren't lessons.
+        if not f.endswith(".md"):
+            return False
+    return True
+
+
+def _canonical_sha(sha: str) -> str:
+    """Resolve a (possibly abbreviated) sha to the full commit hash."""
+    proc = subprocess.run(
+        ["git", "rev-parse", "--verify", sha],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise AuthorError(
+            f"author claimed commit_sha={sha!r} but git rev-parse rejects it: "
+            f"{proc.stderr.strip()}"
+        )
+    return proc.stdout.strip()
 
 
 def lessons_dir_clean() -> bool:
@@ -281,9 +349,12 @@ def verify_agent_state(result: dict) -> None:
         )
     if commit_sha:
         head = git_head_sha()
-        if commit_sha != head:
+        # Agents routinely emit short SHAs ("97f8711"); compare against
+        # canonical form rather than failing on length mismatch.
+        canonical = _canonical_sha(commit_sha)
+        if canonical != head:
             raise AuthorError(
-                f"author claimed commit_sha={commit_sha} but HEAD={head}"
+                f"author claimed commit_sha={commit_sha} ({canonical}) but HEAD={head}"
             )
         if not head_changed_only_lessons():
             raise AuthorError(

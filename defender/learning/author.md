@@ -35,13 +35,19 @@ To decide: enumerate `defender/lessons/*.md` and read the `name + description` f
 
 ## Per-lesson forward-check gate
 
-After you write or rewrite a lesson file, run:
+After you write or rewrite a lesson file, run the exact command the
+orchestrator put in the user prompt under `verify_forward_command:`.
+It looks like:
 
 ```
-python3 defender/learning/verify_forward.py <lesson_path> <run_id>
+<absolute-python-path> defender/learning/verify_forward.py <lesson_path> <run_id>
 ```
 
-`<run_id>` is the source finding's `run_id`. The script prints `GOOD` or `BAD` on its last line. Single rep — do not retry.
+`<run_id>` is the source finding's `run_id`. The orchestrator hands you
+the resolved absolute python path so the gate works regardless of cwd
+or venv layout — do not substitute a relative path or a different
+interpreter; both will fail. The script prints `GOOD` or `BAD` on its
+last line. Single rep — do not retry.
 
 - **GOOD** → keep the file as-is.
 - **BAD** → revert that file:
