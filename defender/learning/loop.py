@@ -377,9 +377,9 @@ def append_findings(
 def invoke_stub_author() -> None:
     if not PENDING_FILE.is_file():
         return
-    lines = [l for l in PENDING_FILE.read_text().splitlines() if l.strip()]
-    ids = [json.loads(l)["finding_id"] for l in lines]
-    source_dirs = sorted({json.loads(l)["source_run_dir"] for l in lines})
+    lines = [line for line in PENDING_FILE.read_text().splitlines() if line.strip()]
+    ids = [json.loads(line)["finding_id"] for line in lines]
+    source_dirs = sorted({json.loads(line)["source_run_dir"] for line in lines})
     print(
         f"[learning-author-stub] batch: {len(ids)} findings, "
         f"source_dirs: {source_dirs}",
@@ -464,7 +464,7 @@ def run_one(run_dir: Path) -> int:
 
     threshold = int(os.environ.get("LEARNING_AUTHOR_THRESHOLD", "5"))
     pending_count = sum(
-        1 for l in PENDING_FILE.read_text().splitlines() if l.strip()
+        1 for line in PENDING_FILE.read_text().splitlines() if line.strip()
     )
     if pending_count >= threshold:
         _log(f"step=author pending={pending_count} threshold={threshold}")
