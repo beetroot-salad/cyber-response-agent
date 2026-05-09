@@ -384,6 +384,114 @@ which sweep volume) do not propagate up to the structural-gap layer.
 The alert's surface bounds the load-bearing claim; the lessons
 converge there even when the actor diverges everywhere else.
 
+## 2026-05-09 — judge schema rev (v3)
+
+The encounter-first judge (v2) produced two structural frictions when
+re-run on a live e2e (one Falco rule-100001 alert + one rule-5710
+monitoring-probe alert):
+
+- The four-way verdict (`actor-wins | defender-wins | both-lose |
+  observability-gap`) hid the most useful output on the 100001 case.
+  The defender refuted the *story-level frame* (a 7-day identical
+  baseline killed the "fresh first-exec" narrative) but the
+  *mechanism-level claim* (Docker socket exec leaves no invoker
+  telemetry) survived independently. v2 returned `defender-wins` and
+  buried the surviving mechanism as a secondary lesson under a
+  side-channel rule. The headline fact — that a tighter actor variant
+  mirroring the established command and cadence would slip past the
+  same investigation — read as a footnote.
+- The §3 lessons block carried a typed `claim:` + `evidence:` pair
+  per entry plus its own confidence note plus the §4 verdict-level
+  confidence paragraph. Three places to look for whether a finding
+  was load-bearing; in practice the judge mostly used §4 and left the
+  per-finding fields redundant. There was also no explicit cap, so
+  borderline lessons that the judge itself flagged as moderate-
+  confidence in §4 still landed in §3.
+
+### v3 changes
+
+The output is now five sections:
+
+1. **Outcome** — replaces verdict. Vocabulary is descriptive of what
+   happened to the *story*, not symmetric "who wins": `caught`,
+   `survived`, `incoherent`, `undecidable`. The headline can carry
+   nuance directly (e.g. "story-level frame caught, mechanism-level
+   claim survived") because the field is single-valued by design but
+   the rationale paragraph is allowed to state that the picture is
+   mixed and which aspects fell on which side.
+2. **Encounter analysis** — unchanged in role; aspect-by-aspect walk
+   that grounds the findings.
+3. **Defender findings (max 3, load-bearing only)** — asymmetric with
+   §4. Single NL `finding:` field with quotes embedded inline (claim
+   + evidence collapsed). Cap forces prioritization. Outcome→finding
+   rules permit residual gaps under `caught` — that license proved
+   load-bearing on the e2e re-run, where the rule-5710 case produced
+   a `caught` outcome with a still-meaningful lead-set finding about
+   a tighter actor variant.
+4. **Actor observations (max 2, optional)** — strategy-level notes
+   on actor mispredictions, framing choices that crumbled, or
+   discarded classes. Asymmetric on purpose: defender findings route
+   to the corpus-edit author stage; actor observations are
+   observations-only until the actor-learning loop materializes. The
+   field name avoids implying a downstream consumer that doesn't
+   exist yet.
+5. **Confidence** — one paragraph that is allowed to call out
+   divergent confidence across findings inline ("high on outcome,
+   moderate on the lead-quality finding because…"). Per-finding
+   confidence fields are explicitly out — the judge's tendency to
+   spread confidence into one paragraph despite the per-finding
+   field being available was the empirical signal.
+
+### Motivating result
+
+The same 100001 actor story produced two judges:
+
+| schema | outcome | findings | net |
+|---|---|---|---|
+| v2  | `defender-wins` | 1 actor (baseline) + 1 defender (residual) | residual gap buried |
+| v3  | `survived` | lead-set + observability + detection-confirmed (3) | residual gap is the headline |
+
+On 5710, the same actor story produced:
+
+| schema | outcome | findings |
+|---|---|---|
+| v2  | `actor-wins` | 3 defender (lead-set ×2 + analyze-discipline) |
+| v3  | `caught` | detection-confirmed + lead-set + lead-quality (3) |
+
+The 5710 verdict swing was independent of the schema change — v3's
+encounter analysis engaged with a `l-002` observation ("zabbix +
+healthcheck within seconds of each other") that v2 had read as
+ambiguous and v3 read as structurally inconsistent with the actor's
+single-username story. Both reads are defensible; the schema does not
+force one. What the schema *did* force was that v3's `caught` outcome
+still surfaced a residual lead-set gap (no source-host lead — load-
+bearing against a tighter single-username variant), which v2's
+`actor-wins` would have made the headline but v2's `defender-wins`
+would have buried.
+
+### Locked decisions in v3
+
+- Asymmetric field names (`defender_findings` vs `actor_observations`)
+  reflect the asymmetric downstream pipeline; they are not a
+  symmetry violation to be resolved later.
+- Cap is 2–3 findings, with explicit "skip lesser findings even if
+  you spot them" instruction. Empirically the judge stayed at 3 on
+  both e2e cases; whether the cap is too generous becomes a
+  measurement question once we have more cases.
+- Single bottom-level confidence paragraph; per-finding confidence
+  fields are not added back without empirical evidence that they
+  carry distinct signal.
+- Outcome vocabulary is `caught | survived | incoherent | undecidable`.
+  `partially_caught` was considered and rejected — the rationale
+  paragraph already carries the nuance, and adding a fifth value
+  would push the judge to commit to a label that the prose was
+  already handling more flexibly.
+
+Lock target unchanged from v2: the prompt iterates until cross-case
+variance on a small N is contained and lessons survive ablation;
+v3 is the current incumbent against which any future change is
+measured.
+
 ## Future work pointers
 - **Visibility-at-the-judge A/B.** Re-run the A/B variable at the
   judge stage: does the judge produce better-grounded discriminators
