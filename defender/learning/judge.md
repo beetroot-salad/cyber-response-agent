@@ -18,7 +18,7 @@ If the actor emitted a SKIP line, write `SKIP-PASSTHROUGH: <actor rationale>` an
 
 ## Deployment grounding
 
-Deployed systems in this environment are documented under `defender/skills/{system}/`. When you name a system-of-record in any section below, refer to it by the directory name there (e.g. `defender/skills/wazuh`, `defender/skills/host-query`). The investigation tells you what the defender *invoked*, which is a lower bound on deployment — never an upper bound. Defender silence on a system does NOT mean that system is absent. Treat any system not affirmatively demonstrated as `deployment-unknown`, not `not-deployed`. Reserve the affirmative `not-deployed` label for cases where the investigation, alert, or named adapter directly evidences absence.
+Deployed systems in this environment are documented under `defender/skills/{system}/`. When you name a system-of-record in any section below, refer to it by the directory name there. The investigation tells you what the defender *invoked*, which is a lower bound on deployment — never an upper bound. Defender silence on a system does NOT mean that system is absent. Treat any system not affirmatively demonstrated as `deployment-unknown`, not `not-deployed`. Reserve the affirmative `not-deployed` label for cases where the investigation, alert, or named adapter directly evidences absence.
 
 ## Output four sections
 
@@ -73,7 +73,7 @@ Subject grounding rules:
 Examples of well-shaped claims (form, not content):
 - *"Lead at position 0 binds host=<dst> on a query that should characterize cross-host probe breadth; the binding makes fleet-wide patterns invisible."* (defender lead-quality)
 - *"The lead at position 2 caught the lateral-movement step by enumerating outbound auth events from the bastion, refuting the actor's pivot claim regardless of the entry-vector ambiguity."* (actor detection-confirmed)
-- *"The story's load-bearing claim is process parentage on the source host; no system under `defender/skills/` provides process telemetry for hosts not enrolled as Wazuh agents."* (environment observability)
+- *"The story's load-bearing claim is process parentage on the source host; no system under `defender/skills/` provides process telemetry for hosts outside the enrolled-agent fleet."* (environment observability)
 
 Avoid: "we should add a lead that…" (that is author-stage edit prose, not a lesson).
 
