@@ -31,9 +31,11 @@ write into freely.
 - **`lead_sequence.yaml`** — written end-of-run per
   `defender/lead_sequence_schema.md`. The actor-reviewer learning loop
   consumes this; if it doesn't parse cleanly, the run is unusable.
-- **`report.md`** — disposition + one-paragraph reason. The
-  investigation log is the debug surface; the report is just the
-  headline.
+- **`report.md`** — YAML frontmatter (`case_id`, `disposition`,
+  `confidence`) followed by a one-paragraph reason. Schema lives in
+  `defender/SKILL.md` §REPORT. The learning loop's normalizer parses
+  the frontmatter — runs that omit it are unusable. The investigation
+  log is the debug surface; the report is just the headline.
 - **`tool_trace.jsonl`** — captured by `run.sh` at the harness level
   (one line per tool call: subagent spawns, Read/Write/Edit, Bash,
   etc.). Used for cost accounting and replay debugging.

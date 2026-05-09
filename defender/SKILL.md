@@ -128,10 +128,31 @@ narrow it down.
 
 ### REPORT
 
-Author `report.md`: one-line disposition + one paragraph reason citing
-the leads that resolved it. Author the corresponding `:T` block in
-`investigation.md`. Then run the projection script to emit
-`lead_sequence.yaml` from your `investigation.md` + `gather_raw/`:
+Author `report.md` with this shape — YAML frontmatter carrying the
+disposition signal, then one paragraph citing the leads that resolved
+it:
+
+```
+---
+case_id: <run id>
+disposition: benign | inconclusive | malicious
+confidence: high | medium | low
+---
+
+<one paragraph reason>
+```
+
+`disposition` is a closed enum:
+
+- `benign` — confident clear.
+- `inconclusive` — ran out of data, escalate. The learning loop runs
+  the adversarial actor on these.
+- `malicious` — confident escalate, story confirmed. The learning loop
+  skips these at MVP.
+
+Author the corresponding `:T` block in `investigation.md`. Then run
+the projection script to emit `lead_sequence.yaml` from your
+`investigation.md` + `gather_raw/`:
 
 ```bash
 python3 defender/scripts/project_lead_sequence.py {run_dir}

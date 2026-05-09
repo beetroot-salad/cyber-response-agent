@@ -135,13 +135,17 @@ catalog (`defender/skills/gather/queries/{system}/`), so the catalog
 grows organically with usage; early near-duplicates are accepted and
 normalized downstream when patterns stabilize.
 
-For gray-box adversarial runs, the actor first sees `alert.json` plus the
-answer-redacted lead contracts: `position`, `lead_description`, and
-`queries` (id + params — the actor sees *what queries ran*, not what they
-returned). The `result_ref` material is revealed only after the story is
-written. If the dispatch contract cannot be projected cleanly, the
-learning run is rejected rather than asking the actor to infer the lead
-set from prose.
+For gray-box adversarial runs, the actor sees `alert.json` plus an
+**answer-and-intent-redacted** projection of the lead sequence: only
+`position` and `queries[].id` + `queries[].params` per entry — no
+`lead_description`, no `result_ref`. The actor learns *what raw queries
+ran* (ambient deployment context) but nothing about defender intent or
+what was found. Reasoning about lead coverage / gaps is the judge's job,
+not the actor's; this projection enforces the split. The orchestrator
+(`defender/learning/loop.py`) emits this as `actor_input.yaml` and
+discards `lead_description` / `result_ref` at projection time. If the
+dispatch contract cannot be projected cleanly, the learning run is
+rejected rather than asking the actor to infer the lead set from prose.
 
 > **Production note.** The legacy `knowledge/common-investigation/leads/`
 > slug catalog (used by the production `soc-agent/` investigate loop) is

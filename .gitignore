@@ -77,6 +77,10 @@ temp/
 !**/runs/.gitkeep
 defender/results/
 
+# Defender learning-loop ephemeral state — never committed.
+defender/learning/_pending/
+defender/learning/runs/
+
 # Generated kanban board (regenerate via `python3 tasks/build.py`)
 /board.html
 
