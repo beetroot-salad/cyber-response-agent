@@ -10,12 +10,16 @@ Steps:
      ``defender/scripts/project_lead_sequence.py --actor-out``.
   3. Invoke the actor (gray-box adversarial). SKIP short-circuits to
      persist + exit with no findings.
-  4. Invoke the judge against alert + investigation + actor story.
-     Parse YAML, validate shape.
-  5. Persist per-run artifacts under ``defender/learning/runs/<run_id>/``.
-  6. Filter ``detection-confirmed`` (audit-only) and append the rest to
+  4. Invoke the telemetry oracle against alert + actor story + full
+     lead_sequence + per-lead exemplars. Output is per-lead synthesized
+     events: "if the attack had happened, this is what each lead would
+     have surfaced." Parse YAML, validate shape.
+  5. Invoke the judge against alert + investigation + actor story +
+     projected_telemetry. Parse YAML, validate shape.
+  6. Persist per-run artifacts under ``defender/learning/runs/<run_id>/``.
+  7. Filter ``detection-confirmed`` (audit-only) and append the rest to
      ``defender/learning/_pending/findings.jsonl``.
-  7. If pending count ≥ ``LEARNING_AUTHOR_THRESHOLD`` (default 5), call
+  8. If pending count ≥ ``LEARNING_AUTHOR_THRESHOLD`` (default 5), call
      the stub author.
 
 The stub author logs the batch to stderr and exits without touching the
@@ -42,6 +46,7 @@ PENDING_DIR = LEARNING_DIR / "_pending"
 PENDING_FILE = PENDING_DIR / "findings.jsonl"
 
 ACTOR_PROMPT = LEARNING_DIR / "actor.md"
+ORACLE_PROMPT = LEARNING_DIR / "oracle.md"
 JUDGE_PROMPT = LEARNING_DIR / "judge.md"
 PROJECT_SCRIPT = REPO_ROOT / "defender" / "scripts" / "project_lead_sequence.py"
 
@@ -174,8 +179,56 @@ def invoke_actor(alert_path: Path, actor_input_path: Path) -> str:
     return _run_claude(ACTOR_PROMPT, user)
 
 
+def assemble_exemplar_bundle(source_run_dir: Path, lead_sequence_text: str) -> str:
+    """Concatenate per-lead `gather_raw/{position}.json` contents.
+
+    The full file (Wazuh aggregation envelope + raw sample events, or
+    whatever the system's CLI produced) is the schema reference. The
+    oracle reads this and synthesizes events that match the same shape.
+    """
+    doc = yaml.safe_load(lead_sequence_text)
+    if not isinstance(doc, dict) or not isinstance(doc.get("entries"), list):
+        raise LoopError("lead_sequence.yaml has no `entries` list")
+    blocks: list[str] = []
+    for entry in doc["entries"]:
+        position = entry.get("position")
+        queries = entry.get("queries") or []
+        qid = (queries[0] or {}).get("id", "?") if queries else "?"
+        result_ref = entry.get("result_ref") or f"gather_raw/{position}.json"
+        path = source_run_dir / result_ref
+        header = f"=== position {position} ({qid}) — {result_ref} ==="
+        if path.is_file():
+            body = path.read_text()
+        else:
+            body = "(no exemplars on disk for this position)"
+        blocks.append(f"{header}\n{body}")
+    return "\n\n".join(blocks)
+
+
+def invoke_oracle(
+    alert_path: Path,
+    actor_story_path: Path,
+    lead_sequence_path: Path,
+    exemplar_bundle: str,
+) -> str:
+    user = (
+        "=== alert.json ===\n"
+        f"{alert_path.read_text()}\n"
+        "=== actor_story.md ===\n"
+        f"{actor_story_path.read_text()}\n"
+        "=== lead_sequence.yaml ===\n"
+        f"{lead_sequence_path.read_text()}\n"
+        "=== exemplars (defender's actual gather_raw/{position}.json — schema reference) ===\n"
+        f"{exemplar_bundle}\n"
+    )
+    return _run_claude(ORACLE_PROMPT, user)
+
+
 def invoke_judge(
-    alert_path: Path, investigation_path: Path, actor_story_path: Path
+    alert_path: Path,
+    investigation_path: Path,
+    actor_story_path: Path,
+    projected_telemetry_path: Path,
 ) -> str:
     user = (
         "=== alert.json ===\n"
@@ -184,6 +237,8 @@ def invoke_judge(
         f"{investigation_path.read_text()}\n"
         "=== actor_story.md ===\n"
         f"{actor_story_path.read_text()}\n"
+        "=== projected_telemetry.yaml ===\n"
+        f"{projected_telemetry_path.read_text()}\n"
     )
     return _run_claude(JUDGE_PROMPT, user)
 
@@ -232,6 +287,50 @@ def strip_yaml_fence(text: str) -> str:
     return text
 
 
+_ORACLE_PROJECTION_KEYS = {"position", "system", "template", "events"}
+
+
+def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, Any]:
+    if not isinstance(doc, dict):
+        raise LoopError("oracle YAML did not parse to a mapping")
+    if set(doc.keys()) != {"projections"}:
+        raise LoopError(
+            f"oracle YAML must have exactly one top-level key `projections`; "
+            f"got {sorted(doc.keys())}"
+        )
+    projections = doc["projections"]
+    if not isinstance(projections, list):
+        raise LoopError("oracle `projections` is not a list")
+    if len(projections) != len(expected_positions):
+        raise LoopError(
+            f"oracle projections count {len(projections)} != "
+            f"lead_sequence positions count {len(expected_positions)}"
+        )
+    for i, p in enumerate(projections):
+        if not isinstance(p, dict):
+            raise LoopError(f"projection[{i}] is not a mapping")
+        missing = _ORACLE_PROJECTION_KEYS - set(p.keys())
+        if missing:
+            raise LoopError(f"projection[{i}] missing keys: {sorted(missing)}")
+        extra = set(p.keys()) - _ORACLE_PROJECTION_KEYS
+        if extra:
+            raise LoopError(f"projection[{i}] has unexpected keys: {sorted(extra)}")
+        if p["position"] != expected_positions[i]:
+            raise LoopError(
+                f"projection[{i}].position={p['position']!r} != "
+                f"expected {expected_positions[i]!r}"
+            )
+        events = p["events"]
+        if not isinstance(events, list):
+            raise LoopError(f"projection[{i}].events is not a list")
+        for j, ev in enumerate(events):
+            if not isinstance(ev, dict):
+                raise LoopError(
+                    f"projection[{i}].events[{j}] is not a mapping (got {type(ev).__name__})"
+                )
+    return doc
+
+
 def validate_judge_doc(doc: Any) -> dict[str, Any]:
     if not isinstance(doc, dict):
         raise LoopError("judge YAML did not parse to a mapping")
@@ -277,6 +376,7 @@ def persist_run(
     judge_yaml_text: str | None,
     normalized_disposition: str,
     alert_rule_key: str,
+    oracle_yaml_text: str | None = None,
 ) -> None:
     learning_run_dir.mkdir(parents=True, exist_ok=True)
     for name in PERSIST_COPY_FILES:
@@ -285,6 +385,8 @@ def persist_run(
             raise LoopError(f"missing source artifact for persist: {src}")
         shutil.copy2(src, learning_run_dir / name)
     (learning_run_dir / "actor_story.md").write_text(actor_story)
+    if oracle_yaml_text is not None:
+        (learning_run_dir / "projected_telemetry.yaml").write_text(oracle_yaml_text)
     if judge_yaml_text is not None:
         (learning_run_dir / "judge_findings.yaml").write_text(judge_yaml_text)
     source_refs = {
@@ -436,9 +538,35 @@ def run_one(run_dir: Path) -> int:
         )
         return 0
 
+    _log("step=oracle")
+    lead_sequence_path = run_dir / "lead_sequence.yaml"
+    lead_sequence_text = lead_sequence_path.read_text()
+    exemplar_bundle = assemble_exemplar_bundle(run_dir, lead_sequence_text)
+    oracle_yaml_text = invoke_oracle(
+        run_dir / "alert.json",
+        actor_story_path,
+        lead_sequence_path,
+        exemplar_bundle,
+    )
+    expected_positions = [
+        e.get("position")
+        for e in (yaml.safe_load(lead_sequence_text) or {}).get("entries", [])
+    ]
+    try:
+        oracle_doc = yaml.safe_load(strip_yaml_fence(oracle_yaml_text))
+        validate_oracle_doc(oracle_doc, expected_positions)
+    except (yaml.YAMLError, LoopError) as e:
+        (learning_run_dir / "projected_telemetry.yaml").write_text(oracle_yaml_text)
+        raise LoopError(f"oracle YAML invalid: {e}") from e
+    projected_telemetry_path = learning_run_dir / "projected_telemetry.yaml"
+    projected_telemetry_path.write_text(oracle_yaml_text)
+
     _log("step=judge")
     judge_yaml_text = invoke_judge(
-        run_dir / "alert.json", run_dir / "investigation.md", actor_story_path
+        run_dir / "alert.json",
+        run_dir / "investigation.md",
+        actor_story_path,
+        projected_telemetry_path,
     )
     try:
         judge_doc = yaml.safe_load(strip_yaml_fence(judge_yaml_text))
@@ -456,6 +584,7 @@ def run_one(run_dir: Path) -> int:
         judge_yaml_text,
         disposition,
         alert_rule_key,
+        oracle_yaml_text=oracle_yaml_text,
     )
 
     _log("step=append")
