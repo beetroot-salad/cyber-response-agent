@@ -263,8 +263,22 @@ def lessons_dir_clean() -> bool:
     return not proc.stdout.strip()
 
 
+def _result_list(result: dict, key: str) -> list[Any]:
+    value = result.get(key, [])
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise AuthorError(f"AUTHOR_RESULT field {key!r} must be a list")
+    return value
+
+
 def verify_agent_state(result: dict) -> None:
     commit_sha = result.get("commit_sha")
+    committed = _result_list(result, "committed")
+    if committed and not commit_sha:
+        raise AuthorError(
+            "author reported committed findings without a commit_sha; refusing to rotate queue"
+        )
     if commit_sha:
         head = git_head_sha()
         if commit_sha != head:
@@ -274,6 +288,10 @@ def verify_agent_state(result: dict) -> None:
         if not head_changed_only_lessons():
             raise AuthorError(
                 "HEAD commit touches files outside defender/lessons/; refusing to rotate queue"
+            )
+        if not lessons_dir_clean():
+            raise AuthorError(
+                "author committed but defender/lessons/ still has uncommitted edits"
             )
     else:
         if not lessons_dir_clean():
@@ -346,6 +364,57 @@ def _by_id(findings: list[dict]) -> dict[str, dict]:
     return {f["finding_id"]: f for f in findings}
 
 
+def _result_finding_id(bucket: str, entry: Any) -> str:
+    if bucket == "committed":
+        if not isinstance(entry, str) or not entry:
+            raise AuthorError(
+                "AUTHOR_RESULT committed entries must be non-empty finding_id strings"
+            )
+        return entry
+
+    if not isinstance(entry, dict):
+        raise AuthorError(f"AUTHOR_RESULT {bucket} entries must be objects")
+    fid = entry.get("finding_id")
+    if not isinstance(fid, str) or not fid:
+        raise AuthorError(
+            f"AUTHOR_RESULT {bucket} entries must include a non-empty finding_id"
+        )
+    return fid
+
+
+def validate_agent_result_partition(result: dict, to_author: list[dict]) -> None:
+    """Require each authored finding to appear in exactly one result bucket."""
+    expected = {f["finding_id"] for f in to_author}
+    occurrences: dict[str, list[str]] = {}
+
+    for entry in _result_list(result, "committed"):
+        fid = _result_finding_id("committed", entry)
+        occurrences.setdefault(fid, []).append("committed")
+    for bucket in ("held_forward_bad", "consumed_skip"):
+        for entry in _result_list(result, bucket):
+            fid = _result_finding_id(bucket, entry)
+            occurrences.setdefault(fid, []).append(bucket)
+
+    unknown = sorted(fid for fid in occurrences if fid not in expected)
+    if unknown:
+        raise AuthorError(f"author result contains unknown findings: {unknown}")
+
+    repeated = {
+        fid: buckets
+        for fid, buckets in sorted(occurrences.items())
+        if len(buckets) != 1
+    }
+    if repeated:
+        raise AuthorError(
+            "author result classified findings more than once: "
+            + json.dumps(repeated, sort_keys=True)
+        )
+
+    unseen = sorted(expected - occurrences.keys())
+    if unseen:
+        raise AuthorError(f"author result missing findings: {unseen}")
+
+
 def run_batch() -> int:
     lock_fh = acquire_lock()
     if lock_fh is None:
@@ -412,11 +481,12 @@ def run_batch() -> int:
                 return 2
             try:
                 verify_agent_state(result)
+                validate_agent_result_partition(result, to_author)
             except AuthorError as e:
                 _log(f"FATAL: {e}")
                 return 2
             commit_sha = result.get("commit_sha")
-            for fid in result.get("committed", []) or []:
+            for fid in _result_list(result, "committed"):
                 src = all_findings.get(fid)
                 if src is None:
                     raise AuthorError(
@@ -425,7 +495,7 @@ def run_batch() -> int:
                 rec = dict(src)
                 rec["consumed_category"] = "consumed_committed"
                 committed.append(rec)
-            for entry in result.get("held_forward_bad", []) or []:
+            for entry in _result_list(result, "held_forward_bad"):
                 fid = entry.get("finding_id")
                 src = all_findings.get(fid)
                 if src is None:
@@ -437,7 +507,7 @@ def run_batch() -> int:
                     f"forward_bad: {entry.get('reason', '')}"
                 )
                 held_forward_bad.append(rec)
-            for entry in result.get("consumed_skip", []) or []:
+            for entry in _result_list(result, "consumed_skip"):
                 fid = entry.get("finding_id")
                 src = all_findings.get(fid)
                 if src is None:
@@ -448,18 +518,6 @@ def run_batch() -> int:
                 rec["consumed_category"] = "consumed_skip"
                 rec["skip_reason"] = entry.get("reason", "")
                 consumed_skip.append(rec)
-
-            # Cross-check: every to_author entry must appear exactly once.
-            seen = (
-                {c["finding_id"] for c in committed}
-                | {h["finding_id"] for h in held_forward_bad}
-                | {c["finding_id"] for c in consumed_skip}
-            )
-            unseen = {f["finding_id"] for f in to_author} - seen
-            if unseen:
-                raise AuthorError(
-                    f"author result missing findings: {sorted(unseen)}"
-                )
 
         try:
             rotate_queue(

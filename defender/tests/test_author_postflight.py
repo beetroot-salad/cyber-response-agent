@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 
 import pytest
 
@@ -48,6 +47,25 @@ def test_committed_finding_consumed_with_commit_sha(tmp_repo, helpers, monkeypat
     assert len(consumed) == 1
     assert consumed[0]["consumed_category"] == "consumed_committed"
     assert consumed[0]["consumed_commit"] == tmp_repo.run_git("rev-parse", "HEAD").stdout.strip()
+
+
+def test_committed_finding_without_commit_sha_aborts(tmp_repo, helpers, monkeypatch):
+    a = tmp_repo.author
+    helpers.write_source_refs(a.RUNS_DIR, "run-1b", "benign")
+    helpers.write_finding(a.PENDING_FILE, finding_id="run-1b/0", run_id="run-1b")
+    pre_pending = a.PENDING_FILE.read_text()
+
+    def fake_invoke(findings, batch_id):
+        return {
+            "committed": ["run-1b/0"],
+            "held_forward_bad": [],
+            "consumed_skip": [],
+        }
+
+    monkeypatch.setattr(a, "invoke_agent", fake_invoke)
+    assert a.run_batch() == 2
+    assert a.PENDING_FILE.read_text() == pre_pending
+    assert not a.CONSUMED_FILE.exists()
 
 
 def test_held_forward_bad_stays_in_queue(tmp_repo, helpers, monkeypatch):
@@ -145,6 +163,41 @@ def test_agent_skipped_commit_but_left_dirty_aborts(tmp_repo, helpers, monkeypat
     assert a.PENDING_FILE.read_text() == pre_pending
 
 
+def test_agent_commit_but_left_dirty_lessons_aborts(tmp_repo, helpers, monkeypatch):
+    a = tmp_repo.author
+    helpers.write_source_refs(a.RUNS_DIR, "run-5b", "benign")
+    helpers.write_finding(a.PENDING_FILE, finding_id="run-5b/0", run_id="run-5b")
+    pre_pending = a.PENDING_FILE.read_text()
+
+    def fake_invoke(findings, batch_id):
+        body = (
+            "---\n"
+            "name: lesson-clean-part\n"
+            "description: d\n"
+            "source_finding_ids:\n"
+            "  - run-5b/0\n"
+            "created_at: 2026-05-09T00:00:00+00:00\n"
+            "---\n\nb\n"
+        )
+        (a.LESSONS_DIR / "lesson-clean-part.md").write_text(body)
+        tmp_repo.run_git("add", a.LESSONS_DIR / "lesson-clean-part.md")
+        tmp_repo.run_git("commit", "-q", "-m", "lesson clean part")
+        sha = tmp_repo.run_git("rev-parse", "HEAD").stdout.strip()
+        (a.LESSONS_DIR / "orphan-after-commit.md").write_text("uncommitted\n")
+        return {
+            "committed": ["run-5b/0"],
+            "held_forward_bad": [],
+            "consumed_skip": [],
+            "commit_sha": sha,
+        }
+
+    monkeypatch.setattr(a, "invoke_agent", fake_invoke)
+    rc = a.run_batch()
+    assert rc == 2
+    assert a.PENDING_FILE.read_text() == pre_pending
+    assert not a.CONSUMED_FILE.exists()
+
+
 def test_agent_result_missing_finding_aborts(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
     helpers.write_source_refs(a.RUNS_DIR, "run-6", "benign")
@@ -162,9 +215,47 @@ def test_agent_result_missing_finding_aborts(tmp_repo, helpers, monkeypatch):
         }
 
     monkeypatch.setattr(a, "invoke_agent", fake_invoke)
-    with pytest.raises(a.AuthorError, match="missing findings"):
-        a.run_batch()
+    rc = a.run_batch()
+    assert rc == 2
     assert a.PENDING_FILE.read_text() == pre_pending
+
+
+@pytest.mark.parametrize(
+    "agent_result",
+    [
+        {
+            "committed": [],
+            "held_forward_bad": [{"finding_id": "run-6b/0", "reason": "x"}],
+            "consumed_skip": [{"finding_id": "run-6b/0", "reason": "x"}],
+            "commit_sha": None,
+        },
+        {
+            "committed": [],
+            "held_forward_bad": [],
+            "consumed_skip": [
+                {"finding_id": "run-6b/0", "reason": "x"},
+                {"finding_id": "run-6b/0", "reason": "x"},
+            ],
+            "commit_sha": None,
+        },
+    ],
+)
+def test_agent_result_duplicate_classification_aborts(
+    tmp_repo, helpers, monkeypatch, agent_result
+):
+    a = tmp_repo.author
+    helpers.write_source_refs(a.RUNS_DIR, "run-6b", "benign")
+    helpers.write_finding(a.PENDING_FILE, finding_id="run-6b/0", run_id="run-6b")
+    pre_pending = a.PENDING_FILE.read_text()
+
+    def fake_invoke(findings, batch_id):
+        return agent_result
+
+    monkeypatch.setattr(a, "invoke_agent", fake_invoke)
+    rc = a.run_batch()
+    assert rc == 2
+    assert a.PENDING_FILE.read_text() == pre_pending
+    assert not a.CONSUMED_FILE.exists()
 
 
 def test_head_touches_non_lessons_aborts(tmp_repo, helpers, monkeypatch):
