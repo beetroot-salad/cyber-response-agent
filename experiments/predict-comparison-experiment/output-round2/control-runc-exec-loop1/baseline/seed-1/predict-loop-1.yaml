@@ -1,0 +1,58 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?operator-initiated-kubectl-exec"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: kubectl_exec_session, classification: operator-kubectl-exec-session}
+      story: |
+        An authorized operator (SRE, release engineer, or deploy pipeline service account)
+        initiated a `kubectl exec` call against `payments-api-7c9d8f5b6-q2vr4` at the alert
+        timestamp, either as part of a planned deploy runbook step or a break-glass incident
+        response ticket. The Kubernetes container runtime routes `kubectl exec` through runc
+        on the worker node, making runc the direct parent of the spawned shell; the interactive
+        TTY (34816) and bare `bash` cmdline are consistent with a direct operator shell session.
+        The kube-audit log records every pod-exec API call with the initiating user identity,
+        and the change-management or deploy-runs system should carry a corresponding approved
+        action for that identity covering the alert window.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "kube-audit records a pod-exec event targeting `payments-api-7c9d8f5b6-q2vr4` whose timestamp matches the alert timestamp"
+          from_story_link: "An authorized operator initiated a kubectl exec call against the pod at the alert timestamp"
+        - id: p2
+          subject: proposed_edge
+          claim: "the initiating identity in the matching kube-audit record is associated with an approved change-management ticket or deploy-run whose window covers the alert timestamp"
+          from_story_link: "either as part of a planned deploy runbook step or a break-glass incident response ticket"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no pod-exec event in kube-audit matches the alert timestamp against this pod"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching pod-exec event exists in kube-audit but the initiating identity has no approved change-management ticket or deploy-run covering the alert window"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: kube-audit
+          predicate: "a pod-exec API call targeting this pod at the alert timestamp, initiated by an identity with an approved change-management ticket or deploy-run covering the alert window"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "kube-audit records the initiating user identity for every pod-exec call; confirming the matching record's identity and cross-referencing it against the change-management or deploy-runs anchor answers both authorization and actor identity in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary: [change-management-correlation]
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Query kube-audit for pod-exec events (verb=create, resource=pods/exec) targeting pod payments-api-7c9d8f5b6-q2vr4 in namespace payments-prod within ±5min of 2026-04-26T08:33:20Z. Surface the initiating user, source IP, and userAgent."
+      change-management-correlation: "Query change-management and deploy-runs APIs for approved tickets or deploy run records whose window covers 2026-04-26T08:33:20Z and whose scope includes the payments-prod namespace or the payments-api service. Surface the initiating identity and approval state."
+    scope_override:
+      window_hours: 1
+      anchor: alert

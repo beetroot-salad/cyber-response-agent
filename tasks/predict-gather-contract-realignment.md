@@ -10,7 +10,7 @@ This task replaces the earlier "subject_kind triple" framing and supersedes the 
 
 ## Why
 
-Run-mirror loop 2 (rule-5710 zabbix monitoring probe — `tasks-scratch/predict-analyze-format-ab/fixtures/run-mirror/investigation.md`) is the load-bearing case. PREDICT routed `selected_lead: monitoring-system-audit` (ad-hoc, no definition), `override_data_source: -`, and a prose `lead_hint` saying "query 172.22.0.10 via host_query for Zabbix daemon scheduled-action log entries... compare foreground record count at t-0 against the tool's 72h per-tick baseline." GATHER constructed a cross-source query that bundled the load-bearing host_query process check with a redundant wazuh re-query of the `(srcip, srcuser, target)` slice already saturated in loop 1. The wazuh re-query yielded zero new evidence; the host_query side carried the actual disposition signal.
+Run-mirror loop 2 (rule-5710 zabbix monitoring probe — `experiments/predict-analyze-format-ab/fixtures/run-mirror/investigation.md`) is the load-bearing case. PREDICT routed `selected_lead: monitoring-system-audit` (ad-hoc, no definition), `override_data_source: -`, and a prose `lead_hint` saying "query 172.22.0.10 via host_query for Zabbix daemon scheduled-action log entries... compare foreground record count at t-0 against the tool's 72h per-tick baseline." GATHER constructed a cross-source query that bundled the load-bearing host_query process check with a redundant wazuh re-query of the `(srcip, srcuser, target)` slice already saturated in loop 1. The wazuh re-query yielded zero new evidence; the host_query side carried the actual disposition signal.
 
 The current envelope has three responsibilities tangled in one block:
 

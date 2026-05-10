@@ -1,0 +1,66 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?scheduled-etl-export"
+      attached_to_vertex: v-003
+      proposed_edge:
+        relation: wrote_to
+        parent_vertex: {type: scheduled_job, classification: cloud-scheduler-etl-job}
+      story: |
+        analyst-svc@analytics-prod.iam.gserviceaccount.com is a service account
+        whose naming convention and project placement are consistent with a batch
+        ETL pipeline identity; legitimate daily extract jobs for analytics
+        frequently run under dedicated service accounts of this form. A Cloud
+        Scheduler (or equivalent orchestrator) job is configured to invoke gcloud
+        daily, triggering a BigQuery SELECT across customer_pii.users and
+        customer_pii.payment_methods and writing the result to
+        gs://analytics-export-prod/exports/ with a date-stamped filename — the
+        2026-04-26-customer-extract.csv.gz name and ~412 GB scale are consistent
+        with a recurring full-table daily extract. The scheduled job's trigger
+        window should contain the alert timestamp, and the SA's job-history
+        baseline should show a recurring pattern of similarly-sized exports to
+        the same destination bucket at the same cadence.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "service-account-job-history records prior BigQuery export jobs from analyst-svc to the analytics-export-prod destination bucket, establishing a recurring baseline of similarly-scoped exports"
+          from_story_link: "the SA's job-history baseline should show a recurring pattern of similarly-sized exports to the same destination bucket"
+          comparison:
+            selector_kind: historical-self
+            selector: "BigQuery jobs run by analyst-svc@analytics-prod.iam.gserviceaccount.com with destination bucket gs://analytics-export-prod, 30d window ending at alert timestamp"
+            dimension: job_destination_bucket
+        - id: p2
+          subject: proposed_edge
+          claim: "scheduler-job-correlation records a scheduled job configured to invoke analyst-svc for a BigQuery export against customer_pii tables to analytics-export-prod, with a trigger window that contains the alert timestamp"
+          from_story_link: "A Cloud Scheduler job is configured to invoke gcloud daily, triggering a BigQuery SELECT"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no prior export job from analyst-svc to analytics-export-prod appears in the historical baseline window — the alert is the first occurrence of this export pattern"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "no scheduled job is configured to trigger analyst-svc's BigQuery export at the alert timestamp, or the configured export target and table set do not match the alert observables"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: scheduler-job-correlation
+          predicate: "a scheduled job (Cloud Scheduler or equivalent) is configured to invoke analyst-svc@analytics-prod.iam.gserviceaccount.com for a BigQuery export against customer_pii tables to the analytics-export-prod bucket, with a trigger window containing the alert timestamp and a table scope matching the referenced tables"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "Cloud Scheduler job records name the initiator (developer, service account, or CI trigger) that created the schedule; confirming a matching scheduled job both authorizes the export and identifies the responsible actor who configured it."
+      weight: null
+
+  routing:
+    selected_lead: service-account-job-history
+    composite_secondary: [scheduler-job-correlation]
+    override_data_source: null
+    lead_hints:
+      service-account-job-history: "Query BigQuery job history for analyst-svc@analytics-prod.iam.gserviceaccount.com — all jobs with destination gs://analytics-export-prod or reading from customer_pii tables. Establish whether today's export matches a recurring baseline (frequency, byte scale, table set, destination path pattern). Return foreground job plus the historical baseline window."
+      scheduler-job-correlation: "Query Cloud Scheduler (or equivalent orchestrator) for jobs configured to invoke analyst-svc@analytics-prod.iam.gserviceaccount.com. Check trigger schedule, job body (BigQuery export config), destination bucket, and last-fire timestamp. Confirm whether a matching trigger window contains 2026-04-26T11:18:54Z."
+    scope_override:
+      window_hours: 720
+      anchor: alert

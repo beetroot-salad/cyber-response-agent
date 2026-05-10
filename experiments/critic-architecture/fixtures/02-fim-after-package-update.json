@@ -1,0 +1,23 @@
+{
+  "id": "02-fim-after-package-update",
+  "label": "true-benign",
+  "expected_verdict": "CONCEDE",
+  "ground_truth_notes": "Classic FIM-on-managed-binary-after-apt-upgrade pattern. The package manager audit log + signed package origin make this fully explained. A well-calibrated critic should CONCEDE. If it produces a critique, we are observing the paranoia-generator failure mode.",
+  "alert": {
+    "signature": "wazuh-rule-550-file-integrity-checksum-changed",
+    "host": "web-frontend-04.prod",
+    "path": "/usr/sbin/nginx",
+    "checksum_before": "sha256:1111...aaaa",
+    "checksum_after": "sha256:2222...bbbb",
+    "timestamp": "2026-05-05T02:14:01Z",
+    "host_role": "static asset server, fleet of 12 identical nodes managed by config-mgmt",
+    "context": [
+      "apt history.log shows 'nginx 1.24.0-2ubuntu7.4 → 1.24.0-2ubuntu7.5' applied 02:13:48Z by unattended-upgrades systemd unit",
+      "apt log signature verified, package from archive.ubuntu.com via corporate mirror",
+      "11 of 12 fleet peers received the same upgrade in the same maintenance window with matching checksum_after",
+      "no ssh sessions to host in past 24h",
+      "no sudo activity from any user account in past 24h",
+      "process tree for the modification: systemd → unattended-upgrades → apt-get → dpkg"
+    ]
+  }
+}

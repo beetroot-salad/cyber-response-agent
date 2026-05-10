@@ -1,0 +1,47 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "a substantial fraction of the 38 distinct child images are unsigned or carry an unknown / untrusted publisher"
+        read_as: "unsigned-child-population — child signing profile deviates from the expected corp-managed workstation office baseline; consistent with dropper payload deployment shape"
+        advance_to: escalate
+        comparison:
+          selector_kind: peer-class
+          selector: "child-process signing distribution for WINWORD.EXE instances on corp-developer-workstation class endpoints in this environment over the prior 30 days"
+          dimension: child_image_unsigned_fraction
+      - id: lp2
+        if: "all or nearly all of the 38 distinct child images are signed by recognized publishers and the image-set composition matches the WINWORD peer-class child-process baseline on at least two recorded dimensions"
+        read_as: "signed-and-recognized-population — consistent with mailmerge batch or addin-driven burst; advance to authorization check for ksilva"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: peer-class
+          selector: "child-process image set for WINWORD.EXE instances on corp-developer-workstation class endpoints over the prior 30 days"
+          dimension: child_image_signing_publisher_set
+      - id: lp3
+        if: "child images are predominantly signed but the image-name entropy distribution or image-set composition deviates from the WINWORD peer-class baseline on at least one recorded dimension"
+        read_as: "signed-but-anomalous-shape — signed provenance does not confirm known-benign burst; mechanism fork required between novel addin and masquerading signed dropper"
+        advance_to: fork-at-mechanism
+        comparison:
+          selector_kind: peer-class
+          selector: "child-process image set and name-entropy distribution for WINWORD.EXE instances on corp-developer-workstation class endpoints over the prior 30 days"
+          dimension: child_image_name_entropy_and_set_composition
+      - id: lp4
+        if: "no prior child-spawning history for WINWORD.EXE exists on WIN-DEV-3211 in the 30-day baseline window (zero-count baseline for this parent-spawns-children behavior on this host)"
+        read_as: "no-baseline-establishable — cannot assess deviation; advance to mechanism fork with peer-class baseline as fallback"
+        advance_to: fork-at-mechanism
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: [child-image-signing-distribution]
+    override_data_source: null
+    lead_hints:
+      process-lineage: "Target WINWORD.EXE pid 9244 on WIN-DEV-3211 in the 5-minute window ending at 2026-04-26T07:14:32Z. Retrieve all distinct child image paths and command lines spawned in that window. Also retrieve the 30-day baseline for WINWORD.EXE child-spawning on this host — prior burst events, typical distinct-image count, typical child-process image set, and any prior alert context. The baseline comparison is the primary discriminator."
+      child-image-signing-distribution: "For all distinct child images spawned by WINWORD.EXE pid 9244 in the alert window on WIN-DEV-3211, retrieve signing status (signed / unsigned / unknown) and publisher name for each. Aggregate into a distribution: count signed by Microsoft Office suite, signed by other Microsoft, signed by Adobe, signed by other known enterprise ISV, and unsigned or unknown-publisher. Return the raw per-image breakdown alongside the aggregate."
+    scope_override:
+      window_hours: 720
+      anchor: alert

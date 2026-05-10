@@ -1,0 +1,31 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "the user's sign-in history shows prior successful authentications from VN or neighboring Southeast Asian geolocations within the baseline window"
+        read_as: "geo-within-established-travel-range"
+        advance_to: fork-at-authorization
+      - id: lp2
+        if: "the user's sign-in history shows no prior authentications from VN or neighboring geolocations AND the source IP classifies as a known VPN or proxy egress node"
+        read_as: "novel-geo-vpn-masked"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "the user's sign-in history shows no prior authentications from VN or neighboring geolocations AND the source IP does not classify as a known VPN or proxy egress node"
+        read_as: "novel-geo-no-vpn-signal"
+        advance_to: escalate
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: [source-reputation]
+    lead_hints:
+      authentication-history: "Retrieve j.morales@example.com sign-in history for the past 30 days — focus on client.geographicalContext.country distribution, session outcomes, and MFA step counts. Baseline should cover country set, city set, and user-agent shape."
+      source-reputation: "Classify 103.27.181.42 — is it a known VPN/proxy/hosting-provider egress, a residential IP, or an anonymizer? Check against threat-intel and IP-range registries."
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```

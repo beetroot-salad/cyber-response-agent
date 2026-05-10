@@ -12,7 +12,7 @@ defender can reason from.
 
 ## Inputs
 
-- `run_dir` — the run's working directory (`defender/results/{run_id}/`)
+- `run_dir` — the run's working directory (`$DEFENDER_RUNS_BASE/{run_id}/`, default `/tmp/defender-runs/{run_id}/`)
 - `position` — integer, scopes your output filenames
 - `alert_ref` — relative path to `alert.json` (read for entity context)
 - `lead_description`:

@@ -160,7 +160,7 @@ for learning.
 5. Pilot runs against existing fixtures from
    `experiments/critic-architecture/fixtures/` plus 2–3 hard cases from
    `soc-agent/runs/` (bait, ambiguous, true-malicious-with-subtle-tell).
-   Transcripts under `defender/results/`.
+   Pinned transcripts under `defender/run-transcripts/`.
 
 ## Out of scope (explicit)
 

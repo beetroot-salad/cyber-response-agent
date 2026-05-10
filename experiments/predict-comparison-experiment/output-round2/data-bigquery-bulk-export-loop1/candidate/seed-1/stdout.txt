@@ -1,0 +1,36 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: service-account-job-history
+    predictions:
+      - id: lp1
+        if: "prior export jobs from analyst-svc to the analytics-export-prod bucket match the foreground job's destination geometry and table scope on at least two recorded dimensions (destination bucket, referenced dataset, job statement type)"
+        read_as: "on-baseline-etl-cadence"
+        advance_to: fork-at-authorization
+      - id: lp2
+        if: "the foreground job introduces a destination, table scope, or job shape absent from the SA's 30-day job baseline (any deviation from a zero-count baseline for that job kind)"
+        read_as: "novel-export-shape"
+        advance_to: escalate
+      - id: lp3
+        if: "the SA has prior export jobs matching the foreground job's general shape but the foreground deviates from the baseline distribution on at least one recorded dimension (volume, destination path, caller user-agent class)"
+        read_as: "known-pattern-anomalous-attribute"
+        advance_to: fork-at-mechanism
+
+  routing:
+    selected_lead: service-account-job-history
+    composite_secondary: []
+    lead_hints:
+      service-account-job-history: >
+        Query BigQuery audit logs for all JobService.InsertJob events from
+        analyst-svc@analytics-prod.iam.gserviceaccount.com over the last 30 days.
+        Return: job count, destination bucket(s), referenced dataset(s),
+        bytes_processed distribution, callerSuppliedUserAgent values, and
+        time-of-day distribution. The goal is a baseline of this SA's normal
+        export shape to compare against the foreground alert job.
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```

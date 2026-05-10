@@ -13,7 +13,7 @@ a relatively clean I/O boundary (evidence in → weighted assessment +
 route out) and is called every loop iteration, so extraction savings
 compound.
 
-**Pilot lives at:** `docs/experiments/analyze-subagent-pilot/`
+**Pilot lives at:** `experiments/analyze-subagent-pilot/`
 **Working directory assumption:** all paths relative to `/workspace/`.
 
 ---
@@ -135,7 +135,7 @@ From a completed run at `soc-agent/runs/{run-id}/`, extract:
    to subagents; used for scoring.
 
 Save fixture as
-`docs/experiments/analyze-subagent-pilot/fixtures/{fixture-id}/`:
+`experiments/analyze-subagent-pilot/fixtures/{fixture-id}/`:
 - `truncated-investigation.md`
 - `lead-output.yaml`
 - `ground-truth-analyze.md` (the held-out block)
@@ -313,7 +313,7 @@ handoff acceptance.
 ### Write contract decision
 
 Per the criteria above. Commit the decision and the load-bearing
-context bundle spec to `docs/experiments/analyze-subagent-pilot/contract.md`.
+context bundle spec to `experiments/analyze-subagent-pilot/contract.md`.
 
 If decision-owning: draft the ANALYZE subagent prompt and bundle
 composition, mirroring the shape of `soc-agent/skills/investigate/gather.md`.
@@ -326,7 +326,7 @@ envelope the main agent consumes.
 ## File map
 
 ```
-docs/experiments/analyze-subagent-pilot/
+experiments/analyze-subagent-pilot/
 ├── README.md                 # Short pointer to this skill
 ├── fixtures/
 │   └── {fixture-id}/

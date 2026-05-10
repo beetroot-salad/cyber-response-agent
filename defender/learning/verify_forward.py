@@ -12,7 +12,7 @@ ground-truth disposition from
 Prints exactly ``GOOD`` or ``BAD`` on the last line of stdout.
 
 Single rep — replication is for statistical TNR/TPR measurement, not
-per-edit gating (see ``tasks-scratch/defender-author-verification/results/final.md``).
+per-edit gating (see ``experiments/defender-author-verification/results/final.md``).
 """
 from __future__ import annotations
 

@@ -1,0 +1,39 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "a successful authentication event from alert srcip is observed within 60s after the alert timestamp"
+        read_as: "forward-success — potential compromise; escalate regardless of archetype"
+        advance_to: escalate
+      - id: lp2
+        if: "multiple failed authentication events from alert srcip are observed in the query window"
+        read_as: "repeated-failed-auth — volume and cadence shape routes to credential-stuffing vs external-bruteforce archetype determination"
+        advance_to: fork-at-archetype-selection
+      - id: lp3
+        if: "zero or near-zero authentication events found for alert srcip in the query window"
+        read_as: "absent-history — inconsistent with alert firedtimes counter; structured-field vs raw-log discrepancy likely; surface discrepancy and re-anchor on raw-log srcip"
+        advance_to: fork-at-field-quality-check
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: [source-reputation]
+    lead_hints:
+      authentication-history: >
+        Query authentication events for srcip=203.0.113.42 in the 1h window before the
+        alert and 60s after. Check for forward-window success (rule group
+        authentication_success). Characterize failed-auth count and cadence shape. Alert
+        full_log shows a different source (172.22.0.10, srcuser=nagios) than the structured
+        fields (203.0.113.42, srcuser=admin); if query returns no events or a count
+        inconsistent with firedtimes=11, surface this field discrepancy explicitly.
+      source-reputation: >
+        Classify 203.0.113.42 — confirm external, check threat intel for known-scanner or
+        credential-stuffing attribution. Raw classification and any threat-intel tags are
+        sufficient for routing.
+    scope_override:
+      window_hours: 1
+      anchor: alert

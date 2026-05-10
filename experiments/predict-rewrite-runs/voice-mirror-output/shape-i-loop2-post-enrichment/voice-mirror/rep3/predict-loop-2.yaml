@@ -1,0 +1,51 @@
+status: complete
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?monitoring-system-is-the-actor"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: initiated_auth
+        parent_vertex: {type: process, classification: monitoring-daemon-process-on-source}
+      story: |
+        The monitoring system daemon on 172.22.0.10 invoked
+        `ssh nagios@target-endpoint` as a scheduled health-check
+        tick. Loop 1 established a periodic cadence (11 events,
+        mean interval 576s, single-attempt clusters) consistent
+        with a fixed-schedule monitoring tool running on a
+        ~10-minute check interval; this alert is on-cadence with
+        that baseline. sshd on target-endpoint rejected the
+        username — nagios is not provisioned as a local account
+        on the target, consistent with a probe that tests SSH
+        reachability rather than expecting to authenticate
+        successfully. Registration of the (172.22.0.10, nagios,
+        target-endpoint) triple in the approved-monitoring-sources
+        registry is the authorization predicate that anchors this
+        hypothesis.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "approved-monitoring-sources registry contains an active entry for the triple (srcip=172.22.0.10, srcuser=nagios, target=target-endpoint)"
+          from_story_link: "Registration of the (172.22.0.10, nagios, target-endpoint) triple in the approved-monitoring-sources registry is the authorization predicate"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "the triple is absent from, or marked inactive/revoked in, the approved-monitoring-sources registry"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: approved-monitoring-sources
+          predicate: "(srcip=172.22.0.10, srcuser=nagios, target=target-endpoint) triple listed as an active approved monitoring probe"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: monitoring-probe
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      monitoring-probe: "Look up the triple (srcip=172.22.0.10, srcuser=nagios, target=target-endpoint) in the approved-monitoring-sources registry. Return the registration status, any associated metadata (probe owner, schedule, last-seen), and whether the entry is currently active or inactive/revoked."

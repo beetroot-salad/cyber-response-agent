@@ -1,0 +1,11 @@
+{
+  "fixture": "shape-i-monitoring-probe",
+  "variant": "effort-low",
+  "rep": 3,
+  "wall_s": 39.49,
+  "prompt_chars": 24484,
+  "stdout_chars": 1349,
+  "error": null,
+  "loop_n": 1,
+  "signature_id": "wazuh-rule-5710"
+}

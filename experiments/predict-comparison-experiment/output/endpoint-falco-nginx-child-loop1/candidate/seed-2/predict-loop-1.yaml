@@ -1,0 +1,58 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?nginx-child-automation-hook"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: deploy_run, classification: deploy-or-update-automation-run}
+      story: |
+        A deploy or update automation system pre-configured on web-edge-03
+        invoked a maintenance step that ran as www-data under the nginx
+        worker. The curl-pipe-sh pattern matches a package-manager-style
+        updater or post-deploy bootstrap script; the automation run would
+        have been initiated by an authorized operator or scheduled trigger,
+        not by an inbound HTTP request. The deploy-runs anchor for
+        web-edge-03 should record an active run whose execution window
+        contains T=03:11:07Z and whose script references the
+        updates.example.io endpoint as the payload source.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "deploy-runs-correlation records an active run against web-edge-03 whose execution window contains the shell-spawn timestamp"
+          from_story_link: "the automation run would have been initiated by an authorized operator or scheduled trigger"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching run's script or manifest references the observed update endpoint as its payload source"
+          from_story_link: "the curl-pipe-sh pattern matches a package-manager-style updater or post-deploy bootstrap script"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no deploy or update run's execution window contains the shell-spawn timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching run exists but its script does not reference the observed update endpoint"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs
+          predicate: "an active deploy or update run against web-edge-03 with an execution window containing the spawn timestamp and a script referencing the observed update endpoint as its payload source"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "deploy-runs records the initiator (operator, scheduled trigger, or CI webhook) that opened the run; confirming the run authorizes the action and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: deploy-runs-correlation
+    composite_secondary: [process-lineage]
+    override_data_source: null
+    lead_hints:
+      deploy-runs-correlation: "Query for any deploy or maintenance runs targeting web-edge-03 (hostname or agent IP 10.0.7.18) with execution windows overlapping 2026-04-26T03:11:07Z. Check whether the run's script body or manifest references updates.example.io."
+      process-lineage: "Retrieve the full parent chain for nginx pid 1422 on web-edge-03 at T. Also look for sibling or child processes spawned by the same nginx worker around T to determine if this shell spawn was an isolated event or part of a broader pattern."
+    scope_override:
+      window_hours: 2
+      anchor: alert

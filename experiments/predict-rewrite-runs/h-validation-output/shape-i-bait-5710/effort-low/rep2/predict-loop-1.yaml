@@ -1,0 +1,28 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "at least one successful SSH authentication from 203.0.113.42 within 60 seconds after the alert timestamp"
+        read_as: "forward-success signal — potential compromise regardless of volume shape"
+        advance_to: escalate
+      - id: lp2
+        if: "no forward success AND foreground volume/cadence deviates from the source's recurring baseline geometry on at least one recorded dimension (burst, off-cadence, or materially higher rate)"
+        read_as: "active brute-force or credential-stuffing pattern from external source"
+        advance_to: fork-at-volume-shape
+      - id: lp3
+        if: "no forward success AND foreground volume and cadence match the source's recurring baseline geometry (or baseline is zero-count and this is a single isolated attempt)"
+        read_as: "isolated low-volume external attempt; username classification drives archetype routing"
+        advance_to: fork-at-username-class
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    override_data_source: null
+    scope_override:
+      window_hours: 1
+      anchor: alert

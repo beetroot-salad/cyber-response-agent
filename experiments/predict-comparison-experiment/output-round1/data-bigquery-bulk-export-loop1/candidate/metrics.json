@@ -1,0 +1,7 @@
+{
+  "variant": "candidate",
+  "fixture": "data-bigquery-bulk-export-loop1",
+  "elapsed_sec": 75.0,
+  "stdout_chars": 3287,
+  "prompt_chars": 17808
+}

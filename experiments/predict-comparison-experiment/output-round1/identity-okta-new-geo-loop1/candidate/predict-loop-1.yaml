@@ -1,0 +1,35 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: source-reputation
+    predictions:
+      - id: lp1
+        if: "103.27.181.42 is classified as a known VPN, proxy, or corporate-egress provider by the reputation source"
+        read_as: "vpn-or-proxy-egress"
+        advance_to: fork-at-user-authorization
+      - id: lp2
+        if: "103.27.181.42 is classified as residential or unclassified consumer ISP in Vietnam with no threat-intel flags"
+        read_as: "unclassified-residential-novel-geo"
+        advance_to: fork-at-credential-integrity
+        comparison:
+          selector_kind: historical-self
+          selector: "j.morales@example.com prior sign-in source countries over 30d"
+          dimension: source_country_set
+      - id: lp3
+        if: "103.27.181.42 carries an active threat-intel flag (malicious, botnet, credential-stuffing infrastructure)"
+        read_as: "threat-intel-flagged-source"
+        advance_to: escalate
+
+  routing:
+    selected_lead: source-reputation
+    composite_secondary:
+      - authentication-history
+    lead_hints:
+      source-reputation: "Classify 103.27.181.42 — determine whether it is a known VPN/proxy/hosting provider, residential ISP, or threat-intel-flagged IP. The country context is VN/Hanoi."
+      authentication-history: "Retrieve j.morales@example.com sign-in history: source countries, IPs, and outcomes over the past 30 days. Determine whether Vietnam or neighboring geographies have appeared before and whether today's event is on-cadence with her normal sign-in pattern."
+    scope_override:
+      window_hours: 720
+      anchor: alert

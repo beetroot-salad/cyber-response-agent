@@ -1,0 +1,66 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?etl-orchestrator-invocation"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: invoked_by
+        parent_vertex:
+          type: scheduler
+          classification: etl-job-orchestrator
+      story: |
+        The service account analyst-svc@analytics-prod.iam.gserviceaccount.com is
+        named and project-scoped for batch analytics work, and the destination bucket
+        (analytics-export-prod) combined with the date-parameterized export filename
+        (2026-04-26-customer-extract.csv.gz) match the shape of a daily scheduled
+        ETL job. An automated orchestrator (Cloud Scheduler, Cloud Composer/Airflow)
+        invokes analyst-svc on a daily cadence to extract the full customer_pii tables
+        for downstream analytics pipelines. The scheduler-job-definition records
+        should carry a registered job targeting this SA, this dataset, and this
+        destination bucket; confirming the record authorizes the export and identifies
+        the responsible initiator in one resolution.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "a scheduler-job-definition record exists authorizing analyst-svc to export from customer_pii to analytics-export-prod on a recurring schedule"
+          from_story_link: "An automated orchestrator invokes analyst-svc on a daily cadence to extract the full customer_pii tables"
+        - id: p2
+          subject: proposed_edge
+          claim: "the export job's submission timestamp falls within the recurring invocation-cadence distribution for this SA"
+          from_story_link: "An automated orchestrator invokes analyst-svc on a daily cadence"
+          comparison:
+            selector_kind: historical-self
+            selector: "All BigQuery jobs submitted by analyst-svc@analytics-prod.iam.gserviceaccount.com in the 30d window preceding the alert"
+            dimension: job_submission_time_of_day
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no scheduler-job-definition record exists authorizing this SA to export from customer_pii to analytics-export-prod"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "the submission timestamp is materially outside the SA's recurring cadence distribution on at least one recorded dimension"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: scheduler-job-definition
+          predicate: "a registered job definition exists that authorizes analyst-svc@analytics-prod.iam.gserviceaccount.com to export from customer_pii to analytics-export-prod on a recurring schedule, and the alert timestamp is consistent with that schedule"
+          on_unauthorized: escalate — no registered job definition covers this export; treat as credentialed exfiltration until proven otherwise
+          on_indeterminate: escalate — scheduler records unavailable; cannot confirm authorization for a large PII export
+      integrity_waived: "scheduler-job-definition records name the initiating identity (human, CI trigger, or service) that registered the job; confirming the job definition authorizes the export and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: service-account-job-history
+    composite_secondary: [scheduler-job-correlation]
+    override_data_source: null
+    lead_hints:
+      service-account-job-history: "Retrieve all BigQuery jobs submitted by analyst-svc@analytics-prod.iam.gserviceaccount.com over the past 30 days. Return a foreground record for today's job (timestamp, destination, bytes_processed, rows_returned) and the historical baseline distribution across those dimensions. Focus on submission time-of-day and destination path pattern."
+      scheduler-job-correlation: "Query Cloud Scheduler and/or Cloud Composer (Airflow) for any registered job definitions that invoke analyst-svc@analytics-prod.iam.gserviceaccount.com to run BigQuery exports from customer_pii to analytics-export-prod. Return: job name, schedule expression, owning initiator identity, last successful run timestamp, and whether today's 11:18Z timestamp is consistent with the schedule."
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```

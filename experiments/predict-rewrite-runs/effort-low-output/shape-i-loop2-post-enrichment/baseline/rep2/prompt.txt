@@ -1,0 +1,647 @@
+run_dir=/tmp/effort-low-no539pzx/shape-i-loop2-post-enrichment__effort-low__rep2
+signature_id=wazuh-rule-5710
+loop_n=2
+
+## Past-investigation priors
+
+Prologue topology — same-signature scope, tier 3: no match, 0 cases matched. Vertex types: endpoint, identity. Edge relations: attempted_auth.
+
+Priors at this topology are sparse — scaffold from first principles per PREDICT's ASSESS gate.
+
+<alert-loop2salt00000000>
+{
+  "predecoder": {
+    "hostname": "target-endpoint",
+    "program_name": "sshd",
+    "timestamp": "Apr 20 19:25:00"
+  },
+  "agent": {
+    "ip": "172.22.0.13",
+    "name": "target-endpoint",
+    "id": "002"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
+  "data": {
+    "srcuser": "nagios",
+    "srcip": "172.22.0.10",
+    "srcport": "44688"
+  },
+  "rule": {
+    "mail": false,
+    "level": 5,
+    "hipaa": [
+      "164.312.b"
+    ],
+    "pci_dss": [
+      "10.2.4",
+      "10.2.5",
+      "10.6.1"
+    ],
+    "tsc": [
+      "CC6.1",
+      "CC6.8",
+      "CC7.2",
+      "CC7.3"
+    ],
+    "description": "sshd: Attempt to login using a non-existent user",
+    "groups": [
+      "syslog",
+      "sshd",
+      "authentication_failed",
+      "invalid_login"
+    ],
+    "nist_800_53": [
+      "AU.14",
+      "AC.7",
+      "AU.6"
+    ],
+    "gdpr": [
+      "IV_35.7.d",
+      "IV_32.2"
+    ],
+    "firedtimes": 11,
+    "mitre": {
+      "technique": [
+        "Password Guessing",
+        "SSH"
+      ],
+      "id": [
+        "T1110.001",
+        "T1021.004"
+      ],
+      "tactic": [
+        "Credential Access",
+        "Lateral Movement"
+      ]
+    },
+    "id": "5710",
+    "gpg13": [
+      "7.1"
+    ]
+  },
+  "decoder": {
+    "parent": "sshd",
+    "name": "sshd"
+  },
+  "full_log": "Apr 20 19:25:00 target-endpoint sshd[8065]: Invalid user nagios from 172.22.0.10 port 44688",
+  "input": {
+    "type": "log"
+  },
+  "@timestamp": "2026-04-20T19:25:01.616Z",
+  "location": "/var/log/auth.log",
+  "id": "1776713101.15149094",
+  "timestamp": "2026-04-20T19:25:01.616+0000",
+  "ticket_id": "1776713101.15149094"
+}
+</alert-loop2salt00000000>
+
+<investigation mode="predict">
+## CONTEXTUALIZE
+
+**Alert:** 1776713101.15149094 — wazuh-rule-5710
+**Key observables:**
+- data.srcuser: nagios
+- data.srcip: 172.22.0.10
+- agent.name: target-endpoint
+- timestamp: 2026-04-20T19:25:01.616+0000
+**Playbook hypotheses:** ?monitoring-system-is-the-actor, ?credentials-used-outside-registered-actor, ?scheduled-behavior-drift, ?operator-manual-probe, ?local-process-credential-reuse, ?tunnel-hijack, ?source-spoofed-from-elsewhere
+**Available leads:** source-classification, monitoring-probe, service-account-rotation, credential-stuffing, external-bruteforce, authentication-history, srcip, username-classification
+**Archetype matches:**
+- monitoring-probe — strong — srcuser='nagios' is an exact match for monitoring-pattern sentinel names; srcip=172.22.0.10 is internal RFC1918; firedtimes=11 suggests periodic cadence (though temporal spacing must be verified by GATHER to rule out burst clustering)
+- service-account-rotation — weak — srcip is internal (✓), but srcuser='nagios' does not match the required service-account pattern (svc-*, backup-*, cron-*, ansible-*). Username is a monitoring-tool sentinel, not an orphaned service credential.
+- credential-stuffing — weak — srcip=172.22.0.10 is internal (disqualifier #1); srcuser='nagios' is a sentinel monitoring name, not a real-looking username (disqualifier #3). This archetype requires external source + realistic/breach-sourced identities.
+- external-bruteforce — very weak — srcip=172.22.0.10 is internal (disqualifier #2); only one username attempted across the fires (disqualifier #3); story requires 'multiple distinct usernames... in high volume' from external source.
+**Adversarial archetype:** external-bruteforce — external-bruteforce represents the worst-case threat outcome for this signature: internet-facing SSH brute-force attack. Though the current alert does not resemble this pattern at all, it is the archetype a real attacker would most plausibly hide inside if they compromised an internal monitoring host or spoofed its address — hence the GATHER phase must confirm srcip legitimacy against approved-monitoring-sources.
+**Data environment:** reachable: host_query, playground_ticket, stub_ticket, wazuh; degraded: elastic (error: elasticsearch unreachable: <urlopen error [Errno -2] Name or service not known>)
+
+```yaml
+prologue:
+  vertices:
+  - id: v-001
+    type: endpoint
+    classification: internal-monitoring-host
+    identifier: 172.22.0.10
+  - id: v-002
+    type: endpoint
+    classification: unclassified-endpoint
+    identifier: target-endpoint
+  - id: v-003
+    type: identity
+    classification: monitoring-pattern
+    identifier: nagios
+  edges:
+  - id: e-001
+    relation: attempted_auth
+    source_vertex: v-001
+    target_vertex: v-002
+    when:
+      timestamp: '2026-04-20T19:25:01.616Z'
+    attributes:
+      target_user: nagios
+    authority:
+      kind: siem-event
+      source: Wazuh (rule 5710)
+```
+
+## PREDICT (loop 1)
+
+**Selected lead:** `authentication-history` — characterize the auth cluster for (`srcip=172.22.0.10`, `srcuser=nagios`) over the 5-minute pre-alert window and 60-second post-alert window. Two unknowns gate further routing: (a) forward-success presence, (b) cadence shape.
+
+Lead-level predictions for ANALYZE to read against the result:
+- lp1: if any 5501/5715 from 172.22.0.10 within 60s of `2026-04-20T19:25:01.616Z` → override to escalation; precedes all archetype matching.
+- lp2: if `cluster_count ≥ 3` AND `max_cluster_size ≤ 3` over 1h backward window → `cadence_shape: periodic`; loop 2 checks `approved-monitoring-sources` + completes monitoring-probe screen.
+- lp3: if `cluster_count < 3` OR `max_cluster_size > 3` → cadence fails; loop 2 articulates the identity-of-use fork.
+
+**Pitfalls:**
+- `firedtimes=11` is Wazuh's composite counter, not a direct attempt count in the query window.
+- 60s forward-success window is tight; confirm window application if overall shape is anomalous.
+
+## GATHER (loop 1)
+
+**Lead:** authentication-history
+**Query:** Wazuh indexer — rule-5710/5501/5715 events from `172.22.0.10` and `nagios` over 1h pre-alert + 60s post-alert.
+
+Result summary:
+- 11 rule-5710 events in the 1h backward window, matching firedtimes.
+- Cluster_count = 11, max_cluster_size = 1 (single attempt per tick).
+- Inter-arrival gaps: 9 × ~10 min (600s ± 30s), 1 × ~5 min. Mean = 576s, stddev = 102s.
+- No rule-5501 (sshd successful auth) and no rule-5715 from 172.22.0.10 in ±60s window.
+- No other srcuser seen from 172.22.0.10 in 30-day window.
+
+## ANALYZE (loop 1)
+
+Lead-level reading: lp2 matches — cadence is periodic (cluster_count ≥ 3 ✓, max_cluster_size ≤ 3 ✓, inter-cluster gaps consistent with a single ~10-min schedule, one outlier gap of ~5 min). Forward-success negative (lp1 does not trigger). Baseline enrichment complete; no adversarial signal surfaced by this lead.
+
+However: registration-style anchor consultation (approved-monitoring-sources) answers whether the (172.22.0.10, nagios, target-endpoint) triple is registered — it does **not** confirm that the registered monitoring system was the specific actor producing this tick. The identity-of-use question is live. Any process on 172.22.0.10 with shell access could emit the same wire triple at a time that happens to land near the monitoring cadence. Move the identity-of-use fork into PREDICT loop 2 as prescribed by the playbook's post-enrichment branching.
+
+```yaml
+findings:
+  - id: l-001
+    loop: 1
+    name: authentication-history
+    target: v-001
+    selection_rationale: "Cadence and forward-success both gate further routing;
+      authentication-history is the lead that measures both. No fork yet — at
+      loop 1 the discriminating question is still whether enrichment surfaces a
+      compromise signal that overrides archetype matching."
+    query_details:
+      system: wazuh-indexer
+      template: auth-history
+      query: "agent.ip:172.22.0.10 AND srcuser:nagios AND rule.id:(5710 OR 5501 OR 5715)"
+      time_window: "1h-backward + 60s-forward"
+      substitutions: { srcip: "172.22.0.10", srcuser: "nagios" }
+    predictions:
+      - id: lp1
+        if: "any rule.id:5501 or 5715 from 172.22.0.10 within 60s of 2026-04-20T19:25:01.616Z"
+        read_as: "forward-success present; overrides archetype match"
+        advance_to: CONCLUDE
+      - id: lp2
+        if: "cluster_count >= 3 AND max_cluster_size <= 3 over 1h backward window"
+        read_as: "periodic cadence confirmed; enrichment complete"
+        advance_to: PREDICT
+      - id: lp3
+        if: "cluster_count < 3 OR max_cluster_size > 3"
+        read_as: "cadence inconsistent with scheduled monitoring"
+        advance_to: PREDICT
+    outcome:
+      attribute_updates:
+        - target: v-001
+          updates:
+            observed_cluster_count_1h: 11
+            observed_max_cluster_size: 1
+            observed_inter_cluster_mean_s: 576
+            observed_inter_cluster_stddev_s: 102
+            forward_success_60s: false
+            distinct_srcusers_30d: 1
+        - target: e-001
+          updates:
+            cadence_shape: periodic
+      observations:
+        vertices: []
+        edges: []
+    resolutions: []
+```
+</investigation>
+
+<signature-knowledge>
+  <playbook>
+---
+signature_id: wazuh-rule-5710
+last_updated: 2026-04-11
+total_investigations: 0
+resolution_rate: null
+---
+
+# Investigation Playbook: SSH Invalid User (5710)
+
+This playbook is **steering, not procedure**. The investigation
+methodology — hypothesis discipline, lead severity, verification and
+scoping, escalation defaults, stop conditions — lives in the
+`investigate` skill. This file provides only what is
+signature-specific:
+
+- Field shortcuts so the agent doesn't query for what the alert
+  already carries
+- Named archetypes the agent should try to recognize, each defined in
+  `archetypes/`
+- A recommended starter lead order
+- A fast-path screen table for the most common benign archetype
+- Quirks of this signature that aren't general investigation lessons
+
+## Field shortcuts
+
+| Field | JSON path |
+|---|---|
+| Source IP | `data.srcip` |
+| Attempted username | `data.srcuser` |
+| Target host | `agent.name` |
+
+See `context.md` §Alert Fields for why `srcuser` is *the username the
+attacker tried*, not the connecting user.
+
+## Hypothesis seeds
+
+At loop 1 there is typically no fork to articulate. The alert
+confirms an `attempted_auth` edge from `v-src-ip` to `v-dst-host`
+with identity `v-attempted-user` and outcome `failed`; the process
+that initiated it on the source endpoint is not named in the event.
+The starter leads below are attribute-enrichment on those
+already-confirmed vertices (source classification, username
+classification, auth-history around the event) — not
+topology-extending proposals. Stay in the mechanical / interpretive
+lane per §ASSESS.
+
+Most investigations resolve through enrichment alone: the archetype
+catalog above captures the cross-product of (source sanctioned?) ×
+(username class) × (volume shape) × (forward success?) that these
+leads discriminate.
+
+### Fork structure when enrichment leaves disposition ambiguous
+
+If the starter leads leave disposition ambiguous **and the source is
+internal-monitoring-host with a monitoring-pattern username**, the
+approved-monitoring-sources anchor will typically confirm the triple
+is registered. That confirms the triple *could* be used by the
+monitoring system — it does **not** confirm the monitoring system
+was the actor on this specific alert. Anyone with shell access to
+the monitoring host (a different script, a manual operator, a
+compromised process) can produce the same `(srcip, srcuser, target)`
+string on the wire. The anchor answers registration, not
+identity-of-use.
+
+**Root fork is identity-of-use, not mechanism.** Fork into:
+
+- `?monitoring-system-is-the-actor` — the registered monitoring
+  tool itself produced this attempt. Predictions: the monitoring
+  system's own audit/output channel records a scheduled action at
+  t-0 ±jitter; the observed (srcport, cadence, cluster-shape)
+  matches the historical baseline for this tool's traffic to this
+  target; the tool's process on monitoring-host is alive and
+  scheduled around t-0.
+- `?credentials-used-outside-registered-actor` — some other actor
+  on monitoring-host (or spoofing its identity) produced the
+  attempt using the registered credential string. Predictions:
+  no matching monitoring-system audit entry at t-0; observed shape
+  deviates from the tool's historical baseline (burst, off-cadence,
+  unfamiliar srcport pattern); the monitoring tool's own process
+  is idle or running a separate cycle at t-0.
+
+These siblings share the registered triple. Their discriminators
+are **correlation queries on adjacent systems**, not process-lineage
+on the source host (which is typically unavailable — the monitoring
+host often has no endpoint agent). See the new-lead suggestions
+below the starter lead order.
+
+**Refinement after identity-of-use resolves.** Only after the root
+fork resolves `++` on one side do mechanism-layer children register:
+
+- Children of `?monitoring-system-is-the-actor`: `?scheduled-retry-
+  misfire`, `?scheduled-behavior-drift`, `?operator-manual-probe`
+  (an operator ran a sibling monitoring-class script whose shape
+  differs from the approved tool's — e.g., a test/bait variant).
+- Children of `?credentials-used-outside-registered-actor`:
+  `?local-process-credential-reuse`, `?tunnel-hijack`,
+  `?source-spoofed-from-elsewhere`.
+
+Do not register these at loop 1 — they depend on the root fork
+having resolved. Identity-of-use first, mechanism second.
+
+### Authorization-contract case (when the triple is NOT registered)
+
+When the source/username pair is NOT in the registry — external
+source or internal-other — the fork is a single authorization question
+on the `attempted_auth` edge carried as an `authorization_contract`
+(same mechanism, only the authority answer differs). The resolving
+lead writes the verdict inline on the materializing edge:
+
+- an `authorization_resolutions[]` entry on the `attempted_auth`
+  edge (or via `attribute_updates[].updates.authorization_resolutions[]`
+  if the edge already exists), with `verdict: authorized | unauthorized
+  | indeterminate`, `grounding_kind: org-authority`,
+  `fulfills_contract: h-*.ac*`, and a concrete `anchor_id` / `anchor_kind`;
+- the consultation itself is recorded on the lead outcome via
+  `anchor_consultations[]` — baseline/registry lookups are consultations,
+  not resolutions.
+
+The resolution's verdict routes to archetype:
+- `authorized` → `monitoring-probe` or `service-account-rotation`
+  depending on username class.
+- `unauthorized` → `credential-stuffing` or `external-bruteforce`
+  depending on username class × volume shape.
+- `indeterminate` → escalate; the anchor gap is the rationale.
+
+### Always-on checks
+
+Forward-window success (a 5501/5715 from the same srcip within 60s)
+is a mandatory attribute check inside `authentication-history`, not
+a separate hypothesis slot. If observed, it overrides every root
+fork — success-after-failure is always severe (escalation).
+
+The escalation archetypes (`credential-stuffing`, `external-bruteforce`)
+are adversarial-by-mechanism: classification carries the claim and
+no contract is declared. Their `--` refutation comes from concrete
+volume/shape evidence, not from an anchor lookup.
+
+See `docs/investigation-language.md` §Authorization as edge attribute and
+`docs/design-v3-authority-consultation.md` for the full primitive.
+
+## Starter lead order
+
+1. **`source-classification`** — classify `data.srcip` against
+   `environment/context/ip-ranges.md`. Internal monitoring host,
+   internal-other, or external determines which half of the archetype
+   space is even applicable. Most investigations discriminate
+   `monitoring-probe` / `service-account-rotation` from
+   `credential-stuffing` / `external-bruteforce` on this lead alone.
+2. **`authentication-history`** — failed logins from same `srcip` in
+   the last 5 minutes, plus successful logins from same `srcip`
+   within 60 seconds after the alert. This lead answers both the
+   volume axis (how many attempts?) and the compromise axis (did any
+   auth succeed?). The compromise check is non-negotiable — a 5710
+   followed by a 5501 from the same source is a different problem
+   regardless of which archetype the 5710 itself matched.
+3. **`username-classification`** — classify `data.srcuser` against
+   `environment/context/identity-patterns.md`. Monitoring-pattern
+   (sentinel, anchored by source classification to monitoring-host),
+   service-account pattern, wordlist-common, or real-looking. This
+   lead picks between archetypes once source and volume are known.
+
+Most investigations resolve cleanly after these three leads. When the
+picture is still ambiguous after lead 3, fall through to the full
+investigation loop.
+
+> **Recent-alert correlation** ("other alerts from this host in last
+> 24h", "is this a repeat", "did 5712/5501/5715 also fire") is
+> handled by the ticket-context subagent at CONTEXTUALIZE — its
+> findings are already in the investigation context. Don't re-execute
+> these queries; reference the ticket-context output for escalation
+> signals.
+
+## Screen
+
+Fast-path pattern for automated resolution. The screen subagent
+checks this before the full investigation loop. Indicators are
+**semantic predicates** — classifications derived from the environment
+knowledge base and anchor lookups, not raw alert-field comparisons.
+
+| Pattern | Indicators | Leads | Action | Archetype |
+|---|---|---|---|---|
+| monitoring-probe fast-path | `source_classification: internal-monitoring-host` (via `environment/context/ip-ranges.md`) AND `username_classification: monitoring-pattern` (via `environment/context/identity-patterns.md`) AND `approved-monitoring-sources` anchor confirms the triple AND `cadence_shape: periodic` (see resolution below) AND `successful_login_after_60s: false` | source-classification, username-classification, authentication-history, approved-monitoring-sources anchor | resolve → benign, matched_archetype: monitoring-probe, matched_ticket_id: SEC-2024-001 | `archetypes/monitoring-probe/` |
+
+**Why a real query, not pure field matching:** `cadence_shape` and
+`successful_login_after_60s` cannot be read from the alert itself.
+They describe context that requires a historical + forward lookup via
+`authentication-history`. This is by design — an adversarial variant
+that reuses an approved source IP and username family but bursts
+multiple attempts (same identity, different shape) would trivially
+bypass a pure field-match screen; requiring the historical + forward
+query forces the fast path to care about cadence and follow-up
+success, both of which the anchor's confirmation shape depends on.
+
+**Indicator resolution:**
+
+- **source_classification** — map `data.srcip` to a classification
+  using `environment/context/ip-ranges.md`. Only
+  `internal-monitoring-host` counts. An unclassified internal IP is
+  not a known monitoring source.
+- **username_classification** — map `data.srcuser` to a pattern in
+  `environment/context/identity-patterns.md`. Monitoring-pattern
+  matches the sentinel list (`nagios`, `zabbix`, `prometheus`,
+  `healthcheck`, `monitorprobe`, `sensu`, `testuser`, `probe`).
+- **approved-monitoring-sources anchor** — query the sanction anchor
+  for the exact `(srcip, srcuser, target)` triple. See
+  `environment/operations/approved-monitoring-sources.md`.
+- **cadence_shape** — from `authentication-history` cluster stats over
+  a **1h backward window** scoped to the `(srcip, srcuser)` pair.
+  Fast-path passes when ALL of:
+  - `cluster_count ≥ 3` — at least three distinct probe attempts in
+    the window (fewer = insufficient evidence of periodicity, fall
+    through to the full loop)
+  - `max_cluster_size ≤ 3` — no single probe attempt has more than
+    three events; larger clusters are burst-shaped and disqualify
+    regardless of repetition
+  - (optional, strengthening) `stdev_cluster_gap_s / mean_cluster_gap_s ≤ 0.3` —
+    inter-cluster gaps tightly clustered around a mean; tolerates
+    any natural cadence (1m, 5m, 15m, 1h) without hard-coding an
+    expected interval
+  See `knowledge/common-investigation/leads/authentication-history/definition.md`
+  §"Cluster stats" for the clustering rule (10s retry gap).
+- **successful_login_after_60s** — from the same lead: was there any
+  successful SSH login (rule group `authentication_success`) from
+  this srcip in the 60 seconds after the alert. Must be **false**.
+
+All five indicators must pass for the screen to match. Any failure
+drops the investigation into the full loop.
+
+**Why cluster-count, not per-minute attempt count:** Legitimate
+probes use a wide range of natural cadences (1m production Nagios,
+5m default Nagios, 15m lightweight health checks, hourly audits).
+A fixed "≤N events per M minutes" indicator either excludes faster
+tools or admits slow brute-force attempts. Clustering events into
+probe attempts first, then checking repetition, captures the actual
+shape a monitoring probe leaves in a SIEM: multiple distinct probe
+attempts at regular intervals, each attempt 1-2 events (single
+connection or one natural retry). The first tick of a newly-started
+probe chain cannot pass (cluster_count=1), which is correct — a
+single sentinel-named attempt with no prior cadence is
+indistinguishable from an opportunistic stray and should route
+through the full loop.
+
+## Signature quirks
+
+- **`srcuser` is the attacker-supplied string, not a host identity.**
+  The rule fires *because the username doesn't exist*. Do not treat
+  `srcuser` as "the user who tried to log in" — it's whatever the
+  connecting party typed. Classification against identity-patterns is
+  pattern-matching the string, not looking up a real account.
+- **`srcip` may be a NAT egress, not the actual attacker.** External
+  IPs are often shared (cloud egress, proxy exit, CGNAT). When the
+  disposition depends on source reputation, cite the IP as the
+  connection source, not as "the attacker."
+- **5712 is the composite rule for brute-force.** Co-firing 5712 in
+  the same window is strong evidence for `external-bruteforce` but
+  not sufficient alone — 5712 can fire on internal brute-force too,
+  which is a different archetype space (operator typo recovery,
+  scanner misconfiguration). Cross-reference with source
+  classification.
+- **Success-after-failure is always severe, regardless of archetype.**
+  A 5710 followed within seconds by a 5501 / 5715 from the same
+  source is a potential compromise indicator. Even if the 5710 would
+  otherwise match a benign archetype, the successful follow-up takes
+  it out of that archetype and into escalation. Check
+  `authentication-history` explicitly for this.
+
+## Scope
+
+Standard for this signature: the alerting event and its immediate
+context (5-minute window before, 60-second window after). Anything
+beyond this requires escalation per the skill's stay-in-scope rule.
+  </playbook>
+  <context>
+---
+signature_id: wazuh-rule-5710
+name: SSH Invalid User
+severity: medium
+data_sources:
+  - auth-events
+created_at: 2024-11-15
+updated_at: 2026-04-08
+mitre:
+  tactics: Initial Access
+  techniques: T1110
+references: null
+related_signatures:
+  - wazuh-rule-5712
+base_rate:
+  benign_pct: null
+  sample_size: null
+---
+
+# Wazuh Rule 5710: SSH Invalid User
+
+## Signature Logic
+
+Wazuh built-in rule. The fundamental detected activity: **OpenSSH's `sshd`
+process logged an authentication attempt for a username that does not
+exist on the host.** OpenSSH writes this to `auth.log` (Debian/Ubuntu) or
+`/var/log/secure` (RHEL family) before any password or key check happens.
+
+The Wazuh sshd decoder parses the syslog line and extracts `srcip` and
+`srcuser`. The parent rule 5700 catches all sshd messages; rule 5710 is a
+child that matches the "Invalid user ..." pattern.
+
+**Log pattern:**
+```
+Invalid user <username> from <IP> port <port>
+```
+
+**Example:**
+```
+Nov 15 02:30:00 server sshd[12345]: Invalid user testuser from 10.0.1.50 port 54321
+```
+
+## Related Rules
+
+| Rule ID | Description | Relationship |
+|---------|-------------|--------------|
+| 5700 | sshd messages grouping | Parent rule (always fires first) |
+| 5501 | SSH successful login | Check for subsequent success (compromise indicator) |
+| 5715 | SSH authentication success | Check for subsequent success |
+| 5712 | SSH brute force attack | Composite rule that fires when 5710 repeats |
+
+## Threat & Motivation
+
+**What the activity is.** Someone connected to the SSH port and submitted
+a username that doesn't exist on the host. sshd logs this *before* the
+password/key check, so we know nothing about credentials yet — only that
+the username was wrong.
+
+**Why an attacker would do this.** Brute-force credential guessing
+(MITRE T1110). Attackers typically don't know what usernames exist on a
+target, so they iterate through common ones (`admin`, `root`, `oracle`,
+`postgres`, ...). Each invalid attempt produces this rule.
+
+**Concrete attacker scenarios:**
+- Mass scanning bot iterating a wordlist against SSH-exposed hosts
+- Targeted enumeration trying to discover real account names before
+  switching to password attacks
+- Credential stuffing using usernames leaked from a third-party breach
+
+**Legitimate reasons this fires.** Common in real environments:
+- Monitoring systems using a test credential to verify SSH availability
+- Users mistyping their username (often followed by a successful login)
+- Service accounts using stale credentials after a password/account rotation
+- Internal security scanners during approved assessment windows
+
+**Blast radius if real.** Each individual 5710 doesn't grant access — the
+auth check fails by definition. The risk is what *follows*: if the
+attacker eventually guesses a valid username and password, they get a
+shell on the host with that user's privileges.
+
+## Risk Indicators
+
+The risk on this signature comes from **two orthogonal axes**:
+
+### Axis 1 — Source trust
+
+Where did the connection originate?
+
+- Internal RFC1918 source IP, especially from a known monitoring,
+  scanner, or jumpbox subnet (lower risk)
+- External source IP, no prior history (higher risk)
+- External source IP that has fired other rules in the recent past
+  (higher risk)
+
+### Axis 2 — Pattern shape
+
+Does this look like a single misfire or like an attack in progress?
+
+- Single attempt, single username, especially a username that fits a
+  recognized monitoring or service-account pattern (lower risk)
+- Multiple attempts in a short window, multiple distinct usernames,
+  usernames from common attack wordlists (higher risk; rule 5712 may
+  also fire)
+- Followed by a successful login from the same source (higher risk —
+  potential compromise; check rules 5501 / 5715)
+
+A trusted source + single-shot pattern is the low-risk quadrant. An
+external source + high-volume / multi-username pattern is the high-risk
+quadrant.
+  </context>
+</signature-knowledge>
+
+<lead-catalog>
+  <lead name="ad-hoc" data_tags="[]">
+  </lead>
+  <lead name="authentication-history" data_tags="[auth-events]">
+Retrieve and characterize authentication patterns for a given entity
+(IP, user, or host) over a time window.
+  </lead>
+  <lead name="correlated-endpoint-events" data_tags="[endpoint-events]">
+Retrieve and characterize correlated endpoint events around an alert — events from the same endpoint entity (container, host, workstation) in a tight window around the alert timestamp, to surface co-firing signals (other detection rules tripping on the same entity at the same time) and the structural shape of each co-fire.
+  </lead>
+  <lead name="data-source-debug" data_tags="[]">
+Diagnose why a query returned suspect results. Determine whether the issue
+is data availability, field naming, query construction, or source health.
+  </lead>
+  <lead name="network-analysis" data_tags="[network-events]">
+Characterize network activity for a given entity — connections made
+or received, traffic patterns, and communication targets.
+  </lead>
+  <lead name="process-lineage" data_tags="[process-events]">
+Reconstruct the process tree for a suspicious process — its parent chain,
+child processes, and the context of execution.
+  </lead>
+  <lead name="source-reputation" data_tags="[asset-state, threat-intel]">
+Determine the identity and reputation of a source entity (IP, hostname,
+or domain). Is it a known internal asset, a known external service,
+or unrecognized?
+  </lead>
+  <lead name="user-analysis" data_tags="[identity-state, auth-events]">
+Classify the user account(s) involved in an alert against known
+patterns and determine what the account choice reveals about the
+actor's intent.
+  </lead>
+</lead-catalog>

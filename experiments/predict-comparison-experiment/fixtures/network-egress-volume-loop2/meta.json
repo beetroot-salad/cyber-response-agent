@@ -1,0 +1,8 @@
+{
+  "run_id": "network-egress-volume-loop2",
+  "signature_id": "wazuh-rule-100110",
+  "severity": 6,
+  "salt": "netwsalt000000001",
+  "created_at": "2026-04-25T22:04:11.000000+00:00",
+  "predict_loop_n": 2
+}

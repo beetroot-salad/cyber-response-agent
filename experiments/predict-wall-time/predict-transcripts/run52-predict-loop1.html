@@ -1,0 +1,771 @@
+<!doctype html><html><head><meta charset='utf-8'><title>57f1f657-bdd1-4029-bf29-2898616b7382.jsonl</title><style>
+body { font-family: ui-monospace, Menlo, Consolas, monospace; max-width: 1100px; margin: 1rem auto; padding: 0 1rem; background: #fafafa; color: #222; }
+h1 { font-size: 1.1rem; }
+.ts { color: #888; font-size: 0.75rem; margin-top: 0.6rem; }
+.blk { border-left: 3px solid #ccc; padding: 0.4rem 0.6rem; margin: 0.2rem 0; background: #fff; border-radius: 4px; }
+.blk pre { white-space: pre-wrap; word-break: break-word; margin: 0.4rem 0 0 0; font-size: 0.78rem; line-height: 1.35; max-height: 600px; overflow: auto; background: #f4f4f4; padding: 0.5rem; border-radius: 3px; }
+.blk summary { cursor: pointer; font-size: 0.82rem; }
+.blk .kind { display: inline-block; min-width: 8em; padding: 0 0.3em; border-radius: 3px; font-weight: 600; font-size: 0.72rem; margin-right: 0.4em; }
+.input .kind { background: #e3f2fd; color: #0d47a1; }
+.thinking { border-left-color: #9c27b0; } .thinking .kind { background: #f3e5f5; color: #4a148c; }
+.tool_use { border-left-color: #1976d2; } .tool_use .kind { background: #e3f2fd; color: #0d47a1; }
+.tool_result { border-left-color: #2e7d32; } .tool_result .kind { background: #e8f5e9; color: #1b5e20; }
+.tool_result_error { border-left-color: #c62828; } .tool_result_error .kind { background: #ffebee; color: #b71c1c; }
+.text { border-left-color: #ef6c00; } .text .kind { background: #fff3e0; color: #e65100; }
+.hdr { color: #555; }
+</style></head><body><h1>57f1f657-bdd1-4029-bf29-2898616b7382.jsonl — 25 events</h1><div class="ts">2026-05-03T10:03:18.600Z — input prompt (enqueue)</div>
+<details class="blk input" open><summary><span class="kind">input</span> <span class="hdr">subagent prompt</span></summary><pre>run_dir=/tmp/soc-agent-orchestrate-eval/20260503-100053-rule100001/runs/bbb914d8-c566-4040-a0dc-d9885c04067f
+signature_id=wazuh-rule-100001
+loop_n=1
+
+## Past-investigation priors
+(priors unavailable: KeyError: 'consult')
+
+## Environment memory
+
+&lt;environment-memory atom_id="wazuh-indexer-rule-100001-cofire-100002" stale="false" pre_window="false"&gt;
+When rule:100001 (Terminal shell in container) fires on a host running
+the wazuh-indexer image, the most common co-fire is the independent
+rule:100002 sshd dup2 cluster — same container.id, distinct process
+lineage. rule:100001 chain is typically `runc → bash` (host-side
+docker-exec); rule:100002 chain is `bash → sshd` (in-container service).
+Concurrent but structurally unrelated. Do NOT treat rule:100002 presence
+as refutation of benign docker-exec unless the rule:100002 events also
+show reverse-shell network geometry.
+&lt;/environment-memory&gt;
+
+
+&lt;alert-694b67c23a7b455a&gt;
+{
+  "agent": {
+    "name": "wazuh.manager",
+    "id": "000"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
+  "data": {
+    "output": "2026-05-03T10:00:02.198762631+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=containerd-shim command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=&lt;NA&gt; k8s_ns_name=&lt;NA&gt;",
+    "output_fields": {
+      "container": {
+        "image": {
+          "tag": "latest",
+          "repository": "cyber-response-agent_devcontainer-target-endpoint"
+        },
+        "name": "target-endpoint",
+        "id": "2a124a5fc6d9"
+      },
+      "evt": {
+        "arg": {
+          "flags": "EXE_WRITABLE|EXE_LOWER_LAYER"
+        },
+        "time": {
+          "iso8601": "1777802402198762752.000000"
+        },
+        "type": "execve"
+      },
+      "proc": {
+        "cmdline": "bash -c whoami",
+        "pname": "containerd-shim",
+        "name": "bash",
+        "tty": "34816",
+        "exepath": "/usr/bin/bash"
+      },
+      "k8s": {
+        "pod": {
+          "name": "null"
+        },
+        "ns": {
+          "name": "null"
+        }
+      },
+      "user": {
+        "uid": "0",
+        "loginuid": "-1",
+        "name": "root"
+      }
+    },
+    "hostname": "falco",
+    "rule": "Terminal shell in container",
+    "source": "syscall",
+    "time": "2026-05-03T10:00:02.198762631Z",
+    "priority": "Notice",
+    "tags": [
+      "T1059",
+      "container",
+      "maturity_stable",
+      "mitre_execution",
+      "shell"
+    ]
+  },
+  "rule": {
+    "firedtimes": 1,
+    "mail": true,
+    "level": 10,
+    "description": "Falco: Terminal shell spawned in container",
+    "groups": [
+      "falco",
+      "security",
+      "falco_process_anomaly",
+      "attack.execution"
+    ],
+    "id": "100001"
+  },
+  "decoder": {
+    "name": "json"
+  },
+  "input": {
+    "type": "log"
+  },
+  "@timestamp": "2026-05-03T10:00:26.388Z",
+  "location": "/var/log/falco/events.json",
+  "id": "1777802426.20382405",
+  "timestamp": "2026-05-03T10:00:26.388+0000"
+}
+&lt;/alert-694b67c23a7b455a&gt;
+
+&lt;investigation mode="predict"&gt;
+## CONTEXTUALIZE
+
+**Alert:** 1777802426.20382405 — wazuh-rule-100001
+**Key observables:**
+- data.output_fields.proc.name: bash
+- data.output_fields.proc.pname: containerd-shim
+- data.output_fields.container.id: 2a124a5fc6d9
+- agent.name: wazuh.manager
+- timestamp: 2026-05-03T10:00:26.388+0000
+**Playbook hypotheses:** ?image-entrypoint, ?runtime-process, ?underlying-host
+**Available leads:** shell-context, container-baseline, correlated-endpoint-events
+**Data environment:** reachable: host_query, playground_ticket, stub_ticket, wazuh; degraded: elastic (error: elasticsearch unreachable: &lt;urlopen error [Errno -2] Name or service not known&gt;)
+
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|process|unclassified-process|bash|
+v-002|process|runtime-exec-primitive|containerd-shim|
+v-003|identity|generic-account|root|kind=user
+v-004|endpoint|unclassified-endpoint|wazuh.manager|
+v-005|endpoint|unclassified-endpoint|target-endpoint|
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|spawned|v-002|v-001|2026-05-03T10:00:26.388Z|runtime-audit:falco (rule 100001)|
+e-002|executed|v-003|v-001|2026-05-03T10:00:26.388Z|siem-event:falco (rule 100001)|
+```
+&lt;/investigation&gt;
+
+&lt;signature-knowledge&gt;
+  &lt;playbook&gt;
+---
+signature_id: wazuh-rule-100001
+last_updated: 2026-04-09
+total_investigations: 0
+resolution_rate: null
+---
+
+# Investigation Playbook: Terminal shell in container (100001)
+
+This playbook is **steering, not procedure**. The investigation
+methodology — hypothesis discipline, lead severity, verification and
+scoping, escalation defaults, stop conditions — lives in the
+`investigate` skill. This file provides only what is signature-specific:
+
+- Field shortcuts so the agent doesn't query for what the alert already
+  carries
+- Named archetypes the agent should try to recognize, each defined in
+  `archetypes/`
+- A recommended starter lead order
+- Composition rules when multiple archetypes match
+- Quirks of this signature that aren't general investigation lessons
+
+## Field shortcuts
+
+| Field | JSON path |
+|---|---|
+| Parent process | `data.output_fields.proc.pname` |
+| Process ancestry | `data.output_fields.proc.aname[2..n]` |
+| Container image | `data.output_fields.container.image.repository` |
+
+`pname` is easy to misread as "process name" — it's the parent. `aname`
+is the ancestry walk for cases where `pname` itself is a shell or
+interpreter and you need to walk further up. Container image carries
+the registry prefix that the `container-baseline` lead keys on.
+
+`proc.tty != 0` is **always true** on every 100001 alert by
+construction of the upstream Falco rule. Do not treat it as a
+discriminating signal.
+
+## Hypothesis seeds
+
+The alert confirms a child shell `process` vertex with a `spawned`
+edge from its parent. The discriminating question is the parent's
+process-topology mechanism — three mutually-exclusive options, read
+directly from `pname` / `aname` in the alert:
+
+- **`?image-entrypoint`** — parent is the image's entrypoint / init
+  wrapper (`tini`, `dumb-init`, `s6`, supervisord, custom launcher).
+- **`?runtime-process`** — parent ancestry walks back to the
+  container's PID 1 entirely inside the pid namespace (long-running
+  app or its descendants).
+- **`?underlying-host`** — parent ancestry crosses the namespace
+  boundary at a runtime exec primitive (`runc`, `containerd-shim`,
+  `docker-exec`, `crictl`, `crio`, `oc exec`, kubelet exec path).
+
+Legitimacy (approved operator vs. RCE attacker spawning a shell from
+the same process) is a trust-anchor attribute on the confirmed
+parent, not a separate hypothesis. The `correlated-endpoint-events`
+lead runs regardless as evidence, captured in the composition rule
+below.
+
+## Contextualize leads
+
+These run in parallel at CONTEXTUALIZE time, before SCREEN/PREDICT —
+mechanically enriching the prologue vertices with classification +
+authoritative-record context that every downstream phase reads.
+
+- `endpoint-context`
+- `identity-context`
+
+`endpoint-context` runs once per endpoint vertex (the container/host the
+shell spawned in), deriving the classification label from the IP-ranges
+context file and attaching the CMDB record. `identity-context` runs once
+per identity vertex (the in-container user, e.g. `root`); on this rule
+the IdP record is typically empty since the user is a container runtime
+identity, not a directory-managed account, and `loginuid=-1` means no
+upstream login session is present. Classification still resolves (the
+identity-pattern file recognizes `root` as `container-runtime-uid0` or
+similar), which lets PREDICT discriminate authorized-runtime-exec
+from a privilege-escalation chain without dispatching a separate lead.
+
+## Starter lead order
+
+Most investigations resolve after the first two leads. The third only
+runs when the composition rules below need checking, or when the
+picture is still ambiguous after lead 2.
+
+1. **`shell-context`** — read parent process, cmdline, container image,
+   and user from the alert directly (no query needed). This alone is
+   enough to recognize most archetypes; the rest of the leads only
+   refine.
+2. **`container-baseline`** — query other 100001 events from the same
+   `container.image` over the last 7-30 days. Surfaces whether this
+   image has a history of shells from this parent (the benign-baseline
+   vs no-baseline discriminator) and whether the cadence matches a
+   recurring scheduled-probe shape.
+3. **`correlated-endpoint-events`** — query Falco rules 100000-100099 from
+   the same `container.id` in a ±15 minute window, especially 100002,
+   100006, 100007, and 100008. Required by the composition rules below.
+
+**Composite dispatch:** leads 2 and 3 share the same `container.id`
+and overlap in window. If lead 1 alone does not uniquely characterize
+the parent mechanism, dispatch leads 2 and 3 as a composite — one
+subagent, one expanded base query.
+
+## Composition rules
+
+When evidence matches multiple disposition shapes, the composition is
+the finding — escalate citing each matching shape, do not pick one.
+
+The composition that matters for this signature:
+
+**Any benign-shaped match + co-firing of related Falco rules in the
+same `container.id` window is severe regardless of the
+otherwise-benign shape.** If the `correlated-endpoint-events` lead
+returns any of the following from the same container within ±15
+minutes, escalate immediately and cite both the matched benign shape
+and the co-firing rule(s):
+
+- 100002 — Redirect STDOUT/STDIN to network connection
+- 100006 — Sensitive file read
+- 100007 — Drop and execute new binary
+- 100008 — Log clearing
+
+This applies even when an anchor confirms the benign match. A
+confirmed authorized-runtime-exec accompanied by 100007 in the same
+window is the strongest possible evidence that the authorized
+credentials were compromised — the anchor confirmation does not
+override the co-firing.
+
+## Benign action classes
+
+Commands whose body, executed in isolation, cannot damage or exfiltrate
+data. CONCLUDE consults this list at trust-root: when the alert's
+command body is on the list, every adversarial-archetype hypothesis is
+below `++`, and the investigation has reached `termination_category:
+trust-root` (no further upstream authority is reachable), disposition
+routes `inconclusive` rather than escalating to `true_positive` by
+exhaustion alone.
+
+The body is the argument to `bash -c`, `sh -c`, or the direct argv
+when no shell is invoked — strip the shell wrapper before comparing.
+
+- `whoami`
+- `id`
+- `hostname`
+- `uname` (any flags)
+- `pwd`
+- `ls` (any flags, any path)
+- `ps` (any flags)
+- `cat /etc/os-release`
+- `cat /proc/version`
+- `cat /etc/hostname`
+- `cat /etc/resolv.conf`
+- `df` (any flags)
+- `free` (any flags)
+- `uptime`
+- `date`
+- `env` (no arguments — listing env vars only, not setting them)
+
+Exhaustion-by-trust-root with a benign command body is a real failure
+mode: the agent runs out of upstream authority to consult and routes
+`true_positive` because no anchor closed the authorization contract.
+For a non-damaging command, that exhaustion is not evidence of
+compromise — it is the limit of available telemetry. Cite the
+short-circuit explicitly in the report rationale when it fires.
+
+## Signature quirks
+
+- **Falco only sees containers it watches.** Containers outside Falco's
+  configured scope are invisible to this rule. Absence of prior events
+  for an image *might* mean "first time" or *might* mean "Falco isn't
+  watching it." The `container-baseline` lead must distinguish via
+  Falco's coverage data, not by inferring from silence alone.
+- **The `user_known_shell_in_container_activities` macro suppresses
+  matches.** Anything on Falco's exception list never fires this rule,
+  so absence of an alert is not evidence the activity didn't happen.
+- **Container privileges are scoping evidence, not a discriminator.**
+  Privileged containers, Docker-socket mounts, host network, host PID
+  raise severity if the matched shape escalates, but they do not
+  change which shape matches. Capture them when escalating for
+  accurate blast-radius reporting.
+- **Apps shelling out is normal.** `pname=&lt;application binary&gt;` is not
+  a standalone red flag — `subprocess.run`, build hooks, image
+  processing wrappers, log rotation, and many other legitimate things
+  all produce shells whose parent is the application binary. The
+  discriminating signal is whether this image has done it *before*
+  (the baseline anchor on the runtime-process mechanism).
+
+## Scope
+
+Standard for this signature: the alerting Falco event, other Falco
+events from the same `container.id` in ±15 minutes, and other alerts
+from the same agent in the last 24 hours (the latter is provided by
+ticket-context at CONTEXTUALIZE — don't re-query). Anything beyond
+this requires escalation per the skill's stay-in-scope rule.
+  &lt;/playbook&gt;
+  &lt;context&gt;
+---
+signature_id: wazuh-rule-100001
+name: Terminal shell in container
+severity: medium
+data_sources:
+  - process-events
+created_at: 2026-04-08
+updated_at: 2026-04-08
+mitre:
+  tactics: Execution
+  techniques: T1059
+references:
+  - https://github.com/falcosecurity/rules/blob/main/rules/falco_rules.yaml
+related_signatures:
+  - wazuh-rule-100002
+  - wazuh-rule-100007
+base_rate:
+  benign_pct: null
+  sample_size: null
+---
+
+# Wazuh Rule 100001: Terminal shell in container
+
+## Signature Logic
+
+Wazuh rule 100001 is a wrapper around Falco's default rule
+**"Terminal shell in container"**. The condition Falco evaluates (paraphrased
+from the upstream rule):
+
+&gt; `spawned_process` event where `proc.name` is one of the known shell
+&gt; binaries (`bash`, `sh`, `ash`, `csh`, `ksh`, `zsh`, ...), the process has
+&gt; a controlling terminal (`proc.tty != 0`), and the process is running
+&gt; inside a container (`container.id != "host"`), excluding processes whose
+&gt; ancestor matches the `user_known_shell_in_container_activities` macro.
+
+So the fundamental detected activity is: **a shell binary started, with a
+TTY attached, inside a container's pid namespace.** This is a syscall-level
+event captured by Falco's eBPF probe — `execve` of a shell binary with a
+TTY fd open and a non-host `container.id`.
+
+The Wazuh side is a JSON localfile ingestion of `/var/log/falco/events.json`
+plus a rule chain: rule 100000 catches any Falco event, rule 100001 narrows
+to events whose `data.rule` matches this name. The Wazuh chain is in
+`playground/config/wazuh_cluster/rules/falco_rules.xml`. The upstream Falco
+rule definition (and any version drift) is in the falcosecurity/rules repo
+linked above.
+
+## Related Rules
+
+| Rule ID | Description | Relationship |
+|---------|-------------|--------------|
+| 100000 | Base Falco event | Parent rule (always fires first via `if_sid`) |
+| 100002 | Redirect STDOUT/STDIN to network connection | Stronger reverse-shell signal — verified firing in playground |
+| 100007 | Drop and execute new binary in container | Often correlated with post-exploitation — verified firing in playground |
+| 100020 | Falco high priority unclassified | Catch-all fallback (level 4 — specific rules win) |
+
+## Threat &amp; Motivation
+
+**What the activity is.** A shell binary executing with a TTY inside a
+container's pid namespace. At the OS level this is one syscall: `execve`
+of `/bin/bash` (or similar) by some parent process, with stdin/stdout
+attached to a pty.
+
+**Why an attacker would want this.** Containers are typically immutable
+execution units shipped with a fixed application surface. An interactive
+shell gives an attacker arbitrary command execution inside that surface,
+which is what they need for: enumeration of the container's filesystem and
+mounted secrets, lateral movement to other containers/services reachable
+from this one, persistence via dropped binaries or modified entrypoint
+scripts, and (if container privileges allow) escape to the host.
+
+**Concrete attacker scenarios:**
+- Web app RCE → shell in the app container → read mounted Kubernetes
+  service-account token → API server access
+- Compromised CI pipeline → shell in a build container → exfiltrate
+  source / signing keys
+- Container with the Docker socket mounted → shell → `docker run` a
+  privileged container → host root
+
+**Legitimate mechanisms this fires on.** All of these are real and common.
+The mechanism (parent process class) is what the alert telemetry directly
+records via `proc.pname`; the invoking actor (operator / pipeline /
+scheduler / probe / admin tooling) is *attribute on the parent vertex*,
+not the discriminator between mechanisms — same mechanism class can be
+driven by any of those actors and resolves through the same authorization
+anchor:
+- **Cross-namespace runtime exec primitive** — host-side client
+  (`docker`, `kubectl`, `crictl`, `oc`, kubelet exec path) crosses the
+  container namespace boundary; parent walks back to `runc` /
+  `containerd-shim` / `docker-exec` / `crio`. Drivers include
+  interactive operator sessions, CI/CD pipeline scripted steps,
+  scheduled probe sweeps, and admin tooling.
+- **Image entrypoint or init wrapper** — the image's own startup wrapper
+  (`tini`, `dumb-init`, `s6`, supervisord, custom launcher) invokes a
+  shell as part of container start.
+- **In-namespace application shell-out** — long-running application
+  process (or one of its descendants) shells out as part of normal work
+  (`subprocess.run(shell=True)`, `os.system()`, build hooks, image
+  processing wrappers, log rotation, scheduled health-check inside the
+  container).
+- **Probe invoked from inside the container** — Kubernetes liveness /
+  readiness / exec probe runs `sh -c "..."` against the container's own
+  pid namespace.
+
+**Blast radius if real.** Equal to the container's effective privileges:
+unprivileged sidecar &lt; typical app container &lt; container with mounted
+Docker socket / privileged flag / host-network / host-pid. Always check
+container privileges before assigning severity.
+
+## Risk Indicators
+
+The risk on this signature comes from **two orthogonal axes**:
+
+### Axis 1 — Privilege of the target
+
+How much harm could the attacker do if this *were* an attacker?
+
+- Container is privileged, has the Docker socket mounted, runs with host
+  network or host PID
+- Container hosts a critical workload (production database, payment
+  service, identity provider)
+- Container has secrets mounted or holds tokens with broad scope
+
+### Axis 2 — Abnormality vs baseline
+
+Does this look like *novel* activity or an *expected* pattern?
+
+- This image/container has fired this rule before, in a recurring pattern
+  (lower risk — likely a healthcheck, init script, or CI flow)
+- This image/container has *never* fired this rule before (higher risk)
+- The shell ancestry doesn't match any pattern we've seen for this image
+- Co-firing of related Falco rules (100002 network redirect, 100006
+  sensitive file read, 100007 drop-and-exec) in the same `container.id`
+  in a tight window
+
+A high-privilege target + novel/abnormal pattern is the high-risk
+quadrant. A low-privilege target + recurring expected pattern is the
+low-risk quadrant.
+
+&gt; **Note on "app spawned a shell":** parent being an application binary
+&gt; (web server, database, language runtime) is a *suspicion multiplier*,
+&gt; not a hard indicator. Many real applications shell out as part of normal
+&gt; work — `subprocess.run(..., shell=True)` from Python, `system()` calls
+&gt; from C, build/deploy/log-rotation hooks, ImageMagick and ffmpeg
+&gt; wrappers, anything that calls a binary via a shell. Treat
+&gt; `pname=&lt;app binary&gt;` as input to the abnormality axis (never seen this
+&gt; app spawn a shell before? higher risk; routinely spawns shells? lower
+&gt; risk), not as a standalone red flag.
+
+## Detection Gaps
+
+- Falco only sees containers it is configured to watch — host shells and
+  shells in containers outside Falco's scope are invisible.
+- A non-shell process executing arbitrary commands (e.g., `python -c`,
+  `perl -e`) does not match this rule.
+- Shells started via syscalls Falco doesn't instrument can be missed.
+- Falco's `user_known_shell_in_container_activities` macro suppresses
+  matches — anything that exception list covers is invisible to this
+  rule even if the activity is interesting.
+  &lt;/context&gt;
+&lt;/signature-knowledge&gt;
+
+&lt;lead-catalog&gt;
+  &lt;lead name="ad-hoc" data_tags="[]"&gt;
+  &lt;/lead&gt;
+  &lt;lead name="authentication-history" data_tags="[auth-events]"&gt;
+Retrieve and characterize authentication patterns for a given entity
+(IP, user, or host) over a time window.
+  &lt;/lead&gt;
+  &lt;lead name="correlated-endpoint-events" data_tags="[endpoint-events]"&gt;
+Retrieve and characterize correlated endpoint events around an alert — events from the same endpoint entity (container, host, workstation) in a tight window around the alert timestamp, to surface co-firing signals (other detection rules tripping on the same entity at the same time) and the structural shape of each co-fire.
+  &lt;/lead&gt;
+  &lt;lead name="data-source-debug" data_tags="[]"&gt;
+Diagnose why a query returned suspect results. Determine whether the issue
+is data availability, field naming, query construction, or source health.
+  &lt;/lead&gt;
+  &lt;lead name="network-analysis" data_tags="[network-events]"&gt;
+Characterize network activity for a given entity — connections made
+or received, traffic patterns, and communication targets.
+  &lt;/lead&gt;
+  &lt;lead name="process-lineage" data_tags="[process-events]"&gt;
+Reconstruct the process tree for a suspicious process — its parent chain,
+child processes, and the context of execution.
+  &lt;/lead&gt;
+  &lt;lead name="source-reputation" data_tags="[asset-state, threat-intel]"&gt;
+Determine the identity and reputation of a source entity (IP, hostname,
+or domain). Is it a known internal asset, a known external service,
+or unrecognized?
+  &lt;/lead&gt;
+  &lt;lead name="user-analysis" data_tags="[identity-state, auth-events]"&gt;
+Classify the user account(s) involved in an alert against known
+patterns and determine what the account choice reveals about the
+actor's intent.
+  &lt;/lead&gt;
+&lt;/lead-catalog&gt;</pre></details>
+<div class="ts">2026-05-03T10:03:51.688Z — thinking</div>
+<details class="blk thinking" open><summary><span class="kind">thinking</span> <span class="hdr">thinking</span></summary><pre>Let me analyze the alert and determine the shape for this prediction loop.
+
+**Alert summary:**
+- Rule 100001: Terminal shell in container
+- `proc.pname = containerd-shim` — parent is containerd-shim
+- `proc.cmdline = bash -c whoami`
+- `user.loginuid = -1` (no upstream login session)
+- Container: `target-endpoint` (cyber-response-agent_devcontainer-target-endpoint)
+- Command body: `whoami` — on the benign action classes list
+
+**Decision procedure:**
+
+1. `pname=containerd-shim` — this directly pins the mechanism to `?underlying-host` (parent ancestry crosses the namespace boundary at a runtime exec primitive). 
+
+The playbook confirms containerd-shim as an `?underlying-host` indicator, so the mechanism is locked in from the alert fields alone. The real question is whether this was an authorized operator action or something else — but I don't have baseline data yet, so I should enrich first before deciding on the shape.
+
+I need to pull `container-baseline` to see if shell execution from this parent is a known pattern, then check `correlated-endpoint-events` for any co-firing signals. Once I have that context, I can anchor on authorization through change-management or deploy-runs data.
+
+The command itself (`bash -c whoami`) is benign, so if I can establish trust-root, this routes to inconclusive rather than escalating. But first I need to determine which lead to prioritize — `shell-context` is already done, so `container-baseline` is the next critical signal. The mechanism is locked in by the alert context, so this is Shape A with authorization as the open question. I need to pull the container baseline and correlated endpoint events to see if this is a recurring pattern, then figure out what authority anchor applies—likely change-management or deploy-runs for a containerd-shim exec operation. Before I commit to the composite leads, let me check the Shape A example to make sure I'm framing the authorization gap correctly. I need to pin down the authorization contract — for the underlying host with containerd-shim, I'm looking at either `change-management` or `approved-operator-sessions` as the anchor. Let me pull up the shape-A example and the dense-schema to write out the checkpoint properly.</pre></details>
+<div class="ts">2026-05-03T10:03:51.694Z — tool_use Read</div>
+<details class="blk tool_use" open><summary><span class="kind">tool_use</span> <span class="hdr">Read /workspace/soc-agent/agents/predict/examples/shape-A.md</span></summary><pre>/workspace/soc-agent/agents/predict/examples/shape-A.md</pre></details>
+<div class="ts">2026-05-03T10:03:53.813Z — tool_result</div>
+<details class="blk tool_result" open><summary><span class="kind">tool_result</span> <span class="hdr">(10111 chars)</span></summary><pre>1	## Shape A — worked examples
+2	
+3	You've already decided Shape A: mechanism is pinned, authorization is the open question. The craft questions are **anchor selection** (which authority's record actually answers the predicate?), **predicate phrasing** (one observable check the anchor can categorically resolve), and **integrity bundling** (does the anchor's verdict cover identity-of-use too, or do you need a peer hypothesis?).
+4	
+5	The dense form for Shape A is one or more `:H` rows (metadata-only — id, name, attached_to, edge geometry, parent attrs, integrity_waived rationale, weight=null, status=active), per-hypothesis sub-blocks `:P h-{id}.preds` / `.refuts` / `.authz` (and `.attr_preds`, `.comparisons` when relevant), the matching `### story h-{id}` prose with sentence IDs (`s1.`, `s2.`, ...), and the always-required `:R routing` block. No `:L lead_preds`.
+6	
+7	### Example 1 — IAM policy modification by a service account
+8	
+9	**Alert:** cloud audit log shows `account-svc-deploy` modified IAM policy on `resource-bucket-prod` 2 minutes ago. Prologue carries `v-actor-svc-deploy`, `v-resource-bucket-prod`, and a `modified_policy` edge. The mechanism is fully pinned by the audit log itself — the API call, the actor identity, and the target resource are all in the alert. The open question is purely *was this change authorized*.
+10	
+11	**Anchor selection.** Candidates:
+12	- `iam-policy-history` — tells you what changed, not whether it was approved. Wrong question.
+13	- `change-management-tickets` — the org's record of approved changes. Authoritative for "was this change approved" *if* the org operates with change-management discipline.
+14	- `deploy-pipeline-runs` — the CI/CD record of deploys that touched this resource in the relevant window. Authoritative if the actor is a deploy-pipeline service account.
+15	
+16	`account-svc-deploy` is a deploy-pipeline identity by name and prior usage; `deploy-pipeline-runs` is the right anchor. The predicate becomes: *"a deploy-pipeline run owned by an authorized initiator executed against `resource-bucket-prod` in the ±5min window of the policy change, and the run's manifest declares an IAM-policy mutation on that resource"*.
+17	
+18	**Integrity bundling.** A deploy-run record names its initiator (the human or CI trigger that opened the run) — confirming the run answers both *was the change authorized* and *who actually did it*. No peer hypothesis needed; the contract's anchor closes both questions. Document the bundling with `integrity_waived` on the `:H` row.
+19	
+20	```
+21	predict loop=1 shape=A
+22	
+23	### story h-001
+24	s1. A deploy-pipeline run owned by an authorized initiator executed against `resource-bucket-prod` in a window bracketing the policy change.
+25	s2. The run's manifest declared the IAM-policy mutation as part of its planned actions.
+26	s3. The audit log records `account-svc-deploy` as the on-wire actor because deploy runs execute under that service identity.
+27	
+28	:H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+29	h-001|?deploy-pipeline-initiated-policy-change|v-resource-bucket-prod|modified_policy|deploy_run|deploy-pipeline-run-on-resource||"deploy-pipeline-runs records the initiator that opened the run; confirming the run authorizes the change and identifies the responsible actor in one resolution"|null|active
+30	
+31	:P h-001.preds [id|subject|kind|from_story|claim]
+32	p1|proposed_edge|absolute|s1|"deploy-pipeline-runs records an active run against `resource-bucket-prod` whose execution window contains the policy-change timestamp"
+33	p2|proposed_edge|absolute|s2|"the matching run's manifest declares an IAM-policy mutation on `resource-bucket-prod`"
+34	
+35	:P h-001.refuts [id|refutes|kind|claim]
+36	r1|p1|absolute|"no deploy-pipeline run's execution window contains the policy-change timestamp"
+37	r2|p2|absolute|"a matching run exists but its manifest does not declare an IAM-policy mutation on the resource"
+38	
+39	:P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+40	ac1|proposed|deploy-pipeline-runs|"an active deploy run with a matching execution window and a manifest declaring this resource's policy mutation, owned by an authorized initiator"|esc|esc
+41	
+42	:R routing
+43	selected_lead         deploy-pipeline-run-lookup
+44	composite_secondary   -
+45	override_data_source  -
+46	rationale             "anchor query against deploy-pipeline-runs resolves both authorization and identity-of-use in one trip; integrity_waived bundles the actor identification under the same record"
+47	```
+48	
+49	**Pitfalls:**
+50	- Don't add a peer `?stolen-credentials-modified-policy` — its predictions are just negations of h-001's, and its refutations duplicate h-001's. That's the invoker-identity anti-pattern; rule #32 will reject it. The authorization contract handles the adversarial case via `on_unauth=esc`.
+51	- Don't anchor against `change-management-tickets` instead of `deploy-pipeline-runs` for a deploy-service-account actor — change-management tickets cover human-initiated changes; pipeline runs are the closer record for automated actors. Pick the anchor whose grain matches the actor.
+52	- Don't omit `integrity_waived` when bundling integrity into the contract — it documents *why* one anchor closes both authorization and identity-of-use questions, which is the audit trail for skipping a peer hypothesis.
+53	
+54	---
+55	
+56	### Example 2 — privileged container exec under a build orchestrator
+57	
+58	**Alert:** container runtime auditor reports a privileged exec inside container `container-build-7f2a` with parent process `runc`, child cmdline `/bin/sh -c "tar -xzf …"`. Prologue carries `v-container-build-7f2a`, the parent-process vertex, and a `privileged_exec` edge. Loop 1 confirmed via process-lineage that `runc`'s grandparent is the build-orchestrator daemon on the host (`v-build-orchestrator`). Mechanism is pinned: a host-side build job crossed the container boundary via runc-exec, which is the orchestrator's documented execution model. The open question is whether *this specific exec* was an approved build run.
+59	
+60	**Anchor selection.** The build-orchestrator emits a `build-runs` log per job with the run-id, the initiating identity (a developer, a scheduled trigger, or a CI webhook), and the script body. Anchor against `build-runs` with a predicate matching execution-time window plus the script body the runc-exec invoked.
+61	
+62	**Integrity bundling.** Build-runs records the initiator — same pattern as Example 1. One hypothesis with the contract; no peer.
+63	
+64	```
+65	predict loop=2 shape=A
+66	
+67	### story h-002
+68	s1. The build orchestrator on the host opened a build run targeting `container-build-7f2a` and dispatched a script step that invoked the observed `tar -xzf …` command through runc-exec.
+69	s2. Loop 1 confirmed the parent runc's grandparent is the orchestrator daemon, which matches the orchestrator's documented exec path.
+70	s3. The build-runs log should record an active run whose dispatched script body matches the observed cmdline.
+71	
+72	:H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+73	h-002|?orchestrator-initiated-build-exec|v-container-build-7f2a|privileged_exec|build_run|build-orchestrator-run||"build-runs records the initiator that opened the run (developer, scheduled trigger, or CI webhook); confirming the run authorizes the exec and identifies the responsible actor in one resolution"|null|active
+74	
+75	:P h-002.preds [id|subject|kind|from_story|claim]
+76	p1|proposed_edge|absolute|s1|"build-runs records an active run targeting `container-build-7f2a` whose execution window contains the exec timestamp"
+77	p2|proposed_edge|absolute|s3|"the matching run's dispatched script body contains the observed cmdline as one of its steps"
+78	
+79	:P h-002.refuts [id|refutes|kind|claim]
+80	r1|p1|absolute|"no build run's execution window contains the exec timestamp"
+
+… [truncated, 2111 more chars]</pre></details>
+<div class="ts">2026-05-03T10:04:39.941Z — thinking</div>
+<details class="blk thinking" open><summary><span class="kind">thinking</span> <span class="hdr">thinking</span></summary><pre>Now I have enough context. Let me author the prediction.
+
+**Alert analysis:**
+- `pname=containerd-shim` → mechanism is `?underlying-host` (pinned directly from alert field)
+- `cmdline=bash -c whoami` → benign action class
+- `loginuid=-1` → no upstream login session
+- Container: `target-endpoint`
+
+**Shape decision:** Shape A — mechanism is pinned, authorization is open.
+
+**Hypothesis:** `?operator-runtime-exec-initiated` — a host-side exec via containerd-shim was authorized by an operator session or scheduled task.
+
+
+For authorization, I should anchor on `change-management` since that's where ticket or session records live, and in this playground environment `playground_ticket` is available. The predicate checks whether an active change ticket or scheduled task authorized this runtime exec into the container around the alert time. I also need to dispatch `container-baseline` and `correlated-endpoint-events` as composites per the playbook rules — the first always runs, and the second tells me if this is a recurring pattern. Since the actor is unknown (loginuid=-1), the closest authority for a containerd-shim parent process would be change-management records.
+
+But looking at the actual catalog, `change-management` isn't listed — only authentication-history, correlated-endpoint-events, data-source-debug, network-analysis, process-lineage, source-reputation, user-analysis, and ad-hoc are available. I need to pick from what's actually there instead of what I assumed would be there.
+
+Since the playbook mentions the playground_ticket and stub_ticket systems as the authoritative source for whether this exec was sanctioned, I'll use `change-management` as the anchor_kind and create a new lead called `change-management-lookup` to query the ticketing system for any open change or maintenance window that would authorize this runtime exec.
+
+For the secondary leads, I need to follow the playbook's ordering: `container-baseline` to check the 7-30 day history of events from this image and container, then `correlated-endpoint-events` to look for co-firing rules within ±15 minutes on the same container ID. These two should be dispatched as a composite since the composition rule depends on having the baseline data first. The authorization contract needs an actual record to verify against — in this environment, that's the change management system tied to the playground ticket. For a `whoami` command on the target-endpoint container, the benign action class would normally short-circuit, but since loginuid=-1 blocks identity tracing, I still need to validate through the authorization path. Let me map out the first hypothesis loop: the operator-runtime-exec was initiated...
+
+Actually, I'm seeing the containerd-shim parent process directly confirms this crossed the namespace boundary from the host side, which would show up in change management records as an authorized maintenance operation. The `whoami` command itself is benign, so if the authorization anchor comes back indeterminate and everything else stays below threshold, the investigation can resolve there.
+
+I'm predicting the change-management record will have an active ticket authorizing this runtime exec at the alert timestamp, but if no ticket exists covering this operation, that refutes the theory. For the investigation, I'll prioritize the change-management lookup as the primary lead since that's what settles authorization, with container-baseline and correlated-endpoint-events as supporting context. I'm applying a 7-day baseline window for the container-baseline scope to match the playbook requirements. I'll let gather-composite handle the per-lead window logic and just add a hint for the correlated-endpoint-events scope. Now I need to consider the `integrity_waived` field—since `loginuid=-1` means the invoking actor is structurally unknown, I should note that change-management's open ticket might identify the authorized initiator, which partially answers the integrity question. Let me write out the full output now.</pre></details>
+<div class="ts">2026-05-03T10:04:40.703Z — tool_use Bash</div>
+<details class="blk tool_use" open><summary><span class="kind">tool_use</span> <span class="hdr">Bash — Create checkpoint directory</span></summary><pre>mkdir -p /tmp/soc-agent-orchestrate-eval/20260503-100053-rule100001/runs/bbb914d8-c566-4040-a0dc-d9885c04067f/subagent_checkpoints</pre></details>
+<div class="ts">2026-05-03T10:04:41.465Z — tool_result</div>
+<details class="blk tool_result" open><summary><span class="kind">tool_result</span> <span class="hdr">(31 chars)</span></summary><pre>(Bash completed with no output)</pre></details>
+<div class="ts">2026-05-03T10:04:45.810Z — thinking</div>
+<details class="blk thinking" open><summary><span class="kind">thinking</span> <span class="hdr">thinking</span></summary><pre>Now let me write the prediction output and checkpoint.
+
+**Summary of my analysis:**
+
+- `pname=containerd-shim` pins the mechanism to `?underlying-host` (host-side runtime exec crossing namespace boundary)
+- Command body `bash -c whoami` is on the benign-action-class list
+- `loginuid=-1` means no upstream login session traceable
+- Shape A: mechanism pinned, authorization open
+- Hypothesis: `?operator-runtime-exec-initiated`
+- Authorization anchor: `change-management` (playground ticketing system)
+- Composite secondary leads: `container-baseline` + `correlated-endpoint-events`
+
+
+- Now I'm compiling the full prediction block with the confidence scores and structured output format.</pre></details>
+<div class="ts">2026-05-03T10:05:01.613Z — tool_use Write</div>
+<details class="blk tool_use" open><summary><span class="kind">tool_use</span> <span class="hdr">Write /tmp/soc-agent-orchestrate-eval/20260503-100053-rule100001/runs/bbb914d8-c566-4040-a0dc-d9885c04067f/subagent_checkpoints/predict-loop-1.yaml</span></summary><pre>file_path: /tmp/soc-agent-orchestrate-eval/20260503-100053-rule100001/runs/bbb914d8-c566-4040-a0dc-d9885c04067f/subagent_checkpoints/predict-loop-1.yaml
+---
+status: complete
+predict: |
+  predict loop=1 shape=A
+
+  ### story h-001
+  s1. The alert's proc.pname=containerd-shim directly names the parent as a host-side container runtime exec primitive, confirming the mechanism crosses the namespace boundary from the host — consistent with an operator or pipeline invoking docker exec or an equivalent tool against the target-endpoint container.
+  s2. A host-side exec via containerd-shim that is authorized would appear in the change-management or scheduled-ops ticket record as a sanctioned maintenance, health-check, or diagnostic operation covering the target-endpoint container at the alert timestamp.
+  s3. The command body is whoami, which is on the signature's benign-action-class list; if the authorization anchor returns indeterminate and no upstream authority is reachable, the investigation reaches trust-root and routes inconclusive rather than true-positive per the playbook's benign-action short-circuit.
+
+  :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+  h-001|?operator-runtime-exec-initiated|v-001|spawned|process|runtime-exec-primitive|kind=containerd-shim|"change-management ticket covers both whether the exec was authorized and which operator or pipeline opened the session; loginuid=-1 means no login-session identity, but the ticket record names the requestor"|null|active
+
+  :P h-001.preds [id|subject|kind|from_story|claim]
+  p1|proposed_edge|absolute|s2|"change-management records an active ticket authorizing runtime exec into the target-endpoint container whose window contains the alert timestamp"
+
+  :P h-001.refuts [id|refutes|kind|claim]
+  r1|p1|absolute|"no change-management ticket covers a runtime exec into target-endpoint at the alert timestamp"
+
+  :P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+  ac1|proposed|change-management|"an active ticket authorizing exec into target-endpoint container exists and its scope window contains the alert timestamp"|esc|esc
+
+  :R routing
+  selected_lead         change-management-lookup
+  composite_secondary   container-baseline,correlated-endpoint-events
+  override_data_source  -
+  rationale             "pname=containerd-shim pins mechanism; authorization anchor settles disposition; container-baseline and correlated-endpoint-events run per playbook composition rules"
+
+  :R routing.lead_hints [lead|hint]
+  container-baseline|"query rule 100001 events for image cyber-response-agent_devcontainer-target-endpoint over the last 7 days to establish whether containerd-shim-spawned shells are a recurring baseline for this image"
+  correlated-endpoint-events|"query Falco rules 100000-100099 for container.id=2a124a5fc6d9 in a 15-minute window around the alert timestamp; flag any co-fire of rules 100002, 100006, 100007, or 100008"
+
+  :R routing.scope_override [key|value]
+  window_hours|168
+  anchor|alert
+</pre></details>
+<div class="ts">2026-05-03T10:05:02.547Z — tool_result</div>
+<details class="blk tool_result" open><summary><span class="kind">tool_result</span> <span class="hdr">(171 chars)</span></summary><pre>File created successfully at: /tmp/soc-agent-orchestrate-eval/20260503-100053-rule100001/runs/bbb914d8-c566-4040-a0dc-d9885c04067f/subagent_checkpoints/predict-loop-1.yaml</pre></details>
+<div class="ts">2026-05-03T10:05:08.406Z — assistant text</div>
+<details class="blk text" open><summary><span class="kind">text</span> <span class="hdr">assistant text</span></summary><pre>predict loop=1 shape=A
+
+### story h-001
+s1. The alert's proc.pname=containerd-shim directly names the parent as a host-side container runtime exec primitive, confirming the mechanism crosses the namespace boundary from the host — consistent with an operator or pipeline invoking docker exec or an equivalent tool against the target-endpoint container.
+s2. A host-side exec via containerd-shim that is authorized would appear in the change-management or scheduled-ops ticket record as a sanctioned maintenance, health-check, or diagnostic operation covering the target-endpoint container at the alert timestamp.
+s3. The command body is whoami, which is on the signature's benign-action-class list; if the authorization anchor returns indeterminate and no upstream authority is reachable, the investigation reaches trust-root and routes inconclusive rather than true-positive per the playbook's benign-action short-circuit.
+
+:H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+h-001|?operator-runtime-exec-initiated|v-001|spawned|process|runtime-exec-primitive|kind=containerd-shim|"change-management ticket covers both whether the exec was authorized and which operator or pipeline opened the session; loginuid=-1 means no login-session identity, but the ticket record names the requestor"|null|active
+
+:P h-001.preds [id|subject|kind|from_story|claim]
+p1|proposed_edge|absolute|s2|"change-management records an active ticket authorizing runtime exec into the target-endpoint container whose window contains the alert timestamp"
+
+:P h-001.refuts [id|refutes|kind|claim]
+r1|p1|absolute|"no change-management ticket covers a runtime exec into target-endpoint at the alert timestamp"
+
+:P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|proposed|change-management|"an active ticket authorizing exec into target-endpoint container exists and its scope window contains the alert timestamp"|esc|esc
+
+:R routing
+selected_lead         change-management-lookup
+composite_secondary   container-baseline,correlated-endpoint-events
+override_data_source  -
+rationale             "pname=containerd-shim pins mechanism; authorization anchor settles disposition; container-baseline and correlated-endpoint-events run per playbook composition rules"
+
+:R routing.lead_hints [lead|hint]
+container-baseline|"query rule 100001 events for image cyber-response-agent_devcontainer-target-endpoint over the last 7 days to establish whether containerd-shim-spawned shells are a recurring baseline for this image"
+correlated-endpoint-events|"query Falco rules 100000-100099 for container.id=2a124a5fc6d9 in a 15-minute window around the alert timestamp; flag any co-fire of rules 100002, 100006, 100007, or 100008"
+
+:R routing.scope_override [key|value]
+window_hours|168
+anchor|alert</pre></details></body></html>

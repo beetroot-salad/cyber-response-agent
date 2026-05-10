@@ -1,0 +1,68 @@
+{
+  "shape-a-runc-exec": {
+    "default": {
+      "n_total": 1,
+      "n_ok": 1,
+      "wall_s_mean": 263.84,
+      "wall_s_stdev": null,
+      "wall_s_min": 263.84,
+      "wall_s_max": 263.84,
+      "stdout_chars_mean": 3532,
+      "errors": []
+    },
+    "effort-low": {
+      "n_total": 3,
+      "n_ok": 3,
+      "wall_s_mean": 92.54,
+      "wall_s_stdev": 24.82,
+      "wall_s_min": 64.01,
+      "wall_s_max": 109.14,
+      "stdout_chars_mean": 3699.7,
+      "errors": []
+    }
+  },
+  "shape-i-monitoring-probe": {
+    "default": {
+      "n_total": 1,
+      "n_ok": 1,
+      "wall_s_mean": 149.01,
+      "wall_s_stdev": null,
+      "wall_s_min": 149.01,
+      "wall_s_max": 149.01,
+      "stdout_chars_mean": 1624,
+      "errors": []
+    },
+    "effort-low": {
+      "n_total": 3,
+      "n_ok": 3,
+      "wall_s_mean": 36.93,
+      "wall_s_stdev": 3.26,
+      "wall_s_min": 33.26,
+      "wall_s_max": 39.49,
+      "stdout_chars_mean": 1171,
+      "errors": []
+    }
+  },
+  "shape-i-bait-5710": {
+    "default": {
+      "n_total": 1,
+      "n_ok": 1,
+      "wall_s_mean": 228.08,
+      "wall_s_stdev": null,
+      "wall_s_min": 228.08,
+      "wall_s_max": 228.08,
+      "stdout_chars_mean": 1974,
+      "errors": []
+    },
+    "effort-low": {
+      "n_total": 3,
+      "n_ok": 3,
+      "wall_s_mean": 41.99,
+      "wall_s_stdev": 11.41,
+      "wall_s_min": 30.31,
+      "wall_s_max": 53.1,
+      "stdout_chars_mean": 1439,
+      "errors": []
+    }
+  }
+}

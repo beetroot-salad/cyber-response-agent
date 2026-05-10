@@ -1,0 +1,457 @@
+run_dir=/tmp/h-validation-j9rxbs1f/shape-a-runc-exec__effort-low__rep1
+signature_id=wazuh-rule-100001
+loop_n=1
+
+## Past-investigation priors
+
+Prologue topology — same-signature scope, tier 3: no match, 0 cases matched. Vertex types: container, process. Edge relations: running_in, spawned.
+
+Priors at this topology are sparse — scaffold from first principles per PREDICT's ASSESS gate.
+
+## Environment memory
+
+<environment-memory atom_id="wazuh-indexer-rule-100001-cofire-100002" stale="false" pre_window="false">
+When rule:100001 (Terminal shell in container) fires on a host running
+the wazuh-indexer image, the most common co-fire is the independent
+rule:100002 sshd dup2 cluster — same container.id, distinct process
+lineage. rule:100001 chain is typically `runc → bash` (host-side
+docker-exec); rule:100002 chain is `bash → sshd` (in-container service).
+Concurrent but structurally unrelated. Do NOT treat rule:100002 presence
+as refutation of benign docker-exec unless the rule:100002 events also
+show reverse-shell network geometry.
+</environment-memory>
+
+
+<alert-shapeasaalt000000>
+{
+  "agent": {
+    "ip": "172.22.0.13",
+    "name": "target-endpoint",
+    "id": "002"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
+  "data": {
+    "output": "19:25:01.512345678: Notice A shell was spawned in a container with an attached terminal (evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=runc command=bash terminal=34816 exe_flags=<NA> container_id=7f9cabcd1234 container_image=payments-api container_image_tag=v1.4.2 container_name=payments-api-7f9c k8s_ns=default k8s_pod_name=payments-api-7f9c-xz4lm)",
+    "proc": {
+      "name": "bash",
+      "cmdline": "bash",
+      "pname": "runc:[2:INIT]",
+      "aname": [
+        "runc:[2:INIT]",
+        "runc",
+        "containerd-shim-runc-v2",
+        "containerd",
+        "systemd"
+      ],
+      "tty": 34816
+    },
+    "container": {
+      "id": "7f9cabcd1234",
+      "image": "payments-api:v1.4.2",
+      "name": "payments-api-7f9c"
+    },
+    "k8s": {
+      "namespace": "default",
+      "pod_name": "payments-api-7f9c-xz4lm"
+    },
+    "user": {
+      "name": "root",
+      "uid": 0
+    }
+  },
+  "rule": {
+    "id": "100001",
+    "level": 7,
+    "description": "Terminal shell in container"
+  },
+  "timestamp": "2026-04-22T19:25:01.512+0000"
+}
+</alert-shapeasaalt000000>
+
+<investigation mode="predict">
+## CONTEXTUALIZE
+
+**Alert:** 1777230301.5 — wazuh-rule-100001 (Terminal shell in container)
+**Key observables:**
+- proc.name: bash
+- proc.pname: runc:[2:INIT]
+- proc.aname: [runc, containerd-shim-runc-v2, containerd, systemd]
+- container.image: payments-api:v1.4.2
+- k8s.pod_name: payments-api-7f9c-xz4lm
+- user.name: root (uid=0)
+- timestamp: 2026-04-22T19:25:01.512+0000
+**Playbook hypotheses:** ?runtime-exec-from-host, ?in-container-init-launcher
+**Available leads:** ancestry-chain, change-management, deploy-runs, container-image-audit
+**Archetype matches:**
+- ci-pipeline-exec — candidate — parent is `runc:[2:INIT]` indicating a host-side exec primitive crossed the namespace boundary; CI/CD pipelines typically invoke `kubectl exec` or equivalent which lands as runc exec from host side.
+- operator-runtime-debug — candidate — pattern of `runc → bash` with tty attached matches an interactive operator debug session initiated via `kubectl exec -it`.
+- post-exploit-interactive — candidate — compromised host actor using `docker exec` / `crictl exec` / direct runc exec produces the same exec-chain shape.
+**Adversarial archetype:** post-exploit-interactive — the worst-case outcome; a compromised host actor landed a shell inside the container for lateral movement or data staging. The exec-chain shape is identical to legitimate operator/CI invocation — only the authorization verdict differs.
+**Data environment:** reachable: host_query, wazuh, playground_ticket; degraded: elastic
+
+```yaml
+prologue:
+  vertices:
+  - id: v-001
+    type: process
+    classification: container-shell
+    identifier: bash
+    attributes:
+      tty: 34816
+      uid: 0
+  - id: v-002
+    type: container
+    classification: application-container
+    identifier: payments-api-7f9c
+    attributes:
+      image: payments-api:v1.4.2
+      k8s_pod: payments-api-7f9c-xz4lm
+  - id: v-003
+    type: process
+    classification: runtime-exec-primitive
+    identifier: runc:[2:INIT]
+  edges:
+  - id: e-001
+    relation: spawned
+    source_vertex: v-003
+    target_vertex: v-001
+    when:
+      timestamp: '2026-04-22T19:25:01.512Z'
+    attributes:
+      namespace_boundary: host-to-container
+    authority:
+      kind: runtime-audit
+      source: Falco (rule 100001)
+  - id: e-002
+    relation: running_in
+    source_vertex: v-001
+    target_vertex: v-002
+    authority:
+      kind: runtime-audit
+      source: Falco (rule 100001)
+```
+</investigation>
+
+<signature-knowledge>
+  <playbook>
+---
+signature_id: wazuh-rule-100001
+last_updated: 2026-04-09
+total_investigations: 0
+resolution_rate: null
+---
+
+# Investigation Playbook: Terminal shell in container (100001)
+
+This playbook is **steering, not procedure**. The investigation
+methodology — hypothesis discipline, lead severity, verification and
+scoping, escalation defaults, stop conditions — lives in the
+`investigate` skill. This file provides only what is signature-specific:
+
+- Field shortcuts so the agent doesn't query for what the alert already
+  carries
+- Named archetypes the agent should try to recognize, each defined in
+  `archetypes/`
+- A recommended starter lead order
+- Composition rules when multiple archetypes match
+- Quirks of this signature that aren't general investigation lessons
+
+## Field shortcuts
+
+| Field | JSON path |
+|---|---|
+| Parent process | `data.output_fields.proc.pname` |
+| Process ancestry | `data.output_fields.proc.aname[2..n]` |
+| Container image | `data.output_fields.container.image.repository` |
+
+`pname` is easy to misread as "process name" — it's the parent. `aname`
+is the ancestry walk for cases where `pname` itself is a shell or
+interpreter and you need to walk further up. Container image carries
+the registry prefix that the `container-baseline` lead keys on.
+
+`proc.tty != 0` is **always true** on every 100001 alert by
+construction of the upstream Falco rule. Do not treat it as a
+discriminating signal.
+
+## Hypothesis seeds
+
+The alert confirms a child shell `process` vertex with a `spawned`
+edge from its parent. The discriminating question is the parent's
+process-topology mechanism — three mutually-exclusive options, read
+directly from `pname` / `aname` in the alert:
+
+- **`?image-entrypoint`** — parent is the image's entrypoint / init
+  wrapper (`tini`, `dumb-init`, `s6`, supervisord, custom launcher).
+- **`?runtime-process`** — parent ancestry walks back to the
+  container's PID 1 entirely inside the pid namespace (long-running
+  app or its descendants).
+- **`?underlying-host`** — parent ancestry crosses the namespace
+  boundary at a runtime exec primitive (`runc`, `containerd-shim`,
+  `docker-exec`, `crictl`, `crio`, `oc exec`, kubelet exec path).
+
+Legitimacy (approved operator vs. RCE attacker spawning a shell from
+the same process) is a trust-anchor attribute on the confirmed
+parent, not a separate hypothesis. The `correlated-endpoint-events`
+lead runs regardless as evidence, captured in the composition rule
+below.
+
+## Starter lead order
+
+Most investigations resolve after the first two leads. The third only
+runs when the composition rules below need checking, or when the
+picture is still ambiguous after lead 2.
+
+1. **`shell-context`** — read parent process, cmdline, container image,
+   and user from the alert directly (no query needed). This alone is
+   enough to recognize most archetypes; the rest of the leads only
+   refine.
+2. **`container-baseline`** — query other 100001 events from the same
+   `container.image` over the last 7-30 days. Surfaces whether this
+   image has a history of shells from this parent (the
+   `app-spawned-shell` vs `post-exploit-interactive` discriminator) and
+   whether the cadence matches a probe (`k8s-exec-probe`).
+3. **`correlated-endpoint-events`** — query Falco rules 100000-100099 from
+   the same `container.id` in a ±15 minute window, especially 100002,
+   100006, 100007, and 100008. Required by the composition rules below.
+
+**Composite dispatch:** leads 2 and 3 share the same `container.id`
+and overlap in window. If lead 1 alone does not uniquely match an
+archetype, dispatch leads 2 and 3 as a composite — one subagent, one
+expanded base query.
+
+## Composition rules
+
+When evidence matches multiple archetypes, the composition is the
+finding — escalate with all matching archetypes named, do not pick one.
+
+The composition that matters for this signature:
+
+**Any benign archetype + co-firing of related Falco rules in the same
+`container.id` window is severe regardless of the otherwise-benign
+match.** If the `correlated-endpoint-events` lead returns any of the
+following from the same container within ±15 minutes, escalate
+immediately and cite both the matched benign archetype and the
+co-firing rule(s):
+
+- 100002 — Redirect STDOUT/STDIN to network connection
+- 100006 — Sensitive file read
+- 100007 — Drop and execute new binary
+- 100008 — Log clearing
+
+This applies even when an anchor confirms the benign match. A
+confirmed `operator-runtime-debug` accompanied by 100007 in the same
+window is the strongest possible evidence that operator credentials
+were compromised — the anchor confirmation does not override the
+co-firing.
+
+## Signature quirks
+
+- **Falco only sees containers it watches.** Containers outside Falco's
+  configured scope are invisible to this rule. Absence of prior events
+  for an image *might* mean "first time" or *might* mean "Falco isn't
+  watching it." The `container-baseline` lead must distinguish via
+  Falco's coverage data, not by inferring from silence alone.
+- **The `user_known_shell_in_container_activities` macro suppresses
+  matches.** Anything on Falco's exception list never fires this rule,
+  so absence of an alert is not evidence the activity didn't happen.
+- **Container privileges are scoping evidence, not a discriminator.**
+  Privileged containers, Docker-socket mounts, host network, host PID
+  raise severity if the matched archetype escalates, but they do not
+  change which archetype matches. Capture them when escalating for
+  accurate blast-radius reporting.
+- **Apps shelling out is normal.** `pname=<application binary>` is not
+  a standalone red flag — `subprocess.run`, build hooks, image
+  processing wrappers, log rotation, and many other legitimate things
+  all produce app-spawned shells. The discriminating signal is whether
+  this image has done it *before* (the baseline anchor on
+  `app-spawned-shell`).
+
+## Scope
+
+Standard for this signature: the alerting Falco event, other Falco
+events from the same `container.id` in ±15 minutes, and other alerts
+from the same agent in the last 24 hours (the latter is provided by
+ticket-context at CONTEXTUALIZE — don't re-query). Anything beyond
+this requires escalation per the skill's stay-in-scope rule.
+  </playbook>
+  <context>
+---
+signature_id: wazuh-rule-100001
+name: Terminal shell in container
+severity: medium
+data_sources:
+  - process-events
+created_at: 2026-04-08
+updated_at: 2026-04-08
+mitre:
+  tactics: Execution
+  techniques: T1059
+references:
+  - https://github.com/falcosecurity/rules/blob/main/rules/falco_rules.yaml
+related_signatures:
+  - wazuh-rule-100002
+  - wazuh-rule-100007
+base_rate:
+  benign_pct: null
+  sample_size: null
+---
+
+# Wazuh Rule 100001: Terminal shell in container
+
+## Signature Logic
+
+Wazuh rule 100001 is a wrapper around Falco's default rule
+**"Terminal shell in container"**. The condition Falco evaluates (paraphrased
+from the upstream rule):
+
+> `spawned_process` event where `proc.name` is one of the known shell
+> binaries (`bash`, `sh`, `ash`, `csh`, `ksh`, `zsh`, ...), the process has
+> a controlling terminal (`proc.tty != 0`), and the process is running
+> inside a container (`container.id != "host"`), excluding processes whose
+> ancestor matches the `user_known_shell_in_container_activities` macro.
+
+So the fundamental detected activity is: **a shell binary started, with a
+TTY attached, inside a container's pid namespace.** This is a syscall-level
+event captured by Falco's eBPF probe — `execve` of a shell binary with a
+TTY fd open and a non-host `container.id`.
+
+The Wazuh side is a JSON localfile ingestion of `/var/log/falco/events.json`
+plus a rule chain: rule 100000 catches any Falco event, rule 100001 narrows
+to events whose `data.rule` matches this name. The Wazuh chain is in
+`playground/config/wazuh_cluster/rules/falco_rules.xml`. The upstream Falco
+rule definition (and any version drift) is in the falcosecurity/rules repo
+linked above.
+
+## Related Rules
+
+| Rule ID | Description | Relationship |
+|---------|-------------|--------------|
+| 100000 | Base Falco event | Parent rule (always fires first via `if_sid`) |
+| 100002 | Redirect STDOUT/STDIN to network connection | Stronger reverse-shell signal — verified firing in playground |
+| 100007 | Drop and execute new binary in container | Often correlated with post-exploitation — verified firing in playground |
+| 100020 | Falco high priority unclassified | Catch-all fallback (level 4 — specific rules win) |
+
+## Threat & Motivation
+
+**What the activity is.** A shell binary executing with a TTY inside a
+container's pid namespace. At the OS level this is one syscall: `execve`
+of `/bin/bash` (or similar) by some parent process, with stdin/stdout
+attached to a pty.
+
+**Why an attacker would want this.** Containers are typically immutable
+execution units shipped with a fixed application surface. An interactive
+shell gives an attacker arbitrary command execution inside that surface,
+which is what they need for: enumeration of the container's filesystem and
+mounted secrets, lateral movement to other containers/services reachable
+from this one, persistence via dropped binaries or modified entrypoint
+scripts, and (if container privileges allow) escape to the host.
+
+**Concrete attacker scenarios:**
+- Web app RCE → shell in the app container → read mounted Kubernetes
+  service-account token → API server access
+- Compromised CI pipeline → shell in a build container → exfiltrate
+  source / signing keys
+- Container with the Docker socket mounted → shell → `docker run` a
+  privileged container → host root
+
+**Legitimate reasons this fires.** All of these are real and common:
+- Operator debugging via `docker exec` / `kubectl exec` / `oc exec`
+- CI/CD pipelines exec'ing into containers to run scripted commands
+- Healthcheck and readiness probes that invoke `sh -c "..."`
+- Container entrypoints or init scripts that themselves call a shell
+- Application code that calls `os.system()` / `subprocess.run(shell=True)`
+  or otherwise shells out as part of normal operation
+
+**Blast radius if real.** Equal to the container's effective privileges:
+unprivileged sidecar < typical app container < container with mounted
+Docker socket / privileged flag / host-network / host-pid. Always check
+container privileges before assigning severity.
+
+## Risk Indicators
+
+The risk on this signature comes from **two orthogonal axes**:
+
+### Axis 1 — Privilege of the target
+
+How much harm could the attacker do if this *were* an attacker?
+
+- Container is privileged, has the Docker socket mounted, runs with host
+  network or host PID
+- Container hosts a critical workload (production database, payment
+  service, identity provider)
+- Container has secrets mounted or holds tokens with broad scope
+
+### Axis 2 — Abnormality vs baseline
+
+Does this look like *novel* activity or an *expected* pattern?
+
+- This image/container has fired this rule before, in a recurring pattern
+  (lower risk — likely a healthcheck, init script, or CI flow)
+- This image/container has *never* fired this rule before (higher risk)
+- The shell ancestry doesn't match any pattern we've seen for this image
+- Co-firing of related Falco rules (100002 network redirect, 100006
+  sensitive file read, 100007 drop-and-exec) in the same `container.id`
+  in a tight window
+
+A high-privilege target + novel/abnormal pattern is the high-risk
+quadrant. A low-privilege target + recurring expected pattern is the
+low-risk quadrant.
+
+> **Note on "app spawned a shell":** parent being an application binary
+> (web server, database, language runtime) is a *suspicion multiplier*,
+> not a hard indicator. Many real applications shell out as part of normal
+> work — `subprocess.run(..., shell=True)` from Python, `system()` calls
+> from C, build/deploy/log-rotation hooks, ImageMagick and ffmpeg
+> wrappers, anything that calls a binary via a shell. Treat
+> `pname=<app binary>` as input to the abnormality axis (never seen this
+> app spawn a shell before? higher risk; routinely spawns shells? lower
+> risk), not as a standalone red flag.
+
+## Detection Gaps
+
+- Falco only sees containers it is configured to watch — host shells and
+  shells in containers outside Falco's scope are invisible.
+- A non-shell process executing arbitrary commands (e.g., `python -c`,
+  `perl -e`) does not match this rule.
+- Shells started via syscalls Falco doesn't instrument can be missed.
+- Falco's `user_known_shell_in_container_activities` macro suppresses
+  matches — anything that exception list covers is invisible to this
+  rule even if the activity is interesting.
+  </context>
+</signature-knowledge>
+
+<lead-catalog>
+  <lead name="ad-hoc" data_tags="[]">
+  </lead>
+  <lead name="authentication-history" data_tags="[auth-events]">
+Retrieve and characterize authentication patterns for a given entity
+(IP, user, or host) over a time window.
+  </lead>
+  <lead name="correlated-endpoint-events" data_tags="[endpoint-events]">
+Retrieve and characterize correlated endpoint events around an alert — events from the same endpoint entity (container, host, workstation) in a tight window around the alert timestamp, to surface co-firing signals (other detection rules tripping on the same entity at the same time) and the structural shape of each co-fire.
+  </lead>
+  <lead name="data-source-debug" data_tags="[]">
+Diagnose why a query returned suspect results. Determine whether the issue
+is data availability, field naming, query construction, or source health.
+  </lead>
+  <lead name="network-analysis" data_tags="[network-events]">
+Characterize network activity for a given entity — connections made
+or received, traffic patterns, and communication targets.
+  </lead>
+  <lead name="process-lineage" data_tags="[process-events]">
+Reconstruct the process tree for a suspicious process — its parent chain,
+child processes, and the context of execution.
+  </lead>
+  <lead name="source-reputation" data_tags="[asset-state, threat-intel]">
+Determine the identity and reputation of a source entity (IP, hostname,
+or domain). Is it a known internal asset, a known external service,
+or unrecognized?
+  </lead>
+  <lead name="user-analysis" data_tags="[identity-state, auth-events]">
+Classify the user account(s) involved in an alert against known
+patterns and determine what the account choice reveals about the
+actor's intent.
+  </lead>
+</lead-catalog>

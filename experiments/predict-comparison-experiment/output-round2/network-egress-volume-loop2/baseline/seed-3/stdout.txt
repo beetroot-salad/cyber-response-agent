@@ -1,0 +1,58 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?ci-artifact-upload"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: opened_tls_connection
+        parent_vertex: {type: ci_job, classification: ci-orchestrator-scheduled-upload-job}
+      story: |
+        The CI orchestrator scheduled or triggered an upload job on ci-runner-04
+        that staged build artifacts to cdn.staticfiles.example.org via a sustained
+        TLS connection. The upload process produced the observed outbound-asymmetric
+        byte ratio — large outbound payload, small inbound acknowledgment — which
+        is the expected geometry for artifact staging to a CDN endpoint. The
+        destination is novel in the host's 30-day Zeek baseline, consistent with
+        a newly provisioned CDN target for a project. Loop 1 found no CI
+        orchestrator event in the baseline correlation pass; the authorization
+        contract resolves whether a job record exists in the orchestrator that
+        accounts for this connection window and destination.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "a CI orchestrator job record exists for ci-runner-04 whose execution window contains the connection start timestamp"
+          from_story_link: "The CI orchestrator scheduled or triggered an upload job on ci-runner-04"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job record designates an artifact upload step targeting cdn.staticfiles.example.org or 185.220.101.7 as the upload destination"
+          from_story_link: "staged build artifacts to cdn.staticfiles.example.org via a sustained TLS connection"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no CI orchestrator job record's execution window contains the connection start timestamp for ci-runner-04"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching job record exists but none of its steps designate cdn.staticfiles.example.org or 185.220.101.7 as an upload destination"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci-orchestrator-api
+          predicate: "authorized iff a CI job record exists for ci-runner-04 with an execution window covering the connection, and that job declares an artifact upload step targeting cdn.staticfiles.example.org or 185.220.101.7"
+          on_unauthorized: escalate — no CI job backs this 27 GB sustained outbound transfer to a novel destination; treat as credentialed-exfil candidate
+          on_indeterminate: escalate — CI orchestrator data unavailable; cannot confirm authorization for anomalous-volume transfer to novel destination
+      weight: null
+
+  routing:
+    selected_lead: ci-job-correlation
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      ci-job-correlation: "Query the CI orchestrator API for jobs scheduled or running on ci-runner-04 in the window 2026-04-25T21:00:00Z to 2026-04-25T23:00:00Z. Return job id, initiator, start time, and step definitions. Check whether any step declares an artifact upload targeting cdn.staticfiles.example.org or 185.220.101.7."
+    scope_override:
+      window_hours: 3
+      anchor: alert
+```

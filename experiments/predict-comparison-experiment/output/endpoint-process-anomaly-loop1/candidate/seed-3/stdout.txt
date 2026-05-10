@@ -1,0 +1,31 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: source-reputation
+    predictions:
+      - id: lp1
+        if: "destination IP 164.92.71.108 has at least one threat-intelligence classification (malicious, C2, scanning, or abuse-listed) or is attributed to generic VPS/hosting infrastructure with no recorded business relationship in the environment's outbound history"
+        read_as: "adversarial-or-unaccountable-destination"
+        advance_to: escalate
+      - id: lp2
+        if: "destination IP is attributed to a recognized cloud provider, SaaS platform, or CDN that appears in the environment's established outbound traffic history"
+        read_as: "destination-classified-as-known-service"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "destination IP returns no threat-intelligence result and no environment egress history (completely unclassified, no prior attribution)"
+        read_as: "destination-unclassified"
+        advance_to: escalate
+
+  routing:
+    selected_lead: source-reputation
+    composite_secondary: [correlated-endpoint-events]
+    lead_hints:
+      source-reputation: "Classify external IP 164.92.71.108 — run threat-intel lookup, determine ASN/hosting organization, and check environment egress history for any prior outbound connections to this destination from any agent."
+      correlated-endpoint-events: "Retrieve all Wazuh alert events on agent edr-mssql-prod-01 in the 24h window around 2026-04-26T09:48:00Z; flag any co-firing of rule IDs 100112, 100113, 100115, 100116, or other anomaly-class rules."
+    scope_override:
+      window_hours: 24
+      anchor: alert
+```

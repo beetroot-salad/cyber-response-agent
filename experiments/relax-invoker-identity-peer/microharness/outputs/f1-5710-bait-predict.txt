@@ -1,0 +1,40 @@
+predict loop=2 shape=E
+
+:L lead_preds [id|kind|if|read_as|advance_to]
+lp1|cadence|"foreground post-burst inter-event distribution matches the recurring baseline geometry"|isolated-retry-burst, monitoring-probe-classification-retained|fork-at-authorization
+lp2|cadence|"foreground post-burst inter-event distribution is materially outside the baseline cadence distribution"|sustained-mechanism-shift|escalate
+lp3|cadence|"foreground post-burst cadence is structurally zero (no events in the post-burst scope window)"|probe-ceased-unexpectedly|escalate
+
+:L lead_preds.comparisons [pred_ref|selector_kind|selector|dimension]
+lp1|historical-self|"src=172.22.0.10 AND user=nagios AND dst=target-endpoint over prior 72h"|inter-event-gap-distribution
+lp2|historical-self|"src=172.22.0.10 AND user=nagios AND dst=target-endpoint over prior 72h"|inter-event-gap-distribution
+lp3|historical-self|"src=172.22.0.10 AND user=nagios AND dst=target-endpoint over prior 72h"|event-count
+
+:R routing
+selected_lead         authentication-history
+composite_secondary   -
+override_data_source  -
+rationale             "burst anomaly is the SCREEN-blocking dimension (5-event 1s cluster vs. single-attempt ~300s-cadence baseline established loop 1); post-burst cadence is the cheapest mechanism discriminator — resumption of baseline geometry reads as an isolated retry artifact and routes to authorization fork next loop; any deviation or cessation escalates without requiring a registry consult that may not be authoritative"
+
+:R routing.lead_hints [lead|hint]
+authentication-history|"Segregate foreground into two bands: burst cluster (±5s around T) and post-burst window (T+5min to scope end); return inter-event gap distribution for the post-burst band as foreground; use the 72h pre-burst baseline established in loop 1 as the comparison reference"
+
+:R routing.scope_override [key|value]
+window_hours|4
+anchor|now
+
+---
+
+**Reasoning trace (not part of dense envelope):**
+
+**Focus unknown:** What mechanism produced the burst? Loop 1 established that the alert-window 5-event 1-second cluster is anomalous against the 72h single-attempt ~300s-cadence baseline. This is the SCREEN-blocking dimension. The classification signals (internal-monitoring-host IP, sentinel monitoring username) are strong, but they pin the *source classification*, not the burst mechanism — a retry storm from the registered probe and a colocated tool sharing the same credentials both produce the same (src, user, dst) triple.
+
+**Why Shape E, not Shape A:** The worked Shape A fast path requires the burst-shape unknown to already be resolved by prior enrichment (authentication-history matching the monitoring-probe geometry). Here it is unresolved — the burst deviates. Jumping to the authorization contract before characterizing whether the burst belongs to the registered probe's mechanism would leave the SCREEN-blocking dimension unaddressed; the registry answers "is the triple sanctioned?" but not "did the registered probe produce this burst shape?" The additional note that the approved-monitoring-sources anchor may only be accessible at context-doc fidelity (non-authoritative) further reduces Shape A's expected discriminating power this loop.
+
+**Why post-burst cadence is the right lead:** If the monitoring probe produced a retry storm (connection refused/timeout → 5 rapid reconnects on new ephemeral ports), the defining signature is that cadence returns to the established ~300s inter-event baseline within one or two probe cycles after the burst. That resumption is directly observable without querying the registry, and it is falsifiable: sustained elevation, a different pattern, or complete cessation each tell a different story. The lead is cheap, already in-scope for the authentication-history family, and its three branch readings cleanly route the next loop.
+
+**lp1 → fork-at-authorization:** If post-burst cadence matches the baseline geometry, the burst is plausibly an isolated retry artifact. The next loop (loop 3) would be Shape A: propose `?registered-actor-initiated` with an authorization contract against the approved-monitoring-sources registry (tolerating indeterminate with escalation given fidelity uncertainty).
+
+**lp2 → escalate:** Sustained cadence deviation after the burst means the mechanism shifted — the event shape is no longer the established baseline pattern, and authorization alone cannot settle it.
+
+**lp3 → escalate:** Complete cessation of probes after the burst is unexpected given 579 events over 72h; an abrupt stop warrants escalation regardless of the burst explanation.

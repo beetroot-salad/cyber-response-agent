@@ -1,0 +1,58 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+  hypotheses:
+    - id: h-001
+      name: "?ci-artifact-upload"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: opened_tls_connection
+        parent_vertex: {type: ci_job, classification: ci-pipeline-artifact-push-job}
+      story: |
+        ci-runner-04 hosts an active CI pipeline job configured to push
+        build artifacts to a CDN endpoint as part of a deployment workflow.
+        The CI orchestrator dispatched the job to this runner, which then
+        opened the observed TLS connection to cdn.staticfiles.example.org
+        to upload artifacts. The novel destination and absence of
+        orchestrator-side events in the Zeek-correlated baseline are
+        consistent with a new or infrequently-exercised deployment pipeline
+        step. The CI orchestrator API maintains job records that would
+        confirm an active job on this runner covering the connection window
+        and targeting this CDN destination.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "CI orchestrator records a job assigned to ci-runner-04 whose execution window contains the alert timestamp"
+          from_story_link: "The CI orchestrator dispatched the job to this runner"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job's configured artifact push destination includes cdn.staticfiles.example.org"
+          from_story_link: "opened the observed TLS connection to cdn.staticfiles.example.org to upload artifacts"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no CI job assigned to ci-runner-04 has an execution window containing the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching job exists but its configured artifact destination does not include cdn.staticfiles.example.org"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci-orchestrator-api
+          predicate: "an active CI job assigned to ci-runner-04 with an execution window containing the alert timestamp and a configured artifact push destination of cdn.staticfiles.example.org, owned by an authorized initiator"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "CI orchestrator job records include the initiating identity (human trigger, webhook, or scheduled run); confirming the job record authorizes the transfer and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: ci-job-correlation
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      ci-job-correlation: "Query the CI orchestrator API for jobs assigned to ci-runner-04 (10.0.18.41) with execution windows covering 2026-04-25T22:04:10Z. Check job metadata for configured artifact push destinations matching cdn.staticfiles.example.org or 185.220.101.7. Return job initiator identity if available."
+    scope_override:
+      window_hours: 2
+      anchor: alert
+```

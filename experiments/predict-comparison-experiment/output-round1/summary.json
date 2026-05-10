@@ -1,0 +1,72 @@
+[
+  {
+    "variant": "baseline",
+    "fixture": "control-runc-exec-loop1",
+    "elapsed_sec": 84.9,
+    "stdout_chars": 3570,
+    "prompt_chars": 16860
+  },
+  {
+    "variant": "candidate",
+    "fixture": "control-runc-exec-loop1",
+    "elapsed_sec": 124.9,
+    "stdout_chars": 5068,
+    "prompt_chars": 16861
+  },
+  {
+    "variant": "baseline",
+    "fixture": "data-bigquery-bulk-export-loop1",
+    "elapsed_sec": 60.7,
+    "stdout_chars": 2360,
+    "prompt_chars": 17807
+  },
+  {
+    "variant": "candidate",
+    "fixture": "data-bigquery-bulk-export-loop1",
+    "elapsed_sec": 75.0,
+    "stdout_chars": 3287,
+    "prompt_chars": 17808
+  },
+  {
+    "variant": "baseline",
+    "fixture": "endpoint-falco-nginx-child-loop1",
+    "elapsed_sec": 70.2,
+    "stdout_chars": 3100,
+    "prompt_chars": 16861
+  },
+  {
+    "variant": "candidate",
+    "fixture": "endpoint-falco-nginx-child-loop1",
+    "elapsed_sec": 49.0,
+    "stdout_chars": 1118,
+    "prompt_chars": 16862
+  },
+  {
+    "variant": "baseline",
+    "fixture": "identity-okta-new-geo-loop1",
+    "elapsed_sec": 57.9,
+    "stdout_chars": 1825,
+    "prompt_chars": 17068
+  },
+  {
+    "variant": "candidate",
+    "fixture": "identity-okta-new-geo-loop1",
+    "elapsed_sec": 62.3,
+    "stdout_chars": 1633,
+    "prompt_chars": 17069
+  },
+  {
+    "variant": "baseline",
+    "fixture": "network-egress-volume-loop2",
+    "elapsed_sec": 92.4,
+    "stdout_chars": 3599,
+    "prompt_chars": 18156
+  },
+  {
+    "variant": "candidate",
+    "fixture": "network-egress-volume-loop2",
+    "elapsed_sec": 93.4,
+    "stdout_chars": 3681,
+    "prompt_chars": 18157
+  }
+]

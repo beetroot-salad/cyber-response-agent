@@ -1,0 +1,15 @@
+{
+  "agent": {"id": "000", "name": "wazuh.manager"},
+  "rule": {"id": "550", "level": 7, "description": "Integrity checksum changed.", "firedtimes": 3},
+  "syscheck": {
+    "path": "/etc/ssl/filebeat.pem",
+    "changed_attributes": ["inode"],
+    "inode_before": 205768,
+    "inode_after": 205768,
+    "mode": "scheduled",
+    "uname_after": "wazuh",
+    "perm_after": "rw-r--r--",
+    "mtime_after": "2025-11-19T15:34:39"
+  },
+  "timestamp": "2026-04-26T11:45:00.000+0000"
+}

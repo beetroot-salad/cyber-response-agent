@@ -1,0 +1,8 @@
+{
+  "variant": "baseline",
+  "fixture": "endpoint-falco-nginx-child-loop1",
+  "seed": 2,
+  "elapsed_sec": 98.0,
+  "stdout_chars": 3826,
+  "prompt_chars": 16864
+}

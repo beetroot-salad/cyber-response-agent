@@ -4,7 +4,7 @@ status: done
 groups: invlang, schema, predict, report
 ---
 
-**Result:** Audit doc at `docs/experiments/invlang-post-predict-assessment.md`. Key findings:
+**Result:** Audit doc at `experiments/invlang-post-predict-assessment.md`. Key findings:
 
 - Coverage multiplicity (Q1): not load-bearing. 7/7 resolved contracts cover exactly 1 edge; 0 multi-edge triples across 14 corpus files. Rejects authz-as-vertex proposal empirically.
 - Authz/legitimacy naming (Q2): 100% of contract predicates are zero-trust ABAC. Zero mention of damage, intent, or business contribution. Field name is a misnomer.
@@ -71,7 +71,7 @@ This task is the structured audit of those questions, not the implementation.
 
 ## Acceptance criteria
 
-1. Short doc (`docs/experiments/invlang-post-predict-assessment.md` or similar) exists containing:
+1. Short doc (`experiments/invlang-post-predict-assessment.md` or similar) exists containing:
    - Corpus-measurement section with concrete numbers.
    - Option comparison with engineering-cost + query-impact + prompt-alignment axes.
    - One recommended option with rationale.

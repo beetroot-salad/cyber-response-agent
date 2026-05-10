@@ -1,0 +1,8 @@
+{
+  "run_id": "identity-okta-new-geo-loop1",
+  "signature_id": "wazuh-rule-100110",
+  "severity": 6,
+  "salt": "idntsalt000000001",
+  "created_at": "2026-04-26T05:42:13.000000+00:00",
+  "predict_loop_n": 1
+}

@@ -1,0 +1,22 @@
+{
+  "agent": {"name": "zeek-mirror", "id": "zeek"},
+  "manager": {"name": "wazuh.manager"},
+  "data": {
+    "src_ip": "10.0.18.41",
+    "src_host": "ci-runner-04",
+    "dst_ip": "185.220.101.7",
+    "dst_port": 443,
+    "proto": "tcp",
+    "service": "ssl",
+    "duration_s": 4187,
+    "orig_bytes": 27411889204,
+    "resp_bytes": 41204117,
+    "ssl.server_name": "cdn.staticfiles.example.org",
+    "ssl.subject": "CN=*.staticfiles.example.org",
+    "window_5min": {
+      "egress_bytes": 6213447188
+    }
+  },
+  "rule": {"id": "100110", "level": 7, "description": "Zeek: sustained outbound TLS volume from internal host"},
+  "timestamp": "2026-04-25T22:04:10.700+0000"
+}

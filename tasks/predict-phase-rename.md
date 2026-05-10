@@ -6,7 +6,7 @@ groups: predict, hypothesize, state-machine, prompt
 
 ## Context — why this exists
 
-Across ~10 PRs (#87 → #110) HYPOTHESIZE work has circled around one pattern: the error-analysis corpus shows **FM4 (legitimacy packed into classification name) in 79%** of blocks and **FM5 (parallel sanctioned/unsanctioned pair, same mechanism) in 46%** (`docs/experiments/hypothesize-error-analysis.md`). Every PR addressed it structurally (validator rules, prompt trims, archetype reframes, topology priors). None of them removed the underlying pressure: the word "hypothesize" and the prompt's "≥ 2 competing classifications" rule together pull the subagent toward enumeration even when the alert pins the mechanism and only authorization is open.
+Across ~10 PRs (#87 → #110) HYPOTHESIZE work has circled around one pattern: the error-analysis corpus shows **FM4 (legitimacy packed into classification name) in 79%** of blocks and **FM5 (parallel sanctioned/unsanctioned pair, same mechanism) in 46%** (`experiments/hypothesize-error-analysis.md`). Every PR addressed it structurally (validator rules, prompt trims, archetype reframes, topology priors). None of them removed the underlying pressure: the word "hypothesize" and the prompt's "≥ 2 competing classifications" rule together pull the subagent toward enumeration even when the alert pins the mechanism and only authorization is open.
 
 **The reframe**: the middle phase's job is not "propose theories." It is to **set up the next two phases** — choose the lead GATHER will fire, and pre-declare the predictions + refutation shapes + legitimacy contracts ANALYZE will read evidence against. That's a scaffolding deliverable, not a generation deliverable. The number of hypothesis entries (0, 1, many) is incidental to the deliverable: emit what ANALYZE needs to close the loop, no more.
 
@@ -47,7 +47,7 @@ The word retire is **PREDICT** — because the deliverable literally is predicti
 - **Invlang `hypotheses:` YAML block name stays unchanged** — corpus backward-compat requirement. Only phase headers and handler names change.
 
 **Validation**:
-- End-to-end eval via `playground/scripts/eval_run_orchestrate.sh 100001 --window 5m` after the changes land. Acceptance: PREDICT fires; output is **scaffold-shaped** (one mechanism story + legitimacy_contract OR genuinely distinct peers, per ASSESS); ANALYZE closes the loop against it; REPORT (still named CONCLUDE at this point) writes report.md. Compare output against the golden reference at `tasks-scratch/golden-rule100001-scenario-A.md` — specifically the "one mechanism + two contracts" positive pattern.
+- End-to-end eval via `playground/scripts/eval_run_orchestrate.sh 100001 --window 5m` after the changes land. Acceptance: PREDICT fires; output is **scaffold-shaped** (one mechanism story + legitimacy_contract OR genuinely distinct peers, per ASSESS); ANALYZE closes the loop against it; REPORT (still named CONCLUDE at this point) writes report.md. Compare output against the golden reference at `experiments/golden-rule100001/golden-rule100001-scenario-A.md` — specifically the "one mechanism + two contracts" positive pattern.
 
 ## Out of scope
 
@@ -74,5 +74,5 @@ None — this is step 1 of the migration. Blocks `report-phase-rename` and `pred
 ## Notes
 
 - Closes (for real) the `tasks/adversarial-as-attribute-not-hypothesis.md` work, which was marked `done` after PR #88 but whose *spirit* — the "drop the maintain-adversarial-hypothesis rule" from hypothesis enumeration — was only partially applied because line 229's ≥ 2 rule kept the enumeration pressure.
-- The `/workspace/tasks-scratch/golden-rule100001-scenario-A.md` golden reference uses HYPOTHESIZE terminology throughout. It gets renamed as part of `predict-report-docs-update`, not here.
+- The `/workspace/experiments/golden-rule100001/golden-rule100001-scenario-A.md` golden reference uses HYPOTHESIZE terminology throughout. It gets renamed as part of `predict-report-docs-update`, not here.
 - Preserve PR #88's legitimacy-contract primitive, PR #92's causal-story discipline, and PR #109's topology-conditioned priors. These are the pieces that worked; what failed was the phase framing around them.

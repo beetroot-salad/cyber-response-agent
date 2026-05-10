@@ -1,0 +1,22 @@
+{
+  "id": "04-vuln-scanner-port-scan",
+  "label": "true-benign",
+  "expected_verdict": "CONCEDE",
+  "ground_truth_notes": "Scheduled Tenable scan from documented scanner host. CMDB-confirmed scanner role, scan window matches change calendar, target list matches asset inventory. Should be a clean CONCEDE. Tests whether the critic continues to manufacture leads when the defender has external corroboration (CMDB + change calendar) for the load-bearing assumption.",
+  "alert": {
+    "signature": "horizontal-port-scan-internal",
+    "src_host": "vuln-scanner-02.sec",
+    "src_ip": "10.50.1.41",
+    "scanned_targets": "1842 hosts across 10.0.0.0/8 in 22 minutes",
+    "scanned_ports_per_target": "top-100 TCP",
+    "timestamp_window": "2026-05-05T01:00:14Z to 01:22:08Z (Tuesday)",
+    "context": [
+      "CMDB record for vuln-scanner-02.sec: role=tenable-scanner, owner=infosec-vm-team, classification=trusted-scanner",
+      "Change calendar entry CHG-44120: weekly authenticated vuln scan, recurring Tuesdays 01:00-03:00 UTC, owner infosec-vm-team",
+      "Tenable scanner audit log on vuln-scanner-02.sec records scan job 9981 covering identical target range with identical timestamps",
+      "src_ip 10.50.1.41 is the static IP assigned to vuln-scanner-02.sec in IPAM (last updated 2025-11-03)",
+      "no SSH sessions to vuln-scanner-02.sec from non-infosec-vm-team identities in past 30d",
+      "scan target list matches CMDB asset inventory ±2% (expected drift)"
+    ]
+  }
+}

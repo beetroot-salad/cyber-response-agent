@@ -1,0 +1,27 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "the process ancestry chain includes sqlagent.exe or a recognized SQL Server agent/scheduler process above sqlservr.exe"
+        read_as: "sqlagent-initiated-dispatch"
+        advance_to: fork-at-authorization
+      - id: lp2
+        if: "sqlservr.exe is the direct parent of powershell.exe with no sqlagent or scheduler intermediary in the ancestry chain"
+        read_as: "direct-engine-spawn"
+        advance_to: escalate
+      - id: lp3
+        if: "process tree data is absent or truncated and ancestry above sqlservr.exe cannot be determined"
+        read_as: "lineage-unavailable"
+        advance_to: fork-at-destination-reputation
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: [source-reputation]
+    lead_hints:
+      process-lineage: "Reconstruct the full parent chain above powershell.exe (pid 8821) on edr-mssql-prod-01 — specifically whether sqlagent.exe (or any SQL Server agent/scheduler process) appears anywhere above sqlservr.exe (pid 4488). Also return any sibling processes spawned by sqlservr.exe in the ±5 min window around alert timestamp."
+      source-reputation: "Classify destination IP 164.92.71.108 (port 8443/tcp): known C2 / threat-intel flagged, known legitimate service, or unclassified. Include any threat-intel feed hits and ASN/hosting provider context."

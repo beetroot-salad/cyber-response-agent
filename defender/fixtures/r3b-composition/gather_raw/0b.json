@@ -1,0 +1,354 @@
+## Query Results
+**Query:** rule.groups:syscheck AND agent.name:target-endpoint
+**Time range:** 2026-04-30T08:00:29Z to 2026-05-07T08:00:29Z
+
+### Data Source Health
+- **Source:** Wazuh Indexer (https://wazuh-indexer:9200)
+- **Most recent matching event:** 2026-05-07T08:00:01.485+0000
+- **Index event count (unfiltered, same window):** 10000
+
+### Summary
+- **Matching events:** 2180
+
+### Sample Events (first 5)
+1. [2026-05-07T08:00:01.485+0000] rule:550 srcip:? srcuser:? agent:target-endpoint desc:Integrity checksum changed.
+2. [2026-05-07T08:00:01.485+0000] rule:550 srcip:? srcuser:? agent:target-endpoint desc:Integrity checksum changed.
+3. [2026-05-07T08:00:01.439+0000] rule:550 srcip:? srcuser:? agent:target-endpoint desc:Integrity checksum changed.
+4. [2026-05-07T07:50:01.369+0000] rule:550 srcip:? srcuser:? agent:target-endpoint desc:Integrity checksum changed.
+5. [2026-05-07T07:50:01.351+0000] rule:550 srcip:? srcuser:? agent:target-endpoint desc:Integrity checksum changed.
+
+### Count Breakdown
+⚠ counts below are over the returned sample (n=500); matching events: 2180. For true totals at scale, pass a JSON search body to --query with an `aggs` clause (server-side aggregation).
+By rule:
+  rule.id:550 (Integrity checksum changed.): 437
+  rule.id:554 (File added to the system.): 32
+  rule.id:553 (File deleted.): 31
+By source IP (1 unique):
+  ?: 500
+By username (1 unique):
+  ?: 500
+By hour:
+  2026-05-05T07: 12
+  2026-05-05T08: 27
+  2026-05-05T09: 20
+  2026-05-05T10: 21
+  2026-05-05T11: 22
+  2026-05-05T12: 18
+  2026-05-05T13: 30
+  2026-05-05T14: 26
+  2026-05-05T15: 20
+  2026-05-05T16: 24
+  2026-05-05T17: 20
+  2026-05-05T18: 17
+  2026-05-05T19: 14
+  2026-05-05T20: 23
+  2026-05-05T21: 3
+  2026-05-06T14: 10
+  2026-05-06T15: 24
+  2026-05-06T16: 26
+  2026-05-06T17: 20
+  2026-05-06T18: 11
+  2026-05-07T02: 9
+  2026-05-07T03: 24
+  2026-05-07T04: 18
+  2026-05-07T05: 18
+  2026-05-07T06: 22
+  2026-05-07T07: 18
+  2026-05-07T08: 3
+
+### Raw Sample Events (first 3, full _source)
+Use these for field-level inspection when the summary lines above don't carry
+the discriminator you need (e.g. source port, process name, connection tuple).
+
+```json
+[
+  {
+    "syscheck": {
+      "uname_after": "root",
+      "mtime_after": "2026-05-07T08:00:01",
+      "size_after": "49",
+      "gid_after": "0",
+      "md5_before": "68f39ade64115dde50fc267ac15b1e7d",
+      "diff": "1c1\n< # Maintenance window marker: 2026-05-07 07:50:01\n---\n> # Maintenance window marker: 2026-05-07 08:00:01\n",
+      "sha256_before": "97abd027929e0472a61fdc45dc470deb20ff2aaacd122035d35bb64f3dfc9858",
+      "mtime_before": "2026-05-07T07:50:01",
+      "mode": "realtime",
+      "path": "/etc/cron.d/maintenance-marker",
+      "sha1_after": "974bd58346c7e96ea682de931c70d84d47a34224",
+      "changed_attributes": [
+        "mtime",
+        "md5",
+        "sha1",
+        "sha256"
+      ],
+      "gname_after": "root",
+      "uid_after": "0",
+      "perm_after": "rw-r--r--",
+      "event": "modified",
+      "md5_after": "5e491cfe63230abfac9a1311e8562555",
+      "sha1_before": "c7c5b9f55b65106371351dca15e713b6eb9dde30",
+      "sha256_after": "ccdb126b93088e7281406e73ccdffebc202785f3487d720c290fe6da2ded58c5",
+      "inode_after": 2294846
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "rule": {
+      "mail": true,
+      "level": 7,
+      "pci_dss": [
+        "11.5"
+      ],
+      "hipaa": [
+        "164.312.c.1",
+        "164.312.c.2"
+      ],
+      "tsc": [
+        "PI1.4",
+        "PI1.5",
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "Integrity checksum changed.",
+      "groups": [
+        "ossec",
+        "syscheck",
+        "syscheck_entry_modified",
+        "syscheck_file"
+      ],
+      "nist_800_53": [
+        "SI.7"
+      ],
+      "gdpr": [
+        "II_5.1.f"
+      ],
+      "firedtimes": 54,
+      "mitre": {
+        "technique": [
+          "Stored Data Manipulation"
+        ],
+        "id": [
+          "T1565.001"
+        ],
+        "tactic": [
+          "Impact"
+        ]
+      },
+      "id": "550",
+      "gpg13": [
+        "4.11"
+      ]
+    },
+    "decoder": {
+      "name": "syscheck_integrity_changed"
+    },
+    "full_log": "File '/etc/cron.d/maintenance-marker' modified\nMode: realtime\nChanged attributes: mtime,md5,sha1,sha256\nOld modification time was: '1778140201', now it is '1778140801'\nOld md5sum was: '68f39ade64115dde50fc267ac15b1e7d'\nNew md5sum is : '5e491cfe63230abfac9a1311e8562555'\nOld sha1sum was: 'c7c5b9f55b65106371351dca15e713b6eb9dde30'\nNew sha1sum is : '974bd58346c7e96ea682de931c70d84d47a34224'\nOld sha256sum was: '97abd027929e0472a61fdc45dc470deb20ff2aaacd122035d35bb64f3dfc9858'\nNew sha256sum is : 'ccdb126b93088e7281406e73ccdffebc202785f3487d720c290fe6da2ded58c5'\n",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T08:00:01.485Z",
+    "location": "syscheck",
+    "id": "1778140801.10751449",
+    "timestamp": "2026-05-07T08:00:01.485+0000"
+  },
+  {
+    "syscheck": {
+      "uname_after": "root",
+      "mtime_after": "2026-05-07T08:00:01",
+      "size_after": "63",
+      "gid_after": "0",
+      "md5_before": "58e28132ffbaca3d62a27de9493509bf",
+      "diff": "1c1\n< System managed by automation. Last update: 2026-05-07 07:50:01\n---\n> System managed by automation. Last update: 2026-05-07 08:00:01\n",
+      "sha256_before": "27f976e159749645010fc2fb1e6b438f55aeb43908bd3a121822a7280e693e29",
+      "mtime_before": "2026-05-07T07:50:01",
+      "mode": "realtime",
+      "path": "/etc/motd",
+      "sha1_after": "bb1451f85ef04f43157a2cd93bf84d1b48b1381b",
+      "changed_attributes": [
+        "mtime",
+        "md5",
+        "sha1",
+        "sha256"
+      ],
+      "gname_after": "root",
+      "uid_after": "0",
+      "perm_after": "rw-r--r--",
+      "event": "modified",
+      "md5_after": "b30d4939611ca944f7d54d13453a48fc",
+      "sha1_before": "a866fe8ebc9021ea5cdca80b4589916c1c64fe98",
+      "sha256_after": "31fb84264afba3493db5f67b5c283ae082cd837ff55cab5876d35a35d69df191",
+      "inode_after": 2294822
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "rule": {
+      "mail": true,
+      "level": 7,
+      "pci_dss": [
+        "11.5"
+      ],
+      "hipaa": [
+        "164.312.c.1",
+        "164.312.c.2"
+      ],
+      "tsc": [
+        "PI1.4",
+        "PI1.5",
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "Integrity checksum changed.",
+      "groups": [
+        "ossec",
+        "syscheck",
+        "syscheck_entry_modified",
+        "syscheck_file"
+      ],
+      "nist_800_53": [
+        "SI.7"
+      ],
+      "gdpr": [
+        "II_5.1.f"
+      ],
+      "firedtimes": 53,
+      "mitre": {
+        "technique": [
+          "Stored Data Manipulation"
+        ],
+        "id": [
+          "T1565.001"
+        ],
+        "tactic": [
+          "Impact"
+        ]
+      },
+      "id": "550",
+      "gpg13": [
+        "4.11"
+      ]
+    },
+    "decoder": {
+      "name": "syscheck_integrity_changed"
+    },
+    "full_log": "File '/etc/motd' modified\nMode: realtime\nChanged attributes: mtime,md5,sha1,sha256\nOld modification time was: '1778140201', now it is '1778140801'\nOld md5sum was: '58e28132ffbaca3d62a27de9493509bf'\nNew md5sum is : 'b30d4939611ca944f7d54d13453a48fc'\nOld sha1sum was: 'a866fe8ebc9021ea5cdca80b4589916c1c64fe98'\nNew sha1sum is : 'bb1451f85ef04f43157a2cd93bf84d1b48b1381b'\nOld sha256sum was: '27f976e159749645010fc2fb1e6b438f55aeb43908bd3a121822a7280e693e29'\nNew sha256sum is : '31fb84264afba3493db5f67b5c283ae082cd837ff55cab5876d35a35d69df191'\n",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T08:00:01.485Z",
+    "location": "syscheck",
+    "id": "1778140801.10750097",
+    "timestamp": "2026-05-07T08:00:01.485+0000"
+  },
+  {
+    "syscheck": {
+      "uname_after": "root",
+      "mtime_after": "2026-05-07T08:00:01",
+      "size_after": "126",
+      "gid_after": "0",
+      "md5_before": "60c49a19863107d848466763885264ad",
+      "diff": "7c7\n<     # Updated: 2026-05-07 07:50:01\n---\n>     # Updated: 2026-05-07 08:00:01\n",
+      "sha256_before": "c11140538f346a92b9fbc8a971fc3b440950f173bfcd7e888ba058d7804521cf",
+      "mtime_before": "2026-05-07T07:50:01",
+      "mode": "realtime",
+      "path": "/etc/logrotate.d/workload-test",
+      "sha1_after": "1e9680354cae260ff76d77af815070ad882a66dd",
+      "changed_attributes": [
+        "mtime",
+        "md5",
+        "sha1",
+        "sha256"
+      ],
+      "gname_after": "root",
+      "uid_after": "0",
+      "perm_after": "rw-r--r--",
+      "event": "modified",
+      "md5_after": "cbd67eeed52acfa075a6bce057b9366c",
+      "sha1_before": "a2f3f683793355b6364a89a66806b9102e4de10d",
+      "sha256_after": "a8a1d680149a6c547a5bdb3f70c583e7a7c7bb0e78c3c1b5103c8bd55fa20ee2",
+      "inode_after": 2294674
+    },
+    "agent": {
+      "ip": "172.22.0.13",
+      "name": "target-endpoint",
+      "id": "002"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "rule": {
+      "mail": true,
+      "level": 7,
+      "pci_dss": [
+        "11.5"
+      ],
+      "hipaa": [
+        "164.312.c.1",
+        "164.312.c.2"
+      ],
+      "tsc": [
+        "PI1.4",
+        "PI1.5",
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "Integrity checksum changed.",
+      "groups": [
+        "ossec",
+        "syscheck",
+        "syscheck_entry_modified",
+        "syscheck_file"
+      ],
+      "nist_800_53": [
+        "SI.7"
+      ],
+      "gdpr": [
+        "II_5.1.f"
+      ],
+      "firedtimes": 52,
+      "mitre": {
+        "technique": [
+          "Stored Data Manipulation"
+        ],
+        "id": [
+          "T1565.001"
+        ],
+        "tactic": [
+          "Impact"
+        ]
+      },
+      "id": "550",
+      "gpg13": [
+        "4.11"
+      ]
+    },
+    "decoder": {
+      "name": "syscheck_integrity_changed"
+    },
+    "full_log": "File '/etc/logrotate.d/workload-test' modified\nMode: realtime\nChanged attributes: mtime,md5,sha1,sha256\nOld modification time was: '1778140201', now it is '1778140801'\nOld md5sum was: '60c49a19863107d848466763885264ad'\nNew md5sum is : 'cbd67eeed52acfa075a6bce057b9366c'\nOld sha1sum was: 'a2f3f683793355b6364a89a66806b9102e4de10d'\nNew sha1sum is : '1e9680354cae260ff76d77af815070ad882a66dd'\nOld sha256sum was: 'c11140538f346a92b9fbc8a971fc3b440950f173bfcd7e888ba058d7804521cf'\nNew sha256sum is : 'a8a1d680149a6c547a5bdb3f70c583e7a7c7bb0e78c3c1b5103c8bd55fa20ee2'\n",
+    "input": {
+      "type": "log"
+    },
+    "@timestamp": "2026-05-07T08:00:01.439Z",
+    "location": "syscheck",
+    "id": "1778140801.10748779",
+    "timestamp": "2026-05-07T08:00:01.439+0000"
+  }
+]
+```

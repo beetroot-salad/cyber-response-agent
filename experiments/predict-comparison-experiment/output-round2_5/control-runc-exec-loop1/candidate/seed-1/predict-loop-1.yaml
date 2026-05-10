@@ -1,0 +1,70 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?operator-initiated-pod-exec"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex:
+          type: kubectl_exec_session
+          classification: "operator-kubectl-exec-session"
+      story: |
+        An operator (SRE or on-call engineer) issued `kubectl exec -it`
+        against payments-api-7c9d8f5b6-q2vr4 at 08:33:20Z, causing the
+        kubelet on k8s-worker-12 to invoke runc, which in turn spawned
+        the interactive bash shell recorded in the alert (tty 34816 is
+        consistent with a -it exec). Operators in the payments-prod
+        namespace require valid RBAC authorization for the exec verb, and
+        production exec access is expected to correlate with an active
+        change-management ticket or a deploy-run under a runbook that
+        permits pod-level debug access. The kube-audit log captures every
+        authenticated kubectl exec request with the requesting identity and
+        the authorization decision, making it the direct anchor for both
+        the action and the actor. No prior exec events on this pod have
+        been confirmed in the investigation window.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "kube-audit records a kubectl exec event targeting payments-api-7c9d8f5b6-q2vr4 whose timestamp matches the alert timestamp within ±30s"
+          from_story_link: "operator issued kubectl exec -it against the pod at 08:33:20Z"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching kube-audit exec event's user identity resolves to a known authorized operator identity in the payments-prod RBAC policy"
+          from_story_link: "operators require valid RBAC authorization for the exec verb"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no kube-audit exec event for payments-api-7c9d8f5b6-q2vr4 falls within ±30s of the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching kube-audit exec event exists but its user identity does not correspond to any authorized operator in the payments-prod RBAC policy"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: kube-audit
+          predicate: "a kubectl exec event against payments-api-7c9d8f5b6-q2vr4 at the alert timestamp issued by a user identity with valid exec RBAC authorization in payments-prod"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+        - id: ac2
+          edge_ref: proposed
+          anchor_kind: change-management
+          predicate: "an active change-management ticket or deploy-run that covers a kubectl exec action against payments-prod pods at the alert timestamp"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "kube-audit records the requesting user identity alongside the RBAC authorization decision; confirming a matching authenticated exec event answers both whether the action was authorized and who performed it."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary: [change-management-correlation]
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Query kube-audit for exec events targeting pod payments-api-7c9d8f5b6-q2vr4 (namespace payments-prod) within ±5 min of 2026-04-26T08:33:20Z. Capture the requesting user identity, userAgent, and authorization status of any matching event."
+      change-management-correlation: "Query the change-management system for open tickets or deploy-runs that authorize kubectl exec access to payments-prod pods around 2026-04-26T08:33:20Z. Match on pod name or namespace scope."
+    scope_override:
+      window_hours: 1
+      anchor: alert

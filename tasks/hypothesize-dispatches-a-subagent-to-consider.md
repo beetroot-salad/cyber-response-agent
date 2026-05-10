@@ -4,7 +4,7 @@ status: done
 groups: cost, optional, context-management
 ---
 
-Pilot at `docs/experiments/hypothesize-subagent-pilot/`. Two rounds run against two fixtures (rule5710 cold-start, ssh-brute mid-loop). Arms A (minimal bundle), B (enriched bundle), C (+ 3-item prompt addendum: atomicity / `environment/context/` / composite dispatch).
+Pilot at `experiments/hypothesize-subagent-pilot/`. Two rounds run against two fixtures (rule5710 cold-start, ssh-brute mid-loop). Arms A (minimal bundle), B (enriched bundle), C (+ 3-item prompt addendum: atomicity / `environment/context/` / composite dispatch).
 
 **Interim findings:**
 - Mid-loop HYPOTHESIZE extraction looks viable with a minimal bundle.

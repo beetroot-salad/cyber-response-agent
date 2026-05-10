@@ -1,0 +1,58 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?nginx-lifecycle-hook"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: deploy_tool, classification: deploy-or-renewal-lifecycle-hook}
+      story: |
+        web-edge-03 is configured with a post-deploy or certbot-renewal hook that
+        invokes a remote bootstrap script as the www-data user when a lifecycle
+        event fires. The hook spawner executes `sh -c "curl … | sh"` against the
+        registered update URL, which explains both the www-data identity and the
+        curl-pipe-sh shape. The deploy-runs-api should record an active run or
+        renewal event against web-edge-03 whose execution window brackets the
+        shell-spawn timestamp at 03:11:07Z. The target domain
+        `updates.example.io` would appear in the hook's registered script URL or
+        deploy manifest.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "deploy-runs-api records an active deploy or renewal run against web-edge-03 whose execution window contains the shell-spawn timestamp"
+          from_story_link: "deploy-runs-api should record an active run or renewal event against web-edge-03 whose execution window brackets the shell-spawn timestamp"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching run's hook definition or manifest references the external script URL observed in the cmdline"
+          from_story_link: "the target domain updates.example.io would appear in the hook's registered script URL or deploy manifest"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no deploy or renewal run's execution window contains the shell-spawn timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a time-matching run exists but its hook definition does not reference the observed external script URL"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs
+          predicate: "an active deploy or certbot-renewal run against web-edge-03 with an execution window covering the shell-spawn timestamp and a hook definition or manifest referencing the observed remote script URL"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "deploy-runs records the initiator (human operator, CI trigger, or scheduled renewal); confirming the run authorizes the shell spawn and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: deploy-runs-correlation
+    composite_secondary: [process-lineage]
+    override_data_source: null
+    lead_hints:
+      deploy-runs-correlation: "Query for any deploy or certbot-renewal runs targeting web-edge-03 (agent 082 / 10.0.7.18) in a ±15-minute window around 2026-04-26T03:11:07Z. Retrieve run initiator, hook definitions, and any manifest URLs. Resolves ac1."
+      process-lineage: "Reconstruct the parent chain of nginx pid 1422 at the alert timestamp to determine whether nginx was spawned by a deploy wrapper, supervisord, or directly by init. This characterizes the upstream trigger shape and informs ac1 resolution."
+    scope_override:
+      window_hours: 1
+      anchor: alert

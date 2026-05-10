@@ -1,0 +1,39 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "a concurrent or temporally overlapping Okta session exists for j.morales@example.com from a geography incompatible with simultaneous presence in VN"
+        read_as: "impossible-travel-signal"
+        advance_to: escalate
+      - id: lp2
+        if: "no concurrent session conflict, and the user's auth history shows prior successful logins from VN or neighboring SEA countries"
+        read_as: "established-regional-travel-pattern"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "j.morales@example.com Okta successful sign-ins, 90-day window"
+          dimension: client.geographicalContext.country
+      - id: lp3
+        if: "no concurrent session conflict, no prior VN/SEA login history, and the source IP (103.27.181.42) classifies as a known VPN, proxy, or hosting infrastructure"
+        read_as: "vpn-or-proxy-egress-candidate"
+        advance_to: fork-at-authorization
+      - id: lp4
+        if: "no concurrent session conflict, no prior VN/SEA login history, and the source IP classifies as residential or generic datacenter without VPN/proxy signal"
+        read_as: "novel-unattributed-geo-login"
+        advance_to: escalate
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: [source-reputation]
+    lead_hints:
+      authentication-history: "Retrieve j.morales@example.com Okta session start events over the last 90 days. Focus on: (1) geographic distribution of successful sign-ins (country/city), (2) whether any session overlaps temporally with the 2026-04-26T05:42Z VN session from a geographically incompatible location (impossible travel), (3) whether VN or neighboring SEA countries appear in her login history."
+      source-reputation: "Classify 103.27.181.42 — determine whether it is a known VPN/proxy exit node, commercial hosting/datacenter infrastructure, or residential assignment. Return ASN, registrant, and any threat-intel or proxy-detection categorization."
+    scope_override:
+      window_hours: 2160
+      anchor: alert
+```

@@ -1,0 +1,67 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?analyst-sa-authorized-export"
+      attached_to_vertex: v-003
+      proposed_edge:
+        relation: wrote_to
+        parent_vertex: {type: export_job, classification: approved-export-pipeline-invocation}
+      story: |
+        analyst-svc@analytics-prod.iam.gserviceaccount.com is the designated
+        service account for the analytics-prod data extraction pipeline. The
+        destination path (2026-04-26-customer-extract.csv.gz) follows a
+        date-stamped naming convention consistent with a recurrently approved
+        daily extract job targeting customer_pii. The callerSuppliedUserAgent
+        field shows gcloud/472.0.0 rather than a direct BigQuery API caller,
+        which indicates a human operator invoked the job via CLI using the SA
+        key rather than an automated scheduler — a pattern consistent with a
+        manual pipeline re-run or audit-triggered export by an authorized
+        analyst. A scheduler-job-correlation lookup determines whether an
+        approved job definition covers this SA exporting customer_pii to
+        analytics-export-prod; the gcloud UA shifts the expected invoker from
+        an automated schedule to a human operator who held authorized key
+        access at the time.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the export destination path matches the recurring date-named convention documented for analyst-svc's approved export pipeline"
+          from_story_link: "destination path follows a date-stamped naming convention consistent with a recurrently approved daily extract job"
+        - id: p2
+          subject: proposed_edge
+          claim: "a scheduler-job or approved-workflow record names analyst-svc as the executing identity for BigQuery exports from customer_pii to analytics-export-prod bucket"
+          from_story_link: "analyst-svc is the designated service account for the analytics-prod data extraction pipeline"
+      attribute_predictions:
+        - id: ap1
+          target: proposed_parent
+          attribute: caller_user_agent
+          claim: "caller user agent deviates from the automated-scheduler baseline (direct BigQuery API call) — gcloud CLI wrapper present, consistent with human-operator invocation using a SA key"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p2]
+          claim: "no scheduler-job or approved-workflow record names analyst-svc as an authorized executing identity for customer_pii exports to analytics-export-prod"
+        - id: r2
+          refutes_predictions: [p1]
+          claim: "the export destination path deviates from the recurring naming convention for analyst-svc's approved export pipeline on at least one recorded dimension"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: scheduler-job-correlation
+          predicate: "an approved scheduled job or workflow definition names analyst-svc as executing identity for BigQuery exports from customer_pii to the analytics-export-prod bucket, with a recurrence or trigger pattern that covers the alert timestamp (2026-04-26T11:18:54Z)"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "the scheduler-job-correlation anchor records the human initiator or trigger identity that owns the job definition; confirming the job record authorizes the export and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: scheduler-job-correlation
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      scheduler-job-correlation: "Query Cloud Scheduler, Cloud Composer, or equivalent workflow-orchestration anchor for job definitions that (a) execute under analyst-svc@analytics-prod.iam.gserviceaccount.com, (b) target customer_pii dataset in analytics-prod, and (c) write to gs://analytics-export-prod/exports/. Confirm whether the job's schedule or trigger pattern covers 2026-04-26T11:18:54Z. Also surface the job owner/initiator identity for integrity resolution. If no job definition is found, note the absence explicitly."
+    scope_override:
+      window_hours: 72
+      anchor: alert

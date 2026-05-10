@@ -1,0 +1,8 @@
+{
+  "variant": "baseline",
+  "fixture": "endpoint-process-anomaly-loop1",
+  "seed": 2,
+  "elapsed_sec": 94.4,
+  "stdout_chars": 1469,
+  "prompt_chars": 17808
+}

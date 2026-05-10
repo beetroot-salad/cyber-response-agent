@@ -1,0 +1,8 @@
+{
+  "variant": "baseline",
+  "fixture": "identity-okta-new-geo-loop1",
+  "seed": 3,
+  "elapsed_sec": 56.8,
+  "stdout_chars": 2363,
+  "prompt_chars": 17071
+}

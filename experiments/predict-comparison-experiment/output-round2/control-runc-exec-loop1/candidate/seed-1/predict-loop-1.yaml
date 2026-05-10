@@ -1,0 +1,60 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?operator-initiated-pod-exec"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: kubectl_exec_session, classification: operator-kubectl-exec-session}
+      story: |
+        An authorized operator or pipeline service account used `kubectl exec`
+        to open an interactive shell in the payments-api pod as part of a
+        deploy, incident-response, or routine maintenance action. The host-side
+        kubelet accepted the exec request from the kube-apiserver and invoked
+        runc to spawn bash inside the container, which is the standard
+        `kubectl exec` execution path. The kube audit log records every
+        `pods/exec` subresource create event with the actor identity, source
+        IP, and session context; that record is the authoritative anchor for
+        whether this exec was initiated by a recognized operator under an
+        approved activity. No baseline of prior exec events for this pod exists
+        in the investigation context.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "kube-audit records a pods/exec subresource create event against payments-api-7c9d8f5b6-q2vr4 in namespace payments-prod whose timestamp matches the alert"
+          from_story_link: "The kube audit log records every pods/exec subresource create event with the actor identity"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching kube-audit event's actor userInfo identifies a human operator or named service account (not an anonymous or unattributable identity)"
+          from_story_link: "An authorized operator or pipeline service account used kubectl exec"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no pods/exec create event for this pod appears in kube-audit at the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "the exec actor identity is anonymous, unrecognized, or absent from the approved operator and service-account roster"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: kube-audit
+          predicate: "a pods/exec create event for payments-api-7c9d8f5b6-q2vr4 at the alert timestamp, initiated by an actor identity present in the approved operator or service-account roster and corroborated by an open change-management ticket or deploy run covering this pod at this time"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "kube-audit records the authenticated actor userInfo for every exec request; confirming the exec event authorizes the action and identifies the responsible operator in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary: [change-management-correlation]
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Query kube audit for pods/exec subresource create events targeting pod payments-api-7c9d8f5b6-q2vr4 in namespace payments-prod around 2026-04-26T08:33:20Z. Return actor userInfo (username, groups, extra), sourceIPs, userAgent, and responseStatus."
+      change-management-correlation: "Check for open change-management tickets or deploy-runs-api records covering payments-api in payments-prod at 2026-04-26T08:33:20Z. Corroborates whether the exec actor had an approved change window."
+    scope_override:
+      window_hours: 1
+      anchor: alert

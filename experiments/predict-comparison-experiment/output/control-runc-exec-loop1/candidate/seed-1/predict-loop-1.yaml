@@ -1,0 +1,62 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?operator-kubectl-exec"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex:
+          type: kubectl_exec_session
+          classification: operator-kubectl-session
+      story: |
+        An authorized operator (deploy pipeline or on-call SRE) issued a
+        `kubectl exec` command targeting payments-api-7c9d8f5b6-q2vr4 in
+        the payments-prod namespace, which the k8s API server admitted and
+        routed through runc to spawn the observed interactive bash shell as
+        root at T=08:33:20. The interactive TTY (tty=34816) and root
+        user-context are consistent with an operator debug or migration step
+        sanctioned under a change-management ticket or an approved deploy
+        run. No prior baseline for pod-exec events on this container exists
+        in the investigation window. The authorization question — whether a
+        current change-management ticket or deploy run for payments-prod
+        covers this exec — determines disposition.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the kube audit log records a pod-exec request targeting payments-api-7c9d8f5b6-q2vr4 within ±5 min of the alert timestamp, sourced from an identity in the operator or engineering user population"
+          from_story_link: "an authorized operator issued a kubectl exec command targeting the pod, which the k8s API server admitted"
+        - id: p2
+          subject: proposed_edge
+          claim: "a change-management ticket or approved deploy run for the payments-prod namespace is open and covers the alert timestamp"
+          from_story_link: "sanctioned under a change-management ticket or an approved deploy run"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no pod-exec record for this pod appears in the kube audit log within ±5 min of the alert timestamp, or the exec is sourced from an in-cluster service account or unrecognized identity outside the operator population"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "no change-management ticket or approved deploy run for payments-prod is open within ±15 min of the alert timestamp"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: change-management
+          predicate: "an open change-management ticket or approved deploy run for the payments-prod namespace, with the executing k8s identity listed as an authorized actor, whose window covers the alert timestamp"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "change-management tickets and deploy-run records name the initiating identity that opened the action; confirming the ticket or run authorizes the exec and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary: [change-management-correlation]
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Query kube audit logs for verb=create, resource=pods/exec, targeting pod payments-api-7c9d8f5b6-q2vr4 or namespace payments-prod, in a ±15 min window around 2026-04-26T08:33:20Z. Capture the userAgent, username, sourceIPs, and responseStatus."
+      change-management-correlation: "Query the change-management anchor for open tickets or approved deploy runs scoped to payments-prod or the payments-api service, with a window covering 2026-04-26T08:33:20Z ±15 min. Verify whether the executing k8s identity matches an authorized actor on the record."
+    scope_override:
+      window_hours: 1
+      anchor: alert

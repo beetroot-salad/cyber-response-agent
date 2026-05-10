@@ -21,7 +21,7 @@ Validate: no regression in hypothesis count / causal-story discipline against th
 
 The ANALYZE-cutover stress tests ran an A/B/C framing experiment on a
 Haiku sensitivity probe (see
-`docs/experiments/analyze-subagent-pilot/stress-test/framing-ab/findings.md`
+`experiments/analyze-subagent-pilot/stress-test/framing-ab/findings.md`
 and `…/harder-round/findings.md`). Headline: ANALYZE is robust enough
 on its own that the probe is not needed at ANALYZE time — 9/9 clean
 on bias traps, 3/3 clean on a stacked-circumstantial-`++` trap it

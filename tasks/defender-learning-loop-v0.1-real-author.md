@@ -8,7 +8,7 @@ groups: defender, learning-loop
 
 **Prereqs.**
 - V0 (`tasks/defender-learning-loop-v0.md`) shipped — the orchestrator, judge YAML contract, persistence layout, and stub author exist; `_pending/findings.jsonl` is being populated by real runs.
-- Verification-method experiment complete (`tasks-scratch/defender-author-verification/results/final.md`). Outcome: forward-check alone, single Haiku rep, against the source case's transcript + ground-truth disposition.
+- Verification-method experiment complete (`experiments/defender-author-verification/results/final.md`). Outcome: forward-check alone, single Haiku rep, against the source case's transcript + ground-truth disposition.
 
 **Note on versioning.** V1 is the corpus-≥-30 milestone where retrieval shifts to invlang-keyed matching. This task (V0.1) is the intermediate step that makes the lesson corpus real but keeps retrieval naive (load-all-descriptions at PLAN time).
 
@@ -37,7 +37,7 @@ groups: defender, learning-loop
 
 ### Verification (per-edit check) — settled by the methodology experiment
 
-V0.1 ships **forward alone** as the auto-gate. The verification-method experiment (`tasks-scratch/defender-author-verification/results/final.md`) ran 4 bad + 4 good hand-crafted lessons through three candidate checks (forward / reverse / regression) at N=3 Haiku reps, and 8 full Sonnet defender reruns as oracle:
+V0.1 ships **forward alone** as the auto-gate. The verification-method experiment (`experiments/defender-author-verification/results/final.md`) ran 4 bad + 4 good hand-crafted lessons through three candidate checks (forward / reverse / regression) at N=3 Haiku reps, and 8 full Sonnet defender reruns as oracle:
 
 | Check | TNR (oracle BAD caught) | TPR (oracle GOOD accepted) | Agreement |
 |---|---|---|---|

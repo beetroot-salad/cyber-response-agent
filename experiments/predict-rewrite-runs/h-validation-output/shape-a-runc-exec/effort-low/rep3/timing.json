@@ -1,0 +1,11 @@
+{
+  "fixture": "shape-a-runc-exec",
+  "variant": "effort-low",
+  "rep": 3,
+  "wall_s": 104.46,
+  "prompt_chars": 19196,
+  "stdout_chars": 3694,
+  "error": null,
+  "loop_n": 1,
+  "signature_id": "wazuh-rule-100001"
+}

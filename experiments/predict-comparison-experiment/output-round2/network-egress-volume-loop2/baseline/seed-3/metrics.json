@@ -1,0 +1,8 @@
+{
+  "variant": "baseline",
+  "fixture": "network-egress-volume-loop2",
+  "seed": 3,
+  "elapsed_sec": 91.5,
+  "stdout_chars": 3316,
+  "prompt_chars": 18159
+}

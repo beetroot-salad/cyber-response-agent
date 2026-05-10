@@ -1,0 +1,63 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?operator-initiated-pod-exec"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: spawned
+        parent_vertex:
+          type: operator_session
+          classification: kubectl-exec-session
+      story: |
+        A Kubernetes operator ran `kubectl exec` against
+        payments-api-7c9d8f5b6-q2vr4 — causing the kube-apiserver
+        to proxy the exec through the node's container runtime,
+        which in turn invoked runc to open the bash session observed
+        in the alert. The Kubernetes audit log records every
+        pod/exec subresource call with the initiating user identity
+        and timestamp; that record is the authoritative chain from
+        the on-wire runc-spawned bash back to the human operator.
+        A corresponding change-management ticket or approved deploy
+        run for payments-prod would confirm the exec was sanctioned
+        under a recognized operational procedure.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the Kubernetes audit log records a pod/exec subresource event for payments-api-7c9d8f5b6-q2vr4 whose timestamp matches the alert"
+          from_story_link: "The Kubernetes audit log records every pod/exec subresource call with the initiating user identity and timestamp"
+        - id: p2
+          subject: proposed_edge
+          claim: "the initiating user identity in the matched audit event belongs to a recognized operator principal"
+          from_story_link: "that record is the authoritative chain from the on-wire runc-spawned bash back to the human operator"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no pod/exec audit event for this pod exists at the alert timestamp (exec was not issued via kubectl)"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching audit event exists but the initiating identity is not a recognized operator principal"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: kube-audit
+          predicate: "a pod/exec event for payments-api-7c9d8f5b6-q2vr4 at the alert timestamp, initiated by a recognized operator identity under an active change-management ticket or approved deploy run for payments-prod"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "the kube audit record names the initiating user identity directly; confirming the matching exec event authorizes the shell and identifies the responsible operator in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary: [change-management-correlation]
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Query the Kubernetes audit log for pod/exec subresource events on pod payments-api-7c9d8f5b6-q2vr4 (namespace payments-prod) in a ±5min window around 2026-04-26T08:33:20Z. Return: user.username, user.groups, requestReceivedTimestamp, responseStatus.code."
+      change-management-correlation: "Check for an open change-management ticket authorizing interactive exec access to payments-prod pods around 2026-04-26T08:33Z. Return: ticket ID, owner, approval status, maintenance window."
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```

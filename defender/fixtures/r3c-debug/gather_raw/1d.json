@@ -1,0 +1,25 @@
+## Query Results
+**Query:** rule.groups:(authentication_success OR authentication_failed)
+**Time range:** 2026-05-06T07:59:32Z to 2026-05-07T07:59:32Z
+
+### Data Source Health
+- **Source:** Wazuh Indexer (https://wazuh-indexer:9200)
+- **Most recent matching event:** no matching events
+- **Index event count (unfiltered, same window):** 7482
+
+### Summary
+- **Matching events:** 209
+
+### Sample Events (first 5)
+(no matching events)
+
+### Count Breakdown
+(no data)
+
+### Raw Sample Events (first 3, full _source)
+Use these for field-level inspection when the summary lines above don't carry
+the discriminator you need (e.g. source port, process name, connection tuple).
+
+```json
+(no matching events)
+```

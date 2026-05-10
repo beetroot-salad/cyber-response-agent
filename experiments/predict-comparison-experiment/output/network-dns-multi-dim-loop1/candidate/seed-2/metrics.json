@@ -1,0 +1,8 @@
+{
+  "variant": "candidate",
+  "fixture": "network-dns-multi-dim-loop1",
+  "seed": 2,
+  "elapsed_sec": 81.8,
+  "stdout_chars": 3256,
+  "prompt_chars": 17333
+}

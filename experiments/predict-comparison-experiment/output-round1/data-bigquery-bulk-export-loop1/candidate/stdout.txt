@@ -1,0 +1,58 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?scheduled-etl-export-job"
+      attached_to_vertex: v-003
+      proposed_edge:
+        relation: wrote_to
+        parent_vertex: {type: scheduler_job, classification: etl-pipeline-scheduled-export}
+      story: |
+        A scheduler-configured ETL pipeline job, authorized to run
+        under analyst-svc@analytics-prod.iam.gserviceaccount.com, issued
+        a daily export of customer_pii.users and customer_pii.payment_methods
+        to a date-stamped GCS path under gs://analytics-export-prod/exports/.
+        The destination filename "2026-04-26-customer-extract.csv.gz" follows
+        a date-template pattern consistent with a recurring scheduled extract.
+        The scheduler's job record should show an execution window bracketing
+        the alert timestamp and a destination template resolving to the
+        observed path.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "scheduler records a job configured to export customer_pii tables to the gs://analytics-export-prod/exports/ bucket whose execution window contains the alert timestamp"
+          from_story_link: "A scheduler-configured ETL pipeline job issued a daily export"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job's configured destination path template resolves to the observed date-stamped filename when substituted with the alert date"
+          from_story_link: "The destination filename follows a date-template pattern consistent with a recurring scheduled extract"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no scheduler job's execution window contains the alert timestamp, or no job is configured to export these tables to this bucket"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching scheduler job exists but its destination template does not resolve to the observed path"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: scheduler-job-correlation
+          predicate: "a scheduler job owned by an authorized initiator, configured to run analyst-svc against customer_pii tables with gs://analytics-export-prod as destination, with an execution window covering the alert timestamp"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "scheduler-job-correlation records the owner/initiator that created the job configuration; confirming the scheduled job authorizes the export and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: scheduler-job-correlation
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      scheduler-job-correlation: "Query Cloud Scheduler / Cloud Composer / BigQuery scheduled queries for jobs configured to export customer_pii tables to gs://analytics-export-prod/exports/ running under analyst-svc@analytics-prod.iam.gserviceaccount.com. Check whether any job's execution window contains 2026-04-26T11:18:54Z and whether its destination template matches the observed date-stamped filename."
+    scope_override:
+      window_hours: 48
+      anchor: alert
+```

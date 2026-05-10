@@ -1,0 +1,62 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?runtime-exec-from-host"
+      attached_to_vertex: v-003
+      proposed_edge:
+        relation: invoked_exec
+        parent_vertex: {type: process, classification: "host-side-exec-invoker"}
+      story: |
+        The process ancestry (runc:[2:INIT] → runc → containerd-shim-runc-v2 → containerd → systemd)
+        confirms this bash shell was spawned by a host-side container exec primitive; a host-side
+        actor issued a container exec API call targeting payments-api-7f9c-xz4lm, which the
+        container runtime honored by crossing the namespace boundary.
+        The executing shell carries uid=0 and loginuid=-1, consistent with a programmatic invocation
+        or a root session that bypassed PAM audit attribution.
+        No prior corpus baseline exists for payments-api:v1.4.2 to establish whether this exec
+        pattern recurs; novelty is unknown until the container-baseline lead returns.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "change-management anchor returns an approved ticket authorizing operator access to pod payments-api-7f9c-xz4lm that was active at alert time T"
+          from_story_link: "host-side actor issued a container exec API call targeting payments-api-7f9c-xz4lm"
+        - id: p2
+          subject: proposed_edge
+          claim: "deploy-runs anchor returns an active CI pipeline run targeting payments-api-7f9c-xz4lm that was in progress at or overlapping alert time T"
+          from_story_link: "host-side actor issued a container exec API call targeting payments-api-7f9c-xz4lm"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "change-management anchor returns no matching approved ticket for payments-api-7f9c-xz4lm at alert time T"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "deploy-runs anchor returns no active CI pipeline run for payments-api-7f9c-xz4lm at alert time T"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: change-management
+          predicate: "an approved change ticket authorizing operator access to pod payments-api-7f9c-xz4lm was active at alert time T"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+        - id: ac2
+          edge_ref: proposed
+          anchor_kind: deploy-runs
+          predicate: "an active CI pipeline run targeting pod payments-api-7f9c-xz4lm was in progress at or overlapping alert time T"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: container-baseline
+    composite_secondary: [correlated-endpoint-events]
+    override_data_source: null
+    lead_hints:
+      container-baseline: "Query rule-100001 events for container.image=payments-api:v1.4.2 over the 30-day window. Characterize whether runc-exec parent shells are part of a recurring pattern for this image — include exec frequency, parent class geometry, and whether this alert is novel or on-cadence with an established baseline."
+      correlated-endpoint-events: "Query Falco rules 100000-100099 from container.id=7f9cabcd1234 in a tight ±15-minute window around T=2026-04-22T19:25:01Z. Flag any co-fires of rules 100002, 100006, 100007, 100008 — these trigger the escalation composition rule per the playbook regardless of authorization verdict."
+    scope_override:
+      window_hours: 720
+      anchor: alert

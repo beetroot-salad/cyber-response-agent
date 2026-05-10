@@ -1,0 +1,63 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?ci-upload-job-initiated-connection"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: opened_tls_connection
+        parent_vertex: {type: ci_job, classification: authorized-ci-upload-job}
+      story: |
+        ci-runner-04's 30-day baseline shows recurring artifact upload
+        jobs to jfrog.example.io and pkg.example.io; cdn.staticfiles.example.org
+        does not appear in that baseline, but an ad-hoc or newly-onboarded
+        upload target could explain a first-time appearance. An authorized
+        CI upload job executing on the runner would produce a heavily
+        asymmetric connection (outbound >> inbound) matching the observed
+        27.4 GB orig_bytes / 41 MB resp_bytes shape. The CI orchestrator
+        should carry a job record assigned to ci-runner-04 with an
+        execution window containing the connection start timestamp and a
+        task step declaring an upload or artifact-push to the observed
+        destination. Loop 1 found no co-correlated CI orchestrator event
+        in the baseline query, making the job-record prediction directly
+        falsifiable.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "CI orchestrator records an active job assigned to ci-runner-04 whose execution window contains the connection start timestamp"
+          from_story_link: "The CI orchestrator should carry a job record assigned to ci-runner-04 with an execution window containing the connection start timestamp"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job's task definition declares an upload or artifact-push step targeting the observed destination domain"
+          from_story_link: "a task step declaring an upload or artifact-push to the observed destination"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no CI orchestrator job assigned to ci-runner-04 has an execution window that contains the connection start timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a time-matching job exists but its task definition does not declare an upload step targeting the observed destination domain"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci-orchestrator
+          predicate: "an active CI job assigned to ci-runner-04 with an execution window covering the connection start time, whose task definition declares an upload or artifact-push step targeting cdn.staticfiles.example.org or its parent domain"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "CI orchestrator job records name the initiating identity (developer, pipeline trigger, or webhook) that dispatched the run; confirming the job record authorizes the connection and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: ci-job-correlation
+    composite_secondary: [source-reputation]
+    override_data_source: null
+    lead_hints:
+      ci-job-correlation: "Look for any CI job assigned to ci-runner-04 (10.0.18.41) active around 2026-04-25T22:04:10Z. Check the job's task definition for upload or artifact-push steps targeting cdn.staticfiles.example.org or 185.220.101.7. Loop 1 baseline query found no correlated CI event — confirm whether this is a data-availability gap or a true absence."
+      source-reputation: "Check reputation and classification for destination IP 185.220.101.7 and domain cdn.staticfiles.example.org against threat-intel feeds. Determine whether this IP/domain belongs to a known legitimate CDN or storage provider, or is unrecognized/flagged."
+    scope_override:
+      window_hours: 2
+      anchor: alert
+```

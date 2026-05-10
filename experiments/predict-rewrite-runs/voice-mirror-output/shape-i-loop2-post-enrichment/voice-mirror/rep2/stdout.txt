@@ -1,0 +1,47 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?registered-actor-initiated"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: initiated_auth
+        parent_vertex: {type: process, classification: monitoring-daemon-process-on-source}
+      story: |
+        The monitoring daemon on 172.22.0.10 (classified as internal-monitoring-host)
+        invoked ssh nagios@target-endpoint as a scheduled health-check probe tick. Loop 1
+        established a periodic cadence across the 1h backward window: 11 single-attempt
+        clusters, mean inter-cluster interval 576s (stddev 102s), consistent with a
+        fixed-schedule monitoring tool; this alert is on-cadence with that baseline. sshd
+        on target-endpoint rejected the user (expected — nagios is not provisioned on
+        target-endpoint for login access but is the probe identity used by the monitoring
+        system). No forward success was observed in the ±60s window around the alert
+        timestamp.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "approved-monitoring-sources registry confirms the (172.22.0.10, nagios, target-endpoint) triple as an active registered probe"
+          from_story_link: "monitoring daemon on 172.22.0.10 invoked ssh nagios@target-endpoint as a scheduled health-check probe tick"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "the triple (172.22.0.10, nagios, target-endpoint) is not registered, or is marked inactive or revoked, in approved-monitoring-sources"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: approved-monitoring-sources
+          predicate: "(srcip, srcuser, dsthost) triple listed as an active approved monitoring probe"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: monitoring-probe
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      monitoring-probe: "Query approved-monitoring-sources for the exact triple (172.22.0.10, nagios, target-endpoint). Verdict resolves ac1 and is dispositive: authorized routes to monitoring-probe archetype resolution; unauthorized or indeterminate escalates per ac1."
+```

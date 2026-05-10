@@ -19,7 +19,7 @@ SCREEN retirement; whole-loop fast-path.
 
 ## Why
 
-Empirical result from `tasks-scratch/predict_fastpath_ab/` (2026-04-26,
+Empirical result from `experiments/predict_fastpath_ab/` (2026-04-26,
 4 arms × 7 fixtures including 1 adversarial collision):
 
 | Arm | Overall | Adversarial collision |
@@ -70,7 +70,7 @@ Operational guards:
     same `selected_lead`
 11. lead `kind` ∈ {branching, interpretive} (never fast-path mechanical)
 
-Reference implementation: `tasks-scratch/predict_fastpath_ab/gate.py`.
+Reference implementation: `experiments/predict_fastpath_ab/gate.py`.
 That module is pure (no plugin imports) and the prod port can copy the
 predicate functions verbatim.
 
@@ -208,7 +208,7 @@ sig_id)` helper alongside the existing prologue queries.
 ## Acceptance
 
 - All adversarial-collision-style fixtures from
-  `tasks-scratch/predict_fastpath_ab/fixtures/` pass when ported to
+  `experiments/predict_fastpath_ab/fixtures/` pass when ported to
   the test suite.
 - A live `/testrun` against the canonical 5710 monitoring-probe alert
   shows `## PREDICT (loop 1) — fast-path` in `investigation.md` and
@@ -220,8 +220,8 @@ sig_id)` helper alongside the existing prologue queries.
 
 ## References
 
-- Experiment: `tasks-scratch/predict_fastpath_ab/RESULTS.md`
-- Reference gate: `tasks-scratch/predict_fastpath_ab/gate.py`
+- Experiment: `experiments/predict_fastpath_ab/RESULTS.md`
+- Reference gate: `experiments/predict_fastpath_ab/gate.py`
 - Current handler: `soc-agent/scripts/handlers/predict.py:798`
   (`handle()`) and `:227` (`_safe_priors_section`)
 - Current priors block: `_format_prologue_priors` and `_format_priors`

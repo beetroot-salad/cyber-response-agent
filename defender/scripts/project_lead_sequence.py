@@ -2,8 +2,10 @@
 """Project lead_sequence.yaml from a defender run dir.
 
 Reads investigation.md, walks the `:L findings` rows in dispatch order,
-and emits defender/results/{run_id}/lead_sequence.yaml per
-defender/lead_sequence_schema.md.
+and emits {run_dir}/lead_sequence.yaml per
+defender/lead_sequence_schema.md. The run dir is the path passed by
+the caller (typically $DEFENDER_RUNS_BASE/{run_id}/, default
+/tmp/defender-runs/{run_id}/).
 
 Per defender/SKILL.md the investigation log is the source of truth: if
 this script can't project a faithful sequence, the log is the bug, not

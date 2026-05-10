@@ -1,0 +1,8 @@
+{
+  "variant": "baseline-effort-low",
+  "rep": 3,
+  "wall_s": 56.18,
+  "prompt_chars": 28714,
+  "stdout_chars": 2003,
+  "error": null
+}

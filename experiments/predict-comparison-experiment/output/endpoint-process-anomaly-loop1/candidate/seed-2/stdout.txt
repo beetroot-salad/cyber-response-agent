@@ -1,0 +1,29 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: source-reputation
+    predictions:
+      - id: lp1
+        if: "destination IP 164.92.71.108 is classified as known malicious, C2 infrastructure, or threat-intel flagged by any consulted feed"
+        read_as: "confirmed-adversarial-destination"
+        advance_to: escalate
+      - id: lp2
+        if: "destination IP 164.92.71.108 is unrecognized — no prior history from this environment, no threat-intel classification, and no association with a known legitimate service provider"
+        read_as: "unknown-external-destination"
+        advance_to: fork-at-mechanism
+      - id: lp3
+        if: "destination IP 164.92.71.108 is classified as a known legitimate service provider (CDN, cloud platform, SaaS endpoint)"
+        read_as: "recognized-service-destination"
+        advance_to: fork-at-authorization
+
+  routing:
+    selected_lead: source-reputation
+    composite_secondary: [encoded-command-decoder]
+    override_data_source: null
+    lead_hints:
+      source-reputation: "Classify destination IP 164.92.71.108 — threat-intel lookup, prior query history from environment, and service-provider association. Port 8443 TCP context."
+      encoded-command-decoder: "Retrieve the full proc.cmdline for pid 8821 on edr-mssql-prod-01 at 2026-04-26T09:48:00Z from the SIEM (alert omitted the b64 blob), then base64-decode the -EncodedCommand argument and characterize the decoded PowerShell — is it recognizable admin automation, download-and-exec, C2 beaconing, or encoded tool invocation?"
+```

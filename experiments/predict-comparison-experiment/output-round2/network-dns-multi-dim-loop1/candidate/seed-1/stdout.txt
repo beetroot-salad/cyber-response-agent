@@ -1,0 +1,42 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "the child image set matches the host's recurring WINWORD.EXE child-image baseline geometry on publisher, image kind, and signing status — no child image kind absent from baseline"
+        read_as: "on-baseline-known-images"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "WINWORD.EXE child-process events on WIN-DEV-3211 for user DOMAIN\\ksilva, prior 7 days"
+          dimension: child_image_kind_and_signing_status
+      - id: lp2
+        if: "at least one child image kind is absent from the host's recurring WINWORD.EXE child-image baseline (any deviation from the zero-count baseline for that image kind)"
+        read_as: "novel-child-image-signal"
+        advance_to: escalate
+        comparison:
+          selector_kind: historical-self
+          selector: "WINWORD.EXE child-process events on WIN-DEV-3211 for user DOMAIN\\ksilva, prior 7 days"
+          dimension: child_image_kind_and_signing_status
+      - id: lp3
+        if: "child images are all within the baseline image-kind set but child count and image diversity deviate materially from the baseline distribution on at least one recorded dimension"
+        read_as: "known-images-volume-anomaly"
+        advance_to: fork-at-mechanism
+        comparison:
+          selector_kind: historical-self
+          selector: "WINWORD.EXE child-process events on WIN-DEV-3211 for user DOMAIN\\ksilva, prior 7 days"
+          dimension: child_process_count_and_distinct_image_count
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: []
+    lead_hints:
+      process-lineage: "Reconstruct the child process list spawned by WINWORD.EXE pid 9244 on WIN-DEV-3211 in the 5-minute alert window. For each distinct child image: capture image path, signing status (publisher / unsigned), and spawn count. Pair with historical WINWORD.EXE child-process events on this host over the prior 7 days to establish baseline image kinds and counts."
+    scope_override:
+      window_hours: 168
+      anchor: alert
+```

@@ -10,7 +10,7 @@ clean buckets:
    discarded (selected_lead, composite_secondary, lead_hints, ...).
 3. **telemetry** — audit / budget metadata (loop number, shape decision).
 
-Design principles (see tasks-scratch/predict-output-schema.md):
+Design principles (see experiments/predict-output-schema/predict-output-schema.md):
 
 - Invlang = state. Routing = orchestrator metadata. No routing keys leak
   into the invlang delta.

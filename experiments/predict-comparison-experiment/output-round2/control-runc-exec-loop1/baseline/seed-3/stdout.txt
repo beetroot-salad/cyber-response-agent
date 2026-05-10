@@ -1,0 +1,71 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?operator-kubectl-exec"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: spawned
+        parent_vertex:
+          type: operator_session
+          classification: kubectl-exec-session
+      story: |
+        A cluster operator (deploy engineer or on-call SRE) issued a
+        `kubectl exec` command targeting pod
+        `payments-api-7c9d8f5b6-q2vr4` in `payments-prod`, causing
+        the Kubernetes API server to instruct the kubelet to open an
+        exec stream via runc, which produced the interactive bash
+        session the alert captures. The runc parent process and
+        interactive TTY (34816) are the canonical host-side
+        fingerprint of a `kubectl exec -it` invocation; no other
+        routine workload path produces this process ancestry shape.
+        No prior-investigation baseline for pod-exec events on this
+        pod exists. The authorization question is whether an approved
+        change-management ticket or active deploy run covers a kubectl
+        exec operation on this pod at the alert timestamp.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "kube-audit records a pod/exec subresource request against payments-api-7c9d8f5b6-q2vr4 whose timestamp falls within the alert window"
+          from_story_link: "operator issued a kubectl exec command targeting the pod, causing the API server to instruct the kubelet"
+        - id: p2
+          subject: proposed_edge
+          claim: "the kube-audit exec record names a human user identity (not a service account) as the initiating subject"
+          from_story_link: "a cluster operator issued the kubectl exec command"
+      attribute_predictions:
+        - id: ap1
+          target: proposed_parent
+          attribute: user_identity_kind
+          claim: "initiating subject is a human operator identity, not a workload service account"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no kube-audit pod/exec record for this pod falls within the alert window"
+        - id: r2
+          refutes_predictions: [p2, ap1]
+          claim: "the exec record's initiating subject is a service account or automated pipeline identity, not a human operator"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: change-management
+          predicate: "an open change-management ticket or active deploy run, owned by an approved initiator, explicitly authorizes a kubectl exec operation on payments-prod/payments-api pods within a window containing the alert timestamp"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "change-management tickets and deploy-run records name the initiator who opened the record; confirming the ticket or run authorizes the exec and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary:
+      - change-management-correlation
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Query kube-audit for pod/exec subresource events against pod payments-api-7c9d8f5b6-q2vr4 (namespace payments-prod) in a ±5min window around 2026-04-26T08:33:20Z. Capture the initiating user identity, user agent, and source IP. This characterizes who opened the exec and feeds p1/p2."
+      change-management-correlation: "Query the change-management anchor for open tickets or active deploy runs that authorize kubectl exec on payments-prod/payments-api pods, with an execution window covering 2026-04-26T08:33:20Z. Resolves ac1."
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```

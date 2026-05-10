@@ -1,0 +1,41 @@
+arm: proposed-B
+model: haiku
+include_environment_context: false
+relative_description_block: true
+
+# When relative_description_block: true, the following paragraph is appended verbatim
+# to §Story authoring of variants/predict-story-only.md before dispatch.
+relative_description_text: |
+  **Relative description discipline (no environment context provided).** This run does not
+  ship environment-specific knowledge. Author each story in mechanism-class terms only:
+  name the parent's *class* and the *role* of each attribute, never a specific image
+  path, user identity, IP value, or org-named tool. Env-specific grounding is ANALYZE's
+  job (anchor consultation), not PREDICT's. PREDICT scaffolds the mechanism-class
+  question; ANALYZE confirms which env-specific instance fits.
+
+  **Divergence axis is mandatory for Shape M.** Your two stories MUST oppose each other
+  on at least one named observable axis. Pick the discriminator from this canonical set,
+  or name an equally-specific observable axis of the same kind:
+
+  - **signing distribution** — uniform recurring CA vs absent / heterogeneous / no
+    recurring publisher
+  - **name-pattern stability** — structured recurring pattern (regex-shaped) vs opaque
+    / one-off / random
+  - **cadence** — within a recurring schedule vs ad-hoc burst with no recurrence
+  - **lineage shape** — known recurring parent ancestry vs novel / unstructured chain
+  - **content entropy** — within a characteristic baseline range vs out-of-band
+  - **distinct-artifact breadth** — bounded recurring set vs unbounded / first-occurrence
+
+  Each story must name the **value of the discriminator under its mechanism class**, and
+  the two values must be opposing on the same axis. Example shape — story A: "all child
+  images uniformly signed by a single recurring publisher consistent with the parent's
+  90-day baseline"; story B: "child images unsigned or signed by no recurring publisher,
+  consistent with ad-hoc payload staging." Same axis (signing distribution); opposing
+  values; both stated at mechanism-class abstraction without naming any specific CA,
+  publisher, image, or user.
+
+  If you cannot identify an opposing pair on any axis after considering the alert's
+  observable fields, the fork is unjustified — but for this experiment, force the
+  selection: pick the axis on which the alert's observable fields are *most informative*
+  (i.e., the alert reports a value the discriminator could split on) and write the two
+  stories around opposing values of that axis.

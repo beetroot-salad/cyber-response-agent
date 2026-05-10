@@ -41,10 +41,10 @@ State up front what would make the proposed variant win — and what would make 
 
 ## 6. Layout
 
-All experiment artifacts live under `tasks-scratch/<experiment-name>/`:
+All experiment artifacts live under `experiments/<experiment-name>/`:
 
 ```
-tasks-scratch/<experiment-name>/
+experiments/<experiment-name>/
   plan.md           # this plan
   variants/         # prompt files or config diffs
   fixtures/         # or pointers to canonical fixtures
@@ -74,12 +74,12 @@ Rank by per-occurrence mean with `n` shown as support — not by `log1p(count) �
 
 ## Trials
 Validation: 1 per variant per fixture.
-Scale-up: N=<…>. Mid-run analysis at <25–30%>. Analysis script: tasks-scratch/<name>/analyze.py.
+Scale-up: N=<…>. Mid-run analysis at <25–30%>. Analysis script: experiments/<name>/analyze.py.
 
 ## Decision criteria
 - proposed wins if <criterion>
 - current retained if <criterion>
 
 ## Layout
-tasks-scratch/<name>/
+experiments/<name>/
 ```

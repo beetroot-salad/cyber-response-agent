@@ -1,0 +1,8 @@
+{
+  "variant": "candidate",
+  "fixture": "endpoint-process-anomaly-loop1",
+  "seed": 1,
+  "elapsed_sec": 92.4,
+  "stdout_chars": 3277,
+  "prompt_chars": 17809
+}

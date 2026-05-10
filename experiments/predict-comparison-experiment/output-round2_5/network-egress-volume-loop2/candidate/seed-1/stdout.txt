@@ -1,0 +1,63 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?ci-artifact-upload"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: opened_tls_connection
+        parent_vertex: {type: ci_job, classification: ci-orchestrator-dispatched-job}
+      story: |
+        ci-runner-04 has a 30-day egress baseline of 4.2 GB/day to a
+        stable set of known destinations; cdn.staticfiles.example.org /
+        185.220.101.7 does not appear anywhere in that set. A CI job
+        dispatched to ci-runner-04 by the CI orchestrator initiated an
+        artifact upload to that destination, accounting for the 27.4 GB
+        outbound volume over ~70 minutes. The CI orchestrator should
+        record an active job assigned to ci-runner-04 whose execution
+        window brackets the alert timestamp and whose configuration
+        declares the observed destination's parent domain as an artifact
+        upload target. The loop 1 "no CI orchestrator co-correlation"
+        observation came from the network-baseline lead, not from a
+        direct CI orchestrator API query, so the orchestrator record
+        has not yet been consulted.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "CI orchestrator records an active job assigned to ci-runner-04 whose execution window contains the alert timestamp"
+          from_story_link: "A CI job dispatched to ci-runner-04 by the CI orchestrator initiated an artifact upload"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job's configuration names the observed destination's parent domain as an artifact upload target"
+          from_story_link: "whose configuration declares the observed destination's parent domain as an artifact upload target"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no CI job execution window contains the alert timestamp for ci-runner-04"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching job exists but its configuration does not name the observed destination's parent domain as an artifact upload target"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci-orchestrator-api
+          predicate: "an active CI job assigned to ci-runner-04 with an execution window containing the alert timestamp and a job configuration declaring the observed destination's parent domain as an artifact upload target"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "the CI orchestrator job record names the initiating identity (developer, scheduled trigger, or webhook) that dispatched the job; confirming the job authorizes the connection and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: ci-job-correlation
+    composite_secondary: [source-reputation]
+    override_data_source: null
+    lead_hints:
+      ci-job-correlation: "Query CI orchestrator API for jobs assigned to ci-runner-04 (10.0.18.41) with an execution window covering the alert timestamp 2026-04-25T22:04:10Z. The TLS connection lasted 4187s (~70 min); look back at least 90 min before the alert to capture job start. Return: job id, initiating identity, execution window, configured artifact upload destinations."
+      source-reputation: "Classify 185.220.101.7 and ssl.server_name cdn.staticfiles.example.org against threat intel and any internal allowlists. The host has no 30-day history with this destination; determine whether the destination is a known CDN/cloud provider or an unrecognized/recently-registered domain."
+    scope_override:
+      window_hours: 2
+      anchor: alert
+```

@@ -1,0 +1,47 @@
+status: complete
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?monitoring-system-is-the-actor"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: initiated_auth
+        parent_vertex: {type: process, classification: monitoring-daemon-process-on-source}
+      story: |
+        The monitoring daemon on 172.22.0.10 invoked `ssh nagios@target-endpoint`
+        as a scheduled health-check tick. Loop 1 established a periodic cadence
+        across 11 rule-5710 events over 1h (mean inter-arrival ~576s,
+        max_cluster_size=1, no forward-success), consistent with a fixed-schedule
+        monitoring tool; this alert is on-cadence with that loop-1 baseline.
+        The username `nagios` is a monitoring-pattern sentinel name — the string
+        a Nagios-class health-check agent supplies when probing target
+        availability. sshd on target-endpoint rejected the user because `nagios`
+        is not provisioned there, which is the expected outcome for an
+        availability probe using a non-local credential.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "approved-monitoring-sources registry confirms the (172.22.0.10, nagios, target-endpoint) triple as an active registered probe"
+          from_story_link: "monitoring daemon on 172.22.0.10 invoked ssh nagios@target-endpoint as a scheduled health-check tick"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "the triple is not registered (or is marked inactive/revoked) in approved-monitoring-sources"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: approved-monitoring-sources
+          predicate: "(srcip, srcuser, target) triple listed as active approved monitoring probe"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: monitoring-probe
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      monitoring-probe: "Look up the exact triple (srcip=172.22.0.10, srcuser=nagios, target=target-endpoint) in the approved-monitoring-sources registry. Confirm whether listed and active. cadence_shape=periodic and forward_success_60s=false are already established by loop 1 — no re-query needed on those dimensions."

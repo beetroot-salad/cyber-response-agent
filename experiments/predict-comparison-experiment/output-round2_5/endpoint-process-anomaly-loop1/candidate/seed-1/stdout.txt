@@ -1,0 +1,42 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: source-reputation
+    predictions:
+      - id: lp1
+        if: "164.92.71.108 matches a threat-intelligence indicator or is classified as known malicious or attacker-controlled infrastructure"
+        read_as: c2-destination-confirmed
+        advance_to: escalate
+      - id: lp2
+        if: "164.92.71.108 is unrecognized — no established egress footprint from this environment, no match to a known cloud, CDN, or corporate service, and no threat-intel hit"
+        read_as: unrecognized-outbound-target
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "164.92.71.108 is classified as a known legitimate corporate or cloud service with an established footprint in environment egress history"
+        read_as: recognized-outbound-target
+        advance_to: fork-at-authorization
+      - id: lp4
+        if: "reputation data is unavailable or indeterminate (threat-intel feed unreachable, no WHOIS, no egress history indexed)"
+        read_as: destination-reputation-indeterminate
+        advance_to: fork-at-authorization
+
+  routing:
+    selected_lead: source-reputation
+    composite_secondary: [process-lineage]
+    override_data_source: null
+    lead_hints:
+      source-reputation: >
+        Classify the external endpoint 164.92.71.108 on port 8443. Check threat-intel feeds for C2/malware-infrastructure tags, WHOIS/registration recency, reverse-DNS, and whether this IP appears in environment egress history from edr-mssql-prod-01 or peer database hosts. The key question: is this a known-legitimate corporate or cloud destination, or an unrecognized/suspicious endpoint?
+      process-lineage: >
+        Reconstruct the process tree around pid 8821 (powershell.exe) on edr-mssql-prod-01 at 2026-04-26T09:48:00Z. Capture: (1) any processes above sqlservr.exe (pid 4488) in the tree that are anomalous, (2) whether sqlagent.exe is running and whether it is an ancestor of sqlservr.exe or a sibling, (3) any child processes spawned by pid 8821, and (4) sibling powershell.exe invocations from sqlservr.exe in the surrounding 15-minute window.
+    scope_override:
+      window_hours: 24
+      anchor: alert
+```
+
+**Shape rationale:** Loop 1, no prior enrichment. The destination IP reputation is the cheapest single discriminator — its outcome space cleanly partitions the next loop. A threat-intel hit (lp1) collapses authorization immediately and escalates. An unrecognized endpoint (lp2) or recognized corporate endpoint (lp3) both route to the authorization fork, but carry different priors (lp2 is higher-confidence adversarial, lp3 requires stronger legitimate-use grounding). lp4 covers feed unavailability without silently dropping through.
+
+Process-lineage is a natural composite: the presence or absence of sqlagent.exe as an ancestor of sqlservr.exe is the primary structural discriminator between `?dba-batch-script-via-sqlagent` (sqlagent.exe would be in the tree above sqlservr.exe, or would have separately invoked powershell) and `?xp_cmdshell-misuse-via-stored-proc` (sqlservr.exe is the direct parent with no sqlagent.exe above it). That observation arrives cheaply in the same GATHER pass and directly informs the loop-2 fork, regardless of how lp1–lp4 resolve.

@@ -1,0 +1,30 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "all child images are signed, well-known Office or Windows system binaries — no unsigned, unknown, or structurally anomalous image kinds present"
+        read_as: "known-signed-helper-set"
+        advance_to: fork-at-authorization
+      - id: lp2
+        if: "one or more child images are unsigned, unrecognized, or structurally inconsistent with the Office helper image geometry (e.g., short random-named executables, binaries outside expected system or Office paths)"
+        read_as: "anomalous-child-image-present"
+        advance_to: escalate
+      - id: lp3
+        if: "child image metadata (signing status, full image path) is unavailable in the process event records — insufficient data to classify the image set"
+        read_as: "image-characterization-blind"
+        advance_to: escalate
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: []
+    lead_hints:
+      process-lineage: "Retrieve all child processes spawned by WINWORD.EXE pid 9244 on WIN-DEV-3211 in the alert window (2026-04-26T07:09–07:19Z). For each distinct child image: full image path, signing status (signed/unsigned/unknown), publisher, and spawn count. The 38-distinct-image count is in the alert; the goal is to characterize what those images are — Office helpers, system binaries, or unknown/unsigned artifacts."
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```

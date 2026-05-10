@@ -1,0 +1,67 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?automation-update-hook"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: deploy_run, classification: deploy-automation-run-on-host}
+      story: |
+        An authorized automation system (deploy pipeline, CI webhook, or
+        scheduled update timer) triggered a shell hook through or alongside
+        the nginx worker process on web-edge-03 as part of a planned update
+        or provisioning operation. The hook follows the curl-pipe-sh
+        bootstrap pattern documented by the automation vendor, fetching and
+        executing an install script from a pre-registered update endpoint.
+        The shell ran as www-data because the automation system executes
+        under the nginx runtime identity. No prior baseline exists for nginx
+        spawning shells on this host; this alert is the first observed
+        instance.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "deploy-runs records an active run targeting web-edge-03 whose execution window contains the alert timestamp"
+          from_story_link: "authorized automation system triggered a shell hook as part of a planned update or provisioning operation"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching run's declared action set includes a shell invocation or update-script step referencing the observed download domain"
+          from_story_link: "the hook follows the curl-pipe-sh bootstrap pattern, fetching from a pre-registered update endpoint"
+      attribute_predictions:
+        - id: ap1
+          target: proposed_parent
+          attribute: initiator_identity
+          claim: "the run was opened by a recognized automation actor (service account, scheduled trigger, or CI webhook) not an interactive user session"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no deploy run's execution window contains the alert timestamp for web-edge-03"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching run exists but its declared actions do not include a shell or update-script step referencing the observed domain"
+        - id: r3
+          refutes_predictions: [ap1]
+          claim: "the matching run's initiator is an interactive user session rather than a recognized automation actor"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs-api
+          predicate: "an active deploy run targeting web-edge-03 with execution window containing 2026-04-26T03:11:07Z, with declared shell or update-script actions and owned by an authorized initiator"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "deploy-runs-api records the initiator that opened each run (service account, CI webhook, or scheduled trigger); confirming the run authorizes the shell spawn and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: [deploy-runs-correlation]
+    override_data_source: null
+    lead_hints:
+      process-lineage: "Reconstruct the full ancestry chain of sh pid 31807 — walk up from nginx pid 1422 to find whether a deploy-system or automation daemon sits above it. Also capture any child processes sh spawned after execve (post-exploitation indicator)."
+      deploy-runs-correlation: "Query the deploy-runs-api for any active runs targeting agent web-edge-03 (10.0.7.18) with an execution window covering 2026-04-26T03:11:07Z. Return run id, initiator identity, declared action steps, and execution window start/end. This resolves h-001.ac1."
+    scope_override:
+      window_hours: 1
+      anchor: alert

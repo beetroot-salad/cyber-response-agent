@@ -1,0 +1,1081 @@
+{
+  "training": {
+    "arm_a": [
+      {
+        "fixture": "01-ssh-bastion-new-source",
+        "defender": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "api_error_status": null,
+          "duration_ms": 30169,
+          "duration_api_ms": 29151,
+          "num_turns": 1,
+          "result": "### TRIAGE\n\n**Claim:** This is jsmith on Building 7 wifi following up on their own bastion config rotation, not a compromise.\n\n- The key fingerprint is established \u2014 same key, four other corp IPs, 90-day history. Not a new credential; the only novelty is the source subnet.\n- INC-8821 (\"rotated bastion sshd config\") closed at 03:31Z \u2014 16 minutes before this login. Login to verify config behavior after a late-night change is the expected next action.\n- Source geolocates to corp-internal Building 7 wifi. Subnet shift (from 10.42.5.0/24 to .7.x) is explained by being on wifi rather than the usual wired network \u2014 not lateral movement.\n- No concurrent sessions rules out parallel key abuse; off-hours timing is explained by the active maintenance window.\n\n**Disposition:** `benign`\n\n**Load-bearing assumption:** INC-8821 is a legitimate ticket authored and closed by jsmith \u2014 not pre-staged cover created or manipulated by an attacker holding jsmith's key. If the ticket was fabricated or its close timestamp was spoofed, the coherent narrative collapses and this becomes a key-compromise with planted alibi.\n\n---\n\n### DIRECTIVE-TO-CRITIC\n\nWhen an alert arrives with strong surface legitimacy \u2014 known key, corp-internal source, role-consistent user, and a recent ticket that narratively explains the anomaly \u2014 prioritize attacking the integrity of that ticket as a whole artifact over auditing individual evidence items independently. A matching ticket is the most dangerous form of cover because it converts a single suspicious data point (new source) into an apparently coherent operational story. The critic should ask: was the ticket created before or after the anomalous action? Is the ticket content specific enough to be predictive rather than post-hoc? Who else can confirm the work order? Treat the ticket not as corroboration but as the highest-value falsification target in the investigation.",
+          "stop_reason": "end_turn",
+          "session_id": "29ada277-1935-4855-b656-1006810b2739",
+          "total_cost_usd": 0.09321204999999999,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 18583,
+            "cache_read_input_tokens": 11896,
+            "output_tokens": 1265,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 18583,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [
+              {
+                "input_tokens": 2,
+                "output_tokens": 1265,
+                "cache_read_input_tokens": 11896,
+                "cache_creation_input_tokens": 18583,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 18583
+                },
+                "type": "message"
+              }
+            ],
+            "speed": "standard"
+          },
+          "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+              "inputTokens": 891,
+              "outputTokens": 17,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "webSearchRequests": 0,
+              "costUSD": 0.000976,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            },
+            "claude-sonnet-4-6": {
+              "inputTokens": 2,
+              "outputTokens": 1265,
+              "cacheReadInputTokens": 11896,
+              "cacheCreationInputTokens": 18583,
+              "webSearchRequests": 0,
+              "costUSD": 0.09223604999999999,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            }
+          },
+          "permission_denials": [],
+          "terminal_reason": "completed",
+          "fast_mode_state": "off",
+          "uuid": "1180cf05-fc09-42bf-8feb-7d0759831e5f"
+        },
+        "critic": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "api_error_status": null,
+          "duration_ms": 51454,
+          "duration_api_ms": 49029,
+          "num_turns": 1,
+          "result": "### VERDICT\n\n**CRITIQUE**\n\n**Assumption attacked:** \"Login to verify config behavior after a late-night change is the expected next action.\"\n\n**Mechanism:** An attacker holding jsmith's key who performed the sshd config rotation could have embedded a persistence mechanism in the rotation itself \u2014 a second `AuthorizedKeysFile`, a relaxed `PermitRootLogin` directive, an added `Match` block, or `AllowTcpForwarding yes`. The post-rotation login is then not verification of a defensive change; it is functional testing of a backdoor. INC-8821 provides standing for the actor, not evidence that the change was defensive.\n\n**Observable consequence:** The sshd_config diff on bastion-01 for the 03:31Z window is a concrete artifact. A legitimate key rotation or policy tightening produces a targeted, narrow delta (one algorithm removed, one key replaced). A backdoor insertion produces an unexpected structural addition.\n\n**Lead:** Retrieve `sshd_config` before/after state \u2014 config management repo diff, backup file, or `auditd` records on bastion-01 around 03:31Z.\n\n**Prediction:** Legitimate rotation \u2192 diff shows one targeted change with no new `Match` blocks, no `PermitRootLogin yes`, no additional `AuthorizedKeysFile`. Backdoor \u2192 diff contains at least one of those indicators.\n\n---\n\n### DIRECTIVE-TO-DEFENDER\n\nFor alerts where the anomalous action is itself a configuration write \u2014 not just an authenticated session but a change to an infrastructure surface \u2014 extend provenance checks to the *content* of the change, not only the actor's standing to make it. A credentialed actor with a plausible ticket satisfies \"who\"; it does not satisfy \"what did they actually do.\" For credentialed-config-write alert classes, the investigation sequence should be: (1) actor standing check, (2) diff the changed artifact against the pre-change state, (3) confirm the observed delta matches the stated purpose. Cover narratives are constructed to pass step 1 and collapse at step 2; skipping the diff leaves the highest-value falsification target unexamined.",
+          "stop_reason": "end_turn",
+          "session_id": "c6b31860-b268-4c15-81e8-261c0e9c1d94",
+          "total_cost_usd": 0.10902254999999998,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 19201,
+            "cache_read_input_tokens": 11896,
+            "output_tokens": 2123,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 19201,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [
+              {
+                "input_tokens": 2,
+                "output_tokens": 2123,
+                "cache_read_input_tokens": 11896,
+                "cache_creation_input_tokens": 19201,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 19201
+                },
+                "type": "message"
+              }
+            ],
+            "speed": "standard"
+          },
+          "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+              "inputTokens": 1509,
+              "outputTokens": 18,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "webSearchRequests": 0,
+              "costUSD": 0.001599,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            },
+            "claude-sonnet-4-6": {
+              "inputTokens": 2,
+              "outputTokens": 2123,
+              "cacheReadInputTokens": 11896,
+              "cacheCreationInputTokens": 19201,
+              "webSearchRequests": 0,
+              "costUSD": 0.10742354999999998,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            }
+          },
+          "permission_denials": [],
+          "terminal_reason": "completed",
+          "fast_mode_state": "off",
+          "uuid": "58734425-c37f-4ece-815b-0fd3a72e948b"
+        }
+      },
+      {
+        "fixture": "08-router-firmware-anomaly",
+        "defender": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "api_error_status": null,
+          "duration_ms": 41000,
+          "duration_api_ms": 38652,
+          "num_turns": 1,
+          "result": "### TRIAGE\n\n**Claim:** The border router is under active control-plane attack \u2014 most likely crafted BGP UPDATE or packet-flood exploitation targeting the control-plane CPU.\n\n- ISP NOC confirms zero upstream link flaps during all three reset windows. This eliminates the dominant benign cause of BGP session resets (physical/upstream instability).\n- The vendor documents control-plane CPU spikes only on config commit or full BGP table reconvergence. Neither occurred. A 78% spike co-located within seconds of the first reset falls entirely outside vendor-documented normal triggers \u2014 this is unexplained behavior by the vendor's own model.\n- Three resets in one day against a 30-day baseline of one is a 90\u00d7 rate increase. Hardware degradation producing this step-change without any accompanying syslog fault events is implausible.\n- The environment has no firmware attestation, no host agent, and syslog that reflects only what vendor code chooses to emit \u2014 the absence of anomaly in syslog does not exonerate the device; it bounds our visibility.\n\n**Disposition:** `malicious`\n\n**Load-bearing assumption:** The vendor's documented CPU-spike trigger conditions (config commit, full reconvergence) are exhaustive for normal operation \u2014 i.e., no undisclosed firmware bug produces this spike pattern under quiescent traffic. If an undocumented firmware defect explains the co-occurrence, the call softens to `escalate`.\n\n---\n\n### DIRECTIVE-TO-CRITIC\n\nWhen an investigation reaches a `malicious` verdict primarily through **elimination of benign explanations** rather than through direct observation of attack artifacts, prioritize stress-testing the completeness of the elimination logic. Specifically: were all plausible benign causes enumerated, and did each elimination step draw on a source with sufficient visibility to make the ruling authoritative? On closed-firmware network devices, vendor syslog is not an integrity-attested record \u2014 it surfaces what the vendor code chooses to surface. An investigation that treats \"nothing unusual in syslog\" as a negative finding conflates limited observability with negative evidence. Flag this conflation wherever the verdict depends on it.",
+          "stop_reason": "end_turn",
+          "session_id": "f364a18d-5c87-4efd-bce3-ab4cf710965f",
+          "total_cost_usd": 0.10262654999999998,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 18645,
+            "cache_read_input_tokens": 11896,
+            "output_tokens": 1873,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 18645,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [
+              {
+                "input_tokens": 2,
+                "output_tokens": 1873,
+                "cache_read_input_tokens": 11896,
+                "cache_creation_input_tokens": 18645,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 18645
+                },
+                "type": "message"
+              }
+            ],
+            "speed": "standard"
+          },
+          "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+              "inputTokens": 953,
+              "outputTokens": 17,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "webSearchRequests": 0,
+              "costUSD": 0.0010379999999999999,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            },
+            "claude-sonnet-4-6": {
+              "inputTokens": 2,
+              "outputTokens": 1873,
+              "cacheReadInputTokens": 11896,
+              "cacheCreationInputTokens": 18645,
+              "webSearchRequests": 0,
+              "costUSD": 0.10158854999999999,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            }
+          },
+          "permission_denials": [],
+          "terminal_reason": "completed",
+          "fast_mode_state": "off",
+          "uuid": "48faab26-2d7b-4e0e-b724-699f50ca589c"
+        },
+        "critic": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "api_error_status": null,
+          "duration_ms": 48892,
+          "duration_api_ms": 46660,
+          "num_turns": 1,
+          "result": "### VERDICT\n\n**CRITIQUE**\n\nAssumption attacked: *\"ISP confirms no upstream link flaps in their NOC log during the alert windows\"* \u2014 treated as eliminating upstream-driven BGP instability.\n\n**Mechanism:** NOC operational vocabulary distinguishes \"link flap\" (physical interface state change) from BGP prefix churn (UPDATE floods, MED oscillations, prefix withdrawals from other ISP customers). A sustained BGP UPDATE storm originating elsewhere in the ISP's AS would not appear in NOC link-flap records but would drive rtr-edge-01's control-plane CPU into sustained high-utilization processing received UPDATEs \u2014 causing hold-timer expiry and session reset. This is a form of BGP reconvergence, but its trigger is upstream UPDATE volume, not local config commit. The defender's elimination of \"upstream instability\" was only as precise as the ISP's confirmation, which covered link state, not prefix dynamics.\n\n**Observable consequence:** Public BGP route collectors (RouteViews, RIPE RIS) archive MRT UPDATE dumps with per-minute granularity for most tier-1/tier-2 ISP ASNs. If upstream-isp-1's ASN exported elevated UPDATE volume or prefix-withdrawal bursts at 02:14, 04:31, and 06:08 Tuesday, that signal is present in archived MRT data \u2014 testable without device access.\n\n**Lead:** Pull RouteViews/RIPE RIS MRT dumps for the upstream ISP's ASN. Filter to the \u00b15-minute window around each reset. Count UPDATE messages and prefix-withdrawal events.\n\n**Prediction:** If UPDATE volume is elevated at all three windows and flat in surrounding hours, the malicious call should soften to ESCALATE pending firmware ruling out.\n\n---\n\n### DIRECTIVE-TO-DEFENDER\n\nFor alerts where the verdict rests on third-party confirmation of \"no anomaly,\" sequence a precision check before treating the confirmation as authoritative: ask what instrumentation the confirming party actually runs, at what granularity, and whether their terminology maps onto your causal hypothesis. An ISP NOC's \"no link flaps\" confirms physical layer stability \u2014 it does not attest to BGP control-plane quiescence. On closed-firmware network devices with no endpoint telemetry, the visibility gap means you are correlating operational events, not inspecting causation chains. When the benign-elimination logic rests on a third-party confirmation, make explicit what that party can and cannot see before treating the confirmation as ruling out the relevant class of upstream cause.",
+          "stop_reason": "end_turn",
+          "session_id": "1b6b1af4-4ffd-4531-9ff0-a7e36b071199",
+          "total_cost_usd": 0.1088298,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 19292,
+            "cache_read_input_tokens": 11896,
+            "output_tokens": 2081,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 19292,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [
+              {
+                "input_tokens": 2,
+                "output_tokens": 2081,
+                "cache_read_input_tokens": 11896,
+                "cache_creation_input_tokens": 19292,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 19292
+                },
+                "type": "message"
+              }
+            ],
+            "speed": "standard"
+          },
+          "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+              "inputTokens": 1600,
+              "outputTokens": 19,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "webSearchRequests": 0,
+              "costUSD": 0.0016950000000000001,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            },
+            "claude-sonnet-4-6": {
+              "inputTokens": 2,
+              "outputTokens": 2081,
+              "cacheReadInputTokens": 11896,
+              "cacheCreationInputTokens": 19292,
+              "webSearchRequests": 0,
+              "costUSD": 0.1071348,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            }
+          },
+          "permission_denials": [],
+          "terminal_reason": "completed",
+          "fast_mode_state": "off",
+          "uuid": "0301871a-f0fd-45bc-8002-b092261585df"
+        }
+      },
+      {
+        "fixture": "05-terraform-iam-mass-change",
+        "defender": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "api_error_status": null,
+          "duration_ms": 38059,
+          "duration_api_ms": 35104,
+          "num_turns": 1,
+          "result": "### TRIAGE\n\n**Claim:** This is an authorized, fully-anticipated Terraform apply executed by the correct OIDC principal against a reviewed, human-approved changeset.\n\n**Reasoning:**\n- The causal chain is complete and corroborated at every link: PR merge at 14:21:55Z triggered run 7799123 seconds later; OIDC token claims (repo, ref, workflow, run_id) all match; no out-of-band assume-role calls.\n- Plan-to-apply fidelity is the strongest signal \u2014 the CI artifact listed exactly 47 changes, no others, and the post-apply state diff matches the plan byte-for-byte. Deviation here would be the fingerprint of a compromised runner or provider injection.\n- The role has no history of console logins or manual CLI use in 90 days and has never been assumed from outside the canonical runner instance \u2014 eliminating the \"stolen long-lived credentials\" branch.\n- Business hours + PR #4421 reviewed by two platform-team approvers establishes human authorization of the intended scope, including the `UpdateAssumeRolePolicy` operations.\n\n**Disposition:** `benign`\n\n**Load-bearing assumption:** The terraform plan artifact stored in CI was generated from the reviewed PR #4421 code and was not tampered with between plan generation and apply consumption. If an adversary could inject operations into the plan artifact (or if a compromised Terraform provider executed out-of-band changes while reporting expected state), the byte-for-byte state match could be fabricated and the 2-approver review would be meaningless \u2014 they reviewed code, not the applied plan.\n\n---\n\n### DIRECTIVE-TO-CRITIC\n\nWhen an investigation closes `benign` on high-volume privileged-API activity attributed to an IaC pipeline, prioritize attacking the artifact-chain integrity rather than re-auditing individual change items. The threat surface in these cases is not *what* changed but *whether the reviewed artifact is what actually ran* \u2014 specifically, the plan-generation-to-apply bridge. Probe whether the plan was generated from reviewed code or could have been substituted, whether provider or module supply-chain compromise could produce operations invisible to the plan output, and whether the review gate was substantive (approvers read the plan diff) or rubber-stamp. Byte-for-byte state matches are strong but not unforgeable if the attacker controls plan storage.",
+          "stop_reason": "end_turn",
+          "session_id": "0a721814-9317-42e7-8ed3-50ad73793ff6",
+          "total_cost_usd": 0.09832504999999998,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 18691,
+            "cache_read_input_tokens": 11896,
+            "output_tokens": 1571,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 18691,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [
+              {
+                "input_tokens": 2,
+                "output_tokens": 1571,
+                "cache_read_input_tokens": 11896,
+                "cache_creation_input_tokens": 18691,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 18691
+                },
+                "type": "message"
+              }
+            ],
+            "speed": "standard"
+          },
+          "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+              "inputTokens": 999,
+              "outputTokens": 19,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "webSearchRequests": 0,
+              "costUSD": 0.0010940000000000001,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            },
+            "claude-sonnet-4-6": {
+              "inputTokens": 2,
+              "outputTokens": 1571,
+              "cacheReadInputTokens": 11896,
+              "cacheCreationInputTokens": 18691,
+              "webSearchRequests": 0,
+              "costUSD": 0.09723104999999999,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            }
+          },
+          "permission_denials": [],
+          "terminal_reason": "completed",
+          "fast_mode_state": "off",
+          "uuid": "a2c6643f-2aeb-4dbb-b409-e980edb5919e"
+        },
+        "critic": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "api_error_status": null,
+          "duration_ms": 73223,
+          "duration_api_ms": 68852,
+          "num_turns": 1,
+          "result": "### VERDICT\n\n**CRITIQUE**\n\n**Assumption attacked:** \"post-apply state diff matches plan diff byte-for-byte\"\n\nThe defender conflates two distinct artifacts: the human-readable plan output reviewers saw in CI, and the binary `.tfplan` file the apply step executed. These are generated together but stored separately. In a split plan/apply workflow (common in production pipelines requiring gating), the apply job downloads the binary artifact and runs `terraform apply planfile.tfplan` \u2014 not a fresh plan from source. If a principal with write access to GitHub Actions artifact storage (or the runner itself) replaced the binary between upload and download, the apply executes the tampered binary. Terraform state is then written by *that apply*, so state would match the tampered binary, not the reviewed HCL \u2014 the byte-for-byte match would hold against the wrong plan.\n\n**Observable consequence:** Query the GitHub API for run 7799123 artifacts (`GET /repos/org/infra/actions/runs/7799123/artifacts`). If a `.tfplan` binary artifact exists (separate from human-readable output), retrieve its `created_at` timestamp and compare to the plan job's completion time and apply job's start time. Then check the `tf-apply` workflow YAML: does the apply step invoke `terraform apply <planfile>` or `terraform apply -auto-approve` from source? If the former, verify the workflow logs the plan binary SHA256 at upload and re-verifies it at download. Absence of hash logging is the observable gap.\n\n**Lead:** Inspect run 7799123 artifact list via GitHub API + workflow YAML apply step invocation.\n\n**Prediction:** Either (a) the workflow re-plans from source (gap closed, CONCEDE warranted) or (b) it uses a saved binary with no hash verification logged (integrity link unverified, CRITIQUE stands).\n\n---\n\n### DIRECTIVE-TO-DEFENDER\n\nFor credentialed-action alerts where disposition rests on artifact-chain integrity \u2014 IaC apply, container image build, package publish \u2014 probe the *execution path*, not just the output match. The attack surface in split workflows (plan/apply, build/deploy, sign/release) is the handoff point between jobs: human-readable output and the binary artifact consumed by the executing step are generated together but live separately. Before closing benign, verify: does the workflow execute from a saved binary or re-derive from source? If from a saved artifact, is the binary hash logged at upload and explicitly verified at download? State-match and output-match checks validate consistency with the *consumed* artifact \u2014 they do not prove the consumed artifact is the reviewed one.",
+          "stop_reason": "end_turn",
+          "session_id": "b67f882f-12b6-4a2e-bba7-388e9a6dde88",
+          "total_cost_usd": 0.1253233,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 19398,
+            "cache_read_input_tokens": 11896,
+            "output_tokens": 3147,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 19398,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [
+              {
+                "input_tokens": 2,
+                "output_tokens": 3147,
+                "cache_read_input_tokens": 11896,
+                "cache_creation_input_tokens": 19398,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 19398
+                },
+                "type": "message"
+              }
+            ],
+            "speed": "standard"
+          },
+          "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+              "inputTokens": 1706,
+              "outputTokens": 19,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "webSearchRequests": 0,
+              "costUSD": 0.001801,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            },
+            "claude-sonnet-4-6": {
+              "inputTokens": 2,
+              "outputTokens": 3147,
+              "cacheReadInputTokens": 11896,
+              "cacheCreationInputTokens": 19398,
+              "webSearchRequests": 0,
+              "costUSD": 0.12352229999999999,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            }
+          },
+          "permission_denials": [],
+          "terminal_reason": "completed",
+          "fast_mode_state": "off",
+          "uuid": "a1823da4-f6c8-47e6-80aa-5d3992cb3751"
+        }
+      }
+    ],
+    "arm_b": [
+      {
+        "fixture": "08-router-firmware-anomaly",
+        "single": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "api_error_status": null,
+          "duration_ms": 55984,
+          "duration_api_ms": 53778,
+          "num_turns": 1,
+          "result": "### TRIAGE\n\n**Claim:** An edge router is exhibiting repeated BGP session resets co-occurring with an unexplained control-plane CPU spike; no benign operational trigger accounts for the observed pattern, making this a credible pre-compromise or active-exploit signal on a high-value asset.\n\n**Hypotheses considered:**\n\n| Hypothesis | Lead |\n|---|---|\n| `?firmware-bug-BGP-stability` \u2014 periodic crash in BGP state machine under specific peer config | Pull vendor TAM / support KB for 7.4.2 known issues; ask ISP for peer-side session teardown reason codes |\n| `?hardware-fault-CPU` \u2014 failing component causing erratic CPU and session drops | Check OOB reachability continuity, request vendor chassis health log (memory ECC errors, thermal) |\n| `?adversary-controlled-BGP-session-reset` \u2014 attacker sending malformed UPDATE/NOTIFICATION packets to force resets and probe CPU headroom | Inspect syslog for BGP NOTIFICATION reason codes and peer IP at each reset; correlate with any upstream ACL hit counters |\n| `?adversary-controlled-control-plane-exploit` \u2014 active exploitation of an undisclosed firmware vuln giving RCE on control plane | Request vendor firmware integrity check; compare running config hash against last-known-good; check for unexpected management-plane connections |\n| `?route-table-DDoS` \u2014 volumetric BGP UPDATE flood spiking CPU and destabilizing sessions | Check interface counters for UPDATE packet rate; ask ISP for peer-side UPDATE volume |\n| `?legitimate-reconvergence-mislabeled` \u2014 partial reconvergence event not classified as \"full\" by vendor code | Compare BGP RIB size before/after each reset window via any available SNMP polling |\n\n**Disposition: escalate**\n\n**Load-bearing assumption:** There is no firmware bug or hardware fault in 7.4.2 that produces periodic BGP resets with a 14s CPU spike absent a config commit or reconvergence event \u2014 if such a defect exists and is confirmed, the call moves to suspicious/benign.\n\n---\n\n### SELF-REVIEW\n\n**1. Load-bearing assumption under pressure.** The assumption is that the CPU spike has no benign explanation. The concrete flip: vendor support produces a field advisory (even undocumented) for 7.4.2 citing a BGP state-machine race under specific timer configurations that causes periodic session teardown with a 10\u201320s CPU burst. That single artifact \u2014 a vendor ticket number or firmware changelog entry \u2014 fully explains the cluster without adversarial involvement.\n\n**2. Lead classification.**\n\n| Lead | Classification |\n|---|---|\n| Vendor TAM / firmware bug search | **load-bearing** \u2014 could flip to benign |\n| Chassis health / hardware fault | **load-bearing** \u2014 alternate non-adversarial explanation |\n| BGP NOTIFICATION reason codes + peer IP | **load-bearing** \u2014 distinguishes inbound attack from self-originated reset |\n| Firmware integrity / unexpected mgmt connections | **load-bearing** \u2014 confirms or denies active compromise |\n| UPDATE packet rate / ISP peer volume | **load-bearing** \u2014 confirms or denies flood attack |\n| BGP RIB size comparison | corroborating \u2014 only strengthens reconvergence hypothesis |\n\nAll five meaningful leads are load-bearing. No concern about a corroboration-heavy list here.\n\n**3. Counter-anchor.** I did not weight the possibility that the ISP's NOC log has a visibility gap \u2014 specifically, a BGP peer process restart on their side that tears down the session cleanly (no link flap, no interface event) but still appears as a remote-initiated reset. That would be a fully benign external explanation I under-examined.\n\n---\n\n### DIRECTIVE\n\nFor alerts on closed-firmware network devices where syslog is the only telemetry surface, treat the absence of a vendor-published CVE as weak evidence \u2014 not exculpatory. The investigation sequence that matters is: (1) demand the exact peer-side teardown reason code from the upstream operator, because \"no link flap\" and \"no session teardown from our side\" are different claims; (2) treat any co-occurring control-plane CPU anomaly as a correlated event requiring a joint explanation, not two independent checks; (3) make the firmware vendor's TAM or support KB the first stop before building an adversarial hypothesis tree, because firmware-stability bugs are systematically under-indexed in public advisories.",
+          "stop_reason": "end_turn",
+          "session_id": "32b20868-c8ea-405d-87d8-6163da2de462",
+          "total_cost_usd": 0.1098478,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 18920,
+            "cache_read_input_tokens": 11896,
+            "output_tokens": 2266,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 18920,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [
+              {
+                "input_tokens": 2,
+                "output_tokens": 2266,
+                "cache_read_input_tokens": 11896,
+                "cache_creation_input_tokens": 18920,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 18920
+                },
+                "type": "message"
+              }
+            ],
+            "speed": "standard"
+          },
+          "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+              "inputTokens": 1228,
+              "outputTokens": 21,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "webSearchRequests": 0,
+              "costUSD": 0.001333,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            },
+            "claude-sonnet-4-6": {
+              "inputTokens": 2,
+              "outputTokens": 2266,
+              "cacheReadInputTokens": 11896,
+              "cacheCreationInputTokens": 18920,
+              "webSearchRequests": 0,
+              "costUSD": 0.1085148,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            }
+          },
+          "permission_denials": [],
+          "terminal_reason": "completed",
+          "fast_mode_state": "off",
+          "uuid": "e3cc6920-a9d4-4309-8f0f-80633155baa0"
+        }
+      },
+      {
+        "fixture": "05-terraform-iam-mass-change",
+        "single": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "api_error_status": null,
+          "duration_ms": 26426,
+          "duration_api_ms": 25162,
+          "num_turns": 1,
+          "result": "### TRIAGE\n\n**Claim:** This is a legitimate Terraform-apply run by the platform team that executed a pre-approved IAM change set; the alert fired on volume, not anomaly.\n\n**Hypotheses considered:**\n\n- `?legitimate-tf-apply` \u2014 PR plan artifact matches CloudTrail change-for-change; lead: diff CloudTrail events against the plan JSON line-by-line.\n- `?plan-injection` \u2014 CI artifact was tampered after plan but before apply; lead: compare plan artifact SHA against the artifact stored in GitHub Actions run 7799123 at plan time.\n- `?adversary-controlled-runner` \u2014 i-09abc was compromised and used the OIDC token to issue additional calls beyond the plan; lead: pull all CloudTrail events for this role session and check for any calls not in the plan diff.\n- `?stolen-oidc-token` \u2014 token exfiltrated and replayed from a different execution context; lead: verify OIDC claims (repo, ref, run_id, aud) match GitHub's token verification endpoint and confirm no duplicate session from a different source IP or instance.\n- `?supply-chain-compromise` \u2014 malicious Terraform provider or module injected extra resources at apply time; lead: check for any resource changes in state diff that do not appear in the plan diff.\n- `?privilege-escalation-via-iam` \u2014 attacker used the apply to embed a backdoor role/policy; lead: review the 5 created policies and 9 UpdateAssumeRolePolicy changes for trust relationships pointing to external principals.\n\n**Disposition:** `benign`\n\n**Load-bearing assumption:** The Terraform plan artifact in the CI run was not tampered with between plan and apply \u2014 i.e., what the reviewers approved is exactly what ran.\n\n---\n\n### SELF-REVIEW\n\n**1. Flip evidence for the load-bearing assumption:** A CloudTrail event for any IAM action not present in the plan artifact (even one extra `iam:PutRolePolicy`) would flip the call from benign to malicious. Concretely: a line in CloudTrail for this session's `userAgent` that has no counterpart in the plan JSON.\n\n**2. Lead classification:**\n\n- `?legitimate-tf-apply` \u2014 diff CloudTrail vs. plan: `load-bearing` (directly validates the core claim)\n- `?plan-injection` \u2014 artifact SHA check: `load-bearing` (integrity of the approved scope)\n- `?adversary-controlled-runner` \u2014 full session call enumeration: `load-bearing` (out-of-plan calls)\n- `?stolen-oidc-token` \u2014 OIDC claims verification: `corroborating` (token metadata is already internally consistent; an attacker with runner access wouldn't need to steal the token)\n- `?supply-chain-compromise` \u2014 state vs. plan diff: `load-bearing` (detects injected resources at apply time)\n- `?privilege-escalation-via-iam` \u2014 trust policy review: `load-bearing` (benign volume \u2260 benign content)\n\nMost leads are load-bearing \u2014 coverage is adequate.\n\n**3. Counter-anchor check:** I did not consider `?review-bypass` \u2014 the two approvers are colluding with the author, and the PR itself contains the malicious change legitimately approved. In that scenario all provenance checks pass and the attack surface is the human review layer, not the technical controls. This is low-probability but structurally invisible to automated analysis.\n\n---\n\n### DIRECTIVE\n\nFor high-volume IAM alerts triggered by CI/CD pipelines with strong provenance, the critical discipline is **plan-to-reality binding, not principal legitimacy**. The OIDC chain, PR approvals, and run metadata are relatively easy to forge or satisfy legitimately \u2014 they establish *who ran*, not *what ran*. Attack the gap between what was approved and what executed: enumerate every CloudTrail event in the role session and diff against the approved artifact. Then audit *content* of the changes (trust relationships, wildcard permissions, cross-account principals) independent of count. Volume-based signatures on CI roles almost always fire on legitimate deployments; the real signal lives in the delta.",
+          "stop_reason": "end_turn",
+          "session_id": "2398877a-8f21-4d6c-8722-0ab462befdee",
+          "total_cost_usd": 0.0905713,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 18966,
+            "cache_read_input_tokens": 11896,
+            "output_tokens": 966,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 18966,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [
+              {
+                "input_tokens": 2,
+                "output_tokens": 966,
+                "cache_read_input_tokens": 11896,
+                "cache_creation_input_tokens": 18966,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 18966
+                },
+                "type": "message"
+              }
+            ],
+            "speed": "standard"
+          },
+          "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+              "inputTokens": 1274,
+              "outputTokens": 22,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "webSearchRequests": 0,
+              "costUSD": 0.001384,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            },
+            "claude-sonnet-4-6": {
+              "inputTokens": 2,
+              "outputTokens": 966,
+              "cacheReadInputTokens": 11896,
+              "cacheCreationInputTokens": 18966,
+              "webSearchRequests": 0,
+              "costUSD": 0.0891873,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            }
+          },
+          "permission_denials": [],
+          "terminal_reason": "completed",
+          "fast_mode_state": "off",
+          "uuid": "aa9dc7c4-a53a-4b7d-af5b-5b10b68e75eb"
+        }
+      },
+      {
+        "fixture": "01-ssh-bastion-new-source",
+        "single": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "api_error_status": null,
+          "duration_ms": 61053,
+          "duration_api_ms": 58391,
+          "num_turns": 1,
+          "result": "### TRIAGE\n\njsmith's publickey login to bastion-01 at 03:47 from a new subnet is suspicious \u2014 the ticket-based cover story is structurally consistent with post-exploitation pattern-washing, and the source location (Building 7 wifi at 03:47) is independently anomalous.\n\n**Hypotheses considered:**\n\n| Hypothesis | Lead |\n|---|---|\n| `?legitimate-maintenance` \u2014 jsmith moved to Building 7 to work late, verifying sshd rotation | Badge/physical-access log: did jsmith swipe into Building 7 tonight? |\n| `?adversary-controlled-lateral-movement` \u2014 attacker extracted jsmith's key from one of 4 known hosts, now operating from Building 7 wifi | Check those 4 hosts for active sessions or new authorized_keys changes in past 24h |\n| `?account-takeover-with-ticket-wash` \u2014 attacker closed INC-8821 to manufacture cover, key separately compromised | Review INC-8821 comment/edit history: source IP, timing cadence, whether changes match jsmith's normal session fingerprint |\n| `?automated-post-rotation-validation` \u2014 sshd config rotation triggers an automated test script from a different runner subnet | Check INC-8821 automation context; was a CI/CD job spawned on ticket close? |\n| `?vpn-or-proxy-shift` \u2014 jsmith changed network path (new VPN exit, different jump host) legitimately | Correlate jsmith's other authenticated actions tonight with same src IP |\n| `?adversary-controlled-building-7-implant` \u2014 threat actor present on Building 7 wifi segment, not physically jsmith | DHCP lease for 10.42.7.183: what device class, first-seen, hostname? |\n\n**Disposition:** `suspicious`\n\n**Load-bearing assumption:** INC-8821 was created, worked, and closed by the real jsmith in a continuous legitimate session. If the ticket activity originated from a different IP or shows timing gaps inconsistent with jsmith's normal workflow, the cover story collapses and this becomes malicious.\n\n---\n\n### SELF-REVIEW\n\n**1. Flip evidence.** The load-bearing assumption is ticket authenticity. A single concrete artifact flips the call: INC-8821's audit trail shows the ticket was edited or closed from an IP *other* than jsmith's normal 10.42.5.0/24 subnet, or the edit timestamp precedes the login by more than 30 minutes with no intermediate activity \u2014 indicating pre-positioned cover rather than active maintenance.\n\n**2. Lead classification.**\n\n| Lead | Classification |\n|---|---|\n| Badge log / Building 7 physical access | **load-bearing** \u2014 no swipe = strong escalation trigger |\n| INC-8821 edit-history source IP | **load-bearing** \u2014 different IP breaks the cover story |\n| 4 known hosts for active compromise | **load-bearing** \u2014 compromised host validates lateral movement |\n| DHCP lease for 10.42.7.183 | **load-bearing** \u2014 unrecognized device class changes the picture |\n| CI/CD automation context | corroborating |\n| jsmith other actions from same IP tonight | corroborating |\n\nMost leads are load-bearing \u2014 the triage is well-structured here.\n\n**3. Counter-anchor.** I did not adequately consider `?key-replay-from-memory-resident-credential` \u2014 an attacker operating fully in-memory on a host jsmith previously authenticated to, forwarding the agent socket rather than extracting the key file. Agent-forwarding would produce the same fingerprint without key material ever leaving jsmith's machine, and would be invisible to the 4-host key-extraction check. This is a meaningful gap.\n\n---\n\n### DIRECTIVE\n\nFor alerts where a recent legitimate-looking ticket creates strong surface cover for an anomalous access, do not let the ticket absorb your skepticism \u2014 attack it as a separate artifact. Verify that the ticket activity and the alert event share a coherent session lineage (same source IP range, plausible timing, consistent privilege footprint). When the cover is ticket-based, the highest-yield lead is ticket edit provenance, not the access event itself. For key-authenticated logins specifically, complement static fingerprint matching with agent-forwarding detection: an attacker forwarding a live agent leaves no key on disk but produces an identical fingerprint \u2014 check for `SSH_AUTH_SOCK`-style session chaining on the intermediate hosts.",
+          "stop_reason": "end_turn",
+          "session_id": "cb9660ee-de34-4f98-878d-7652bad0e49e",
+          "total_cost_usd": 0.1102983,
+          "usage": {
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 18858,
+            "cache_read_input_tokens": 11896,
+            "output_tokens": 2316,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 18858,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [
+              {
+                "input_tokens": 2,
+                "output_tokens": 2316,
+                "cache_read_input_tokens": 11896,
+                "cache_creation_input_tokens": 18858,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 18858
+                },
+                "type": "message"
+              }
+            ],
+            "speed": "standard"
+          },
+          "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+              "inputTokens": 1166,
+              "outputTokens": 20,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "webSearchRequests": 0,
+              "costUSD": 0.001266,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            },
+            "claude-sonnet-4-6": {
+              "inputTokens": 2,
+              "outputTokens": 2316,
+              "cacheReadInputTokens": 11896,
+              "cacheCreationInputTokens": 18858,
+              "webSearchRequests": 0,
+              "costUSD": 0.1090323,
+              "contextWindow": 200000,
+              "maxOutputTokens": 32000
+            }
+          },
+          "permission_denials": [],
+          "terminal_reason": "completed",
+          "fast_mode_state": "off",
+          "uuid": "8f8432aa-8e5b-4f5e-84c1-f2bb356811f9"
+        }
+      }
+    ]
+  },
+  "curate": {
+    "A": {
+      "type": "result",
+      "subtype": "success",
+      "is_error": false,
+      "api_error_status": null,
+      "duration_ms": 40754,
+      "duration_api_ms": 39923,
+      "num_turns": 1,
+      "result": "# Addendum library\n\n1. When surface legitimacy is strong (known credential, internal source, recent explanatory ticket), treat the ticket itself as the top falsification target: check creation timestamp vs. anomalous action, whether content is predictive rather than post-hoc, and whether a second party can independently confirm the work order.\n\n2. For credentialed-write alert classes, actor standing satisfies \"who,\" not \"what\": sequence (1) actor standing, (2) diff the changed artifact against pre-change state, (3) confirm the delta matches the stated purpose. Cover narratives are designed to pass step 1 and collapse at step 2.\n\n3. Before treating a third-party \"no anomaly\" confirmation as ruling out a cause class, establish what their instrumentation covers and what vocabulary they used \u2014 a physical-layer confirmation does not attest to control-plane or application-layer quiescence.\n\n4. When a verdict rests on benign-cause elimination rather than direct artifact observation, flag each elimination step for source visibility: absence of signal on closed-firmware or vendor-emitted telemetry bounds observability, not causation.\n\n5. In split-artifact workflows (plan/apply, build/deploy, sign/release), the handoff between reviewed output and the executing artifact is the attack surface: verify whether the executing step re-derives from source or consumes a stored artifact, and confirm hash verification spans upload-to-download.",
+      "stop_reason": "end_turn",
+      "session_id": "aaa73dc2-537b-4740-b972-dd76e4476b0f",
+      "total_cost_usd": 0.11811829999999998,
+      "usage": {
+        "input_tokens": 2,
+        "cache_creation_input_tokens": 21618,
+        "cache_read_input_tokens": 11896,
+        "output_tokens": 1963,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 21618,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "",
+        "iterations": [
+          {
+            "input_tokens": 2,
+            "output_tokens": 1963,
+            "cache_read_input_tokens": 11896,
+            "cache_creation_input_tokens": 21618,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 21618
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 3926,
+          "outputTokens": 21,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.004031,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000
+        },
+        "claude-sonnet-4-6": {
+          "inputTokens": 2,
+          "outputTokens": 1963,
+          "cacheReadInputTokens": 11896,
+          "cacheCreationInputTokens": 21618,
+          "webSearchRequests": 0,
+          "costUSD": 0.11408729999999997,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "terminal_reason": "completed",
+      "fast_mode_state": "off",
+      "uuid": "a93cf2e9-2b06-442b-b781-c6129288987c"
+    },
+    "B": {
+      "type": "result",
+      "subtype": "success",
+      "is_error": false,
+      "api_error_status": null,
+      "duration_ms": 42612,
+      "duration_api_ms": 42288,
+      "num_turns": 1,
+      "result": "```\n# Addendum library\n\n1. For closed-firmware network device alerts, consult the vendor support KB before\n   constructing an adversarial hypothesis tree; absence of a published CVE is weak\n   evidence, not exculpatory \u2014 firmware-stability defects are systematically\n   under-indexed in public advisories.\n\n2. When a network device shows co-occurring protocol-layer and control-plane anomalies,\n   require a single causal explanation before splitting into independent branches; also\n   obtain the upstream operator's peer-side teardown reason codes \u2014 \"no link flap\" and\n   \"no self-originated session reset\" are different claims.\n\n3. On credentialed-action alerts from automation or CI/CD roles, attack the plan-to-\n   reality gap: enumerate every executed action in the role session and diff against the\n   approved artifact. Principal legitimacy (OIDC chain, PR approvals) establishes *who*\n   ran, not *what* ran; audit change content (trust relationships, wildcard grants)\n   independent of volume.\n\n4. When a recent legitimate-looking ticket creates surface cover for an anomalous access\n   event, verify that the ticket's source IP, timing, and privilege footprint share\n   coherent session lineage with the alert \u2014 ticket edit provenance is the highest-yield\n   lead, not the access event itself.\n\n5. For key-authenticated access alerts, complement credential fingerprint matching with\n   agent-forwarding detection on intermediate hosts; an attacker forwarding a live agent\n   produces an identical fingerprint without key extraction.\n```",
+      "stop_reason": "end_turn",
+      "session_id": "5118d1fd-9567-42fb-8343-f7a1272df4ab",
+      "total_cost_usd": 0.11774330000000001,
+      "usage": {
+        "input_tokens": 2,
+        "cache_creation_input_tokens": 21418,
+        "cache_read_input_tokens": 11896,
+        "output_tokens": 2002,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 21418,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "",
+        "iterations": [
+          {
+            "input_tokens": 2,
+            "output_tokens": 2002,
+            "cache_read_input_tokens": 11896,
+            "cache_creation_input_tokens": 21418,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 21418
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 3726,
+          "outputTokens": 19,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.003821,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000
+        },
+        "claude-sonnet-4-6": {
+          "inputTokens": 2,
+          "outputTokens": 2002,
+          "cacheReadInputTokens": 11896,
+          "cacheCreationInputTokens": 21418,
+          "webSearchRequests": 0,
+          "costUSD": 0.1139223,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "terminal_reason": "completed",
+      "fast_mode_state": "off",
+      "uuid": "7c7cd625-18d7-48ab-a347-6009bd6fb7cb"
+    }
+  },
+  "test": [
+    {
+      "arm": "A",
+      "fixture": "03-novel-outbound-dns",
+      "result": {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "api_error_status": null,
+        "duration_ms": 36894,
+        "duration_api_ms": 35440,
+        "num_turns": 1,
+        "result": "### TRIAGE\n\n**Claim.** A first-time npm publisher added a package that, within 81 minutes of publication, began beaconing a 2-week-old domain from CI on a clockwork 30-minute schedule \u2014 textbook supply-chain implant behavior.\n\n**Hypotheses and leads:**\n\n| # | Hypothesis | Concrete lead |\n|---|---|---|\n| 1 | `?supply-chain-malicious-package` \u2014 `@quickmetrics/runtime-collector` is a purpose-built implant | Fetch and static-analyze the package tarball from npm; inspect `postinstall` scripts and any timer/`setInterval` calls |\n| 2 | `?adversary-controlled-dependency-injection` \u2014 PR 9921 was opened by an adversary to introduce the dep | Check PR author identity, account age, and whether CI ran before any code review approval was recorded |\n| 3 | `?build-time-secret-exfil` \u2014 package harvests `GITHUB_TOKEN`, `NPM_TOKEN`, or other env vars during the build | Correlate outbound payload bytes against known secret lengths; inspect what env is visible to `npm exec` in this runner config |\n| 4 | `?legitimate-telemetry-misconfigured` \u2014 package is a real (if poorly scoped) metrics collector that shouldn't run at build time | Check whether `@quickmetrics` has a public website, documentation, or any social presence; a real vendor has traceable identity |\n| 5 | `?rogue-developer-side-project` \u2014 developer who authored PR 9921 owns the npm account and is testing their own tooling | Cross-reference PR author's GitHub identity against the npm publisher handle |\n\n**Disposition: `malicious`**\n\nPublisher with zero prior packages + domain registered 14 days ago + no PTR + first beacon 81 minutes post-publish + clockwork jitter-beaconing + 0/38 peer spread = implant, not telemetry. The \"telemetry\" naming is cover.\n\n**Load-bearing assumption.** The node process responsible for the DNS queries is executing code from `@quickmetrics/runtime-collector` \u2014 not a coincidentally co-resident process. The process chain (job 9921 \u2192 npm exec \u2192 node PID 2188) makes this the near-certain reading, but confirming the package contains the timer logic closes the last exit.\n\n---\n\n### ADDENDUM USE\n\n**Rule 5** (split-artifact workflows) was the primary shaping rule: the CI pipeline is exactly a plan/apply split \u2014 the PR introduces a dependency, `npm install` fetches and materializes it, and `npm exec` runs it. The attack surface is the handoff from \"dependency declared in PR\" to \"code executing in the build.\" This directed the lead toward the tarball contents rather than just the DNS logs. **Rule 2** (actor standing vs. artifact diff) reinforced that the PR author's identity is irrelevant until the package's actual code is inspected \u2014 the cover narrative (\"runtime collector\") is designed to pass a surface legitimacy check and collapse under static analysis.",
+        "stop_reason": "end_turn",
+        "session_id": "a0b1eae1-bfbb-40d3-992a-d9e05eef31b9",
+        "total_cost_usd": 0.10158205000000001,
+        "usage": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 18943,
+          "cache_read_input_tokens": 11896,
+          "output_tokens": 1709,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 18943,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 1709,
+              "cache_read_input_tokens": 11896,
+              "cache_creation_input_tokens": 18943,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 18943
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "modelUsage": {
+          "claude-haiku-4-5-20251001": {
+            "inputTokens": 1251,
+            "outputTokens": 17,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.001336,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000
+          },
+          "claude-sonnet-4-6": {
+            "inputTokens": 2,
+            "outputTokens": 1709,
+            "cacheReadInputTokens": 11896,
+            "cacheCreationInputTokens": 18943,
+            "webSearchRequests": 0,
+            "costUSD": 0.10024605,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000
+          }
+        },
+        "permission_denials": [],
+        "terminal_reason": "completed",
+        "fast_mode_state": "off",
+        "uuid": "ce86a508-36bd-4903-b363-2a8dced318a6"
+      }
+    },
+    {
+      "arm": "B",
+      "fixture": "03-novel-outbound-dns",
+      "result": {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "api_error_status": null,
+        "duration_ms": 43442,
+        "duration_api_ms": 45456,
+        "num_turns": 1,
+        "result": "### TRIAGE\n\n**Claim:** A freshly-published npm package added by PR #9921 is beaconing to a newly-registered, uncategorized domain from a CI runner \u2014 high-confidence supply chain insertion with C2 characteristics.\n\n**Hypotheses considered:**\n\n| Hypothesis | Lead |\n|---|---|\n| `?supply-chain-malicious-npm` \u2014 `@quickmetrics/runtime-collector@0.1.2` embeds intentional C2 beacon | Unpack tarball from npm registry; inspect `postinstall`, `index.js`, bundled scripts for `setInterval`/`setTimeout` DNS calls and the `telemetry-collect.live` string |\n| `?adversary-controlled-npm-account` \u2014 maintainer account was freshly created as cover identity | Check npm maintainer account age, linked GitHub handle, package publish history, PGP signing (no other packages is the red flag here) |\n| `?legitimate-telemetry-misbehaving` \u2014 package is a real SDK with a poorly-chosen domain that happens to look suspicious | Inspect package README/license; check if `telemetry-collect.live` appears in published docs, issue tracker, or the package's own GitHub repo |\n| `?transitive-dependency-beacon` \u2014 `@quickmetrics/runtime-collector` pulled in a malicious sub-dep | Diff the full resolved `package-lock.json` before/after PR merge; trace which sub-dep owns the `telemetry-collect.live` hostname |\n| `?compromised-build-runner` \u2014 runner was compromised independently and the process tree attribution to npm is coincidental | Verify process ancestry beyond PID 2188 \u2014 check runner's own file integrity and whether the beaconing predates job #9921's first execution on this host |\n\n**Disposition: `malicious`**\n\n**Load-bearing assumption:** The `@quickmetrics/runtime-collector@0.1.2` tarball is the actual source of the DNS queries. If the queries originate from a pre-existing runner process that merely happens to be listed as the parent, the supply chain framing collapses \u2014 but the process tree (`node \u2192 npm exec \u2192 github-runner job 9921`) and the 1h21m gap between npm publish and first-seen-org make independent runner compromise nearly impossible to maintain as the primary hypothesis.\n\nThe 30-minute \u00b13-minute jitter is decisive: legitimate telemetry SDKs fire on events (page load, error, session end), not a fixed polling interval. Fixed-interval beaconing with jitter is a C2 heartbeat.\n\n---\n\n### ADDENDUM USE\n\nAddendum rule **#3** (CI/CD credentialed-action: attack the plan-to-reality gap) directly shaped lead selection. PR approval establishes that a human authorized merging code from a contributor \u2014 it does not establish what `@quickmetrics/runtime-collector@0.1.2` actually does at runtime. The highest-yield lead is unpacking the tarball and auditing its bundled scripts against the package's stated purpose, independent of the PR diff's apparent innocuousness. The low outbound volume (~280 bytes) is a deliberate distractor: small beacon payloads are characteristic of C2 heartbeat traffic, not a sign of low risk.",
+        "stop_reason": "end_turn",
+        "session_id": "c1febb33-7986-4d4a-8409-0cab2b8bf3dc",
+        "total_cost_usd": 0.10501705,
+        "usage": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 18983,
+          "cache_read_input_tokens": 11896,
+          "output_tokens": 1925,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 18983,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 1925,
+              "cache_read_input_tokens": 11896,
+              "cache_creation_input_tokens": 18983,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 18983
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "modelUsage": {
+          "claude-haiku-4-5-20251001": {
+            "inputTokens": 1291,
+            "outputTokens": 18,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.001381,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000
+          },
+          "claude-sonnet-4-6": {
+            "inputTokens": 2,
+            "outputTokens": 1925,
+            "cacheReadInputTokens": 11896,
+            "cacheCreationInputTokens": 18983,
+            "webSearchRequests": 0,
+            "costUSD": 0.10363605000000001,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000
+          }
+        },
+        "permission_denials": [],
+        "terminal_reason": "completed",
+        "fast_mode_state": "off",
+        "uuid": "63b0fa78-ec44-4c5c-a7de-93d938941844"
+      }
+    },
+    {
+      "arm": "B",
+      "fixture": "09-printer-anomalous-smb",
+      "result": {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "api_error_status": null,
+        "duration_ms": 48469,
+        "duration_api_ms": 46937,
+        "num_turns": 1,
+        "result": "### TRIAGE\n\n**Claim:** A domain-joined embedded printer is making structurally anomalous SMB beacon-pattern connections \u2014 negotiate-and-drop, no file operations, 90-day zero baseline \u2014 which is inconsistent with any legitimate MFP function and consistent with a compromised firmware implant using the device as a network beachhead.\n\n**Hypotheses and leads:**\n\n1. **?firmware-implant / adversary-controlled-printer** \u2014 Attacker exploited the admin web UI (authenticated or via a pre-auth vuln) at some point before the 30-day log window, installed a persistent implant, and is using the printer's domain Kerberos credentials for SMB reconnaissance or C2 keepalive.\n   - *Lead:* Pull the admin UI access log beyond 30 days; check for logins around the firmware 5.18.1\u21925.18.2 upgrade timestamp.\n\n2. **?kerberos-ticket-theft / lateral-movement-pivot** \u2014 An attacker on the same VLAN is ARP-spoofing the printer's static IP, using a harvested computer-account TGS to authenticate to the fileserver, and the printer itself is unaffected.\n   - *Lead:* Compare ARP table entries on the distribution switch for the printer's MAC against the expected static assignment over the 6h window.\n\n3. **Firmware bug (SMB connectivity probe)** \u2014 A defect in 5.18.2 triggers periodic SMB negotiate attempts against a misconfigured \"scan to folder\" target. Release notes claim no networking changes, but that is weak exculpation for stability defects.\n   - *Lead:* Check PrintCo support KB and field service bulletins for 5.18.x SMB regression reports; ask vendor TAM directly before ruling out.\n\n4. **Legitimate scan-to-folder misconfiguration** \u2014 A user configured a scan destination pointing to fileserver-prod-01 that fails authentication and retries.\n   - *Lead:* Inspect the printer admin UI scan-destination config (web UI snapshot) for any configured SMB targets; 30s idle-disconnect is too short for a retry-backoff pattern, making this unlikely.\n\n5. **Network scanner / asset discovery tool** \u2014 An internal scanner is sourcing connections through the printer's IP via a NAT or routing anomaly.\n   - *Lead:* Verify netflow for the printer's VLAN segment \u2014 confirm all 23 source connections have the printer's MAC as the L2 origin.\n\n**Disposition: `escalate`**\n\n**Load-bearing assumption:** The SMB connections genuinely originate at the printer's physical Ethernet interface (not ARP/MAC-spoofed from another host). If that holds, the negotiate-and-drop pattern with no file operations has no plausible legitimate MFP explanation, and the device cannot be forensically examined \u2014 no agent, no console, no attestation. Escalation to vendor IR + network isolation is the only safe path.\n\n---\n\n### ADDENDUM USE\n\nAddendum **#1** directly shaped hypothesis ordering: the firmware release notes state \"no networking changes vs 5.18.1,\" but that claim is weak evidence for a stability defect \u2014 embedded firmware defects are systematically under-indexed in public advisories and release notes. This kept the firmware-bug hypothesis live rather than letting the vendor's own documentation quietly eliminate it. Addendum **#2** enforced causal discipline: the co-occurring signals here (valid Kerberos ticket + negotiate-only SMB + zero baseline) demand a single upstream cause before branching \u2014 which is why the ARP-spoof and firmware-implant hypotheses are kept structurally separate and ordered by testability, not collapsed into a vague \"compromise or misconfiguration\" fork.",
+        "stop_reason": "end_turn",
+        "session_id": "7f088a60-c2c5-4f91-bb3a-a08602287673",
+        "total_cost_usd": 0.10485855000000001,
+        "usage": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 18977,
+          "cache_read_input_tokens": 11896,
+          "output_tokens": 1916,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 18977,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 1916,
+              "cache_read_input_tokens": 11896,
+              "cache_creation_input_tokens": 18977,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 18977
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "modelUsage": {
+          "claude-haiku-4-5-20251001": {
+            "inputTokens": 1285,
+            "outputTokens": 19,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.00138,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000
+          },
+          "claude-sonnet-4-6": {
+            "inputTokens": 2,
+            "outputTokens": 1916,
+            "cacheReadInputTokens": 11896,
+            "cacheCreationInputTokens": 18977,
+            "webSearchRequests": 0,
+            "costUSD": 0.10347855,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000
+          }
+        },
+        "permission_denials": [],
+        "terminal_reason": "completed",
+        "fast_mode_state": "off",
+        "uuid": "784facce-90ce-46b7-acb7-e1680786a967"
+      }
+    },
+    {
+      "arm": "A",
+      "fixture": "09-printer-anomalous-smb",
+      "result": {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "api_error_status": null,
+        "duration_ms": 48540,
+        "duration_api_ms": 47115,
+        "num_turns": 1,
+        "result": "### TRIAGE\n\n**Claim:** An embedded MFP with zero SMB history is initiating periodic SMB sessions with no file I/O \u2014 a pattern inconsistent with any legitimate print/scan function and consistent with C2 beaconing or reconnaissance.\n\n**Hypotheses considered:**\n\n1. `?scan-to-folder-misconfiguration` \u2014 A new scan-to-folder target was configured, but scan-to-folder writes files; 30s idle-disconnect with no read/write rules this out. Lead: Check printer admin UI scan-destination config (even without recent logins, config may predate the 30d window).\n\n2. `?firmware-behavior-change` \u2014 Firmware 5.18.2 introduced undocumented SMB network discovery or DFS probing. Lead: Diff 5.18.1\u21925.18.2 firmware changelogs beyond the release notes summary; check vendor security advisories for this model.\n\n3. `?adversary-controlled-firmware` \u2014 Malicious firmware flashed via a brief admin UI session, supply-chain compromise, or unauthenticated vulnerability in the web UI. Firmware now uses the domain computer account to probe the file server. Lead: Audit admin web UI access logs beyond the 30d window; check for CVEs against PrintCo MFP-7250 web interface.\n\n4. `?kerberos-ticket-relay` \u2014 The printer's AD computer account credentials were captured and are being replayed from a separate compromised host spoofing the printer's static IP. Lead: Correlate ARP table / DHCP lease for `printer-floor3-04`'s IP against the MAC observed on fileserver-prod-01 SMB sessions; check for ARP cache poisoning on the floor-3 segment.\n\n5. `?C2-beacon-via-MFP` \u2014 Device is compromised (firmware or OS layer) and using the printer's legitimate Kerberos identity to beacon fileserver-prod-01 \u2014 possibly staging SMB relay, testing connectivity before exfiltration, or waiting for a file to appear. Lead: Inspect full 6h netflow for outbound connections from the printer's IP to any non-internal destination.\n\n6. `?domain-policy-push` \u2014 A new GPO applied to the printer's OU triggered SMB enumeration. Lead: Check AD change log for GPO modifications to the OU containing this computer account in the last 7 days.\n\n**Disposition: `escalate`**\n\nThe negotiate-then-idle pattern at regular intervals with no file I/O is the behavioral fingerprint of a beacon, not any legitimate MFP function. The device is a closed, unattestable black box.\n\n**Load-bearing assumption:** The SMB connections genuinely originate from the physical printer hardware. If ARP/IP spoofing is occurring, the printer itself is clean and the threat actor is elsewhere on the floor-3 segment \u2014 a different (and more tractable) incident scope.\n\n---\n\n### ADDENDUM USE\n\nRules **3** and **4** were decisive. The vendor release note stating \"no networking changes vs. 5.18.1\" is closed-firmware telemetry \u2014 it describes what PrintCo *intended* to ship, not what the executing image is actually doing; it does not rule out a firmware supply-chain or web-UI compromise (rule 3). Rule 4 sharpened this: the absence of SMB anomaly *signal* from a device with no agent, no attestation API, and no console access bounds observability, not causation \u2014 so the \"no file I/O yet\" observation cannot be read as benign. Together these two rules pushed `?adversary-controlled-firmware` to the top of the hypothesis stack and justified escalation despite surface indicators (valid Kerberos, current firmware, no visible file access) that might otherwise anchor toward benign.",
+        "stop_reason": "end_turn",
+        "session_id": "2923fc9b-3d75-44db-aead-96b5fb4857fe",
+        "total_cost_usd": 0.10896855,
+        "usage": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 18937,
+          "cache_read_input_tokens": 11896,
+          "output_tokens": 2202,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 18937,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 2202,
+              "cache_read_input_tokens": 11896,
+              "cache_creation_input_tokens": 18937,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 18937
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "modelUsage": {
+          "claude-haiku-4-5-20251001": {
+            "inputTokens": 1245,
+            "outputTokens": 21,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.00135,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000
+          },
+          "claude-sonnet-4-6": {
+            "inputTokens": 2,
+            "outputTokens": 2202,
+            "cacheReadInputTokens": 11896,
+            "cacheCreationInputTokens": 18937,
+            "webSearchRequests": 0,
+            "costUSD": 0.10761855,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000
+          }
+        },
+        "permission_denials": [],
+        "terminal_reason": "completed",
+        "fast_mode_state": "off",
+        "uuid": "c3954416-ce02-411d-b972-9a450dc24991"
+      }
+    }
+  ]
+}

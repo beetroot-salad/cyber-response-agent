@@ -1,0 +1,59 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?operator-initiated-pod-exec"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: kube_api_exec_request, classification: kubectl-exec-session}
+      story: |
+        An operator or CI/CD service account issued a `kubectl exec`
+        request against payments-api-7c9d8f5b6-q2vr4 at the alert
+        timestamp, which Kubernetes translated into a runc exec that
+        spawned the observed bash shell as root. The interactive TTY
+        (tty=34816) is consistent with a `kubectl exec -it` invocation
+        from a human operator or an automated runbook step. The kube
+        audit log records every pod-exec event with its initiating
+        principal and target container; a matching entry from a
+        recognized ops or deploy-service identity in that log resolves
+        both authorization and actor identity in one pass.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the kube audit log contains a pod-exec event targeting payments-api-7c9d8f5b6-q2vr4 at a timestamp that falls within the alert window"
+          from_story_link: "issued a kubectl exec request against payments-api-7c9d8f5b6-q2vr4 at the alert timestamp"
+        - id: p2
+          subject: proposed_edge
+          claim: "the initiating principal in the matching audit entry belongs to the recognized ops or deploy-service-account set for the payments-prod namespace"
+          from_story_link: "the kube audit log records every pod-exec event with its initiating principal; a matching entry from a recognized ops or deploy-service identity"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no kube audit pod-exec entry targets payments-api-7c9d8f5b6-q2vr4 within a window containing the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching audit entry exists but the initiating principal is not a member of the recognized ops or deploy-service-account set"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: kube-audit
+          predicate: "a pod-exec event for payments-api-7c9d8f5b6-q2vr4 at the alert timestamp initiated by a principal belonging to the approved operator or deploy-service-account set for payments-prod"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "the kube audit record names the initiating principal; confirming the exec entry authorizes the action and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Query kube audit for pod exec events (verb=create, resource=pods/exec) targeting pod payments-api-7c9d8f5b6-q2vr4 in namespace payments-prod within ±5 min of 2026-04-26T08:33:20Z. Return the initiating user/service-account, timestamp, and response code. This resolves h-001.ac1."
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```

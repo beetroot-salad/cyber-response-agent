@@ -1,0 +1,59 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+  hypotheses:
+    - id: h-001
+      name: "?ci-artifact-upload"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: executed-ci-job
+        parent_vertex:
+          type: process
+          classification: ci-job-executor
+      story: |
+        ci-runner-04 was executing a CI pipeline job that uploads build artifacts to an
+        external artifact CDN. The job was dispatched by the CI orchestrator and targeted
+        cdn.staticfiles.example.org as an authorized artifact destination. The 27.4 GB
+        outbound volume and ~70-minute duration fit a large artifact upload batch — a
+        known legitimate pattern for CI runners uploading compiled binaries or container
+        images. The destination is novel in the 30-day baseline, consistent with a newly
+        onboarded artifact CDN endpoint or a rarely-triggered release pipeline that runs
+        outside the routine daily cadence; no CI orchestrator event was co-correlated by
+        the host-egress-baseline lead, but that lead did not directly query the
+        orchestrator API.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "a CI orchestrator job record exists for ci-runner-04 with an execution window containing the alert timestamp"
+          from_story_link: "The job was dispatched by the CI orchestrator and targeted cdn.staticfiles.example.org as an authorized artifact destination."
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job record declares an artifact upload destination that matches the observed ssl.server_name or dst IP"
+          from_story_link: "The job was dispatched by the CI orchestrator and targeted cdn.staticfiles.example.org as an authorized artifact destination."
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no CI orchestrator job record exists for ci-runner-04 whose execution window contains the alert timestamp (any deviation from the expected non-zero job record for an authorized upload)"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching job record exists but its declared destination geometry deviates from the observed TLS endpoint on at least one recorded dimension"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci_orchestrator_api
+          predicate: "authorized iff a CI job record exists for ci-runner-04 with an execution window containing the alert timestamp and a declared artifact upload destination matching cdn.staticfiles.example.org or 185.220.101.7"
+          on_unauthorized: "escalate — no authorized CI job accounts for the observed 27.4 GB outbound connection to a novel destination; credentialed-exfil is the live threat hypothesis"
+          on_indeterminate: "escalate — CI orchestrator API unreachable or no record found; cannot confirm authorization for a connection of this volume and novelty"
+      weight: null
+
+  routing:
+    selected_lead: ci-job-correlation
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      ci-job-correlation: "Query the CI orchestrator API for job records on ci-runner-04 in a window around 2026-04-25T22:04:10Z. Return job ID, trigger type, declared artifact upload destination or target store, job start/end time, and initiating identity. The host-egress-baseline lead in loop 1 found no co-correlated orchestrator events but did not directly query the orchestrator API."
+    scope_override:
+      window_hours: 4
+      anchor: alert
+```

@@ -1,0 +1,13 @@
+{
+  "run_id": "5710-nagios-monitoring-probe",
+  "signature_id": "wazuh-rule-5710",
+  "severity": 5,
+  "salt": "experimentsalt0000",
+  "created_at": "2026-04-20T19:25:02.000000+00:00",
+  "fastpath_meta": {
+    "expected_prior_level": "exact",
+    "ground_truth_lead": "approved-monitoring-sources",
+    "adversarial": false,
+    "notes": "Canonical monitoring-probe shape: srcip in monitoring subnet, srcuser=nagios in monitoring-pattern family. Should fast-path under D."
+  }
+}

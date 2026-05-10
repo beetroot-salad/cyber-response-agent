@@ -75,7 +75,6 @@ temp/
 # Runtime investigation/triage runs (contain sensitive alert data)
 **/runs/*
 !**/runs/.gitkeep
-defender/results/
 
 # Defender learning-loop ephemeral state — never committed.
 defender/learning/_pending/
@@ -86,9 +85,6 @@ defender/learning/eval/_tmp/
 # Generated kanban board (regenerate via `python3 tasks/build.py`)
 /board.html
 
-# Scratch dir for ephemeral experiment outputs, golden-reference drafts,
-# forensic notes — not meant to ship
-/tasks-scratch/
-
-# Local experiment scratch — design drafts get extracted to docs/ before shipping
-/experiments/
+# Ephemeral scratch work happens in git worktrees under .claude/worktrees/,
+# not at the repo root. Kept experiment writeups live in /experiments/ (tracked).
+/.claude/worktrees/

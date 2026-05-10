@@ -1,0 +1,63 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?scheduled-etl-export"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: triggered_by
+        parent_vertex: {type: scheduled_job, classification: cloud-scheduler-etl-job}
+      story: |
+        analyst-svc@analytics-prod.iam.gserviceaccount.com is a batch ETL
+        service account configured to run a daily Cloud Scheduler or Composer-
+        triggered job that exports customer_pii tables to analytics-export-prod.
+        The filename pattern (YYYY-MM-DD-customer-extract.csv.gz under the same
+        GCS prefix) is characteristic of date-parameterised scheduled exports,
+        not ad-hoc queries. The SA's job history should show prior exports at
+        a recurring daily cadence with comparable volume and destination geometry.
+        A Cloud Scheduler or Composer job definition should exist naming this SA,
+        this dataset, and this destination bucket as its configured export target,
+        owned by an authorized initiator.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "service-account-job-history records prior export jobs from analyst-svc to analytics-export-prod with a recurring cadence pattern whose geometry matches the current job"
+          from_story_link: "The SA's job history should show prior exports at a recurring daily cadence with comparable volume and destination geometry"
+          comparison:
+            selector_kind: historical-self
+            selector: "BigQuery jobs by analyst-svc@analytics-prod.iam.gserviceaccount.com targeting gs://analytics-export-prod over the prior 30 days"
+            dimension: export-job cadence and destination geometry
+        - id: p2
+          subject: proposed_edge
+          claim: "scheduler-job-correlation identifies a Cloud Scheduler or Composer job whose configuration names analyst-svc, the customer_pii dataset, and analytics-export-prod as its configured export target"
+          from_story_link: "A Cloud Scheduler or Composer job definition should exist naming this SA, this dataset, and this destination bucket as its configured export target"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no prior export jobs from analyst-svc to analytics-export-prod appear in the history, or the cadence and destination geometry deviate from the recurring baseline on at least one recorded dimension"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "no Cloud Scheduler or Composer job exists whose configuration declares analyst-svc, the customer_pii dataset, and analytics-export-prod as its export target"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: scheduler-job-correlation
+          predicate: "a Cloud Scheduler or Composer job owned by an authorized initiator exists, configured to run analyst-svc exports from customer_pii to analytics-export-prod, whose scheduled window contains the alert timestamp"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "Cloud Scheduler and Composer job records name the human or team that created the job definition; confirming the job authorizes the export and attributes it to a known owner in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: service-account-job-history
+    composite_secondary: [scheduler-job-correlation]
+    lead_hints:
+      service-account-job-history: "Query BigQuery job history for analyst-svc@analytics-prod.iam.gserviceaccount.com — look for prior SELECT jobs exporting to gs://analytics-export-prod with the date-stamped customer-extract.csv.gz filename pattern; characterise cadence, volume range, and destination geometry. Also register impact observables: bytes_processed (~412 GB) and rows_returned (~18M) against the SA's historical export baseline. Window: 30 days prior to alert."
+      scheduler-job-correlation: "Query Cloud Scheduler and Cloud Composer for job definitions that reference analyst-svc@analytics-prod.iam.gserviceaccount.com as the runner and analytics-export-prod as the destination bucket. Retrieve job owner, schedule expression, and whether the job was active at the alert timestamp."
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```

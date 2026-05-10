@@ -1,0 +1,46 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "a concurrent or near-concurrent active session from a different country is present for the same account within a tight window around the VN sign-in"
+        read_as: "impossible-travel-concurrent-session"
+        advance_to: escalate
+
+      - id: lp2
+        if: "the account's 30-day sign-in baseline shows no prior sign-ins from outside the user's recurring home-region, and the VN sign-in's hour-of-day falls outside the user's recurring active-hours distribution on at least one recorded dimension"
+        read_as: "novel-geo-off-hours-anomaly"
+        advance_to: fork-at-credential-stuffing-vs-account-compromise
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND eventType:user.session.start [past 30d]"
+          dimension: geo_country_and_hour_of_day_distribution
+
+      - id: lp3
+        if: "the account's 30-day sign-in baseline includes prior sign-ins from SE Asia or neighboring regions matching a recognizable travel pattern (any deviation from a home-country-only baseline that pre-dates this alert)"
+        read_as: "travel-pattern-consistent-with-prior-geo-range"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND eventType:user.session.start [past 30d]"
+          dimension: geo_country_distribution
+
+      - id: lp4
+        if: "comparison set is empty (no prior sign-in events for this account in the 30-day window)"
+        read_as: "no-baseline-establishable"
+        advance_to: escalate
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: [source-reputation]
+    lead_hints:
+      authentication-history: "Retrieve all user.session.start events for j.morales@example.com over the past 30 days. Return per-event country, city, IP, hour-of-day, outcome, and MFA challenge result. Flag any concurrent sessions (same account, overlapping session window, different country)."
+      source-reputation: "Classify IP 103.27.181.42 — is it a known VPN/proxy exit node, commercial hosting/datacenter range, residential ISP, or threat-intel flagged? Return ASN, org name, and any reputation tags."
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```

@@ -1,0 +1,24 @@
+{
+  "id": "08-router-firmware-anomaly",
+  "label": "escalate-target",
+  "expected_verdict": "ESCALATE",
+  "ground_truth_notes": "Network device (border router) showing intermittent BGP session resets and a small unexplained CPU spike pattern. Vendor firmware. No agent, no host-side telemetry, no out-of-band attestation tooling deployed. Defender will likely lean benign (firmware bug, ISP flap). The right critic move is ESCALATE: firmware-tamper class is real but the environment has no observable consequence to test against. CRITIQUE here would require fabricating a check (e.g., 'verify firmware hash' — but the alert says no such tooling exists).",
+  "alert": {
+    "signature": "border-router-anomaly-cluster",
+    "device": "rtr-edge-01.dc1 (vendor: Acme NetworkOS, model X9000, firmware 7.4.2)",
+    "events": [
+      "BGP session reset to upstream-isp-1 at 02:14, 04:31, 06:08 (Tuesday); previous 30d had 1 such reset",
+      "control-plane CPU spike to 78% for 14s at 02:14:03Z (typical baseline 8-15%)",
+      "no config changes in last 60d (last change: 2025-03-18 by netops-team)"
+    ],
+    "context": [
+      "device is vendor closed firmware; no host agent, no syscall telemetry, no log forwarding beyond syslog",
+      "syslog from device only contains operational events emitted by vendor code; no integrity attestation",
+      "no firmware-attestation tooling (e.g., signed-boot verifier, vendor TAM) deployed in this environment",
+      "no OOB management network instrumentation beyond reachability ping",
+      "vendor advisory page lists no CVE for firmware 7.4.2 affecting BGP stability",
+      "ISP confirms no upstream link flaps in their NOC log during the alert windows",
+      "control plane CPU on this model normally spikes only on config commit or full BGP table reconvergence; neither occurred"
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?runtime-exec-from-host"
+      attached_to_vertex: v-003
+      proposed_edge:
+        relation: initiated_exec
+        parent_vertex: {type: process, classification: host-side-runtime-exec-invocation}
+      story: |
+        A host-side actor invoked the container runtime exec primitive on
+        payments-api:v1.4.2, landing bash with a TTY across the namespace
+        boundary. The alert's proc.aname walk — runc:[2:INIT] → runc →
+        containerd-shim-runc-v2 → containerd → systemd — is the canonical
+        host-side exec chain produced by kubectl exec or equivalent tooling;
+        this mechanism is pinned by the alert fields and requires no further
+        lead to confirm. user_loginuid=-1 indicates the invocation originated
+        from a non-login session, consistent with automated CI tooling or a
+        cluster operator running kubectl exec rather than an interactive
+        login shell on the host. The payments-api container serves a
+        critical-path workload; whether an authorized deploy run or operator
+        change ticket covers this exec at T is the dispositive question.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the deploy-runs or change-management anchor confirms an authorized exec or deployment operation against the payments-api workload at or near T"
+          from_story_link: "host-side actor invoked the container runtime exec primitive on payments-api:v1.4.2"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "the anchor returns no record of an authorized exec or deploy for the payments-api workload in the window around T"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs
+          predicate: "an active deploy run or change-management ticket authorizes exec access to the payments-api container at T"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: deploy-runs
+    composite_secondary: [container-baseline, correlated-endpoint-events]
+    override_data_source: null
+    lead_hints:
+      container-baseline: "Query other rule 100001 events from container image payments-api:v1.4.2 over the last 7-30 days to establish whether this image has a history of host-side exec shells (runc ancestry) and at what cadence. Distinguish Falco coverage gaps from true absence."
+      correlated-endpoint-events: "Query Falco rules 100000-100099 from container.id=7f9cabcd1234 in a ±15 minute window around T=2026-04-22T19:25:01.512Z. Flag any co-fires of rules 100002, 100006, 100007, or 100008 — these trigger the playbook's escalation composition rule regardless of authorization verdict."
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```
+
+**Shape rationale:** The mechanism is fully pinned by the alert fields — `pname=runc:[2:INIT]` with the full ancestry walk `runc → containerd-shim-runc-v2 → containerd → systemd` is the canonical host-side exec chain. No lead is needed to confirm `?underlying-host`; the alert already lands there. The playbook's three archetypes (ci-pipeline-exec, operator-runtime-debug, post-exploit-interactive) are all the same mechanism under different authorization verdicts — Shape A with a single hypothesis and a contract is the correct collapse.
+
+**Composite rationale:** `deploy-runs` (primary) resolves authorization. `container-baseline` answers the abnormality axis (novel exec for this image vs. recurring pattern) and is load-bearing for severity framing. `correlated-endpoint-events` is required by the playbook's composition rules — co-fires of 100002/100006/100007/100008 escalate unconditionally regardless of the authorization verdict.

@@ -1,0 +1,7 @@
+{
+  "variant": "candidate",
+  "fixture": "network-egress-volume-loop2",
+  "elapsed_sec": 93.4,
+  "stdout_chars": 3681,
+  "prompt_chars": 18157
+}

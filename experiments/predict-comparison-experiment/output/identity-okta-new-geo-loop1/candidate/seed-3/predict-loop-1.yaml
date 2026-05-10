@@ -1,0 +1,52 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "auth baseline includes prior successful logins from VN or from other Asia-Pacific countries that form a geographically plausible travel arc to VN"
+        read_as: "travel-consistent-geo-baseline"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND outcome.result:SUCCESS [past 30d]"
+          dimension: client_geographicalContext_country
+      - id: lp2
+        if: "auth baseline includes a concurrent or near-concurrent successful login from a geographically distant country within a travel-impossible window around the alert timestamp"
+        read_as: "impossible-travel-signal"
+        advance_to: escalate
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND outcome.result:SUCCESS [past 30d]"
+          dimension: concurrent_session_geo_geometry
+      - id: lp3
+        if: "auth baseline shows no prior logins from outside a consistent home-region pattern and no prior international travel footprint — VN is a structurally novel deviation from that baseline"
+        read_as: "no-travel-baseline-novel-geo"
+        advance_to: escalate
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND outcome.result:SUCCESS [past 30d]"
+          dimension: client_geographicalContext_country
+      - id: lp4
+        if: "comparison set is empty (no prior successful auth events for j.morales@example.com in the 30-day window)"
+        read_as: "no-baseline-establishable"
+        advance_to: escalate
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    lead_hints:
+      authentication-history: >
+        Retrieve all Okta user.session.start events for actor
+        j.morales@example.com over the past 30 days. Return: per-login
+        country, city, IP, outcome, MFA step (authenticationContext.authenticationStep),
+        and timestamp. Also flag any sessions active concurrently with
+        the alert window (±2h of 2026-04-26T05:42:12Z). The alert shows
+        authenticationStep=0 — note whether MFA steps (step≥1) were
+        present in prior successful logins.
+    scope_override:
+      window_hours: 720
+      anchor: alert

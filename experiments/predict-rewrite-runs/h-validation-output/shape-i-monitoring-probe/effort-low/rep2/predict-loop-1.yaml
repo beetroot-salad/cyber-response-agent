@@ -1,0 +1,28 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "at least one successful SSH login from 172.22.0.10 is present in the 60-second forward window after the alert timestamp"
+        read_as: "forward-success signal — potential compromise regardless of source classification"
+        advance_to: escalate
+      - id: lp2
+        if: "cluster_count >= 3 AND max_cluster_size <= 3 AND no forward success — periodic cadence consistent with scheduled probe"
+        read_as: "periodic monitoring cadence confirmed — authorization fork warranted"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "cluster_count < 3 OR max_cluster_size > 3 — insufficient history or burst-shaped"
+        read_as: "cadence indeterminate or burst-shaped — identity-of-use fork on next loop with cadence-anomaly signal"
+        advance_to: fork-at-identity-of-use
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    override_data_source: null
+    scope_override:
+      window_hours: 1
+      anchor: alert

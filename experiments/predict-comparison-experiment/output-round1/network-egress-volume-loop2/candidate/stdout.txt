@@ -1,0 +1,59 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?ci-artifact-upload"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: opened_tls_connection
+        parent_vertex: {type: ci_job, classification: ci-orchestrator-job-upload-step}
+      story: |
+        A CI job executing on ci-runner-04 dispatched an artifact-upload step that opened
+        the observed 4187-second TLS session to cdn.staticfiles.example.org. Large artifact
+        uploads (container images, binary distributions, OS image layers) routinely produce
+        the observed asymmetric byte ratio — 27.4 GB outbound, 41 MB inbound — and sustained
+        connection durations measured in tens of minutes. The CI orchestrator schedules jobs
+        on ci-runner-04 and records per-job execution windows and declared upload targets;
+        the upload step would appear in that record. No orchestrator event was correlated in
+        loop 1's narrow window, but a manually-triggered or ad-hoc job may fall outside the
+        standard correlation window used there.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the CI orchestrator records an active job execution on ci-runner-04 whose window contains the connection timestamp"
+          from_story_link: "A CI job executing on ci-runner-04 dispatched an artifact-upload step that opened the observed TLS session"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job's declared upload targets or artifact registry destinations include cdn.staticfiles.example.org or the destination IP block"
+          from_story_link: "the CI orchestrator records per-job execution windows and declared upload targets; the upload step would appear in that record"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no CI job's execution window on ci-runner-04 contains the connection timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching job exists but its declared upload targets do not include cdn.staticfiles.example.org or its destination IP block"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci-orchestrator-job-registry
+          predicate: "an active CI job on ci-runner-04 with an execution window containing the connection timestamp and declared upload targets matching cdn.staticfiles.example.org or the destination IP"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "the CI orchestrator job registry records the initiating identity (developer, pipeline trigger, or webhook) that opened the job; confirming the job authorizes the upload and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: ci-job-correlation
+    composite_secondary: [source-reputation]
+    override_data_source: null
+    lead_hints:
+      ci-job-correlation: "Query CI orchestrator for any job on ci-runner-04 (10.0.18.41) with execution window covering 2026-04-25T22:04:10Z ±90 min (to account for the 4187s connection duration). Verify whether any job declares upload targets matching cdn.staticfiles.example.org or 185.220.101.7."
+      source-reputation: "Classify 185.220.101.7 and cdn.staticfiles.example.org / staticfiles.example.org parent domain against threat intel and known-provider allowlists. Determine whether this IP is a known CDN endpoint, a hosting-abuse or Tor exit node, or previously unseen. Flag if 185.220.101.7 appears in any threat intel feed."
+    scope_override:
+      window_hours: 2
+      anchor: alert
+```

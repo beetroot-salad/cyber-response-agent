@@ -1,0 +1,39 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "sqlservr.exe→powershell.exe spawn is absent from this host's 30-day process-creation baseline (any deviation from the zero-count baseline for that parent-child kind)"
+        read_as: "novel-engine-shell-invocation"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "process-creation events on edr-mssql-prod-01 where proc.pname=sqlservr.exe and proc.name=powershell.exe, 30-day window ending at alert timestamp"
+          dimension: parent-child-spawn-kind
+      - id: lp2
+        if: "sqlservr.exe→powershell.exe spawn matches the host's recurring 30-day process-creation baseline geometry on at least one recorded dimension"
+        read_as: "established-engine-shell-pattern"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "process-creation events on edr-mssql-prod-01 where proc.pname=sqlservr.exe and proc.name=powershell.exe, 30-day window ending at alert timestamp"
+          dimension: parent-child-spawn-kind
+      - id: lp3
+        if: "process-lineage reveals child processes spawned under powershell.exe beyond the single outbound connection captured in the alert"
+        read_as: "post-shell-activity-present"
+        advance_to: escalate
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: [source-reputation]
+    lead_hints:
+      process-lineage: "Reconstruct the full process tree rooted at sqlservr.exe pid 4488 on edr-mssql-prod-01. Retrieve all child and grandchild processes, cmdline shapes, and check whether sqlservr.exe→powershell.exe spawns appear in the 30-day process-creation history for this host. Return both foreground (this alert's spawn) and the 30-day baseline side by side."
+      source-reputation: "Classify 164.92.71.108 against threat-intel feeds, WHOIS/ASN data, and any prior appearance in environment telemetry. Is this a known CDN/cloud provider, a VPS/hosting provider with no prior environment history, or a confirmed malicious IP?"
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```

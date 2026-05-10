@@ -6,7 +6,7 @@ groups: defender, learning-loop, evaluation
 
 **Goal.** Build a cross-case verification oracle that catches *regresses-elsewhere* and *overgeneralized-misframe* (T2/T4) bad lessons — the structural blind spot of the same-case oracle used in the V0.1 verification experiment.
 
-**Background.** The V0.1 verification experiment (`tasks-scratch/defender-author-verification/results/final.md`) settled on forward-check (Haiku, single rep, against source case transcript + ground truth) as the V0.1 author gate. Forward achieves 100% TNR / 83% TPR / 88% oracle agreement. But the oracle itself — same-case Sonnet rerun — cannot detect lessons that are correct on the original case but wrong on variants. Two of four hand-crafted bad lessons (L2 burst-escalate, L4 high-entropy-c2) slipped past the same-case oracle on this basis.
+**Background.** The V0.1 verification experiment (`experiments/defender-author-verification/results/final.md`) settled on forward-check (Haiku, single rep, against source case transcript + ground truth) as the V0.1 author gate. Forward achieves 100% TNR / 83% TPR / 88% oracle agreement. But the oracle itself — same-case Sonnet rerun — cannot detect lessons that are correct on the original case but wrong on variants. Two of four hand-crafted bad lessons (L2 burst-escalate, L4 high-entropy-c2) slipped past the same-case oracle on this basis.
 
 This is the next step in tightening the gate.
 

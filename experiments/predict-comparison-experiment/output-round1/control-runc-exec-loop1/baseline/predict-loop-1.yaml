@@ -1,0 +1,61 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?kubectl-exec-operator-session"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: spawned
+        parent_vertex:
+          type: kubectl_exec_request
+          classification: operator-initiated-pod-exec
+      story: |
+        An operator (human or automated pipeline) issued a kubectl exec
+        against pod payments-api-7c9d8f5b6-q2vr4 in the payments-prod
+        namespace, opening an interactive bash session under the
+        container's root identity. The Kubernetes API server proxied the
+        exec request to the kubelet, which directed runc to spawn bash —
+        producing the Falco execve event. The Kubernetes audit log should
+        record this exec request with the requesting identity, the RBAC
+        authorization context, and the target pod and container, timestamped
+        within seconds of the alert.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "a kube-audit exec record exists targeting pod payments-api-7c9d8f5b6-q2vr4 with a request timestamp within a short window of the alert timestamp"
+          from_story_link: "The Kubernetes API server proxied the exec request to the kubelet, timestamped within seconds of the alert"
+        - id: p2
+          subject: proposed_edge
+          claim: "the kube-audit record names a requesting identity (user or service account) bound to an RBAC role that grants exec on pods in payments-prod"
+          from_story_link: "An operator issued a kubectl exec against the pod in the payments-prod namespace"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no kube-audit exec record exists for this pod in the window bracketing the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching kube-audit exec record exists but the requesting identity is not bound to an RBAC role granting exec in payments-prod, or the identity is absent/unknown"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: kube-audit-pod-exec
+          predicate: "a kubectl exec audit event targeting payments-api-7c9d8f5b6-q2vr4, timestamped within the alert window, with a requesting identity authorized by RBAC to exec in payments-prod"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "kube-audit records the requesting user or service account identity alongside the authorization decision; confirming the exec record authorizes the action and identifies the actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary:
+      - change-management-correlation
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Query the Kubernetes audit log for exec subresource events against pod payments-api-7c9d8f5b6-q2vr4 (namespace payments-prod) in a ±2min window around 2026-04-26T08:33:20Z. Retrieve: requesting user/service-account, RBAC authorization decision, source IP, and the container target. This is the primary authorization anchor for h-001.ac1."
+      change-management-correlation: "Check for any open change tickets, deploy runs, or incident-response tickets that would explain an operator exec into payments-prod at this timestamp. Secondary context for disposition narrative — does not substitute for the kube-audit authorization check."
+    scope_override:
+      window_hours: 1
+      anchor: alert

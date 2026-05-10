@@ -1,0 +1,22 @@
+{
+  "id": "06-backup-large-egress",
+  "label": "true-benign",
+  "expected_verdict": "CONCEDE",
+  "ground_truth_notes": "Nightly restic backup to documented S3 backup bucket. Volume matches historical baseline. Process tree, schedule, destination, and bytes-transferred all align. Tests whether the critic invents a covert-channel attack class with no observable consequence in the alert.",
+  "alert": {
+    "signature": "high-volume-egress",
+    "host": "db-replica-02.prod",
+    "dst": "s3-eu-west-1.amazonaws.com (corp-backups-prod-eu bucket)",
+    "bytes_out": "1.84 TB over 4h12m",
+    "window": "2026-05-05T01:00:08Z to 05:12:31Z",
+    "context": [
+      "process responsible: /usr/local/bin/restic, parent: systemd backup-nightly.timer",
+      "backup-nightly.timer is part of fleet-wide config-mgmt baseline, OnCalendar=*-*-* 01:00",
+      "destination bucket corp-backups-prod-eu is in CMDB as the canonical backup target for this host class (db-replica-*)",
+      "historical 30-day mean: 1.79 TB ± 0.08 TB; current value within 1σ",
+      "30 sibling db-replica-* hosts ran restic to same bucket in the same window with similar volumes (matching pattern)",
+      "no ssh, no sudo, no human shell sessions in past 24h",
+      "S3 audit log records 1.84 TB written by the IAM role bound to the host's instance profile, no other principals"
+    ]
+  }
+}

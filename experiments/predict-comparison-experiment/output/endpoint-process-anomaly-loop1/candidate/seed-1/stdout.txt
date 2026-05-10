@@ -1,0 +1,65 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?sqlservr-xp-cmdshell-invocation"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: process, classification: sql-stored-proc-via-xp-cmdshell}
+      story: |
+        sqlservr.exe invoked xp_cmdshell (or a CDC/replication stored
+        procedure) as part of a configured DBA maintenance or automation
+        task, producing powershell.exe under the MSSQL$PROD service account.
+        This is the documented execution path for xp_cmdshell — the engine
+        process itself is the parent, not sqlagent.exe, because xp_cmdshell
+        runs inside the engine's process space. An authorized xp_cmdshell
+        configuration or scheduled stored-procedure call would explain the
+        observed parent-child relationship and the encoded command argument.
+        No prior baseline for sqlservr.exe→powershell.exe on edr-mssql-prod-01
+        is established from available context, making this a first-observed
+        spawn on this host.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "sqlagent-job-correlation returns at least one SQL Agent job or stored-procedure execution record tied to an authorized configuration whose scheduled or triggered window contains the alert timestamp"
+          from_story_link: "an authorized xp_cmdshell configuration or scheduled stored-procedure call would explain the observed parent-child relationship"
+        - id: p2
+          subject: proposed_edge
+          claim: "sql-server-child-baseline records prior sqlservr.exe→powershell.exe spawns on edr-mssql-prod-01 within the 30-day historical window"
+          from_story_link: "No prior baseline for sqlservr.exe→powershell.exe on edr-mssql-prod-01 is established from available context"
+          comparison:
+            selector_kind: historical-self
+            selector: "sqlservr.exe child-process spawn events on edr-mssql-prod-01 over the prior 30 days"
+            dimension: child_process_name
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no SQL Agent job or stored-procedure execution record whose scheduled or triggered window contains the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "sqlservr.exe→powershell.exe spawns from this host are absent from the 30-day baseline (any deviation from the zero-count baseline for that child-process kind)"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: sqlagent-job-correlation
+          predicate: "a SQL Agent job or stored-procedure execution record tied to an authorized change-management entry or known maintenance configuration whose execution window contains the alert timestamp and whose actor identity matches an authorized DBA or automation principal"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "sqlagent-job-correlation and sql_audit_api records name the session login and initiating principal; confirming the job authorizes the xp_cmdshell call and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: sqlagent-job-correlation
+    composite_secondary: [sql-server-child-baseline]
+    override_data_source: null
+    lead_hints:
+      sqlagent-job-correlation: "Query sql_audit_api for xp_cmdshell invocations and SQL Agent job executions on edr-mssql-prod-01 (sqlservr.exe pid 4488) in the ±10 min window around 2026-04-26T09:48:00Z. Check whether xp_cmdshell is currently enabled on this instance and whether any stored procedure or scheduled job is configured to invoke powershell with an encoded command."
+      sql-server-child-baseline: "Retrieve sqlservr.exe child-process spawn events on edr-mssql-prod-01 over the prior 30 days from sysmon_indexer or edr_query. Focus on whether powershell.exe has ever appeared as a direct child of sqlservr.exe on this host, and if so, what cmdline shapes were observed."
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```

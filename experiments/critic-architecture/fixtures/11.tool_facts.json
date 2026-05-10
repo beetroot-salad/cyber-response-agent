@@ -1,0 +1,120 @@
+{
+  "k8s_audit:resource=billing-api-7c9f8b-x2q4n|verb=create": {
+    "events": [
+      {
+        "ts": "2026-05-03T11:24:08Z",
+        "verb": "create",
+        "resource": "pods/billing-api-7c9f8b-x2q4n",
+        "namespace": "billing",
+        "user": "dev:abansal@corp.com",
+        "user_groups": ["platform-team", "kubeconfig-issued"],
+        "source_ip": "198.51.100.42",
+        "user_agent": "kubectl/v1.29.3 (linux/amd64)"
+      }
+    ],
+    "context_note": "creator is a kubeconfig user, NOT system:serviceaccount:kube-system:deployment-controller"
+  },
+  "k8s_audit:resource=billing-api-*|verb=create": {
+    "events": "summary: 247 pod creates for billing-api-* in past 90d",
+    "creator_breakdown": {
+      "system:serviceaccount:kube-system:deployment-controller": 246,
+      "dev:abansal@corp.com": 1
+    },
+    "anomaly_note": "exactly 1 of 247 created by a non-deployment-controller principal"
+  },
+  "pod_get:pod=billing-api-7c9f8b-x2q4n": {
+    "name": "billing-api-7c9f8b-x2q4n",
+    "namespace": "billing",
+    "spec": {
+      "containers": [
+        {
+          "name": "billing-api",
+          "image": "registry.corp/billing-api@sha256:abc...123",
+          "image_matches_helm_2.18.0_manifest": true,
+          "env": [
+            {"name": "BILLING_DB_QUERY_LOG_LEVEL", "value": "ERROR", "fleet_norm": "INFO"},
+            {"name": "DB_HOST", "value": "warehouse.prod.internal"}
+          ]
+        }
+      ]
+    },
+    "labels": {"app": "billing-api"},
+    "owner_references": [],
+    "fleet_comparison_note": "no replicaset/deployment ownerRef — pod is freestanding, not deployment-managed"
+  },
+  "helm_history:release=billing-api|time_range=30d": {
+    "releases": [
+      {"version": "billing-api-2.18.0", "ts": "2026-04-28T15:11:02Z", "deployed_by": "ci-bot@corp", "status": "deployed"}
+    ],
+    "note": "no helm rollouts after 2026-04-28; the suspect pod's 2026-05-03 creation has no corresponding helm release"
+  },
+  "iam_audit:principal=abansal@corp.com|time_range=30d": {
+    "events": [
+      {"ts": "2026-04-21T09:08:00Z", "action": "kubeconfig_issue", "ttl": "28d", "issuer": "k8s-cli-iam"},
+      {"ts": "2026-05-03T11:24:08Z", "action": "k8s_api_call", "verb": "create", "resource": "pods/billing-api-7c9f8b-x2q4n", "source_ip": "198.51.100.42"}
+    ],
+    "principal_team": "platform",
+    "principal_repo_ownership": ["infra-tools", "k8s-bootstrap"],
+    "billing_api_ownership": false
+  },
+  "slack_history:user=abansal|channel=billing-api": {
+    "messages": [],
+    "note": "no messages in #billing-api channel ever; user is not on billing oncall rotation"
+  },
+  "slack_history:user=abansal": {
+    "messages_30d": 14,
+    "primary_channels": ["#platform-tools", "#k8s-on-call", "#general"],
+    "billing_api_channel_messages": 0
+  },
+  "git_log:repo=billing-api|author=abansal|time_range=180d": {
+    "commits": [],
+    "prs": [],
+    "note": "no contributions to billing-api repo in 180d"
+  },
+  "vpn_log:user=abansal|time_range=14d": {
+    "sessions": [
+      {"ts": "2026-04-22T08:14Z", "client_ip": "203.0.113.42", "client_geo": "corp WAN (HQ)"},
+      {"ts": "2026-04-25T11:09Z", "client_ip": "203.0.113.42", "client_geo": "corp WAN (HQ)"},
+      {"ts": "2026-05-01T07:51Z", "client_ip": "203.0.113.42", "client_geo": "corp WAN (HQ)"},
+      {"ts": "2026-05-03T11:23Z", "client_ip": "198.51.100.42", "client_geo": "Phnom Penh, KH (residential ISP)"}
+    ],
+    "note": "the 2026-05-03 session — same minute as the pod creation — used a Phnom Penh residential IP. Prior 90d baseline is corp WAN HQ."
+  },
+  "ticket_search:query=billing-export|time_range=30d": {
+    "tickets": [
+      {"id": "PR-6612", "title": "expand customer-pii read for new billing-export feature", "merged": "2026-04-27T22:14Z", "reviewers": ["jin", "rao"], "author": "klee@corp"},
+      {"id": "REL-2.18.0", "title": "billing-api-2.18.0 helm release", "deployed": "2026-04-28T15:11Z"}
+    ],
+    "note": "PR + release exist; explains a feature that reads customer-pii. Does NOT explain a non-deployment-controller pod created 5 days later."
+  },
+  "warehouse_audit:principal=billing/api-billing-prod|time_range=4h": {
+    "summary": "4720 SELECT queries against customer_pii in window",
+    "per_pod_breakdown": {
+      "billing-api-7c9f8b-x2q4n": 4720,
+      "billing-api-7c9f8b-other-pods": 0
+    },
+    "query_shape_observations": {
+      "where_clause_pattern_suspect_pod": "WHERE customer_id BETWEEN <range>; ranges walk sequentially through customer_id space (1000000, 1100000), (1100000, 1200000), ...",
+      "where_clause_pattern_other_pods_baseline": "WHERE customer_id IN (<small list from incoming HTTP request>)",
+      "rows_per_query_suspect": 1.4,
+      "rows_per_query_baseline": 1.3,
+      "inter_query_timing_suspect": "mean 2.7s, jitter 0.3s — programmatic, not request-driven",
+      "inter_query_timing_baseline": "irregular, request-driven, no fixed cadence"
+    },
+    "log_suppression_note": "warehouse-side audit channel cannot be silenced by app-side BILLING_DB_QUERY_LOG_LEVEL"
+  },
+  "network_egress:host=billing-api-7c9f8b-x2q4n|time_range=4h": {
+    "external_connections": [
+      {"dst": "203.0.113.99:443", "proto": "https", "bytes_out": 1432819, "first_seen_org": "2026-05-03T11:34Z"}
+    ],
+    "dst_metadata": {
+      "203.0.113.99": {"ptr": null, "registered": "2026-04-08", "reputation": "unknown", "fleet_seen_count_90d": 1}
+    },
+    "fleet_comparison": "no other billing-api-* pod has connections to 203.0.113.99",
+    "feature_spec_check_pr_6612": "does not require external HTTPS egress"
+  },
+  "siem_query:index=app-logs|filter=app=billing-api|time_range=4h": {
+    "summary": "app-side logs heavily reduced for pod billing-api-7c9f8b-x2q4n; only ERROR-level entries visible (consistent with BILLING_DB_QUERY_LOG_LEVEL=ERROR override)",
+    "note": "app logs are not authoritative for query content; warehouse_audit is"
+  }
+}

@@ -1,0 +1,15 @@
+:A loop  1
+
+:T resolutions
+
+:R consultations [lead|anchor_id|anchor_kind|grounding|result|as_of|authority|reasoning]
+l-001|wazuh.manager|telemetry-datasource|telemetry-baseline|confirmed|2026-05-05T09:23:53Z|wazuh.manager|post-burst (T+5s to T+4h) mean_gap=304.6s stdev=12.1s vs baseline mean≈300s stdev≈14s; max_cluster_size=1 both windows; within 1σ on all cadence dimensions — lp1 confirmed; burst is isolated, probe resumed baseline geometry immediately after; no auth success post-burst
+
+:A unresolved_prescribed
+none
+
+:A anomalies
+none
+
+:A data_wishes
+approved-monitoring-sources registry for triple (172.22.0.10, nagios, target-endpoint) — anchor fidelity indeterminate this run (context-doc classification only, not a registry surface); required for authorization contract in next loop

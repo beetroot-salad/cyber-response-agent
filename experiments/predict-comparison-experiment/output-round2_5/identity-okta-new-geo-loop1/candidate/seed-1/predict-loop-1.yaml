@@ -1,0 +1,47 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "a successful sign-in from a geographically distant country appears within the same 24-hour window as this alert, creating an impossible-travel geometry against the foreground VN sign-in"
+        read_as: "impossible-travel-detected"
+        advance_to: escalate
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND outcome.result:SUCCESS [past 24h]"
+          dimension: sign_in_geo_timestamp_geometry
+      - id: lp2
+        if: "the foreground source country (VN) appears in the user's historical successful sign-in geo baseline"
+        read_as: "known-travel-geo"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND outcome.result:SUCCESS [past 30d]"
+          dimension: client_geo_country
+      - id: lp3
+        if: "the user's historical baseline shows a domestic-only or consistent single-region geo pattern with no prior VN sign-in, and no impossible-travel signal is present"
+        read_as: "novel-geo-no-impossible-travel"
+        advance_to: fork-at-credential-vs-travel
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND outcome.result:SUCCESS [past 30d]"
+          dimension: client_geo_country
+      - id: lp4
+        if: "the comparison set is empty (no prior successful sign-ins for this account in the 30-day window)"
+        read_as: "no-baseline-new-or-dormant-account"
+        advance_to: escalate
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary:
+      - source-reputation
+    lead_hints:
+      authentication-history: "Query Okta system logs for j.morales@example.com successful sign-in events (eventType:user.session.start, outcome.result:SUCCESS) over the past 30 days. Return per-event client.geographicalContext.country, client.ipAddress, client.userAgent.os, and timestamp. The goal is to characterize the user's historical geo baseline and detect any impossible-travel signal relative to the 2026-04-26T05:42:12Z VN sign-in."
+      source-reputation: "Classify 103.27.181.42 against threat-intel and IP-classification sources. Key questions: (1) is this IP flagged as malicious, TOR exit, or known credential-stuffing infrastructure? (2) is it a datacenter/VPN/proxy egress node? (3) is it consistent with residential ISP allocation in VN? A threat-intel hit or datacenter/proxy classification materially changes routing."
+    scope_override:
+      window_hours: 720
+      anchor: alert

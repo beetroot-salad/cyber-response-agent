@@ -1,0 +1,60 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?scheduled-etl-export"
+      attached_to_vertex: v-003
+      proposed_edge:
+        relation: wrote_to
+        parent_vertex: {type: scheduler_job, classification: daily-etl-batch-job}
+      story: |
+        analyst-svc@analytics-prod.iam.gserviceaccount.com is a service account
+        dedicated to daily ETL batch processing in analytics-prod. A recurring
+        scheduled job (Cloud Scheduler or Cloud Composer DAG) fires daily around
+        11:00 UTC, invoking a BigQuery SELECT across customer_pii.users and
+        customer_pii.payment_methods and exporting results to a date-stamped
+        GCS path under gs://analytics-export-prod/exports/. The 412 GB / 18.5M
+        row volume is consistent with a full-table daily snapshot. The observed
+        filename pattern (2026-04-26-customer-extract.csv.gz) matches a
+        date-templated export destination, and no prior investigation baseline
+        exists for this signature, so cadence is inferred from alert structure
+        alone.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "scheduler records an execution of a recurring job configured to run as analyst-svc whose execution window contains the alert timestamp 2026-04-26T11:18:54Z"
+          from_story_link: "A recurring scheduled job fires daily around 11:00 UTC"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching scheduled job's configured destination path template resolves to the observed GCS object path (analytics-export-prod/exports/2026-04-26-customer-extract.csv.gz)"
+          from_story_link: "exporting results to a date-stamped GCS path under gs://analytics-export-prod/exports/"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no scheduled job execution window contains the alert timestamp when queried against the scheduler record for analyst-svc"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching execution exists but its configured destination template does not resolve to the observed GCS path"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: scheduler-job-correlation
+          predicate: "a recurring scheduled job record exists for analyst-svc with an execution window containing 2026-04-26T11:18:54Z and a configured destination template matching the observed GCS export path"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "scheduler job records carry the identity of the human or CI principal that created and owns the schedule; confirming the scheduled job authorizes the export and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: scheduler-job-correlation
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      scheduler-job-correlation: "Query GCP Cloud Scheduler and Cloud Composer for jobs configured to execute as analyst-svc@analytics-prod.iam.gserviceaccount.com. Check for a recurring job whose scheduled execution window covers 2026-04-26T11:18:54Z and whose configured BigQuery export destination matches the analytics-export-prod/exports/YYYY-MM-DD-customer-extract.csv.gz path template. Return the job name, owner, cadence, and any execution history for the past 30 days."
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```

@@ -1,0 +1,32 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "source IP 103.27.181.42 is identified as proxy, VPN, TOR exit node, or threat-intel-listed infrastructure in reputation data"
+        read_as: "high-risk-source"
+        advance_to: escalate
+      - id: lp2
+        if: "source IP has no high-risk reputation markers AND user j.morales@example.com has prior signin history from VN or geographically proximate regions (any deviation from the zero-count baseline for that geo is false)"
+        read_as: "geo-within-user-baseline"
+        advance_to: halt
+      - id: lp3
+        if: "source IP has no high-risk reputation markers AND user j.morales@example.com has no prior signin history from VN or neighboring SE Asia regions"
+        read_as: "geo-novel-to-user"
+        advance_to: fork-at-mechanism
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: [source-reputation]
+    override_data_source: null
+    lead_hints:
+      authentication-history: "Retrieve j.morales@example.com Okta signin history for the past 30 days. Focus on client.geographicalContext.country and client.ipAddress distributions to establish whether VN or neighboring SE Asia countries appear in the baseline. Also check whether MFA was challenged or bypassed on this session."
+      source-reputation: "Classify 103.27.181.42 — is it a known datacenter/hosting IP, VPN/proxy exit node, TOR exit, or threat-intel-listed? Check ASN ownership and any available reputation feeds."
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```

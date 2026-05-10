@@ -1,0 +1,61 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?ci-artifact-upload"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: opened_tls_connection
+        parent_vertex: {type: ci_job, classification: ci-orchestrator-dispatched-job}
+      story: |
+        The CI orchestrator dispatched a job to ci-runner-04 that
+        included an artifact upload step targeting cdn.staticfiles.example.org
+        as a configured storage endpoint; the 27.4 GB outbound volume and
+        ~70-minute session duration are consistent with a bulk artifact export.
+        The destination being novel in the 30-day baseline is explained by a
+        recently introduced or infrequently used storage integration rather
+        than by adversarial activity. The CI orchestrator API records each
+        dispatched job, its initiating identity, its configured artifact
+        destination, and the runner assignment — confirming the job's
+        existence authorizes both the transfer and identifies the responsible
+        actor.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "ci-orchestrator-api records a job assigned to ci-runner-04 whose execution window contains the alert timestamp"
+          from_story_link: "CI orchestrator dispatched a job to ci-runner-04"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job's artifact upload configuration declares cdn.staticfiles.example.org or 185.220.101.7 as an authorized upload target"
+          from_story_link: "an artifact upload step targeting cdn.staticfiles.example.org as a configured storage endpoint"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no CI job assigned to ci-runner-04 has an execution window containing the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching job exists but its artifact upload configuration does not reference cdn.staticfiles.example.org or 185.220.101.7 as an authorized destination"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci-orchestrator-api
+          predicate: "an active CI job assigned to ci-runner-04 with an execution window covering the alert timestamp, whose artifact upload configuration declares cdn.staticfiles.example.org or its backing IP as an authorized destination"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "ci-orchestrator-api records the initiating identity that triggered the job (developer, scheduled trigger, or webhook); confirming the job authorizes the transfer and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: ci-job-correlation
+    composite_secondary: [source-reputation]
+    override_data_source: null
+    lead_hints:
+      ci-job-correlation: "Look up all CI jobs dispatched to ci-runner-04 (host 10.0.18.41) with an execution window covering 2026-04-25T22:04:10Z. Confirm whether any job's artifact upload step declares cdn.staticfiles.example.org or 185.220.101.7 as a destination. Return the job id, initiating identity, configured artifact target, and execution window."
+      source-reputation: "Classify 185.220.101.7 and cdn.staticfiles.example.org against threat-intel and asset-state sources. Determine whether the IP is a known CDN/cloud egress range, a known-malicious IP (Tor exit, C2 infrastructure, abuse-reported), or unrecognized. Return reputation verdict and any feed hits."
+    scope_override:
+      window_hours: 2
+      anchor: alert
+```

@@ -1,0 +1,28 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "at least one successful SSH login (rule group authentication_success) from srcip 172.22.0.10 within 60 seconds after the alert timestamp"
+        read_as: "forward-success signal — potential compromise regardless of source classification"
+        advance_to: escalate
+      - id: lp2
+        if: "cluster_count >= 3 AND max_cluster_size <= 3 AND no forward success"
+        read_as: "periodic cadence consistent with a scheduled monitoring probe"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "cluster_count < 3 OR max_cluster_size > 3, and no forward success"
+        read_as: "insufficient cadence evidence or burst shape — cannot confirm periodic probe"
+        advance_to: fork-at-identity
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    override_data_source: null
+    scope_override:
+      window_hours: 1
+      anchor: alert

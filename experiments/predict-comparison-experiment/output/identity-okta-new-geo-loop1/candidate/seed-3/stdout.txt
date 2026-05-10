@@ -1,0 +1,57 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "auth baseline includes prior successful logins from VN or from other Asia-Pacific countries that form a geographically plausible travel arc to VN"
+        read_as: "travel-consistent-geo-baseline"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND outcome.result:SUCCESS [past 30d]"
+          dimension: client_geographicalContext_country
+      - id: lp2
+        if: "auth baseline includes a concurrent or near-concurrent successful login from a geographically distant country within a travel-impossible window around the alert timestamp"
+        read_as: "impossible-travel-signal"
+        advance_to: escalate
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND outcome.result:SUCCESS [past 30d]"
+          dimension: concurrent_session_geo_geometry
+      - id: lp3
+        if: "auth baseline shows no prior logins from outside a consistent home-region pattern and no prior international travel footprint — VN is a structurally novel deviation from that baseline"
+        read_as: "no-travel-baseline-novel-geo"
+        advance_to: escalate
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND outcome.result:SUCCESS [past 30d]"
+          dimension: client_geographicalContext_country
+      - id: lp4
+        if: "comparison set is empty (no prior successful auth events for j.morales@example.com in the 30-day window)"
+        read_as: "no-baseline-establishable"
+        advance_to: escalate
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    lead_hints:
+      authentication-history: >
+        Retrieve all Okta user.session.start events for actor
+        j.morales@example.com over the past 30 days. Return: per-login
+        country, city, IP, outcome, MFA step (authenticationContext.authenticationStep),
+        and timestamp. Also flag any sessions active concurrently with
+        the alert window (±2h of 2026-04-26T05:42:12Z). The alert shows
+        authenticationStep=0 — note whether MFA steps (step≥1) were
+        present in prior successful logins.
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```
+
+**Decision rationale.** Loop 1, no prior corpus priors, no baseline yet for this user. The alert confirms geo-novelty (VN never seen in recent history) but doesn't yet tell us whether that novelty is explained by travel, VPN egress, or credential compromise. The cheapest single discriminator is the user's own 30-day auth history: its geo distribution, session concurrency, and MFA-step pattern partition the next loop cleanly. A hypothesis fork (traveling-user vs credential-stuffing) is premature until we know whether Julia has any international travel footprint at all — the enrichment reading routes directly to escalate if there's no baseline or an impossible-travel signal, and to a fork only if the baseline supports a travel interpretation.
+
+**Note on `authenticationStep: 0`**: this signals no MFA step was recorded, which is worth surfacing in the lead hint. If the baseline shows she normally completes MFA (step ≥ 1) and this login skipped it, that shifts the loop-2 fork toward credential compromise; GATHER will capture the MFA-step distribution and ANALYZE will grade it.

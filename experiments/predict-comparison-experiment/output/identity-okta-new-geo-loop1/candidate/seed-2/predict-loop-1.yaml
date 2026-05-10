@@ -1,0 +1,39 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "at least one other successful session from a different country exists within ±4h of the alert timestamp for the same account"
+        read_as: "impossible-travel-signal"
+        advance_to: escalate
+      - id: lp2
+        if: "prior signin history is present in the baseline window and the foreground session's source-country geometry deviates from the account's recurring country set (any deviation from the zero-count baseline for that country)"
+        read_as: "novel-geo-against-established-baseline"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND eventType:user.session.start AND outcome.result:SUCCESS [past 30d]"
+          dimension: source_country
+      - id: lp3
+        if: "no prior successful signin events exist for the account in the 30d baseline window"
+        read_as: "no-baseline-establishable"
+        advance_to: fork-at-authorization
+      - id: lp4
+        if: "prior signin history is present and the foreground session's source-country matches the account's recurring country set on at least one recorded dimension"
+        read_as: "geo-within-known-baseline"
+        advance_to: halt
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary:
+      - source-reputation
+    lead_hints:
+      authentication-history: "Retrieve all successful user.session.start events for j.morales@example.com over the last 30 days. Characterize distinct source countries, cities, and ASNs. Flag any concurrent sessions (within ±4h of 2026-04-26T05:42:12Z) from a different country. Check whether MFA was required and whether any MFA challenges were declined in the same window."
+      source-reputation: "Classify 103.27.181.42 — ASN, org, and whether it is associated with a VPN provider, datacenter/hosting, residential ISP, or known proxy/anonymizer service. Check against threat-intel feeds for reputation hits."
+    scope_override:
+      window_hours: 720
+      anchor: alert

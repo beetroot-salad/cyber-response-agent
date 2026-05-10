@@ -1,0 +1,31 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: child-image-signing-distribution
+    predictions:
+      - id: lp1
+        if: "all or nearly all of the 38 distinct child images are signed by Microsoft Corporation or well-known Office ecosystem vendors, with image names matching a recognizable Office helper process shape"
+        read_as: "known-vendor-child-set — child composition consistent with a legitimate Office-driven burst (mailmerge, addin, print dispatch)"
+        advance_to: fork-at-legitimate-mechanism
+      - id: lp2
+        if: "one or more child images are unsigned, signed by an untrusted or unknown publisher, or carry names that deviate from the known Office helper image baseline on at least one recorded dimension (name shape, path, publisher)"
+        read_as: "untrusted-child-images-present — dropper or injected payload cannot be excluded; child composition anomalous for a clean Office session"
+        advance_to: escalate
+      - id: lp3
+        if: "signing data is unavailable for this endpoint (EDR telemetry gap — child image attributes not queryable)"
+        read_as: "signing-data-gap — composition cannot be characterized; conservative routing applies"
+        advance_to: escalate
+
+  routing:
+    selected_lead: child-image-signing-distribution
+    composite_secondary: [process-lineage]
+    lead_hints:
+      child-image-signing-distribution: "Query the 38 distinct child image paths spawned by WINWORD.EXE pid 9244 on WIN-DEV-3211 in the 5-minute window ending at 2026-04-26T07:14:32Z. Return per-image: signing status, publisher/signer name, image path. Summarize: fraction signed by Microsoft vs other known vendors vs unsigned; any images with anomalous path locations (outside Program Files, AppData\\Roaming\\Microsoft, etc.)."
+      process-lineage: "Retrieve the parent of WINWORD.EXE pid 9244 on WIN-DEV-3211 at or before 2026-04-26T07:14:32Z. Surface the grandparent-process name and command-line if available. Flag if WINWORD.EXE was launched by a scripting host (wscript, cscript, powershell, cmd) or from a temp/download path — that is an independent escalation signal regardless of child-image signing outcomes."
+```
+
+**Shape rationale — E:**
+Loop 1, no prior enrichment on this host's WINWORD.EXE child-spawning behavior. The alert delivers raw counts (142 children, 38 distinct images, avg entropy 3.12) but no composition: we don't know whether the 38 images are `EXCEL.EXE, AcroPDF.exe, PrintIsolationHost.exe…` (mailmerge/addin shape) or a mix that includes unsigned short-named binaries (dropper shape). Child-image signing distribution is the cheapest single discriminator — it partitions the outcome space cleanly before any mechanism fork is earned. The composite `process-lineage` surfaces WINWORD.EXE's own launch context (scripting-host parent = independent escalation signal) at no extra loop cost.

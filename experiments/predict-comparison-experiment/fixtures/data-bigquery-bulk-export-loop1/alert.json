@@ -1,0 +1,19 @@
+{
+  "agent": {"name": "gcp-audit", "id": "gcp"},
+  "manager": {"name": "wazuh.manager"},
+  "data": {
+    "principalEmail": "analyst-svc@analytics-prod.iam.gserviceaccount.com",
+    "callerSuppliedUserAgent": "google-cloud-sdk gcloud/472.0.0",
+    "service": "bigquery.googleapis.com",
+    "method": "google.cloud.bigquery.v2.JobService.InsertJob",
+    "resource.dataset_id": "customer_pii",
+    "resource.project_id": "analytics-prod",
+    "job.statement_type": "SELECT",
+    "job.referenced_tables": ["customer_pii.users", "customer_pii.payment_methods"],
+    "job.total_bytes_processed": 412803881420,
+    "job.total_rows_returned": 18472911,
+    "job.destination": "gs://analytics-export-prod/exports/2026-04-26-customer-extract.csv.gz"
+  },
+  "rule": {"id": "100110", "level": 9, "description": "BigQuery: large export from PII dataset"},
+  "timestamp": "2026-04-26T11:18:54.331+0000"
+}

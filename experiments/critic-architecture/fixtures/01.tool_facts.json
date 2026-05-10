@@ -1,0 +1,151 @@
+{
+  "_meta": {
+    "fixture": "01-ssh-bastion-new-source",
+    "ground_truth_disposition": "escalate (malicious — T1550.001 SSH agent-forwarding hijack)",
+    "ground_truth_notes": "An attacker with shell on jsmith's laptop (or another corp host inside Building 7 wifi) hijacked jsmith's live ssh-agent socket and rode the live agent through to bastion-01. The smoking gun is the parent-PID lineage on the inbound sshd session (originated from a non-jsmith user shell on the corp wifi gateway segment) plus the agent-forwarding flag set by an unexpected upstream hop. The recent-ticket cover (INC-8821) is unrelated; the closure timestamp is post-hoc cover. Must-check tool: ssh_audit on bastion-01 for parent-PID lineage and AgentForwarding=yes from the new src_ip."
+  },
+
+  "ssh_audit:host=bastion-01.corp|user=jsmith|time_range=2h": {
+    "sessions": [
+      {
+        "ts": "2026-05-05T03:47:12Z",
+        "src_ip": "10.42.7.183",
+        "auth_method": "publickey",
+        "key_fingerprint": "SHA256:a1b2c3...",
+        "agent_forwarding": true,
+        "agent_forwarding_first_seen_for_user": true,
+        "parent_session_id": "session-9c1f-bld7wifi-gw",
+        "parent_pid_lineage": ["sshd(2148)", "sshd(2157)<-AgentForwardedFrom 10.42.7.4 (bld7-wifi-gw)", "no_corresponding_login_session_for_jsmith_on_10.42.7.4"],
+        "client_software": "OpenSSH_9.6 (linux)",
+        "tty_allocated": true,
+        "exec_seq": ["uname -a", "id", "cat /etc/sshd/sshd_config", "history -c", "ssh -A internal-prod-01"]
+      }
+    ],
+    "baseline_for_user_180d": {
+      "agent_forwarding_session_count": 0,
+      "src_ips": ["10.42.5.0/24"],
+      "tty_pattern": "interactive, mean session 12 minutes"
+    },
+    "anomaly_note": "the 03:47 session is the FIRST agent-forwarded session for jsmith on bastion-01 in 180d; the upstream parent claims to be from 10.42.7.4 (bld7-wifi-gw) but no login session for jsmith exists on 10.42.7.4 in the same window — agent socket was used by a different uid"
+  },
+
+  "ssh_audit:host=bastion-01.corp|user=jsmith": {
+    "sessions": [
+      {
+        "ts": "2026-05-05T03:47:12Z",
+        "src_ip": "10.42.7.183",
+        "auth_method": "publickey",
+        "agent_forwarding": true,
+        "parent_session_id": "session-9c1f-bld7wifi-gw"
+      }
+    ],
+    "note": "see also the time-bounded query for parent-PID lineage and agent-forwarding-first-seen flag"
+  },
+
+  "ssh_audit:host=10.42.7.4|user=jsmith|time_range=24h": {
+    "sessions": [],
+    "note": "no jsmith login on bld7-wifi-gw (10.42.7.4) in 24h — the host the agent-forwarding chain claims to originate from"
+  },
+
+  "ssh_audit:host=10.42.7.4|time_range=24h": {
+    "sessions": [
+      {"ts": "2026-05-05T03:46:51Z", "user": "guest-wifi-shared", "src_ip": "10.42.7.183", "auth_method": "publickey", "key_fingerprint": "SHA256:zz77ee...", "agent_forwarding_received": true, "agent_forwarding_received_from_socket": "/tmp/ssh-XXXX/agent.4422 (owned by uid=jsmith via shared kerberos pam socket — UNUSUAL)"}
+    ],
+    "anomaly_note": "guest-wifi-shared uid logged in from 10.42.7.183 at 03:46:51 — 21 seconds before the bastion login. The agent socket on bld7-wifi-gw appears to be reachable to non-jsmith uids due to a permissive pam_ssh_agent_socket override on this host."
+  },
+
+  "badge_log:user=jsmith|time_range=24h": {
+    "events": [
+      {"ts": "2026-05-04T18:23Z", "action": "exit", "reader": "bld7-east-exit"}
+    ],
+    "note": "jsmith badged OUT at 18:23 the previous evening; no badge IN for 2026-05-05 — physically not in Building 7 at 03:47. The src_ip is corp wifi but the badge claims jsmith is offsite."
+  },
+
+  "dhcp_log:ip=10.42.7.183|time_range=12h": {
+    "leases": [
+      {"ts": "2026-05-05T03:21:08Z", "mac": "f4:30:b9:21:cc:14", "hostname": "guest-laptop-shared-04", "vendor_oid": "Apple", "lease_pool": "bld7-wifi-guest"}
+    ],
+    "anomaly_note": "10.42.7.183 is currently leased to a Building 7 GUEST-wifi MAC — not a jsmith-issued corp asset. jsmith's normal device(s) historically live on 10.42.5.0/24."
+  },
+
+  "vpn_log:user=jsmith|time_range=14d": {
+    "sessions": [
+      {"ts": "2026-04-27T09:11Z", "client_ip": "203.0.113.88", "client_geo": "corp WAN (HQ remote)"}
+    ],
+    "note": "jsmith VPN shows infrequent off-corp use; no active VPN session on 2026-05-05. Consistent with badge — jsmith was offsite without VPN."
+  },
+
+  "ticket_get:id=INC-8821": {
+    "id": "INC-8821",
+    "title": "rotate bastion-01 sshd config (key allowlist refresh)",
+    "created": "2026-05-04T22:14Z",
+    "closed": "2026-05-05T03:31Z",
+    "closer": "jsmith@corp",
+    "closer_session_ip": "10.42.7.183",
+    "comments": [
+      {"ts": "2026-05-04T22:14Z", "author": "jsmith", "text": "scheduled rotation, will close after deploy"},
+      {"ts": "2026-05-05T03:31Z", "author": "jsmith", "text": "rotated. closing."}
+    ],
+    "linked_change": null,
+    "anomaly_note": "the closing comment was authored from 10.42.7.183 (the same guest-wifi IP as the bastion login). No linked CR/ticket-system change record. The closure looks like cover-text rather than the result of a deploy pipeline action — no commit, no helm/ansible run, no sshd_config diff attached."
+  },
+
+  "ticket_search:query=bastion-01 sshd|time_range=30d": {
+    "tickets": [
+      {"id": "INC-8821", "title": "rotate bastion-01 sshd config (key allowlist refresh)", "closed": "2026-05-05T03:31Z"}
+    ]
+  },
+
+  "siem_query:index=auth-log|filter=user=jsmith|time_range=4h": {
+    "events": [
+      {"ts": "2026-05-05T03:46:51Z", "host": "10.42.7.4 (bld7-wifi-gw)", "user": "guest-wifi-shared", "src_ip": "10.42.7.183", "auth_method": "publickey", "outcome": "success"},
+      {"ts": "2026-05-05T03:47:12Z", "host": "bastion-01.corp", "user": "jsmith", "src_ip": "10.42.7.183", "auth_method": "publickey", "agent_forwarding": true, "outcome": "success"},
+      {"ts": "2026-05-05T03:48:55Z", "host": "internal-prod-01", "user": "jsmith", "src_ip": "10.42.5.11 (bastion-01 internal)", "auth_method": "publickey", "agent_forwarding": true, "outcome": "success"}
+    ],
+    "anomaly_note": "21-second gap between guest-wifi-shared login on the wifi gateway and jsmith publickey login on bastion-01 from the same client IP — consistent with an attacker pivoting through the wifi gateway's pam socket to jsmith's live agent. The subsequent hop to internal-prod-01 from bastion-01 also carries agent-forwarding."
+  },
+
+  "siem_query:index=auth-log|filter=src_ip=10.42.7.183|time_range=24h": {
+    "events": [
+      {"ts": "2026-05-05T03:46:51Z", "host": "10.42.7.4", "user": "guest-wifi-shared"},
+      {"ts": "2026-05-05T03:47:12Z", "host": "bastion-01.corp", "user": "jsmith"}
+    ]
+  },
+
+  "siem_query:index=corp-wifi|filter=client_mac=f4:30:b9:21:cc:14|time_range=30d": {
+    "events": [
+      {"ts": "2026-05-05T03:18Z", "ssid": "corp-guest", "auth_method": "captive-portal", "guest_email": "vendor-temp@partnerco.example", "session_first_seen": true}
+    ],
+    "anomaly_note": "MAC f4:30:b9:21:cc:14 is a first-time-seen device on corp-guest wifi (3 hours before the bastion login), captive-portal-registered with a partner-vendor email."
+  },
+
+  "ssh_key_audit:fingerprint=SHA256:a1b2c3...": {
+    "owner": "jsmith@corp",
+    "issued": "2025-09-12T10:00Z",
+    "stored_in_agent_on_hosts_30d": ["jsmith-laptop-04 (10.42.5.211)", "bld7-wifi-gw (10.42.7.4) — via shared pam socket"],
+    "note": "key was NOT extracted from disk — it remains in jsmith's laptop ssh-agent. The bld7-wifi-gw entry indicates the agent socket was reachable through the shared pam configuration; this is the pivot point."
+  },
+
+  "git_log:repo=infra-ansible|author=jsmith|time_range=14d": {
+    "commits": [],
+    "note": "no commits to infra-ansible / sshd-config-related repos in 14d — the INC-8821 'rotation' has no corresponding change-management artifact"
+  },
+
+  "slack_history:user=jsmith|time_range=24h": {
+    "messages": [
+      {"ts": "2026-05-04T17:55Z", "channel": "#general", "text": "heading out, see y'all tomorrow"}
+    ],
+    "note": "no slack activity from jsmith between 18:00 and 03:47; no mention of bastion rotation work in #infra or #sre"
+  },
+
+  "process_audit:host=bastion-01.corp|session=session-9c1f-bld7wifi-gw|time_range=2h": {
+    "events": [
+      {"ts": "2026-05-05T03:47:13Z", "cmd": "uname -a"},
+      {"ts": "2026-05-05T03:47:18Z", "cmd": "id"},
+      {"ts": "2026-05-05T03:47:24Z", "cmd": "cat /etc/sshd/sshd_config"},
+      {"ts": "2026-05-05T03:47:31Z", "cmd": "history -c"},
+      {"ts": "2026-05-05T03:48:55Z", "cmd": "ssh -A internal-prod-01"}
+    ],
+    "note": "session reads sshd_config (recon), wipes shell history, then pivots agent-forwarded into internal-prod-01. Not consistent with 'rotate sshd config' which would write to it, not just read."
+  }
+}

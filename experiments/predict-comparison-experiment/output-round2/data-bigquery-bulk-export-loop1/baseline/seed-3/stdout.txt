@@ -1,0 +1,41 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: service-account-job-history
+    predictions:
+      - id: lp1
+        if: "the SA has prior BigQuery export jobs whose scale, destination bucket, and referenced-table set match the recurring baseline geometry on at least two recorded dimensions"
+        read_as: "recurring-etl-pattern"
+        advance_to: fork-at-authorization
+      - id: lp2
+        if: "the SA has no prior export jobs at this scale (any deviation from a zero-count baseline for bulk PII exports from this SA)"
+        read_as: "novel-bulk-export"
+        advance_to: escalate
+      - id: lp3
+        if: "the SA has prior export jobs but this job deviates from the baseline geometry on at least one recorded dimension (scale, destination, table scope, or timing cadence)"
+        read_as: "baseline-deviation-export"
+        advance_to: escalate
+
+  routing:
+    selected_lead: service-account-job-history
+    composite_secondary: []
+    scope_override:
+      window_hours: 168
+      anchor: alert
+    lead_hints:
+      service-account-job-history: >
+        Query GCP Audit logs for all BigQuery JobService.InsertJob events
+        where principalEmail = analyst-svc@analytics-prod.iam.gserviceaccount.com
+        in the 7-day window ending at alert time. Return job-level attributes:
+        statement_type, referenced_tables, total_bytes_processed, destination,
+        and timestamp for each job. The goal is to establish whether this SA
+        runs recurring bulk exports matching today's shape (scale, tables,
+        destination bucket) or whether today's job is novel.
+```
+
+**Shape E — reasoning:**
+
+No prior-loop enrichment exists for `analyst-svc@analytics-prod.iam.gserviceaccount.com`'s export behavior. The cheapest next discriminator is the SA's 7-day job history: a recurring daily export at this scale routes the next loop toward an authorization fork (scheduled ETL vs. credentialed-exfil); a novel or deviating export routes straight to escalation. Forking now would be premature — both `?scheduled-etl-export` and `?credentialed-exfil` are live candidates, but neither has grounding until we know whether this job fits a baseline pattern. The 168-hour window is needed to establish cadence (daily exports would appear ~7 times); the 1h default would return at most one data point.

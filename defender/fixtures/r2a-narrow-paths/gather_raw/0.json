@@ -1,0 +1,85 @@
+## Query Results
+**Query:** <JSON body>
+**Time range:** (JSON body owns time filter) to (JSON body owns time filter)
+
+### Data Source Health
+- **Source:** Wazuh Indexer (https://wazuh-indexer:9200)
+- **Most recent matching event:** no matching events
+- **Index event count (unfiltered, same window):** n/a (JSON body owns time filter)
+
+### Summary
+- **Matching events:** 197
+
+### Aggregations (server-side, true totals over full match set)
+**by_path** (11 buckets):
+  /etc/cron.d/maintenance-marker: 55
+  /etc/logrotate.d/workload-test: 55
+  /etc/motd: 55
+  /etc/ssh/sshd_config: 10
+  /etc/ssh/sshd_config.bak: 10
+  /etc/cron.d/suspicious-job: 4
+  /etc/.hidden_config_1778079601: 2
+  /etc/.hidden_config_1778088001: 2
+  /etc/.hidden_config_1778091601: 2
+  /etc/.hidden_config_1778003403: 1
+  /etc/.hidden_config_1778125201: 1
+**by_path_event** (11 buckets):
+  /etc/cron.d/maintenance-marker: 55
+    ↳ by_event:
+      550: 55
+  /etc/logrotate.d/workload-test: 55
+    ↳ by_event:
+      550: 55
+  /etc/motd: 55
+    ↳ by_event:
+      550: 55
+  /etc/ssh/sshd_config: 10
+    ↳ by_event:
+      550: 10
+  /etc/ssh/sshd_config.bak: 10
+    ↳ by_event:
+      553: 5
+      554: 5
+  /etc/cron.d/suspicious-job: 4
+    ↳ by_event:
+      553: 2
+      554: 2
+  /etc/.hidden_config_1778079601: 2
+    ↳ by_event:
+      553: 1
+      554: 1
+  /etc/.hidden_config_1778088001: 2
+    ↳ by_event:
+      553: 1
+      554: 1
+  /etc/.hidden_config_1778091601: 2
+    ↳ by_event:
+      553: 1
+      554: 1
+  /etc/.hidden_config_1778003403: 1
+    ↳ by_event:
+      553: 1
+  /etc/.hidden_config_1778125201: 1
+    ↳ by_event:
+      554: 1
+**etc_ssh_paths**: {"doc_count": 20, "by_path": {"doc_count_error_upper_bound": 0, "sum_other_doc_count": 0, "buckets": [{"key": "/etc/ssh/sshd_config", "doc_count": 10}, {"key": "/etc/ssh/sshd_config.bak", "doc_count":
+**by_event** (3 buckets):
+  550: 175
+  553: 11
+  554: 11
+**etc_cron_paths**: {"doc_count": 59, "by_path": {"doc_count_error_upper_bound": 0, "sum_other_doc_count": 0, "buckets": [{"key": "/etc/cron.d/maintenance-marker", "doc_count": 55}, {"key": "/etc/cron.d/suspicious-job", 
+**path_cardinality**: 11
+
+### Sample Events (first 5)
+(no matching events)
+
+### Count Breakdown
+(no data)
+
+### Raw Sample Events (first 3, full _source)
+Use these for field-level inspection when the summary lines above don't carry
+the discriminator you need (e.g. source port, process name, connection tuple).
+
+```json
+(no matching events)
+```

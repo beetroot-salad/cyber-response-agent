@@ -1,0 +1,13 @@
+{
+  "run_id": "5710-root-external",
+  "signature_id": "wazuh-rule-5710",
+  "severity": 5,
+  "salt": "experimentsalt0003",
+  "created_at": "2026-04-26T11:00:00.000000+00:00",
+  "fastpath_meta": {
+    "expected_prior_level": "exact",
+    "ground_truth_lead": "external-bruteforce",
+    "adversarial": false,
+    "notes": "External RFC1918-non bruteforce shape, matching SEED-5710-EXTBRUTE-001 exactly. true_positive precedent path."
+  }
+}

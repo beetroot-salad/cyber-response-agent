@@ -9,7 +9,7 @@ argument-hint: "[status | next | method | launch <case>]"
 This skill is for continuing iterative design work on the **investigation
 language** — the structured companion file proposed in
 `docs/investigation-language.md`, §3. The pilot lives under
-`docs/experiments/investigation-language-pilot/`.
+`experiments/investigation-language-pilot/`.
 
 **Working directory assumption.** All paths are relative to `/workspace/`.
 
@@ -28,7 +28,7 @@ to hit 100% writability).
 against A.1 and two real cases, not yet Haiku-regression-tested).
 **Current focus:** write the **query/distillation script** next. This is
 where v2.3's "push retrieval load to the distiller" bet pays off or
-doesn't. See `docs/experiments/investigation-language-pilot/case-a4/retrieval-needs.md`
+doesn't. See `experiments/investigation-language-pilot/case-a4/retrieval-needs.md`
 for the 10 retrieval needs (R-1 through R-10) the script must cover.
 
 **Status table:**
@@ -115,7 +115,7 @@ foreground while they run.
 
 ---
 
-## File map (under `docs/experiments/investigation-language-pilot/`)
+## File map (under `experiments/investigation-language-pilot/`)
 
 **Case inputs:**
 - `alert.json` — synthetic Falco shell-in-container alert for A.1
@@ -368,7 +368,7 @@ the writer is not required to type. Open design questions:
   ceiling test) — they exercise the three main projection classes.
 - **Output shape.** JSON for machine consumption + a human-readable
   table for spot-checking.
-- **Where it lives.** `docs/experiments/investigation-language-pilot/scripts/query.py`
+- **Where it lives.** `experiments/investigation-language-pilot/scripts/query.py`
   is the pilot-local home. Promote to `soc-agent/scripts/` only once
   it earns production use.
 
@@ -427,12 +427,12 @@ the user wants.
 
 Ordered by signal density:
 
-1. **`docs/experiments/investigation-language-pilot/comparison-v2.1.md`**
+1. **`experiments/investigation-language-pilot/comparison-v2.1.md`**
    — current state, scorecard, recommendations. The single most
    informative file.
-2. **`docs/experiments/investigation-language-pilot/spec-condensed-v2.1.md`**
+2. **`experiments/investigation-language-pilot/spec-condensed-v2.1.md`**
    — the locked spec. Read §A (delta from v2) for the short version.
-3. **`docs/experiments/investigation-language-pilot/spec-condensed-v2.2.md`**
+3. **`experiments/investigation-language-pilot/spec-condensed-v2.2.md`**
    — the in-flight draft. Read §A for deltas from v2.1.
 4. **This skill file** — context, method, open questions.
 

@@ -1,0 +1,38 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "all 38 distinct child images resolve to recognized, digitally-signed Office or Windows system binaries located in expected installation paths"
+        read_as: "legitimate-office-burst"
+        advance_to: fork-at-mechanism
+      - id: lp2
+        if: "one or more child images are from non-standard paths, unsigned by a recognized publisher, or carry names deviating from the baseline geometry of Office child-process image sets"
+        read_as: "anomalous-image-in-burst"
+        advance_to: escalate
+      - id: lp3
+        if: "process-lineage returns no children for pid-9244 in the alert window, or child image metadata is unavailable"
+        read_as: "data-gap-cannot-classify"
+        advance_to: escalate
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: []
+    lead_hints:
+      process-lineage: >
+        Enumerate all child processes spawned by WINWORD.EXE pid 9244 on WIN-DEV-3211
+        in the 5-minute window ending at 2026-04-26T07:14:32Z. For each distinct child
+        image: full path, publisher/signing status, and spawn count. Return both the
+        per-image breakdown and any aggregate signing-distribution summary available.
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```
+
+**Lead-selection rationale.** The alert's summary statistics (38 distinct images, avg entropy 3.12, avg name length 14) are aggregate — they can't distinguish a mailmerge-spawned Acrobat+printdriver fleet from a macro dropper launching 38 renamed payloads. The actual child image paths and signing status are the cheapest single discriminator: Office legitimacy hypotheses all produce children that are recognizable signed binaries in expected install paths; every macro-dropper variant produces at least one image that falls outside that set. `process-lineage` on pid-9244 returns exactly that breakdown.
+
+**Reading geometry.** lp1/lp2 partition on whether *all* images are clean vs *any* image is anomalous (a single unsigned or misplaced binary is sufficient to route escalation). lp3 covers the data-gap path — an empty or missing result forecloses lp1 and lp2 both, and the safe default is escalation.

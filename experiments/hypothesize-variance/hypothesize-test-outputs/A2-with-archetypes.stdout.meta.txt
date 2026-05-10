@@ -1,0 +1,3 @@
+duration_s=481.7
+prompt_chars=30477
+stdout_chars=5577

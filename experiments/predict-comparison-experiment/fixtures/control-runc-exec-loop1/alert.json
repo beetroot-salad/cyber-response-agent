@@ -1,0 +1,19 @@
+{
+  "agent": {"ip": "10.0.4.50", "name": "k8s-worker-12", "id": "127"},
+  "manager": {"name": "wazuh.manager"},
+  "data": {
+    "rule_name": "Container shell spawned via runc",
+    "proc.name": "bash",
+    "proc.pname": "runc",
+    "proc.cmdline": "bash",
+    "user.name": "root",
+    "container.id": "9f3b1c87a204",
+    "container.image": "registry.example.io/payments-api:v2.18.4",
+    "k8s.pod.name": "payments-api-7c9d8f5b6-q2vr4",
+    "k8s.ns.name": "payments-prod",
+    "evt.type": "execve",
+    "proc.tty": 34816
+  },
+  "rule": {"id": "100110", "level": 9, "description": "Falco: shell spawned in container via runc"},
+  "timestamp": "2026-04-26T08:33:20.401+0000"
+}

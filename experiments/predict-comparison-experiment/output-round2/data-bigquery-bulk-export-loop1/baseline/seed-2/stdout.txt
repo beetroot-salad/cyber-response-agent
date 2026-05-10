@@ -1,0 +1,60 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?scheduled-etl-export"
+      attached_to_vertex: v-003
+      proposed_edge:
+        relation: wrote_to
+        parent_vertex: {type: scheduled_job, classification: daily-etl-job-run}
+      story: |
+        A daily scheduled ETL job configured for analyst-svc@analytics-prod
+        runs on a recurring cadence and extracts from customer_pii.users and
+        customer_pii.payment_methods, writing a dated CSV to
+        gs://analytics-export-prod/exports/. The filename convention
+        YYYY-MM-DD-customer-extract.csv.gz and the ~11:18 UTC timestamp
+        match the expected shape for a scheduled morning export. The scheduler
+        record for this job names analyst-svc as the execution identity and the
+        analytics-export-prod bucket as the configured destination; confirming
+        the record authorizes both the action and identifies the responsible
+        actor.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the scheduler records a job configured to execute as analyst-svc@analytics-prod whose execution window contains the export timestamp"
+          from_story_link: "daily scheduled ETL job configured for analyst-svc runs on a recurring cadence"
+        - id: p2
+          subject: proposed_edge
+          claim: "the job's configuration names customer_pii tables as source and gs://analytics-export-prod/ as the export destination"
+          from_story_link: "extracts from customer_pii.users and customer_pii.payment_methods, writing to gs://analytics-export-prod/exports/"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no scheduler job's execution window contains the export timestamp for this service account"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching job exists but its configuration does not name customer_pii tables or the analytics-export-prod destination"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: scheduler-api
+          predicate: "a scheduled job configured to run as analyst-svc@analytics-prod with an execution window covering the alert timestamp, whose source is the customer_pii dataset and whose destination is the analytics-export-prod bucket"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "the scheduler job configuration names both the service account (analyst-svc) and the human or team that created the job; confirming the scheduled job authorizes the export and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: scheduler-job-correlation
+    composite_secondary: [service-account-job-history]
+    override_data_source: null
+    lead_hints:
+      scheduler-job-correlation: "Look for a scheduled job (Cloud Scheduler, Workflows, or similar) configured to execute as analyst-svc@analytics-prod.iam.gserviceaccount.com targeting the customer_pii dataset with gs://analytics-export-prod/ as export destination. Verify execution window covers 2026-04-26T11:18:54Z and confirm the job was configured by an authorized team."
+      service-account-job-history: "Pull BigQuery job history for analyst-svc@analytics-prod.iam.gserviceaccount.com over the past 30 days. Characterize: does a similar SELECT-to-GCS export appear on a regular daily cadence? Note prior run dates, byte volumes, and destination filenames to establish the recurring baseline geometry."
+    scope_override:
+      window_hours: 720
+      anchor: now
+```

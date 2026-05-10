@@ -1,0 +1,60 @@
+{
+  "id": "11-billing-svc-account-mimicry",
+  "label": "true-malicious-with-strong-cover",
+  "expected_verdict": "ESCALATE / MALICIOUS",
+  "ground_truth_notes": "abansal's kubeconfig (developer, platform team, not a billing-api maintainer) was leaked. An attacker is using it to run a pod from the legitimate image SHA (2.18.0) with an env override that suppresses query logging, enumerating customer_pii by walking customer_id ranges and exfiltrating to an external IP. Surface signals are dominated by legitimate framing (canonical service account, in-baseline volume, baseline-shape queries, recent reviewed PR explaining cross-table reads). Each individual tell can be benign-rationalized; only the integration (dev-created pod + 2-day-old manifest + env-suppressed logging + walking-customer_id queries + Phnom Penh kubeconfig use + external egress) is decisive. Designed so a drifted-benign defender at R1 has rationalizations available for every R2 tell unless forced into a focused must-check.",
+  "alert": {
+    "signature": "db-high-volume-pii-access",
+    "principal": "serviceaccount:billing/api-billing-prod",
+    "target": "warehouse.prod.customer_pii",
+    "query_count": "4720 queries in 4h (90d mean 3100, 1σ ±900) — high but within 2σ",
+    "window": "2026-05-05T13:00–17:00Z (Tuesday business hours)",
+    "host_origin": "pod billing-api-7c9f8b-x2q4n in namespace billing",
+    "context": [
+      "service account is canonical for billing-api deployment; IAM grants include SELECT on customer_pii",
+      "billing-api pods routinely query customer_pii for invoice rendering",
+      "90d query shape: SELECT-with-WHERE-customer_id, mean rows-per-query 1.3",
+      "current pattern: SELECT-with-WHERE-customer_id, mean rows-per-query 1.4 (matches baseline shape)",
+      "PR #6612 merged 8d ago: 'expand customer-pii read for new billing-export feature' — reviewed by 2 engineers, adds endpoint /v2/exports/customer-pii",
+      "helm release billing-api-2.18.0 deployed 7d ago carrying PR #6612",
+      "pod billing-api-7c9f8b-x2q4n image sha256:abc...123 matches the helm release 2.18.0 manifest"
+    ]
+  },
+  "r1_evidence_packet": {
+    "k8s_audit_pod_create": {
+      "pod": "billing-api-7c9f8b-x2q4n",
+      "created_by": "kubeconfig user dev:abansal@corp.com (platform team)",
+      "creator_role": "NOT system:serviceaccount:kube-system:deployment-controller (deviation from norm)",
+      "creation_timestamp": "2026-05-03T11:24:08Z (2 days before alert)"
+    },
+    "comparison_other_billing_pods_90d": "all 90d billing-api-* pods were deployment-controller-created",
+    "pod_manifest_mtime_etcd": "2026-05-03T11:24:08Z (NOT the 7d-ago 2.18.0 helm release timestamp)",
+    "abansal_profile": "platform team; NOT a billing-api maintainer; kubeconfig last issued 14d ago, expires 14d from now",
+    "image_sha_check": "matches 2.18.0 manifest (legitimate image)",
+    "env_var_override_on_suspect_pod": "BILLING_DB_QUERY_LOG_LEVEL=ERROR (other billing-api-* pods: INFO)",
+    "fleet_baseline_query_volume": "individual pod queries today are within 2σ of fleet baseline; aggregated across all billing-api pods, today's volume is normal"
+  },
+  "r2_evidence_packet": {
+    "helm_history_billing_api": "only 2.18.0 deployed in 30d; no subsequent rollouts",
+    "abansal_collaboration_history": "no messages in #billing-api Slack ever; not on billing oncall; no jira/git activity touching billing-api in 90d",
+    "kubeconfig_use_audit": "pod creation API call from IP 198.51.100.42 — geolocates Phnom Penh; abansal's normal access from corp WAN IPs",
+    "warehouse_audit_logs_for_suspect_pod": "WHERE customer_id values walk sequentially: ranges (1000000,1100000), (1100000,1200000), ... full enumeration shape; other billing-api pods show customer_id values matching incoming HTTP request batches (small, varied)",
+    "warehouse_audit_circumvents_app_config": "audit channel cannot be silenced by app-side BILLING_DB_QUERY_LOG_LEVEL",
+    "egress_telemetry": "suspect pod made outbound HTTPS to 203.0.113.99 (no PTR, registered 2026-04-08), 1.4MB total over the 4h window; no other billing-api-* pod has egress to this IP",
+    "feature_legitimacy_check": "PR #6612's /v2/exports/customer-pii endpoint, by spec and code review, does not require external HTTPS egress"
+  },
+  "drifted_benign_rationalizations_to_resist": [
+    "abansal might be running a one-off data audit; customer_id enumeration could be testing",
+    "egress to 203.0.113.99 might be a misconfigured monitoring/error-tracking endpoint",
+    "Phnom Penh login could be remote work / travel",
+    "kubectl exec / direct pod create is normal for debugging",
+    "env-var override might be an experimental config",
+    "manifest mtime is from a config update, not a separate deploy"
+  ],
+  "must_checks_critic_should_demand": [
+    "pod creation principal MUST be deployment-controller, not a user kubeconfig",
+    "creator-user MUST have a Slack/jira/git/PR record on the targeted service in past 30d",
+    "kubeconfig source IP for pod creation MUST be in the user's 90d access baseline",
+    "audit-channel query shape (not app-logged) MUST match deployed code's expected query shape, not enumeration"
+  ]
+}

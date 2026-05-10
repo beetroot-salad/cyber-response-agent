@@ -1,0 +1,48 @@
+status: complete
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?monitoring-system-is-the-actor"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: initiated_auth
+        parent_vertex: {type: process, classification: monitoring-daemon-process-on-source}
+      story: |
+        The monitoring daemon on 172.22.0.10 invoked
+        `ssh nagios@target-endpoint` as a scheduled health-check tick.
+        Loop 1 established a periodic cadence (11 events in the 1h
+        backward window, mean inter-arrival 576s ± 102s, single-attempt
+        clusters, no forward-success) consistent with a fixed-schedule
+        monitoring tool. The source vertex is classified
+        internal-monitoring-host and the attempted username `nagios` is a
+        monitoring-pattern sentinel — both pattern-matched from environment
+        knowledge, not yet anchor-confirmed. sshd on target rejected the
+        user (expected — `nagios` is not provisioned on target-endpoint).
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "approved-monitoring-sources registry confirms the (172.22.0.10, nagios, target-endpoint) triple as an active registered probe"
+          from_story_link: "monitoring daemon on 172.22.0.10 invoked ssh nagios@target-endpoint as a scheduled health-check tick"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "the triple is not registered (or is marked inactive/revoked) in approved-monitoring-sources"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: approved-monitoring-sources
+          predicate: "(srcip=172.22.0.10, srcuser=nagios, target=target-endpoint) triple listed as an active approved monitoring probe"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: monitoring-probe
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      monitoring-probe: "Look up the exact triple (172.22.0.10, nagios, target-endpoint) in the approved-monitoring-sources registry. Return the registration status (active / inactive / not-found), the registered probe owner/tool name if present, and any expiry or review date."
+    scope_override: null

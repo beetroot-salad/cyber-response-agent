@@ -1,0 +1,35 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: source-reputation
+    predictions:
+      - id: lp1
+        if: "the destination IP 164.92.71.108 matches a threat-intel feed entry or is classified as known malicious / C2 infrastructure"
+        read_as: "confirmed-malicious-destination"
+        advance_to: escalate
+      - id: lp2
+        if: "the destination IP is unrecognized — not in threat-intel feeds and has no prior connection history from this environment"
+        read_as: "unknown-external-destination"
+        advance_to: fork-at-mechanism
+      - id: lp3
+        if: "the destination IP is attributed to a known legitimate service provider with established prior connection history from this environment"
+        read_as: "known-legitimate-destination"
+        advance_to: fork-at-authorization
+
+  routing:
+    selected_lead: source-reputation
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      source-reputation: >
+        Check threat-intel feeds (IP reputation, AS classification, hosting provider)
+        and environment connection history for 164.92.71.108. The destination is the
+        child_outbound_connection target from the alert — TCP to port 8443 with null
+        TLS service name. Prior connection history from edr-mssql-prod-01 or any
+        production-database-server role host to this IP is specifically relevant.
+    scope_override:
+      window_hours: 168
+      anchor: now

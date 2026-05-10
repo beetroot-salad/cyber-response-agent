@@ -1,0 +1,29 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "the user's sign-in history includes prior sessions from VN, neighboring Southeast Asian countries, or other international geolocations in a pattern consistent with travel or distributed work"
+        read_as: "geo-novelty-overstated — user has international sign-in precedent"
+        advance_to: fork-at-traveling-vs-proxy
+      - id: lp2
+        if: "the user's sign-in history shows a single-region or single-country baseline with no prior international sessions, and this VN session is the first geo-novel event"
+        read_as: "geo-anomaly-confirmed — no travel precedent for this account"
+        advance_to: fork-at-credential-compromise-vs-travel
+      - id: lp3
+        if: "the user's sign-in history shows a recent session from a geographically distant location whose timestamp is close enough to this VN session to be physically impossible"
+        read_as: "impossible-travel — concurrent or near-concurrent sessions from incompatible geolocations"
+        advance_to: escalate
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    lead_hints:
+      authentication-history: "Retrieve sign-in history for j.morales@example.com. Focus on: (1) geographic distribution of prior sessions (countries/cities), (2) whether any prior session from VN or Southeast Asia exists, (3) timestamps of recent sessions to check for impossible travel relative to the 2026-04-26T05:42:12Z VN session, (4) MFA outcome on this session and prior sessions, (5) session outcome distribution (success vs failure cadence)."
+    scope_override:
+      window_hours: 720
+      anchor: alert

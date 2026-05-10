@@ -1,0 +1,119 @@
+status: complete
+predict:
+  loop: 1
+  shape: M
+
+  hypotheses:
+    - id: h-001
+      name: "?macro-payload-dropper"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: spawned_children
+        parent_vertex: {type: process, classification: "vba-macro-execution-host"}
+      story: |
+        WINWORD.EXE pid 9244, running under DOMAIN\ksilva, executed a
+        VBA macro embedded in an opened document and entered a payload
+        delivery loop — iterating across a manifest of drop targets and
+        launching one child per entry. In the dropper pattern, each child
+        image is a dropped or decoded binary written to a user-writable
+        staging path (AppData, TEMP, or user profile) rather than a
+        standard installation directory, and is unsigned or carries an
+        invalid/unknown Authenticode signature. The 38 distinct child
+        images and near-flat repetition distribution (142 total / 38
+        distinct ≈ 3.7 per image) is consistent with a manifest-driven
+        iteration rather than a fixed helper set. No prior WINWORD.EXE
+        child-process baseline for WIN-DEV-3211 is established in the
+        investigation record.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "at least one child image path resolves to a user-writable
+            directory outside standard installation paths (AppData, TEMP,
+            user profile, or Downloads)"
+          from_story_link: "each child image is a dropped or decoded binary
+            written to a user-writable staging path"
+        - id: p2
+          subject: proposed_edge
+          claim: "the child image frequency distribution is flat — no single
+            child image accounts for more than 15% of the 142 spawn events"
+          from_story_link: "iterating across a manifest of drop targets and
+            launching one child per entry"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "all child image paths resolve to standard installation
+            directories (Program Files, Windows, or equivalent system paths)"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "child image frequency distribution is concentrated — at
+            least one image accounts for more than 15% of the 142 spawn
+            events"
+      weight: null
+
+    - id: h-002
+      name: "?office-automation-driver"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: spawned_children
+        parent_vertex: {type: process, classification: "office-automation-process"}
+      story: |
+        WINWORD.EXE pid 9244 is driving a legitimate batch automation
+        task — mailmerge printing to physical or PDF targets, or a
+        third-party addin iterating templates — and spawns one or more
+        helper processes per record or document. In the automation
+        pattern, each child image is a Microsoft-signed or
+        publisher-signed binary drawn from a stable set of known helpers
+        (acrobat, printtoprinter, WerFault, registered COM servers), and
+        the same few images repeat across all 142 spawn events. The 38
+        distinct images exceeds the typical mailmerge helper set (2–4)
+        but is plausible for a complex addin that shells out to multiple
+        registered handlers per template. No prior WINWORD.EXE
+        child-process baseline for WIN-DEV-3211 is established in the
+        investigation record.
+      predictions:
+        - id: p3
+          subject: proposed_edge
+          claim: "all or nearly all child image paths resolve to standard
+            installation directories (Program Files, Windows, or registered
+            COM server paths)"
+          from_story_link: "each child image is a Microsoft-signed or
+            publisher-signed binary drawn from a stable set of known helpers"
+        - id: p4
+          subject: proposed_edge
+          claim: "child image frequency distribution is concentrated — at
+            least one child image accounts for more than 15% of the 142
+            spawn events"
+          from_story_link: "the same few images repeat across all 142 spawn
+            events"
+      refutation_shape:
+        - id: r3
+          refutes_predictions: [p3]
+          claim: "at least one child image path resolves to a user-writable
+            directory outside standard installation paths"
+        - id: r4
+          refutes_predictions: [p4]
+          claim: "child image frequency distribution is flat — no single
+            image accounts for more than 15% of the 142 spawn events"
+      weight: null
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: [correlated-endpoint-events]
+    override_data_source: null
+    lead_hints:
+      process-lineage: "Enumerate all child processes spawned by WINWORD.EXE
+        pid 9244 on WIN-DEV-3211 in the ±5 min window around the alert
+        timestamp. For each distinct child image: full executable path,
+        Authenticode signing status (valid/unsigned/invalid), publisher
+        name if signed, and spawn count. Compute the frequency distribution
+        across the 142 total spawn events — which images repeat and how
+        many times."
+      correlated-endpoint-events: "Check for Sysmon EID 11 file-creation
+        events and EID 3 network-connection events attributed to WINWORD.EXE
+        pid 9244 or any of its direct child processes on WIN-DEV-3211 in
+        the ±5 min window. Flag any file writes to AppData, TEMP, or user
+        profile paths, and any outbound connections from child processes
+        to external IPs."
+    scope_override:
+      window_hours: 1
+      anchor: alert

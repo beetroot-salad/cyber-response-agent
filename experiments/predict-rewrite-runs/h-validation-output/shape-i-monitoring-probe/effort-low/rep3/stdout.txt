@@ -1,0 +1,29 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "a successful SSH authentication event (rule group authentication_success) from srcip 172.22.0.10 appears within 60 seconds after the alert timestamp"
+        read_as: "forward-success signal — success-after-failure is a potential compromise indicator regardless of archetype"
+        advance_to: escalate
+      - id: lp2
+        if: "no forward success AND cluster_count >= 3 AND max_cluster_size <= 3 in the 1h backward window for the (srcip, srcuser) pair"
+        read_as: "periodic cadence established — source is classified internal-monitoring-host, username is monitoring-pattern, cadence is probe-shaped; authorization anchor check is the remaining discriminator"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "no forward success AND cadence evidence is insufficient (cluster_count < 3) or burst-shaped (max_cluster_size > 3)"
+        read_as: "cadence shape disqualifies monitoring-probe fast path — fork on identity-of-use with cadence-anomaly signal"
+        advance_to: fork-at-identity-of-use
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    override_data_source: null
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```

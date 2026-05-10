@@ -1,0 +1,102 @@
+```yaml
+predict:
+  loop: 1
+  shape: M
+
+  hypotheses:
+    - id: h-001
+      name: "?macro-vba-payload-dropper"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned_children
+        parent_vertex: {type: process, classification: vba-macro-executing-word-instance}
+      story: |
+        WINWORD.EXE on WIN-DEV-3211 opened a document containing a VBA
+        macro that iterated a dropper routine, spawning 142 child processes
+        across 38 distinct image names in a 5-minute window. The child
+        executables are novel relative to this WINWORD instance's historical
+        spawn pattern — short-named or renamed binaries typical of payload
+        delivery — and are unsigned or signed by publishers absent from the
+        recurring WINWORD child baseline on this host. No prior WINWORD.EXE
+        session on WIN-DEV-3211 has produced a child-image set of this
+        diversity or volume.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "burst-window child image publisher distribution deviates from the recurring WINWORD child-image-publisher baseline on at least one recorded dimension"
+          from_story_link: "unsigned or signed by publishers absent from the recurring WINWORD child baseline on this host"
+          comparison:
+            selector_kind: historical-self
+            selector: "parent.image:WINWORD.EXE AND host:WIN-DEV-3211 [past 7d]"
+            dimension: child_image_publisher_distribution
+        - id: p2
+          subject: proposed_edge
+          claim: "burst-window child image set introduces image kinds absent from the 7d WINWORD child-image-set baseline on this host (any deviation from the zero-count baseline for those image kinds)"
+          from_story_link: "child executables are novel relative to this WINWORD instance's historical spawn pattern"
+          comparison:
+            selector_kind: historical-self
+            selector: "parent.image:WINWORD.EXE AND host:WIN-DEV-3211 [past 7d]"
+            dimension: child_image_set_composition
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "burst-window child image publisher distribution matches the recurring WINWORD child-image-publisher baseline geometry on at least two recorded dimensions"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "burst-window child image set does not introduce image kinds absent from the 7d WINWORD child-image-set baseline on this host"
+      weight: null
+
+    - id: h-002
+      name: "?batch-document-processing"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned_children
+        parent_vertex: {type: process, classification: batch-processing-word-instance}
+      story: |
+        WINWORD.EXE on WIN-DEV-3211 is executing a batch document operation —
+        mail merge, addin-driven template iteration, or format-conversion
+        workflow — that spawns many helper processes per document. The helper
+        processes are Office and system components (print drivers, COM
+        handlers, format converters) consistent with WINWORD's historical
+        child-spawn pattern for this host. All or most children are signed by
+        Microsoft or recognized publishers, matching the recurring WINWORD
+        child-image-publisher geometry. The image set composition, while large
+        in count, does not introduce kinds absent from the 7d baseline for
+        this WINWORD parent.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "burst-window child image publisher distribution matches the recurring WINWORD child-image-publisher baseline geometry on at least two recorded dimensions"
+          from_story_link: "signed by Microsoft or recognized publishers, matching the recurring WINWORD child-image-publisher geometry"
+          comparison:
+            selector_kind: historical-self
+            selector: "parent.image:WINWORD.EXE AND host:WIN-DEV-3211 [past 7d]"
+            dimension: child_image_publisher_distribution
+        - id: p2
+          subject: proposed_edge
+          claim: "burst-window child image set does not introduce image kinds absent from the 7d WINWORD child-image-set baseline on this host"
+          from_story_link: "image set composition does not introduce kinds absent from the 7d baseline for this WINWORD parent"
+          comparison:
+            selector_kind: historical-self
+            selector: "parent.image:WINWORD.EXE AND host:WIN-DEV-3211 [past 7d]"
+            dimension: child_image_set_composition
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "burst-window child image publisher distribution deviates from the recurring WINWORD child-image-publisher baseline on at least one recorded dimension"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "burst-window child image set introduces image kinds absent from the 7d WINWORD child-image-set baseline on this host"
+      weight: null
+
+  routing:
+    selected_lead: child-image-signing-distribution
+    composite_secondary: [parent-process-child-baseline]
+    override_data_source: null
+    lead_hints:
+      child-image-signing-distribution: "Return signing metadata (publisher, signature status) for all 38 distinct child images spawned by WINWORD.EXE pid 9244 on WIN-DEV-3211 in the alert window."
+      parent-process-child-baseline: "Return the set of distinct child image paths and publisher metadata for all WINWORD.EXE-parented process-creation events on WIN-DEV-3211 in the past 7 days, to establish the recurring child-image-set and publisher-distribution baseline."
+    scope_override:
+      window_hours: 168
+      anchor: alert
+```

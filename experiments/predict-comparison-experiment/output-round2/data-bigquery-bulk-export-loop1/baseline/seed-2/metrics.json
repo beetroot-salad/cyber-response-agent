@@ -1,0 +1,8 @@
+{
+  "variant": "baseline",
+  "fixture": "data-bigquery-bulk-export-loop1",
+  "seed": 2,
+  "elapsed_sec": 83.3,
+  "stdout_chars": 3640,
+  "prompt_chars": 17810
+}

@@ -1,0 +1,60 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?underlying-host-exec"
+      attached_to_vertex: v-003
+      proposed_edge:
+        relation: initiated_exec
+        parent_vertex: {type: process, classification: host-side-runtime-exec-primitive}
+      story: |
+        The runc:[2:INIT] parent with full ancestry [runc, containerd-shim-runc-v2,
+        containerd, systemd] unambiguously places this shell spawn on the host side
+        of the container namespace boundary — the exec-chain is the host-side
+        kubectl/docker/crictl exec path, not an in-container process. The
+        payments-api:v1.4.2 container is a production Kubernetes workload in
+        namespace=default; no prior-loop baseline exists for this image, so whether
+        this runc-ancestry exec pattern recurs or is novel is the key discriminator
+        between scheduled operator/CI activity and unauthorized access. The
+        authorization contract anchors against deploy-runs to determine whether a
+        CI/CD job, scheduled operator action, or unauthorized actor produced this
+        exec at T=2026-04-22T19:25:01Z.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "container-baseline returns at least one prior shell event for image payments-api:v1.4.2 with runc-ancestry geometry, indicating this exec pattern recurs for this image"
+          from_story_link: "whether this runc-ancestry exec pattern recurs or is novel is the key discriminator"
+        - id: p2
+          subject: proposed_edge
+          claim: "correlated-endpoint-events returns no post-exploit co-fire signals from container.id=7f9cabcd1234 in the ±15-minute window around T"
+          from_story_link: "payments-api:v1.4.2 container is a production Kubernetes workload"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "container-baseline returns no prior shell events for payments-api:v1.4.2 with runc-ancestry geometry (any deviation from the zero-count baseline for this ancestry kind on this image)"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "correlated-endpoint-events returns at least one post-exploit co-fire signal from this container.id in the ±15-minute window (any deviation from zero-count baseline for post-exploit co-fire signals on this container)"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs
+          predicate: "a CI/CD job, scheduled operator exec, or change-management-approved action targeting pod payments-api-7f9c-xz4lm or image payments-api:v1.4.2 is recorded within ±5 minutes of T=2026-04-22T19:25:01Z"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: container-baseline
+    composite_secondary: [correlated-endpoint-events]
+    override_data_source: null
+    lead_hints:
+      container-baseline: "Query all wazuh-rule-100001 events for container.image=payments-api:v1.4.2 over the 30-day window. Return event count, parent process names (pname), and inter-event cadence shape to assess whether runc-ancestry shells are a recurring pattern for this image. Distinguish first-ever from recurring."
+      correlated-endpoint-events: "Query Falco rules 100000-100099 for container.id=7f9cabcd1234 in a ±15-minute window around T=2026-04-22T19:25:01Z. Flag any hits on rules 100002 (STDOUT/STDIN redirect), 100006 (sensitive file read), 100007 (drop-and-exec), or 100008 (log clearing) — these are the composition-rule co-fire signals per the playbook."
+    scope_override:
+      window_hours: 720
+      anchor: alert
+```

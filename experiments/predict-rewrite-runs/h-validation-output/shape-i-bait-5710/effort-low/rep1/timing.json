@@ -1,0 +1,11 @@
+{
+  "fixture": "shape-i-bait-5710",
+  "variant": "effort-low",
+  "rep": 1,
+  "wall_s": 53.1,
+  "prompt_chars": 24063,
+  "stdout_chars": 1107,
+  "error": null,
+  "loop_n": 1,
+  "signature_id": "wazuh-rule-5710"
+}

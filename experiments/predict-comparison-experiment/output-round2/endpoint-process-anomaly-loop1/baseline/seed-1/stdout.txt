@@ -1,0 +1,28 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: source-reputation
+    predictions:
+      - id: lp1
+        if: "the destination IP 164.92.71.108 matches a threat-intel or malicious-infrastructure classification"
+        read_as: "known-malicious-destination"
+        advance_to: escalate
+      - id: lp2
+        if: "the destination IP is classified as a known legitimate cloud, SaaS, or managed-service provider with established query history from this environment"
+        read_as: "known-legitimate-destination"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "the destination IP is unclassified, unrecognized, or has no established history from this environment (including VPS/hosting-provider assignments with no service attribution)"
+        read_as: "unknown-external-destination"
+        advance_to: escalate
+
+  routing:
+    selected_lead: source-reputation
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      source-reputation: "Classify the external destination IP 164.92.71.108 — check threat-intel feeds, known cloud/CDN/SaaS provider ranges, and query history from edr-mssql-prod-01 or the broader environment. The port (8443 TCP) and absence of TLS service_name are secondary signals."
+```

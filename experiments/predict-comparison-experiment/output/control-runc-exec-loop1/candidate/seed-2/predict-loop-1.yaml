@@ -1,0 +1,64 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?operator-initiated-pod-exec"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex:
+          type: operator_session
+          classification: kubectl-exec-session
+      story: |
+        A human operator with kubectl exec permissions in the payments-prod
+        namespace issued an API request to the kube-apiserver, which relayed
+        it to the kubelet on k8s-worker-12, which invoked runc to spawn bash
+        inside container 9f3b1c87a204. The interactive TTY (34816) and bare
+        `bash` cmdline indicate the operator established an interactive session
+        rather than executing a one-shot command. In payments-prod, authorized
+        interactive exec access should be anchored to either an active deploy
+        runbook or a change-management ticket opened prior to the exec timestamp.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "kube-audit records a pods/exec create request against payments-api-7c9d8f5b6-q2vr4 from a recognized operator identity at the alert timestamp"
+          from_story_link: "A human operator issued an API request to the kube-apiserver"
+        - id: p2
+          subject: proposed_edge
+          claim: "the requesting identity in the kube-audit record is a human user identity (not a service account or controller)"
+          from_story_link: "A human operator with kubectl exec permissions"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no pods/exec create request appears in kube-audit for this pod at the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "the requesting identity in the kube-audit record is a service account or non-human controller identity"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs-api
+          predicate: "an active deploy run targeting payments-api in payments-prod with an execution window containing the exec timestamp, owned by an authorized initiator"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+        - id: ac2
+          edge_ref: proposed
+          anchor_kind: change-management
+          predicate: "a change-management ticket opened prior to the exec timestamp that authorizes interactive pod access in payments-prod, with the requesting operator listed as an approved responder"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "kube-audit records the requesting user identity; confirming the audit entry identifies the actor, and confirming the deploy-run or change-ticket authorizes both the access and the actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Look for a pods/exec or pods/attach create event in the Kubernetes audit log for pod payments-api-7c9d8f5b6-q2vr4 in namespace payments-prod at 2026-04-26T08:33:20Z (±60s). Extract the requesting user identity, user agent, source IP, and any impersonation fields. The hypothesis requires a human operator identity — flag service account usernames explicitly."
+    scope_override:
+      window_hours: 1
+      anchor: alert

@@ -1,0 +1,65 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?scheduled-etl-export"
+      attached_to_vertex: v-003
+      proposed_edge:
+        relation: triggered
+        parent_vertex: {type: pipeline_run, classification: scheduled-etl-pipeline-run}
+      story: |
+        The service account `analyst-svc@analytics-prod.iam.gserviceaccount.com` is the
+        execution identity for a daily ETL pipeline whose documented purpose is exporting
+        the customer_pii dataset to the analytics-export-prod GCS bucket. A scheduler
+        (Cloud Scheduler or Cloud Composer) fires this pipeline on a daily cadence;
+        the destination filename `2026-04-26-customer-extract.csv.gz` embeds the alert
+        date, matching a date-stamped daily-extract naming convention. The scheduler's
+        job-execution records should show a run whose execution window contains the
+        alert timestamp, targeting the customer_pii export job with the observed GCS
+        destination.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "scheduler records show an active pipeline run whose execution window contains the alert timestamp (2026-04-26T11:18:54Z) for a job associated with this service account"
+          from_story_link: "A scheduler fires this pipeline on a daily cadence"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching run's configured export destination matches the observed GCS path prefix gs://analytics-export-prod/exports/"
+          from_story_link: "exporting the customer_pii dataset to the analytics-export-prod GCS bucket"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no scheduler run's execution window contains the alert timestamp for a job associated with this service account"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching run exists but its configured destination does not include the observed GCS path prefix"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: scheduler-job-records
+          predicate: "a scheduled pipeline run with an execution window containing the alert timestamp, a configured destination matching the observed GCS bucket, and an owning business principal who is authorized to export the customer_pii dataset"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "scheduler-job-records names the owning principal (team or human) that registered the scheduled job; confirming the scheduled run authorizes the export and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: service-account-job-history
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      service-account-job-history: >
+        Retrieve all BigQuery export jobs executed by
+        analyst-svc@analytics-prod.iam.gserviceaccount.com in the past 30 days.
+        Focus on: (1) whether similar customer_pii → GCS exports appear on prior
+        dates at a consistent time-of-day, (2) whether the destination filename
+        pattern includes a date stamp matching the run date (cadence baseline),
+        and (3) whether a Cloud Scheduler or Composer job is recorded as the
+        trigger for those runs. The goal is to confirm or refute h-001.ac1 —
+        a scheduled ETL run with an authorized business owner at the alert timestamp.
+    scope_override:
+      window_hours: 720
+      anchor: alert

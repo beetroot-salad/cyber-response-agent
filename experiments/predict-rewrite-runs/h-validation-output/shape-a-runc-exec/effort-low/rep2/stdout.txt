@@ -1,0 +1,67 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?host-exec-into-container"
+      attached_to_vertex: v-003
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: process, classification: host-side-runtime-exec-primitive}
+      story: |
+        A host-side actor invoked a container exec primitive (kubectl exec,
+        docker exec, or equivalent) that landed as runc:[2:INIT] → bash
+        inside payments-api:v1.4.2. The alert's ancestry chain
+        (runc:[2:INIT] → runc → containerd-shim-runc-v2 → containerd →
+        systemd) is the canonical host-exec footprint: the exec crossed the
+        pid-namespace boundary from the host runtime into the container.
+        No prior investigation history exists for this image, so whether
+        this exec is part of a recurring authorized pattern (operator debug
+        session, CI pipeline step) or a novel adversarial access is
+        unresolved. An authorized exec would have a corresponding deploy-run
+        record or change-management ticket in the ±30-minute window; an
+        adversarial exec would have no such record.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "process ancestry in SIEM matches the host-exec footprint: runc:[2:INIT] as immediate parent, runc and containerd-shim-runc-v2 in the ancestor chain"
+          from_story_link: "ancestry chain is the canonical host-exec footprint"
+        - id: p2
+          subject: proposed_edge
+          claim: "container-baseline returns at least one prior 100001 event for payments-api image, establishing a recurring exec pattern for this image"
+          from_story_link: "whether this exec is part of a recurring authorized pattern is unresolved"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "process ancestry deviates from the host-exec footprint geometry on at least one recorded dimension"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "container-baseline returns zero prior 100001 events for the payments-api image (any deviation from the zero-count baseline for this exec kind)"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs
+          predicate: "an approved deploy or exec run targeting payments-api-7f9c-xz4lm (or its pod/image) is recorded within ±30 minutes of T"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+        - id: ac2
+          edge_ref: proposed
+          anchor_kind: change-management
+          predicate: "an open change-management ticket authorizing interactive exec into payments-api containers is active at T"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: container-baseline
+    composite_secondary: [correlated-endpoint-events]
+    override_data_source: null
+    lead_hints:
+      container-baseline: "Query 100001 events for container.image=payments-api:v1.4.2 over a 7-day window ending at alert timestamp. Return event count, parent-process distribution, and cadence shape to establish whether host-exec shells into this image are a recurring expected pattern."
+      correlated-endpoint-events: "Query Falco rules 100000-100099 from container.id=7f9cabcd1234 in a ±15 minute window around T=2026-04-22T19:25:01.512Z. Flag any co-fires of 100002, 100006, 100007, or 100008 per composition rules."
+    scope_override:
+      window_hours: 168
+      anchor: alert
+```

@@ -1,0 +1,26 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "nginx pid 1422 is a request-handling worker process and its ancestry traces to the nginx master only (master → worker → sh), consistent with a request-triggered execution path"
+        read_as: "request-triggered-execution"
+        advance_to: escalate
+      - id: lp2
+        if: "the ancestry above nginx pid 1422 includes a non-nginx ancestor (cron, systemd timer, CI/CD agent, or admin shell) indicating the shell was invoked from a management or deploy context rather than a request handler"
+        read_as: "management-or-deploy-invocation"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "process-lineage is truncated, ancestry is ambiguous, or the parent chain contains unexpected intermediate processes that fit neither the request-handler nor management-context geometry"
+        read_as: "inconclusive-lineage"
+        advance_to: escalate
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: []
+    override_data_source: null
+```

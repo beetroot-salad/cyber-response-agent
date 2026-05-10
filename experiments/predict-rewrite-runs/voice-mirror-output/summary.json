@@ -1,0 +1,25 @@
+{
+  "fixture": "shape-i-loop2-post-enrichment",
+  "variants": {
+    "baseline": {
+      "n_total": 3,
+      "n_ok": 3,
+      "wall_s_mean": 160.26,
+      "wall_s_stdev": 70.26,
+      "wall_s_min": 98.41,
+      "wall_s_max": 236.65,
+      "stdout_chars_mean": 2223.3,
+      "errors": []
+    },
+    "voice-mirror": {
+      "n_total": 3,
+      "n_ok": 3,
+      "wall_s_mean": 218.56,
+      "wall_s_stdev": 146.08,
+      "wall_s_min": 111.03,
+      "wall_s_max": 384.88,
+      "stdout_chars_mean": 2942,
+      "errors": []
+    }
+  }
+}

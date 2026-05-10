@@ -1,0 +1,59 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?operator-initiated-pod-exec"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: operator_action, classification: kubectl-exec-invocation}
+      story: |
+        An operator or authorized pipeline invoked `kubectl exec` against
+        pod `payments-api-7c9d8f5b6-q2vr4`, causing the Kubernetes API
+        server to route the request through the kubelet, which invoked runc
+        on k8s-worker-12 to spawn the interactive bash session observed in
+        the alert. The initiating identity, timestamp, and session attributes
+        for this action are recorded in the Kubernetes API audit log. For
+        the exec to be authorized, the initiating identity must be traceable
+        to an active deploy run or open change-management ticket at the time
+        of the exec — both of which constitute sanctioned reasons to open a
+        direct shell into a production payments pod.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the kube audit log contains a pod/exec event for payments-api-7c9d8f5b6-q2vr4 within ±60s of the alert timestamp"
+          from_story_link: "the Kubernetes API server routes the request through the kubelet"
+        - id: p2
+          subject: proposed_edge
+          claim: "the initiating user or service account in the audit record is a named operator or pipeline identity"
+          from_story_link: "the initiating identity, timestamp, and session attributes for this action are recorded in the Kubernetes API audit log"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no pod/exec event for this pod appears in the kube audit log within ±60s of the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "the audit record identifies an anonymous, unknown, or non-operator system identity as the initiator"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: change-management-correlation
+          predicate: "the initiating operator identity recorded in the kube audit log is traceable to either an active deploy run (deploy-runs-api) or an open change-management ticket at the alert timestamp"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "the kube audit record names the initiating user and the change-management or deploy-runs anchor names the ticket/run owner; confirming either anchor authorizes the exec and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Query kube audit for pod/exec events targeting payments-api-7c9d8f5b6-q2vr4 (namespace payments-prod) with a ±60s window around 2026-04-26T08:33:20Z. Capture the initiating user, userAgent, sourceIP, and any impersonation fields. Then probe change-management-correlation and deploy-runs-api for active records traceable to that identity at T."
+    scope_override:
+      window_hours: 2
+      anchor: alert
+```

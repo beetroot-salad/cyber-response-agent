@@ -1,0 +1,22 @@
+{
+  "id": "09-printer-anomalous-smb",
+  "label": "escalate-target",
+  "expected_verdict": "ESCALATE",
+  "ground_truth_notes": "MFP (multi-function printer) initiating SMB connections to an internal file server with anomalous frequency. Embedded vendor firmware, no agent, no SSH, no shell. Vendor support won't share firmware images. The class of attack (compromised printer firmware as foothold — documented in real campaigns) is real, but every plausible test requires capabilities not deployed here. Right verdict is ESCALATE.",
+  "alert": {
+    "signature": "device-anomalous-smb-pattern",
+    "device": "printer-floor3-04 (vendor: PrintCo MFP-7250, firmware 5.18.2)",
+    "behavior": "23 SMB v2 connections to fileserver-prod-01 over past 6h; baseline last 90d = 0",
+    "context": [
+      "device is embedded MFP, no host agent capability supported by vendor",
+      "no SSH/telnet/serial console enabled per corp policy; admin web UI only",
+      "no remote-attestation API or signed-firmware verification supported by vendor on this model",
+      "vendor firmware 5.18.2 is current; release notes mention no networking changes vs prior 5.18.1",
+      "SMB connections originated from printer's static IP, reached fileserver-prod-01:445 with valid kerberos ticket bound to the printer's AD computer account",
+      "printer AD computer account has been domain-joined since 2023-04, password rotation per default policy",
+      "fileserver-prod-01 SMB audit log records the connections but no file enumeration, no read/write — TCP handshake + SMB negotiate + idle disconnect after 30s",
+      "no malware sandboxing capability for embedded firmware images even if vendor provided one",
+      "printer admin UI access log: no admin logins in past 30d"
+    ]
+  }
+}

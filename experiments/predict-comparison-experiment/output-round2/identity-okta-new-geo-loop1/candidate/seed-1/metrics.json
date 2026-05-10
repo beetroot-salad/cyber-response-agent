@@ -1,0 +1,8 @@
+{
+  "variant": "candidate",
+  "fixture": "identity-okta-new-geo-loop1",
+  "seed": 1,
+  "elapsed_sec": 61.5,
+  "stdout_chars": 2208,
+  "prompt_chars": 17072
+}

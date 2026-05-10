@@ -1,0 +1,58 @@
+[
+  {
+    "variant": "candidate",
+    "fixture": "control-runc-exec-loop1",
+    "seed": 1,
+    "elapsed_sec": 90.3,
+    "stdout_chars": 3907,
+    "prompt_chars": 16864
+  },
+  {
+    "variant": "candidate",
+    "fixture": "data-bigquery-bulk-export-loop1",
+    "seed": 1,
+    "elapsed_sec": 100.7,
+    "stdout_chars": 4707,
+    "prompt_chars": 17811
+  },
+  {
+    "variant": "candidate",
+    "fixture": "endpoint-falco-nginx-child-loop1",
+    "seed": 1,
+    "elapsed_sec": 101.0,
+    "stdout_chars": 3357,
+    "prompt_chars": 16865
+  },
+  {
+    "variant": "candidate",
+    "fixture": "endpoint-process-anomaly-loop1",
+    "seed": 1,
+    "elapsed_sec": 92.4,
+    "stdout_chars": 3277,
+    "prompt_chars": 17809
+  },
+  {
+    "variant": "candidate",
+    "fixture": "identity-okta-new-geo-loop1",
+    "seed": 1,
+    "elapsed_sec": 75.2,
+    "stdout_chars": 2757,
+    "prompt_chars": 17072
+  },
+  {
+    "variant": "candidate",
+    "fixture": "network-dns-multi-dim-loop1",
+    "seed": 1,
+    "elapsed_sec": 80.6,
+    "stdout_chars": 2809,
+    "prompt_chars": 17333
+  },
+  {
+    "variant": "candidate",
+    "fixture": "network-egress-volume-loop2",
+    "seed": 1,
+    "elapsed_sec": 79.2,
+    "stdout_chars": 3763,
+    "prompt_chars": 18160
+  }
+]

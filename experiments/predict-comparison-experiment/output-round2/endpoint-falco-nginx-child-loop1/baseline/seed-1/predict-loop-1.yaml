@@ -1,0 +1,63 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?deploy-hook-exec"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: deploy_run, classification: deploy-or-maintenance-hook-on-edge-proxy}
+      story: |
+        A scheduled or CI-triggered deploy job for web-edge-03
+        invoked a remote-fetch script step that ran under
+        nginx's www-data runtime user. Deploy systems managing
+        edge proxies sometimes stage upgrade or config-refresh
+        scripts by calling curl to a provisioning endpoint and
+        piping the result to sh; the execution lands under nginx
+        pid 1422 because the hook is wired into the proxy's
+        post-action or service-wrapper path. The deploy-runs
+        anchor should record an active job whose execution window
+        brackets the shell-spawn timestamp, with a script body
+        that references the remote URL domain observed in the
+        cmdline. No prior web-server-child baseline for this
+        host has been established, so the spawn's novelty cannot
+        yet be calibrated against a recurring pattern.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "deploy-runs records an active job whose execution window contains the shell-spawn timestamp (2026-04-26T03:11:07Z)"
+          from_story_link: "A scheduled or CI-triggered deploy job for web-edge-03 invoked a remote-fetch script step"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job's script body references the remote URL domain observed in the cmdline"
+          from_story_link: "deploy systems stage upgrade or config-refresh scripts by calling curl to a provisioning endpoint"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no deploy or maintenance job's execution window contains the shell-spawn timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching job exists but its script body does not reference the remote URL domain observed in the cmdline"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs
+          predicate: "an active deploy or maintenance job initiated by an authorized actor whose execution window brackets the shell-spawn timestamp and whose script body references the observed remote URL domain"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "deploy-runs records the initiating identity (human operator, scheduled trigger, or CI webhook); confirming the job authorizes the exec and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: [deploy-runs-correlation]
+    override_data_source: null
+    lead_hints:
+      process-lineage: "Reconstruct the full parent chain above nginx pid 1422 on web-edge-03 at T=2026-04-26T03:11:07Z. Focus on whether any deploy orchestrator, cron wrapper, or service-management process sits above the nginx worker in the ancestry chain, and whether sh pid 31807 has any child processes (e.g. curl). Also retrieve any sibling processes spawned by nginx pid 1422 in the ±2 min window."
+      deploy-runs-correlation: "Query deploy-runs for any active job targeting web-edge-03 or the web-edge tier with an execution window containing 2026-04-26T03:11:07Z. Verify whether the matched job's script body references the domain 'updates.example.io' or an equivalent remote-fetch step. This lead resolves h-001.ac1."
+    scope_override:
+      window_hours: 2
+      anchor: alert

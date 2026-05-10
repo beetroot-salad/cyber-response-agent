@@ -1,0 +1,67 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?operator-initiated-pod-exec"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: operator_session, classification: kubectl-exec-session}
+      story: |
+        An authorized operator issued `kubectl exec` (or an equivalent
+        Kubernetes API pod/exec call) against pod
+        payments-api-7c9d8f5b6-q2vr4 in payments-prod, causing the
+        Kubernetes API server to instruct runc to spawn the observed
+        `bash` process inside the container. The interactive tty (34816)
+        is consistent with `kubectl exec -it` from an operator CLI
+        session, not an automated pipeline step. The operator's identity
+        and the purpose of the exec should be recorded in the Kubernetes
+        audit log as a pod/exec event timestamped at or just before the
+        Falco execve at 08:33:20Z, and the session should correlate
+        with a sanctioned operation — either a deploy runbook or an
+        incident response ticket — covering this pod and time window.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the Kubernetes audit log contains a pod/exec API event targeting payments-api-7c9d8f5b6-q2vr4 whose timestamp is at or just before 2026-04-26T08:33:20Z"
+          from_story_link: "causing the Kubernetes API server to instruct runc to spawn the observed bash process"
+        - id: p2
+          subject: proposed_edge
+          claim: "the audit event's user.username resolves to a known operator or service-account identity in the authorized-operators roster"
+          from_story_link: "an authorized operator issued kubectl exec"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no pod/exec audit event for payments-api-7c9d8f5b6-q2vr4 appears in the Kubernetes audit log in the window around 08:33:20Z"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching audit event exists but its user.username is not in the authorized-operators roster or is an unrecognized identity"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: kube-audit
+          predicate: "a pod/exec API event for this pod at the alert timestamp, initiated by an identity present in the authorized-operators roster"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+        - id: ac2
+          edge_ref: proposed
+          anchor_kind: change-management
+          predicate: "an open change-management ticket or deploy runbook that sanctions a pod exec into payments-prod at the alert timestamp, owned by the same operator identity confirmed in ac1"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "kube-audit records the initiating user.username; confirming the audit event identifies the responsible actor alongside authorization in one resolution. change-management cross-check covers both break-glass and deploy-runbook scenarios under a single contract."
+      weight: null
+
+  routing:
+    selected_lead: kube-audit-pod-exec
+    composite_secondary: [change-management-correlation]
+    override_data_source: null
+    lead_hints:
+      kube-audit-pod-exec: "Query for pod/exec events targeting pod payments-api-7c9d8f5b6-q2vr4 in namespace payments-prod in a ±5min window around 2026-04-26T08:33:20Z. Capture user.username, userAgent, sourceIPs, and responseStatus. Resolves h-001.ac1 and informs ac2."
+      change-management-correlation: "Query for open tickets or deploy runbooks covering payments-prod / payments-api around 2026-04-26T08:33:20Z. Match against the operator identity returned by kube-audit-pod-exec. Resolves h-001.ac2."
+    scope_override:
+      window_hours: 1
+      anchor: alert

@@ -12,7 +12,7 @@ Extract the ANALYZE phase of the investigation loop into a dedicated subagent. T
 
 ## Empirical basis (pilot results)
 
-Pilot experiment under `docs/experiments/analyze-subagent-pilot/` ran three rounds across two fixtures with multiple context-bundle variants.
+Pilot experiment under `experiments/analyze-subagent-pilot/` ran three rounds across two fixtures with multiple context-bundle variants.
 
 ### Decided
 
@@ -90,7 +90,7 @@ This is a separate task, but adjacent: the ANALYZE subagent's self-reported cont
 ## Pilot artifacts
 
 - Skill: `.claude/skills/analyze-pilot/SKILL.md`
-- Experiment dir: `docs/experiments/analyze-subagent-pilot/`
+- Experiment dir: `experiments/analyze-subagent-pilot/`
   - `fixtures/case-rule5710-loop1/` — ambiguous-routing fixture
   - `fixtures/case-ssh-brute-loop3/` — crisp-routing mid-loop fixture
   - `fixtures/case-ssh-brute-loop3-poisoned/` — rollup-error stress (directory-name-leak variant)

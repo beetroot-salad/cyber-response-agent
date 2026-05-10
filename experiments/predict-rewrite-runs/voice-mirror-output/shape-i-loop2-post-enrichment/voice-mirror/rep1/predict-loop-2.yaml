@@ -1,0 +1,73 @@
+status: complete
+predict:
+  loop: 2
+  shape: M
+
+  hypotheses:
+    - id: h-001
+      name: "?monitoring-system-is-the-actor"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: initiated_auth
+        parent_vertex: {type: process, classification: "monitoring-daemon-process-on-source"}
+      story: |
+        The Nagios monitoring daemon on 172.22.0.10 invoked
+        `ssh nagios@target-endpoint` as a scheduled health-check probe.
+        Loop 1 confirmed a periodic cadence of 11 single-attempt clusters
+        over 1h (mean inter-arrival 576s, stddev 102s), consistent with a
+        fixed-schedule monitoring tool; this alert falls on-cadence with
+        that baseline. The approved-monitoring-sources registry should
+        confirm the (172.22.0.10, nagios, target-endpoint) triple as an
+        active registered probe, and the monitoring tool's own scheduling
+        output on 172.22.0.10 should record a corresponding probe invocation
+        at or near t-0.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "approved-monitoring-sources registry lists the (172.22.0.10, nagios, target-endpoint) triple as an active registered probe"
+          from_story_link: "The approved-monitoring-sources registry should confirm the triple as an active registered probe"
+        - id: p2
+          subject: proposed_edge
+          claim: "monitoring tool's scheduling output on 172.22.0.10 records a probe invocation at or near t-0 consistent with the observed cadence baseline geometry"
+          from_story_link: "the monitoring tool's own scheduling output on 172.22.0.10 should record a corresponding probe invocation at or near t-0"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "triple is absent from or marked inactive/revoked in the approved-monitoring-sources registry"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "monitoring tool's scheduling output shows no probe execution at or near t-0 (record absent from the baseline-cadence slot)"
+      weight: null
+
+    - id: h-002
+      name: "?credentials-used-outside-registered-actor"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: initiated_auth
+        parent_vertex: {type: process, classification: "non-monitoring-process-on-source"}
+      story: |
+        A process other than the registered Nagios monitoring daemon on
+        172.22.0.10 used the nagios credential string to attempt SSH
+        against target-endpoint. The actor's timing coincidentally falls
+        within the established 10-minute cadence window — accounting for
+        the on-cadence shape seen in loop 1 — but the monitoring tool's
+        own scheduling output on 172.22.0.10 would show no probe execution
+        at t-0, distinguishing this variant from h-001 on the direct
+        evidence available from the monitoring host's own records.
+      predictions:
+        - id: p3
+          subject: proposed_edge
+          claim: "monitoring tool's scheduling output on 172.22.0.10 shows no probe execution at or near t-0"
+          from_story_link: "the monitoring tool's own scheduling output on 172.22.0.10 would show no probe execution at t-0"
+      refutation_shape:
+        - id: r3
+          refutes_predictions: [p3]
+          claim: "monitoring tool's scheduling output on 172.22.0.10 records a probe execution at or near t-0 (record present in the baseline-cadence slot)"
+      weight: null
+
+  routing:
+    selected_lead: monitoring-probe
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      monitoring-probe: "Two objectives: (1) Consult approved-monitoring-sources for the (172.22.0.10, nagios, target-endpoint) triple — is it listed as an active registered probe? (2) Query host_query or any accessible monitoring tool log on 172.22.0.10 for scheduling output around t=2026-04-20T19:25:01.616Z — is there a probe invocation record at or near that tick?"

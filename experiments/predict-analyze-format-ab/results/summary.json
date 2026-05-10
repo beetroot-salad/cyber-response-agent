@@ -1,0 +1,138 @@
+{
+  "ab1_analyze": {
+    "control": {
+      "n": 3,
+      "wall_ms_mean": 317206.7,
+      "wall_ms_min": 278616,
+      "wall_ms_max": 375971,
+      "stdout_chars_mean": 1697,
+      "parse_ok_rate": 1.0,
+      "parse_error_count": 0,
+      "parse_errors": [],
+      "grade_tiers_total": {
+        "++": 3,
+        "+": 3,
+        "-": 3,
+        "--": 3
+      },
+      "dispositions": [
+        "true_positive",
+        "true_positive",
+        "true_positive"
+      ],
+      "x_violations_total": 0
+    },
+    "treatment": {
+      "n": 3,
+      "wall_ms_mean": 289922.3,
+      "wall_ms_min": 272575,
+      "wall_ms_max": 301697,
+      "stdout_chars_mean": 1613,
+      "parse_ok_rate": 1.0,
+      "parse_error_count": 0,
+      "parse_errors": [],
+      "grade_tiers_total": {
+        "++": 3,
+        "+": 2,
+        "-": 2,
+        "--": 3
+      },
+      "dispositions": [
+        "true_positive",
+        "true_positive",
+        "true_positive"
+      ],
+      "x_violations_total": 0
+    },
+    "decision": {
+      "wall_pct": -8.6,
+      "parser_regression": false,
+      "decisive_collapse": false,
+      "won": false,
+      "verdict": "current retained"
+    }
+  },
+  "ab2_predict": {
+    "control": {
+      "n": 3,
+      "wall_ms_mean": 273288.7,
+      "wall_ms_min": 219830,
+      "wall_ms_max": 362170,
+      "stdout_chars_mean": 2974,
+      "parse_ok_rate": 0.67,
+      "parse_error_count": 1,
+      "parse_errors": [
+        "h-001: :P h-001.comparisons references attribute_prediction 'ap1'; attribute_predictions do not carry comparisons (only p*/r* do)"
+      ],
+      "shapes": [
+        null,
+        "A",
+        "A"
+      ],
+      "n_hypotheses": [
+        0,
+        1,
+        1
+      ],
+      "downstream_analyze": {
+        "n": 2,
+        "wall_ms_mean": 248188,
+        "grade_tiers_total": {
+          "++": 1,
+          "+": 1,
+          "-": 0,
+          "--": 0
+        },
+        "parse_ok_rate": 0.5,
+        "dispositions": [
+          null,
+          null
+        ]
+      }
+    },
+    "treatment": {
+      "n": 3,
+      "wall_ms_mean": 287100.3,
+      "wall_ms_min": 245184,
+      "wall_ms_max": 341424,
+      "stdout_chars_mean": 2519.7,
+      "parse_ok_rate": 1.0,
+      "parse_error_count": 0,
+      "parse_errors": [],
+      "shapes": [
+        "A",
+        "A",
+        "A"
+      ],
+      "n_hypotheses": [
+        2,
+        1,
+        1
+      ],
+      "downstream_analyze": {
+        "n": 3,
+        "wall_ms_mean": 338604.3,
+        "grade_tiers_total": {
+          "++": 2,
+          "+": 3,
+          "-": 0,
+          "--": 1
+        },
+        "parse_ok_rate": 1.0,
+        "dispositions": [
+          "true_positive",
+          "benign",
+          "unclear"
+        ]
+      }
+    },
+    "decision": {
+      "wall_pct": 5.1,
+      "stdout_pct": -15.3,
+      "treatment_rejected": false,
+      "downstream_grade_shift": 4,
+      "won": false,
+      "verdict": "current retained"
+    }
+  }
+}

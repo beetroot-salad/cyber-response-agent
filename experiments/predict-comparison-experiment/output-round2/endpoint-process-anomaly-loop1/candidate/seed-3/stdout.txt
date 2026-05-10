@@ -1,0 +1,47 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "powershell.exe spawned one or more child processes whose names or command-line shapes belong to discovery, credential-access, or lateral-movement tool classes (e.g. cmd.exe, net.exe, whoami.exe, mimikatz-shaped binary)"
+        read_as: "post-exploitation-activity-confirmed"
+        advance_to: escalate
+      - id: lp2
+        if: "powershell.exe has no child processes in the window and sqlservr.exe shows no sibling shell-spawn events around T; powershell.exe execution is structurally isolated"
+        read_as: "isolated-shell-spawn-authorization-open"
+        advance_to: fork-at-xp_cmdshell-authorization
+      - id: lp3
+        if: "process-lineage data for this host is absent or truncated such that child and sibling context cannot be characterized"
+        read_as: "insufficient-process-telemetry"
+        advance_to: escalate
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: []
+    lead_hints:
+      process-lineage: >
+        Reconstruct the process tree rooted at powershell.exe (pid 8821) on host
+        edr-mssql-prod-01 (10.0.6.27) at T=2026-04-26T09:48:00Z. Retrieve: (1) full
+        ancestry chain up to system/init; (2) all child processes spawned by pid 8821
+        within the alert window; (3) sibling processes sharing parent pid 4488
+        (sqlservr.exe) in a ±10 min window around T. Flag any child or sibling whose
+        pname or cmdline matches discovery, credential-access, or network-utility tool
+        classes.
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```
+
+**Lead-selection reasoning.** The alert already confirms the edge (`sqlservr.exe → powershell.exe -EncodedCommand`) and the outbound connection (`164.92.71.108:8443`). The open question for loop 1 is not "did this happen" but "what followed." Three candidates:
+
+- `source-reputation` on `164.92.71.108` — fast, but a clean rep doesn't rule out a fresh C2 domain, and a flagged rep doesn't characterize what the shell *did*. Routes thinly.
+- `correlated-endpoint-events` — useful for co-firing signals, but the ticket-context subagent already covered the 4-hour correlation window at CONTEXTUALIZE; re-querying the same window adds noise, not signal.
+- `process-lineage` — names every child process spawned by `powershell.exe` and every sibling shell spawned from `sqlservr.exe`. If post-exploitation tooling ran (discovery, credential harvest, pivot), it shows up here. This directly partitions the next loop: recon children → escalate immediately; no children → authorization contract (was this an approved xp_cmdshell call?).
+
+`process-lineage` wins because its outcome naturally partitions the authorization vs. escalation question without requiring a parallel fork assumption.
+
+**Reading geometry.** Three mutually-exclusive readings covering the partition: recon child activity (escalate), structurally isolated (authorization fork), or telemetry gap (escalate conservatively). No overlap: lp1 requires at least one post-exploitation child; lp2 requires zero children AND no sibling shells; lp3 is the telemetry-absent catch.

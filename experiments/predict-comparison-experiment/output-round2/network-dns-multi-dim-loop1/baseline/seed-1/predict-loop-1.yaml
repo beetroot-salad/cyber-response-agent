@@ -1,0 +1,34 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "the child image set includes at least one image that deviates from the signed-trusted-office-helper baseline geometry (unsigned, unknown publisher, or name-shape inconsistent with established Office helper image names)"
+        read_as: "dropper-candidate-shape"
+        advance_to: fork-at-mechanism
+      - id: lp2
+        if: "all child images match the signed-trusted-office-helper baseline geometry across every recorded classification dimension (publisher, signing status, image-name shape)"
+        read_as: "legitimate-office-operation-burst"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "child image records are unavailable, truncated, or cover fewer than a representative sample of the 38 distinct images"
+        read_as: "context-gap-insufficient-image-data"
+        advance_to: escalate
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: []
+    lead_hints:
+      process-lineage: >
+        Enumerate all distinct child images spawned by WINWORD.EXE pid 9244 on WIN-DEV-3211
+        in the 5-minute burst window ending at 2026-04-26T07:14:32Z. For each image record
+        its full path, Authenticode signing status, publisher name, and image-name character
+        shape (length, entropy, printable-word vs hash-like). Return the full set of 38
+        distinct images so signing distribution can be assessed.
+    scope_override:
+      window_hours: 1
+      anchor: alert

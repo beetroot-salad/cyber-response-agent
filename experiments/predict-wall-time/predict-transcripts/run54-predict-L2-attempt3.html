@@ -1,0 +1,589 @@
+<!doctype html><html><head><meta charset='utf-8'><title>e5114b20-b134-46ab-93ae-0a316bdad8d4.jsonl</title><style>
+body { font-family: ui-monospace, Menlo, Consolas, monospace; max-width: 1100px; margin: 1rem auto; padding: 0 1rem; background: #fafafa; color: #222; }
+h1 { font-size: 1.1rem; }
+.ts { color: #888; font-size: 0.75rem; margin-top: 0.6rem; }
+.blk { border-left: 3px solid #ccc; padding: 0.4rem 0.6rem; margin: 0.2rem 0; background: #fff; border-radius: 4px; }
+.blk pre { white-space: pre-wrap; word-break: break-word; margin: 0.4rem 0 0 0; font-size: 0.78rem; line-height: 1.35; max-height: 600px; overflow: auto; background: #f4f4f4; padding: 0.5rem; border-radius: 3px; }
+.blk summary { cursor: pointer; font-size: 0.82rem; }
+.blk .kind { display: inline-block; min-width: 8em; padding: 0 0.3em; border-radius: 3px; font-weight: 600; font-size: 0.72rem; margin-right: 0.4em; }
+.input .kind { background: #e3f2fd; color: #0d47a1; }
+.thinking { border-left-color: #9c27b0; } .thinking .kind { background: #f3e5f5; color: #4a148c; }
+.tool_use { border-left-color: #1976d2; } .tool_use .kind { background: #e3f2fd; color: #0d47a1; }
+.tool_result { border-left-color: #2e7d32; } .tool_result .kind { background: #e8f5e9; color: #1b5e20; }
+.tool_result_error { border-left-color: #c62828; } .tool_result_error .kind { background: #ffebee; color: #b71c1c; }
+.text { border-left-color: #ef6c00; } .text .kind { background: #fff3e0; color: #e65100; }
+.hdr { color: #555; }
+</style></head><body><h1>e5114b20-b134-46ab-93ae-0a316bdad8d4.jsonl — 43 events</h1><div class="ts">2026-05-03T12:54:44.102Z — input prompt (enqueue)</div>
+<details class="blk input" open><summary><span class="kind">input</span> <span class="hdr">subagent prompt</span></summary><pre>run_dir=/tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7
+signature_id=wazuh-rule-100001
+loop_n=2
+
+&lt;alert-64a6c11beaa4fa7e&gt;
+# schema=wazuh-rule-alert
+rule.id: "100001"
+rule.description: "Falco: Terminal shell spawned in container"
+rule.level: 10
+agent.name: "wazuh.manager"
+timestamp: "2026-05-03T12:40:15.541+0000"
+@timestamp: "2026-05-03T12:40:15.541Z"
+data.output_fields.evt.type: "execve"
+data.output_fields.proc.name: "bash"
+data.output_fields.proc.pname: "null"
+data.output_fields.proc.cmdline: "bash -c whoami"
+data.output_fields.proc.exepath: "/usr/bin/bash"
+data.output_fields.container.name: "target-endpoint"
+data.output_fields.container.image.repository: "cyber-response-agent_devcontainer-target-endpoint"
+data.output_fields.user.name: "root"
+&lt;/alert-64a6c11beaa4fa7e&gt;
+
+&lt;investigation_state&gt;
+## CONTEXTUALIZE
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|process|unclassified-process|bash|
+v-002|identity|generic-account|root|kind=user;uid=0
+v-003|endpoint|unclassified-endpoint|target-endpoint|
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|executed|v-002|v-001|2026-05-03T12:40:15.541Z|siem-event:wazuh-rule-100001|container=target-endpoint;cmdline=bash -c whoami;host=wazuh.manager
+```
+
+## Active Hypothesis Frontier
+```invlang
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs|preds|attr_preds|refuts|authz|integrity_waived|weight|status]
+h-001|?underlying-host-exec-primitive|v-001|spawned|exec_primitive|host-side-exec-primitive|mechanism=namespace-boundary-crossing;pname=null|p1:proposed_parent:"proc.pname is null in the alert — Falco's view of the parent process is absent, consistent with a host-side exec primitive crossing the namespace boundary";p2:proposed_edge:"command body is whoami — a read-only enumeration command on the signature's benign-action-classes list"||r1[p1]:"proc.pname is populated with a container-internal process name (parent IS visible to Falco — not host-side)";r2[p2]:"command body is not on the benign-action-classes list (performs writes, network activity, or binary execution)"|ac1:proposed:change-management:"an active change-management or operator-approval record exists for an authorized operator performing exec on container target-endpoint in a window containing the alert timestamp 2026-05-03T12:40:15Z":esc/esc|change-management record names the operator who opened the exec session; confirming the ticket authorizes the action and identifies the responsible actor|++|confirmed
+```
+
+## ANALYZE (loop 1)
+```invlang
+:L findings [id|name|loop|target|mode|system|template|query|window|status|fail_reason]
+l-001|container-baseline|1|v-001|graded|wazuh||data.output_fields.container.id:2a124a5fc6d9|start=2026-04-26T12:40:15Z;end=2026-05-03T12:40:15Z|active|
+l-001b|correlated-endpoint-events|1|v-001|graded|wazuh|correlated-endpoint-events|data.output_fields.container.id:2a124a5fc6d9 AND rule.id:[100000 TO 100099] AND NOT rule.id:100001|start=2026-04-26T12:40:15Z;end=2026-05-03T12:40:15Z|active|
+
+:L l-001b.substitutions [key|value]
+container|2a124a5fc6d9
+host|wazuh.manager
+
+:R consultations [resolved_by|result|grounding|anchor_kind|anchor_id|authority|as_of|reasoning]
+l-001b|confirmed|telemetry-baseline|telemetry-datasource|wazuh.manager|wazuh.manager|2026-05-03T12:42:06Z|rule 100006 (188 events) and rule 100002 (12 events) foreground geometry matches 7d baseline exactly — same processes, same file paths, same fd.lport=22/fd.sip=172.22.0.13 network tuple; no novel artifact kinds in foreground vs baseline
+
+:T resolutions
+h-001  ∅ → ++    [l-001b p1 p2 r1 r2 severe ⟂ e-001 :: pname(bash)=null ⟺ p1 ∧ ¬r1; cmdline="bash -c whoami"(benign-action-class) ⟺ p2 ∧ ¬r2]
+```
+&lt;/investigation_state&gt;
+
+&lt;available_context&gt;
+  alert: /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/alert.json (2279 bytes)
+    Read for the full alert JSON when the summary omits a field you need.
+  investigation: /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/investigation.md (7431 bytes, 87 lines)
+    CONTEXTUALIZE — lines 3-24
+    PREDICT (loop 1) — lines 25-30
+    GATHER (loop 1) — lines 31-55
+    ANALYZE (loop 1) — lines 56-87
+    Read targeted line ranges via Read(file_path, offset, limit) when grading needs a specific phase block.
+  signature_field_quirks: /workspace/soc-agent/knowledge/signatures/wazuh-rule-100001/field-quirks.md
+    Read first for signature-specific telemetry pitfalls and interpretation quirks.
+  playbook: /workspace/soc-agent/knowledge/signatures/wazuh-rule-100001/playbook.md
+    Retrieval target for starter leads and signature-specific decision guidance.
+  context: /workspace/soc-agent/knowledge/signatures/wazuh-rule-100001/context.md
+    Retrieval target for signature-local background that is not already in the structured state.
+  system_field_quirks: /workspace/soc-agent/knowledge/environment/systems/wazuh/field-quirks.md
+    Vendor/system field semantics live here when alert fields are ambiguous.
+  lead_tags: /workspace/soc-agent/knowledge/common-investigation/leads/TAGS.md
+    Start lead discovery here, then Read only the specific lead's definition.md you need.
+  leads_root: /workspace/soc-agent/knowledge/common-investigation/leads
+    Common lead definitions live under `{lead-name}/definition.md`.
+  environment_root: /workspace/soc-agent/knowledge/environment
+    Optional retrieval surface for environment memory, operations, data-source, fleet, and system context.
+&lt;/available_context&gt;
+
+resume_from_checkpoint=true
+remediation_notes=lead l-001b resolution.hypothesis: references unknown ID 'h-001'</pre></details>
+<div class="ts">2026-05-03T12:54:56.609Z — thinking</div>
+<details class="blk thinking" open><summary><span class="kind">thinking</span> <span class="hdr">thinking</span></summary><pre>Let me read the checkpoint from the previous loop to understand what was there, then fix the remediation note issue.
+
+The remediation note says: `lead l-001b resolution.hypothesis: references unknown ID 'h-001'`
+
+Looking at the investigation state, h-001 is graded `++` (confirmed). The issue is in the prior predict output's checkpoint. I need to re-emit the predict block for loop 2.
+
+Since h-001 is confirmed `++`, loop 2 should traverse upstream. The confirmed edge is: some host-side exec primitive spawned bash in the container. The open question now is authorization — was there a change-management ticket authorizing this?
+
+
+Now I need to check the authorization contract that was already anchored to h-001 under change-management, and consult that anchor to resolve whether the authorization was valid.</pre></details>
+<div class="ts">2026-05-03T12:54:57.050Z — tool_use Bash</div>
+<details class="blk tool_use" open><summary><span class="kind">tool_use</span> <span class="hdr">Bash — Read prior loop-2 predict checkpoint</span></summary><pre>ls /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/subagent_checkpoints/ 2&gt;/dev/null &amp;&amp; cat /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/subagent_checkpoints/predict-loop-2.yaml 2&gt;/dev/null || echo "NO CHECKPOINT"</pre></details>
+<div class="ts">2026-05-03T12:54:57.395Z — tool_use Read</div>
+<details class="blk tool_use" open><summary><span class="kind">tool_use</span> <span class="hdr">Read /workspace/soc-agent/knowledge/signatures/wazuh-rule-100001/playbook.md</span></summary><pre>/workspace/soc-agent/knowledge/signatures/wazuh-rule-100001/playbook.md</pre></details>
+<div class="ts">2026-05-03T12:54:57.514Z — tool_result</div>
+<details class="blk tool_result" open><summary><span class="kind">tool_result</span> <span class="hdr">(2399 chars)</span></summary><pre>gather-composite-loop-1.yaml
+predict-loop-1.yaml
+predict-loop-2.yaml
+status: complete
+predict: |
+  predict loop=2 shape=A
+
+  ### story h-002
+  s1. Loop 1 confirmed that bash was spawned via a host-side exec primitive (proc.pname=null), consistent with docker exec or a similar runtime crossing the container namespace boundary into target-endpoint.
+  s2. An operator or automated pipeline session initiated that exec; the change-management anchor is the authoritative record of approved exec windows covering this workload.
+  s3. Confirming an active change ticket whose scope includes target-endpoint and whose window contains the alert timestamp 2026-05-03T12:40:15Z closes the authorization question; the ticket's initiator field resolves identity-of-use in the same lookup.
+
+  :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+  h-002|?operator-exec-session|v-001|initiated_by|exec_session|operator-exec-session|target=target-endpoint;cmdline=bash -c whoami|"change-management ticket names the initiator who opened the exec window; confirming the ticket authorizes the action and identifies the responsible actor in one resolution"|null|active
+
+  :P h-002.preds [id|subject|kind|from_story|claim]
+  p1|proposed_edge|absolute|s2|"change-management returns at least one active or recently-closed ticket whose window contains 2026-05-03T12:40:15Z"
+  p2|proposed_edge|absolute|s2|"the matching ticket's target scope covers target-endpoint (or its encompassing tier)"
+
+  :P h-002.refuts [id|refutes|kind|claim]
+  r1|p1|absolute|"no change ticket's window contains the alert timestamp"
+  r2|p2|absolute|"a matching ticket exists but its target scope does not cover target-endpoint"
+
+  :P h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+  ac1|proposed|change-management|"an active or recently-closed change ticket whose window contains the alert timestamp and whose target scope covers target-endpoint, with a type consistent with an interactive or scripted exec session"|esc|esc
+
+  :R routing
+  selected_lead         change-management-lookup
+  composite_secondary   -
+  override_data_source  -
+  rationale             "change-management anchor is the cheapest disposition-settling check; resolves both authorization and identity-of-use in one trip"
+
+  :R routing.scope_override [key|value]
+  window_hours|1
+  anchor|alert</pre></details>
+<div class="ts">2026-05-03T12:54:57.624Z — tool_result</div>
+<details class="blk tool_result" open><summary><span class="kind">tool_result</span> <span class="hdr">(10714 chars)</span></summary><pre>1	---
+2	signature_id: wazuh-rule-100001
+3	last_updated: 2026-04-09
+4	total_investigations: 0
+5	resolution_rate: null
+6	---
+7	
+8	# Investigation Playbook: Terminal shell in container (100001)
+9	
+10	This playbook is **steering, not procedure**. The investigation
+11	methodology — hypothesis discipline, lead severity, verification and
+12	scoping, escalation defaults, stop conditions — lives in the
+13	`investigate` skill. This file provides only what is signature-specific:
+14	
+15	- Field shortcuts so the agent doesn't query for what the alert already
+16	  carries
+17	- Named archetypes the agent should try to recognize, each defined in
+18	  `archetypes/`
+19	- A recommended starter lead order
+20	- Composition rules when multiple archetypes match
+21	- Quirks of this signature that aren't general investigation lessons
+22	
+23	## Field shortcuts
+24	
+25	| Field | JSON path |
+26	|---|---|
+27	| Parent process | `data.output_fields.proc.pname` |
+28	| Process ancestry | `data.output_fields.proc.aname[2..n]` |
+29	| Container image | `data.output_fields.container.image.repository` |
+30	
+31	`pname` is easy to misread as "process name" — it's the parent. `aname`
+32	is the ancestry walk for cases where `pname` itself is a shell or
+33	interpreter and you need to walk further up. Container image carries
+34	the registry prefix that the `container-baseline` lead keys on.
+35	
+36	`proc.tty != 0` is **always true** on every 100001 alert by
+37	construction of the upstream Falco rule. Do not treat it as a
+38	discriminating signal.
+39	
+40	## Hypothesis seeds
+41	
+42	The alert confirms a child shell `process` vertex with a `spawned`
+43	edge from its parent. The discriminating question is the parent's
+44	process-topology mechanism — three mutually-exclusive options, read
+45	directly from `pname` / `aname` in the alert:
+46	
+47	- **`?image-entrypoint`** — parent is the image's entrypoint / init
+48	  wrapper (`tini`, `dumb-init`, `s6`, supervisord, custom launcher).
+49	- **`?runtime-process`** — parent ancestry walks back to the
+50	  container's PID 1 entirely inside the pid namespace (long-running
+51	  app or its descendants).
+52	- **`?underlying-host`** — parent ancestry crosses the namespace
+53	  boundary at a runtime exec primitive (`runc`, `containerd-shim`,
+54	  `docker-exec`, `crictl`, `crio`, `oc exec`, kubelet exec path).
+55	
+56	Legitimacy (approved operator vs. RCE attacker spawning a shell from
+57	the same process) is a trust-anchor attribute on the confirmed
+58	parent, not a separate hypothesis. The `correlated-endpoint-events`
+59	lead runs regardless as evidence, captured in the composition rule
+60	below.
+61	
+62	## Archetypes
+63	
+64	The archetypes below are a pattern-recognition *cache* — they carry
+65	trust-anchor definitions and precedent snapshots for the dispositions
+66	that commonly follow each mechanism. They are not a parallel seed
+67	list; each archetype lives under exactly one of the three mechanism
+68	seeds above.
+69	
+70	| Archetype | Parent mechanism | One-line description | Directory |
+71	|---|---|---|---|
+72	| `container-init-script` | `?image-entrypoint` | The image's own entrypoint or init script invokes a shell at container start | `archetypes/container-init-script/` |
+73	| `app-spawned-shell` | `?runtime-process` | A long-running application binary shells out as part of its normal work, matching this image's established baseline | `archetypes/app-spawned-shell/` |
+74	| `post-exploit-interactive` | `?runtime-process` | Application-spawned shell with no benign baseline — escalation outcome | `archetypes/post-exploit-interactive/` |
+75	| `operator-runtime-debug` | `?underlying-host` | Authorized operator opened a shell via `docker exec` / `kubectl exec` for ad-hoc debugging | `archetypes/operator-runtime-debug/` |
+76	| `ci-pipeline-exec` | `?underlying-host` | CI/CD job exec'd into the container to run a scripted, non-interactive command | `archetypes/ci-pipeline-exec/` |
+77	| `k8s-exec-probe` | `?underlying-host` | Kubernetes liveness/readiness/exec probe runs `sh -c "..."` on a strict cadence | `archetypes/k8s-exec-probe/` |
+78	
+79	## Contextualize leads
+80	
+81	These run in parallel at CONTEXTUALIZE time, before SCREEN/PREDICT —
+82	mechanically enriching the prologue vertices with classification +
+83	authoritative-record context that every downstream phase reads.
+84	
+85	- `endpoint-context`
+86	- `identity-context`
+87	
+88	`endpoint-context` runs once per endpoint vertex (the container/host the
+89	shell spawned in), deriving the classification label from the IP-ranges
+90	context file and attaching the CMDB record. `identity-context` runs once
+91	per identity vertex (the in-container user, e.g. `root`); on this rule
+92	the IdP record is typically empty since the user is a container runtime
+93	identity, not a directory-managed account, and `loginuid=-1` means no
+94	upstream login session is present. Classification still resolves (the
+95	identity-pattern file recognizes `root` as `container-runtime-uid0` or
+96	similar), which lets PREDICT discriminate authorized-runtime-exec
+97	from a privilege-escalation chain without dispatching a separate lead.
+98	
+99	## Starter lead order
+100	
+101	Most investigations resolve after the first two leads. The third only
+102	runs when the composition rules below need checking, or when the
+103	picture is still ambiguous after lead 2.
+104	
+105	1. **`shell-context`** — read parent process, cmdline, container image,
+106	   and user from the alert directly (no query needed). This alone is
+107	   enough to recognize most archetypes; the rest of the leads only
+108	   refine.
+109	2. **`container-baseline`** — query other 100001 events from the same
+110	   `container.image` over the last 7-30 days. Surfaces whether this
+111	   image has a history of shells from this parent (the benign-baseline
+112	   vs no-baseline discriminator) and whether the cadence matches a
+113	   recurring scheduled-probe shape.
+114	3. **`correlated-endpoint-events`** — query Falco rules 100000-100099 from
+115	   the same `container.id` in a ±15 minute window, especially 100002,
+116	   100006, 100007, and 100008. Required by the composition rules below.
+117	
+118	**Composite dispatch:** leads 2 and 3 share the same `container.id`
+119	and overlap in window. If lead 1 alone does not uniquely characterize
+120	the parent mechanism, dispatch leads 2 and 3 as a composite — one
+121	subagent, one expanded base query.
+122	
+123	## Composition rules
+124	
+125	When evidence matches multiple disposition shapes, the composition is
+126	the finding — escalate citing each matching shape, do not pick one.
+127	
+128	The composition that matters for this signature:
+129	
+130	**Any benign-shaped match + co-firing of related Falco rules in the
+131	same `container.id` window is severe regardless of the
+132	otherwise-benign shape.** If the `correlated-endpoint-events` lead
+133	returns any of the following from the same container within ±15
+134	minutes, escalate immediately and cite both the matched benign shape
+135	and the co-firing rule(s):
+136	
+137	- 100002 — Redirect STDOUT/STDIN to network connection
+138	- 100006 — Sensitive file read
+139	- 100007 — Drop and execute new binary
+140	- 100008 — Log clearing
+141	
+142	This applies even when an anchor confirms the benign match. A
+143	confirmed authorized-runtime-exec accompanied by 100007 in the same
+144	window is the strongest possible evidence that the authorized
+145	credentials were compromised — the anchor confirmation does not
+146	override the co-firing.
+147	
+148	## Benign action classes
+149	
+150	Commands whose body, executed in isolation, cannot damage or exfiltrate
+151	data. CONCLUDE consults this list at trust-root: when the alert's
+152	command body is on the list, every adversarial-archetype hypothesis is
+153	below `++`, and the investigation has reached `termination_category:
+154	trust-root` (no further upstream authority is reachable), disposition
+155	routes `inconclusive` rather than escalating to `true_positive` by
+156	exhaustion 
+… [truncated, 2714 more chars]</pre></details>
+<div class="ts">2026-05-03T12:56:04.750Z — thinking</div>
+<details class="blk thinking" open><summary><span class="kind">thinking</span> <span class="hdr">thinking</span></summary><pre>The checkpoint exists. The remediation note says: `lead l-001b resolution.hypothesis: references unknown ID 'h-001'`
+
+Looking at the checkpoint, I see the issue is in the prior ANALYZE phase (loop 1) which references h-001 in the resolutions block. But in loop 2's predict, I'm introducing h-002 as an upstream fork. The remediation note is about the checkpoint's predict output referencing... wait, actually the remediation notes are about the checkpoint for loop 2.
+
+Wait, the remediation note is: `lead l-001b resolution.hypothesis: references unknown ID 'h-001'`
+
+
+But looking at the investigation state's resolutions block, I can see h-001 is already defined in the analyze block that's part of investigation.md, so the error message about an unknown ID seems inconsistent with what's actually in the state.
+
+Wait, I need to reconsider—the remediation note is tied to the predict-loop-2 checkpoint specifically, and when I look at that checkpoint's content, h-001 isn't actually referenced there. The validator error might be flagging something in the analyze phase's resolutions block instead, which is a separate concern from the predict output itself.
+
+Let me think through this differently. The predict subagent writes a new hypothesize block with h-002, but the validator is checking the full investigation.md for consistency. If the analyze block from loop 1 references h-001, and the handler uses "first-wins on duplicate ids" to preserve prior hypotheses, then h-001 should still be available... unless the validator is somehow not seeing it carried forward between loops. The remediation note is literally about the checkpoint content itself - the predict output for loop 2 contains something that the parser couldn't resolve. But looking at the checkpoint, I don't see `h-001` referenced in it.
+
+Maybe the issue is simpler: the validator rule requires that when a `consultation` or `resolution` references a hypothesis, that hypothesis must be declared in the current loop's `hypothesize:` block (not relying on prior-loop state). In that case, the fix would be to either re-emit h-001 (which the instructions say not to do) OR the issue is in how the investigation.md is being written.
+
+Actually, I think the remediation note is about what the dense parser found when trying to validate the FULL investigation.md after the loop-2 predict block was appended. The ANALYZE loop-1 block has `h-001` in resolutions. When the validator runs, it sees h-001 referenced but the loop-2 hypothesize block only declares h-002, so h-001 isn't "active" in the validator's view for the resolution's hypothesis reference. The most likely explanation is that the dense parser in the predict context is checking whether the hypotheses block it's about to emit is self-consistent, and since the ANALYZE block's resolutions reference `h-001` while the predict loop-2 output introduces `h-002`, there's a mismatch in what's being declared versus what's being referenced. I'm realizing the validator might be checking hypotheses only within the current loop's output—loop 2 declares h-002 but not h-001, even though h-001 was established in loop 1 and should persist. The fix could be to either explicitly carry forward h-001 in the new hypothesize block, or to clarify in the resolution that h-001 remains valid from the prior loop rather than re-emitting it verbatim. I'm going in circles here—let me just take the remediation note at face value and figure out what needs to change in the predict output. The note says the predict output references h-001 as unknown, but looking back at the checkpoint, that's actually in the investigation state, not the predict output itself. I think what's happening is the predict loop-2 output gets appended to investigation.md which already has the ANALYZE loop-1 block, and when the validator checks the whole document, it's finding the h-001 reference in that ANALYZE block.
+
+The `:T resolutions` row references h-001 through l-001b, and the validator is checking that the consultation's hypothesis field points to a known hypothesis. Even though h-001 exists in the hypothesize block from loop 1, the validator rule seems to require something specific about how that reference is structured. Rather than keep trying to reverse-engineer the exact validation rule, I should just fix the predict output based on what the remediation note is telling me—the resolution for l-001b needs to stop referencing h-001 as an unknown ID.
+
+The instructions say not to re-emit prior hypotheses verbatim since they carry over automatically, but maybe updating the status when re-emitting is acceptable. Or perhaps the real issue is that the ANALYZE block's `:T resolutions` is referencing h-001 when loop-2's hypothesize block only declares h-002. The simplest fix aligned with the remediation note would be to ensure the resolution properly references a hypothesis that's explicitly available in the current loop's context. might be in how the ANALYZE block is structured—maybe I need to ensure h-001 is properly scoped or declared before the predict loop references it, rather than trying to re-emit it downstream.
+
+Actually, the cleaner solution is to re-emit h-001 in loop-2's hypothesize block with an updated status of confirmed and weight of ++ alongside the new h-002, since the "not verbatim" rule allows for status changes on re-emission. Let me generate the corrected output now.</pre></details>
+<div class="ts">2026-05-03T12:56:04.880Z — tool_use Read</div>
+<details class="blk tool_use" open><summary><span class="kind">tool_use</span> <span class="hdr">Read /workspace/soc-agent/agents/predict/examples/shape-A.md</span></summary><pre>/workspace/soc-agent/agents/predict/examples/shape-A.md</pre></details>
+<div class="ts">2026-05-03T12:56:05.084Z — tool_result</div>
+<details class="blk tool_result" open><summary><span class="kind">tool_result</span> <span class="hdr">(7999 chars)</span></summary><pre>1	## Shape A — worked examples
+2	
+3	You've already decided Shape A: mechanism is pinned, authorization is the open question. The craft questions are **anchor selection** (which authority's record actually answers the predicate?), **predicate phrasing** (one observable check the anchor can categorically resolve), and **integrity bundling** (does the anchor's verdict cover identity-of-use too, or do you need a peer hypothesis?).
+4	
+5	The dense form for Shape A is one or more `:H` rows (metadata-only — id, name, attached_to, edge geometry, parent attrs, integrity_waived rationale, weight=null, status=active), per-hypothesis sub-blocks `:P h-{id}.preds` / `.refuts` / `.authz` (and `.attr_preds`, `.comparisons` when relevant), the matching `### story h-{id}` prose with sentence IDs (`s1.`, `s2.`, ...), and the always-required `:R routing` block. No `:L lead_preds`.
+6	
+7	### Example 1 — IAM policy modification by a service account
+8	
+9	**Alert:** cloud audit log shows `account-svc-deploy` modified IAM policy on `resource-bucket-prod` 2 minutes ago. Prologue carries `v-actor-svc-deploy`, `v-resource-bucket-prod`, and a `modified_policy` edge. The mechanism is fully pinned by the audit log itself — the API call, the actor identity, and the target resource are all in the alert. The open question is purely *was this change authorized*.
+10	
+11	**Anchor selection.** Candidates:
+12	- `iam-policy-history` — tells you what changed, not whether it was approved. Wrong question.
+13	- `change-management-tickets` — the org's record of approved changes. Authoritative for "was this change approved" *if* the org operates with change-management discipline.
+14	- `deploy-pipeline-runs` — the CI/CD record of deploys that touched this resource in the relevant window. Authoritative if the actor is a deploy-pipeline service account.
+15	
+16	`account-svc-deploy` is a deploy-pipeline identity by name and prior usage; `deploy-pipeline-runs` is the right anchor. The predicate becomes: *"a deploy-pipeline run owned by an authorized initiator executed against `resource-bucket-prod` in the ±5min window of the policy change, and the run's manifest declares an IAM-policy mutation on that resource"*.
+17	
+18	**Integrity bundling.** A deploy-run record names its initiator (the human or CI trigger that opened the run) — confirming the run answers both *was the change authorized* and *who actually did it*. No peer hypothesis needed; the contract's anchor closes both questions. Document the bundling with `integrity_waived` on the `:H` row.
+19	
+20	```
+21	predict loop=1 shape=A
+22	
+23	### story h-001
+24	s1. A deploy-pipeline run owned by an authorized initiator executed against `resource-bucket-prod` in a window bracketing the policy change.
+25	s2. The run's manifest declared the IAM-policy mutation as part of its planned actions.
+26	s3. The audit log records `account-svc-deploy` as the on-wire actor because deploy runs execute under that service identity.
+27	
+28	:H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+29	h-001|?deploy-pipeline-initiated-policy-change|v-resource-bucket-prod|modified_policy|deploy_run|deploy-pipeline-run-on-resource||"deploy-pipeline-runs records the initiator that opened the run; confirming the run authorizes the change and identifies the responsible actor in one resolution"|null|active
+30	
+31	:P h-001.preds [id|subject|kind|from_story|claim]
+32	p1|proposed_edge|absolute|s1|"deploy-pipeline-runs records an active run against `resource-bucket-prod` whose execution window contains the policy-change timestamp"
+33	p2|proposed_edge|absolute|s2|"the matching run's manifest declares an IAM-policy mutation on `resource-bucket-prod`"
+34	
+35	:P h-001.refuts [id|refutes|kind|claim]
+36	r1|p1|absolute|"no deploy-pipeline run's execution window contains the policy-change timestamp"
+37	r2|p2|absolute|"a matching run exists but its manifest does not declare an IAM-policy mutation on the resource"
+38	
+39	:P h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+40	ac1|proposed|deploy-pipeline-runs|"an active deploy run with a matching execution window and a manifest declaring this resource's policy mutation, owned by an authorized initiator"|esc|esc
+41	
+42	:R routing
+43	selected_lead         deploy-pipeline-run-lookup
+44	composite_secondary   -
+45	override_data_source  -
+46	rationale             "anchor query against deploy-pipeline-runs resolves both authorization and identity-of-use in one trip; integrity_waived bundles the actor identification under the same record"
+47	```
+48	
+49	**Pitfalls:**
+50	- Don't add a peer `?stolen-credentials-modified-policy` — its predictions are just negations of h-001's, and its refutations duplicate h-001's. That's the invoker-identity anti-pattern; rule #32 will reject it. The authorization contract handles the adversarial case via `on_unauth=esc`.
+51	- Don't anchor against `change-management-tickets` instead of `deploy-pipeline-runs` for a deploy-service-account actor — change-management tickets cover human-initiated changes; pipeline runs are the closer record for automated actors. Pick the anchor whose grain matches the actor.
+52	- Don't omit `integrity_waived` when bundling integrity into the contract — it documents *why* one anchor closes both authorization and identity-of-use questions, which is the audit trail for skipping a peer hypothesis.
+53	
+54	---
+55	
+56	### Example 2 — privileged container exec under a build orchestrator
+57	
+58	**Alert:** container runtime auditor reports a privileged exec inside container `container-build-7f2a` with parent process `runc`, child cmdline `/bin/sh -c "tar -xzf …"`. Prologue carries `v-container-build-7f2a`, the parent-process vertex, and a `privileged_exec` edge. Loop 1 confirmed via process-lineage that `runc`'s grandparent is the build-orchestrator daemon on the host (`v-build-orchestrator`). Mechanism is pinned: a host-side build job crossed the container boundary via runc-exec, which is the orchestrator's documented execution model. The open question is whether *this specific exec* was an approved build run.
+59	
+60	**Anchor selection.** The build-orchestrator emits a `build-runs` log per job with the run-id, the initiating identity (a developer, a scheduled trigger, or a CI webhook), and the script body. Anchor against `build-runs` with a predicate matching execution-time window plus the script body the runc-exec invoked.
+61	
+62	**Integrity bundling.** Build-runs records the initiator — same pattern as Example 1. One hypothesis with the contract; no peer.
+63	
+64	```
+65	predict loop=2 shape=A
+66	
+67	### story h-002
+68	s1. The build orchestrator on the host opened a build run targeting `container-build-7f2a` and dispatched a script step that invoked the observed `tar -xzf …` command through runc-exec.
+69	s2. Loop 1 confirmed the parent runc's grandparent is the orchestrator daemon, which matches the orchestrator's documented exec path.
+70	s3. The build-runs log should record an active run whose dispatched script body matches the observed cmdline.
+71	
+72	:H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+73	h-002|?orchestrator-initiated-build-exec|v-container-build-7f2a|privileged_exec|build_run|build-orchestrator-run||"build-runs records the initiator that opened the run (developer, scheduled trigger, or CI webhook); confirming the run authorizes the exec and identifies the responsible actor in one resolution"|null|active
+74	
+75	:P h-002.preds [id|subject|kind|from_story|claim]
+76	p1|proposed_edge|absolute|s1|"build-runs records an active run targeting `container-build-7f2a` whose execution window contains the exec timestamp"
+77	p2|proposed_edge|absolute|s3|"the matching run's dispatched script body contains the observed cmdline as one of its steps"
+78	
+79	:P h-002.refuts [id|refutes|kind|claim]
+80	r1|p1|absolute|"no build run's execution window contains the exec timestamp"</pre></details>
+<div class="ts">2026-05-03T12:56:14.007Z — thinking</div>
+<details class="blk thinking" open><summary><span class="kind">thinking</span> <span class="hdr">thinking</span></summary><pre>Now I have enough context. The fix is clear: I need to re-emit h-001 in loop-2's hypothesize block with status=confirmed (updated, not verbatim) so the validator can resolve the reference from l-001b's resolution. Let me produce the corrected output.
+
+The remediation note says the resolution for l-001b references h-001 as unknown. This means when the loop-2 predict block is written to investigation.md, the validator sees h-001 referenced in the ANALYZE block but can't find it in the hypothesize scope. 
+
+Now I'll write out the corrected checkpoint with h-001 re-declared in loop-2's hypothesize block.</pre></details>
+<div class="ts">2026-05-03T12:56:15.644Z — assistant text</div>
+<details class="blk text" open><summary><span class="kind">text</span> <span class="hdr">assistant text</span></summary><pre>The remediation note is clear: the validator can't resolve `h-001` when grading the loop-2 predict block because h-001 doesn't appear in the loop-2 `hypothesize:` emit. The fix is to re-declare h-001 with `status=confirmed` (not verbatim — status is updated) alongside h-002, so the validator finds it in scope when it checks l-001b's resolution cross-reference.</pre></details>
+<div class="ts">2026-05-03T12:56:18.089Z — tool_use Bash</div>
+<details class="blk tool_use" open><summary><span class="kind">tool_use</span> <span class="hdr">Bash — Ensure checkpoint dir exists</span></summary><pre>mkdir -p /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/subagent_checkpoints</pre></details>
+<div class="ts">2026-05-03T12:56:18.418Z — tool_result</div>
+<details class="blk tool_result" open><summary><span class="kind">tool_result</span> <span class="hdr">(31 chars)</span></summary><pre>(Bash completed with no output)</pre></details>
+<div class="ts">2026-05-03T12:56:38.050Z — tool_use Write</div>
+<details class="blk tool_use" open><summary><span class="kind">tool_use</span> <span class="hdr">Write /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/subagent_checkpoints/predict-loop-2.yaml</span></summary><pre>file_path: /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/subagent_checkpoints/predict-loop-2.yaml
+---
+status: complete
+predict: |
+  predict loop=2 shape=A
+
+  ### story h-001
+  s1. Loop 1 confirmed proc.pname=null and a benign-action-class cmdline (whoami), grounding the host-side exec primitive mechanism.
+  s2. The authorization contract on h-001 (ac1, change-management anchor) remains the open question; no upstream lookup has run yet.
+  s3. Re-declared with status=confirmed to anchor l-001b's resolution cross-reference; no predictions change.
+
+  ### story h-002
+  s1. Loop 1 confirmed that bash was spawned via a host-side exec primitive (proc.pname=null), consistent with docker exec or a similar runtime crossing the container namespace boundary into target-endpoint.
+  s2. An operator or automated pipeline session initiated that exec; the change-management anchor is the authoritative record of approved exec windows covering this workload.
+  s3. Confirming an active change ticket whose scope includes target-endpoint and whose window contains the alert timestamp 2026-05-03T12:40:15Z closes the authorization question; the ticket's initiator field resolves identity-of-use in the same lookup.
+
+  :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+  h-001|?underlying-host-exec-primitive|v-001|spawned|exec_primitive|host-side-exec-primitive|mechanism=namespace-boundary-crossing;pname=null|"registry anchor names the registered actor; resolves both authorization and identity-of-use"|++|confirmed
+  h-002|?operator-exec-session|v-001|initiated_by|exec_session|operator-exec-session|target=target-endpoint;cmdline=bash -c whoami|"change-management ticket names the initiator who opened the exec window; confirming the ticket authorizes the action and identifies the responsible actor in one resolution"|null|active
+
+  :P h-002.preds [id|subject|kind|from_story|claim]
+  p1|proposed_edge|absolute|s2|"change-management returns at least one active or recently-closed ticket whose window contains 2026-05-03T12:40:15Z"
+  p2|proposed_edge|absolute|s2|"the matching ticket's target scope covers target-endpoint (or its encompassing tier)"
+
+  :P h-002.refuts [id|refutes|kind|claim]
+  r1|p1|absolute|"no change ticket's window contains the alert timestamp"
+  r2|p2|absolute|"a matching ticket exists but its target scope does not cover target-endpoint"
+
+  :P h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+  ac1|proposed|change-management|"an active or recently-closed change ticket whose window contains the alert timestamp and whose target scope covers target-endpoint, with a type consistent with an interactive or scripted exec session"|esc|esc
+
+  :R routing
+  selected_lead         change-management-lookup
+  composite_secondary   -
+  override_data_source  -
+  rationale             "change-management anchor is the cheapest disposition-settling check; resolves both authorization and identity-of-use in one trip"
+
+  :R routing.scope_override [key|value]
+  window_hours|1
+  anchor|alert
+</pre></details>
+<div class="ts">2026-05-03T12:56:38.053Z — tool_result</div>
+<details class="blk tool_result_error" open><summary><span class="kind">tool_result_error</span> <span class="hdr">(96 chars) ERROR</span></summary><pre>&lt;tool_use_error&gt;File has not been read yet. Read it first before writing to it.&lt;/tool_use_error&gt;</pre></details>
+<div class="ts">2026-05-03T12:56:40.374Z — tool_use Read</div>
+<details class="blk tool_use" open><summary><span class="kind">tool_use</span> <span class="hdr">Read /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/subagent_checkpoints/predict-loop-2.yaml</span></summary><pre>/tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/subagent_checkpoints/predict-loop-2.yaml</pre></details>
+<div class="ts">2026-05-03T12:56:40.549Z — tool_result</div>
+<details class="blk tool_result" open><summary><span class="kind">tool_result</span> <span class="hdr">(2421 chars)</span></summary><pre>1	status: complete
+2	predict: |
+3	  predict loop=2 shape=A
+4	
+5	  ### story h-002
+6	  s1. Loop 1 confirmed that bash was spawned via a host-side exec primitive (proc.pname=null), consistent with docker exec or a similar runtime crossing the container namespace boundary into target-endpoint.
+7	  s2. An operator or automated pipeline session initiated that exec; the change-management anchor is the authoritative record of approved exec windows covering this workload.
+8	  s3. Confirming an active change ticket whose scope includes target-endpoint and whose window contains the alert timestamp 2026-05-03T12:40:15Z closes the authorization question; the ticket's initiator field resolves identity-of-use in the same lookup.
+9	
+10	  :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+11	  h-002|?operator-exec-session|v-001|initiated_by|exec_session|operator-exec-session|target=target-endpoint;cmdline=bash -c whoami|"change-management ticket names the initiator who opened the exec window; confirming the ticket authorizes the action and identifies the responsible actor in one resolution"|null|active
+12	
+13	  :P h-002.preds [id|subject|kind|from_story|claim]
+14	  p1|proposed_edge|absolute|s2|"change-management returns at least one active or recently-closed ticket whose window contains 2026-05-03T12:40:15Z"
+15	  p2|proposed_edge|absolute|s2|"the matching ticket's target scope covers target-endpoint (or its encompassing tier)"
+16	
+17	  :P h-002.refuts [id|refutes|kind|claim]
+18	  r1|p1|absolute|"no change ticket's window contains the alert timestamp"
+19	  r2|p2|absolute|"a matching ticket exists but its target scope does not cover target-endpoint"
+20	
+21	  :P h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+22	  ac1|proposed|change-management|"an active or recently-closed change ticket whose window contains the alert timestamp and whose target scope covers target-endpoint, with a type consistent with an interactive or scripted exec session"|esc|esc
+23	
+24	  :R routing
+25	  selected_lead         change-management-lookup
+26	  composite_secondary   -
+27	  override_data_source  -
+28	  rationale             "change-management anchor is the cheapest disposition-settling check; resolves both authorization and identity-of-use in one trip"
+29	
+30	  :R routing.scope_override [key|value]
+31	  window_hours|1
+32	  anchor|alert
+33	</pre></details>
+<div class="ts">2026-05-03T12:56:53.880Z — tool_use Write</div>
+<details class="blk tool_use" open><summary><span class="kind">tool_use</span> <span class="hdr">Write /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/subagent_checkpoints/predict-loop-2.yaml</span></summary><pre>file_path: /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/subagent_checkpoints/predict-loop-2.yaml
+---
+status: complete
+predict: |
+  predict loop=2 shape=A
+
+  ### story h-001
+  s1. Loop 1 confirmed proc.pname=null and a benign-action-class cmdline (whoami), grounding the host-side exec primitive mechanism.
+  s2. The authorization contract on h-001 (ac1, change-management anchor) remains the open question; no upstream lookup has run yet.
+  s3. Re-declared with status=confirmed to anchor l-001b's resolution cross-reference; no predictions change.
+
+  ### story h-002
+  s1. Loop 1 confirmed that bash was spawned via a host-side exec primitive (proc.pname=null), consistent with docker exec or a similar runtime crossing the container namespace boundary into target-endpoint.
+  s2. An operator or automated pipeline session initiated that exec; the change-management anchor is the authoritative record of approved exec windows covering this workload.
+  s3. Confirming an active change ticket whose scope includes target-endpoint and whose window contains the alert timestamp 2026-05-03T12:40:15Z closes the authorization question; the ticket's initiator field resolves identity-of-use in the same lookup.
+
+  :H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+  h-001|?underlying-host-exec-primitive|v-001|spawned|exec_primitive|host-side-exec-primitive|mechanism=namespace-boundary-crossing;pname=null|"change-management record names the operator who opened the exec session; confirming the ticket authorizes the action and identifies the responsible actor"|++|confirmed
+  h-002|?operator-exec-session|v-001|initiated_by|exec_session|operator-exec-session|target=target-endpoint;cmdline=bash -c whoami|"change-management ticket names the initiator who opened the exec window; confirming the ticket authorizes the action and identifies the responsible actor in one resolution"|null|active
+
+  :P h-002.preds [id|subject|kind|from_story|claim]
+  p1|proposed_edge|absolute|s2|"change-management returns at least one active or recently-closed ticket whose window contains 2026-05-03T12:40:15Z"
+  p2|proposed_edge|absolute|s2|"the matching ticket's target scope covers target-endpoint (or its encompassing tier)"
+
+  :P h-002.refuts [id|refutes|kind|claim]
+  r1|p1|absolute|"no change ticket's window contains the alert timestamp"
+  r2|p2|absolute|"a matching ticket exists but its target scope does not cover target-endpoint"
+
+  :P h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+  ac1|proposed|change-management|"an active or recently-closed change ticket whose window contains the alert timestamp and whose target scope covers target-endpoint, with a type consistent with an interactive or scripted exec session"|esc|esc
+
+  :R routing
+  selected_lead         change-management-lookup
+  composite_secondary   -
+  override_data_source  -
+  rationale             "change-management anchor is the cheapest disposition-settling check; resolves both authorization and identity-of-use in one trip"
+
+  :R routing.scope_override [key|value]
+  window_hours|1
+  anchor|alert
+</pre></details>
+<div class="ts">2026-05-03T12:56:54.328Z — tool_result</div>
+<details class="blk tool_result" open><summary><span class="kind">tool_result</span> <span class="hdr">(181 chars)</span></summary><pre>The file /tmp/soc-agent-orchestrate-eval/20260503-124027-rule100001/runs/356e46ca-40a0-4fc2-992b-d25bf64f37a7/subagent_checkpoints/predict-loop-2.yaml has been updated successfully.</pre></details>
+<div class="ts">2026-05-03T12:57:01.178Z — assistant text</div>
+<details class="blk text" open><summary><span class="kind">text</span> <span class="hdr">assistant text</span></summary><pre>predict loop=2 shape=A
+
+### story h-001
+s1. Loop 1 confirmed proc.pname=null and a benign-action-class cmdline (whoami), grounding the host-side exec primitive mechanism.
+s2. The authorization contract on h-001 (ac1, change-management anchor) remains the open question; no upstream lookup has run yet.
+s3. Re-declared with status=confirmed to anchor l-001b's resolution cross-reference; no predictions change.
+
+### story h-002
+s1. Loop 1 confirmed that bash was spawned via a host-side exec primitive (proc.pname=null), consistent with docker exec or a similar runtime crossing the container namespace boundary into target-endpoint.
+s2. An operator or automated pipeline session initiated that exec; the change-management anchor is the authoritative record of approved exec windows covering this workload.
+s3. Confirming an active change ticket whose scope includes target-endpoint and whose window contains the alert timestamp 2026-05-03T12:40:15Z closes the authorization question; the ticket's initiator field resolves identity-of-use in the same lookup.
+
+:H hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|integrity_waived?|weight|status]
+h-001|?underlying-host-exec-primitive|v-001|spawned|exec_primitive|host-side-exec-primitive|mechanism=namespace-boundary-crossing;pname=null|"change-management record names the operator who opened the exec session; confirming the ticket authorizes the action and identifies the responsible actor"|++|confirmed
+h-002|?operator-exec-session|v-001|initiated_by|exec_session|operator-exec-session|target=target-endpoint;cmdline=bash -c whoami|"change-management ticket names the initiator who opened the exec window; confirming the ticket authorizes the action and identifies the responsible actor in one resolution"|null|active
+
+:P h-002.preds [id|subject|kind|from_story|claim]
+p1|proposed_edge|absolute|s2|"change-management returns at least one active or recently-closed ticket whose window contains 2026-05-03T12:40:15Z"
+p2|proposed_edge|absolute|s2|"the matching ticket's target scope covers target-endpoint (or its encompassing tier)"
+
+:P h-002.refuts [id|refutes|kind|claim]
+r1|p1|absolute|"no change ticket's window contains the alert timestamp"
+r2|p2|absolute|"a matching ticket exists but its target scope does not cover target-endpoint"
+
+:P h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|proposed|change-management|"an active or recently-closed change ticket whose window contains the alert timestamp and whose target scope covers target-endpoint, with a type consistent with an interactive or scripted exec session"|esc|esc
+
+:R routing
+selected_lead         change-management-lookup
+composite_secondary   -
+override_data_source  -
+rationale             "change-management anchor is the cheapest disposition-settling check; resolves both authorization and identity-of-use in one trip"
+
+:R routing.scope_override [key|value]
+window_hours|1
+anchor|alert</pre></details></body></html>

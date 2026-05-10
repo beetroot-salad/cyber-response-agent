@@ -1,0 +1,20 @@
+{
+  "agent": {"name": "sysmon-collector", "id": "sysmon"},
+  "manager": {"name": "wazuh.manager"},
+  "data": {
+    "host": "WIN-DEV-3211",
+    "host_role": "developer-workstation",
+    "rule_name": "Unusual process-creation burst from one parent",
+    "parent_image": "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+    "parent_pid": 9244,
+    "user": "DOMAIN\\ksilva",
+    "window_5min": {
+      "child_process_count": 142,
+      "distinct_child_images": 38,
+      "child_image_name_avg_length": 14,
+      "child_image_name_avg_entropy": 3.12
+    }
+  },
+  "rule": {"id": "100110", "level": 8, "description": "Sysmon: child-process burst from one parent"},
+  "timestamp": "2026-04-26T07:14:32.118+0000"
+}

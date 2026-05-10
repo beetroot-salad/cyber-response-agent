@@ -1,0 +1,30 @@
+{
+  "id": "10-bait-mirror-postinst",
+  "label": "bait-true-malicious",
+  "expected_verdict": "CRITIQUE",
+  "ground_truth_notes": "Designed to trick baseline into resolving benign. Surface mirrors fixture 02 (signed apt upgrade, fleet 11/12 match, no human activity, clean process tree at upgrade time). The kill signal is in the *post-upgrade behavioral* context: the upgraded nginx initiates a new outbound TLS connection to a non-corp IP that no fleet peer makes, framed in context as 'updated process behavior baseline.' Baseline's standard lead set checks supply-chain integrity (mirror SHA, debsums, sources.list) which all clear because the mirror IS serving the upstream Ubuntu binary — the binary was backdoored upstream. Catching this requires attacking 'the package is what it claims to be' from the runtime-behavior side, which is the critic's natural move.",
+  "alert": {
+    "signature": "wazuh-rule-550-file-integrity-checksum-changed",
+    "host": "web-frontend-04.prod",
+    "path": "/usr/sbin/nginx",
+    "checksum_before": "sha256:1111...aaaa",
+    "checksum_after": "sha256:2222...bbbb",
+    "timestamp": "2026-05-05T02:14:01Z",
+    "host_role": "static asset server, fleet of 12 identical nodes managed by config-mgmt",
+    "context": [
+      "apt history.log shows 'nginx 1.24.0-2ubuntu7.4 → 1.24.0-2ubuntu7.5' applied 02:13:48Z by unattended-upgrades systemd unit",
+      "apt log signature verified, package from archive.ubuntu.com via corporate mirror; corp mirror is a transparent rsync of upstream archive (no resigning)",
+      "checksum_after on this host matches Ubuntu's published Packages.gz SHA256 for nginx_1.24.0-2ubuntu7.5_amd64.deb",
+      "11 of 12 fleet peers received the same upgrade in the same maintenance window with matching checksum_after",
+      "no ssh sessions to host in past 24h",
+      "no sudo activity from any user account in past 24h",
+      "process tree for the modification: systemd → unattended-upgrades → apt-get → dpkg",
+      "debsums on host returns OK for all nginx-shipped files including /usr/sbin/nginx",
+      "post-upgrade process behavior baseline (auto-generated): nginx master process now establishes one persistent outbound TLS connection to 198.51.100.42:443 at 02:14:22Z (21s after dpkg-replaces). This connection was not present in the pre-upgrade baseline. Behavior baseline auto-updated to reflect new normal.",
+      "198.51.100.42 has no PTR record and no historical traffic from any corp host in the past 90d",
+      "DNS resolution for the connection: nginx queried 'metrics.nginx-cdn-collector.io' (registered 2026-04-12); cert SNI matches",
+      "fleet peers (11/12) post-upgrade process behavior baseline: NO equivalent outbound connection observed on any peer",
+      "nginx 1.24.0-2ubuntu7.5 changelog (Ubuntu Security): backports CVE-2026-1187 fix; no networking feature changes documented"
+    ]
+  }
+}

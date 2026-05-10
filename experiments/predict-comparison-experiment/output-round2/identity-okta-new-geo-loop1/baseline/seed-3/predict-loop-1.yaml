@@ -1,0 +1,29 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "the baseline contains a successful sign-in from a geographically distinct location within a window that makes simultaneous presence in VN physically unreachable"
+        read_as: "impossible-travel"
+        advance_to: escalate
+      - id: lp2
+        if: "no impossible-travel signal is present, and the baseline shows the user's recent sign-in geography is narrow (single country or a small set of established locations with no prior record of VN or neighboring regions)"
+        read_as: "sedentary-user-novel-geo"
+        advance_to: fork-at-credential-integrity
+      - id: lp3
+        if: "no impossible-travel signal is present, and the baseline shows the user has a multi-country or geographically diverse sign-in history (established traveler pattern)"
+        read_as: "traveling-user-baseline"
+        advance_to: fork-at-vpn-or-legitimate-travel
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    lead_hints:
+      authentication-history: "Retrieve j.morales@example.com sign-in history across the baseline window. Return: per-event country, city, IP, outcome, MFA step, and timestamp. Return both foreground (this event) and baseline so ANALYZE can compare geo distribution and cadence. Flag any prior sign-in whose geography and timestamp make concurrent presence in VN (2026-04-26T05:42Z) physically unreachable."
+    scope_override:
+      window_hours: 168
+      anchor: alert

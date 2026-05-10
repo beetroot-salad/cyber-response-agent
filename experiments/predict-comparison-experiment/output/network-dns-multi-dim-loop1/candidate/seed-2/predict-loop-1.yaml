@@ -1,0 +1,52 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "the child image set matches the host's recurring WINWORD child-image baseline on at least two recorded dimensions (image kinds present, signing distribution)"
+        read_as: "on-baseline-office-burst"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "agent.name:WIN-DEV-3211 AND parent_image:*WINWORD* AND event_type:process_creation [past 72h]"
+          dimension: child_image_kind_signing_geometry
+      - id: lp2
+        if: "the child image set introduces image kinds absent from the host's recurring WINWORD child-image baseline (any deviation from the zero-count baseline for those image kinds)"
+        read_as: "novel-child-images"
+        advance_to: escalate
+        comparison:
+          selector_kind: historical-self
+          selector: "agent.name:WIN-DEV-3211 AND parent_image:*WINWORD* AND event_type:process_creation [past 72h]"
+          dimension: child_image_kind
+      - id: lp3
+        if: "the child image set is mixed — a subset matches baseline image kinds while at least one image kind is absent from the baseline"
+        read_as: "mixed-child-set-with-novel-images"
+        advance_to: escalate
+        comparison:
+          selector_kind: historical-self
+          selector: "agent.name:WIN-DEV-3211 AND parent_image:*WINWORD* AND event_type:process_creation [past 72h]"
+          dimension: child_image_kind
+      - id: lp4
+        if: "comparison set is empty (no prior WINWORD child-process events recorded for WIN-DEV-3211 in the 72h window)"
+        read_as: "no-baseline-establishable"
+        advance_to: fork-at-child-signing
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: []
+    lead_hints:
+      process-lineage: >
+        Target pid-9244 (WINWORD.EXE) on WIN-DEV-3211. Retrieve all child
+        processes spawned by this parent in the alert window (±15 min around
+        2026-04-26T07:14:32Z). For each child: image path, signing status,
+        command-line shape, and whether the image name is recognizable Office
+        helper vs. short/random-named. Also retrieve the 72h historical
+        WINWORD child-image baseline for this host so the reading can compare
+        the alert-window set against the established set.
+    scope_override:
+      window_hours: 72
+      anchor: alert

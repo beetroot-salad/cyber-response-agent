@@ -1,0 +1,8 @@
+{
+  "variant": "voice-mirror",
+  "rep": 2,
+  "wall_s": 111.03,
+  "prompt_chars": 28718,
+  "stdout_chars": 2322,
+  "error": null
+}

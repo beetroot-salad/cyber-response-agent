@@ -1,0 +1,13 @@
+{
+  "run_id": "550-filebeat-inode-flap",
+  "signature_id": "wazuh-rule-550",
+  "severity": 7,
+  "salt": "experimentsalt0005",
+  "created_at": "2026-04-26T11:45:00.000000+00:00",
+  "fastpath_meta": {
+    "expected_prior_level": "exact",
+    "ground_truth_lead": "syscheck-db-state",
+    "adversarial": false,
+    "notes": "Cross-signature exact-match: same prologue topology + classifications as SEED-550-INODE-001."
+  }
+}

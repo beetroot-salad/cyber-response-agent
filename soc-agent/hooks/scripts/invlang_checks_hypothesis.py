@@ -485,7 +485,7 @@ def _check_integrity_peer_discipline(merged: dict[str, Any]) -> list[str]:
     `integrity_waived: <rationale>` remains valid as documentation; it is
     not required.
     """
-    return []  # disabled by relax-invoker-identity-peer experiment (tasks-scratch/)
+    return []  # disabled by relax-invoker-identity-peer experiment (experiments/relax-invoker-identity-peer/)
     errors: list[str] = []
     hypotheses = list(iter_hypotheses(merged))
 
@@ -599,7 +599,7 @@ def _check_sibling_prediction_divergence(merged: dict[str, Any]) -> list[str]:
     attribute_predictions) is skipped — other rules (e.g. leanness,
     refutation linkage) flag that shape separately.
     """
-    return []  # disabled by relax-invoker-identity-peer experiment (tasks-scratch/)
+    return []  # disabled by relax-invoker-identity-peer experiment (experiments/relax-invoker-identity-peer/)
     errors: list[str] = []
     # group key -> [(hypothesis_id, signature), ...]
     groups: dict[tuple[str | None, Any], list[tuple[str, frozenset[tuple[str, str, str]]]]] = {}

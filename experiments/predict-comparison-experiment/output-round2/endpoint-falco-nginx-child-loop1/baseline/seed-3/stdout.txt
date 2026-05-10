@@ -1,0 +1,68 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?nginx-hook-execution"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: process, classification: nginx-maintenance-hook-invocation}
+      story: |
+        nginx pid 1422 on web-edge-03 executed sh as part of a scripted
+        maintenance or deploy hook — certbot renewal, operator-authored
+        update script, or a post-deploy trigger — not in response to an
+        HTTP request. In this model the hook is operator-authored and
+        lives in a cron entry, systemd timer, or deploy-runner manifest;
+        the curl-pipe-sh cmdline fetches and executes a known update
+        artifact from updates.example.io. The process lineage should
+        show nginx pid 1422's parent chain includes a scheduler or
+        deploy-runner rather than the standard nginx master-worker tree.
+        A concurrent deploy-runs record with a matching execution window
+        and a manifest referencing the observed endpoint or cmdline
+        pattern anchors the authorization verdict; no such record is the
+        adversarial outcome. No prior rule-100110 investigations exist,
+        so baseline cadence is structurally zero — any prior benign hook
+        execution of this shape would be the first recorded instance.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "nginx pid 1422's parent chain includes a scheduler or deploy-runner process rather than the standard nginx master-worker ancestry"
+          from_story_link: "the process lineage should show nginx pid 1422's parent chain includes a scheduler or deploy-runner"
+        - id: p2
+          subject: proposed_edge
+          claim: "deploy-runs records an active maintenance or deploy run whose execution window contains the shell-spawn timestamp"
+          from_story_link: "a concurrent deploy-runs record with a matching execution window anchors the authorization verdict"
+        - id: p3
+          subject: proposed_edge
+          claim: "the matching run's manifest references the observed endpoint (updates.example.io) or the observed cmdline pattern"
+          from_story_link: "a manifest referencing the observed endpoint or cmdline pattern anchors the authorization verdict"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "nginx pid 1422's parent chain follows the standard nginx master-worker tree with no scheduler or deploy-runner ancestor"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "no deploy-runs record's execution window contains the shell-spawn timestamp"
+        - id: r3
+          refutes_predictions: [p3]
+          claim: "a run with a matching execution window exists but its manifest does not reference the observed endpoint or cmdline pattern"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs
+          predicate: "an active deploy or maintenance run with an execution window containing the shell-spawn timestamp, owned by an authorized operator, whose manifest references the observed endpoint or cmdline pattern"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: [deploy-runs-correlation]
+    override_data_source: null
+    lead_hints:
+      process-lineage: "Retrieve the full parent chain for nginx pid 1422 on web-edge-03 at 2026-04-26T03:11:07Z, plus any child processes of sh pid 31807. Key question: is nginx's parent a scheduler (cron, systemd timer) or deploy-runner, or the standard nginx master process? The answer routes directly to authorization."
+      deploy-runs-correlation: "Query the deploy-runs anchor for any maintenance or deploy runs active on web-edge-03 at 2026-04-26T03:11:07Z (±5 min window). Look for manifests referencing updates.example.io or a curl-pipe-sh cmdline pattern. Resolves ac1."
+```

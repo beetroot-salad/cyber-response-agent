@@ -1,0 +1,30 @@
+## Query Results
+**Query:** <JSON body>
+**Time range:** (JSON body owns time filter) to (JSON body owns time filter)
+
+### Data Source Health
+- **Source:** Wazuh Indexer (https://wazuh-indexer:9200)
+- **Most recent matching event:** no matching events
+- **Index event count (unfiltered, same window):** n/a (JSON body owns time filter)
+
+### Summary
+- **Matching events:** 10000
+
+### Aggregations (server-side, true totals over full match set)
+**agents** (2 buckets):
+  wazuh.manager: 4103849
+  target-endpoint: 221421
+
+### Sample Events (first 5)
+(no matching events)
+
+### Count Breakdown
+(no data)
+
+### Raw Sample Events (first 3, full _source)
+Use these for field-level inspection when the summary lines above don't carry
+the discriminator you need (e.g. source port, process name, connection tuple).
+
+```json
+(no matching events)
+```

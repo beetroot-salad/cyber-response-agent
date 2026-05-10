@@ -1,0 +1,57 @@
+status: complete
+predict:
+  loop: 1
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?deploy-hook-execution"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: deploy_run, classification: deploy-hook-run-on-edge-proxy}
+      story: |
+        A deploy or maintenance run targeting web-edge-03 executed a
+        hook script through the nginx worker process at 03:11, running
+        as www-data. Some deploy systems invoke post-deploy or
+        maintenance steps via nginx hooks under the server's runtime
+        user, producing exactly this process ancestry. The hook script
+        fetched and executed a remote payload from the distribution
+        endpoint encoded in the cmdline. A deploy-runs record covering
+        the alert timestamp and naming a script step that fetches from
+        the observed URL would confirm this path.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "deploy-runs records an active run targeting web-edge-03 whose execution window contains the 2026-04-26T03:11:07Z timestamp"
+          from_story_link: "A deploy or maintenance run targeting web-edge-03 executed a hook script at 03:11"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching run's script manifest includes a step that fetches and executes from the URL observed in the spawned cmdline"
+          from_story_link: "The hook script fetched and executed a remote payload from the distribution endpoint encoded in the cmdline"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no deploy run's execution window contains the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a run matching the timestamp window exists but its script manifest does not include a fetch-and-execute step referencing the observed URL"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: deploy-runs
+          predicate: "an active deploy run targeting web-edge-03 with an execution window covering the alert timestamp and a script manifest step that fetches-and-executes from the observed URL"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "deploy-runs records the initiator (human operator, scheduled trigger, or CI webhook) that opened the run; confirming the run authorizes the spawn and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: deploy-runs-correlation
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      deploy-runs-correlation: "Query for any deploy or maintenance runs against host web-edge-03 (10.0.7.18) with an execution window that contains 2026-04-26T03:11:07Z. Retrieve the script manifest or step list for any matching run and check whether it includes a fetch-and-execute step (curl or wget piped to sh) whose URL matches the one in the spawned cmdline."
+    scope_override:
+      window_hours: 2
+      anchor: alert

@@ -1,0 +1,8 @@
+{
+  "variant": "candidate",
+  "fixture": "control-runc-exec-loop1",
+  "seed": 2,
+  "elapsed_sec": 117.1,
+  "stdout_chars": 3424,
+  "prompt_chars": 16864
+}

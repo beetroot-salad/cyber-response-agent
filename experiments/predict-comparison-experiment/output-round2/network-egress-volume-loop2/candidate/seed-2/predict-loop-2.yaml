@@ -1,0 +1,62 @@
+status: complete
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?ci-initiated-artifact-upload"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: opened_tls_connection
+        parent_vertex: {type: ci_job, classification: ci-runner-artifact-upload-job}
+      story: |
+        A scheduled or ad-hoc CI job on ci-runner-04 uploaded build
+        artifacts to cdn.staticfiles.example.org as a deployment or
+        distribution pipeline step. CI runners legitimately push large
+        artifact archives (container images, compiled binaries, release
+        tarballs) to CDN origin endpoints as part of release pipelines,
+        which naturally produces highly asymmetric outbound traffic.
+        The CI orchestrator should carry a job record for ci-runner-04
+        active during the egress window, with a declared upload step
+        targeting this destination. Loop 1's host-egress-baseline pass
+        found no co-correlated CI job and flagged the destination as
+        novel for this host; a dedicated CI orchestrator query is the
+        authoritative record for whether this job existed and was
+        sanctioned.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "CI orchestrator records an active job on ci-runner-04 whose execution window contains the alert timestamp (2026-04-25T22:04:10Z)"
+          from_story_link: "The CI orchestrator should carry a job record for ci-runner-04 active during the egress window"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job's declared steps include an artifact upload step targeting cdn.staticfiles.example.org or 185.220.101.7"
+          from_story_link: "with a declared upload step targeting this destination"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no CI job execution window on ci-runner-04 contains the alert timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a matching job exists but its declared steps do not include an artifact upload targeting cdn.staticfiles.example.org or 185.220.101.7"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci-orchestrator
+          predicate: "an active CI job on ci-runner-04 with an execution window containing the alert timestamp and declared upload steps targeting this destination"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "CI orchestrator job records name the initiating identity (developer, webhook trigger, or schedule); confirming the job authorizes the egress and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: ci-job-correlation
+    composite_secondary: [source-reputation]
+    override_data_source: null
+    lead_hints:
+      ci-job-correlation: "Query CI orchestrator for jobs assigned to ci-runner-04 (10.0.18.41) with an execution window covering 2026-04-25T22:04:10Z. Retrieve job id, initiating identity, declared pipeline steps, and any configured upload destination URLs. This is the authoritative anchor for h-001.ac1."
+      source-reputation: "Check reputation of 185.220.101.7 and cdn.staticfiles.example.org / staticfiles.example.org against threat-intel feeds (blocklists, TOR exit-node lists, passive-DNS). Flag any match against known-malicious, TOR, or previously-unseen CDN infrastructure."
+    scope_override:
+      window_hours: 2
+      anchor: alert

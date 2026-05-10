@@ -1,0 +1,32 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "the user's sign-in history includes prior successful sign-ins from the same country or a geographically neighboring region within the baseline window"
+        read_as: "geo-within-baseline"
+        advance_to: halt
+      - id: lp2
+        if: "VN is absent from the user's geo baseline AND the foreground sign-in's time-of-day and cadence shape matches the user's recurring sign-in distribution"
+        read_as: "geo-novel-pattern-consistent"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "VN is absent from the user's geo baseline AND the foreground sign-in's time-of-day or cadence deviates from the user's recurring sign-in distribution on at least one recorded dimension"
+        read_as: "geo-novel-pattern-anomalous"
+        advance_to: escalate
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: [source-reputation]
+    override_data_source: null
+    lead_hints:
+      authentication-history: "Query sign-in history for j.morales@example.com. Return per-event geo (country, city), IP, outcome, timestamp, and MFA step count. Baseline window is 7 days pre-alert. Foreground is the alerting event at 2026-04-26T05:42:12Z from VN/103.27.181.42. Characterize: (1) geo distribution across baseline events, (2) time-of-day distribution of successful sign-ins, (3) whether any MFA challenge fired on the alerting event (authenticationStep field)."
+      source-reputation: "Classify 103.27.181.42 — is it a known VPN exit node, datacenter/hosting range, residential ISP, or flagged threat-intel entry? Report ASN, org name, and any proxy/VPN/tor classification."
+    scope_override:
+      window_hours: 168
+      anchor: alert
+```

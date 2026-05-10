@@ -1,0 +1,8 @@
+{
+  "variant": "baseline",
+  "fixture": "network-dns-multi-dim-loop1",
+  "seed": 1,
+  "elapsed_sec": 83.4,
+  "stdout_chars": 1570,
+  "prompt_chars": 17332
+}

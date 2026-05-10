@@ -1,0 +1,44 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "a concurrent or temporally-impossible prior successful sign-in from a different country appears in the alert-window observations (same session window or physically-impossible travel gap)"
+        read_as: "impossible-travel-detected"
+        advance_to: escalate
+      - id: lp2
+        if: "baseline sign-in country distribution contains no prior international entries; VN is a genuinely novel country for a domestic-pattern user"
+        read_as: "novel-geo-domestic-baseline"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND eventType:user.session.start [past 7d]"
+          dimension: signin_country_distribution
+      - id: lp3
+        if: "baseline sign-in country distribution contains prior international or Asia-Pacific entries; VN aligns with an established travel footprint"
+        read_as: "geo-consistent-with-travel-baseline"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "actor.alternateId:j.morales@example.com AND eventType:user.session.start [past 7d]"
+          dimension: signin_country_distribution
+      - id: lp4
+        if: "comparison_set is empty (no prior sign-in history for this user in the 7d window)"
+        read_as: "no-baseline-establishable"
+        advance_to: escalate
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    lead_hints:
+      authentication-history: "Retrieve all Okta user.session.start events for actor j.morales@example.com over the past 7 days. Return: per-event country, city, IP, outcome, MFA factor used (if any), and timestamp. Also flag any session from a country other than VN that overlaps or is within 12 hours of 2026-04-26T05:42:12Z."
+    scope_override:
+      window_hours: 168
+      anchor: alert
+```
+
+**Shape decision rationale:** Loop 1, no prior enrichment of j.morales@example.com's geo pattern. The open question is whether VN is a novel credential-theft indicator or an established travel footprint — but we can't fork on that without seeing the user's prior sign-in country distribution. `authentication-history` over 7 days is the cheapest single lead that answers all three routing questions in one pass: impossible travel (→ escalate immediately), domestic-only baseline (→ authorization fork with elevated adversarial prior), or established international footprint (→ authorization fork with lower adversarial prior). Empty baseline (new user) also routes to escalate since we can't characterize. `lp2`/`lp3` are mirror readings on the same `signin_country_distribution` dimension.

@@ -1,0 +1,22 @@
+{
+  "agent": {"ip": "10.0.6.27", "name": "edr-mssql-prod-01", "id": "061"},
+  "manager": {"name": "wazuh.manager"},
+  "data": {
+    "rule_name": "Database engine spawned shell with outbound network",
+    "proc.name": "powershell.exe",
+    "proc.cmdline": "powershell.exe -ExecutionPolicy Bypass -EncodedCommand <b64-blob-omitted>",
+    "proc.pname": "sqlservr.exe",
+    "proc.ppid": 4488,
+    "proc.pid": 8821,
+    "user.name": "MSSQL$PROD",
+    "host.role": "production-database-server",
+    "child_outbound_connection": {
+      "dst_ip": "164.92.71.108",
+      "dst_port": 8443,
+      "proto": "tcp",
+      "service_name_tls": null
+    }
+  },
+  "rule": {"id": "100110", "level": 12, "description": "EDR: SQL Server engine spawned PowerShell with outbound connection"},
+  "timestamp": "2026-04-26T09:48:00.221+0000"
+}

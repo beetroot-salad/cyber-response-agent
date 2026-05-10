@@ -1,0 +1,86 @@
+```yaml
+predict:
+  loop: 1
+  shape: M
+
+  hypotheses:
+    - id: h-001
+      name: "?scheduled-maintenance-script"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: process, classification: scheduled-script-process}
+      story: |
+        A maintenance or update script running on web-edge-03 as www-data is
+        scheduled independently of nginx's HTTP request-handling pipeline — via
+        cron, a CI/CD agent, or a systemd timer. The script invokes a process
+        that shares the nginx worker execution context (pid 1422), then launches
+        sh to fetch and execute a payload from updates.example.io. Because the
+        trigger is a scheduler rather than an inbound HTTP request, the lineage
+        above nginx pid 1422 should contain a scheduling ancestor (cron, systemd-
+        timer unit, or CI-agent process) — not a direct nginx master worker spawn.
+        No baseline history of nginx spawning sh on this host exists (first
+        occurrence), so this shape is novel regardless of mechanism.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the process ancestry above pid 1422 includes a scheduling ancestor (cron, systemd-timer, or CI-agent process) rather than tracing to an nginx master worker-fork path"
+          from_story_link: "scheduled independently of nginx's HTTP request-handling pipeline"
+        - id: p2
+          subject: proposed_edge
+          claim: "no co-firing HTTP-triggered alert or inbound-request-correlated event appears in the endpoint event stream at T on web-edge-03"
+          from_story_link: "trigger is a scheduler rather than an inbound HTTP request"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "the process ancestry above pid 1422 traces to the nginx master daemon's worker-fork path with no scheduling ancestor present"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "at least one co-firing endpoint event at T on web-edge-03 corresponds to an inbound HTTP request that maps to the shell spawn timing"
+      weight: null
+
+    - id: h-002
+      name: "?http-request-triggered-exec"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: spawned
+        parent_vertex: {type: process, classification: nginx-request-worker-process}
+      story: |
+        An inbound HTTP request processed by nginx worker pid 1422 at T triggered
+        execution of the alerting shell — via a proxied application's command
+        injection vulnerability, a server-side script, or a webshell that an
+        attacker reached via HTTP. The curl-pipe-sh cmdline (fetching from
+        updates.example.io) is the attacker's remote payload delivery instruction
+        embedded in or triggered by the request. Because the trigger is a live
+        HTTP request, the ancestry above pid 1422 should trace through the nginx
+        master daemon's worker-fork path, and a corresponding inbound-request
+        event will appear in the endpoint event stream near T.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the process ancestry above pid 1422 traces to the nginx master daemon's worker-fork path with no scheduling ancestor"
+          from_story_link: "ancestry above pid 1422 should trace through the nginx master daemon's worker-fork path"
+        - id: p2
+          subject: proposed_edge
+          claim: "at least one co-firing endpoint event at T on web-edge-03 corresponds to an inbound HTTP request that maps to the shell spawn timing"
+          from_story_link: "corresponding inbound-request event will appear in the endpoint event stream near T"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "the process ancestry above pid 1422 contains a scheduling ancestor rather than tracing to an nginx master worker-fork path"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "no co-firing HTTP-triggered alert or inbound-request-correlated event appears in the endpoint event stream at T on web-edge-03"
+      weight: null
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: [correlated-endpoint-events]
+    override_data_source: null
+    lead_hints:
+      process-lineage: "Reconstruct the full ancestor chain of pid 31807 (sh) and its direct parent nginx pid 1422 on web-edge-03. The load-bearing question is whether the ancestry above pid 1422 contains a scheduling ancestor (cron daemon, systemd timer unit, CI-agent process) or traces directly through the nginx master daemon's worker-fork path. Capture sibling processes spawned by pid 1422 in the window around T if available."
+      correlated-endpoint-events: "Retrieve endpoint events on web-edge-03 at T=2026-04-26T03:11:07Z ±2 minutes. Surface any co-firing alerts or inbound-HTTP-request-correlated events that map to the shell spawn timing. A co-firing HTTP request event supports h-002; absence supports h-001."
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```

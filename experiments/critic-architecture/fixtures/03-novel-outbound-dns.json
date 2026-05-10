@@ -1,0 +1,21 @@
+{
+  "id": "03-novel-outbound-dns",
+  "label": "novel-no-playbook",
+  "expected_verdict": "CRITIQUE or ESCALATE",
+  "ground_truth_notes": "No prior incidents like this. The defender will probably reach for benign explanations (admin testing, supply-chain library phoning home). The critic should attack the strongest one with an observable test, OR concede that the worry is real but the test is unrunnable here (ESCALATE). Either is acceptable; CONCEDE is the failure.",
+  "alert": {
+    "signature": "egress-dns-query-to-rare-tld",
+    "host": "build-runner-07.ci",
+    "host_role": "stateless CI runner, ephemeral, builds JS frontend artifacts",
+    "query": "telemetry-collect.live (.live TLD)",
+    "query_count_24h": 47,
+    "query_pattern": "every ~30 min, +/- 3 min jitter",
+    "first_seen_org_wide": "2026-05-04T22:11Z (29 hours before alert)",
+    "fleet_peers_with_same_query": "0 of 38",
+    "resolved_to": "203.0.113.42 (no PTR, no historical reputation, registered 2026-04-21)",
+    "process_responsible": "node (PID 2188) — child of npm exec → child of github-runner job 'build-frontend-pr-9921'",
+    "pr_9921_diff_summary": "adds new dependency '@quickmetrics/runtime-collector@0.1.2', published to npm 2026-05-04T20:50Z by maintainer with no other packages",
+    "outbound_volume": "~280 bytes per query, no significant data egress observed",
+    "sandbox_egress_policy": "CI runners can reach internet; no allowlist enforced"
+  }
+}

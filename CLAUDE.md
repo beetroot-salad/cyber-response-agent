@@ -193,12 +193,30 @@ Shared helpers: `run_context.py` (session→run resolution), `permissions.py` (p
 │   └── skills/                    # Personal dev skills (not shipped): analyze-pilot, invlang, ship, testrun
 │
 ├── docs/                          # Design documentation
+├── experiments/                   # Kept experiment writeups + adjacent artifacts (see "Experiments & Scratch Work")
 ├── playground/                    # Docker / Wazuh stack / ticket-server for dev + eval
 ├── tasks/                         # Kanban task files (one .md per task, frontmatter-driven)
 │   └── build.py                   # Renders board.html from tasks/*.md
 ├── board.html                     # Generated kanban board — open in browser, no server
 └── .devcontainer/                 # Docker environment
 ```
+
+## Experiments & Scratch Work
+
+There are two distinct surfaces — pick the right one before writing files.
+
+**`experiments/{name}/`** — the single canonical home for experiment findings worth keeping. One subdirectory per experiment, each containing the writeup (`README.md` / `findings.md` / `RESULTS.md`) plus its load-bearing artifacts (fixtures, harness, results, transcripts). Anything you'd want to cite from a task file or a future post-mortem belongs here. Replaces the historical `tasks-scratch/`, `docs/experiments/`, and `soc-agent/experiments/` locations (consolidated 2026-05-10).
+
+**Ephemeral scratch (one-shot probes, throwaway harnesses, debugging notes)** — do **not** add to `experiments/` and do **not** create new top-level scratch dirs. Use a git worktree:
+
+```bash
+git worktree add .claude/worktrees/{branch-name} -b {branch-name}
+# ... work inside the worktree; commit incrementally ...
+# At the end either: open a PR (worktree contents land on the branch),
+# or discard with: git worktree remove .claude/worktrees/{branch-name} --force
+```
+
+Promote a worktree's outputs into `experiments/{name}/` only if there's a writeup with reusable findings. Loose probe scripts with no companion writeup should be deleted, not relocated.
 
 ## Task Tracking
 

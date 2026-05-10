@@ -44,12 +44,12 @@ This is a doc-pass task — no behavior changes, no schema changes. Scope is tig
 - Cost baseline table past entries (#1-#43) stay as historical record with HYPOTHESIZE/CONCLUDE names — they happened under the old terms. New entries use PREDICT/REPORT.
 - Anti-pattern callouts (quirks section) — update references.
 
-**Golden reference** (`tasks-scratch/golden-rule100001-scenario-A.md`):
+**Golden reference** (`experiments/golden-rule100001/golden-rule100001-scenario-A.md`):
 - Rename HYPOTHESIZE section → PREDICT; CONCLUDE → REPORT.
 - **Rewrite the positive-example section** to show ONE mechanism hypothesis + two legitimacy_contract entries + one composite lead, as the scaffold shape PREDICT should emit. (Today the golden already describes this in prose but the phase header says HYPOTHESIZE.)
 - Anti-patterns stay — they are negative examples by design.
 - Target metrics table: rename columns; same timing targets.
-- Consider moving the golden from `tasks-scratch/` to a permanent location under `soc-agent/tests/fixtures/golden-set/` or `docs/experiments/golden-set/` so it's discoverable + can seed a future regression harness. (Decide during this task; don't block on infrastructure.)
+- Consider moving the golden from `experiments/` to a permanent location under `soc-agent/tests/fixtures/golden-set/` or `experiments/golden-set/` so it's discoverable + can seed a future regression harness. (Decide during this task; don't block on infrastructure.)
 
 **Design docs** (`docs/`):
 - `design-v3-overview.md`, `design-v3-architecture.md`, `design-v3-tool-execution.md`, `design-v3-hypothesis-archetype-rewrite.md`, `design-v3-authority-consultation.md`: scan for phase names, update.

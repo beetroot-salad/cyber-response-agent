@@ -67,7 +67,7 @@ Severity cap: baseline-consistency leads default to `moderate` severity (one-ste
 - SKILL.md operating principle #4: drop "maintain adversarial hypothesis until `--`"; replace with pointer to legitimacy contracts and the policy-vs-integrity boundary.
 - docs/investigation-language.md: new §Legitimacy-as-edge-attribute subsection under Philosophy; new `legitimacy_contract`/`legitimacy_resolutions` fields in §Hypothesis and §Edge; validator rules #19–#22; commentary establishing contracts = policy, mechanism = integrity, and contracts bottom out at AuthN.
 
-See `docs/experiments/hypothesize-subagent-v2/schema-delta-legitimacy.md` for the full draft; v2.8 spec being applied inline to `docs/investigation-language.md`.
+See `experiments/hypothesize-subagent-v2/schema-delta-legitimacy.md` for the full draft; v2.8 spec being applied inline to `docs/investigation-language.md`.
 
 **Why it's a blocker.** The hypothesize-subagent v2 pilot (April 2026) and the rule-100001 playbook revision both surfaced this: forcing `?compromise-followup` as a seed makes clean mechanism enumeration impossible. Until the rule is reframed, every playbook rewrite either violates the rule (cleaner but non-compliant) or inflates the hypothesis space (compliant but ugly). For the rule-100001 revision we chose the former pragmatically; the validator does not yet enforce the adversarial-hypothesis rule, so there is no immediate break. But the inconsistency is now visible in the seed and will confuse the subagent extraction work.
 
@@ -77,4 +77,4 @@ See `docs/experiments/hypothesize-subagent-v2/schema-delta-legitimacy.md` for th
 - Every playbook's hypothesis seeds (rule-5710 pending rewrite, rule-100001 already written in the cleaner style and should not regress)
 - Validator implementation in `soc-agent/scripts/invlang/`
 
-**Downstream dependencies.** Hypothesize subagent pilot v2 is deferred until this is resolved — otherwise scoring hinges on whether an arm pays lip service to the rule, which is noise. See `docs/experiments/hypothesize-subagent-v2/`.
+**Downstream dependencies.** Hypothesize subagent pilot v2 is deferred until this is resolved — otherwise scoring hinges on whether an arm pays lip service to the rule, which is noise. See `experiments/hypothesize-subagent-v2/`.

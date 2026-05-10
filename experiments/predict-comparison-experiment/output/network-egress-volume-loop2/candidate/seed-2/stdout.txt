@@ -1,0 +1,31 @@
+```yaml
+predict:
+  loop: 2
+  shape: E
+
+  branch_plan:
+    primary_lead: source-reputation
+    predictions:
+      - id: lp1
+        if: "destination 185.220.101.7 / cdn.staticfiles.example.org is flagged in threat-intel feeds or is unrecognized as a known provider (no established footprint in org environment history and no match against known CDN/artifact/cloud provider allowlist)"
+        read_as: "novel-or-malicious-destination"
+        advance_to: escalate
+      - id: lp2
+        if: "destination is classified as a known legitimate CDN or artifact hosting provider AND appears in the org's sanctioned destination registry or known-provider allowlist"
+        read_as: "sanctioned-known-provider"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "destination is classified as a known CDN or hosting provider by reputation but does NOT appear in the org's sanctioned destination registry or known-provider allowlist"
+        read_as: "known-provider-unsanctioned"
+        advance_to: fork-at-authorization
+
+  routing:
+    selected_lead: source-reputation
+    composite_secondary: []
+    lead_hints:
+      source-reputation: "Classify destination 185.220.101.7 and ssl.server_name cdn.staticfiles.example.org. Check threat-intel feeds for the IP. Determine whether the parent domain staticfiles.example.org (or its eTLD+1) is a known CDN, artifact host, or cloud provider. Cross-reference against the org's known destination allowlist / sanctioned provider registry. Return: reputation verdict (known-provider / unrecognized / flagged), any threat-intel hits, and whether the destination appears in org environment history."
+```
+
+**Lead-selection reasoning.** Loop 1 gave us two anomaly signals: the destination is novel (absent from ci-runner-04's 30-day destination set) and the volume is a 13× outlier against the 99th-percentile 5-min distribution. The CI job correlation was already negative. The remaining cheapest discriminator is destination reputation — it directly partitions the outcome space without requiring a hypothesis fork. A threat-intel hit or unrecognized destination collapses to escalation immediately; a sanctioned known provider opens an authorization question (was there a CI job after all, perhaps undocumented?); a known-but-unsanctioned provider is the ambiguous middle case that still routes to an authorization fork but carries higher adversarial prior. Destination reputation is the single lead that cleanly partitions all three paths in one query.
+
+**Reading geometry.** Three mutually-exclusive readings cover the partition: flagged/unrecognized → escalate (lp1); known and sanctioned → authorization fork (lp2); known but unsanctioned → authorization fork with elevated risk signal (lp3). No comparison blocks attached — destination reputation is a categorical classification, not a baseline-deviation measurement.

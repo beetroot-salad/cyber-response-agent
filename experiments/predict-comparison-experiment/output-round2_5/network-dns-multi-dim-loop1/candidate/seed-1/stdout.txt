@@ -1,0 +1,45 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "the foreground child-image set matches WINWORD.EXE's recurring child-process baseline on this host on at least two recorded dimensions (image diversity, name geometry, or image-kind distribution)"
+        read_as: "on-baseline-burst"
+        advance_to: fork-at-burst-trigger
+        comparison:
+          selector_kind: historical-self
+          selector: "parent_image:WINWORD.EXE AND host:WIN-DEV-3211 [past 72h]"
+          dimension: child_image_set_geometry
+      - id: lp2
+        if: "the foreground introduces child image kinds absent from WINWORD.EXE's 72h baseline on this host (any deviation from the zero-count baseline for that image kind) or the foreground child-image diversity deviates from the baseline distribution on at least one recorded dimension"
+        read_as: "anomalous-child-profile"
+        advance_to: escalate
+        comparison:
+          selector_kind: historical-self
+          selector: "parent_image:WINWORD.EXE AND host:WIN-DEV-3211 [past 72h]"
+          dimension: child_image_diversity_and_kind
+      - id: lp3
+        if: "comparison set is empty (no prior WINWORD.EXE child-process events recorded for this host in the 72h window)"
+        read_as: "no-baseline-establishable"
+        advance_to: escalate
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: []
+    lead_hints:
+      process-lineage: >
+        Reconstruct child-process tree under WINWORD.EXE pid 9244 on WIN-DEV-3211.
+        Return both the foreground burst window (alert ±5 min) and a 72h historical
+        baseline of all child processes spawned by WINWORD.EXE on this host — image
+        names, counts, and distinct-image cardinality — so the foreground can be
+        compared against the established pattern.
+    scope_override:
+      window_hours: 72
+      anchor: alert
+```
+
+**Reasoning:** Loop 1, no prior enrichment of WINWORD.EXE's child-process behavior on this host. The alert fields (142 children, 38 distinct images) are suggestive but uninterpretable without a baseline — 38 distinct child images could be normal for a developer running a mail-merge batch with multiple helper tools, or it could be a macro dropper. The single cheapest discriminator is whether this burst's child-image profile matches what WINWORD.EXE has historically spawned on WIN-DEV-3211. `process-lineage` fetches both the foreground and the 72h historical baseline in one pass; the three readings partition the outcome space cleanly (on-baseline → investigate trigger; anomalous profile → escalate; no baseline at all → escalate conservatively). No fork is earned yet — mechanism and authorization both remain open until the baseline comparison resolves.

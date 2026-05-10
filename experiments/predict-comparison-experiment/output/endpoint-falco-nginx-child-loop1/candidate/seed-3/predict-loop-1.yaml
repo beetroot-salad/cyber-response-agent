@@ -1,0 +1,30 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: process-lineage
+    predictions:
+      - id: lp1
+        if: "lineage above nginx worker pid 1422 shows standard nginx master ancestry with no external trigger process (cron daemon, deploy script, sshd-backed session, or maintenance scheduler) between init and nginx master"
+        read_as: rce-execution-path — sh was spawned from within a request-handling worker context with no scheduled or administrative trigger visible above nginx
+        advance_to: escalate
+      - id: lp2
+        if: "lineage above nginx worker pid 1422 includes an external trigger ancestor (cron daemon, deploy script, sshd-backed interactive or non-interactive session, or maintenance scheduler) between init and nginx"
+        read_as: scheduled-hook-candidate — nginx was invoked by an external trigger; the curl-pipe-sh may originate from an authorized deploy or maintenance hook rather than a request handler
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "lineage for pid 1422 is truncated, unavailable, or the process-events data source does not carry ancestry above the nginx worker"
+        read_as: insufficient-lineage-data — parent chain cannot be determined; curl-pipe-sh shape alone is high-risk
+        advance_to: escalate
+
+  routing:
+    selected_lead: process-lineage
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      process-lineage: "Reconstruct the full parent chain of nginx worker pid 1422 on host web-edge-03 (10.0.7.18) at alert time 2026-04-26T03:11:07Z, tracing ancestry from pid 1422 up to init/pid-1. Also retrieve any sibling processes of sh pid 31807 spawned from pid 1422 in a tight window around the alert. The key discriminator is whether any non-nginx ancestor (cron, sshd, deploy orchestrator) sits above pid 1422 in the chain."
+    scope_override:
+      window_hours: 1
+      anchor: alert

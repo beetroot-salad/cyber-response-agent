@@ -36,7 +36,7 @@ The loader in `scripts/handlers/_context_loader.py` then exposes `load_invlang_s
 
 Invlang is a steering mechanism — its structural constraints (lists vs dicts, required keys, validator rules) do work the prose prompt currently duplicates. When schema and prose drift apart, the agent has to reconcile both and falls through the cracks. Aligning them, then exposing the relevant slice per writer, collapses the prompt surface without losing the constraints.
 
-Experiment data (see `/workspace/tasks-scratch/hypothesize-variance-analysis.md`):
+Experiment data (see `/workspace/experiments/hypothesize-variance/hypothesize-variance-analysis.md`):
 - Run #50 drift thinking spent ~4 oscillations on "where does legitimacy_contract live, which authority, what shape" — exactly the class of question a schema excerpt would resolve.
 - Experiment B trimmed hypothesize.md to 33K (vs 37K production) by swapping in the full schema. It didn't compress much because the schema is 30K. Phase-scoped slicing would cut more.
 

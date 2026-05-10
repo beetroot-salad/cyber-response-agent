@@ -1,0 +1,170 @@
+[
+  {
+    "variant": "candidate",
+    "fixture": "control-runc-exec-loop1",
+    "seed": 1,
+    "elapsed_sec": 123.8,
+    "stdout_chars": 3766,
+    "prompt_chars": 16864
+  },
+  {
+    "variant": "candidate",
+    "fixture": "control-runc-exec-loop1",
+    "seed": 2,
+    "elapsed_sec": 117.1,
+    "stdout_chars": 3424,
+    "prompt_chars": 16864
+  },
+  {
+    "variant": "candidate",
+    "fixture": "control-runc-exec-loop1",
+    "seed": 3,
+    "elapsed_sec": 89.0,
+    "stdout_chars": 3404,
+    "prompt_chars": 16864
+  },
+  {
+    "variant": "candidate",
+    "fixture": "data-bigquery-bulk-export-loop1",
+    "seed": 1,
+    "elapsed_sec": 109.1,
+    "stdout_chars": 4371,
+    "prompt_chars": 17811
+  },
+  {
+    "variant": "candidate",
+    "fixture": "data-bigquery-bulk-export-loop1",
+    "seed": 2,
+    "elapsed_sec": 75.5,
+    "stdout_chars": 3311,
+    "prompt_chars": 17811
+  },
+  {
+    "variant": "candidate",
+    "fixture": "data-bigquery-bulk-export-loop1",
+    "seed": 3,
+    "elapsed_sec": 121.0,
+    "stdout_chars": 4365,
+    "prompt_chars": 17811
+  },
+  {
+    "variant": "candidate",
+    "fixture": "endpoint-falco-nginx-child-loop1",
+    "seed": 1,
+    "elapsed_sec": 90.1,
+    "stdout_chars": 3869,
+    "prompt_chars": 16865
+  },
+  {
+    "variant": "candidate",
+    "fixture": "endpoint-falco-nginx-child-loop1",
+    "seed": 2,
+    "elapsed_sec": 94.7,
+    "stdout_chars": 3257,
+    "prompt_chars": 16865
+  },
+  {
+    "variant": "candidate",
+    "fixture": "endpoint-falco-nginx-child-loop1",
+    "seed": 3,
+    "elapsed_sec": 98.7,
+    "stdout_chars": 1937,
+    "prompt_chars": 16865
+  },
+  {
+    "variant": "candidate",
+    "fixture": "endpoint-process-anomaly-loop1",
+    "seed": 1,
+    "elapsed_sec": 140.9,
+    "stdout_chars": 4166,
+    "prompt_chars": 17809
+  },
+  {
+    "variant": "candidate",
+    "fixture": "endpoint-process-anomaly-loop1",
+    "seed": 2,
+    "elapsed_sec": 107.8,
+    "stdout_chars": 1571,
+    "prompt_chars": 17809
+  },
+  {
+    "variant": "candidate",
+    "fixture": "endpoint-process-anomaly-loop1",
+    "seed": 3,
+    "elapsed_sec": 117.7,
+    "stdout_chars": 1659,
+    "prompt_chars": 17809
+  },
+  {
+    "variant": "candidate",
+    "fixture": "identity-okta-new-geo-loop1",
+    "seed": 1,
+    "elapsed_sec": 69.3,
+    "stdout_chars": 2443,
+    "prompt_chars": 17072
+  },
+  {
+    "variant": "candidate",
+    "fixture": "identity-okta-new-geo-loop1",
+    "seed": 2,
+    "elapsed_sec": 70.4,
+    "stdout_chars": 2179,
+    "prompt_chars": 17072
+  },
+  {
+    "variant": "candidate",
+    "fixture": "identity-okta-new-geo-loop1",
+    "seed": 3,
+    "elapsed_sec": 89.6,
+    "stdout_chars": 3567,
+    "prompt_chars": 17072
+  },
+  {
+    "variant": "candidate",
+    "fixture": "network-dns-multi-dim-loop1",
+    "seed": 1,
+    "elapsed_sec": 117.7,
+    "stdout_chars": 1518,
+    "prompt_chars": 17333
+  },
+  {
+    "variant": "candidate",
+    "fixture": "network-dns-multi-dim-loop1",
+    "seed": 2,
+    "elapsed_sec": 81.8,
+    "stdout_chars": 3256,
+    "prompt_chars": 17333
+  },
+  {
+    "variant": "candidate",
+    "fixture": "network-dns-multi-dim-loop1",
+    "seed": 3,
+    "elapsed_sec": 138.0,
+    "stdout_chars": 3671,
+    "prompt_chars": 17333
+  },
+  {
+    "variant": "candidate",
+    "fixture": "network-egress-volume-loop2",
+    "seed": 1,
+    "elapsed_sec": 93.9,
+    "stdout_chars": 3773,
+    "prompt_chars": 18160
+  },
+  {
+    "variant": "candidate",
+    "fixture": "network-egress-volume-loop2",
+    "seed": 2,
+    "elapsed_sec": 79.6,
+    "stdout_chars": 2875,
+    "prompt_chars": 18160
+  },
+  {
+    "variant": "candidate",
+    "fixture": "network-egress-volume-loop2",
+    "seed": 3,
+    "elapsed_sec": 121.0,
+    "stdout_chars": 3818,
+    "prompt_chars": 18160
+  }
+]

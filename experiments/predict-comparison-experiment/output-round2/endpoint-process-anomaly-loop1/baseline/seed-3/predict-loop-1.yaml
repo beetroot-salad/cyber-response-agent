@@ -1,0 +1,31 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: source-reputation
+    predictions:
+      - id: lp1
+        if: "destination IP 164.92.71.108 carries a malicious or C2-associated classification from threat intel"
+        read_as: "threat-intel-confirmed-adversarial-destination"
+        advance_to: escalate
+      - id: lp2
+        if: "destination IP is unclassified or unknown AND sqlservr.exe on edr-mssql-prod-01 shows a zero-count baseline for powershell child-process spawning over the 7-day window"
+        read_as: "novel-child-proc-unknown-destination"
+        advance_to: fork-at-authorization
+      - id: lp3
+        if: "destination IP is unclassified or known-legitimate AND sqlservr.exe on edr-mssql-prod-01 has prior powershell-spawn events in the 7-day baseline matching this invocation shape"
+        read_as: "child-proc-within-established-baseline"
+        advance_to: fork-at-authorization
+
+  routing:
+    selected_lead: source-reputation
+    composite_secondary: [process-lineage]
+    override_data_source: null
+    lead_hints:
+      source-reputation: "Classify destination IP 164.92.71.108 — check threat-intel feeds for malicious/C2 classification, ASN/hosting provider identity, and whether this IP has been observed communicating with hosts in this environment before."
+      process-lineage: "Focus on sqlservr.exe (pid 4488) on edr-mssql-prod-01: retrieve all child-process spawning events for sqlservr.exe over the 7-day window prior to the alert. Characterize whether powershell.exe has ever appeared as a sqlservr.exe child on this host, the frequency, and whether -EncodedCommand invocations appear in that history."
+    scope_override:
+      window_hours: 168
+      anchor: alert

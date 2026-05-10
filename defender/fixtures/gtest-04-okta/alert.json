@@ -1,0 +1,7 @@
+{
+  "rule": {"id": "5710", "description": "sshd: Attempt to login using a non-existent user", "level": 5},
+  "agent": {"name": "target-endpoint", "id": "002", "ip": "172.22.0.13"},
+  "data": {"srcuser": "nagios", "srcip": "172.22.0.10"},
+  "timestamp": "2026-05-07T07:15:01.561+0000",
+  "_test_note": "alert is sshd; lead asks for Okta SSO context — no Okta system in environment"
+}

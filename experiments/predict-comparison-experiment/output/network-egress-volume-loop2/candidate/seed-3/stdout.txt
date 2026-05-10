@@ -1,0 +1,64 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?ci-artifact-upload"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: opened_tls_connection
+        parent_vertex: {type: ci_job, classification: ci-orchestrator-job-on-runner}
+      story: |
+        ci-runner-04 initiated the 27.4 GB outbound TLS connection to
+        cdn.staticfiles.example.org as the upload leg of a CI pipeline
+        job — a push-asymmetric shape consistent with artifact publication
+        or cache-warming to a CDN-backed storage endpoint. The destination
+        is novel in the 30-day host-egress baseline, which could reflect a
+        newly provisioned CDN region or a recently added pipeline target
+        not yet established in the recurring destination set. Loop 1 found
+        no CI orchestrator correlation, which is the primary authorization
+        gap: if the job ran outside the orchestrator's normal event path
+        (direct runner invocation, recently promoted pipeline, or an
+        orchestrator log gap), the connection would appear orphaned in job
+        history. Confirming a CI job window covering the connection start,
+        combined with the destination appearing in the approved upload
+        registry, would close the authorization question; absence of either
+        forces escalation as potential credentialed-exfil.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the destination IP 185.220.101.7 and SNI cdn.staticfiles.example.org are classifiable as a known CDN or artifact-storage provider with no threat-intel flags"
+          from_story_link: "a CI pipeline job — a push-asymmetric shape consistent with artifact publication or cache-warming to a CDN-backed storage endpoint"
+        - id: p2
+          subject: proposed_edge
+          claim: "a CI orchestrator job record exists for ci-runner-04 whose execution window covers the connection start time"
+          from_story_link: "Loop 1 found no CI orchestrator correlation, which is the primary authorization gap"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "the destination IP or SNI carries a threat-intel flag or is absent from any known CDN or artifact-storage provider classification"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "no CI orchestrator job window covers the connection start on ci-runner-04 (loop 1 already found no correlation; confirmation closes this)"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci-orchestrator
+          predicate: "a CI job ran on ci-runner-04 with an execution window covering the connection start, and the job's configured upload target includes cdn.staticfiles.example.org or its registered CDN address range"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: source-reputation
+    composite_secondary: [ci-job-correlation]
+    override_data_source: null
+    lead_hints:
+      source-reputation: "Check 185.220.101.7 and SNI cdn.staticfiles.example.org against threat-intel and CDN provider classification. Is this IP/domain a recognized CDN or artifact-storage provider? Any threat-intel flags? Is the parent domain staticfiles.example.org an internal corp domain or an external one?"
+      ci-job-correlation: "Query the CI orchestrator API for jobs assigned to ci-runner-04 with an execution window covering 2026-04-25T22:04:10Z (±30 min). Look for any upload or artifact-push job targeting a CDN or external storage endpoint. Loop 1 found no correlation — confirm whether this is a log gap or a genuine absence of any scheduled job."
+    scope_override:
+      window_hours: 2
+      anchor: alert
+```

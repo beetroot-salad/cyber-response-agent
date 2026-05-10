@@ -1,0 +1,62 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?ci-pipeline-artifact-upload"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: opened_tls_connection
+        parent_vertex: {type: ci_job, classification: ci-pipeline-job-on-runner}
+      story: |
+        A CI pipeline job dispatched to ci-runner-04 executed an
+        artifact upload or cache-push step targeting
+        cdn.staticfiles.example.org, accounting for the 27 GB
+        outbound asymmetry over 70 minutes. The destination is
+        CDN-pattern by SSL name and cert, consistent with a
+        newly-adopted artifact CDN endpoint. Loop 1 found no CI
+        orchestrator job correlated to this window, which is the
+        primary unresolved gap; a job record exists but was not
+        captured by the baseline query, or none exists. The
+        destination has no 30-day history on this runner, which is
+        consistent with a first-time CDN endpoint adoption but
+        also consistent with an unauthorized novel destination.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "the CI orchestrator records an active job for ci-runner-04 whose execution window contains the connection start timestamp"
+          from_story_link: "A CI pipeline job dispatched to ci-runner-04 executed an artifact upload step"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job's configuration names cdn.staticfiles.example.org or the destination IP as an upload or cache target"
+          from_story_link: "targeting cdn.staticfiles.example.org"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no CI orchestrator job for ci-runner-04 has an execution window containing the connection start timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a job record exists in the window but its configuration does not reference the observed destination"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci-orchestrator
+          predicate: "an active CI job for ci-runner-04 whose execution window covers the connection timestamp and whose configuration declares the observed destination as an artifact upload or cache target"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "the CI orchestrator records the initiating identity (developer, scheduled trigger, or webhook) that queued the job; confirming the job authorizes the connection and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: ci-job-correlation
+    composite_secondary: [source-reputation]
+    override_data_source: null
+    lead_hints:
+      ci-job-correlation: "Query the CI orchestrator for jobs assigned to ci-runner-04 with execution windows covering 2026-04-25T22:04:10Z (connection start). Retrieve job id, initiating identity, and declared upload/cache targets if available. Resolves h-001.ac1."
+      source-reputation: "Check threat-intel and any org CDN/artifact-destination allowlist for 185.220.101.7 and cdn.staticfiles.example.org (cert CN *.staticfiles.example.org). Determine whether the destination is known malicious, sanctioned, or unrecognized."
+    scope_override:
+      window_hours: 2
+      anchor: alert
+```

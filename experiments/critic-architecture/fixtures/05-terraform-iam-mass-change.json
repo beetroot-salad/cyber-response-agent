@@ -1,0 +1,22 @@
+{
+  "id": "05-terraform-iam-mass-change",
+  "label": "true-benign",
+  "expected_verdict": "CONCEDE",
+  "ground_truth_notes": "Routine infrastructure-as-code apply. CI-issued OIDC token, plan output in PR matches applied changes, terraform state diff is exactly the PR diff. Strongest possible benign provenance chain. Tests whether the critic invents a credential-pivot attack where none is supported by the evidence.",
+  "alert": {
+    "signature": "aws-iam-mass-change",
+    "principal": "arn:aws:sts::1234:assumed-role/github-actions-tf-apply/i-09abc",
+    "changes_count": 47,
+    "change_types": "iam:AttachRolePolicy x12, iam:CreatePolicy x5, iam:CreateRole x3, iam:UpdateAssumeRolePolicy x9, iam:TagRole x18",
+    "window": "2026-05-05T14:22:01Z to 14:23:48Z (Tuesday business hours)",
+    "context": [
+      "principal is the OIDC role assumed by github-actions runner for org/infra repo, terraform-apply workflow only",
+      "github-actions run id 7799123, triggered by merge of PR #4421 to main 2026-05-05T14:21:55Z, author lkhan (platform team), reviewed by 2 platform-team approvers",
+      "PR #4421 terraform plan output (CI artifact) lists exactly the 47 IAM changes that occurred, no others",
+      "terraform state diff post-apply matches plan diff byte-for-byte",
+      "OIDC token claims: repo=org/infra, ref=refs/heads/main, workflow=tf-apply, run_id=7799123 — all match the GitHub run",
+      "no manual aws cli calls, no console logins as this role in past 90d",
+      "no sts:AssumeRole calls to this role from outside i-09abc (the canonical runner instance) in past 24h"
+    ]
+  }
+}

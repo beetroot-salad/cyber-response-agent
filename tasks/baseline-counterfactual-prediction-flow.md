@@ -132,7 +132,7 @@ Worth a manual rewrite of the rule-5710 worked example in `agents/predict.md` ag
 
 - Actionable (1) shipped on `predict-prompt-redesign` branch: `gather-composite.md` + `gather.md` `raw.siem_response` contract strengthened to require verbatim CLI passthrough including `### Raw Sample Events` JSON. This task builds on that — the structured baseline is what makes the raw passthrough load-bearing for ANALYZE.
 - Actionable (4) — environment-memory retrieval — **promoted from orthogonal to hard prerequisite by the 2026-04-25 dummy test (below).** The deviations frame doesn't author useful refutations on loop 1 without env-knowledge vocabulary; the topology task feeds it.
-- A/B harness: `/workspace/tasks-scratch/predict_ab_harness.py` (run on 2026-04-24, results in `/tmp/predict_ab_harness/`). Step 4 above re-runs it against the updated prompt.
+- A/B harness: `/workspace/(removed) predict_ab_harness.py` (run on 2026-04-24, results in `/tmp/predict_ab_harness/`). Step 4 above re-runs it against the updated prompt.
 - Run #45-equivalent (`20260424-153230-rule100001`): the disposition that motivates this task. Walkthrough of the misreading lives in this session's transcript.
 
 ## Design revision (2026-04-25)
@@ -146,8 +146,8 @@ Replace with one rule: **predictions name deviations from the lead's baseline by
 Method: temp `agents/predict_deviations.md` (canonical predict.md untouched) carrying the deviations §section + Disciplines bullet; ran against the same pre-PREDICT state used by the prior A/B harness (rule-100001 fixture, `20260424-153230-rule100001` run, `9e179055`).
 
 Harness scripts:
-- `/workspace/tasks-scratch/predict_deviations_dummy.py` — no env preload
-- `/workspace/tasks-scratch/predict_deviations_dummy_preloaded.py` — env preload (matches B-preloaded variant)
+- `/workspace/(removed) predict_deviations_dummy.py` — no env preload
+- `/workspace/(removed) predict_deviations_dummy_preloaded.py` — env preload (matches B-preloaded variant)
 
 Results in `/tmp/predict_deviations_dummy/`.
 
@@ -229,5 +229,5 @@ Decision deferred to next session. The chain itself is verified end-to-end at ev
 ## Scratch artifacts
 
 - `soc-agent/agents/predict_deviations.md` — temp deviations rewrite, source for the canonical fold-in. Delete or merge after step 2.
-- `tasks-scratch/predict_deviations_dummy.py` + `predict_deviations_dummy_preloaded.py` — harness scripts.
+- `(removed) predict_deviations_dummy.py` + `predict_deviations_dummy_preloaded.py` — harness scripts.
 - `/tmp/predict_deviations_dummy/` — outputs (D-deviations + B'-deviations stdout YAML, prompts, summaries).

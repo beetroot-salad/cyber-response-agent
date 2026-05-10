@@ -1,0 +1,29 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: service-account-job-history
+    predictions:
+      - id: lp1
+        if: "prior export jobs from this service account match the foreground on at least two recorded dimensions of the recurring baseline geometry (destination bucket pattern, volume order-of-magnitude, referenced tables, time-of-day cadence)"
+        read_as: "on-baseline-scheduled-export"
+        advance_to: fork-at-authorization
+      - id: lp2
+        if: "no prior export jobs from this service account exist in the lookback window (any deviation from a zero-count baseline for this export kind)"
+        read_as: "novel-export-no-history"
+        advance_to: escalate
+      - id: lp3
+        if: "prior export jobs exist but the foreground deviates from the baseline geometry on at least one recorded dimension (volume, destination, referenced tables, or cadence)"
+        read_as: "known-account-anomalous-shape"
+        advance_to: fork-at-mechanism
+
+  routing:
+    selected_lead: service-account-job-history
+    composite_secondary: []
+    scope_override:
+      window_hours: 168
+      anchor: alert
+    lead_hints:
+      service-account-job-history: "Retrieve all BigQuery JobService.InsertJob events for analyst-svc@analytics-prod.iam.gserviceaccount.com over the past 7 days. Return: job count, destination bucket(s), referenced tables, bytes_processed distribution, rows_returned distribution, and time-of-day cadence. Both the foreground event and the baseline shape must be in the same GATHER pass so ANALYZE can compare dimensions."

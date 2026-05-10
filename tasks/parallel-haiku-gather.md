@@ -8,7 +8,7 @@ groups: gather, orchestrator, cost-optimization
 
 ## Why
 
-Two stress tests in `tasks-scratch/parallel-gather-experiment-{1,2}.md` (2026-04-25 sessions):
+Two stress tests in `experiments/parallel-gather/parallel-gather-experiment-{1,2}.md` (2026-04-25 sessions):
 
 - **Experiment #1 (mixed-set: container-baseline + correlated-endpoint-events on rule 100001).** Container-baseline is signature-local (no on-disk def). Singleton `gather` errored fast on `missing_template`; the production composite-fallback path would re-dispatch via gather-composite, making total wall _worse_ than the baseline. Confirmed: parallelize only when all leads are on-disk. Headline number was misleading because the missing-template lead fast-failed in 33s.
 - **Experiment #2 (all-on-disk: authentication-history + network-analysis on rule 5710 scenario A).** Side-by-side parallel singletons vs serial gather-composite control on the same fixture:
@@ -48,10 +48,10 @@ Tighten `gather.md`'s status discriminator so `health_probe.verdict=baseline_all
 
 ## References
 
-- `/workspace/tasks-scratch/parallel-gather-experiment.py` — experiment #1 harness
-- `/workspace/tasks-scratch/parallel-gather-experiment.md` — experiment #1 findings
-- `/workspace/tasks-scratch/parallel-gather-experiment-2.py` — experiment #2 harness (all-on-disk fixture, side-by-side parallel + composite control)
-- `/workspace/tasks-scratch/parallel-gather-experiment-2.md` — experiment #2 findings
+- `/workspace/experiments/parallel-gather/parallel-gather-experiment.py` — experiment #1 harness
+- `/workspace/experiments/parallel-gather/parallel-gather-experiment.md` — experiment #1 findings
+- `/workspace/experiments/parallel-gather/parallel-gather-experiment-2.py` — experiment #2 harness (all-on-disk fixture, side-by-side parallel + composite control)
+- `/workspace/experiments/parallel-gather/parallel-gather-experiment-2.md` — experiment #2 findings
 - `soc-agent/scripts/handlers/gather.py` — `_dispatch_single` / `_dispatch_composite` are the integration points
 - `soc-agent/scripts/handlers/_raw_manifest.py` — `consume_new_entries` docstring already names the session_id-partition switch needed for concurrent dispatch
 - `soc-agent/scripts/handlers/_context_loader.py:162` — `load_lead_definition()` for the precondition check

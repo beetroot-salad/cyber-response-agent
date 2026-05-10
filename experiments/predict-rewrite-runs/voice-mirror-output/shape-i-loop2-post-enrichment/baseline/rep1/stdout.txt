@@ -1,0 +1,47 @@
+```yaml
+predict:
+  loop: 2
+  shape: A
+  hypotheses:
+    - id: h-001
+      name: "?monitoring-system-is-the-actor"
+      attached_to_vertex: v-001
+      proposed_edge:
+        relation: initiated_auth
+        parent_vertex: {type: process, classification: monitoring-daemon-process-on-source}
+      story: |
+        The Nagios monitoring daemon on 172.22.0.10 executed a scheduled SSH
+        reachability probe to target-endpoint at t-0. Loop 1 established a
+        periodic cadence across 11 single-attempt clusters in the 1h backward
+        window (mean inter-arrival 576s, stddev 102s), consistent with a
+        fixed-schedule health-check running on approximately 10-minute ticks.
+        sshd on target-endpoint rejected the nagios username because it is not
+        provisioned on that host — the expected outcome for a connectivity probe
+        that does not require a real local account. The source has emitted only
+        the nagios sentinel username across the entire 30-day window, reinforcing
+        a single-tool, single-purpose pattern with no diversification signal.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "approved-monitoring-sources confirms the (172.22.0.10, nagios, target-endpoint) triple as an active registered probe"
+          from_story_link: "Nagios monitoring daemon executed a scheduled SSH reachability probe to target-endpoint"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "the triple is not registered (or is marked inactive/revoked) in approved-monitoring-sources"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: approved-monitoring-sources
+          predicate: "(srcip=172.22.0.10, srcuser=nagios, target=target-endpoint) triple listed as an active approved monitoring probe"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      weight: null
+
+  routing:
+    selected_lead: monitoring-probe
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      monitoring-probe: "Query the approved-monitoring-sources registry for the exact triple (srcip=172.22.0.10, srcuser=nagios, target=target-endpoint). The anchor verdict is dispositive: authorized confirms the hypothesis and routes to monitoring-probe archetype; unauthorized or indeterminate escalates per the contract."
+```

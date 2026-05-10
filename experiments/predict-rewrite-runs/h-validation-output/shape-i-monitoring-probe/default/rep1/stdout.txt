@@ -1,0 +1,35 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "at least one successful SSH authentication event is present from srcip 172.22.0.10 within 60 seconds after the alert timestamp"
+        read_as: post-failure-success-indicator
+        advance_to: escalate
+      - id: lp2
+        if: "foreground cluster geometry is burst-shaped rather than single-attempt-periodic"
+        read_as: anomalous-burst-cadence
+        advance_to: fork-at-identity-of-use
+      - id: lp3
+        if: "foreground cluster geometry is single-attempt-periodic"
+        read_as: monitoring-probe-consistent-cadence
+        advance_to: fork-at-identity-of-use
+      - id: lp4
+        if: "foreground history contains insufficient clusters to establish a cadence pattern"
+        read_as: sparse-history-no-cadence-evidence
+        advance_to: fork-at-identity-of-use
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    override_data_source: null
+    lead_hints:
+      authentication-history: "Query all SSH auth events from srcip 172.22.0.10 scoped to srcuser nagios against target-endpoint over the 1h backward window. Compute cluster stats (cluster_count, max_cluster_size, mean and stdev inter-cluster gap using 10s retry-gap clustering rule). Additionally check for any successful auth event (rule groups authentication_success: rules 5501/5715) from srcip 172.22.0.10 within 60 seconds after the alert timestamp — this forward-success check is mandatory."
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```

@@ -1,0 +1,29 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "at least one successful authentication event from 203.0.113.42 appears within 60 seconds after the alert timestamp"
+        read_as: "forward-success detected — compromise indicator overrides archetype routing"
+        advance_to: escalate
+      - id: lp2
+        if: "no forward-success AND foreground authentication volume is burst-shaped (high event count concentrated in a tight sub-window)"
+        read_as: "external burst attack — routes toward external-bruteforce archetype"
+        advance_to: fork-at-volume-shape
+      - id: lp3
+        if: "no forward-success AND foreground authentication volume is sparse or single-attempt"
+        read_as: "low-volume external probe — routes toward credential-stuffing archetype for disposition"
+        advance_to: fork-at-authorization
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    override_data_source: null
+    scope_override:
+      window_hours: 1
+      anchor: alert
+```

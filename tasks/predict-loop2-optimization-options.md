@@ -17,7 +17,7 @@ Run `20260424-115003-rule100001` (session `7e045002`), post-lever-1 (signature-k
 | Output chars | ~2KB | 5,803 |
 | Largest single thinking block | small | **31,177 chars** (Turn 1) |
 
-Forensics in `tasks-scratch/predict-loop2-thinking-20260424.md`. The loop-1 driver that lever-1 killed (signature-knowledge restatement-and-reconcile) has reappeared on loop 2 — now attached to the accumulated `investigation.md` state instead of `<signature-knowledge>`. The 31K-char Turn-1 thinking block re-litigates resolved questions: Shape A vs M vs I (3×), 100002 SSH composition rule (3-4×), ci-pipeline-exec vs operator-runtime-debug (3×), integrity peer (2×), process-lineage as the right lead (4×).
+Forensics in `experiments/predict-wall-time/predict-loop2-thinking-20260424.md`. The loop-1 driver that lever-1 killed (signature-knowledge restatement-and-reconcile) has reappeared on loop 2 — now attached to the accumulated `investigation.md` state instead of `<signature-knowledge>`. The 31K-char Turn-1 thinking block re-litigates resolved questions: Shape A vs M vs I (3×), 100002 SSH composition rule (3-4×), ci-pipeline-exec vs operator-runtime-debug (3×), integrity peer (2×), process-lineage as the right lead (4×).
 
 **Driver:** prompt size ↔ Sonnet's upfront restatement, scaling super-linearly with "how much the prompt asks the model to hold in mind". Not a real reasoning loop on hard evidence.
 
@@ -55,7 +55,7 @@ Voice-mirror is +36% slower on mean and 2× the variance, with worst-case 384.9s
 
 **Refuting reading:** Sonnet's restatement isn't a stylistic translation pass — it's a content-reconciliation pass driven by prompt size + ambiguous input. Voice doesn't shortcut it. Skip this lever.
 
-Artifacts: `soc-agent/experiments/predict-rewrite/predict.voice-mirror.md`, `run_voice_mirror.py`, `voice-mirror-output/`.
+Artifacts: `experiments/predict-rewrite/predict.voice-mirror.md`, `run_voice_mirror.py`, `voice-mirror-output/`.
 
 ## C. Skill-style §Shapes refactor
 
@@ -126,7 +126,7 @@ E2E orchestrator run (`/tmp/soc-agent-orchestrate-eval/20260425-185339-rule5710/
 
 **SHIPPED 2026-04-25** — `effort: low` added to `agents/predict.md` frontmatter. Single-line change; reversible by removing the frontmatter line. Other Sonnet phases (analyze, conclude, report_narrative) deferred — same restatement pathology likely applies but each needs its own validation.
 
-Artifacts: `soc-agent/experiments/predict-rewrite/{run_effort_low.py, run_h_validation.py, effort-low-output/, h-validation-output/}`, e2e run at `/tmp/soc-agent-orchestrate-eval/20260425-185339-rule5710/`.
+Artifacts: `experiments/predict-rewrite/{run_effort_low.py, run_h_validation.py, effort-low-output/, h-validation-output/}`, e2e run at `/tmp/soc-agent-orchestrate-eval/20260425-185339-rule5710/`.
 
 ## E. Absorb query fallback ladders into GATHER/CLI *(orthogonal, full-loop save)*
 

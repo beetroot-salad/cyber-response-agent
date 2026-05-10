@@ -1,0 +1,12 @@
+{
+  "fixture": "shape-i-loop2-post-enrichment",
+  "variant": "baseline-effort-low",
+  "reps": 3,
+  "n_ok": 3,
+  "wall_s_mean": 62.34,
+  "wall_s_stdev": 6.63,
+  "wall_s_min": 56.18,
+  "wall_s_max": 69.35,
+  "stdout_chars_mean": 2311.3,
+  "errors": []
+}

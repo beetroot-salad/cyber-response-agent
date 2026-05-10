@@ -1,0 +1,59 @@
+status: complete
+predict:
+  loop: 2
+  shape: A
+
+  hypotheses:
+    - id: h-001
+      name: "?ci-artifact-upload"
+      attached_to_vertex: v-002
+      proposed_edge:
+        relation: opened_tls_connection
+        parent_vertex: {type: ci_job, classification: ci-artifact-upload-job}
+      story: |
+        A CI build job dispatched to ci-runner-04 executed an artifact-upload
+        step that opened the observed TLS session to cdn.staticfiles.example.org
+        and pushed a large artifact bundle, accounting for the 27.4 GB outbound
+        volume over ~70 minutes. The destination is novel to the host's 30-day
+        egress baseline and the 5-min egress rate exceeded the 99th-percentile
+        distribution by ~13x, which is consistent with a rare large-scale upload
+        but also with exfil. Loop 1 found no CI orchestrator correlation in its
+        query window; the authorization contract below asks the orchestrator
+        directly whether a job on this runner at this time included an
+        upload step targeting the observed endpoint.
+      predictions:
+        - id: p1
+          subject: proposed_edge
+          claim: "ci-orchestrator-api records an active job on ci-runner-04 whose execution window contains the connection-start timestamp"
+          from_story_link: "A CI build job dispatched to ci-runner-04 executed an artifact-upload step that opened the observed TLS session"
+        - id: p2
+          subject: proposed_edge
+          claim: "the matching job includes an artifact-upload step whose configured destination matches the observed TLS endpoint"
+          from_story_link: "an artifact-upload step that opened the observed TLS session to cdn.staticfiles.example.org"
+      refutation_shape:
+        - id: r1
+          refutes_predictions: [p1]
+          claim: "no CI job's execution window on ci-runner-04 contains the connection-start timestamp"
+        - id: r2
+          refutes_predictions: [p2]
+          claim: "a job with a matching execution window exists but no upload step is configured for the observed destination"
+      authorization_contract:
+        - id: ac1
+          edge_ref: proposed
+          anchor_kind: ci-orchestrator-api
+          predicate: "an active CI job on ci-runner-04 with an execution window containing the connection-start timestamp and an artifact-upload step configured for the observed TLS endpoint (ssl.server_name or dst IP)"
+          on_unauthorized: escalate
+          on_indeterminate: escalate
+      integrity_waived: "ci-orchestrator-api job records name the initiating identity (developer, webhook, or scheduled trigger); confirming the job authorizes the connection and identifies the responsible actor in one resolution."
+      weight: null
+
+  routing:
+    selected_lead: ci-job-correlation
+    composite_secondary: [source-reputation]
+    override_data_source: null
+    lead_hints:
+      ci-job-correlation: "Query the CI orchestrator API for jobs assigned to ci-runner-04 (10.0.18.41) with an execution window that covers 2026-04-25T22:04:10Z. The connection lasted ~70 min (4187s) so the job window may have started as early as 2026-04-25T20:54:00Z. Retrieve job name, initiating identity, and any configured upload/artifact-push steps with their destination URLs. Loop 1 found no correlation on a narrower window — widen to ±2h around the connection start."
+      source-reputation: "Classify 185.220.101.7 and ssl.server_name cdn.staticfiles.example.org (cert subject CN=*.staticfiles.example.org) against threat intel. Is the parent domain staticfiles.example.org a known CDN or cloud provider, or is it unrecognized / recently registered? Any malicious classification immediately strengthens the exfil hypothesis."
+    scope_override:
+      window_hours: 4
+      anchor: alert

@@ -1,0 +1,49 @@
+```yaml
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: service-account-job-history
+    predictions:
+      - id: lp1
+        if: "the export's destination bucket, referenced tables, approximate volume, and timing match the service account's recurring export geometry on at least two recorded dimensions"
+        read_as: "on-baseline-etl-export"
+        advance_to: fork-at-authorization
+        comparison:
+          selector_kind: historical-self
+          selector: "principalEmail:analyst-svc@analytics-prod.iam.gserviceaccount.com AND method:JobService.InsertJob AND job.statement_type:SELECT [past 30d]"
+          dimension: destination_tables_volume_timing_geometry
+      - id: lp2
+        if: "the service account has prior export jobs but this export deviates from the recurring baseline geometry on at least one recorded dimension (destination bucket, referenced tables set, or volume)"
+        read_as: "known-account-anomalous-export-shape"
+        advance_to: escalate
+        comparison:
+          selector_kind: historical-self
+          selector: "principalEmail:analyst-svc@analytics-prod.iam.gserviceaccount.com AND method:JobService.InsertJob AND job.statement_type:SELECT [past 30d]"
+          dimension: destination_tables_volume_geometry
+      - id: lp3
+        if: "comparison set is empty (no prior BigQuery export jobs for this service account in the 30d window)"
+        read_as: "no-baseline-establishable"
+        advance_to: escalate
+
+  routing:
+    selected_lead: service-account-job-history
+    composite_secondary: []
+    scope_override:
+      window_hours: 720
+      anchor: alert
+    lead_hints:
+      service-account-job-history: >
+        Retrieve all BigQuery JobService.InsertJob events where
+        principalEmail = analyst-svc@analytics-prod.iam.gserviceaccount.com
+        over the past 30 days. Return per-job: destination (GCS URI prefix),
+        referenced tables, bytes_processed, rows_returned, and timestamp.
+        The goal is to establish whether today's ~412 GB customer_pii export
+        to analytics-export-prod follows a recurring ETL cadence or is a
+        novel shape for this service account.
+```
+
+**Shape rationale.** Loop 1, no prior enrichment of `v-001` (analyst-svc). The open question — scheduled ETL or credentialed exfil — can't be forked without knowing whether this service account has a history of similar exports. `service-account-job-history` (ad-hoc, named in CONTEXTUALIZE's available-leads list) is the cheapest single discriminator: it returns the account's 30-day job geometry in one pass, and its outcome naturally partitions the next loop. If the export is on-baseline → loop 2 opens the authorization fork (is the scheduled job still approved, is the destination ACL clean). If it deviates or is novel → escalate immediately. No hypothesis fork is warranted until the baseline is in hand.
+
+**Note on signature mismatch.** The loaded signature knowledge (wazuh-rule-100110 playbook) describes a DNS/high-entropy-subdomain investigation, but the alert and CONTEXTUALIZE prologue are clearly a BigQuery bulk export case. The investigation proceeds from the confirmed prologue topology (v-001 identity → v-002 PII dataset → v-003 GCS export object); the DNS playbook leads are not applicable and have been set aside.

@@ -1,0 +1,28 @@
+status: complete
+predict:
+  loop: 1
+  shape: E
+
+  branch_plan:
+    primary_lead: authentication-history
+    predictions:
+      - id: lp1
+        if: "at least one successful SSH login (rule group authentication_success) from 203.0.113.42 appears within 60 seconds after the alert timestamp"
+        read_as: "forward-success detected — potential compromise regardless of archetype"
+        advance_to: escalate
+      - id: lp2
+        if: "no forward success AND foreground authentication volume is materially outside a low-single-attempt shape (burst cluster or multi-attempt pattern)"
+        read_as: "high-volume external pattern — consistent with active brute-force campaign"
+        advance_to: fork-at-bruteforce-vs-stuffing
+      - id: lp3
+        if: "no forward success AND foreground volume fits a low-attempt shape with no burst cluster"
+        read_as: "low-volume external attempt — consistent with credential-stuffing probe; advance to username-classification for archetype routing"
+        advance_to: fork-at-credential-stuffing-archetype
+
+  routing:
+    selected_lead: authentication-history
+    composite_secondary: []
+    override_data_source: null
+    scope_override:
+      window_hours: 1
+      anchor: alert

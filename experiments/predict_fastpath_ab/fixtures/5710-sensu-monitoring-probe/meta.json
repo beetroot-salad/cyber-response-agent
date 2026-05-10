@@ -1,0 +1,13 @@
+{
+  "run_id": "5710-sensu-monitoring-probe",
+  "signature_id": "wazuh-rule-5710",
+  "severity": 5,
+  "salt": "experimentsalt0002",
+  "created_at": "2026-04-26T12:05:00.000000+00:00",
+  "fastpath_meta": {
+    "expected_prior_level": "exact",
+    "ground_truth_lead": "approved-monitoring-sources",
+    "adversarial": false,
+    "notes": "Second canonical monitoring-probe with srcuser=sensu (also in monitoring family). Should fast-path under D."
+  }
+}

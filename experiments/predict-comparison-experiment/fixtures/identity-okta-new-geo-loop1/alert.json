@@ -1,0 +1,21 @@
+{
+  "agent": {"name": "okta-mcp", "id": "okta"},
+  "manager": {"name": "wazuh.manager"},
+  "data": {
+    "actor.alternateId": "j.morales@example.com",
+    "actor.displayName": "Julia Morales",
+    "actor.type": "User",
+    "client.geographicalContext.country": "VN",
+    "client.geographicalContext.city": "Hanoi",
+    "client.ipAddress": "103.27.181.42",
+    "client.userAgent.os": "Mac OS X",
+    "client.userAgent.browser": "CHROME",
+    "outcome.result": "SUCCESS",
+    "eventType": "user.session.start",
+    "authenticationContext.authenticationStep": 0,
+    "authenticationContext.externalSessionId": "102t7fxXXXXyznI4sJ7oEVZ_g",
+    "session.id": "102t7fxXXXXyznI4sJ7oEVZ_g"
+  },
+  "rule": {"id": "100110", "level": 8, "description": "Okta: Successful sign-in from country not seen in user's recent history"},
+  "timestamp": "2026-04-26T05:42:12.118+0000"
+}
