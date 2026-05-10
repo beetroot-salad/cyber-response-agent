@@ -15,9 +15,6 @@ scaffolding), and the actor-reviewer judge — it describes what Wazuh
 queries (defender/gather, template authors) — adapter CLI shape, flag
 conventions, dispatch-time pitfalls.
 
-For the spec governing this two-section shape and the v4 / cache
-boundary, see `docs/defender-system-skill-shape.md`.
-
 ## Visibility surface
 
 ### Available queries

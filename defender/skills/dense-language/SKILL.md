@@ -5,10 +5,7 @@ description: Compact guide for authoring defender investigation.md dense invlang
 
 The defender writes `investigation.md` as fenced `​```invlang` blocks under
 markdown phase headers (`## ORIENT`, `## PLAN`, `## GATHER (loop N)`,
-`## ANALYZE (loop N)`, `## REPORT`). Full production reference:
-`soc-agent/knowledge/invlang/schema.md`; full surface grammar:
-`docs/dense-investigation-format.md`. This skill is the short authoring
-subset.
+`## ANALYZE (loop N)`, `## REPORT`).
 
 ## Mental model
 

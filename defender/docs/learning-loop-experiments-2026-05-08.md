@@ -1,9 +1,14 @@
 # Learning-loop experiments — 2026-05-08 session notes
 
-Companion to `docs/actor-reviewer-learning-loop.md`. Captures the experiments
+Companion to `defender/docs/learning-loop.md`. Captures the experiments
 that drove the v4 environment surface and the architectural reframes that
 emerged. Written so a fresh-context session can pick up without rebuilding
 the reasoning.
+
+**Status: historical session notes.** The architecture described here
+has since landed under `defender/learning/`. Kept for the empirical
+findings (actor visibility A/B, judge prompt iteration) and the trail
+of how the current shape was reached.
 
 ## What was run
 

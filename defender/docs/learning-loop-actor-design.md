@@ -1,15 +1,18 @@
 # Learning-loop actor — design draft (2026-05-08)
 
-Companion to `docs/actor-reviewer-learning-loop.md` and
-`docs/learning-loop-experiments-2026-05-08.md`. Captures the actor-side
-decisions taken during design discussion and flags the one open
-question that an A/B trial against real fixtures will close.
+Companion to `defender/docs/learning-loop.md` and
+`defender/docs/learning-loop-experiments-2026-05-08.md`. Captures the
+actor-side decisions taken during design discussion and flags the one
+open question that an A/B trial against real fixtures closed.
 
-Status: **draft, visibility A/B resolved 2026-05-08, role-split
-reframe 2026-05-08**. The actor runs blind, produces story-only output
-(no defender-side discriminator), and the judge derives the
-discriminator. Orchestrator contract, output shape, run-dir layout,
-and gray-box reveal are all locked.
+Status: **design draft, superseded by landed implementation.** The
+actor and judge described here exist today as `defender/learning/actor.md`
+and `defender/learning/judge.md`. A telemetry-oracle stage
+(`defender/learning/oracle.md`) was inserted between them, and a
+forward-check gate (`defender/learning/verify_forward.md`) sits
+downstream of the judge — neither stage existed in this draft. When
+this doc and the code disagree, the code wins. Kept for the
+visibility-A/B and role-split reasoning.
 
 ## Scope
 

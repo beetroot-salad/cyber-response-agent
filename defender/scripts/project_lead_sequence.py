@@ -2,9 +2,9 @@
 """Project lead_sequence.yaml from a defender run dir.
 
 Reads investigation.md, walks the `:L findings` rows in dispatch order,
-and emits {run_dir}/lead_sequence.yaml per
-defender/lead_sequence_schema.md. The run dir is the path passed by
-the caller (typically $DEFENDER_RUNS_BASE/{run_id}/, default
+and emits {run_dir}/lead_sequence.yaml per the schema documented in
+defender/CLAUDE.md (§Lead-sequence schema). The run dir is the path
+passed by the caller (typically $DEFENDER_RUNS_BASE/{run_id}/, default
 /tmp/defender-runs/{run_id}/).
 
 Per defender/SKILL.md the investigation log is the source of truth: if

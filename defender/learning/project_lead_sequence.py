@@ -5,10 +5,9 @@ Drops `lead_description`, `what_to_characterize`, `result_ref`. Keeps
 only `position`, `queries[].id`, `queries[].params`. Top-level case_id
 preserved for context; nothing else.
 
-This enforces the gray-box contract specified in
-`docs/learning-loop-actor-design.md`: the actor sees raw queries
+This enforces the gray-box contract: the actor sees raw queries
 verbatim and never sees synthesized fields that would leak defender
-intent.
+intent. Background: `defender/docs/learning-loop-actor-design.md`.
 """
 import pathlib
 import sys

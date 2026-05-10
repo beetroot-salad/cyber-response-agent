@@ -2,6 +2,16 @@
 
 ## Status
 
+**Design doc, partially superseded by the landed implementation.** The
+loop described here now exists under `defender/learning/` as
+orchestrator (`loop.py`) → actor (`actor.md`) → telemetry oracle
+(`oracle.md`) → judge (`judge.md`) → forward-check
+(`verify_forward.{md,py}`) → author (`author.md`/`author.py`) →
+lessons corpus (`defender/lessons/*.md`). When this doc and the code
+disagree, code wins. Kept for the design rationale (lighter schema,
+PR-based delivery, why we walked away from the heavyweight earlier
+draft).
+
 This document describes an **offline learning mechanism** that mines completed
 investigations for reusable lessons and ships them as pull requests against the
 playbook / knowledge base. It is not a real-time guard.
@@ -15,6 +25,91 @@ together and proposed a heavyweight schema (multi-axis subjective rewards,
 canonical taxonomy, anti-scope fields, addendum library, retrieval algorithm).
 That scope was wrong for where we are. This version replaces it with a much
 lighter schema and a PR-based delivery mechanism.
+
+## Inspirations
+
+The defender + learning-loop architecture is closer in spirit to
+classical ML training regimes than to "an LLM agent with a better
+prompt." It helps to read the components through that lens — both
+because the analogies suggest concrete techniques to import, and
+because they flag known failure modes early.
+
+**Reinforcement learning.** The runtime defender is the *policy*. Its
+trajectory through ORIENT → PLAN → GATHER → ANALYZE → REPORT is an
+*episode*. The judge's outcome (`caught | survived | undecidable | ...`)
+is a sparse, per-episode *reward signal* — and like all sparse rewards,
+it's hard to credit-assign back to the specific decision that earned it.
+The lessons corpus is a low-bandwidth *policy update*: instead of
+gradient steps on weights, we get curated text injected at PLAN time.
+Things to borrow from RL practice:
+
+- *Reward shaping over outcome-only rewards.* The judge's findings are
+  intermediate signal — "this lead set missed authorization
+  context" — that we credit-assign by hand into a lesson. Without it,
+  we'd be trying to learn from `caught/survived` alone, which is
+  exactly the regime RL practitioners avoid when they can.
+- *Off-policy replay.* The actor + telemetry oracle let us evaluate
+  counterfactuals against a completed run without re-executing the
+  defender. Each real run amortizes into many synthetic adversarial
+  evaluations.
+- *Distribution shift.* Lessons authored from yesterday's cases bias
+  the policy on today's cases. The same drift pathology that haunts
+  offline-RL haunts us — keep an eye on whether lessons that helped
+  on past fixtures hurt on new ones, and prefer a held-out eval set
+  the curator has never seen.
+- *Reward hacking.* If the judge's outcome rubric has a loophole, the
+  defender will find it. The forward-check gate
+  (`verify_forward.{md,py}`) is the structural answer: a finding has
+  to actually bite the actor's story before it queues. The judge's
+  prompt is part of the reward function and should be audited as
+  such.
+
+**Evolutionary / population-based methods.** The lessons corpus is a
+*population* of candidate behaviors. Authoring a new lesson is
+*mutation*; the curator's merge / supersede / skip decisions are
+*selection*. The defender at runtime samples from this population
+(reads the lesson bodies whose descriptions look relevant). Things
+to borrow:
+
+- *Diversity matters.* A monoculture of similar lessons covers one
+  failure mode well and misses the rest. The curator's job is partly
+  diversity preservation — supersede when a new lesson genuinely
+  obsoletes an old one, otherwise keep both.
+- *Niching by relevance description.* Lessons compete for PLAN-time
+  attention. The frontmatter `description` is the niche tag — the
+  defender only reads the body if the description fires on the
+  current alert shape. This makes the corpus scale sublinearly with
+  size, but only if descriptions are crisp.
+- *Fitness ≠ proxy fitness.* The proxy fitness we optimize is "judge
+  outcome on synthetic adversarial cases." True fitness is "triage
+  quality on real production alerts." Periodically sanity-check that
+  the proxy still tracks.
+
+**Self-play and curriculum.** The actor is adversarial against the
+defender's *prior* runs. As the defender improves (lessons accumulate),
+the actor's job gets harder — the surviving stories have to slip
+through tighter lead sets. This is a form of *autocurriculum*. The
+risk: if the actor gets stuck producing the same shape of attack, the
+defender overfits to that shape. Watch for actor-story diversity.
+
+**Where the analogy breaks.** We are not running gradient descent.
+There is no continuous parameter space, no smooth loss surface, no
+guarantee that "more lessons" monotonically improves anything. The
+update mechanism is text edits curated by an LLM, with all the
+discontinuity that implies. Expect non-monotonic improvement and
+budget for regression-detection accordingly.
+
+## References
+
+- Sutton & Barto, *Reinforcement Learning: An Introduction* — for the
+  policy / reward / credit-assignment vocabulary used above.
+- Lehman & Stanley, *Abandoning Objectives: Evolution Through the
+  Search for Novelty Alone* — the diversity-preservation argument.
+- Silver et al., self-play in AlphaGo / AlphaZero — actor-vs-prior-defender
+  is a coarse cousin of self-play.
+- Sculley et al., *Hidden Technical Debt in Machine Learning Systems* —
+  for the failure modes of feedback loops in production ML; many
+  apply once a lesson corpus starts feeding back into the runtime.
 
 ## Purpose
 
@@ -346,6 +441,68 @@ The PR itself is the lesson record. There is no separate lesson store.
 - **Inverse failure (deferred)**: replay merged lesson PRs against a
   held-out fixture set; measure correct-disposition runs that the lesson
   would have made worse.
+
+## Future Enhancements
+
+### Learning actor (true co-evolution)
+
+Today's autocurriculum is **one-sided**: the defender accumulates
+lessons and improves; the actor is a fixed prompt. Over time, this
+biases the corpus toward defending against whatever attack shapes the
+current actor prompt happens to generate well. Failure modes the
+actor doesn't think to write — novel pivots, environment-specific
+abuse paths, attack chains the prompt under-samples — never enter the
+training signal.
+
+A **learning actor** mirrors the defender's improvement mechanism on
+the adversarial side: a corpus of attack-pattern lessons (or
+exemplars) the actor reads when generating counterfactual stories,
+authored from cases where the actor *failed* to slip past the
+defender's lead set or where the judge marked the story `incoherent`.
+
+Sketch of the loop, symmetric to the defender's:
+
+- **Signal source.** Cases where the actor's story was `caught` by
+  the defender's existing leads, *or* cases the actor `SKIP`-ed when
+  in fact a competent adversary could have produced a survivable
+  story (the latter requires a separate "missed-skip" detector —
+  potentially the judge itself, given the run + the SKIP rationale).
+- **Curator.** A counterpart to `author.py` that folds these into
+  attack-pattern lessons under (e.g.) `defender/learning/actor_lessons/`.
+- **Retrieval.** The actor enumerates lesson frontmatter at
+  story-generation time, same shape as the defender's PLAN-time
+  retrieval; loads bodies whose description fires on the alert
+  surface.
+- **Diversity guard.** Critical here — a monoculture of attack
+  patterns is exactly the failure mode this enhancement is supposed
+  to fix. The curator must enforce niching across (TTP, target
+  surface, pivot mechanism), and the eval harness should track
+  actor-story diversity as a first-class metric.
+
+This gets us closer to genuine self-play: each side's lessons make
+the other side's job harder, and the curriculum advances on its own.
+Caveats from the RL/evo literature apply double — co-evolution is
+notoriously prone to **cycling** (defender learns to beat actor v3,
+actor v4 rediscovers v1's tricks), to **arms-race drift** away from
+realistic alerts, and to **Red Queen dynamics** where both sides get
+more capable on synthetic cases without either gaining on real ones.
+Mitigations to design in from day one:
+
+- Hold a fixed set of historical actor stories as a regression suite;
+  the live actor must continue to surface them, not just the ones
+  the live curator currently rewards.
+- Periodically re-run the defender against a *frozen* prior actor to
+  detect overfitting to the current one.
+- Anchor on real production alerts as ground truth — the proxy
+  fitness ("can our actor beat our defender") must continue to track
+  true fitness ("does our defender triage real cases correctly").
+
+**Prerequisite.** Don't build this until the one-sided loop is
+demonstrably moving the needle on real cases. A learning actor adds
+a second moving part to a system whose first moving part isn't yet
+proven; debugging compound feedback loops is much harder than
+debugging one. Ship the defender-side learning, validate it, then
+revisit.
 
 ## Open Questions
 

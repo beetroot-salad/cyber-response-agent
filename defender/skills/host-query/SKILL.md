@@ -14,9 +14,6 @@ read by the defender (gather routing, judge), the author (template
 scaffolding), and the actor-reviewer judge. The **Execution** section
 is read only by code paths that dispatch queries.
 
-For the spec governing this two-section shape and the v4 / cache
-boundary, see `docs/defender-system-skill-shape.md`.
-
 ## Visibility surface
 
 ### Available queries

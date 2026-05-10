@@ -1,7 +1,7 @@
 # Run transcripts
 
 Snapshots of defender runs preserved in-tree for review. Live runs land
-in `/tmp/defender-runs/{run_id}/` (see `defender/run_artifacts.md`); a
+in `/tmp/defender-runs/{run_id}/` (see `defender/CLAUDE.md` §Run dir layout); a
 copy lands here when a run is worth pinning to history — representative
 regression cases, anything we want a PR reviewer to be able to open
 without rerunning.
