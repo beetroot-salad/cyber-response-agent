@@ -21,7 +21,7 @@ For a small window where match_count is likely ≤ `--limit`, the Lucene
 form is fine — the default Count Breakdown will reflect reality:
 
 ```bash
-python3 soc-agent/scripts/tools/wazuh_cli.py query \
+python3 defender/scripts/tools/wazuh_cli.py query \
   --query 'rule.id:${rule_id}' \
   --window ${window} \
   --run-dir ${run_dir}
@@ -33,7 +33,7 @@ distributions come back as server-side true totals instead of a
 limit-capped sample:
 
 ```bash
-python3 soc-agent/scripts/tools/wazuh_cli.py query \
+python3 defender/scripts/tools/wazuh_cli.py query \
   --query '{
     "query": {
       "bool": {

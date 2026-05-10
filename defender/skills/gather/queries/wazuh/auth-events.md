@@ -26,7 +26,7 @@ under one template — bind whichever filters the lead needs.
 ## Query
 
 ```bash
-python3 soc-agent/scripts/tools/wazuh_cli.py query \
+python3 defender/scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:(authentication_success OR authentication_failed)${host_clause}${user_clause}${srcip_clause}' \
   --window ${window} \
   --run-dir ${run_dir}

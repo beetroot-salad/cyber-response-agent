@@ -87,10 +87,10 @@ Things Wazuh cannot answer in this deployment:
 ## Execution
 
 The defender and gather dispatch Wazuh queries through the production
-adapter at `soc-agent/scripts/tools/wazuh_cli.py`:
+adapter at `defender/scripts/tools/wazuh_cli.py`:
 
 ```bash
-python3 soc-agent/scripts/tools/wazuh_cli.py query \
+python3 defender/scripts/tools/wazuh_cli.py query \
   --query '<Lucene>' \
   --window 2h \
   --run-dir {run_dir}

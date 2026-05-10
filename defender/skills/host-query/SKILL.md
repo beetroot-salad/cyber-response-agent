@@ -80,10 +80,10 @@ Things host-query cannot answer in this deployment:
 ## Execution
 
 The defender and gather dispatch host-query subcommands through the
-production adapter at `soc-agent/scripts/tools/host_query.py`:
+production adapter at `defender/scripts/tools/host_query.py`:
 
 ```bash
-python3 soc-agent/scripts/tools/host_query.py <subcommand> [options] \
+python3 defender/scripts/tools/host_query.py <subcommand> [options] \
   --host <host>
 ```
 

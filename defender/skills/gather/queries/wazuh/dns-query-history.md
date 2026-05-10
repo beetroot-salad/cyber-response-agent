@@ -23,7 +23,7 @@ Retrieve DNS queries matching a domain pattern (literal domain + wildcard
 subdomains) with aggregations for subdomain variants and per-host distribution:
 
 ```bash
-python3 soc-agent/scripts/tools/wazuh_cli.py query \
+python3 defender/scripts/tools/wazuh_cli.py query \
   --query '{
     "query": {
       "bool": {

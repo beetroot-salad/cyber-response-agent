@@ -29,7 +29,7 @@ escalations). Used to answer "did anything change on host X?" and
 Default Lucene form for "show me FIM events":
 
 ```bash
-python3 soc-agent/scripts/tools/wazuh_cli.py query \
+python3 defender/scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:syscheck${host_clause}${path_clause}' \
   --window ${window} \
   --run-dir ${run_dir}
@@ -45,7 +45,7 @@ breakdown does not aggregate by `syscheck.path`. Pass a JSON body with
 a path aggregation:
 
 ```bash
-python3 soc-agent/scripts/tools/wazuh_cli.py query \
+python3 defender/scripts/tools/wazuh_cli.py query \
   --query '{
     "query": {
       "bool": {

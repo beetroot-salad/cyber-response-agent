@@ -22,7 +22,7 @@ the full window around an event.
 ## Query
 
 ```bash
-python3 soc-agent/scripts/tools/wazuh_cli.py query \
+python3 defender/scripts/tools/wazuh_cli.py query \
   --query '{
     "query": {
       "bool": {
