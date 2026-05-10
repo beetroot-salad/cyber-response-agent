@@ -31,22 +31,22 @@ uncertain.
    disposition has to be graded against this entity's normal output
    along the dimensions that could carry the deviation:
 
-   - **Presence** — a rule, event-type, process, or destination this
-     entity has not previously emitted.
+   - **Presence** — an event type, process, or destination this entity
+     has not previously emitted.
    - **Absence** — silence where the entity habitually speaks. Often
      the strongest signal and the easiest to miss because zero counts
      don't catch the eye; check for it explicitly when the alert says
      a process *should* have run.
-   - **Shape** — same rule, different fields populated (or the
+   - **Shape** — same event type, different fields populated (or the
      reverse), different decoder version, different parent chain.
-   - **Distribution** — same rule + fields, different cadence, volume,
-     cardinality, or time-of-day.
-   - **Composition** — same rule + fields + distribution, different
-     *attached* identities. `rule.id:100002` with `proc.name=sshd` is
-     baseline noise; the same rule with `proc.name=bash` from the
-     same container is load-bearing. The rule's description is a
-     label on the alert; the per-event content is what carries the
-     deviation.
+   - **Distribution** — same event type + fields, different cadence,
+     volume, cardinality, or time-of-day.
+   - **Composition** — same event type + fields + distribution,
+     different *attached* identities. A "STDOUT/STDIN-redirect-to-net"
+     event with `proc.name=sshd` going to port 22 is baseline noise;
+     the same event with `proc.name=bash` going to a remote port is
+     load-bearing. The event-type label is a category on the alert;
+     the per-event content is what carries the deviation.
 
    When the discriminating dimension isn't yet known, ask gather for
    a baseline characterization alongside the foreground query. A
