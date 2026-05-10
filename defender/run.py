@@ -192,13 +192,17 @@ def main(argv: list[str]) -> int:
     for entry in sorted(run_dir.iterdir()):
         sys.stderr.write(f"  {entry.name}\n")
 
+    if not projected:
+        # Projection failure is a harness-level break (no lead_sequence.yaml,
+        # the documented learning-loop input). Surface it on every path —
+        # the non-zero exit lets CI / loops detect a broken run regardless
+        # of whether --no-learn was requested.
+        print("[run.py] lead_sequence.yaml missing; halting after post-steps", file=sys.stderr)
+        return rc or 1
+
     if ns.no_learn:
         print("[run.py] --no-learn set; skipping learning loop", file=sys.stderr)
         return rc
-
-    if not projected:
-        print("[run.py] lead_sequence.yaml missing; skipping learning loop", file=sys.stderr)
-        return rc or 1
 
     print("[run.py] handing off to learning loop", file=sys.stderr)
     learn_rc = run_learning_loop(run_dir)
