@@ -29,7 +29,6 @@ import yaml
 SOC_AGENT_ROOT = Path(__file__).resolve().parent.parent / "soc-agent"
 sys.path.insert(0, str(SOC_AGENT_ROOT))
 
-from scripts.handlers._context_loader import load_lead_definition  # noqa: E402
 from scripts.handlers._subagent import invoke_subagent  # noqa: E402
 from scripts.handlers.gather import (  # noqa: E402
     Scope,
@@ -233,14 +232,14 @@ def main() -> int:
         "",
         "## Control (gather-composite, single dispatch)",
         "",
-        f"- agent: `gather-composite` (sonnet)",
+        "- agent: `gather-composite` (sonnet)",
     ]
     if control_gc:
         lines += [
             f"- duration: {control_gc['duration_ms']/1000:.1f}s",
             f"- prompt_chars: {control_gc['prompt_chars']}",
             f"- stdout_chars: {control_gc['stdout_chars']}",
-            f"- leads emitted: 2 (container-baseline + correlated-endpoint-events)",
+            "- leads emitted: 2 (container-baseline + correlated-endpoint-events)",
         ]
     lines += [
         "",

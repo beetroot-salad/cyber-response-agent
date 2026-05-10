@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import textwrap
-from typing import Any
 
 # ---------------------------------------------------------------------------
 # Shared system prompts
@@ -63,7 +62,7 @@ def _prologue_brief(prologue: dict) -> str:
 
 
 def _leads_list(catalog: list[str]) -> str:
-    return "Available leads:\n" + "\n".join(f"  - {l}" for l in sorted(catalog))
+    return "Available leads:\n" + "\n".join(f"  - {lead}" for lead in sorted(catalog))
 
 
 def _prior_block(prior_strength: str, gate_decision: dict) -> str:

@@ -12,7 +12,6 @@ Parallel 4-wide. ~5 min per run; ~10-20 min total wall time.
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -168,7 +167,7 @@ def main() -> int:
     print(f"Launching {len(LESSONS)} Sonnet defender investigations (4-wide)...", flush=True)
     records: list[dict] = []
     with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = [ex.submit(run_defender_with_lesson, l) for l in LESSONS]
+        futures = [ex.submit(run_defender_with_lesson, lesson) for lesson in LESSONS]
         for f in as_completed(futures):
             try:
                 records.append(f.result())
