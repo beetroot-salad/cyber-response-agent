@@ -104,7 +104,17 @@ trip to the indexer.
 
 For every bullet in `what_to_characterize`, report a value — even if
 it is "not available" or "not observed." Be specific: exact IPs,
-counts, usernames, timestamps. Do not interpret.
+counts, usernames, timestamps.
+
+**Do not interpret.** Report measurements, not characterizations of
+what they mean. No `**Pattern**:` / `**Assessment**:` labels
+summarizing what the values "look like." No normative comparisons
+("characteristic of monitoring, not brute-force"; "consistent with
+adversarial enumeration"). No threat-model framing. The defender
+weighs evidence against hypotheses in ANALYZE — that work is not
+yours to pre-empt. If a value is striking (a 5-minute cadence, a
+single source IP, a 7-day baseline), the number itself is the
+finding; let it stand without a verdict attached.
 
 #### Smell test before reporting empty / sparse
 
@@ -238,6 +248,9 @@ The defender decides what the differential means; you report it.
   payload.
 - Do not echo raw query output back to the defender; that's the whole
   point of letting the CLI persist it to `gather_raw/`.
+- Do not append a trailing `Assessment` / `Synthesis` / `Conclusion`
+  section after the three required sections. Stop at `## Raw payload`.
+  Disposition reasoning belongs to the defender's ANALYZE phase.
 - If the lead is genuinely unrunnable (no system, no plausible
   template, no entity binding you can construct), say so plainly and
   stop. The defender will record the dead end in the investigation

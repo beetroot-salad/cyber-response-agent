@@ -24,11 +24,35 @@ uncertain.
 2. **Triage rapidly; escalate when the data runs out.** When the
    systems you can reach don't answer the question, escalate with the
    gap named. Better to flag missing visibility than to over-interpret.
-3. **Compare against the standard, not against your priors.** Your
-   environment knowledge is partial. When the question is "is this
-   normal," characterize the standard pattern for the relevant
-   entities — typical access patterns, processes that usually fire on
-   the host — and grade current observations against that.
+3. **Read every observation as a deviation from baseline.** Telemetry
+   is the entity's habitual emissions plus whatever's happening now,
+   layered on top. The *signal* is the delta between the two — never
+   the raw shape of "now" alone. Any observation that drives
+   disposition has to be graded against this entity's normal output
+   along the dimensions that could carry the deviation:
+
+   - **Presence** — an event type, process, or destination this entity
+     has not previously emitted.
+   - **Absence** — silence where the entity habitually speaks. Often
+     the strongest signal and the easiest to miss because zero counts
+     don't catch the eye; check for it explicitly when the alert says
+     a process *should* have run.
+   - **Shape** — same event type, different fields populated (or the
+     reverse), different decoder version, different parent chain.
+   - **Distribution** — same event type + fields, different cadence,
+     volume, cardinality, or time-of-day.
+   - **Composition** — same event type + fields + distribution,
+     different *attached* identities. A "STDOUT/STDIN-redirect-to-net"
+     event with `proc.name=sshd` going to port 22 is baseline noise;
+     the same event with `proc.name=bash` going to a remote port is
+     load-bearing. The event-type label is a category on the alert;
+     the per-event content is what carries the deviation.
+
+   When the discriminating dimension isn't yet known, ask gather for
+   a baseline characterization alongside the foreground query. A
+   correlated signal that drives disposition gets the same baseline
+   treatment as the focal alert — never weigh a count without the
+   reference distribution it's deviating from.
 4. **Predict before you observe.** Each lead carries an explicit
    prediction of what gather will see under the competing explanations.
    Compare actual observations to that prediction; ungrounded post-hoc

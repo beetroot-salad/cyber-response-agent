@@ -24,13 +24,22 @@ Steps:
 """
 from __future__ import annotations
 
-import json
 import os
+import sys
+from pathlib import Path
+
+# Re-exec into defender/.venv if launched against a different interpreter.
+# Compare unresolved paths — the venv python is typically a symlink to the
+# system interpreter, so .resolve() would collapse both sides and skip the
+# re-exec even when site-packages differ.
+_VENV_PY = Path(__file__).resolve().parents[2] / "defender" / ".venv" / "bin" / "python3"
+if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
+    os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
+
+import json
 import re
 import shutil
 import subprocess
-import sys
-from pathlib import Path
 from typing import Any
 
 import yaml

@@ -22,7 +22,7 @@ the command list is consistent with a stated work item.
 ## Query
 
 ```bash
-python3 soc-agent/scripts/tools/wazuh_cli.py query \
+python3 defender/scripts/tools/wazuh_cli.py query \
   --query 'rule.groups:sudo${host_clause}${user_clause}' \
   --window ${window} \
   --run-dir ${run_dir}

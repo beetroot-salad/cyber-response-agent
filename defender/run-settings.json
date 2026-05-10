@@ -1,14 +1,28 @@
 {
   "permissions": {
     "allow": [
-      "Bash(*)",
-      "Read(*)",
-      "Write(*)",
-      "Edit(*)",
-      "Grep(*)",
-      "Glob(*)",
+      "Read(/workspace/defender/**)",
+      "Read(/tmp/defender-runs/**)",
+      "Grep(/workspace/defender/**)",
+      "Grep(/tmp/defender-runs/**)",
+      "Glob(/workspace/defender/**)",
+      "Glob(/tmp/defender-runs/**)",
+      "Write(/tmp/defender-runs/**)",
+      "Edit(/tmp/defender-runs/**)",
+      "Write(/workspace/defender/skills/gather/queries/**)",
+      "Edit(/workspace/defender/skills/gather/queries/**)",
+      "Bash(python3 defender/scripts/tools/wazuh_cli.py *)",
+      "Bash(python3 defender/scripts/tools/host_query.py *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
       "Task(*)",
       "Skill(*)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/credentials*)",
+      "Read(**/.ssh/**)",
+      "Read(/workspace/soc-agent/**)"
     ]
   },
   "hooks": {
