@@ -24,19 +24,25 @@ concrete, comparable artifacts.
   interpretation. Output is `projections: [{position, system, template,
   events: [{...}]}]`.
 - `defender/learning/loop.py`:
-  - new `redact_exemplar(...)` keeps only the `### Raw Sample Events`
-    block (per-event schema); counts/aggregations/sample summaries are
-    dropped so the oracle cannot mirror the defender's actual results,
+  - default `LEARNING_CLAUDE_MODEL` is `claude-haiku-4-5`,
+  - new `redact_exemplar(...)` returns a type/field skeleton: drops
+    everything outside `### Raw Sample Events`, then parses the inner
+    JSON and replaces every concrete leaf with a `<field-name>`
+    placeholder (numbers → `0`, booleans → `false`) so the oracle sees
+    field/nesting/types only and cannot mirror the defender's actual
+    results,
   - new `assemble_exemplar_bundle(source_run_dir, lead_sequence_text)`
-    helper assembles one redacted block per lead position as the schema
-    reference,
+    helper assembles one redacted skeleton per lead position as the
+    schema reference,
   - new `invoke_oracle(...)` step between actor and judge,
   - new `validate_oracle_doc(...)` (count/position match, projection
     schema, events-list-of-mappings), bad output is `LoopError`,
-  - persist `projected_telemetry.yaml` (post-`strip_yaml_fence` —
-    the validated text, not raw model output) in `learning_run_dir`;
-    if the model wrapped the YAML in a code fence, the raw response is
-    kept alongside as `projected_telemetry.raw.txt` for debugging,
+  - persist `projected_telemetry.yaml` and `judge_findings.yaml`
+    post-`strip_yaml_fence` (validated text, not raw model output) —
+    `persist_run` takes the stripped text, not the raw, so the final
+    artifact is parseable downstream; if the model wrapped the YAML in
+    a code fence, the raw response is kept alongside as
+    `{projected_telemetry,judge_findings}.raw.txt` for debugging,
   - judge gains a fourth `=== projected_telemetry.yaml ===` input section.
 - `defender/learning/judge.md`:
   - fourth input section,

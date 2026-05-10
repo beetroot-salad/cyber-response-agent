@@ -158,10 +158,14 @@ def test_assemble_exemplar_bundle_concatenates_per_position(tmp_path: Path):
     out = assemble_exemplar_bundle(tmp_path, lead_seq)
     assert "position 0 (wazuh.auth-events)" in out
     assert "position 1 (wazuh.dns-history)" in out
-    # Per-event schema kept (Raw Sample Events block + payload).
+    # Per-event schema kept as a type/field skeleton — field names survive.
     assert "Raw Sample Events" in out
-    assert '"tag": "0"' in out
-    assert '"tag": "1"' in out
+    assert "values scrubbed" in out
+    assert '"srcip": "<srcip>"' in out
+    # Concrete values from the source JSON do not survive.
+    assert '"1.2.3.4"' not in out
+    assert '"tag": "0"' not in out
+    assert '"tag": "1"' not in out
     # Counts / aggregations (which leak the actual lead result) are dropped.
     assert "ACTUAL-RESULT" not in out
     assert "Matching events" not in out
@@ -198,11 +202,21 @@ def test_assemble_exemplar_bundle_rejects_malformed_lead_sequence(tmp_path: Path
 # ---------------------------------------------------------------------------
 
 
-def test_redact_exemplar_keeps_only_raw_sample_block():
+def test_redact_exemplar_returns_type_field_skeleton():
     text = _gather_raw_fixture("0")
     out = redact_exemplar(text)
     assert out.startswith("### Raw Sample Events")
-    assert '"srcip": "1.2.3.4"' in out
+    assert "values scrubbed" in out
+    # Field names + nesting preserved.
+    assert '"srcip"' in out
+    assert '"data"' in out
+    # Field-name placeholders replace concrete strings.
+    assert '"<srcip>"' in out
+    assert '"<tag>"' in out
+    # Concrete values from the source JSON are gone.
+    assert '"1.2.3.4"' not in out
+    assert '"0"' not in out  # the "tag" was "0"; must not survive
+    # Sections outside Raw Sample Events stay dropped.
     assert "Matching events" not in out
     assert "Aggregations" not in out
     assert "ACTUAL-RESULT" not in out

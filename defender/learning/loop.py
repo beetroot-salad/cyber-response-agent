@@ -63,7 +63,7 @@ QUEUEABLE_FINDING_TYPES = {
 }
 ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"detection-confirmed"}
 
-CLAUDE_MODEL = os.environ.get("LEARNING_CLAUDE_MODEL", "claude-sonnet-4-6")
+CLAUDE_MODEL = os.environ.get("LEARNING_CLAUDE_MODEL", "claude-haiku-4-5")
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "300"))
 
 
@@ -181,27 +181,67 @@ def invoke_actor(alert_path: Path, actor_input_path: Path) -> str:
 
 
 _RAW_SAMPLE_HEADER_RE = re.compile(r"^### Raw Sample Events\b.*$", re.MULTILINE)
+_JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
+
+
+def _scrub_skeleton(value, key=None):
+    """Replace concrete leaf values with a type/field skeleton.
+
+    Strings become `<key>` (or `<string>` if no key context); numbers go
+    to 0; booleans go to `false`; nulls stay null. Lists collapse to a
+    single scrubbed element preserving inner shape. Dicts recurse,
+    threading the parent key down so child strings can be tagged with
+    their field name.
+    """
+    if isinstance(value, dict):
+        return {k: _scrub_skeleton(v, k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_scrub_skeleton(value[0], key)] if value else []
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return 0
+    if isinstance(value, str):
+        return f"<{key}>" if key else "<string>"
+    return value  # null
 
 
 def redact_exemplar(text: str) -> str:
-    """Reduce a `gather_raw/{position}.json` to its schema-only portion.
+    """Reduce a `gather_raw/{position}.json` to a schema-only skeleton.
 
     The oracle is supposed to project events from the actor story alone;
-    handing it the full gather_raw (Summary, Aggregations, Count Breakdown,
-    Sample Events) leaks the *actual* lead result and contaminates the
-    projected-vs-actual comparison the judge later does. We keep only the
-    `### Raw Sample Events` block — the per-event JSON shape — which is
-    what the oracle prompt names as the schema reference.
+    handing it the full gather_raw leaks the *actual* lead result and
+    contaminates the projected-vs-actual comparison the judge later does.
 
-    If no Raw Sample Events block is present (e.g. zero-match lead, or a
-    different envelope), return a placeholder; the oracle has the system
-    + template + params from `lead_sequence.yaml` and must project shape
-    from those.
+    Two-stage redaction:
+      1. Drop everything outside the `### Raw Sample Events` block
+         (Summary, Aggregations, Count Breakdown, Sample Events) so
+         counts and per-event values from non-schema sections are gone.
+      2. Inside the Raw Sample Events block, parse the embedded JSON and
+         replace every concrete leaf with a `<field-name>` placeholder
+         (or 0 / false / null for non-strings). The oracle sees the
+         field/nesting/type skeleton with no values it could mirror.
+
+    If no Raw Sample Events block is present, return a placeholder; the
+    oracle has the system + template + params from `lead_sequence.yaml`
+    and must project shape from those.
     """
-    m = _RAW_SAMPLE_HEADER_RE.search(text)
-    if not m:
+    header_m = _RAW_SAMPLE_HEADER_RE.search(text)
+    if not header_m:
         return "(no schema sample available for this position)"
-    return text[m.start():]
+    block = text[header_m.start():]
+    header_line = block.split("\n", 1)[0]
+
+    json_m = _JSON_BLOCK_RE.search(block)
+    if not json_m:
+        return f"{header_line}\n(schema sample not in JSON form; skeleton unavailable)"
+    try:
+        sample = json.loads(json_m.group(1))
+    except json.JSONDecodeError:
+        return f"{header_line}\n(could not parse schema sample as JSON; skeleton unavailable)"
+
+    skeleton = _scrub_skeleton(sample)
+    return f"{header_line} (values scrubbed — type/field skeleton only)\n\n```json\n{json.dumps(skeleton, indent=2)}\n```"
 
 
 def assemble_exemplar_bundle(source_run_dir: Path, lead_sequence_text: str) -> str:
@@ -403,6 +443,13 @@ def persist_run(
     alert_rule_key: str,
     oracle_yaml_text: str | None = None,
 ) -> None:
+    """Persist the per-run artifacts.
+
+    `oracle_yaml_text` and `judge_yaml_text` are expected to be the
+    fence-stripped, validated YAML — i.e. the text that downstream
+    consumers will parse. Caller-side code fences (if any) belong in a
+    `*.raw.txt` companion, not in the canonical `.yaml`.
+    """
     learning_run_dir.mkdir(parents=True, exist_ok=True)
     for name in PERSIST_COPY_FILES:
         src = run_dir / name
@@ -596,23 +643,25 @@ def run_one(run_dir: Path) -> int:
         actor_story_path,
         projected_telemetry_path,
     )
+    judge_yaml_stripped = strip_yaml_fence(judge_yaml_text)
     try:
-        judge_doc = yaml.safe_load(strip_yaml_fence(judge_yaml_text))
+        judge_doc = yaml.safe_load(judge_yaml_stripped)
         judge_doc = validate_judge_doc(judge_doc)
     except (yaml.YAMLError, LoopError) as e:
-        # Still persist the raw output for debugging before failing.
-        (learning_run_dir / "judge_findings.yaml").write_text(judge_yaml_text)
+        (learning_run_dir / "judge_findings.raw.txt").write_text(judge_yaml_text)
         raise LoopError(f"judge YAML invalid: {e}") from e
+    if judge_yaml_stripped != judge_yaml_text:
+        (learning_run_dir / "judge_findings.raw.txt").write_text(judge_yaml_text)
 
     _log("step=persist")
     persist_run(
         run_dir,
         learning_run_dir,
         actor_story,
-        judge_yaml_text,
+        judge_yaml_stripped,
         disposition,
         alert_rule_key,
-        oracle_yaml_text=oracle_yaml_text,
+        oracle_yaml_text=oracle_yaml_stripped,
     )
 
     _log("step=append")

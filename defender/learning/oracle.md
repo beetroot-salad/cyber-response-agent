@@ -7,7 +7,7 @@ You see four artifacts:
 1. **alert.json** — the alert the SIEM produced.
 2. **actor_story.md** — the malicious end-to-end activity the actor constructed (Attack story / Goal / Bypass).
 3. **lead_sequence.yaml** — the full sequence of leads the defender ran, including each lead's `goal`, `what_to_characterize`, `system.template`, params, and window.
-4. **exemplars** — for each lead position, the `### Raw Sample Events` block from the defender's `gather_raw/{position}.json`, redacted to the per-event schema only. Counts, aggregations, and sample summaries are stripped so you cannot mirror the defender's actual results. Use the events here purely as a field-shape reference: field names, nesting, value formats. If a position shows `(no schema sample available …)`, project events from the lead's `system` + `template` + `params` in `lead_sequence.yaml`.
+4. **exemplars** — for each lead position, a type/field skeleton derived from the defender's `gather_raw/{position}.json`. Concrete values are scrubbed (strings replaced with `<field-name>`, numbers with `0`, booleans with `false`); only field names, nesting, and value types remain. You cannot read the defender's actual results from this. Use it purely as a shape reference. If a position shows `(no schema sample available …)`, project events from the lead's `system` + `template` + `params` in `lead_sequence.yaml`.
 
 For each lead position in `lead_sequence.yaml`, in order, emit a projection block. The events you synthesize must:
 
