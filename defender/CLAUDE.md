@@ -69,6 +69,22 @@ alerts through `defender/run.py` and reviewing the run dir.
 `defender/tests/` covers learning-loop invariants (lesson schema,
 author pre/post-flight, atomic writes, forward-check).
 
+## Python environment
+
+Defender has its own venv at `defender/.venv` (declared by
+`defender/pyproject.toml`, only runtime dep is `pyyaml`). Bootstrap or
+refresh with:
+
+```bash
+cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'
+```
+
+`defender/run.py` and `defender/learning/loop.py` re-exec into
+`defender/.venv/bin/python3` if invoked under a different interpreter,
+so `python3 defender/run.py …` works regardless of which python is on
+PATH. The author-side verifier subprocess (`learning/author.py`) also
+resolves to `defender/.venv` first.
+
 ## Runtime loop (one-line overview)
 
 `python3 defender/run.py <alert.json>` → spawns `claude -p` with

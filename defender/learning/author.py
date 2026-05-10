@@ -221,19 +221,19 @@ def _extract_author_result(text: str) -> str | None:
 def _resolve_verifier_python() -> Path:
     """Locate a python interpreter that has pyyaml available.
 
-    Preference order: env override → ``soc-agent/.venv/bin/python3``
-    next to repo root → walking up the parents (so a git-worktree that
-    has no venv of its own resolves to the parent checkout's) →
+    Preference order: env override → ``defender/.venv/bin/python3`` next
+    to repo root → walking up the parents (so a git-worktree that has
+    no venv of its own resolves to the parent checkout's) →
     ``sys.executable`` (the current process already imported yaml, so
     it is a safe fallback).
     """
     env = os.environ.get("LEARNING_VERIFIER_PYTHON")
     if env:
         return Path(env).resolve()
-    candidates = [REPO_ROOT / "soc-agent" / ".venv" / "bin" / "python3"]
+    candidates = [REPO_ROOT / "defender" / ".venv" / "bin" / "python3"]
     p = REPO_ROOT.resolve().parent
     for _ in range(5):
-        cand = p / "soc-agent" / ".venv" / "bin" / "python3"
+        cand = p / "defender" / ".venv" / "bin" / "python3"
         if cand.is_file():
             candidates.append(cand)
         if p.parent == p:

@@ -28,16 +28,28 @@ whatever artifacts the agent did manage to write.
 
 from __future__ import annotations
 
-import argparse
-import datetime as _dt
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
-DEFENDER_DIR = Path(__file__).resolve().parent
+# Re-exec into defender/.venv if launched against a different interpreter,
+# so callers don't have to remember to invoke the venv python. Bootstrap
+# instructions live in defender/CLAUDE.md §Python environment.
+_DEFENDER_DIR = Path(__file__).resolve().parent
+_VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
+# Compare unresolved paths — the venv python is typically a symlink to the
+# system interpreter, so .resolve() would collapse both sides and skip the
+# re-exec even when site-packages differ.
+if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
+    os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
+
+import argparse
+import datetime as _dt
+import shutil
+import subprocess
+import tempfile
+
+DEFENDER_DIR = _DEFENDER_DIR
 REPO_ROOT = DEFENDER_DIR.parent
 SETTINGS_TEMPLATE = DEFENDER_DIR / "run-settings.json"
 PROJECT_SCRIPT = DEFENDER_DIR / "scripts" / "project_lead_sequence.py"
@@ -185,7 +197,6 @@ def main(argv: list[str]) -> int:
         print(f"[run.py] claude exited rc={rc}; continuing post-steps on whatever artifacts exist", file=sys.stderr)
 
     projected = project_lead_sequence(run_dir)
-    visualize(run_dir)
 
     print("[run.py] artifacts:", file=sys.stderr)
     for entry in sorted(run_dir.iterdir()):
@@ -195,16 +206,22 @@ def main(argv: list[str]) -> int:
         # Projection failure is a harness-level break (no lead_sequence.yaml,
         # the documented learning-loop input). Surface it on every path —
         # the non-zero exit lets CI / loops detect a broken run regardless
-        # of whether --no-learn was requested.
+        # of whether --no-learn was requested. Render the transcript first
+        # so the broken run still has a reviewable artifact.
+        visualize(run_dir)
         print("[run.py] lead_sequence.yaml missing; halting after post-steps", file=sys.stderr)
         return rc or 1
 
+    learn_rc = 0
     if ns.no_learn:
         print("[run.py] --no-learn set; skipping learning loop", file=sys.stderr)
-        return rc
+    else:
+        print("[run.py] handing off to learning loop", file=sys.stderr)
+        learn_rc = run_learning_loop(run_dir)
 
-    print("[run.py] handing off to learning loop", file=sys.stderr)
-    learn_rc = run_learning_loop(run_dir)
+    # Render after the learning loop so transcript.html includes the
+    # actor/oracle/judge artifacts and any lesson-corpus commits.
+    visualize(run_dir)
     return rc or learn_rc
 
 
