@@ -215,7 +215,7 @@ def main() -> int:
         for r in results
     ]
     ctl_envelope = control.get("envelope") or {}
-    ctl_lead_status = [l.get("status", "?") for l in (ctl_envelope.get("leads") or [])]
+    ctl_lead_status = [lead.get("status", "?") for lead in (ctl_envelope.get("leads") or [])]
 
     lines = [
         "# parallel-gather stress test #2 — both leads on-disk + wazuh",

@@ -232,3 +232,33 @@ def test_redact_exemplar_returns_placeholder_when_no_raw_sample_block():
     assert "no schema sample available" in out
     # Crucially, the upstream summary text is not echoed back.
     assert "Matching events" not in out
+
+
+# ---------------------------------------------------------------------------
+# _outcome_keyword tolerance
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_keyword_accepts_bare_enum():
+    assert loop._outcome_keyword("survived") == "survived"
+
+
+def test_outcome_keyword_tolerates_period_then_rationale():
+    # Observed live: model fused outcome with rationale via "survived. The…"
+    fused = "survived. The defender's investigation returned results consistent with the oracle."
+    assert loop._outcome_keyword(fused) == "survived"
+
+
+def test_outcome_keyword_tolerates_block_scalar_newline_form():
+    # YAML `|` block scalars produce trailing newlines; strip + token-extract.
+    assert loop._outcome_keyword("caught\nrationale follows…\n") == "caught"
+
+
+def test_outcome_keyword_rejects_unknown_first_token():
+    with pytest.raises(LoopError, match="not in"):
+        loop._outcome_keyword("definitely-survived. lots of detail")
+
+
+def test_outcome_keyword_rejects_non_string():
+    with pytest.raises(LoopError, match="not a string"):
+        loop._outcome_keyword({"survived": True})

@@ -321,7 +321,10 @@ def is_skip_story(actor_story: str) -> bool:
 def _outcome_keyword(outcome_value: Any) -> str:
     if not isinstance(outcome_value, str):
         raise LoopError(f"judge `outcome` is not a string: {type(outcome_value)}")
-    first = outcome_value.split("\n", 1)[0].strip()
+    # Tolerate the model fusing the keyword with a rationale clause
+    # ("survived. The defender's investigation…"): split on the first
+    # whitespace or sentence-punctuation boundary, take the head token.
+    first = re.split(r"[\s.,;:]", outcome_value.strip(), maxsplit=1)[0]
     if first not in OUTCOME_ENUM:
         raise LoopError(
             f"judge outcome keyword {first!r} not in {sorted(OUTCOME_ENUM)}"
@@ -663,11 +666,58 @@ def run_one(run_dir: Path) -> int:
     return 0
 
 
+_HELP_EPILOG = """\
+Inputs (must exist in <run_dir>):
+  alert.json            verbatim alert input
+  report.md             YAML frontmatter with disposition ∈ {benign, inconclusive, malicious}
+                        ('malicious' is skipped at MVP — actor has nothing to bypass)
+  investigation.md      defender's invlang audit log
+  lead_sequence.yaml    projected lead set (emitted by defender/scripts/project_lead_sequence.py)
+  gather_raw/{N}.json   raw query payloads referenced by lead_sequence
+
+Outputs:
+  defender/learning/runs/<run_id>/
+    actor_input.yaml          actor-facing projection (queries only, no goals/results)
+    actor_story.md            adversarial counterfactual narrative (or "SKIP: ...")
+    projected_telemetry.yaml  oracle's per-lead synthesized events
+    judge_findings.yaml       judge classification + queueable findings
+  defender/learning/_pending/findings.jsonl
+    appended queueable findings; when count >= LEARNING_AUTHOR_THRESHOLD,
+    the lessons curator (author.py) is invoked automatically.
+
+Environment:
+  LEARNING_CLAUDE_MODEL          claude model for actor/oracle/judge subagents
+                                 (default: claude-haiku-4-5)
+  LEARNING_SUBAGENT_TIMEOUT_SECONDS  per-subagent timeout (default: 300)
+  LEARNING_AUTHOR_THRESHOLD      pending findings before author runs (default: 5)
+
+Typical use: invoked in-process by `defender/run.py` after the runtime loop
+exits. Run standalone with `python3 defender/learning/loop.py <run_dir>` to
+re-process an existing run dir (e.g. after a judge-parse failure).
+
+Exit codes: 0 success / 0 skipped (malicious or actor SKIP) /
+            2 LoopError / 64 usage.
+"""
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage: loop.py <run_dir>", file=sys.stderr)
-        return 64
-    run_dir = Path(argv[1]).resolve()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="defender/learning/loop.py",
+        description=(
+            "Defender learning-loop orchestrator. Given a finished defender "
+            "run dir, runs actor → oracle → judge, persists artifacts under "
+            "defender/learning/runs/<run_id>/, and queues findings for the "
+            "lessons curator."
+        ),
+        epilog=_HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("run_dir", type=Path, help="Defender run dir (e.g. /tmp/defender-runs/<run_id>)")
+    ns = parser.parse_args(argv[1:])
+
+    run_dir = ns.run_dir.resolve()
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1

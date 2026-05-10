@@ -141,8 +141,8 @@ def main() -> int:
     print(f"\nSummary: {OUTPUT_DIR / 'summary.json'}")
     print(f"  effort=low: wall_mean={summary['wall_s_mean']}s "
           f"(stdev={summary['wall_s_stdev']}, n={summary['n_ok']}/{summary['reps']})")
-    print(f"  reference (effort=default, baseline from voice-mirror): "
-          f"wall_mean=160.26s, stdev=70.26")
+    print("  reference (effort=default, baseline from voice-mirror): "
+          "wall_mean=160.26s, stdev=70.26")
     return 0
 
 
