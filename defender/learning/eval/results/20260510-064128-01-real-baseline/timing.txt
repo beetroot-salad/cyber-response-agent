@@ -1,7 +1,0 @@
-wall_seconds=207.6
-verifier_seconds=75.7
-curator_seconds=131.9
-effort=low
-verifier_calls:
-source-host-legitimacy-unverified.md livetest-5710 46.44
-container-runtime-integrity-unobservable.md livetest-5710 29.26

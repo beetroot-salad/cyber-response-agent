@@ -1,2 +1,0 @@
-[author] batch=e31ac3fd0869 total=2 to_author=2 held=0 idempotent=0
-[author] FATAL: author committed but defender/lessons/ still has uncommitted edits

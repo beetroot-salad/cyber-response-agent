@@ -1,2 +1,0 @@
-wall_seconds=339.6
-effort=(default)

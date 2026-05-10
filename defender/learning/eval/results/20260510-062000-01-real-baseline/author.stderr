@@ -1,2 +1,0 @@
-[author] batch=7686ecf4464e total=2 to_author=2 held=0 idempotent=0
-[author] done batch=7686ecf4464e committed=2 held_forward_bad=0 consumed_skip=0 idempotent=0 held_no_ground_truth=0 commit_sha=face3147c7151ba412fd49a3c690860d404ad620

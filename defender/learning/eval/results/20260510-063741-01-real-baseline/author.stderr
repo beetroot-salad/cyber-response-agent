@@ -1,3 +1,0 @@
-[author] batch=4b972d558f0e total=2 to_author=2 held=0 idempotent=0
-[author] FATAL: AUTHOR_RESULT JSON invalid: Expecting ',' delimiter: line 1 column 252 (char 251)
-{"committed": [], "held_forward_bad": [{"finding_id": "livetest-5710/1", "reason": "Lesson instructs agent to escalate when source-host integrity is unverifiable; ground-truth disposition is benign — lesson would flip agent to escalated on this case"}
