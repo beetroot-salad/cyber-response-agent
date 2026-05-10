@@ -167,6 +167,16 @@ def visualize(run_dir: Path) -> None:
     sys.stderr.write(proc.stdout)
     if proc.returncode != 0:
         sys.stderr.write(f"[run.py] visualize_run failed: {proc.stderr}")
+        return
+    # Mirror the rendered transcript into defender/run-visualizations/
+    # so reviews aren't gated on /tmp/defender-runs/ surviving.
+    transcript = run_dir / "transcript.html"
+    if transcript.is_file():
+        dest_dir = DEFENDER_DIR / "run-visualizations"
+        dest_dir.mkdir(exist_ok=True)
+        dest = dest_dir / f"{run_dir.name}.html"
+        shutil.copyfile(transcript, dest)
+        sys.stderr.write(f"[run.py] copied transcript to {dest.relative_to(REPO_ROOT)}\n")
 
 
 def run_learning_loop(run_dir: Path) -> int:
