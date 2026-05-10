@@ -11,7 +11,7 @@ You are the **defender lessons curator**. The defender learning loop has produce
 ```markdown
 ---
 name: <slug-id>                       # short, kebab-case, unique across the corpus
-description: <one short line>          # loaded into the defender's PLAN-time prompt; this is what makes the lesson findable
+description: <one short line, ~12-18 words>  # loaded into the defender's PLAN-time prompt — every word is paid for at every retrieval. Cut clause-chains; one beat about the pitfall and how the agent recognizes it.
 source_finding_ids:
   - <run_id>/<n>
 created_at: <ISO 8601 UTC>
@@ -95,7 +95,7 @@ The orchestrator parses this line. Make sure every finding from the input appear
 ## Discipline
 
 - One file per lesson. Flat layout. No subdirectories.
-- Bodies are short — one screen of markdown is plenty. If a lesson wants to be three sections, it's probably two lessons.
+- Bodies are short — half a screen is the target, one screen is the ceiling. If a lesson wants to be three sections, it's probably two lessons. Strip preamble; lead with the pitfall.
 - Don't reference the finding text verbatim in the body; rewrite for the future agent who'll consult the lesson without seeing the source case.
 - Don't add fields to the frontmatter. The retrieval surface is `name + description`; everything else is bookkeeping.
 - If a finding is `type: observability` (system gap, no covering data source), still write a pitfall lesson teaching the agent to stop planning gather steps that need the missing system. Add the finding to the `Observability gaps:` block in the commit message and to `observability_gaps` in the result JSON.

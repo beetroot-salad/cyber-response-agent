@@ -66,6 +66,7 @@ VERIFY_SCRIPT = LEARNING_DIR / "verify_forward.py"
 
 AUTHOR_MODEL = os.environ.get("LEARNING_AUTHOR_MODEL", "claude-sonnet-4-6")
 AUTHOR_TIMEOUT = int(os.environ.get("LEARNING_AUTHOR_TIMEOUT_SECONDS", "1800"))
+AUTHOR_EFFORT = os.environ.get("LEARNING_AUTHOR_EFFORT")  # low|medium|high|xhigh|max
 
 
 class AuthorError(Exception):
@@ -176,8 +177,45 @@ def existing_finding_ids() -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-# Tolerate the agent wrapping the line in backticks / a code fence.
-_RESULT_RE = re.compile(r"AUTHOR_RESULT:\s*(\{.*?\})", re.DOTALL)
+# Marker the agent emits before the final JSON object. Tolerate
+# wrapping in backticks / a code fence.
+_RESULT_MARKER = re.compile(r"AUTHOR_RESULT:\s*(?=\{)")
+
+
+def _extract_author_result(text: str) -> str | None:
+    """Return the JSON object body following the last AUTHOR_RESULT marker.
+
+    Walks forward from the opening brace counting balanced braces while
+    respecting JSON string quoting; this handles nested objects/arrays
+    that the previous non-greedy regex truncated. Returns ``None`` if
+    no marker or no balanced object is found.
+    """
+    matches = list(_RESULT_MARKER.finditer(text))
+    if not matches:
+        return None
+    start = matches[-1].end()  # index of the '{'
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
 
 
 def _resolve_verifier_python() -> Path:
@@ -228,6 +266,7 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         AUTHOR_MODEL,
         "--system-prompt-file",
         str(AUTHOR_PROMPT),
+        *(["--effort", AUTHOR_EFFORT] if AUTHOR_EFFORT else []),
         # Tight allowlist — Bash needs to run git add/commit and the
         # forward-check wrapper. File edits inside defender/lessons/
         # are allowed; everything else still prompts (and in --print
@@ -255,16 +294,16 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
             f"author agent failed (rc={proc.returncode}):\n"
             f"stderr: {proc.stderr[-2000:]}"
         )
-    matches = _RESULT_RE.findall(proc.stdout)
-    if not matches:
+    body = _extract_author_result(proc.stdout)
+    if body is None:
         raise AuthorError(
             "author agent did not emit AUTHOR_RESULT line:\n"
             + proc.stdout[-2000:]
         )
     try:
-        return json.loads(matches[-1])
+        return json.loads(body)
     except json.JSONDecodeError as e:
-        raise AuthorError(f"AUTHOR_RESULT JSON invalid: {e}\n{matches[-1]}") from e
+        raise AuthorError(f"AUTHOR_RESULT JSON invalid: {e}\n{body}") from e
 
 
 # ---------------------------------------------------------------------------
