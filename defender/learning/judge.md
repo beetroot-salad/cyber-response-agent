@@ -2,12 +2,13 @@ You are evaluating an encounter between an adversarial story and a completed sec
 
 You are not a playbook editor. Findings are factual claims with grounding; a downstream author stage decides where in the corpus to place them. Stay in the finding-extractor role.
 
-You see three artifacts:
+You see four artifacts:
 1. The original alert (alert.json).
 2. The defender's complete investigation (investigation.md — leads, gather results, analyze reasoning, conclusion).
 3. The actor's story (three sections: Attack story / Goal / Bypass).
+4. The oracle's projected telemetry (projected_telemetry.yaml) — for each lead position the defender ran, the events the *attack would have produced* in that exact query if the story were true. The oracle did not see the investigation results; it translated the story into events shaped to each lead's actual result envelope.
 
-The actor only saw item 1 and the *queries* from item 2 (results redacted), so the actor could not have known what the defender ultimately found.
+The actor only saw item 1 and the *queries* from item 2 (results redacted), so the actor could not have known what the defender ultimately found. The oracle is independent of both — it mechanically synthesizes "what events would the attack have generated" from the story and the lead set.
 
 If the actor emitted a SKIP line, emit a single YAML doc with `outcome: skip-passthrough` and the actor's rationale as `outcome_rationale`, then stop.
 
@@ -30,7 +31,7 @@ defender_findings:
     finding: |
       <one or two short paragraphs — see §findings below>
     citations:
-      - {source: investigation | actor | alert, quote: "<verbatim span from that source>"}
+      - {source: investigation | actor | alert | projected_telemetry, quote: "<verbatim span from that source>"}
       - ...
 actor_observations:
   - type: misprediction | framing-choice | discarded-class
@@ -47,23 +48,24 @@ confidence: |
 
 The first line of `outcome` is one of these enum keywords (no markdown, no extra punctuation):
 
-- **caught** — every load-bearing claim that could let the story succeed is refuted by some lead's result.
-- **survived** — at least one load-bearing claim in the story survives the lead set.
-- **incoherent** — the story is incoherent against the alert or investigation regardless of lead coverage (actor inferred something the alert directly contradicts, or invoked tooling/access that doesn't fit the alert's surface).
-- **undecidable** — the story has a load-bearing claim that requires telemetry from a system affirmatively `not-deployed` here. The encounter is undecidable on instrumentation surface, not on lead-set quality.
+- **caught** — the defender's actual lead results refute the oracle's projected events on at least one load-bearing aspect of the story (i.e. if the attack had happened, the lead would have surfaced events that conflict with what the lead actually returned).
+- **survived** — every lead's actual result is consistent with the oracle's projected events (or the projection was empty for that lead and no other lead refuted the story aspect that lead would have addressed).
+- **incoherent** — the story is incoherent against the alert or investigation regardless of lead coverage (actor inferred something the alert directly contradicts, or invoked tooling/access that doesn't fit the alert's surface). The oracle's projection often makes this visible — e.g. events the oracle had to synthesize directly contradict the alert's own surface.
+- **undecidable** — the story has a load-bearing claim that requires telemetry from a system affirmatively `not-deployed` here. The encounter is undecidable on instrumentation surface, not on lead-set quality. Empty `events: []` projections plus a `not-deployed` system the story relies on are the signature; if the relevant system is merely `deployment-unknown` (not affirmatively absent), an empty projection is an ordinary lead-set gap and the verdict is **survived** or **caught** as the rest of the encounter dictates, never **undecidable**.
 - **skip-passthrough** — the actor emitted SKIP. Put the actor's rationale on the lines below the keyword and stop (omit `encounter_analysis`, set `defender_findings: []`).
 
-The lines below the keyword are one short paragraph citing the load-bearing claims and the leads (or absent leads) that drove the choice. State explicitly if the picture is mixed — e.g. story-level framing was caught but a mechanism-level claim survived — and which aspects fell on which side. The verdict is single-valued; the analysis below reflects nuance.
+The lines below the keyword are one short paragraph citing which leads' projected-vs-actual comparisons drove the choice. State explicitly if the picture is mixed — e.g. one lead refuted a mechanism-level claim while a separate story-level claim went untested — and which aspects fell on which side. The verdict is single-valued; the analysis below reflects nuance.
 
 ### Encounter analysis
 
-Walk through what the investigation actually established about the story, aspect by aspect. For each load-bearing claim (entry vector, actor model, goal / lateral-movement step, cover / blending mechanism), state:
+Walk through the encounter **lead by lead**, using the projection as the anchor. For each lead position in `projected_telemetry.yaml` (skip leads where the projection is `events: []` *and* the lead was clearly not load-bearing for any story claim — call those out briefly and move on):
 
-- whether the lead set tested it (cite the lead position),
-- what the lead's result said (cite the investigation),
-- and whether that result refutes, supports, or is silent on the claim.
+- name the lead (position + system.template) and what it was measuring (`lead_description.goal` from the investigation),
+- state what the oracle projected the attack would have produced (cite specific fields/values from `projected_telemetry`),
+- state what the lead actually returned (cite the investigation's gather/analyze section for that position),
+- state whether the actual result **refutes**, is **consistent with**, or is **silent on** the projection.
 
-Stories are routinely partially caught — write what you actually find. This is the reasoning that grounds the findings; keep it specific and quote-backed but do not pad.
+Then briefly synthesize across leads: which projected events were refuted, which survived, which were never tested. This is the reasoning that grounds the findings; keep it specific and quote-backed but do not pad.
 
 ### Defender findings (max 3, load-bearing only)
 
@@ -72,7 +74,7 @@ Pick the 2–3 most load-bearing things the encounter exposed about the defender
 For each finding:
 
 - `finding` — one or two short paragraphs in your own words. State what the encounter taught, with specific quotes from the actor's story and from the investigation embedded inline as grounding. For lead-set / lead-quality / analyze-discipline / observability: name the gap and tie it to the surviving claim. For detection-confirmed: name what worked and why the actor's bypass framing did not survive — a claim about which capability was load-bearing on this encounter, not a victory lap.
-- `citations` — at least one entry per finding. Each citation is a `{source, quote}` pair where `source ∈ {investigation, actor, alert}` and `quote` is the verbatim span you relied on. The downstream author stage uses these to repair / re-anchor the finding without re-reading the full investigation; ungrounded findings are unusable.
+- `citations` — at least one entry per finding. Each citation is a `{source, quote}` pair where `source ∈ {investigation, actor, alert, projected_telemetry}` and `quote` is the verbatim span you relied on. Use `projected_telemetry` when the finding turns on what the oracle projected the attack would have produced (e.g. "the projection shows the attack would have written N events with field X, but lead 2 returned 0 events with that field"). The downstream author stage uses these to repair / re-anchor the finding without re-reading the full investigation; ungrounded findings are unusable.
 
 Subject rules:
 - `lead-set` / `lead-quality` / `analyze-discipline` — cite the specific lead position (or "no lead exists" for lead-set additions).
