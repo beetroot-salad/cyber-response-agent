@@ -17,11 +17,10 @@ per-edit gating (see ``tasks-scratch/defender-author-verification/results/final.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
-
-import yaml
 
 
 HERE = Path(__file__).resolve().parent
@@ -41,13 +40,20 @@ def load_run_context(run_id: str) -> tuple[str, str]:
         raise SystemExit(f"verify_forward: missing investigation.md at {investigation}")
     if not refs.is_file():
         raise SystemExit(f"verify_forward: missing source_refs.yaml at {refs}")
-    refs_doc = yaml.safe_load(refs.read_text())
-    disposition = refs_doc.get("normalized_disposition")
-    if not isinstance(disposition, str):
+    # source_refs.yaml is a flat key:value document with one nested
+    # `paths:` block; we only need `normalized_disposition` from the
+    # top level. Parse with a regex so the verifier runs under any
+    # python interpreter (no pyyaml dependency).
+    m = re.search(
+        r"^normalized_disposition:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$",
+        refs.read_text(),
+        re.MULTILINE,
+    )
+    if not m:
         raise SystemExit(
             f"verify_forward: source_refs.yaml missing normalized_disposition: {refs}"
         )
-    return investigation.read_text(), disposition
+    return investigation.read_text(), m.group(1).strip()
 
 
 def render_user_prompt(lesson_text: str, transcript: str, disposition: str) -> str:
@@ -109,8 +115,21 @@ def main(argv: list[str]) -> int:
         return 1
     transcript, disposition = load_run_context(run_id)
     user_prompt = render_user_prompt(lesson_path.read_text(), transcript, disposition)
+    import time as _time
+    t0 = _time.monotonic()
     output = call_haiku(user_prompt)
+    elapsed = _time.monotonic() - t0
     verdict = parse_verdict(output)
+    # Append timing for the harness to reconstruct verifier time. The
+    # path is opportunistic: if VERIFY_TIMING_LOG is set we use it,
+    # else fall back to a sibling file next to the script. Last line
+    # of stdout is still the verdict — author.md reads `last line` only.
+    log_path = os.environ.get("VERIFY_TIMING_LOG") or str(HERE / "_verify_timing.log")
+    try:
+        with open(log_path, "a") as fh:
+            fh.write(f"{lesson_path.name} {run_id} {elapsed:.2f}\n")
+    except OSError:
+        pass
     print(verdict)
     return 0
 

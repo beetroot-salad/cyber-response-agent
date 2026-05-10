@@ -80,6 +80,8 @@ defender/results/
 # Defender learning-loop ephemeral state — never committed.
 defender/learning/_pending/
 defender/learning/runs/
+defender/learning/eval/results/
+defender/learning/eval/_tmp/
 
 # Generated kanban board (regenerate via `python3 tasks/build.py`)
 /board.html
