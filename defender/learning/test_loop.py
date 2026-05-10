@@ -25,6 +25,7 @@ _spec.loader.exec_module(loop)
 
 LoopError = loop.LoopError
 assemble_exemplar_bundle = loop.assemble_exemplar_bundle
+redact_exemplar = loop.redact_exemplar
 validate_oracle_doc = loop.validate_oracle_doc
 
 
@@ -116,10 +117,26 @@ def test_validate_oracle_doc_rejects_events_not_list():
 # ---------------------------------------------------------------------------
 
 
+def _gather_raw_fixture(tag: str) -> str:
+    """Mirrors the wazuh-CLI gather_raw layout: counts/aggregations on top,
+    then a `### Raw Sample Events` block carrying the per-event schema."""
+    return (
+        "## Query Results\n"
+        "### Summary\n"
+        f"- **Matching events:** 999  # ACTUAL-RESULT-{tag}\n"
+        "### Aggregations\n"
+        f"  total_events: 999  # ACTUAL-RESULT-{tag}\n"
+        "### Raw Sample Events (first 3, full _source)\n"
+        "```json\n"
+        f'[{{"data": {{"srcip": "1.2.3.4", "tag": "{tag}"}}}}]\n'
+        "```\n"
+    )
+
+
 def test_assemble_exemplar_bundle_concatenates_per_position(tmp_path: Path):
     (tmp_path / "gather_raw").mkdir()
-    (tmp_path / "gather_raw" / "0.json").write_text("EXEMPLAR-0\n")
-    (tmp_path / "gather_raw" / "1.json").write_text("EXEMPLAR-1\n")
+    (tmp_path / "gather_raw" / "0.json").write_text(_gather_raw_fixture("0"))
+    (tmp_path / "gather_raw" / "1.json").write_text(_gather_raw_fixture("1"))
     lead_seq = yaml.safe_dump(
         {
             "case_id": "x",
@@ -140,9 +157,15 @@ def test_assemble_exemplar_bundle_concatenates_per_position(tmp_path: Path):
     )
     out = assemble_exemplar_bundle(tmp_path, lead_seq)
     assert "position 0 (wazuh.auth-events)" in out
-    assert "EXEMPLAR-0" in out
     assert "position 1 (wazuh.dns-history)" in out
-    assert "EXEMPLAR-1" in out
+    # Per-event schema kept (Raw Sample Events block + payload).
+    assert "Raw Sample Events" in out
+    assert '"tag": "0"' in out
+    assert '"tag": "1"' in out
+    # Counts / aggregations (which leak the actual lead result) are dropped.
+    assert "ACTUAL-RESULT" not in out
+    assert "Matching events" not in out
+    assert "Aggregations" not in out
 
 
 def test_assemble_exemplar_bundle_marks_missing_files(tmp_path: Path):
@@ -168,3 +191,30 @@ def test_assemble_exemplar_bundle_marks_missing_files(tmp_path: Path):
 def test_assemble_exemplar_bundle_rejects_malformed_lead_sequence(tmp_path: Path):
     with pytest.raises(LoopError, match="`entries` list"):
         assemble_exemplar_bundle(tmp_path, "not_a_mapping: true\n")
+
+
+# ---------------------------------------------------------------------------
+# redact_exemplar
+# ---------------------------------------------------------------------------
+
+
+def test_redact_exemplar_keeps_only_raw_sample_block():
+    text = _gather_raw_fixture("0")
+    out = redact_exemplar(text)
+    assert out.startswith("### Raw Sample Events")
+    assert '"srcip": "1.2.3.4"' in out
+    assert "Matching events" not in out
+    assert "Aggregations" not in out
+    assert "ACTUAL-RESULT" not in out
+
+
+def test_redact_exemplar_returns_placeholder_when_no_raw_sample_block():
+    text = (
+        "## Query Results\n"
+        "### Summary\n"
+        "- **Matching events:** 0\n"
+    )
+    out = redact_exemplar(text)
+    assert "no schema sample available" in out
+    # Crucially, the upstream summary text is not echoed back.
+    assert "Matching events" not in out

@@ -24,13 +24,19 @@ concrete, comparable artifacts.
   interpretation. Output is `projections: [{position, system, template,
   events: [{...}]}]`.
 - `defender/learning/loop.py`:
+  - new `redact_exemplar(...)` keeps only the `### Raw Sample Events`
+    block (per-event schema); counts/aggregations/sample summaries are
+    dropped so the oracle cannot mirror the defender's actual results,
   - new `assemble_exemplar_bundle(source_run_dir, lead_sequence_text)`
-    helper concatenates each lead's `gather_raw/{position}.json` as the
-    schema reference,
+    helper assembles one redacted block per lead position as the schema
+    reference,
   - new `invoke_oracle(...)` step between actor and judge,
   - new `validate_oracle_doc(...)` (count/position match, projection
     schema, events-list-of-mappings), bad output is `LoopError`,
-  - persist `projected_telemetry.yaml` in `learning_run_dir`,
+  - persist `projected_telemetry.yaml` (post-`strip_yaml_fence` —
+    the validated text, not raw model output) in `learning_run_dir`;
+    if the model wrapped the YAML in a code fence, the raw response is
+    kept alongside as `projected_telemetry.raw.txt` for debugging,
   - judge gains a fourth `=== projected_telemetry.yaml ===` input section.
 - `defender/learning/judge.md`:
   - fourth input section,

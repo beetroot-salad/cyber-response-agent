@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -179,12 +180,36 @@ def invoke_actor(alert_path: Path, actor_input_path: Path) -> str:
     return _run_claude(ACTOR_PROMPT, user)
 
 
-def assemble_exemplar_bundle(source_run_dir: Path, lead_sequence_text: str) -> str:
-    """Concatenate per-lead `gather_raw/{position}.json` contents.
+_RAW_SAMPLE_HEADER_RE = re.compile(r"^### Raw Sample Events\b.*$", re.MULTILINE)
 
-    The full file (Wazuh aggregation envelope + raw sample events, or
-    whatever the system's CLI produced) is the schema reference. The
-    oracle reads this and synthesizes events that match the same shape.
+
+def redact_exemplar(text: str) -> str:
+    """Reduce a `gather_raw/{position}.json` to its schema-only portion.
+
+    The oracle is supposed to project events from the actor story alone;
+    handing it the full gather_raw (Summary, Aggregations, Count Breakdown,
+    Sample Events) leaks the *actual* lead result and contaminates the
+    projected-vs-actual comparison the judge later does. We keep only the
+    `### Raw Sample Events` block — the per-event JSON shape — which is
+    what the oracle prompt names as the schema reference.
+
+    If no Raw Sample Events block is present (e.g. zero-match lead, or a
+    different envelope), return a placeholder; the oracle has the system
+    + template + params from `lead_sequence.yaml` and must project shape
+    from those.
+    """
+    m = _RAW_SAMPLE_HEADER_RE.search(text)
+    if not m:
+        return "(no schema sample available for this position)"
+    return text[m.start():]
+
+
+def assemble_exemplar_bundle(source_run_dir: Path, lead_sequence_text: str) -> str:
+    """Concatenate per-lead schema samples — one block per lead position.
+
+    Only the `### Raw Sample Events` portion of each `gather_raw/{position}.json`
+    is included; counts, aggregations, and sample summaries are dropped so
+    the oracle cannot mirror the defender's actual results.
     """
     doc = yaml.safe_load(lead_sequence_text)
     if not isinstance(doc, dict) or not isinstance(doc.get("entries"), list):
@@ -196,9 +221,9 @@ def assemble_exemplar_bundle(source_run_dir: Path, lead_sequence_text: str) -> s
         qid = (queries[0] or {}).get("id", "?") if queries else "?"
         result_ref = entry.get("result_ref") or f"gather_raw/{position}.json"
         path = source_run_dir / result_ref
-        header = f"=== position {position} ({qid}) — {result_ref} ==="
+        header = f"=== position {position} ({qid}) — {result_ref} (schema sample only) ==="
         if path.is_file():
-            body = path.read_text()
+            body = redact_exemplar(path.read_text())
         else:
             body = "(no exemplars on disk for this position)"
         blocks.append(f"{header}\n{body}")
@@ -552,14 +577,17 @@ def run_one(run_dir: Path) -> int:
         e.get("position")
         for e in (yaml.safe_load(lead_sequence_text) or {}).get("entries", [])
     ]
+    oracle_yaml_stripped = strip_yaml_fence(oracle_yaml_text)
     try:
-        oracle_doc = yaml.safe_load(strip_yaml_fence(oracle_yaml_text))
+        oracle_doc = yaml.safe_load(oracle_yaml_stripped)
         validate_oracle_doc(oracle_doc, expected_positions)
     except (yaml.YAMLError, LoopError) as e:
-        (learning_run_dir / "projected_telemetry.yaml").write_text(oracle_yaml_text)
+        (learning_run_dir / "projected_telemetry.raw.txt").write_text(oracle_yaml_text)
         raise LoopError(f"oracle YAML invalid: {e}") from e
     projected_telemetry_path = learning_run_dir / "projected_telemetry.yaml"
-    projected_telemetry_path.write_text(oracle_yaml_text)
+    projected_telemetry_path.write_text(oracle_yaml_stripped)
+    if oracle_yaml_stripped != oracle_yaml_text:
+        (learning_run_dir / "projected_telemetry.raw.txt").write_text(oracle_yaml_text)
 
     _log("step=judge")
     judge_yaml_text = invoke_judge(
