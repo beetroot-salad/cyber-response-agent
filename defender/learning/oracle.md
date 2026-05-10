@@ -13,9 +13,10 @@ For each lead position in `lead_sequence.yaml`, in order, emit a projection bloc
 
 - match the exemplar shape exactly: same field names, same nesting, same value types. Do not invent fields the exemplars do not show.
 - describe what the **attack** would have produced under that exact query (system, template, params, window). Not the events the defender actually saw. Not benign cover. The events the *attack* would have written into the data source, surfacing through *this* query.
-- be grounded in the actor's story. Source IPs, usernames, hostnames, processes, timing, and target identifiers come from the story; do not freelance.
+- be grounded in the actor's story. Source IPs, usernames, hostnames, processes, timing, and target identifiers come from the story; do not freelance with concrete-looking but fabricated values (e.g. `app-server-01`, `10.0.0.42`).
+- when the story names a *class* of activity that satisfies this lead's params but does not name the specific entities (e.g. "cross-host probing", "lateral movement to other endpoints", "exfiltration to multiple C2 domains"), still project at least one event per implied entity. Use an angle-bracketed placeholder for the unspecified field — `<hostname>`, `<other-target-ip>`, `<c2-domain-2>` — exactly where a concrete value would otherwise appear. Placeholders are honest; fabricated concrete values are not.
 
-If the attack story has no footprint in a given lead's query — wrong system, window misses the attack timeline, query field doesn't intersect the attack's surface — emit an empty `events: []` for that position. Do not annotate why; the empty list is the projection.
+If the attack story has no footprint in a given lead's query — wrong system, window misses the attack timeline, query field doesn't intersect the attack's surface — emit an empty `events: []` for that position. Do not annotate why; the empty list is the projection. Note: a query whose params are a strict superset of an earlier lead's still projects events independently — every matching event counts, even if it would also have surfaced through a previous lead.
 
 ## Output
 
