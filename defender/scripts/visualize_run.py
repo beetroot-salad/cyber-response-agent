@@ -276,7 +276,8 @@ def lesson_changes(run_dir: Path, run_id: str) -> dict:
     for line in log.stdout.splitlines():
         if not line.strip():
             if cur:
-                commits.append(cur); cur = None
+                commits.append(cur)
+                cur = None
             continue
         if "\t" in line and len(line.split("\t")) >= 3 and len(line.split("\t")[0]) == 40:
             sha, when, subject = line.split("\t", 2)
