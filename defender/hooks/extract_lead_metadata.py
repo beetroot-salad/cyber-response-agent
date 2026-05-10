@@ -31,30 +31,61 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
-
 
 GATHER_SKILL_MARKER = "defender/skills/gather/SKILL.md"
 
 # Capture the first ```yaml ... ``` (or ```yml) fenced block in the prompt.
-YAML_FENCE_RE = re.compile(
-    r"```ya?ml\s*\n(.*?)\n```",
-    re.DOTALL,
-)
+FENCE_RE = re.compile(r"```ya?ml\s*\n(.*?)\n```", re.DOTALL)
+
+# Top-level key: line — `name:` or `name: value` (no leading whitespace).
+# `name` is conservatively limited to identifier-shape chars so colons
+# inside free-form values can't be mistaken for a new key.
+_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$")
+# Bullet — two-or-more-space indent + dash + body. Body is taken literally,
+# including any colons.
+_BULLET_RE = re.compile(r"^\s{2,}-\s+(.*)$")
 
 
 def extract_dispatch(prompt: str) -> dict | None:
-    """Return the parsed YAML dispatch block, or None if not found / unparseable."""
-    match = YAML_FENCE_RE.search(prompt)
+    """Parse the dispatch block leniently.
+
+    YAML.safe_load is unsafe here because the dispatch fields are free-form
+    natural-language strings (`goal: Compare fields: user and src`,
+    `- process cmdline: /bin/sh`). YAML interprets the inner colon-space
+    as a nested mapping or raises, which silently drops the sidecar. We
+    parse line-by-line instead: only the leading `name:` or `  - ` is
+    structural; everything after is a literal string.
+    """
+    match = FENCE_RE.search(prompt)
     if not match:
         return None
-    try:
-        doc = yaml.safe_load(match.group(1))
-    except yaml.YAMLError:
-        return None
-    if not isinstance(doc, dict):
-        return None
-    return doc
+    return _parse_block(match.group(1))
+
+
+def _parse_block(text: str) -> dict | None:
+    out: dict = {}
+    current_list_key: str | None = None
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        bullet = _BULLET_RE.match(line)
+        if bullet and current_list_key is not None:
+            out.setdefault(current_list_key, []).append(bullet.group(1).strip())
+            continue
+        key = _KEY_RE.match(line)
+        if not key:
+            # Unrecognized continuation line — ignore rather than fail.
+            continue
+        name, value = key.group(1), key.group(2).strip()
+        if value:
+            out[name] = value
+            current_list_key = None
+        else:
+            # Empty value → next bullets accumulate into a list.
+            out[name] = []
+            current_list_key = name
+    return out or None
 
 
 def write_sidecar(dispatch: dict) -> None:
