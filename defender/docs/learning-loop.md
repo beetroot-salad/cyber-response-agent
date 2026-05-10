@@ -2,29 +2,30 @@
 
 ## Status
 
-**Design doc, partially superseded by the landed implementation.** The
-loop described here now exists under `defender/learning/` as
-orchestrator (`loop.py`) → actor (`actor.md`) → telemetry oracle
-(`oracle.md`) → judge (`judge.md`) → forward-check
-(`verify_forward.{md,py}`) → author (`author.md`/`author.py`) →
-lessons corpus (`defender/lessons/*.md`). When this doc and the code
-disagree, code wins. Kept for the design rationale (lighter schema,
-PR-based delivery, why we walked away from the heavyweight earlier
-draft).
+**Implementation cache; code wins on conflict.** The loop described
+here exists under `defender/learning/` as orchestrator (`loop.py`) →
+actor (`actor.md`) → telemetry oracle (`oracle.md`) → judge
+(`judge.md`) → author (`author.md`/`author.py`) with a per-lesson
+forward-check gate (`verify_forward.{md,py}`) → lessons corpus
+(`defender/lessons/*.md`). This doc is not the source of truth, but it
+should track the implementation closely enough that a reader can
+orient without reopening every file.
 
 This document describes an **offline learning mechanism** that mines completed
-investigations for reusable lessons and ships them as pull requests against the
-playbook / knowledge base. It is not a real-time guard.
+investigations for reusable lessons and writes them into
+`defender/lessons/*.md`. The current implementation commits lesson edits
+locally; PR wrapping and CI review remain design/deferred work. The loop is
+not a real-time guard.
 
-The live investigation path is unchanged: a single investigator with optional
-same-context self-review (described briefly below for completeness, but not the
-focus of this doc).
+The live investigation path is unchanged: a single investigator. A same-context
+self-evaluation loop is described below as a future enhancement, not as a
+current runtime stage.
 
 The previous version of this doc bundled live review and cross-case learning
 together and proposed a heavyweight schema (multi-axis subjective rewards,
 canonical taxonomy, anti-scope fields, addendum library, retrieval algorithm).
 That scope was wrong for where we are. This version replaces it with a much
-lighter schema and a PR-based delivery mechanism.
+lighter artifact pipeline and a checked-in lessons corpus.
 
 ## Inspirations
 
@@ -59,10 +60,10 @@ Things to borrow from RL practice:
   the curator has never seen.
 - *Reward hacking.* If the judge's outcome rubric has a loophole, the
   defender will find it. The forward-check gate
-  (`verify_forward.{md,py}`) is the structural answer: a finding has
-  to actually bite the actor's story before it queues. The judge's
-  prompt is part of the reward function and should be audited as
-  such.
+  (`verify_forward.{md,py}`) is the structural answer for promotion:
+  a candidate lesson has to keep the source case on its ground-truth
+  disposition before it is committed. The judge's prompt is part of
+  the reward function and should be audited as such.
 
 **Evolutionary / population-based methods.** The lessons corpus is a
 *population* of candidate behaviors. Authoring a new lesson is
@@ -113,58 +114,56 @@ budget for regression-detection accordingly.
 
 ## Purpose
 
-Improve investigation **correctness and efficiency** by sampling counterfactual
-actors against completed cases and converting their findings into concrete
-playbook edits.
+Improve investigation **correctness and efficiency** by sampling a
+counterfactual adversarial actor against completed cases and converting
+judge findings into compact pitfall lessons.
 
-Two modes:
-
-1. **Adversarial-defender** — could a competent adversary have survived this
-   exact lead sequence? If yes, what assumption let them through?
-2. **Benign-defender** — if the defender had simply phoned the (legitimate)
-   operator or service-account owner, would they have been "washed" — told
-   that the question could have been answered cheaply with one specific query?
-
-Both modes produce concrete, citation-backed edits to playbooks and knowledge
-docs, delivered as pull requests.
+The implemented mode is **gray-box adversarial-defender**: could a competent
+adversary have survived this exact lead sequence, and what defender pitfall did
+that encounter expose? Benign-defender review and live self-evaluation remain
+future enhancements.
 
 ## Design Principles
 
-1. **Offline only.** No live latency cost. No production gating. The curator
-   is a human reviewing a PR.
-2. **One reward signal per mode.** No additive subjective scoring. Adversarial
-   reward is `survives_evidence: bool`. Benign reward is
-   `was_in_lead_set: bool`.
+1. **Offline only.** No live latency cost. No production gating.
+2. **One encounter outcome.** The judge emits one outcome keyword
+   (`caught | survived | undecidable | incoherent | skip-passthrough`) plus
+   a small set of grounded findings. There is no additive scoring model.
 3. **Concrete observables only.** A lesson must name a specific field,
-   artifact, or system-of-record query. Abstract advice is rejected.
-4. **PRs as the audit trail.** Lessons land as inline edits to playbook /
-   knowledge files via PR. Git history is the lesson store. CI can be added
-   later to gate promotion.
-5. **No addendum library, no retrieval engine, no taxonomy.** The playbook is
-   the addendum library. Retrieval is whatever the live investigator already
-   does when it loads its skill prompt.
+   artifact, system-of-record query, or analysis discipline failure. Abstract
+   advice is rejected by the author or forward-check gate.
+4. **Git history as the audit trail.** The author edits only
+   `defender/lessons/*.md`, commits those edits, and rotates the queue
+   atomically. PR review can wrap that flow later, but it is not in the
+   current scripts.
+5. **No addendum library, no retrieval engine, no taxonomy.** The lesson
+   corpus is flat markdown. Runtime retrieval is the defender PLAN step:
+   enumerate frontmatter and read bodies whose descriptions look relevant.
 
 ## Loop Shape
 
 ```text
-Completed investigation (alert.json + investigation.md + report.md + tool_trace.jsonl)
+Completed run dir
+(alert.json + investigation.md + report.md + lead_sequence.yaml + gather_raw/)
         │
-        ├── Adversarial-defender run ──┐
-        │                              │
-        ├── Benign-defender run ───────┤
-        │                              │
-        ▼                              ▼
-   findings.yaml (per-mode)     findings.yaml (per-mode)
-        │                              │
-        └──────────────┬───────────────┘
-                       ▼
-            Lesson author agent
+        ▼
+defender/learning/loop.py <run_dir>
+        │
+        ├── normalize disposition from report.md
+        ├── project actor_input.yaml
+        ├── actor_story.md (or SKIP)
+        ├── projected_telemetry.yaml from telemetry oracle
+        ├── judge_findings.yaml from judge
+        ├── persist under defender/learning/runs/<run_id>/
+        └── append queueable findings to defender/learning/_pending/findings.jsonl
                        │
                        ▼
-            Playbook / knowledge edits in a worktree
-                       │
-                       ▼
-                     Pull request (human review)
+defender/learning/author.py (when threshold is reached)
+        │
+        ├── lock + clean-scope + idempotency + ground-truth gates
+        ├── new/fold/skip lesson edits under defender/lessons/
+        ├── verify_forward.py per candidate edit
+        └── commit lesson edits + rotate queue / hold findings
 ```
 
 ## Adversarial-Defender Mode
@@ -175,25 +174,19 @@ The adversary's objective is to pass as benign through the actual lead
 sequence the investigator pursued. The defender's objective is for the lead
 sequence to break the adversary's story.
 
-### Variants
+### Implemented Variant
 
-Three exposure levels, in increasing usefulness:
+Only **gray-box: query-only reveal** is implemented. The actor sees
+`alert.json` plus the ordered lead projection containing only
+`position` and `queries[].id` / `queries[].params`. It does not see lead
+descriptions, result references, or investigation results. It emits either a
+plain-markdown attack story (`Attack story`, `Goal`, `Bypass`) or a single
+`SKIP:` line.
 
-1. **Direct review** — adversary reads the full investigation and proposes
-   where reasoning is brittle. Cheap; biased because the adversary sees the
-   answer.
-2. **Black-box story** — adversary reads only `alert.json` and writes a
-   malicious story consistent with it. Tests intrinsic alert ambiguity, not
-   investigator quality.
-3. **Gray-box: leads-only reveal** *(primary)* — adversary sees `alert.json`
-   plus the ordered lead contracts PREDICT selected (lead definitions, not
-   answers). Adversary writes the most coherent malicious story consistent
-   with that lead set.
-   Then the actual lead results are revealed. Adversary self-reflects on
-   whether the story survived.
-
-Gray-box is the primary mode because it directly tests whether the lead set is
-**discriminating** rather than **confirming**.
+The actor does **not** self-reflect after results are revealed. The telemetry
+oracle translates the actor story into per-lead projected events, and the judge
+does the projected-vs-actual comparison. Direct-review and black-box variants
+remain design ideas, not current code paths.
 
 ### Lead set projection
 
@@ -206,243 +199,276 @@ The defender does not pick from a slugged lead catalog; gather picks (or
 authors) a query template per dispatch, and the template id is what makes
 a lead addressable across cases.
 
-The learning job materializes that ordered contract as:
+The source run materializes that ordered contract as:
 
 ```yaml
-lead_sequence:
-  case_id: <run id>
-  entries:
-    - position: 0
-      lead_description:
-        goal: <defender's measurement contract>
-        what_to_characterize:
-          - <dimension the gather result must characterize>
-      queries:
-        - id: <system-prefixed kebab, e.g. wazuh.auth-events-by-host>
-          params: {<param>: <bound value>}
-      result_ref: <citation to actual result, hidden during gray-box story phase>
+case_id: <run id>
+alert_ref: alert.json
+entries:
+  - position: 0
+    lead_description:
+      goal: <defender's measurement contract>
+      what_to_characterize:
+        - <dimension the gather result must characterize>
+    queries:
+      - id: <system-prefixed kebab, e.g. wazuh.auth-events>
+        params: {<param>: <bound value>}
+    result_ref: <gather_raw/{position}.json>
 ```
 
-When gather fans a single dispatch out into multiple queries, each is an
-entry in the same `queries` list — there is no separate composite mode.
-Templates authored during a run are written back to the per-system
-catalog (`defender/skills/gather/queries/{system}/`), so the catalog
-grows organically with usage; early near-duplicates are accepted and
-normalized downstream when patterns stabilize.
+`defender/scripts/project_lead_sequence.py` is the canonical projector. It
+parses `:L findings` rows from `investigation.md`, requires `system` and
+`template` cells, derives `queries[].id` as `{system}.{template}` (or
+`ad-hoc`), parses bound params from the `query` and `window` cells, and writes
+`lead_sequence.yaml` back into the source run dir. If a
+`gather_raw/{position}.lead.json` sidecar exists, its `goal` and
+`what_to_characterize` fill `lead_description`; otherwise the projector falls
+back to the `:L` row name and an empty dimension list.
+
+The schema allows multiple `queries[]` entries per lead position, but the
+current projector emits one query per parsed `:L` row. Templates authored
+during a run are written back to the per-system catalog
+(`defender/skills/gather/queries/{system}/`), so the catalog grows organically
+with usage; early near-duplicates are accepted and normalized downstream when
+patterns stabilize.
 
 For gray-box adversarial runs, the actor sees `alert.json` plus an
-**answer-and-intent-redacted** projection of the lead sequence: only
-`position` and `queries[].id` + `queries[].params` per entry — no
-`lead_description`, no `result_ref`. The actor learns *what raw queries
-ran* (ambient deployment context) but nothing about defender intent or
-what was found. Reasoning about lead coverage / gaps is the judge's job,
-not the actor's; this projection enforces the split. The orchestrator
-(`defender/learning/loop.py`) emits this as `actor_input.yaml` and
-discards `lead_description` / `result_ref` at projection time. If the
-dispatch contract cannot be projected cleanly, the learning run is
-rejected rather than asking the actor to infer the lead set from prose.
-
-> **Production note.** The legacy `knowledge/common-investigation/leads/`
-> slug catalog (used by the production `soc-agent/` investigate loop) is
-> unchanged; production runs continue to project a slug-keyed
-> `selected_lead`. The query-template keying above is the contract for
-> the `defender/` agent and any future defender that drops the slug
-> catalog. The learning-loop tooling treats `query.id` and
-> `selected_lead` as parallel cross-case keys during the transition.
-
-### Schema
+**answer-and-intent-redacted** projection of the lead sequence:
 
 ```yaml
-adversarial_run:
-  case_id: <run id>
-  mode: gray_box | direct_review | black_box
-  lead_sequence_ref: <runs/{run_id}/learning/lead_sequence.yaml>
-  story: <causal chain consistent with leads pursued>
-  survives_evidence: true | false
-  survival_check:
-    checked_by: independent_judge
-    agrees: true | false
-    note: <short rationale>
-  breaking_observation: <field/artifact that killed the story, or null>
-  exploited_assumption: <investigator assumption that almost let it pass, or null>
-  suggested_lead: <one concrete additional lead that would have caught this, or null>
-  evidence_refs:
-    lead_results: [<refs used in the evidence reveal>]
-    survival_rationale: [<refs supporting survives_evidence or breaking_observation>]
-    suggested_lead_basis: [<refs supporting the suggested lead, or []>]
+case_id: <run id>
+alert_ref: alert.json
+entries:
+  - position: 0
+    queries:
+      - id: wazuh.auth-events
+        params: {srcip: 172.22.0.10, window: 7d}
 ```
 
-The reward signal is still only `survives_evidence: bool`. `survival_check`
-and `evidence_refs` are audit metadata, not extra scoring axes. No confidence
-ratings. No `protects_against`, no `discriminator_class`, no anti-scope.
+This projection is emitted as
+`defender/learning/runs/<run_id>/actor_input.yaml`. It discards
+`lead_description` and `result_ref` at projection time. If the dispatch
+contract cannot be projected cleanly, the learning run is rejected rather than
+asking the actor to infer the lead set from prose.
 
-If `survives_evidence: true` and the independent survival check agrees, the run
-is a finding — the lead set was not discriminating against this attack class.
-The `suggested_lead` becomes the lesson candidate.
+### Artifact Schemas
 
-If `survives_evidence: false`, log the run for later analysis (it confirms the
-lead set works against this story class) but no PR is generated.
+The current implementation uses three model-authored artifacts, not a single
+`adversarial_run` record.
 
-## Benign-Defender Mode
+**Actor output** (`actor_story.md`) is plain markdown with exactly three
+numbered sections (`Attack story`, `Goal`, `Bypass`) or a single `SKIP:` line.
 
-### Mental model
-
-> The defender calls the operator (or the service-account owner). The operator
-> answers, then washes them: "you could have verified this yourself by
-> doing XYZ." XYZ is a concrete query against a system of record.
-
-If XYZ was already in the lead set, the investigation was efficient. If XYZ
-was *not* in the lead set, that's the lesson: the playbook is missing a
-cheap, decisive legitimacy check.
-
-### Schema
+**Oracle output** (`projected_telemetry.yaml`) is a single YAML document:
 
 ```yaml
-benign_run:
-  case_id: <run id>
-  lead_sequence_ref: <runs/{run_id}/learning/lead_sequence.yaml>
-  minimum_resolving_query:
-    system_of_record: <CI/CD | IAM | ticketing | change-calendar | orchestration-audit | ...>
-    query: <concrete query, field, or API call>
-    expected_answer: <what would resolve the case as benign>
-  was_in_lead_set: true | false
-  position_in_sequence: <int — index in actual lead order, or null if absent>
-  sequence_savings: <int — leads after position that became unnecessary, or null>
-  evidence_refs:
-    minimum_query_basis: [<refs proving this system/query exists>]
-    lead_sequence_match: [<refs proving the query was present, late, or absent>]
+projections:
+  - position: 0
+    system: wazuh
+    template: auth-events
+    events:
+      - {<event object matching the redacted exemplar shape>}
+  - position: 1
+    system: wazuh
+    template: recent-rule-fires
+    events: []
 ```
 
-If `was_in_lead_set: false`, the lesson candidate is "add this query to the
-playbook." If `was_in_lead_set: true` but `position_in_sequence` is late,
-the lesson candidate is "reorder this query earlier." If
-`position_in_sequence == 0`, no finding.
+The oracle sees alert, actor story, full lead sequence, and per-lead schema
+exemplars. `loop.py` redacts exemplars down to `### Raw Sample Events` JSON
+field/type skeletons, dropping counts, aggregations, and concrete values so
+the oracle cannot mirror the defender's actual results.
 
-The benign actor must name a query against an actual system of record present
-in the environment. "The operator would have told you" without a system query
-is rejected — that's the post-hoc rationalization failure mode.
+**Judge output** (`judge_findings.yaml`) is a single YAML document:
 
-## Lesson Delivery via Pull Request
+```yaml
+outcome: |
+  caught | survived | undecidable | incoherent | skip-passthrough
+  <short rationale>
+encounter_analysis: |
+  <lead-by-lead projected-vs-actual analysis>
+defender_findings:
+  - type: lead-set | lead-quality | analyze-discipline | observability | detection-confirmed
+    subject: <specific lead position, no-lead gap, or system path>
+    finding: |
+      <grounded finding>
+    citations:
+      - {source: investigation | actor | alert | projected_telemetry, quote: "<verbatim span>"}
+actor_observations:
+  - type: misprediction | framing-choice | discarded-class
+    subject: <story aspect>
+    observation: |
+      <optional actor-side note>
+confidence: |
+  <short confidence note>
+```
+
+`actor_observations` is optional and is not queued into the defender lesson
+corpus today. `detection-confirmed` findings are retained in
+`judge_findings.yaml` but filtered out of `_pending/findings.jsonl` as
+audit-only. Queueable finding types are `lead-set`, `lead-quality`,
+`analyze-discipline`, and `observability`.
+
+## Lesson Delivery
 
 ### Pipeline
 
-1. **Run** — async job samples either adversarial or benign mode against a
-   completed case, writes `lead_sequence.yaml` and `findings.yaml` to
-   `runs/{run_id}/learning/`.
-2. **Author** — a lesson-author agent reads `findings.yaml` and the current
-   playbook for the signature, decides where the edit belongs (one of:
-   `knowledge/signatures/{sig}/playbook.md`, `knowledge/signatures/{sig}/
-   archetypes/{arch}/README.md`, `knowledge/common-investigation/leads/`,
-   `knowledge/environment/operations/{anchor}.md`), and stages inline edits
-   in a worktree.
-3. **PR** — orchestrator opens a PR with title `[lesson] {sig}: {one-line
-   summary}`, body containing: finding type, citation to source run,
-   schema-form findings, and rationale for placement.
-4. **Human review** — reviewer accepts, edits, or rejects. CI can be added
-   later (e.g., replay the PR's edits against a held-out fixture set and
-   block on inverse-failure rate).
+1. **Run** — `defender/learning/loop.py <run_dir>` handles one completed case.
+   It persists artifacts under `defender/learning/runs/<run_id>/` and appends
+   queueable judge findings as JSONL to
+   `defender/learning/_pending/findings.jsonl`.
+2. **Threshold** — when pending count reaches `LEARNING_AUTHOR_THRESHOLD`
+   (default 5), `loop.py` calls `author.run_batch()`. `author.py` can also be
+   run directly.
+3. **Pre-flight** — `author.py` takes `_pending/.lock`, requires
+   `defender/lessons/` to be git-clean, filters already-authored findings via
+   lesson `source_finding_ids`, and holds findings whose source disposition is
+   not `benign` (currently `inconclusive` or missing ground truth).
+4. **Author agent** — `author.md` receives the remaining findings, enumerates
+   existing `defender/lessons/*.md`, and decides `new`, `fold`, or `skip`.
+   Lesson files are flat markdown with frontmatter: `name`, `description`,
+   `source_finding_ids`, `created_at`.
+5. **Forward-check** — after each new or folded lesson edit, the author runs
+   `verify_forward.py <lesson_path> <run_id>`. `GOOD` keeps the edit; `BAD`
+   reverts it and leaves the finding held for later review.
+6. **Commit + post-flight** — the author commits lesson edits if any survived.
+   `author.py` verifies that the claimed `commit_sha` is HEAD, that HEAD
+   touches only `defender/lessons/*.md`, and that the lessons dir is clean.
+   Then it atomically rotates `_pending/findings.jsonl`, appends consumed
+   findings to `_pending/consumed.jsonl`, and logs no-commit held/skip batches
+   to `_pending/held_report.log`.
 
-### Why PRs, not an addendum library
+### Why Lessons, Not an Addendum Library
 
-- Git history is the audit trail. No separate `runs/_lessons/lessons.yaml`
-  to maintain.
-- Edits land in the same files the investigator already reads at skill-load
-  time. No retrieval algorithm, no prompt projection, no 2KB budget.
-- A reviewer can edit-in-flight, which is the only realistic inverse-failure
-  filter at this stage.
-- CI can later replay learning-derived PRs against a fixture corpus before
-  merge — the cleanest possible inverse-failure measurement.
+- Git history is the audit trail. No separate `runs/_lessons/lessons.yaml` to
+  maintain.
+- Lessons land in the same `defender/lessons/` corpus the runtime investigator
+  already reads at PLAN time. No retrieval service, no prompt projection, no
+  sidecar taxonomy.
+- A future PR wrapper can review the committed lesson diff and add CI replay
+  before merge, but the current local transaction is intentionally smaller.
 
 ### Citation requirement
 
-Every PR must cite at least one source run id and either the breaking
-observation (adversarial) or the missing minimum query (benign). PRs that
-modify shared knowledge (`common-investigation/`, `environment/operations/`)
-must cite at least two source runs across distinct signatures, to avoid
-fixture-specific rules leaking into shared surfaces.
-
-The citation source is the structured `evidence_refs` block in
-`findings.yaml`. A lesson-author PR may add prose rationale, but it cannot
-invent new evidence after the finding is emitted; if the needed citation is
-missing, the finding is rejected or re-run.
+Each judge finding carries `citations`, each a `{source, quote}` pair with
+`source ∈ {investigation, actor, alert, projected_telemetry}`. The author can
+rewrite the lesson for future use, but should not invent evidence. The durable
+lesson-to-source link is the `source_finding_ids` frontmatter list plus the
+consumed queue record.
 
 ## Sampling Policy
 
-One mode sample per completed case (cost control), with mode assignment drawn
-from a tunable policy rather than a fixed disposition map.
+There is no scheduler or sampling layer today. The API is manual:
+`defender/learning/loop.py <run_dir>`.
 
-Initial policy:
+Current disposition behavior:
 
-1. **Counter-disposition sample** *(default)* — resolved-benign cases sample
-   adversarial-defender; resolved-malicious or threat-escalated cases sample
-   benign-defender. This tests the question most likely to expose false
-   closure: "what would have flipped the call?"
-2. **Random exploration bucket** — reserve a guessed fraction of cases for
-   random mode assignment, stratified by signature and severity. This prevents
-   the learning loop from only finding failures we already expected.
-3. **Ambiguous / inconclusive cases** — sample either mode, with preference for
-   the mode that is underrepresented for that signature in the current month.
+- `benign` and `inconclusive` reports run through actor/oracle/judge.
+- `malicious` reports are skipped at MVP.
+- Author promotion only proceeds for findings whose source disposition is
+  `benign`; `inconclusive` findings are held as no-ground-truth because the
+  forward-check gate needs a ground-truth disposition.
 
-No statistical tuning at MVP stage. Start with an explicit guessed distribution
-(for example, mostly counter-disposition with a smaller random bucket), then
-aggregate findings monthly. If one mode or signature dominates accepted PRs,
-that is a playbook gap signal — no formal test required yet.
-
-## Live Self-Review (Brief)
-
-Out of scope for this learning loop, but noted for completeness:
-
-The live investigator may run a same-context self-review before commit that
-asks "what counter-disposition story explains the same observations, and is
-there one cheap missing check?" This is a separate workstream. The schema
-above is intentionally independent of it — learning runs against the
-investigation as it actually happened, regardless of whether self-review
-fired.
+The older counter-disposition/random-bucket policy remains a future sampling
+design, not current behavior.
 
 ## Run Artifacts
 
 ```text
-runs/{run_id}/learning/
-  lead_sequence.yaml    # projected ordered lead contracts, result refs included
-  findings.yaml         # adversarial_run or benign_run record
-  prompt_inputs.md      # what the actor saw (gray-box reveal log)
-  pr_url               # populated after PR opens
+defender/learning/runs/{run_id}/
+  alert.json                  # copied from source run
+  report.md                   # copied from source run
+  investigation.md            # copied from source run
+  lead_sequence.yaml          # copied after projection
+  actor_input.yaml            # redacted actor-facing lead sequence
+  actor_story.md              # actor markdown or SKIP line
+  projected_telemetry.yaml    # oracle output, absent on actor SKIP
+  projected_telemetry.raw.txt # optional raw fenced/bad oracle output
+  judge_findings.yaml         # judge output, absent on actor SKIP
+  judge_findings.raw.txt      # optional raw fenced/bad judge output
+  source_refs.yaml            # source paths, normalized_disposition, alert_rule_key
+
+defender/learning/_pending/
+  findings.jsonl              # queueable findings
+  consumed.jsonl              # consumed committed/idempotent/skipped findings
+  held_report.log             # no-commit held/skip summaries
+
+defender/lessons/
+  *.md                        # committed pitfall lessons read at PLAN time
 ```
 
-The PR itself is the lesson record. There is no separate lesson store.
+The source run dir also contains or receives `lead_sequence.yaml`; the loop
+copies canonical artifacts into `defender/learning/runs/<run_id>/`.
 
 ## MVP
 
-1. Implement lead-sequence projection against existing run artifacts.
-2. Implement gray-box adversarial mode against existing fixtures. One agent,
-   one prompt, schema output.
-3. Implement benign-defender mode against completed fixtures selected by the
-   sampling policy.
-4. Implement independent survival check for adversarial findings.
-5. Implement lesson-author agent that converts a `findings.yaml` into a
-   worktree of inline edits and opens a PR.
-6. Run manually on ~10 cases per signature; review PRs; iterate on author
-   prompt until placements are correct ≥80% of the time without human
-   reshuffling.
-7. Defer: scheduling, automatic CI gating, holdout replay, multi-mode
-   sampling, calibration.
+Implemented:
+
+1. Lead-sequence projection from defender run artifacts.
+2. Gray-box adversarial actor.
+3. Telemetry oracle with schema-only exemplar redaction.
+4. Judge output validation and queueable finding extraction.
+5. Pending JSONL queue, consumed queue, held-report surface.
+6. Lesson author with clean-scope/idempotency/ground-truth gates.
+7. Per-lesson forward-check gate before commit.
+8. Flat `defender/lessons/*.md` corpus and PLAN-time retrieval contract.
+
+Deferred:
+
+1. Benign-defender mode and live self-evaluation / self-review loop.
+2. Scheduling and statistical sampling policy.
+3. PR wrapper and automatic CI gating.
+4. Holdout replay / inverse-failure measurement.
+5. Actor-side learning corpus.
 
 ## Evaluation
 
-- **Adversarial mode**: of cases where `survives_evidence: true`, what
-  fraction yielded a PR a reviewer accepted without rewrite?
-- **Benign mode**: of cases where `was_in_lead_set: false`, did the
-  proposed minimum query actually exist as a tool/query in the environment?
-- **Citation validity**: fraction of findings whose `evidence_refs` resolve to
-  the claimed run artifact and support the finding.
-- **Survival-check quality**: adversarial actor / independent judge
-  disagreement rate, reviewed manually for the first batch.
-- **PR quality**: human edit distance between authored diff and merged diff.
-- **Inverse failure (deferred)**: replay merged lesson PRs against a
-  held-out fixture set; measure correct-disposition runs that the lesson
-  would have made worse.
+- **Queue yield**: findings appended per run, by `outcome` and finding `type`.
+- **Detection-confirmed audit rate**: caught encounters that produced
+  audit-only `detection-confirmed` findings but no queued lesson.
+- **Citation validity**: fraction of finding `citations` whose quotes resolve
+  to the claimed artifact and support the finding.
+- **Forward-check pass rate**: candidate lesson edits marked `GOOD` vs `BAD`
+  by `verify_forward.py`, with manual review of BAD holds.
+- **Author disposition**: committed vs folded vs skipped vs held-forward-bad vs
+  held-no-ground-truth.
+- **Inverse failure (deferred)**: replay merged lesson commits against a
+  held-out fixture set; measure correct-disposition runs that the lesson would
+  have made worse.
 
 ## Future Enhancements
+
+### Benign-defender mode
+
+Benign-defender remains a useful design idea but is **not implemented**. There
+is no benign actor prompt, no `benign_run` schema, and no current sampling
+path that routes malicious cases to a benign-mode reviewer.
+
+The mental model:
+
+> The defender calls the operator (or the service-account owner). The operator
+> answers, then washes them: "you could have verified this yourself by doing
+> XYZ." XYZ is a concrete query against a system of record.
+
+If built, this mode should name a query against an actual system of record
+present in the environment. "The operator would have told you" without a
+system query should remain rejected as post-hoc rationalization. The useful
+reward signal is whether the minimum resolving query was already present in
+the lead set, and if so whether it appeared early enough to avoid unnecessary
+work.
+
+### Live self-evaluation loop
+
+The live investigator may eventually run a same-context self-review before
+commit that asks: "what counter-disposition story explains the same
+observations, and is there one cheap missing check?" This is separate from the
+offline learning loop. Offline learning should continue to run against the
+investigation as it actually happened, regardless of whether live
+self-evaluation fired.
+
+Keep this future loop small: it should surface a missing check or force an
+escalation when the case is underdetermined, not become a second full
+investigator or a source of post-hoc rationalization.
 
 ### Learning actor (true co-evolution)
 
@@ -507,9 +533,10 @@ revisit.
 ## Open Questions
 
 - Where does shared knowledge live when a lesson recurs across signatures?
-  `common-investigation/leads/` is the obvious target, but the two-signature
-  citation rule may be too strict early.
-- Should the lesson-author agent see prior accepted PRs as exemplars? If
+  The current answer is still a flat `defender/lessons/` file that broadens
+  its `description`; if that becomes too coarse, do we add tags or subdirs?
+- Should the lesson-author agent see prior accepted lesson commits as exemplars? If
   yes, how to avoid drift toward a single editing style.
 - For benign mode, how strict should "system of record actually queryable"
-  be enforced? Hard-fail in the schema, or accept and flag in the PR body?
+  be enforced? Hard-fail in the schema, or accept and flag in held metadata /
+  future PR wrapper metadata?
