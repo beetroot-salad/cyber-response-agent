@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Defender learning-loop V0 orchestrator.
+"""Defender learning-loop orchestrator.
 
 Per-run-dir API: ``loop.py <run_dir>``. One case at a time.
 
@@ -19,12 +19,8 @@ Steps:
   6. Persist per-run artifacts under ``defender/learning/runs/<run_id>/``.
   7. Filter ``detection-confirmed`` (audit-only) and append the rest to
      ``defender/learning/_pending/findings.jsonl``.
-  8. If pending count ≥ ``LEARNING_AUTHOR_THRESHOLD`` (default 5), call
-     the stub author.
-
-The stub author logs the batch to stderr and exits without touching the
-queue — V1 (``tasks/defender-learning-loop-v1-real-author.md``) replaces
-it with the real author + transaction model.
+  8. If pending count >= ``LEARNING_AUTHOR_THRESHOLD`` (default 5), call
+     ``author.run_batch`` — see ``defender/learning/author.py``.
 """
 from __future__ import annotations
 
@@ -544,29 +540,6 @@ def append_findings(
 
 
 # ---------------------------------------------------------------------------
-# Step 7: Stub author
-# ---------------------------------------------------------------------------
-
-
-def invoke_stub_author() -> None:
-    if not PENDING_FILE.is_file():
-        return
-    lines = [line for line in PENDING_FILE.read_text().splitlines() if line.strip()]
-    ids = [json.loads(line)["finding_id"] for line in lines]
-    source_dirs = sorted({json.loads(line)["source_run_dir"] for line in lines})
-    print(
-        f"[learning-author-stub] batch: {len(ids)} findings, "
-        f"source_dirs: {source_dirs}",
-        file=sys.stderr,
-    )
-    print(
-        f"LEARNING_AUTHOR_STUB: {len(ids)} findings ready, "
-        "real author deferred to follow-up PR",
-        file=sys.stderr,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
@@ -674,7 +647,16 @@ def run_one(run_dir: Path) -> int:
     )
     if pending_count >= threshold:
         _log(f"step=author pending={pending_count} threshold={threshold}")
-        invoke_stub_author()
+        # Sibling module — loop.py is invoked as a script, so we
+        # import author by file path rather than via package syntax.
+        sys.path.insert(0, str(LEARNING_DIR))
+        try:
+            import author as _author  # type: ignore[import-not-found]
+        finally:
+            sys.path.pop(0)
+        rc = _author.run_batch()
+        if rc != 0:
+            _log(f"author returned rc={rc} (queue intact, retry next tick)")
     else:
         _log(f"pending={pending_count} threshold={threshold} — author not invoked")
 

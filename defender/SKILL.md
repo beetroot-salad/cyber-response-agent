@@ -78,6 +78,15 @@ If PLAN can't name a real branch the next move resolves, scaffold a
 single mechanism + legitimacy contract and proceed; don't loop on
 prediction.
 
+**Lessons.** The learning loop builds up a corpus of pitfall lessons
+under `defender/lessons/` — each is a markdown file with `name` +
+`description` frontmatter and a freeform pitfall body. At PLAN time,
+enumerate `defender/lessons/*.md` and read each file's frontmatter.
+For any lesson whose `description` looks plausibly relevant to the
+current alert shape, Read the body before writing your `:H` / `:L`
+blocks. Bodies are short; they teach you what to *check next time*,
+not what conclusion to reach.
+
 ### GATHER
 
 Dispatch the gather subagent on **Haiku** with a prompt that points it
