@@ -89,19 +89,32 @@ not what conclusion to reach.
 ### GATHER
 
 Dispatch the gather subagent on **Haiku** with a prompt that points it
-at its own SKILL on disk plus the dispatch parameters. Don't inline
-the SKILL body — the file on disk is the single source of truth.
+at its own SKILL on disk plus a fenced YAML dispatch block. Don't
+inline the SKILL body — the file on disk is the single source of
+truth.
 
 ```
 Task(
   model="haiku",
   prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
          "## Dispatch\n"
-         "lead_description: ...\n"
-         "run_dir: ...\n"
+         "```yaml\n"
+         "run_dir: /tmp/defender-runs/{run_id}\n"
          "position: N\n"
+         "goal: <one-sentence measurement contract>\n"
+         "what_to_characterize:\n"
+         "  - <dimension 1>\n"
+         "  - <dimension 2>\n"
+         "```\n"
 )
 ```
+
+A PreToolUse hook (`defender/hooks/extract_lead_metadata.py`) parses
+that YAML block and writes `{run_dir}/gather_raw/{position}.lead.json`
+before gather runs. The projection script reads that sidecar to
+populate `lead_description` in `lead_sequence.yaml`. Keep the YAML
+well-formed and put `goal` / `what_to_characterize` at the top level
+— gather reads the same fields from the same block.
 
 Haiku is the default because gather's job is mechanical — pick a
 template, bind params, run the CLI, summarize. Structural correctness
@@ -158,18 +171,12 @@ confidence: high | medium | low
 - `malicious` — confident escalate, story confirmed. The learning loop
   skips these at MVP.
 
-Author the corresponding `:T` block in `investigation.md`. Then run
-the projection script to emit `lead_sequence.yaml` from your
-`investigation.md` + `gather_raw/`:
-
-```bash
-python3 defender/scripts/project_lead_sequence.py {run_dir}
-```
-
-The script is the single source of truth for projection rules (which
-dispatches count, how composite calls collapse, where `params` come
-from). Don't hand-author `lead_sequence.yaml` — if the script can't
-project it, the investigation log is the bug, not the schema.
+Author the corresponding `:T` block in `investigation.md`. Stop after
+that — the harness (`defender/run.py`) runs the projection script
+(`defender/scripts/project_lead_sequence.py`) and the visualizer
+after you exit. Don't hand-author `lead_sequence.yaml`; if the script
+can't project a faithful sequence from your investigation log, the
+log is the bug, not the schema.
 
 ## Skills
 
@@ -228,9 +235,15 @@ GATHER dispatch (single-lead, parallel-of-one):
 Task(model="haiku",
      prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
             "## Dispatch\n"
-            "lead_description: Did the file modification at 02:14:01Z trace to a managed apt upgrade? Characterize the apt event window ±10m around the FIM timestamp and grade the resulting checksum against the published Ubuntu package SHA for nginx 1.24.0-2ubuntu7.5.\n"
-            "run_dir: results/2026-05-05-A\n"
-            "position: 0\n")
+            "```yaml\n"
+            "run_dir: /tmp/defender-runs/2026-05-05-A\n"
+            "position: 0\n"
+            "goal: Did the file modification at 02:14:01Z trace to a managed apt upgrade?\n"
+            "what_to_characterize:\n"
+            "  - apt history events ±10m around the FIM timestamp\n"
+            "  - checksum_after vs the published Ubuntu package SHA for nginx 1.24.0-2ubuntu7.5\n"
+            "  - fleet upgrade pattern for the same window\n"
+            "```\n")
 ```
 
 Gather authored a new template (`host-query.apt-history-around` —

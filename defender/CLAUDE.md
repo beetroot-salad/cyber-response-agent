@@ -15,7 +15,12 @@ If a question is "should we add a hook / validator / safety gate to the
 defender runtime?" — the answer right now is almost certainly **no**.
 That investment belongs in `soc-agent/`. The defender's job is to
 generate signal for the offline loop; gaps in its runtime discipline
-are *features* of the experiment, not bugs.
+are *features* of the experiment, not bugs. The narrow exception is
+plumbing hooks that materialize harness contracts (e.g.
+`hooks/extract_lead_metadata.py`, which writes the
+`lead_description` sidecar from the gather dispatch block) — those
+are extraction shims, not safety gates, and they replace prompt
+instructions the model would otherwise have to remember.
 
 **Design rationale lives in `defender/docs/`.** Before changing the
 loop shape, the actor/judge/oracle prompts, or the lessons mechanism,
@@ -31,7 +36,10 @@ session notes), `system-skill-shape.md` (per-system SKILL.md split).
 defender/
   SKILL.md              # the runtime agent's entry point — ORIENT/PLAN/GATHER/ANALYZE/REPORT loop
   CLAUDE.md             # this file
-  run.sh                # invoke defender on one alert.json fixture
+  run.py                # canonical entrypoint: investigate one alert end-to-end (runtime + post-steps + learning loop)
+  run-settings.json     # claude --settings template (permissions + extract_lead_metadata hook)
+  hooks/
+    extract_lead_metadata.py   # PreToolUse on Task: parses gather dispatch YAML, writes {position}.lead.json
   skills/
     dense-language/     # invlang block surface (local copy of the schema)
     gather/             # gather subagent (Haiku) + per-system query templates
@@ -42,7 +50,7 @@ defender/
     run_stats.py
     visualize_run.py           # post-run transcript renderer
   learning/             # offline learning loop — see §Learning loop below
-    loop.py             # orchestrator (per-run-dir entry point)
+    loop.py             # orchestrator (per-run-dir entry point); imported in-process by run.py
     actor.md            # adversarial counterfactual story
     oracle.md           # telemetry oracle: per-lead synthesized events
     judge.md            # outcome classifier + finding emitter
@@ -57,17 +65,21 @@ defender/
 ```
 
 The runtime agent has no unit tests — it's evaluated by running real
-alerts through `defender/run.sh` and reviewing the run dir.
+alerts through `defender/run.py` and reviewing the run dir.
 `defender/tests/` covers learning-loop invariants (lesson schema,
 author pre/post-flight, atomic writes, forward-check).
 
 ## Runtime loop (one-line overview)
 
-`defender/run.sh <alert.json>` → spawns `claude -p` with
+`python3 defender/run.py <alert.json>` → spawns `claude -p` with
 `defender/SKILL.md` → agent works through ORIENT → PLAN → GATHER →
 ANALYZE → REPORT, dispatching the gather subagent (Haiku) per query →
-emits `investigation.md`, `report.md`, `lead_sequence.yaml`,
-`gather_raw/*.json` into a run dir under `/tmp/defender-runs/`.
+emits `investigation.md`, `report.md`, `gather_raw/*.json` into a run
+dir under `/tmp/defender-runs/`. After the agent exits, `run.py`
+projects `lead_sequence.yaml`, renders `transcript.html`, and (unless
+`--no-learn`) hands off to `defender.learning.loop.run_one`. Pass
+`--no-learn` to skip the learning step when iterating on the runtime
+loop only.
 
 `SKILL.md` is the spec. Everything below is reference material for
 the run dir's on-disk shape and the projection contract — kept here
@@ -75,8 +87,9 @@ so there's one doc to read at the root.
 
 ## Learning loop
 
-This is the headlining experiment. After a run finishes,
-`defender/learning/loop.py <run_dir>`:
+This is the headlining experiment. `run.py` invokes it in-process
+after the runtime loop exits (skip with `--no-learn`); it can also be
+run standalone via `python3 defender/learning/loop.py <run_dir>`.
 
 1. **Normalizes** disposition from `report.md` frontmatter. Skips
    `malicious` at MVP.
@@ -110,20 +123,21 @@ listed at the top of this file). When a doc and the code disagree,
 
 ## Run dir layout
 
-`run.sh` creates a dir under `$DEFENDER_RUNS_BASE/{run_id}/` (default
+`run.py` creates a dir under `$DEFENDER_RUNS_BASE/{run_id}/` (default
 `/tmp/defender-runs/`). Runs live outside the repo so transcripts stay
 out of git and SIEM CLIs have writable scratch space.
 
 ```
 {run_id}/
-  alert.json              # input — copied by run.sh, read-only for the agent
+  alert.json              # input — copied by run.py, read-only for the agent
   investigation.md        # ORIENT/PLAN/GATHER/ANALYZE/REPORT log, dense invlang
                           #   (:V/:E/:H/:L/:R/:T blocks per defender/skills/dense-language/SKILL.md)
   lead_sequence.yaml      # projected contract surface for the learning loop (see below)
   report.md               # YAML frontmatter (case_id, disposition, confidence) + one paragraph
-  tool_trace.jsonl        # stream-json events captured by run.sh
-  transcript.html         # rendered transcript + artifact panel (run.sh post-step)
+  tool_trace.jsonl        # stream-json events captured by run.py
+  transcript.html         # rendered transcript + artifact panel (run.py post-step)
   gather_raw/
+    {position}.lead.json  # dispatch goal + dimensions, written by extract_lead_metadata hook
     {position}.json       # raw payload per gather call, keyed by lead_sequence position
 ```
 

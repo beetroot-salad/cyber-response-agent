@@ -12,36 +12,32 @@ defender can reason from.
 
 ## Inputs
 
+The defender's Task prompt carries a fenced YAML dispatch block with
+these keys:
+
 - `run_dir` — the run's working directory (`$DEFENDER_RUNS_BASE/{run_id}/`, default `/tmp/defender-runs/{run_id}/`)
 - `position` — integer, scopes your output filenames
-- `alert_ref` — relative path to `alert.json` (read for entity context)
-- `lead_description`:
-  - `goal` — one-sentence measurement contract
-  - `what_to_characterize` — list of dimensions your summary must address
-- `catalog_dir` — `defender/skills/gather/queries/`
+- `goal` — one-sentence measurement contract
+- `what_to_characterize` — list of dimensions your summary must address
+
+`alert.json` lives at `{run_dir}/alert.json` (the harness copied it
+in at run setup). The query catalog lives at
+`defender/skills/gather/queries/`.
 
 ## Procedure
 
 ### 1. Load context
 
-Read `{run_dir}/{alert_ref}` and any environment skills you need
+Read `{run_dir}/alert.json` and any environment skills you need
 (`defender/skills/{system}/SKILL.md`) to understand what data sources
 exist and what their CLIs look like.
 
-Then persist the lead description for the projection script:
-
-```bash
-cat > {run_dir}/gather_raw/{position}.lead.json <<JSON
-{"goal": "<dispatch goal verbatim>",
- "what_to_characterize": ["<dim 1>", "<dim 2>", ...]}
-JSON
-```
-
-`project_lead_sequence.py` reads this sidecar to populate
-`lead_description` in `lead_sequence.yaml`. Without it the projection
-falls back to the `:L findings.name` cell, which loses the goal
-sentence and the dimension list. Write the sidecar before running
-queries so it survives an early gather error.
+The lead-description sidecar
+(`{run_dir}/gather_raw/{position}.lead.json`) that the projection
+script reads is written for you by the `extract_lead_metadata`
+PreToolUse hook before you start — you do not need to author it. If
+you ever notice it missing, the dispatch YAML upstream was malformed;
+fix the dispatch shape, not the sidecar.
 
 ### 2. Find or author a query template
 
