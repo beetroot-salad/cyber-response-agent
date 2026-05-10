@@ -1,6 +1,6 @@
 ---
 title: Defender learning loop — real author phase
-status: backlog
+status: done
 groups: defender, learning-loop
 ---
 

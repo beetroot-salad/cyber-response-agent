@@ -1,6 +1,6 @@
 ---
 title: Defender learning loop V0.1 — real author (replaces stub)
-status: doing
+status: done
 groups: defender, learning-loop
 ---
 

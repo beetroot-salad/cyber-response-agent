@@ -1,6 +1,6 @@
 ---
 title: Defender learning loop V0 — orchestrator + stub author
-status: doing
+status: done
 groups: defender, learning-loop
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: Telemetry oracle between actor and judge
-status: doing
+status: done
 groups: defender, learning-loop
 ---
 

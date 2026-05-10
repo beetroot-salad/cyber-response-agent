@@ -1,6 +1,6 @@
 ---
 title: Defender POC — lean single-agent investigation loop (paired with learning loop)
-status: todo
+status: done
 groups: defender, critic-architecture, poc, prompt
 ---
 
