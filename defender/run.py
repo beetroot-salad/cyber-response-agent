@@ -83,7 +83,11 @@ def build_settings_file() -> Path:
     keeps the on-disk template diff-friendly.
     """
     template = SETTINGS_TEMPLATE.read_text()
-    resolved = template.replace("${DEFENDER_DIR}", str(DEFENDER_DIR))
+    resolved = (
+        template
+        .replace("${DEFENDER_DIR}", str(DEFENDER_DIR))
+        .replace("${PYTHON}", sys.executable)
+    )
     fh = tempfile.NamedTemporaryFile(
         mode="w", suffix=".settings.json", delete=False, prefix="defender-"
     )

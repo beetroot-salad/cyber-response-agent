@@ -14,11 +14,11 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Task",
+        "matcher": "Task|Agent",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${DEFENDER_DIR}/hooks/extract_lead_metadata.py"
+            "command": "${PYTHON} ${DEFENDER_DIR}/hooks/extract_lead_metadata.py"
           }
         ]
       }
