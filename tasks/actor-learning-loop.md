@@ -6,9 +6,11 @@ groups: defender, learning-loop, actor
 
 **Motivation.** Defender's `lessons/` accumulates monotonically; actor is
 memoryless across cases and reads a hand-curated `mitre_corpus.py`. The
-asymmetry guarantees a plateau — defender either exhausts the actor's
-static strategy space or its judge-gradable neighborhood, and learning
-yield drops to zero. Classic self-play collapse if uncorrected.
+asymmetry plausibly drives a plateau (defender exhausts actor's static
+strategy space or its judge-gradable neighborhood). Static actor is the
+most actionable lever among several candidate plateau causes — judge
+sensitivity, oracle limits, held-out drift — distinguished post-hoc via
+the divergence diagnostic on the secondary metric.
 
 **Scope (problem statement #1).** Build a self-play loop in which the
 defender accumulates lessons from adversarial alert investigations and
@@ -22,27 +24,35 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
 
 ## Sequencing — one PR each
 
-- [ ] **Held-out fixture set + persist-stage filter.** 20–30 alerts with
-  ground-truth labels; learning loop's persist stage drops held-out
-  findings before they reach `_pending/`. Unblocks primary-metric
-  baseline against current defender.
+- [ ] **Held-out fixture set + persist-stage filter.** 24–30 alerts with
+  ground-truth labels (≥8 per class: benign/malicious/inconclusive).
+  Persist stage drops both `defender_findings` and `actor_observations`
+  from held-out runs before either `_pending/` queue is touched.
+  Unblocks primary-metric baseline against current defender.
 - [ ] **Actor-side judge calibration set.** ~30 rows. Humans label
-  `(alert, story, lead_sequence) → caught/survived/incoherent/undecidable`.
-  Mirrors `defender/learning/judge-alignment/`. Highest leverage —
-  every downstream actor-author decision is built on this signal.
+  the judge's full input tuple:
+  `(alert, investigation.md, actor story, projected_telemetry.yaml)
+  → caught/survived/incoherent/undecidable`. Mirrors
+  `defender/learning/judge-alignment/`. Highest leverage — every
+  downstream actor-author decision is built on this signal.
 - [ ] **`defender/lessons-actor/` corpus structure** — tradecraft +
   environment channels, schemas, seed lessons. No code yet.
 - [ ] **Actor.md edit — grep-after-Section-0 phase.** Validate retrieval
-  reliability at MVP (Sonnet expected clean, Haiku may miss).
+  reliability at MVP (Sonnet expected clean, Haiku may miss). Includes
+  switching the actor invocation to stream-json, persisting
+  `actor_trace.jsonl`, and adding the missed-retrieval audit script.
 - [ ] **Actor author** — `defender/learning/author_actor.py` +
-  `author_actor.md`. Consumes `actor_observations` on `caught` only
-  (failure-only channel). Routes to tradecraft or environment;
-  environment prompt enforces attacker-framing constraint (no
-  visibility-surface prose). Author commit on fire is the generation
-  boundary (trailer `Generation: N`).
-- [ ] **Secondary metric harness.** Replay actor stage from
-  `gen-{N-3}` commit against held-out; feed stories to current
-  defender; report catch rate. Divergence diagnostic.
+  `author_actor.md`. `caught` → tradecraft + environment authoring;
+  `incoherent` → environment invalidation only (closes the
+  contradiction-only loop for stale env claims). Environment prompt
+  enforces attacker-framing constraint (no visibility-surface prose).
+  Author commit on fire is the generation boundary; trailer asserts
+  `Generation: N` + actor-model identifier (for replay pinning).
+- [ ] **Secondary metric harness.** Two-worktree replay: current
+  defender investigates held-out from HEAD; frozen actor from
+  `gen-{N-3}` writes a story against that lead sequence; current
+  oracle + judge grade. Reads actor-model pin from `gen-{N-3}` commit
+  trailer. Divergence diagnostic.
 - [ ] **End-to-end wiring** — defender author + actor author concurrent
   on independent queues + thresholds (default 5 each).
 

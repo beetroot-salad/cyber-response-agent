@@ -71,19 +71,53 @@ in §Ship criteria.
 
 ### Secondary — catch rate against frozen actor from K generations ago
 
-To compute the secondary, replay *the current defender* against the
-actor-as-it-was K generations ago on the held-out alert set; report
-the fraction of stories the defender catches.
+The defender does not consume actor stories — the architecture runs
+defender first, then actor, then oracle + judge against the
+investigation's lead sequence. So "catch rate against a frozen actor"
+is shorthand for: how well does the *current defender's lead
+sequence* refute stories written by an old actor?
 
-**Frozen actor = git checkout.** The whole `defender/` tree
-(`actor.md`, `mitre_corpus.py`, `lessons-actor/`, retrieval logic,
-seed policy, model selection) is the actor; reproducing actor-of-K
-means reproducing all of it. Git already does this. The author commit
-when it fires (see §Generation boundary) is the manifest; gen-N is
-identified by a commit SHA. The replay harness checks out
-`gen-{N-K}`, runs the actor stage from that working tree against the
-held-out alerts, and feeds the resulting stories to the current
-defender.
+**Replay flow (held-out alert × K-generations-old actor):**
+
+1. **Current defender** investigates the held-out alert from
+   `HEAD` — produces `investigation.md` + `lead_sequence.yaml` +
+   `gather_raw/`.
+2. **Frozen actor** writes a story against that lead sequence,
+   running from a `gen-{N-K}` checkout. The actor sees the alert and
+   the projected lead sequence; it does not see investigation
+   results (gray-box, unchanged from the live loop).
+3. **Current oracle** projects telemetry from story + lead set.
+4. **Current judge** grades `(alert, investigation, story,
+   projected_telemetry) → outcome ∈ {caught | survived | …}`.
+5. Catch rate = fraction of replays with `outcome: caught` on the
+   held-out alert set.
+
+**Two-worktree harness.** Replay needs old actor code *and* current
+defender/oracle/judge simultaneously. A single `git checkout` cannot
+provide both. The harness uses two worktrees:
+
+- `worktrees/replay-head/` checked out at `HEAD` — runs defender,
+  oracle, judge.
+- `worktrees/replay-gen-{N-K}/` checked out at the target generation
+  commit — runs the actor stage only.
+
+The harness shells the actor invocation into the gen-{N-K} tree, then
+brings the resulting story back to the HEAD tree for oracle + judge.
+
+**Git is not the *full* manifest.** Two non-source dimensions can
+drift independently of the working tree:
+
+- **Model selection.** `defender/learning/loop.py` reads model
+  identifiers from environment variables with defaults. Replay must
+  pin actor model to whatever the gen-{N-K} commit specified.
+  Concretely: the actor-author commit's trailer records the actor
+  model in addition to `Generation: N`, and the replay harness reads
+  that trailer to set the env vars before invoking the actor.
+- **External API behavior.** Anthropic model versions can shift
+  silently behind aliases. Replay results are not literal
+  reproductions — they are best-effort, and large unexplained
+  secondary-metric swings should be checked against model-version
+  changes before being attributed to actor drift.
 
 K = 3 by default — far enough that "actor moved" is measurable, close
 enough that frozen-actor stories remain in-distribution.
@@ -257,13 +291,23 @@ of the actor-grep PR.
 **Retrieval is audit-only at MVP, not gated.** Section 0 may not be
 revised after lessons load — the technique commit is the retrieval
 key, and post-hoc revision would invite circular reasoning ("read
-lessons, swap to techniques whose lessons I happen to like"). The
-actor's `tool_trace.jsonl` records the grep + read calls; an audit
-script flags generations where the actor's chosen techniques had
-matching lessons on disk but the trace shows zero reads. Audit-only
-because at MVP a missed retrieval just means weaker actor performance,
-not unsafe behavior. Promotion to a gate is a follow-up if audit
-shows consistent retrieval failures.
+lessons, swap to techniques whose lessons I happen to like").
+
+**Trace capture is part of the actor-grep PR, not assumed.** The
+current actor stage runs as a plain `claude -p` text invocation in
+`defender/learning/loop.py` and persists only the story output — no
+tool trace today. The actor-grep PR adds:
+
+- `claude -p --output-format stream-json` (or equivalent) on the
+  actor stage to capture per-tool-call events,
+- a per-case `actor_trace.jsonl` artifact in the run dir,
+- an audit script that scans traces and flags generations where the
+  actor's chosen techniques had matching lessons on disk but the
+  trace shows zero reads.
+
+Audit-only because at MVP a missed retrieval means weaker actor
+performance, not unsafe behavior. Promotion to a gate is follow-up
+if audit shows consistent retrieval failures.
 
 #### 3. Actor author — concurrent with defender author
 
@@ -286,7 +330,7 @@ unconsumed):
 |---|---|---|
 | `caught` | yes | defender refuted the story — the failure pattern is the lesson |
 | `survived` | **no** | learn only from failures; survival may reflect judge leniency, not real tradecraft strength |
-| `incoherent` | no | hygiene / prompt-quality issue, not tradecraft; surface via judge-alignment review instead |
+| `incoherent` | environment channel only | a story that contradicts its own setup is often driven by a stale environment assumption the actor relied on — this is the only mechanism that surfaces stale env claims for invalidation under contradiction-only invalidation; tradecraft-channel authoring stays off because incoherence is not a refuted tradecraft pattern |
 | `undecidable` | no | by definition, no signal |
 | `skip-passthrough` | no | actor declined; nothing to learn from |
 
@@ -296,6 +340,20 @@ at story time as patterns to avoid. There is no positive-pattern
 channel at MVP — defender learns from where it failed (its `caught`
 is defender's miss); actor learns the same way (its `caught` is the
 actor's miss). Symmetric.
+
+**Environment-channel authoring on `incoherent`.** Asymmetric to
+tradecraft, the environment channel does read `incoherent` outcomes
+— but only for the narrow purpose of flipping stale env claims to
+`stale`. Without this, contradiction-only invalidation has a gap:
+a stale env claim drives the actor to write a story that contradicts
+the alert or investigation; judge calls it `incoherent`; under a
+strictly-caught-only filter no new env lesson is authored and the
+stale claim persists. Allowing `incoherent` to invalidate (but not
+to add new positive env claims unless the contradiction *names* the
+correct fact) closes the loop. The author's env-channel prompt is
+responsible for distinguishing "this incoherence implies env claim X
+is wrong" (invalidate X) from "this incoherence is an actor logic
+error unrelated to env" (no-op).
 
 The judge v3 schema is unchanged.
 
@@ -373,10 +431,17 @@ These are not stretch goals. The loop's signal is invalid without
 them.
 
 1. **Actor-side judge calibration set.** ~30 rows. Humans label
-   `(alert, story, lead_sequence) → caught/survived/incoherent/undecidable`.
-   Equivalent to the defender's `defender/learning/judge-alignment/`
-   work, but for actor-side outcomes. Without this, every downstream
-   actor-author decision is built on uncalibrated judge output.
+   the *judge's full input tuple*:
+   `(alert, investigation.md, actor story, projected_telemetry.yaml)
+   → caught/survived/incoherent/undecidable`.
+   The (alert, story, lead_sequence) shorthand is wrong — `judge.md`
+   needs the investigation log and the oracle's projected telemetry
+   to grade the encounter (see `defender/learning/judge.md` §inputs).
+   Calibration fixtures must include all four artifacts, snapshotted
+   together. Equivalent to the defender's
+   `defender/learning/judge-alignment/` work, but for actor-side
+   outcomes. Without this, every downstream actor-author decision is
+   built on uncalibrated judge output.
 
 2. **Held-out alert set with ground-truth labels.** 20–30 alerts is
    the minimum to detect meaningful primary-metric movement (see
@@ -404,15 +469,23 @@ baseline is measured):
     mode that matters most.
 - **Class balance in held-out.** At least 8 alerts per
   `disposition` class (`benign | malicious | inconclusive`), 24–30
-  alerts total. Sizing rationale: with 8 per class and the per-class
-  floor binding at 90% on malicious, a single miss drops recall to
-  87.5% — already below floor, so the regression signal is
-  detectable on a single failure. A held-out set without
-  representatives of a class cannot detect regressions on that class.
+  alerts total. Sizing rationale: with 8 per class and a 90% recall
+  floor on malicious, the floor effectively requires **8/8 malicious
+  correct** — 7/8 = 87.5%, already below floor. This is intended:
+  any malicious miss on the held-out set is a ship-blocker, which
+  aligns with the project's zero-false-negative goal. A held-out set
+  without representatives of a class cannot detect regressions on
+  that class.
 - **Plateau definition.** Three consecutive author generations with
-  primary-metric delta < 2 percentage points and bootstrap 95% CI
-  (N=1000 resamples) overlapping. The CI rule guards against calling
-  noise a plateau on a small held-out set.
+  primary-metric delta below the smallest single-alert resolution
+  the held-out set can express. On 24–30 alerts, one alert changing
+  label moves aggregate accuracy by 3.3–4.2 pp; the previous
+  "<2 pp" threshold was below single-alert resolution and is
+  meaningless on this set size. Reframed: **plateau = three
+  consecutive generations with zero label changes on held-out**, and
+  bootstrap 95% CI (N=1000 resamples) overlapping. The zero-change
+  rule is the operational form on a small held-out set; if the set
+  grows to ≥100 alerts later, swap back to a percentage-point delta.
 - **Secondary check.** At the same time the primary plateaus, the
   secondary metric must *not* be diverging upward — see §Secondary
   divergence diagnostic. If it is, investigate before shipping.
@@ -433,16 +506,23 @@ Land in this order, each as its own PR:
    — just the corpus shape and a couple of hand-authored seed lessons
    to test grep retrieval.
 4. **Actor.md edit — grep-after-Section-0 phase.** Validate that the
-   actor can retrieve lessons reliably enough at MVP.
+   actor can retrieve lessons reliably enough at MVP. **Includes
+   trace capture**: switch the actor invocation in
+   `defender/learning/loop.py` to a stream-json mode, persist
+   per-case `actor_trace.jsonl`, and add the audit script that flags
+   missed retrievals.
 5. **Actor author** — `author_actor.py` + `author_actor.md`. Fed by
-   judge `actor_observations` on `outcome: caught` only (see §Outcome
-   filter). Routes to tradecraft or environment channel; environment
-   author prompt enforces the attacker-framing constraint and rejects
-   visibility-surface prose. Author commit on fire is the generation
-   boundary; commit trailer asserts `Generation: N`.
-6. **Secondary metric harness.** Replay actor stage from `gen-{N-3}`
-   commit against held-out; feed stories to current defender; report
-   catch rate.
+   judge `actor_observations` per the outcome filter: `caught` →
+   tradecraft + environment; `incoherent` → environment invalidation
+   only. Environment author prompt enforces the attacker-framing
+   constraint and rejects visibility-surface prose. Author commit on
+   fire is the generation boundary; commit trailer asserts
+   `Generation: N` plus the actor-model identifier (for replay).
+6. **Secondary metric harness.** Two-worktree replay: current defender
+   investigates held-out from `HEAD`, frozen actor from `gen-{N-3}`
+   writes a story against that lead sequence, current oracle + judge
+   grade. Report catch rate. Reads actor-model pin from the
+   gen-{N-3} commit trailer.
 7. **End-to-end loop wiring** — defender author and actor author
    firing concurrently per their own thresholds.
 
@@ -469,6 +549,8 @@ Land in this order, each as its own PR:
 - **`actor_observations` richness.** Currently capped at 2 per case
   by judge v3 schema. If the author finds it consistently too thin,
   the judge prompt edit precedes any pipeline addition.
-- **Snapshot retention.** All generations kept at MVP. If snapshot
-  count grows unwieldy, prune by keeping every Nth generation plus
-  the latest K.
+- **Generation retention.** Generations are git commits — git
+  history retains them by default at no marginal storage cost.
+  Nothing to prune at MVP. If commit count on the actor-author
+  sequence ever becomes a navigation problem, the response is
+  tagging (e.g. `gen-N` annotated tags) rather than deletion.
