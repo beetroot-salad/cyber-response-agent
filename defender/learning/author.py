@@ -248,8 +248,76 @@ def _resolve_verifier_python() -> Path:
     return Path(sys.executable)
 
 
+AUTHOR_RUN_LOG = PENDING_DIR / "author_run.jsonl"
+
+
+def _summarize_event(evt: dict) -> str | None:
+    """One-liner for a stream-json event; None to suppress."""
+    etype = evt.get("type")
+    if etype == "system":
+        return f"system subtype={evt.get('subtype')}"
+    if etype == "assistant":
+        msg = evt.get("message") or {}
+        for blk in msg.get("content") or []:
+            btype = blk.get("type")
+            if btype == "tool_use":
+                name = blk.get("name", "?")
+                inp = blk.get("input") or {}
+                if name == "Bash":
+                    cmd = (inp.get("command") or "").splitlines()[0][:120]
+                    return f"tool:Bash {cmd}"
+                if name in ("Read", "Glob", "Grep"):
+                    target = inp.get("file_path") or inp.get("pattern") or ""
+                    return f"tool:{name} {target}"
+                if name in ("Edit", "Write"):
+                    return f"tool:{name} {inp.get('file_path', '')}"
+                return f"tool:{name}"
+            if btype == "text":
+                txt = (blk.get("text") or "").strip().splitlines()
+                head = txt[0][:140] if txt else ""
+                return f"text {head}" if head else None
+        return "assistant (empty)"
+    if etype == "user":
+        msg = evt.get("message") or {}
+        for blk in msg.get("content") or []:
+            if blk.get("type") == "tool_result":
+                content = blk.get("content")
+                if isinstance(content, list):
+                    body = "".join(
+                        b.get("text", "") for b in content if isinstance(b, dict)
+                    )
+                else:
+                    body = str(content or "")
+                size = len(body)
+                err = " ERR" if blk.get("is_error") else ""
+                return f"tool_result{err} {size}B"
+        return None
+    if etype == "result":
+        return f"result subtype={evt.get('subtype')} duration_ms={evt.get('duration_ms')}"
+    return None
+
+
+def _assistant_text(evt: dict) -> str:
+    """Concatenate assistant text blocks from one event; empty string otherwise."""
+    if evt.get("type") != "assistant":
+        return ""
+    msg = evt.get("message") or {}
+    out = []
+    for blk in msg.get("content") or []:
+        if blk.get("type") == "text":
+            out.append(blk.get("text") or "")
+    return "".join(out)
+
+
 def invoke_agent(findings: list[dict], batch_id: str) -> dict:
-    """Spawn the curator agent. Returns parsed AUTHOR_RESULT dict."""
+    """Spawn the curator agent. Returns parsed AUTHOR_RESULT dict.
+
+    Uses stream-json output so each turn (tool call, tool result, text
+    chunk) appears as a JSONL event we can tee to disk and summarize
+    to stderr in real time. ``--print`` text mode buffers the entire
+    response until the agent exits, which hides AUTHOR's mid-run
+    behavior and makes ordinary slowness indistinguishable from a hang.
+    """
     verifier_py = _resolve_verifier_python()
     user_prompt = (
         f"batch_id: {batch_id}\n"
@@ -266,6 +334,10 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         AUTHOR_MODEL,
         "--system-prompt-file",
         str(AUTHOR_PROMPT),
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-hook-events",
         *(["--effort", AUTHOR_EFFORT] if AUTHOR_EFFORT else []),
         # Tight allowlist — Bash needs to run git add/commit and the
         # forward-check wrapper. File edits inside defender/lessons/
@@ -278,27 +350,76 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
             "Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),"
             "Bash(git rev-parse:*),Bash(git status:*),Bash(git diff:*),"
             f"Bash({verifier_py} defender/learning/verify_forward.py:*),"
-            "Bash(rm defender/lessons/*.md)"
+            "Bash(rm defender/lessons/*.md),"
+            f"Bash(rm {LESSONS_DIR}/*.md)"
         ),
     ]
-    proc = subprocess.run(
+
+    import time as _time
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    log_fh = AUTHOR_RUN_LOG.open("w")
+    log_fh.write(json.dumps({"batch_id": batch_id, "started_at": _now_iso()}) + "\n")
+    log_fh.flush()
+
+    proc = subprocess.Popen(
         cmd,
         cwd=REPO_ROOT,
-        input=user_prompt,
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=AUTHOR_TIMEOUT,
+        bufsize=1,
     )
-    if proc.returncode != 0:
+    assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+    proc.stdin.write(user_prompt)
+    proc.stdin.close()
+
+    deadline = _time.monotonic() + AUTHOR_TIMEOUT
+    text_buf: list[str] = []
+    t0 = _time.monotonic()
+    try:
+        for raw in proc.stdout:
+            if _time.monotonic() > deadline:
+                proc.kill()
+                raise AuthorError(
+                    f"author agent timed out after {AUTHOR_TIMEOUT}s "
+                    f"(see {AUTHOR_RUN_LOG})"
+                )
+            log_fh.write(raw)
+            log_fh.flush()
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                evt = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            text_buf.append(_assistant_text(evt))
+            summary = _summarize_event(evt)
+            if summary:
+                elapsed = _time.monotonic() - t0
+                _log(f"+{elapsed:5.1f}s {summary}")
+        rc = proc.wait(timeout=max(1, deadline - _time.monotonic()))
+    except subprocess.TimeoutExpired:
+        proc.kill()
         raise AuthorError(
-            f"author agent failed (rc={proc.returncode}):\n"
-            f"stderr: {proc.stderr[-2000:]}"
+            f"author agent timed out after {AUTHOR_TIMEOUT}s "
+            f"(see {AUTHOR_RUN_LOG})"
         )
-    body = _extract_author_result(proc.stdout)
+    finally:
+        log_fh.close()
+
+    stderr_tail = proc.stderr.read()[-2000:] if proc.stderr else ""
+    if rc != 0:
+        raise AuthorError(
+            f"author agent failed (rc={rc}):\nstderr: {stderr_tail}"
+        )
+    full_text = "".join(text_buf)
+    body = _extract_author_result(full_text)
     if body is None:
         raise AuthorError(
             "author agent did not emit AUTHOR_RESULT line:\n"
-            + proc.stdout[-2000:]
+            + full_text[-2000:]
         )
     try:
         return json.loads(body)
