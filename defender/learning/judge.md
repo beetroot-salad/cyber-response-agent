@@ -21,34 +21,34 @@ Deployed systems in this environment are documented under `defender/skills/{syst
 Emit a **single YAML document** as your entire response. **Critical:** do **not** wrap it in a ```yaml … ``` (or any other) fenced code block, do not prefix it with a markdown header, and do not add any preamble or trailing commentary. Your first character is `o` (the start of `outcome:`). The downstream loop parses the whole output with `yaml.safe_load`; a leading fence is the most common failure mode. Top-level keys, in order:
 
 ```yaml
-outcome: <enum keyword — one of caught | survived | incoherent | undecidable | skip-passthrough; plain scalar, no quotes, no punctuation>
+outcome: {enum keyword — one of caught | survived | incoherent | undecidable | skip-passthrough; plain scalar, no quotes, no punctuation}
 outcome_rationale: |
-  <one short paragraph citing which leads' projected-vs-actual comparisons drove the verdict>
+  {one short paragraph citing which leads' projected-vs-actual comparisons drove the verdict}
 encounter_analysis: |
-  <multi-paragraph free text — see §encounter analysis below>
+  {multi-paragraph free text — see §encounter analysis below}
 defender_findings:
   - type: lead-set | lead-quality | analyze-discipline | observability | detection-confirmed
-    subject_anchor: <plain scalar — see §subject rules below; no quotes, no parens, no trailing prose>
-    subject_topic: <plain scalar — short phrase naming the issue (e.g. host-daemon authorization). No internal quotes>
+    subject_anchor: {plain scalar — see §subject rules below; no quotes, no parens, no trailing prose}
+    subject_topic: {plain scalar — short phrase naming the issue, e.g. host-daemon authorization. No internal quotes}
     finding: |
-      <one or two short paragraphs — see §findings below>
+      {one or two short paragraphs — see §findings below}
     citations:
       - source: investigation | actor | alert | projected_telemetry
         quote: |
-          <verbatim span from that source — block scalar so internal quotes,
-          parens, and punctuation in the cited text need no escaping>
+          {verbatim span from that source — block scalar so internal quotes,
+          parens, and punctuation in the cited text need no escaping}
       - ...
 actor_observations:
   - type: misprediction | framing-choice | discarded-class
-    subject_anchor: <story aspect anchor — entry-vector | cover | goal | persistence | exfil | ...>
-    subject_topic: <short phrase naming the observation>
+    subject_anchor: {story aspect anchor — entry-vector | cover | goal | persistence | exfil | ...}
+    subject_topic: {short phrase naming the observation}
     observation: |
-      <one short paragraph>
+      {one short paragraph}
 confidence: |
-  <single short paragraph — see §confidence below>
+  {single short paragraph — see §confidence below}
 ```
 
-`actor_observations` is optional — omit the key entirely if nothing load-bearing surfaced (do not emit `actor_observations: []` and do not emit empty placeholders). All multi-paragraph fields use YAML block scalars (`|`).
+Placeholders in the skeleton above use `{…}` to flag content you must fill in — they are notational, never emit literal curly braces in your output. `actor_observations` is optional — omit the key entirely if nothing load-bearing surfaced (do not emit `actor_observations: []` and do not emit empty placeholders). All multi-paragraph fields use YAML block scalars (`|`).
 
 ### Outcome
 
