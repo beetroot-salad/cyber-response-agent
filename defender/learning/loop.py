@@ -36,13 +36,17 @@ _VENV_PY = Path(__file__).resolve().parents[2] / "defender" / ".venv" / "bin" / 
 if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
+import hashlib
 import json
+import random
 import re
 import shutil
 import subprocess
 from typing import Any
 
 import yaml
+
+import mitre_corpus
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -175,7 +179,24 @@ def _run_claude(system_prompt_path: Path, user_prompt: str) -> str:
     return proc.stdout
 
 
-def invoke_actor(alert_path: Path, actor_input_path: Path) -> str:
+def _actor_seed(run_id: str) -> int:
+    """Stable per-run seed for menu sampling and archetype choice."""
+    return int(hashlib.sha256(run_id.encode()).hexdigest()[:8], 16)
+
+
+def invoke_actor(
+    alert_path: Path,
+    actor_input_path: Path,
+    learning_run_dir: Path,
+) -> str:
+    rng = random.Random(_actor_seed(learning_run_dir.name))
+    archetype = rng.choice(["internal", "external"])
+    menu = mitre_corpus.sample_menu(rng)
+    menu_text = mitre_corpus.format_menu(menu)
+
+    (learning_run_dir / "actor_archetype.txt").write_text(archetype + "\n")
+    (learning_run_dir / "actor_menu.txt").write_text(menu_text + "\n")
+
     user = (
         "<alert>\n"
         f"{alert_path.read_text().rstrip()}\n"
@@ -184,6 +205,12 @@ def invoke_actor(alert_path: Path, actor_input_path: Path) -> str:
         "<!-- lead sequence projected for the actor -->\n"
         f"{actor_input_path.read_text().rstrip()}\n"
         "</actor_input>\n"
+        "<actor_archetype>\n"
+        f"{archetype}\n"
+        "</actor_archetype>\n"
+        "<mitre_menu>\n"
+        f"{menu_text}\n"
+        "</mitre_menu>\n"
     )
     return _run_claude(ACTOR_PROMPT, user)
 
@@ -624,7 +651,9 @@ def run_one(run_dir: Path) -> int:
     project_actor_input(run_dir, actor_input_path)
 
     _log("step=actor")
-    actor_story = invoke_actor(run_dir / "alert.json", actor_input_path)
+    actor_story = invoke_actor(
+        run_dir / "alert.json", actor_input_path, learning_run_dir
+    )
     actor_story_path = learning_run_dir / "actor_story.md"
     actor_story_path.write_text(actor_story)
 

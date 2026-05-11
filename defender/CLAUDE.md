@@ -52,6 +52,7 @@ defender/
   learning/             # offline learning loop — see §Learning loop below
     loop.py             # orchestrator (per-run-dir entry point); imported in-process by run.py
     actor.md            # adversarial counterfactual story
+    mitre_corpus.py     # hand-curated MITRE ATT&CK technique pool for actor-menu sampling
     oracle.md           # telemetry oracle: per-lead synthesized events
     judge.md            # outcome classifier + finding emitter
     verify_forward.{md,py}     # forward-check gate before queuing
@@ -111,8 +112,12 @@ run standalone via `python3 defender/learning/loop.py <run_dir>`.
    `malicious` at MVP.
 2. **Projects** `lead_sequence.yaml` to an actor-facing view.
 3. **Actor** (`actor.md`, gray-box adversarial) — given alert + lead
-   set, writes a candidate attack story designed to slip through that
-   lead set. Can short-circuit with SKIP.
+   set + `actor_archetype` (`internal`/`external`) + `mitre_menu` (a
+   12-technique subset sampled from `mitre_corpus.py`), writes a
+   candidate attack story citing the techniques used in a Section 0
+   table. Seed is derived from the run id so menu + archetype are
+   reproducible per case. Can short-circuit with SKIP — required when
+   the menu lacks an Initial Access technique for the archetype.
 4. **Telemetry oracle** (`oracle.md`) — synthesizes per-lead events
    the actor's story would have produced. Sits between actor and
    judge so the judge isn't grading its own imagination.
