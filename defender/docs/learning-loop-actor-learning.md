@@ -77,11 +77,22 @@ investigation's lead sequence. So "catch rate against a frozen actor"
 is shorthand for: how well does the *current defender's lead
 sequence* refute stories written by an old actor?
 
-**Replay flow (held-out alert × K-generations-old actor):**
+**Replay scope — benign/inconclusive only.** `defender/learning/loop.py`
+skips alerts whose defender disposition is `malicious` (the live
+adversarial loop is undefined on cases where the defender already
+escalated — there's nothing for the actor to construct a benign
+cover for). The secondary metric inherits that scope: replay runs
+across the held-out subset whose defender disposition on the
+*current* HEAD run is `benign` or `inconclusive`. Malicious held-out
+alerts contribute to the primary metric (malicious recall is the
+load-bearing class there) but are skipped in the secondary.
+
+**Replay flow (eligible held-out alert × K-generations-old actor):**
 
 1. **Current defender** investigates the held-out alert from
    `HEAD` — produces `investigation.md` + `lead_sequence.yaml` +
-   `gather_raw/`.
+   `gather_raw/`. If the defender's disposition is `malicious`,
+   skip this alert (eligibility check at this step).
 2. **Frozen actor** writes a story against that lead sequence,
    running from a `gen-{N-K}` checkout. The actor sees the alert and
    the projected lead sequence; it does not see investigation
@@ -89,8 +100,15 @@ sequence* refute stories written by an old actor?
 3. **Current oracle** projects telemetry from story + lead set.
 4. **Current judge** grades `(alert, investigation, story,
    projected_telemetry) → outcome ∈ {caught | survived | …}`.
-5. Catch rate = fraction of replays with `outcome: caught` on the
-   held-out alert set.
+5. **Catch rate denominator excludes `skip-passthrough`.** Actor SKIP
+   means the frozen actor couldn't construct any plausible malicious
+   story from the menu/archetype it was handed — that's not the
+   actor failing on tradecraft, it's the actor declining. Reported
+   separately as a *SKIP rate* alongside catch rate; a frozen actor
+   whose SKIP rate climbs unexpectedly is itself a signal but
+   distinct from "current defender caught the story." Catch rate =
+   `caught / (caught + survived + incoherent + undecidable)` on
+   eligible held-out alerts.
 
 **Two-worktree harness.** Replay needs old actor code *and* current
 defender/oracle/judge simultaneously. A single `git checkout` cannot
@@ -146,8 +164,9 @@ suspect.
 
 - Runtime defender loop (ORIENT/PLAN/GATHER/ANALYZE/REPORT).
 - Defender's `lessons/` pipeline and `defender/learning/author.py`.
-- Actor prompt at `defender/learning/actor.md` — three-section output
-  with Section 0 technique table.
+- Actor prompt at `defender/learning/actor.md` — four-section output
+  (Section 0 technique table + Sections 1–3: Attack story / Goal /
+  Bypass).
 - Judge v3 schema — `caught | survived | incoherent | undecidable`
   outcome plus `actor_observations` field (max 2).
 - Oracle and forward-check stages unchanged.
@@ -282,11 +301,20 @@ Two-phase within the single actor call:
 3. **Write Sections 1–3.** Story, goal, bypass — informed by the
    loaded lessons.
 
-**Actor model: Sonnet.** Retrieval is a model-behavior contract
-inside a single actor call; Sonnet handles grep+read reliably,
-Haiku misses occasionally. The current `defender/learning/loop.py`
-defaults the actor to Haiku — that defaults flips to Sonnet as part
-of the actor-grep PR.
+**Actor model: Sonnet — via a stage-specific env var.** Retrieval is
+a model-behavior contract inside a single actor call; Sonnet handles
+grep+read reliably, Haiku misses occasionally. The current
+`defender/learning/loop.py` reads a single `CLAUDE_MODEL` shared
+across actor, oracle, and judge — flipping that to Sonnet globally
+would silently change oracle and judge behavior, invalidating both
+judge calibration and the secondary-metric replay. The actor-grep PR
+introduces stage-specific env vars (`ACTOR_MODEL`, `ORACLE_MODEL`,
+`JUDGE_MODEL`) with `CLAUDE_MODEL` retained as the shared fallback;
+the actor default goes to Sonnet, oracle and judge stay on their
+calibrated models. The author commit trailer records the actor model
+used at that generation (see §Generation boundary) — replay reads
+the trailer and sets `ACTOR_MODEL` accordingly without touching
+`ORACLE_MODEL` / `JUDGE_MODEL` (which always come from HEAD).
 
 **Retrieval is audit-only at MVP, not gated.** Section 0 may not be
 revised after lessons load — the technique commit is the retrieval
@@ -314,15 +342,21 @@ if audit shows consistent retrieval failures.
 `defender/learning/author_actor.py` + `author_actor.md`. Mirror
 shape; distinct queue, distinct corpus, distinct threshold.
 
-**Inputs** (from `judge.md` v3 output, currently emitted but
-unconsumed):
+**Inputs** (per-case bundle):
 
-- `outcome` — gates whether a case is authored from at all.
-- `actor_observations` — strategy-level notes on what failed
-  (misprediction / framing-failure / discarded class). The existing
-  v3 schema is sufficient; no judge edit is required.
-- Story text + lead sequence as grounding for what the observation
-  references.
+- `outcome` — gates whether the case is authored from, and which
+  channels are eligible (see §Outcome filter).
+- `actor_observations` (from `judge.md` v3, currently emitted but
+  unconsumed) — strategy-level notes on what failed.
+- Alert + story + investigation + projected telemetry — the same
+  four artifacts the judge saw, so the author can ground claims.
+- **Loaded env lessons + retrieval trace** — the env lessons that
+  were in-prompt for this actor call, plus the `actor_trace.jsonl`
+  recording which tradecraft lessons the actor grepped/read. Without
+  these the author cannot map "this incoherence implies env claim X
+  is wrong" back to a specific live env-lesson file (subject + path).
+  The retrieval trace is also what lets the author observe whether a
+  tradecraft lesson was load-bearing in producing the failing story.
 
 **Outcome filter for actor authoring.**
 
@@ -337,9 +371,14 @@ unconsumed):
 The tradecraft channel is therefore **failure-only** by construction:
 every lesson is a pattern the defender refuted. The actor reads these
 at story time as patterns to avoid. There is no positive-pattern
-channel at MVP — defender learns from where it failed (its `caught`
-is defender's miss); actor learns the same way (its `caught` is the
-actor's miss). Symmetric.
+channel at MVP.
+
+Note that `caught` is the *actor's* failure (defender's leads
+refuted the story), not the defender's. The defender's failure mode
+in this loop is `survived` (story would have evaded the
+investigation). The actor authors from `caught`; the defender's
+existing `defender_findings` pipeline draws on a different mix of
+outcomes — the two authors are not perfectly symmetric.
 
 **Environment-channel authoring on `incoherent`.** Asymmetric to
 tradecraft, the environment channel does read `incoherent` outcomes
@@ -431,17 +470,29 @@ These are not stretch goals. The loop's signal is invalid without
 them.
 
 1. **Actor-side judge calibration set.** ~30 rows. Humans label
-   the *judge's full input tuple*:
-   `(alert, investigation.md, actor story, projected_telemetry.yaml)
-   → caught/survived/incoherent/undecidable`.
-   The (alert, story, lead_sequence) shorthand is wrong — `judge.md`
-   needs the investigation log and the oracle's projected telemetry
-   to grade the encounter (see `defender/learning/judge.md` §inputs).
-   Calibration fixtures must include all four artifacts, snapshotted
-   together. Equivalent to the defender's
-   `defender/learning/judge-alignment/` work, but for actor-side
-   outcomes. Without this, every downstream actor-author decision is
-   built on uncalibrated judge output.
+   *two* things on the judge's full input tuple
+   `(alert, investigation.md, actor story, projected_telemetry.yaml)`:
+
+   - **Outcome label** — `caught/survived/incoherent/undecidable`.
+     Calibrates the outcome enum that gates which cases the actor
+     author runs on.
+   - **Expected-observation gist** — a one-sentence description of
+     what the load-bearing actor observation *should* be on this
+     case (e.g. "story relied on docker-exec being un-audited; lead
+     l-002 directly catches it"). The judge's actual
+     `actor_observations` are then compared against this gist for
+     pertinence and groundedness, since the observations are what
+     actually trains the actor author. Outcome calibration without
+     observation calibration would calibrate the gate but leave the
+     training signal uncalibrated.
+
+   The (alert, story, lead_sequence) shorthand from earlier drafts
+   was wrong — `judge.md` needs the investigation log and the
+   oracle's projected telemetry to grade the encounter (see
+   `defender/learning/judge.md` §inputs). Calibration fixtures must
+   include all four artifacts, snapshotted together. Equivalent to
+   the defender's `defender/learning/judge-alignment/` work, but for
+   actor-side outcomes plus observations.
 
 2. **Held-out alert set with ground-truth labels.** 20–30 alerts is
    the minimum to detect meaningful primary-metric movement (see

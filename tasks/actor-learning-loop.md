@@ -73,8 +73,12 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   `inconclusive` is a labeled disposition, not abstention.
 - Environment lessons: attacker-framed only; no defender-visibility
   prose. Framing rule enforced at author write time.
-- Retrieval: audit-only at MVP via `tool_trace.jsonl`; Section 0 may
-  not be revised post-retrieval.
+- Retrieval: audit-only at MVP via `actor_trace.jsonl` (captured by
+  the actor-grep PR via stream-json invocation); Section 0 may not
+  be revised post-retrieval.
+- Stage-specific model env vars (`ACTOR_MODEL`, `ORACLE_MODEL`,
+  `JUDGE_MODEL`) introduced in the actor-grep PR; only `ACTOR_MODEL`
+  is overridden by the generation trailer at replay time.
 - Environment claims: one file per write, cache-style, contradiction-
   only invalidation, `system_ref` required for `live`. No time-based
   TTL at MVP. **Known unbounded risk**: stale-but-uncontradicted
