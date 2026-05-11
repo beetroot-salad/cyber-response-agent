@@ -156,8 +156,9 @@ def test_assemble_exemplar_bundle_concatenates_per_position(tmp_path: Path):
         }
     )
     out = assemble_exemplar_bundle(tmp_path, lead_seq)
-    assert "position 0 (wazuh.auth-events)" in out
-    assert "position 1 (wazuh.dns-history)" in out
+    assert '<exemplar position="0" query="wazuh.auth-events"' in out
+    assert '<exemplar position="1" query="wazuh.dns-history"' in out
+    assert "</exemplar>" in out
     # Per-event schema kept as a type/field skeleton — field names survive.
     assert "Raw Sample Events" in out
     assert "values scrubbed" in out
@@ -262,3 +263,128 @@ def test_outcome_keyword_rejects_unknown_first_token():
 def test_outcome_keyword_rejects_non_string():
     with pytest.raises(LoopError, match="not a string"):
         loop._outcome_keyword({"survived": True})
+
+
+# ---------------------------------------------------------------------------
+# validate_judge_doc — split outcome/outcome_rationale schema
+# ---------------------------------------------------------------------------
+
+
+def _full_judge_doc(**overrides):
+    doc = {
+        "outcome": "caught",
+        "outcome_rationale": "Lead l-001 refuted the projection.",
+        "encounter_analysis": "lead-by-lead walkthrough.",
+        "defender_findings": [
+            {
+                "type": "detection-confirmed",
+                "subject_anchor": "l-001",
+                "subject_topic": "falco container scan",
+                "finding": "lead caught the story.",
+                "citations": [{"source": "investigation", "quote": "q"}],
+            }
+        ],
+        "confidence": "high.",
+    }
+    doc.update(overrides)
+    return doc
+
+
+def test_validate_judge_doc_accepts_split_schema():
+    loop.validate_judge_doc(_full_judge_doc())
+
+
+def test_validate_judge_doc_requires_outcome_rationale():
+    doc = _full_judge_doc()
+    del doc["outcome_rationale"]
+    with pytest.raises(LoopError, match="outcome_rationale"):
+        loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_skip_passthrough_omits_analysis_and_confidence():
+    doc = {
+        "outcome": "skip-passthrough",
+        "outcome_rationale": "actor SKIP rationale.",
+        "defender_findings": [],
+    }
+    loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_non_skip_requires_encounter_analysis():
+    doc = _full_judge_doc()
+    del doc["encounter_analysis"]
+    with pytest.raises(LoopError, match="encounter_analysis"):
+        loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_requires_subject_anchor_and_topic():
+    for missing in ("subject_anchor", "subject_topic"):
+        doc = _full_judge_doc()
+        del doc["defender_findings"][0][missing]
+        with pytest.raises(LoopError, match=missing):
+            loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_accepts_apostrophe_in_subject_topic():
+    # Apostrophes in prose ("actor's framing") are valid plain YAML scalars
+    # and must not be rejected — the YAML parser already accepts them.
+    doc = _full_judge_doc()
+    doc["defender_findings"][0]["subject_topic"] = "actor's framing assumption"
+    loop.validate_judge_doc(doc)
+
+
+# ---------------------------------------------------------------------------
+# strip_yaml_fence — envelope tolerance
+# ---------------------------------------------------------------------------
+
+
+def test_strip_yaml_fence_passes_through_plain_yaml():
+    assert loop.strip_yaml_fence("outcome: caught\nconfidence: high\n") == (
+        "outcome: caught\nconfidence: high"
+    )
+
+
+def test_strip_yaml_fence_strips_yaml_code_fence():
+    fenced = "```yaml\noutcome: caught\n```\n"
+    assert loop.strip_yaml_fence(fenced) == "outcome: caught"
+
+
+def test_strip_yaml_fence_strips_trailing_close_tag():
+    # Observed live: model emitted a stray </content> after the YAML.
+    text = "outcome: caught\nconfidence: high\n</content>\n"
+    assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
+
+
+def test_strip_yaml_fence_strips_full_xml_envelope():
+    text = "<content>\noutcome: caught\nconfidence: high\n</content>\n"
+    assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
+
+
+def test_strip_yaml_fence_strips_dangling_close_fence():
+    # Observed live: model emitted a trailing ``` with no opener.
+    text = "outcome: caught\nconfidence: high\n```\n"
+    assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
+
+
+def test_strip_yaml_fence_strips_thinking_prelude():
+    # Observed live: model emitted a reasoning trace + dangling </thinking>
+    # before the actual answer.
+    text = (
+        "outcome: caught\n(reasoning trace…)\n</thinking>\n"
+        "outcome: survived\nconfidence: high\n"
+    )
+    assert loop.strip_yaml_fence(text) == "outcome: survived\nconfidence: high"
+
+
+def test_strip_yaml_fence_strips_system_thinking_variant():
+    # Observed live: model used </system_thinking> instead of </thinking>.
+    text = (
+        "outcome: caught\n(reasoning trace…)\n</system_thinking>\n"
+        "outcome: survived\nconfidence: high\n"
+    )
+    assert loop.strip_yaml_fence(text) == "outcome: survived\nconfidence: high"
+
+
+def test_strip_yaml_fence_passes_through_when_no_thinking_tag():
+    text = "outcome: caught\nconfidence: high\n"
+    assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
