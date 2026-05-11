@@ -355,51 +355,93 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         ),
     ]
 
+    import select as _select
     import time as _time
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    log_fh = AUTHOR_RUN_LOG.open("w")
-    log_fh.write(json.dumps({"batch_id": batch_id, "started_at": _now_iso()}) + "\n")
+    log_fh = AUTHOR_RUN_LOG.open("wb")
+    log_fh.write(
+        (json.dumps({"batch_id": batch_id, "started_at": _now_iso()}) + "\n").encode()
+    )
     log_fh.flush()
 
+    # Binary streams + manual line buffering: a text-mode iterator
+    # (`for raw in proc.stdout`) blocks waiting for a newline, so the
+    # wall-clock check below never fires when the child stops emitting
+    # mid-line (e.g., a stuck verify_forward subprocess, a hung tool).
+    # select() on the raw fd lets us bound every read by the remaining
+    # deadline. stderr is drained in the same loop so a full stderr
+    # pipe (64KiB on Linux) can't deadlock the child either.
     proc = subprocess.Popen(
         cmd,
         cwd=REPO_ROOT,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
+        bufsize=0,
     )
     assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
-    proc.stdin.write(user_prompt)
+    proc.stdin.write(user_prompt.encode())
     proc.stdin.close()
 
     deadline = _time.monotonic() + AUTHOR_TIMEOUT
     text_buf: list[str] = []
+    stderr_chunks: list[bytes] = []
+    stdout_buf = b""
     t0 = _time.monotonic()
+
+    def _handle_line(raw: bytes) -> None:
+        log_fh.write(raw + b"\n")
+        log_fh.flush()
+        try:
+            line = raw.decode("utf-8", errors="replace").strip()
+        except Exception:
+            return
+        if not line:
+            return
+        try:
+            evt = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        text_buf.append(_assistant_text(evt))
+        summary = _summarize_event(evt)
+        if summary:
+            elapsed = _time.monotonic() - t0
+            _log(f"+{elapsed:5.1f}s {summary}")
+
+    rc: int | None = None
     try:
-        for raw in proc.stdout:
-            if _time.monotonic() > deadline:
+        stdout_fd = proc.stdout.fileno()
+        stderr_fd = proc.stderr.fileno()
+        open_fds: set[int] = {stdout_fd, stderr_fd}
+        while open_fds:
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
                 proc.kill()
                 raise AuthorError(
                     f"author agent timed out after {AUTHOR_TIMEOUT}s "
                     f"(see {AUTHOR_RUN_LOG})"
                 )
-            log_fh.write(raw)
-            log_fh.flush()
-            line = raw.strip()
-            if not line:
+            # Cap the select wait so the deadline check runs at least
+            # once per second even when the child is fully silent.
+            ready, _w, _x = _select.select(list(open_fds), [], [], min(remaining, 1.0))
+            if not ready:
                 continue
-            try:
-                evt = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            text_buf.append(_assistant_text(evt))
-            summary = _summarize_event(evt)
-            if summary:
-                elapsed = _time.monotonic() - t0
-                _log(f"+{elapsed:5.1f}s {summary}")
-        rc = proc.wait(timeout=max(1, deadline - _time.monotonic()))
+            for fd in ready:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    open_fds.discard(fd)
+                    continue
+                if fd == stdout_fd:
+                    stdout_buf += chunk
+                    while b"\n" in stdout_buf:
+                        raw, stdout_buf = stdout_buf.split(b"\n", 1)
+                        _handle_line(raw)
+                else:
+                    stderr_chunks.append(chunk)
+        # Flush any trailing partial stdout line (no terminating newline).
+        if stdout_buf.strip():
+            _handle_line(stdout_buf)
+        rc = proc.wait(timeout=max(1.0, deadline - _time.monotonic()))
     except subprocess.TimeoutExpired:
         proc.kill()
         raise AuthorError(
@@ -409,7 +451,7 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
     finally:
         log_fh.close()
 
-    stderr_tail = proc.stderr.read()[-2000:] if proc.stderr else ""
+    stderr_tail = b"".join(stderr_chunks).decode("utf-8", errors="replace")[-2000:]
     if rc != 0:
         raise AuthorError(
             f"author agent failed (rc={rc}):\nstderr: {stderr_tail}"
