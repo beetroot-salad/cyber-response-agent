@@ -177,10 +177,13 @@ def _run_claude(system_prompt_path: Path, user_prompt: str) -> str:
 
 def invoke_actor(alert_path: Path, actor_input_path: Path) -> str:
     user = (
-        "=== alert.json ===\n"
-        f"{alert_path.read_text()}\n"
-        "=== actor_input.yaml (lead sequence projected for the actor) ===\n"
-        f"{actor_input_path.read_text()}\n"
+        "<alert>\n"
+        f"{alert_path.read_text().rstrip()}\n"
+        "</alert>\n"
+        "<actor_input>\n"
+        "<!-- lead sequence projected for the actor -->\n"
+        f"{actor_input_path.read_text().rstrip()}\n"
+        "</actor_input>\n"
     )
     return _run_claude(ACTOR_PROMPT, user)
 
@@ -266,13 +269,16 @@ def assemble_exemplar_bundle(source_run_dir: Path, lead_sequence_text: str) -> s
         qid = (queries[0] or {}).get("id", "?") if queries else "?"
         result_ref = entry.get("result_ref") or f"gather_raw/{position}.json"
         path = source_run_dir / result_ref
-        header = f"=== position {position} ({qid}) — {result_ref} (schema sample only) ==="
         if path.is_file():
             body = redact_exemplar(path.read_text())
         else:
             body = "(no exemplars on disk for this position)"
-        blocks.append(f"{header}\n{body}")
-    return "\n\n".join(blocks)
+        blocks.append(
+            f'<exemplar position="{position}" query="{qid}" result_ref="{result_ref}">\n'
+            f"{body}\n"
+            f"</exemplar>"
+        )
+    return "\n".join(blocks)
 
 
 def invoke_oracle(
@@ -282,14 +288,19 @@ def invoke_oracle(
     exemplar_bundle: str,
 ) -> str:
     user = (
-        "=== alert.json ===\n"
-        f"{alert_path.read_text()}\n"
-        "=== actor_story.md ===\n"
-        f"{actor_story_path.read_text()}\n"
-        "=== lead_sequence.yaml ===\n"
-        f"{lead_sequence_path.read_text()}\n"
-        "=== exemplars (defender's actual gather_raw/{position}.json — schema reference) ===\n"
-        f"{exemplar_bundle}\n"
+        "<alert>\n"
+        f"{alert_path.read_text().rstrip()}\n"
+        "</alert>\n"
+        "<actor_story>\n"
+        f"{actor_story_path.read_text().rstrip()}\n"
+        "</actor_story>\n"
+        "<lead_sequence>\n"
+        f"{lead_sequence_path.read_text().rstrip()}\n"
+        "</lead_sequence>\n"
+        "<exemplars>\n"
+        "<!-- defender's actual gather_raw/{position}.json — schema reference, values scrubbed -->\n"
+        f"{exemplar_bundle.rstrip()}\n"
+        "</exemplars>\n"
     )
     return _run_claude(ORACLE_PROMPT, user)
 
@@ -301,14 +312,18 @@ def invoke_judge(
     projected_telemetry_path: Path,
 ) -> str:
     user = (
-        "=== alert.json ===\n"
-        f"{alert_path.read_text()}\n"
-        "=== investigation.md ===\n"
-        f"{investigation_path.read_text()}\n"
-        "=== actor_story.md ===\n"
-        f"{actor_story_path.read_text()}\n"
-        "=== projected_telemetry.yaml ===\n"
-        f"{projected_telemetry_path.read_text()}\n"
+        "<alert>\n"
+        f"{alert_path.read_text().rstrip()}\n"
+        "</alert>\n"
+        "<investigation>\n"
+        f"{investigation_path.read_text().rstrip()}\n"
+        "</investigation>\n"
+        "<actor_story>\n"
+        f"{actor_story_path.read_text().rstrip()}\n"
+        "</actor_story>\n"
+        "<projected_telemetry>\n"
+        f"{projected_telemetry_path.read_text().rstrip()}\n"
+        "</projected_telemetry>\n"
     )
     return _run_claude(JUDGE_PROMPT, user)
 
@@ -345,19 +360,40 @@ _FENCE_RE = None  # filled lazily; tiny stdlib re import kept local to use site
 
 
 def strip_yaml_fence(text: str) -> str:
-    """Strip a leading ```yaml ... ``` (or ``` ... ```) fence if present.
+    """Strip a leading code fence and/or a stray opening/closing XML tag.
 
-    Models routinely wrap structured output in a code fence even when the
-    prompt forbids it; the loop accepts the fenced form rather than fail
-    on a deeply-ingrained LLM tic.
+    Models routinely wrap structured output in a code fence or a phantom
+    `<content>...</content>` envelope even when the prompt forbids it;
+    the loop accepts these tics rather than fail on them. Belt to the
+    XML-envelope suspenders in the user prompt — switching the input
+    envelope to XML removed the trigger, this absorbs any residue.
+
+    Stripping is shallow: only one fence/tag layer is removed, and only
+    if it surrounds the entire payload.
     """
     import re
 
     s = text.strip()
+    # Drop everything up to and including a closing </thinking> or </think>
+    # tag — reasoning-model output convention sometimes leaks through, with
+    # the actual answer following the closing tag.
+    m = re.search(r"</[a-zA-Z_][\w-]*?think[a-zA-Z_]*>\s*\n", s) or re.search(
+        r"</think(?:ing)?>\s*\n", s
+    )
+    if m:
+        s = s[m.end():].strip()
     m = re.match(r"\A```(?:yaml|yml)?\s*\n(.*?)\n```\s*\Z", s, re.DOTALL)
     if m:
-        return m.group(1)
-    return text
+        s = m.group(1).strip()
+    # Strip a wrapping <tag>...</tag> envelope (e.g. <content>, <output>).
+    m = re.match(r"\A<([a-zA-Z_][\w-]*)\s*>\s*\n(.*?)\n\s*</\1>\s*\Z", s, re.DOTALL)
+    if m:
+        s = m.group(2).strip()
+    # Strip a dangling trailing close tag with no matching opener.
+    s = re.sub(r"\n\s*</[a-zA-Z_][\w-]*>\s*\Z", "", s)
+    # Strip a dangling trailing close fence with no matching opener.
+    s = re.sub(r"\n\s*```\s*\Z", "", s)
+    return s
 
 
 _ORACLE_PROJECTION_KEYS = {"position", "system", "template", "events"}
@@ -407,19 +443,27 @@ def validate_oracle_doc(doc: Any, expected_positions: list[int]) -> dict[str, An
 def validate_judge_doc(doc: Any) -> dict[str, Any]:
     if not isinstance(doc, dict):
         raise LoopError("judge YAML did not parse to a mapping")
-    for key in ("outcome", "encounter_analysis", "defender_findings", "confidence"):
+    for key in ("outcome", "outcome_rationale", "defender_findings"):
         if key not in doc:
             raise LoopError(f"judge YAML missing required key: {key}")
-    _outcome_keyword(doc["outcome"])
+    outcome = _outcome_keyword(doc["outcome"])
+    if outcome != "skip-passthrough":
+        for key in ("encounter_analysis", "confidence"):
+            if key not in doc:
+                raise LoopError(f"judge YAML missing required key: {key}")
     findings = doc["defender_findings"]
     if not isinstance(findings, list):
         raise LoopError("judge `defender_findings` is not a list")
     for i, f in enumerate(findings):
         if not isinstance(f, dict):
             raise LoopError(f"finding[{i}] is not a mapping")
-        for k in ("type", "subject", "finding", "citations"):
+        for k in ("type", "subject_anchor", "subject_topic", "finding", "citations"):
             if k not in f:
                 raise LoopError(f"finding[{i}] missing key: {k}")
+        for k in ("subject_anchor", "subject_topic"):
+            v = f[k]
+            if not isinstance(v, str) or not v.strip():
+                raise LoopError(f"finding[{i}].{k} must be a non-empty string")
         if f["type"] not in ALL_FINDING_TYPES:
             raise LoopError(
                 f"finding[{i}].type={f['type']!r} not in {sorted(ALL_FINDING_TYPES)}"
@@ -538,7 +582,8 @@ def append_findings(
                 "run_id": run_id,
                 "alert_rule_key": alert_rule_key,
                 "type": f["type"],
-                "subject": f["subject"],
+                "subject_anchor": f["subject_anchor"],
+                "subject_topic": f["subject_topic"],
                 "finding": f["finding"],
                 "judge_outcome": outcome,
                 "citations": f["citations"],

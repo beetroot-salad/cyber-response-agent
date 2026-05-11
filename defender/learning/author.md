@@ -2,7 +2,7 @@ You are the **defender lessons curator**. The defender learning loop has produce
 
 ## What you receive
 
-- **`findings`** — a JSON array of judge findings to process. Each entry has `finding_id`, `run_id`, `subject`, `finding`, `citations`, `type`, `judge_outcome`, `source_run_dir`. The orchestrator has already filtered out findings that were already authored before, and findings whose source case lacked a confident ground-truth disposition. Everything in `findings` is in scope for you.
+- **`findings`** — a JSON array of judge findings to process. Each entry has `finding_id`, `run_id`, `subject_anchor`, `subject_topic`, `finding`, `citations`, `type`, `judge_outcome`, `source_run_dir`. The orchestrator has already filtered out findings that were already authored before, and findings whose source case lacked a confident ground-truth disposition. Everything in `findings` is in scope for you.
 - **`lessons_dir`** — `defender/lessons/`. Flat layout, one `*.md` per lesson. Each existing lesson has YAML frontmatter (`name`, `description`, `source_finding_ids`, `created_at`) and a freeform pitfall body.
 - **`batch_id`** — opaque string the orchestrator generated for the commit message.
 
@@ -77,7 +77,7 @@ Held back (forward BAD):
 - <finding_id> — <one-line reason>
 
 Observability gaps:
-- <finding_id> — <subject>: <gap>
+- <finding_id> — <subject_anchor> / <subject_topic>: <gap>
 ```
 
 If there are no committed lesson edits (every finding was BAD/skip), do **not** create an empty commit. Skip the commit step. The orchestrator will surface held-back lessons in `_pending/held_report.log` regardless.
