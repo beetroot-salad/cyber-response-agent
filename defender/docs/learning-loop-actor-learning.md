@@ -77,22 +77,47 @@ investigation's lead sequence. So "catch rate against a frozen actor"
 is shorthand for: how well does the *current defender's lead
 sequence* refute stories written by an old actor?
 
-**Replay scope — benign/inconclusive only.** `defender/learning/loop.py`
-skips alerts whose defender disposition is `malicious` (the live
-adversarial loop is undefined on cases where the defender already
-escalated — there's nothing for the actor to construct a benign
-cover for). The secondary metric inherits that scope: replay runs
-across the held-out subset whose defender disposition on the
-*current* HEAD run is `benign` or `inconclusive`. Malicious held-out
-alerts contribute to the primary metric (malicious recall is the
-load-bearing class there) but are skipped in the secondary.
+**Replay scope — eligibility by ground-truth, not by defender
+disposition.** `defender/learning/loop.py` skips alerts whose
+*defender disposition* is `malicious`. If the secondary inherited
+that scope literally, the eligible set would change every time the
+defender's disposition on an alert flipped (e.g. as defender
+improves, a previously-misclassified-benign-actually-malicious alert
+gets correctly escalated and drops out of the eligible set). That
+makes secondary trends conflate "actor got better" with denominator
+drift.
+
+The secondary metric fixes the eligible set by **ground-truth
+label**: held-out alerts where the human-applied label is `benign`
+or `inconclusive` are *always* eligible; alerts labeled `malicious`
+are *never* eligible (they contribute only to the primary's
+malicious-recall floor). The eligible set is therefore stable
+across generations.
+
+Within the eligible set, the *executed* set per generation is the
+subset where the current-HEAD defender's disposition was not
+`malicious` — that is, where the loop was actually willing to run
+the actor stage. False escalations (current defender escalating an
+alert whose ground truth is benign or inconclusive) drop out of the
+executed set; that drop is itself a defender-quality signal and is
+reported as the executed/eligible ratio alongside catch rate. Three
+numbers per generation:
+
+- Eligible set size — fixed across generations.
+- Executed/eligible — fraction of eligible alerts the loop ran on.
+- Catch rate — `caught / (caught + survived + incoherent +
+  undecidable)` over the executed set, excluding skip-passthrough
+  from the denominator.
 
 **Replay flow (eligible held-out alert × K-generations-old actor):**
 
-1. **Current defender** investigates the held-out alert from
-   `HEAD` — produces `investigation.md` + `lead_sequence.yaml` +
-   `gather_raw/`. If the defender's disposition is `malicious`,
-   skip this alert (eligibility check at this step).
+1. **Eligibility check on ground-truth label.** Skip if held-out
+   label is `malicious`. Otherwise: **current defender** investigates
+   the held-out alert from `HEAD` — produces `investigation.md` +
+   `lead_sequence.yaml` + `gather_raw/`. If the defender's
+   disposition on this run is `malicious`, the alert is *eligible
+   but not executed* this generation; record it as such and skip the
+   remaining steps.
 2. **Frozen actor** writes a story against that lead sequence,
    running from a `gen-{N-K}` checkout. The actor sees the alert and
    the projected lead sequence; it does not see investigation
@@ -219,13 +244,25 @@ superseded_by: <run_id, when status=stale>
 system_ref: defender/skills/{system}/SKILL.md#<anchor>  # required for live
 ```
 
-Invalidation: contradiction-only. A new lesson with a matching
-`subject` flips the prior live file's `status` to `stale` (and sets
-its `superseded_by`) and writes a new live file with the new run id.
-Stale files persist for audit; the read path filters to
-`status: live`. No time-based TTL at MVP — environment claims aren't
-time-sensitive at our cadence, and the `system_ref` grounding gate is
-the stronger freshness check.
+**Two invalidation modes:**
+
+- **Contradiction-with-replacement** (`caught` outcomes): the
+  author identifies the correct fact, writes a new live file with
+  the new `recorded_at`, and flips the prior live file's `status`
+  to `stale` with `superseded_by` set.
+- **Stale-only invalidation** (`incoherent` outcomes): the author
+  identifies that the actor's story contradicted itself because of a
+  specific live env claim, but cannot derive the correct replacement
+  fact from the incoherent encounter alone. The prior live file's
+  `status` flips to `stale`, `superseded_by` is recorded as the
+  run id that surfaced the contradiction, and **no new live file is
+  written**. The subject is left without a live claim until a
+  future `caught` case (or hand-authored knowledge) supplies one.
+
+Stale files persist for audit in both modes; the read path filters
+to `status: live`. No time-based TTL at MVP — environment claims
+aren't time-sensitive at our cadence, and the `system_ref` grounding
+gate is the stronger freshness check.
 
 The `subject` is the load-bearing equivalence key; the author prompt
 specifies how to coin one consistently (kebab-case, `{system}.{area}.{noun}`).
@@ -350,13 +387,26 @@ shape; distinct queue, distinct corpus, distinct threshold.
   unconsumed) — strategy-level notes on what failed.
 - Alert + story + investigation + projected telemetry — the same
   four artifacts the judge saw, so the author can ground claims.
-- **Loaded env lessons + retrieval trace** — the env lessons that
-  were in-prompt for this actor call, plus the `actor_trace.jsonl`
-  recording which tradecraft lessons the actor grepped/read. Without
-  these the author cannot map "this incoherence implies env claim X
-  is wrong" back to a specific live env-lesson file (subject + path).
-  The retrieval trace is also what lets the author observe whether a
-  tradecraft lesson was load-bearing in producing the failing story.
+- **Env-lessons snapshot (`actor_env_lessons.yaml`)** and
+  **retrieval trace (`actor_trace.jsonl`)** — two distinct artifacts
+  the actor-grep PR persists per case:
+  - `actor_env_lessons.yaml` — the verbatim list of live env-lesson
+    files that were pre-loaded into the actor prompt (path + subject
+    + recorded_at per entry). Without this, the author cannot map
+    "this incoherence implies env claim X is wrong" back to a
+    specific live env-lesson file. Env lessons are *injected* by
+    the orchestrator, not grepped by the actor, so the retrieval
+    trace alone does not name them.
+  - `actor_trace.jsonl` — the actor's tool-call trace, including
+    grep + read calls into `lessons-actor/tradecraft/`.
+- **Note on causality.** The retrieval trace proves *exposure*, not
+  *influence*. A read does not prove the lesson shaped the story.
+  The author should treat trace reads as exposure when attributing
+  load-bearing tradecraft to a lesson, and avoid claims of the form
+  "lesson X caused failure Y" — only "lesson X was in scope when
+  failure Y occurred." A future hardening option (explicit citation
+  of lesson IDs inside Section 0 or story body) is noted as
+  follow-up; not in MVP.
 
 **Outcome filter for actor authoring.**
 
@@ -425,9 +475,23 @@ tradecraft = claim about story shape or blending).
   (the `system_ref` frontmatter field, required for `status: live`).
   Plus the attacker-framing rule above.
 
-**Concurrency.** Actor author and defender author share no state and
-run on independent `_pending` queues hitting independent thresholds
-(default 5 each). They can fire in any order; no synchronization.
+**Concurrency.** Actor author and defender author write to disjoint
+corpora and read disjoint `_pending` queues, but they **share the
+git repository** — HEAD, the index, working-tree cleanliness, and
+the commit sequence. Two authors firing simultaneously would race
+on the index and produce interleaved or aborted commits. A repo-
+level mutex serializes the fold-and-commit critical section:
+
+- File-lock (`fcntl.flock` on `defender/learning/_author.lock`)
+  acquired before either author begins folding findings into its
+  corpus, held through the commit. Whichever author acquires first
+  runs; the other blocks, then proceeds with a fresh `git pull`-
+  equivalent rebase / fast-forward against the new HEAD.
+- Authors are independent in their *decision* to fire (independent
+  thresholds, independent queues) but serialized in their *commit*.
+- Default 5 each. Empty/no-op author runs that fail validation
+  release the lock without committing, and (per §Generation
+  boundary) do not advance generation N for the actor author.
 
 **Independent corpora — no cross-author reconciliation at MVP.** If
 actor and defender disagree about the same environment fact, each
