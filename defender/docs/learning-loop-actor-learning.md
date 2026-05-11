@@ -132,8 +132,10 @@ numbers per generation:
    separately as a *SKIP rate* alongside catch rate; a frozen actor
    whose SKIP rate climbs unexpectedly is itself a signal but
    distinct from "current defender caught the story." Catch rate =
-   `caught / (caught + survived + incoherent + undecidable)` on
-   eligible held-out alerts.
+   `caught / (caught + survived + incoherent + undecidable)` over
+   the **executed set** (see §Replay scope) — non-executed eligible
+   alerts and SKIPs contribute no catch outcome and are excluded
+   from the denominator.
 
 **Two-worktree harness.** Replay needs old actor code *and* current
 defender/oracle/judge simultaneously. A single `git checkout` cannot
@@ -383,20 +385,32 @@ shape; distinct queue, distinct corpus, distinct threshold.
 
 - `outcome` — gates whether the case is authored from, and which
   channels are eligible (see §Outcome filter).
-- `actor_observations` (from `judge.md` v3, currently emitted but
-  unconsumed) — strategy-level notes on what failed.
+- `actor_observations` (from `judge.md` v3) — strategy-level notes
+  on what failed. **Optional in the judge schema** (`judge.md`
+  emits 0–2 observations per case). The author treats present
+  observations as the preferred seed because they pre-isolate the
+  load-bearing element; when absent on an authorable outcome
+  (`caught` or `incoherent`), the author falls back to deriving
+  candidate lessons from the full per-case bundle below. The judge
+  schema is unchanged — the fallback discipline lives in the author
+  prompt, not in a stricter judge contract.
 - Alert + story + investigation + projected telemetry — the same
   four artifacts the judge saw, so the author can ground claims.
 - **Env-lessons snapshot (`actor_env_lessons.yaml`)** and
   **retrieval trace (`actor_trace.jsonl`)** — two distinct artifacts
   the actor-grep PR persists per case:
-  - `actor_env_lessons.yaml` — the verbatim list of live env-lesson
-    files that were pre-loaded into the actor prompt (path + subject
-    + recorded_at per entry). Without this, the author cannot map
-    "this incoherence implies env claim X is wrong" back to a
-    specific live env-lesson file. Env lessons are *injected* by
-    the orchestrator, not grepped by the actor, so the retrieval
-    trace alone does not name them.
+  - `actor_env_lessons.yaml` — the verbatim contents of every live
+    env-lesson file that was pre-loaded into the actor prompt at
+    story time. Each entry is `{path, subject, recorded_at,
+    assertion, blob_sha}` — `assertion` is the one-line claim
+    inlined into the snapshot (self-contained — survives later edits
+    or stale-flips of the underlying file), and `blob_sha` is the
+    git object SHA of the version the actor saw (cross-check against
+    history). Identifier-only references (path + subject) are
+    insufficient because env-lesson files mutate between the actor
+    run and the author run. Env lessons are *injected* by the
+    orchestrator, not grepped by the actor, so the retrieval trace
+    alone does not name them.
   - `actor_trace.jsonl` — the actor's tool-call trace, including
     grep + read calls into `lessons-actor/tradecraft/`.
 - **Note on causality.** The retrieval trace proves *exposure*, not
@@ -479,19 +493,36 @@ tradecraft = claim about story shape or blending).
 corpora and read disjoint `_pending` queues, but they **share the
 git repository** — HEAD, the index, working-tree cleanliness, and
 the commit sequence. Two authors firing simultaneously would race
-on the index and produce interleaved or aborted commits. A repo-
-level mutex serializes the fold-and-commit critical section:
+on the index and produce interleaved or aborted commits.
 
-- File-lock (`fcntl.flock` on `defender/learning/_author.lock`)
-  acquired before either author begins folding findings into its
-  corpus, held through the commit. Whichever author acquires first
-  runs; the other blocks, then proceeds with a fresh `git pull`-
-  equivalent rebase / fast-forward against the new HEAD.
-- Authors are independent in their *decision* to fire (independent
-  thresholds, independent queues) but serialized in their *commit*.
-- Default 5 each. Empty/no-op author runs that fail validation
-  release the lock without committing, and (per §Generation
-  boundary) do not advance generation N for the actor author.
+**Two locks, fixed order in both authors:**
+
+1. **Queue lock** — per-author, on its own `_pending` queue.
+   `defender/learning/author.py:81` already takes this for the
+   defender side; the actor author takes its own queue lock on its
+   own pending file. Acquired first, released last.
+2. **Repo lock** — `fcntl.flock` on
+   `defender/learning/_author.lock`. Shared between both authors.
+   Acquired **after** the queue lock, around the
+   `git add` + `git commit` critical section, released **before**
+   the queue lock is released.
+
+Ordering invariant: every author acquires `queue → repo` and
+releases `repo → queue`. Same order in both authors prevents
+deadlock. The queue lock is held continuously across the
+fold+commit step so the batch read from the queue cannot be
+trimmed by another path between read and write.
+
+Operational notes:
+
+- Empty/no-op author runs that produce nothing to commit acquire
+  both locks, decide no commit is needed, release both. Per
+  §Generation boundary, the actor counter does not advance.
+- After releasing the repo lock following a commit, an author
+  observes the new HEAD it just created; the other author, when it
+  next acquires the repo lock, sees that HEAD as its base.
+- The repo lock guards only the local working tree's commit
+  critical section. Push and PR creation are out of band.
 
 **Independent corpora — no cross-author reconciliation at MVP.** If
 actor and defender disagree about the same environment fact, each
@@ -622,17 +653,25 @@ Land in this order, each as its own PR:
    to test grep retrieval.
 4. **Actor.md edit — grep-after-Section-0 phase.** Validate that the
    actor can retrieve lessons reliably enough at MVP. **Includes
-   trace capture**: switch the actor invocation in
-   `defender/learning/loop.py` to a stream-json mode, persist
-   per-case `actor_trace.jsonl`, and add the audit script that flags
-   missed retrievals.
-5. **Actor author** — `author_actor.py` + `author_actor.md`. Fed by
-   judge `actor_observations` per the outcome filter: `caught` →
-   tradecraft + environment; `incoherent` → environment invalidation
-   only. Environment author prompt enforces the attacker-framing
-   constraint and rejects visibility-surface prose. Author commit on
-   fire is the generation boundary; commit trailer asserts
-   `Generation: N` plus the actor-model identifier (for replay).
+   artifact capture**: switch the actor invocation in
+   `defender/learning/loop.py` to stream-json mode, persist per-case
+   `actor_trace.jsonl` (tradecraft grep+read events) **and**
+   `actor_env_lessons.yaml` (verbatim live env-lesson bodies +
+   blob SHAs), introduce stage-specific model env vars (`ACTOR_MODEL`,
+   `ORACLE_MODEL`, `JUDGE_MODEL`), and add the missed-retrieval audit
+   script.
+5. **Actor author** — `author_actor.py` + `author_actor.md`.
+   Per-case input bundle: `outcome`, `actor_observations` (if
+   present, else fall back to the full bundle), alert, investigation,
+   story, projected telemetry, `actor_env_lessons.yaml`,
+   `actor_trace.jsonl`. Outcome routing: `caught` → tradecraft +
+   environment (contradiction-with-replacement); `incoherent` →
+   environment stale-only invalidation. Environment author prompt
+   enforces the attacker-framing constraint. Acquires queue lock
+   then `_author.lock` (in that order, both authors) around commit.
+   Author commit on fire is the generation boundary; commit trailer
+   asserts `Generation: N` plus the actor-model identifier (for
+   replay).
 6. **Secondary metric harness.** Two-worktree replay: current defender
    investigates held-out from `HEAD`, frozen actor from `gen-{N-3}`
    writes a story against that lead sequence, current oracle + judge
