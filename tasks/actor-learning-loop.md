@@ -25,7 +25,8 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
 ## Sequencing — one PR each
 
 - [ ] **Held-out fixture set + persist-stage filter.** 24–30 alerts with
-  ground-truth labels (≥8 per class: benign/malicious/inconclusive).
+  ground-truth labels, ≥8 per disposition class (benign/malicious/
+  inconclusive).
   Persist stage drops both `defender_findings` and `actor_observations`
   from held-out runs before either `_pending/` queue is touched.
   Unblocks primary-metric baseline against current defender.
@@ -34,9 +35,11 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   `(alert, investigation.md, actor story, projected_telemetry.yaml)`:
   (a) outcome enum (`caught/survived/incoherent/undecidable`),
   (b) expected-observation gist — one sentence on what the
-  load-bearing actor observation should be. Observation calibration
-  matters because the actor author trains on observations, not just
-  outcomes. Mirrors `defender/learning/judge-alignment/`.
+  load-bearing actor observation should be. **Acceptance criteria
+  for enabling actor learning**: outcome agreement ≥80%, observation
+  pertinence ≥70%, zero parse failures. Below either floor → judge
+  prompt iteration precedes rollout. Mirrors
+  `defender/learning/judge-alignment/`.
 - [ ] **`defender/lessons-actor/` corpus structure** — tradecraft +
   environment channels, schemas, seed lessons. No code yet.
 - [ ] **Actor.md edit — grep-after-Section-0 phase.** Validate retrieval
@@ -45,6 +48,12 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   `actor_trace.jsonl` (tradecraft grep+read events) **and**
   `actor_env_lessons.yaml` (verbatim snapshot of preloaded live env
   lessons), and adding the missed-retrieval audit script.
+- [ ] **Actor pending queue + persist-stage rotation.** Implement
+  `_pending/actor_observations.jsonl` per the design's queue
+  contract: one entry per observation, stable ID
+  `{case_id}:{observation_index}`, dedup on ID, consumed-on-fold,
+  rejected-after-3-attempts side queue. Persist stage writes
+  entries from non-held-out `caught`/`incoherent` cases only.
 - [ ] **Actor author** — `defender/learning/author_actor.py` +
   `author_actor.md`. `caught` → tradecraft + environment authoring
   (contradiction-with-replacement); `incoherent` → environment
@@ -53,11 +62,13 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   inputs include `actor_env_lessons.yaml` + `actor_trace.jsonl` so
   the author can identify the specific stale subject. Environment
   prompt enforces attacker-framing constraint (no visibility-surface
-  prose). Repo-level commit lock
-  (`defender/learning/_author.lock`) serializes commits across actor
-  + defender authors. Author commit on fire is the generation
-  boundary; trailer asserts `Generation: N` + actor-model identifier
-  (for replay pinning).
+  prose). Repo-level lock
+  (`defender/learning/_author.lock`) wraps the **entire fold-and-
+  commit flow** including child-agent execution that mutates files —
+  not just the final `git commit`. Order: acquire queue lock first,
+  then repo lock; release in reverse. Author commit on fire is the
+  generation boundary; trailer asserts `Generation: N` +
+  actor-model identifier (for replay pinning).
 - [ ] **Secondary metric harness.** Two-worktree replay: current
   defender investigates held-out from HEAD; frozen actor from
   `gen-{N-3}` writes a story against that lead sequence; current

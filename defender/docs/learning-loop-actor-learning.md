@@ -467,6 +467,55 @@ shape; distinct queue, distinct corpus, distinct threshold.
   of lesson IDs inside Section 0 or story body) is noted as
   follow-up; not in MVP.
 
+**Pending queue contract — `_pending/actor_observations.jsonl`.**
+
+One entry **per observation** (not per run), so the unit of dedupe
+and routing is the lesson candidate. Schema, one JSONL line per
+entry:
+
+```json
+{
+  "id": "<case_id>:<observation_index>",
+  "case_id": "<run_id of the live-loop case>",
+  "observation_index": 0,
+  "outcome": "caught | survived | incoherent | undecidable | skip-passthrough",
+  "observation": "<verbatim actor_observations[i] text from judge>",
+  "case_bundle_ref": "<relative path to the per-case artifacts directory>",
+  "queued_at": "<ISO-8601 UTC>"
+}
+```
+
+Rules:
+
+- **Stable ID** = `{case_id}:{observation_index}`. The case_id comes
+  from the live-loop run dir name; observation_index is the zero-
+  based position in the judge's `actor_observations` array. The pair
+  is unique per emitted observation and stable across re-queue
+  attempts.
+- **Dedup on `id`.** Replaying or rerunning the persist stage on a
+  case must not double-queue. The queue writer checks `id`
+  membership before append.
+- **Per-observation, not per-case.** A case with two observations
+  produces two entries; the actor author can fold one and defer the
+  other.
+- **Case-bundle reference, not inlined.** `case_bundle_ref` points
+  to the per-case artifacts directory (alert, investigation, story,
+  projected telemetry, `actor_env_lessons.yaml`, `actor_trace.jsonl`).
+  The author Reads these from disk; inlining them would bloat the
+  queue.
+- **Consumed-on-fold.** Successful fold (lesson written + committed)
+  removes the entry. Failed validation (e.g., environment grounding
+  gate, attacker-framing rule) keeps the entry in the queue with an
+  appended `attempts` counter; after N=3 attempts the entry is moved
+  to `_pending/actor_observations.rejected.jsonl` for review and
+  removed from the active queue. Idempotent on retry.
+- **Threshold check.** Author fires when active-queue line count
+  reaches `LEARNING_AUTHOR_THRESHOLD` (default 5). Rejected-queue
+  entries do not count toward the threshold.
+- **No outcome=`skip-passthrough` entries.** Cases that emitted
+  SKIP produce no `actor_observations` and therefore no queue
+  entries.
+
 **Outcome filter for actor authoring.**
 
 | outcome | author? | rationale |
@@ -652,9 +701,26 @@ them.
    the defender's `defender/learning/judge-alignment/` work, but for
    actor-side outcomes plus observations.
 
-2. **Held-out alert set with ground-truth labels.** 20–30 alerts is
-   the minimum to detect meaningful primary-metric movement (see
-   §Ship criteria). These alerts live in a fixture dir and are tagged
+   **Acceptance criteria — turning on actor learning is gated on:**
+   - **Outcome agreement ≥80%** between judge and human label across
+     the 30-row set. Below this, judge prompt iteration is required
+     before actor learning is enabled. (Initial threshold; can be
+     tightened once a stable baseline exists.)
+   - **Observation pertinence ≥70%** — fraction of `actor_observations`
+     judged by a human reviewer as substantively matching the
+     expected-observation gist (the load-bearing element of what
+     should have been observed). The lower threshold reflects that
+     observation phrasing varies more than outcome enums.
+   - **No silent failures**: every case must produce a parseable
+     judge YAML doc. Parse failures count as outcome disagreement.
+
+   Below either floor → judge prompt iteration precedes any actor
+   author rollout. The calibration set is re-run after each judge
+   prompt edit.
+
+2. **Held-out alert set with ground-truth labels.** 24–30 alerts
+   (≥8 per disposition class — see §Ship criteria for the class
+   balance derivation). These alerts live in a fixture dir and are tagged
    `held_out: true`; the learning loop's persist stage drops both
    `defender_findings` and `actor_observations` from held-out runs
    before either queue (`_pending/findings.jsonl`,
@@ -700,9 +766,30 @@ baseline is measured):
   below single-alert resolution. The zero-change rule is the
   operational form on a small held-out set; if the set grows to
   ≥100 alerts later, swap back to a percentage-point delta.
-- **Secondary check.** At the same time the primary plateaus, the
-  secondary metric must *not* be diverging upward — see §Secondary
-  divergence diagnostic. If it is, investigate before shipping.
+- **Secondary check.** At ship time, the secondary metric must not
+  show **upward divergence** against the primary. Concretely:
+  - **Window.** Last 3 eval checkpoints (i.e., the same checkpoints
+    that produced the primary plateau).
+  - **Slope rule.** Linear-fit slope of secondary catch rate over
+    those 3 checkpoints must be ≤ +4 pp/checkpoint. On a 24-30
+    alert held-out set, +4 pp/checkpoint is roughly one alert per
+    step — anything sharper is a real movement, not noise. Slope
+    above the threshold blocks ship; slope at or below allows it.
+  - **Confidence.** Bootstrap 95% CI (N=1000 resamples) on the
+    secondary catch rate at each checkpoint. If the CIs across the
+    3 checkpoints fully overlap, treat the slope as noise regardless
+    of its point value; ship is not blocked.
+  - **Insufficient-evidence gate.** If any of the 3 checkpoints
+    has executed/eligible < 0.5 (sparse replay, mostly false
+    escalations) or a non-zero `replay-incompatible` count, the
+    divergence test is reported as **insufficient evidence** and
+    requires manual review before ship — neither automatic-pass nor
+    automatic-block.
+  
+  See also §Secondary metric for the full diagnostic context (the
+  test only flags divergence; the causal attribution among judge
+  gaming, defender overfit, oracle/judge drift, and held-out drift
+  is a manual investigation triggered by the flag).
 
 These are initial defaults. Re-calibrate once the held-out fixture
 set lands and the current defender's baseline is measured.
@@ -736,10 +823,13 @@ Land in this order, each as its own PR:
    environment (contradiction-with-replacement); `incoherent` →
    environment stale-only invalidation. Environment author prompt
    enforces the attacker-framing constraint. Acquires queue lock
-   then `_author.lock` (in that order, both authors) around commit.
-   Author commit on fire is the generation boundary; commit trailer
-   asserts `Generation: N` plus the actor-model identifier (for
-   replay).
+   then `_author.lock` (in that order, both authors) **before
+   launching the child-agent fold** and holds both through commit —
+   the wider scope is mandatory (see §Concurrency); narrowing the
+   lock to only the final commit reintroduces the shared-worktree
+   race. Author commit on fire is the generation boundary; commit
+   trailer asserts `Generation: N` plus the actor-model identifier
+   (for replay).
 6. **Secondary metric harness.** Two-worktree replay: current defender
    investigates held-out from `HEAD`, frozen actor from `gen-{N-3}`
    writes a story against that lead sequence, current oracle + judge
