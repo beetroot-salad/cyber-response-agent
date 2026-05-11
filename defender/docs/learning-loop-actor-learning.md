@@ -9,18 +9,26 @@ PRs against this branch.
 
 ## Motivation
 
-The deployed loop has a structural asymmetry that guarantees a
-plateau: the defender accumulates `lessons/` monotonically; the actor
-is memoryless across cases and reads a hand-curated `mitre_corpus.py`
-that does not grow. Given enough generations, the defender either
-exhausts the actor's static strategy space or its judge-gradable
-neighborhood — whichever comes first — and learning yield drops to
-zero. The plateau is the system's stable state, not a hypothesis.
+The deployed loop has a structural asymmetry that *plausibly* drives
+a plateau: the defender accumulates `lessons/` monotonically; the
+actor is memoryless across cases and reads a hand-curated
+`mitre_corpus.py` that does not grow. Over enough generations the
+defender may exhaust the actor's static strategy space or its
+judge-gradable neighborhood, and learning yield trends toward zero.
 
-This is a known self-play failure mode (one side dominates → weaker
-side's gradient vanishes → stronger side overfits to a weak opponent
-→ both stagnate; cf. AlphaZero / AlphaEvolve literature on population
-preservation and frozen-baseline evaluation).
+This is the headlining risk this workstream addresses, but it is not
+the only plausible cause of an observed plateau in the current
+system: judge sensitivity, oracle limits, sampling policy, held-out
+distribution drift, and defender retrieval ergonomics can all
+flatten yield independently. We treat the static-actor hypothesis as
+the most actionable lever (the others are already on the roadmap or
+out of scope) and ship instrumentation that can distinguish them
+post-hoc — chiefly the divergence diagnostic in §Secondary metric.
+
+Self-play framing precedent: one side dominates → weaker side's
+gradient vanishes → stronger side overfits to a weak opponent → both
+stagnate; cf. AlphaZero / AlphaEvolve literature on population
+preservation and frozen-baseline evaluation.
 
 ## Problem statement
 
@@ -45,6 +53,18 @@ is the fraction of runs whose `report.md` frontmatter `disposition`
 matches the label. **Judge-independent at eval time.** No held-out
 case's judge findings or `actor_observations` ever feed back into
 `lessons/`, `lessons-actor/`, or either `_pending/` queue.
+
+**`inconclusive` as a labeled disposition, not a free pass.** The
+ground-truth label `inconclusive` is reserved for alerts where the
+correct human judgment, given the available telemetry, is "evidence
+does not discriminate." When the ground truth is `benign` or
+`malicious`, predicting `inconclusive` is *wrong* — exact-match.
+This prevents the loop from rewarding abstention. Per-class recall
+matters more than aggregate accuracy; the ship criteria call out a
+per-class floor for exactly this reason. The most load-bearing class
+is `malicious` recall (false negatives are the project's stated
+zero-tolerance failure mode); the per-class floor binds especially
+there.
 
 This is the headline number. Defender ships against the ship criteria
 in §Ship criteria.
@@ -290,9 +310,23 @@ tradecraft = claim about story shape or blending).
 **Validation gates.**
 
 - Tradecraft: non-duplication only (no probe-evidence gate). Soft
-  channel.
-- Environment: groundability check against `defender/skills/{system}/`.
-  Author must cite a system+surface reference for the claim.
+  channel. **Known risk: no realism gate.** A novel-but-unrealistic
+  tradecraft lesson (overconfident generalization from a single
+  `caught` case, judge artifact misread as a pattern) can become
+  durable curriculum the actor reads at every subsequent story. The
+  forward-check stage (`verify_forward.{md,py}`) is the closest thing
+  to a realism check we already run on the defender side; an
+  analogous stage for tradecraft is a follow-up. **At MVP we accept
+  the risk and mitigate via**: (a) periodic human review of new
+  tradecraft lessons at each generation boundary — feasible at MVP
+  scale, ~5 lessons per generation; (b) tradecraft lesson count per
+  generation is logged so unusually prolific generations are
+  reviewed first; (c) lessons that consistently fail to predict
+  `caught` outcomes when their pattern is invoked are flagged for
+  retirement (instrumentation, not enforcement, at MVP).
+- Environment: groundability check against `defender/skills/{system}/`
+  (the `system_ref` frontmatter field, required for `status: live`).
+  Plus the attacker-framing rule above.
 
 **Concurrency.** Actor author and defender author share no state and
 run on independent `_pending` queues hitting independent thresholds
@@ -359,15 +393,22 @@ them.
 at poor correctness is not a ship signal. Defaults (calibrated once
 baseline is measured):
 
-- **Minimum correctness floor.** The defender's correctness on the
-  held-out set must clear a floor before plateau counts as ship-
-  ready. Initial floor: 80% overall, with no class falling below 70%
-  (per-class floor protects against an unbalanced set hiding a
-  systemic failure on the minority class).
+- **Minimum correctness floor.** Defender correctness on held-out
+  must clear an aggregate floor *and* a per-class floor before
+  plateau counts as ship-ready. Initial floors:
+  - Aggregate: 80% exact-match.
+  - Per-class recall: ≥70% on `benign`, ≥70% on `inconclusive`,
+    **≥90% on `malicious`**. The asymmetric malicious floor reflects
+    the project's stated zero-false-negative goal — predicting
+    `inconclusive` or `benign` on a malicious alert is the failure
+    mode that matters most.
 - **Class balance in held-out.** At least 8 alerts per
   `disposition` class (`benign | malicious | inconclusive`), 24–30
-  alerts total. A held-out set without representatives of a class
-  cannot detect regressions on that class.
+  alerts total. Sizing rationale: with 8 per class and the per-class
+  floor binding at 90% on malicious, a single miss drops recall to
+  87.5% — already below floor, so the regression signal is
+  detectable on a single failure. A held-out set without
+  representatives of a class cannot detect regressions on that class.
 - **Plateau definition.** Three consecutive author generations with
   primary-metric delta < 2 percentage points and bootstrap 95% CI
   (N=1000 resamples) overlapping. The CI rule guards against calling

@@ -55,6 +55,12 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
 - Actor model = Sonnet (Haiku misses retrieval).
 - Tradecraft authoring: **failure-only**, from `outcome: caught` only.
   No positive-pattern channel at MVP. Judge v3 schema unchanged.
+- Tradecraft realism gate: **none at MVP.** Non-duplication is the
+  only check. Mitigated by per-generation human review + retirement
+  instrumentation. Probe-evidence-style gate is follow-up.
+- Primary metric: exact-match on `disposition` with asymmetric
+  per-class floors (≥90% malicious recall, ≥70% on benign/inconclusive).
+  `inconclusive` is a labeled disposition, not abstention.
 - Environment lessons: attacker-framed only; no defender-visibility
   prose. Framing rule enforced at author write time.
 - Retrieval: audit-only at MVP via `tool_trace.jsonl`; Section 0 may
