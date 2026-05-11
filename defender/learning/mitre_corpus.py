@@ -92,8 +92,16 @@ CORPUS: list[tuple[str, str, str]] = [
 
 
 def sample_menu(rng: random.Random, n: int = MENU_SIZE) -> list[tuple[str, str, str]]:
-    """Draw ``n`` techniques from the corpus without replacement."""
-    return rng.sample(CORPUS, n)
+    """Draw ``n`` techniques from the corpus without replacement.
+
+    Guarantees at least one Initial Access technique per menu so the actor
+    is never forced into a SKIP for lack of an entry-point citation. Other
+    tactics may be absent — that's exploration surface, not a contract.
+    """
+    initial_access = [e for e in CORPUS if e[0] == "Initial Access"]
+    seed_ia = rng.choice(initial_access)
+    others = rng.sample([e for e in CORPUS if e != seed_ia], n - 1)
+    return [seed_ia] + others
 
 
 def format_menu(menu: list[tuple[str, str, str]]) -> str:
