@@ -54,6 +54,20 @@ matches the label. **Judge-independent at eval time.** No held-out
 case's judge findings or `actor_observations` ever feed back into
 `lessons/`, `lessons-actor/`, or either `_pending/` queue.
 
+**Failure accounting.** Every held-out alert is in the denominator.
+Runs that fail to produce a clean `report.md` with parseable
+disposition frontmatter — runtime errors, timeouts, missing report,
+invalid frontmatter, disposition outside the closed enum — count as
+**wrong** against the ground-truth class. Excluding failures from
+the denominator would inflate correctness and let regressions hide
+behind crashes. Per-class recall floors apply post-bucketing, so a
+malicious-ground-truth alert that produces a runtime error contributes
+1 to the malicious denominator and 0 to malicious recall — i.e., it
+counts against the 90% malicious floor. The failure bucket is
+reported separately as a *failure rate* alongside correctness, both
+for diagnostic visibility and because a non-trivial failure rate is
+itself a ship-blocker even if the surviving runs are all correct.
+
 **`inconclusive` as a labeled disposition, not a free pass.** The
 ground-truth label `inconclusive` is reserved for alerts where the
 correct human judgment, given the available telemetry, is "evidence
@@ -144,10 +158,27 @@ provide both. The harness uses two worktrees:
 - `worktrees/replay-head/` checked out at `HEAD` — runs defender,
   oracle, judge.
 - `worktrees/replay-gen-{N-K}/` checked out at the target generation
-  commit — runs the actor stage only.
+  commit — runs the actor stage.
 
-The harness shells the actor invocation into the gen-{N-K} tree, then
-brings the resulting story back to the HEAD tree for oracle + judge.
+**Boundary: where the actor stage starts.** The actor stage is
+*everything from actor-input projection through actor invocation* —
+including the projection step (`actor_input` assembly in
+`defender/learning/loop.py`). The gen-{N-K} worktree owns this end
+of the pipeline. The HEAD worktree hands over `lead_sequence.yaml`
+(plus the alert) and receives back the actor's story; nothing in
+between.
+
+**Compatibility contract on `lead_sequence.yaml`.** The handoff
+artifact crossing worktrees is `lead_sequence.yaml`. The schema
+must remain backward-compatible across K generations so the
+gen-{N-K} projector can parse a HEAD-produced sequence. If a
+breaking schema change is necessary mid-experiment, the actor-author
+commit at that generation records the schema version in its trailer,
+and the replay harness refuses to cross a schema boundary
+(reports the replay as `replay-incompatible` rather than producing
+garbage). For K=3 and a stable schema, this is a no-op; the rule
+exists so a future schema break does not silently corrupt the
+secondary metric.
 
 **Git is not the *full* manifest.** Two non-source dimensions can
 drift independently of the working tree:
@@ -399,18 +430,32 @@ shape; distinct queue, distinct corpus, distinct threshold.
 - **Env-lessons snapshot (`actor_env_lessons.yaml`)** and
   **retrieval trace (`actor_trace.jsonl`)** — two distinct artifacts
   the actor-grep PR persists per case:
-  - `actor_env_lessons.yaml` — the verbatim contents of every live
-    env-lesson file that was pre-loaded into the actor prompt at
-    story time. Each entry is `{path, subject, recorded_at,
-    assertion, blob_sha}` — `assertion` is the one-line claim
-    inlined into the snapshot (self-contained — survives later edits
-    or stale-flips of the underlying file), and `blob_sha` is the
-    git object SHA of the version the actor saw (cross-check against
-    history). Identifier-only references (path + subject) are
-    insufficient because env-lesson files mutate between the actor
-    run and the author run. Env lessons are *injected* by the
-    orchestrator, not grepped by the actor, so the retrieval trace
-    alone does not name them.
+  - `actor_env_lessons.yaml` — a snapshot of every live env-lesson
+    file pre-loaded into the actor prompt at story time. Locked
+    schema, ordered list, order matches the order injected into the
+    prompt:
+
+    ```yaml
+    - order: 0                      # injection order; matters because
+                                    # prompt position can influence weight
+      path: defender/lessons-actor/environment/falco-rule-cov-XXX.md
+      subject: falco.rule.coverage.docker-exec
+      recorded_at: <run_id>
+      status: live                  # always live at story time; recorded for audit
+      system_ref: defender/skills/wazuh/SKILL.md#falco-rules
+      assertion: |
+        <verbatim one-line claim body the actor saw>
+      blob_sha: <git object SHA of the file at story time>
+    - order: 1
+      ...
+    ```
+
+    Both `assertion` (inlined for self-containment — survives later
+    edits or stale-flips) and `blob_sha` (cross-check against
+    history) are recorded. Identifier-only references would lose the
+    exact claim if files mutate between actor run and author run.
+    Env lessons are *injected* by the orchestrator, not grepped by
+    the actor, so the retrieval trace alone does not name them.
   - `actor_trace.jsonl` — the actor's tool-call trace, including
     grep + read calls into `lessons-actor/tradecraft/`.
 - **Note on causality.** The retrieval trace proves *exposure*, not
@@ -503,15 +548,33 @@ on the index and produce interleaved or aborted commits.
    own pending file. Acquired first, released last.
 2. **Repo lock** — `fcntl.flock` on
    `defender/learning/_author.lock`. Shared between both authors.
-   Acquired **after** the queue lock, around the
-   `git add` + `git commit` critical section, released **before**
-   the queue lock is released.
+   Acquired **after** the queue lock and held across the **entire
+   fold-and-commit flow** — including the child-agent invocation
+   that mutates files, not just the final `git add` + `git commit`.
+
+**Why the wider scope.** The existing defender author
+(`defender/learning/author.py:312`,`:342`) delegates lesson edits
+*and* the commit to a child agent. If the repo lock only wraps the
+final commit, the other author can start its own child agent
+concurrently, both children dirty the shared working tree, and the
+commits interleave or stomp on each other's edits. The lock
+therefore covers: child-agent launch → child writes files → child
+issues commit (or parent commits, if the protocol changes — see
+below) → lock release.
 
 Ordering invariant: every author acquires `queue → repo` and
 releases `repo → queue`. Same order in both authors prevents
 deadlock. The queue lock is held continuously across the
 fold+commit step so the batch read from the queue cannot be
 trimmed by another path between read and write.
+
+**Compatible alternatives** (not required at MVP, listed if the
+wider lock turns out to hold too long in practice):
+- Move commit ownership out of the child agent — child produces a
+  proposed-edit bundle, parent applies it and commits under a
+  narrow lock.
+- Run each author in its own git worktree, merge to the canonical
+  branch under lock.
 
 Operational notes:
 
@@ -622,16 +685,21 @@ baseline is measured):
   aligns with the project's zero-false-negative goal. A held-out set
   without representatives of a class cannot detect regressions on
   that class.
-- **Plateau definition.** Three consecutive author generations with
-  primary-metric delta below the smallest single-alert resolution
-  the held-out set can express. On 24–30 alerts, one alert changing
-  label moves aggregate accuracy by 3.3–4.2 pp; the previous
-  "<2 pp" threshold was below single-alert resolution and is
-  meaningless on this set size. Reframed: **plateau = three
-  consecutive generations with zero label changes on held-out**, and
-  bootstrap 95% CI (N=1000 resamples) overlapping. The zero-change
-  rule is the operational form on a small held-out set; if the set
-  grows to ≥100 alerts later, swap back to a percentage-point delta.
+- **Plateau axis.** The primary metric measures defender capability;
+  it depends on defender state only. Plateau is therefore measured
+  on the **defender-author commit sequence**, not on actor
+  generations. Each defender-author commit produces an eval
+  checkpoint `(defender_sha, actor_generation)`; the
+  `actor_generation` is recorded for traceability but does not
+  affect the plateau test. Actor-author commits that do not change
+  defender corpus produce no new checkpoint.
+- **Plateau definition.** Three consecutive defender-author commits
+  with zero label changes on held-out, and bootstrap 95% CI (N=1000
+  resamples) overlapping. On 24–30 alerts, one label flip moves
+  aggregate accuracy by 3.3–4.2 pp; the prior "<2 pp" threshold was
+  below single-alert resolution. The zero-change rule is the
+  operational form on a small held-out set; if the set grows to
+  ≥100 alerts later, swap back to a percentage-point delta.
 - **Secondary check.** At the same time the primary plateaus, the
   secondary metric must *not* be diverging upward — see §Secondary
   divergence diagnostic. If it is, investigate before shipping.

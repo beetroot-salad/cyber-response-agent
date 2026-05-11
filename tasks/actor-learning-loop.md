@@ -86,7 +86,13 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   instrumentation. Probe-evidence-style gate is follow-up.
 - Primary metric: exact-match on `disposition` with asymmetric
   per-class floors (≥90% malicious recall, ≥70% on benign/inconclusive).
-  `inconclusive` is a labeled disposition, not abstention.
+  `inconclusive` is a labeled disposition, not abstention. Failed
+  runs (crashes, timeouts, missing/invalid report) count wrong
+  against ground truth; failure rate reported separately.
+- Plateau measured on the **defender-author commit sequence**. Each
+  defender-author commit produces an eval checkpoint
+  `(defender_sha, actor_generation)`; actor-author commits do not
+  advance the plateau test.
 - Environment lessons: attacker-framed only; no defender-visibility
   prose. Framing rule enforced at author write time.
 - Retrieval: audit-only at MVP via `actor_trace.jsonl` (captured by
