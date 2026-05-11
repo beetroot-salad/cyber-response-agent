@@ -355,6 +355,8 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         ),
     ]
 
+    import fcntl as _fcntl
+    import os as _os_local
     import select as _select
     import time as _time
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
@@ -368,9 +370,12 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
     # (`for raw in proc.stdout`) blocks waiting for a newline, so the
     # wall-clock check below never fires when the child stops emitting
     # mid-line (e.g., a stuck verify_forward subprocess, a hung tool).
-    # select() on the raw fd lets us bound every read by the remaining
+    # select() on the raw fds lets us bound every read by the remaining
     # deadline. stderr is drained in the same loop so a full stderr
-    # pipe (64KiB on Linux) can't deadlock the child either.
+    # pipe (64KiB on Linux) can't deadlock the child either. stdin is
+    # written through the same select loop so a child that hangs
+    # before reading the prompt cannot block the parent in write() —
+    # the findings JSON regularly clears 64KiB once a batch grows.
     proc = subprocess.Popen(
         cmd,
         cwd=REPO_ROOT,
@@ -380,10 +385,15 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         bufsize=0,
     )
     assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
-    proc.stdin.write(user_prompt.encode())
-    proc.stdin.close()
 
+    # Start the deadline *before* we touch stdin — a hung child must
+    # not give us an unbounded grace period during prompt delivery.
     deadline = _time.monotonic() + AUTHOR_TIMEOUT
+
+    stdin_fd = proc.stdin.fileno()
+    _fcntl.fcntl(stdin_fd, _fcntl.F_SETFL, _fcntl.fcntl(stdin_fd, _fcntl.F_GETFL) | _os_local.O_NONBLOCK)
+    prompt_bytes = user_prompt.encode()
+
     text_buf: list[str] = []
     stderr_chunks: list[bytes] = []
     stdout_buf = b""
@@ -412,8 +422,10 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
     try:
         stdout_fd = proc.stdout.fileno()
         stderr_fd = proc.stderr.fileno()
-        open_fds: set[int] = {stdout_fd, stderr_fd}
-        while open_fds:
+        open_read_fds: set[int] = {stdout_fd, stderr_fd}
+        stdin_offset = 0
+        stdin_closed = False
+        while open_read_fds or not stdin_closed:
             remaining = deadline - _time.monotonic()
             if remaining <= 0:
                 proc.kill()
@@ -423,13 +435,16 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
                 )
             # Cap the select wait so the deadline check runs at least
             # once per second even when the child is fully silent.
-            ready, _w, _x = _select.select(list(open_fds), [], [], min(remaining, 1.0))
-            if not ready:
+            write_fds = [stdin_fd] if not stdin_closed else []
+            ready_r, ready_w, _x = _select.select(
+                list(open_read_fds), write_fds, [], min(remaining, 1.0)
+            )
+            if not ready_r and not ready_w:
                 continue
-            for fd in ready:
+            for fd in ready_r:
                 chunk = os.read(fd, 65536)
                 if not chunk:
-                    open_fds.discard(fd)
+                    open_read_fds.discard(fd)
                     continue
                 if fd == stdout_fd:
                     stdout_buf += chunk
@@ -438,6 +453,21 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
                         _handle_line(raw)
                 else:
                     stderr_chunks.append(chunk)
+            if ready_w and not stdin_closed:
+                try:
+                    n = os.write(stdin_fd, prompt_bytes[stdin_offset:])
+                except BlockingIOError:
+                    n = 0
+                except BrokenPipeError:
+                    # Child closed stdin before we finished — finish the
+                    # read loop and surface the rc/stderr the caller sees.
+                    stdin_closed = True
+                    proc.stdin.close()
+                    n = 0
+                stdin_offset += n
+                if stdin_offset >= len(prompt_bytes):
+                    proc.stdin.close()
+                    stdin_closed = True
         # Flush any trailing partial stdout line (no terminating newline).
         if stdout_buf.strip():
             _handle_line(stdout_buf)

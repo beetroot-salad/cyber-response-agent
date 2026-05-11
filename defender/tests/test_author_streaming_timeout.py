@@ -42,6 +42,14 @@ def _fake_claude_script(repo, *, behavior: str) -> str:
             'sys.stdout.write(\'{"type":"result","subtype":"success"}\\n\')\n'
             'sys.stdout.flush()\n'
         )
+    elif behavior == "ignore_stdin":
+        # Never read stdin — exercises the path where the prompt
+        # exceeds the pipe buffer and the parent must not deadlock
+        # in proc.stdin.write().
+        body = (
+            'import sys, time\n'
+            'time.sleep(60)\n'
+        )
     else:
         raise ValueError(behavior)
     path.write_text(body)
@@ -87,6 +95,24 @@ def test_silent_hang_is_killed_by_wall_clock(tmp_repo, _shim_claude, monkeypatch
     elapsed = time.monotonic() - t0
     # Generous upper bound: timeout=2s, select tick=1s, kill overhead.
     assert elapsed < 6.0, f"timeout did not fire promptly (elapsed={elapsed:.2f}s)"
+
+
+def test_stdin_write_is_bounded_by_deadline(tmp_repo, _shim_claude, monkeypatch):
+    """Child never reads stdin; prompt > pipe buffer must not block writer."""
+    a = tmp_repo.author
+    monkeypatch.setattr(a, "AUTHOR_TIMEOUT", 2)
+    _shim_claude("ignore_stdin")
+
+    # Findings list large enough that json.dumps(...) exceeds the
+    # default 64KiB Linux pipe buffer — forces the writer to wait
+    # for the child to drain stdin, which it never will.
+    big = {"finding_id": "x", "blob": "y" * (128 * 1024)}
+
+    t0 = time.monotonic()
+    with pytest.raises(a.AuthorError, match="timed out after 2s"):
+        a.invoke_agent([big], batch_id="test")
+    elapsed = time.monotonic() - t0
+    assert elapsed < 6.0, f"stdin-write deadlock — elapsed={elapsed:.2f}s"
 
 
 def test_stderr_flood_does_not_deadlock(tmp_repo, _shim_claude, monkeypatch):
