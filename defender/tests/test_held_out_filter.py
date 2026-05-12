@@ -47,6 +47,12 @@ def test_read_ground_truth_rejects_non_mapping(run_dir: Path) -> None:
         loop.read_ground_truth(run_dir)
 
 
+def test_read_ground_truth_rejects_malformed_yaml(run_dir: Path) -> None:
+    (run_dir / "ground_truth.yaml").write_text("held_out: true\n: bad indent\n  - [\n")
+    with pytest.raises(loop.LoopError, match="malformed YAML"):
+        loop.read_ground_truth(run_dir)
+
+
 def test_run_one_gate_short_circuits_before_append(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

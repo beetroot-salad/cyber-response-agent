@@ -645,7 +645,10 @@ def read_ground_truth(run_dir: Path) -> dict | None:
     path = run_dir / GROUND_TRUTH_FILE
     if not path.is_file():
         return None
-    doc = yaml.safe_load(path.read_text()) or {}
+    try:
+        doc = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as e:
+        raise LoopError(f"{path}: malformed YAML: {e}") from e
     if not isinstance(doc, dict):
         raise LoopError(f"{path}: expected a mapping at top level")
     return doc
