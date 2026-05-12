@@ -1,8 +1,0 @@
-{
-  "goal": "Determine whether the shell spawn at 14:25:22Z is surrounded by other anomalous alerts that would indicate an intrusion chain.",
-  "what_to_characterize": [
-    "all Wazuh alerts in the ±15m window around 2026-05-07T14:25:22Z for the falco agent or target-endpoint container",
-    "rule IDs and descriptions of co-occurring alerts",
-    "whether any alerts indicate recon, lateral movement, exploitation, or C2"
-  ]
-}

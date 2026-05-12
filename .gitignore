@@ -82,6 +82,9 @@ defender/learning/runs/
 defender/learning/eval/results/
 defender/learning/eval/_tmp/
 
+# Defender run transcripts — local artifacts, not committed.
+defender/run-transcripts/
+
 # Generated kanban board (regenerate via `python3 tasks/build.py`)
 /board.html
 

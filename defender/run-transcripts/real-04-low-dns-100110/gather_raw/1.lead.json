@@ -1,9 +1,0 @@
-{
-  "goal": "Characterize the process and activity context on target-endpoint near the alert time to understand what other activity is happening on the host around the DNS alert.",
-  "what_to_characterize": [
-    "what other rules fired on target-endpoint in the past hour",
-    "are there signs of a suspicious process (unusual process names, lateral movement indicators, privilege escalation)",
-    "any DNS-related rules other than 100110",
-    "overall host activity level"
-  ]
-}
