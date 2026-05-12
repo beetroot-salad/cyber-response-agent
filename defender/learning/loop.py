@@ -72,7 +72,8 @@ QUEUEABLE_FINDING_TYPES = {
 }
 ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"detection-confirmed"}
 
-CLAUDE_MODEL = os.environ.get("LEARNING_CLAUDE_MODEL", "claude-haiku-4-5")
+CLAUDE_MODEL = os.environ.get("LEARNING_CLAUDE_MODEL", "claude-sonnet-4-6")
+ORACLE_MODEL = os.environ.get("LEARNING_ORACLE_MODEL", "claude-haiku-4-5")
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "300"))
 
 
@@ -152,13 +153,13 @@ def project_actor_input(run_dir: Path, actor_out: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_claude(system_prompt_path: Path, user_prompt: str) -> str:
+def _run_claude(system_prompt_path: Path, user_prompt: str, model: str = CLAUDE_MODEL) -> str:
     """One-shot ``claude -p`` call. Returns stdout."""
     cmd = [
         "claude",
         "-p",
         "--model",
-        CLAUDE_MODEL,
+        model,
         "--output-format",
         "text",
         "--system-prompt-file",
@@ -329,7 +330,7 @@ def invoke_oracle(
         f"{exemplar_bundle.rstrip()}\n"
         "</exemplars>\n"
     )
-    return _run_claude(ORACLE_PROMPT, user)
+    return _run_claude(ORACLE_PROMPT, user, model=ORACLE_MODEL)
 
 
 def invoke_judge(
@@ -769,7 +770,10 @@ Outputs:
     the lessons curator (author.py) is invoked automatically.
 
 Environment:
-  LEARNING_CLAUDE_MODEL          claude model for actor/oracle/judge subagents
+  LEARNING_CLAUDE_MODEL          claude model for actor + judge subagents
+                                 (default: claude-sonnet-4-6)
+  LEARNING_ORACLE_MODEL          claude model for the telemetry oracle —
+                                 cheap projection work, no reasoning
                                  (default: claude-haiku-4-5)
   LEARNING_SUBAGENT_TIMEOUT_SECONDS  per-subagent timeout (default: 300)
   LEARNING_AUTHOR_THRESHOLD      pending findings before author runs (default: 5)
