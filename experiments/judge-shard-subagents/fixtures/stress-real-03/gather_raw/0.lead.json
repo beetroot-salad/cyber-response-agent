@@ -1,0 +1,8 @@
+{
+  "goal": "Query Wazuh for all rule 100001 (Falco terminal shell in container) events for container target-endpoint over the past 7 days to establish a baseline frequency.",
+  "what_to_characterize": [
+    "count and timestamps of rule 100001 events for target-endpoint in the past 7d",
+    "commands (proc.cmdline) seen across those events",
+    "whether the pattern is regular/dev-cadence or sparse/anomalous"
+  ]
+}

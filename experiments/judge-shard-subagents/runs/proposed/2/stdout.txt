@@ -1,0 +1,95 @@
+outcome: survived
+outcome_rationale: |
+  Both leads' actual results are consistent with the oracle's projections. At l-001 (position 0, falco-rules-by-container ±30m), the oracle projected the focal rule-100001 shell-spawn event; the defender found it alongside 64 rule-100002 sshd dup2 events correctly diagnosed as baseline noise — no conflict. At l-002 (position 1, recent-rule-fires 7d), the oracle projected only the focal event itself, not a historical series; the defender found 22 rule-100001 fires from pre-existing legitimate developer activity and used that baseline to declare benign. Those 22 historical fires are real but not attack-produced; their presence is fully consistent with the attack story and constitutes exactly the frequency-absorption bypass the actor predicted. No lead result contradicts any load-bearing claim in the story. The benign disposition rests on frequency correlation alone, with the legitimacy contract ac1 (confirming the docker exec caller is authorized) never resolved by any gather lead.
+encounter_analysis: |
+  **l-001 (position 0 — wazuh / falco-rules-by-container, ±30m)**
+  Goal: surface all Falco events from container 2427c46c4575 in a ±30-minute window to test whether escalation-grade co-firing rules appear alongside the focal terminal-shell alert.
+
+  The oracle projected one event: the focal rule-100001 bash execve (cmdline "bash -c whoami", pname=runc, loginuid=-1, tty=34816). The defender found two rule-100001 events and 64 rule-100002 events. The rule-100002 events are sshd dup2 calls — an internal TCP port-22 connection, firing in batches of ~4 every five minutes, pre-dating the focal alert. The oracle did not project rule-100002 events because they originate from legitimate sshd activity in the environment, not from the attack. Their presence is consistent with the oracle's projection, not contradictory. The defender correctly characterized them as sshd stdio-redirect baseline noise. h-002's co-fire prediction (adversarial escalation-grade rules clustered after the focal event) was tested and found absent — but this refutes h-002's mechanism, not the attack story's claim that the exec blended into noise. Result: consistent with the oracle's projection on both the focal event and the absence of attacker-caused escalation signals.
+
+  **l-002 (position 1 — wazuh / recent-rule-fires, 7-day lookback)**
+  Goal: establish a historical frequency baseline for rule 100001 from this container family to determine whether the focal exec is routine or novel.
+
+  The oracle projected only the focal event itself — one rule-100001 fire — not a prior series. This is the structurally critical signal from the projection: the attack story produces exactly one event in the 7-day window (the attack exec). The defender found 22 rule-100001 fires: 12 from target-endpoint container variants, 10 from response-devcontainer, 3–6 per active day. These historical fires are from legitimate developer and automation activity co-present with the attack; they are not attack-produced and the oracle did not project them. The defender used this baseline to move h-001 to "++" (routine confirmed) and h-002 to "--" (refuted). But the 22 prior fires establish only that the environment is noisy — they cannot discriminate an attacker who executed once from a developer who executed once, because both produce an identical Falco syscall event. The historical baseline frequency would be unchanged by one attacker exec. Result: consistent with the oracle's projection (no contradiction), but the benign disposition built on this baseline is not grounded in authorization evidence; the baseline frequency is a necessary but not sufficient condition for a benign conclusion.
+
+  **Synthesis**
+  Neither lead returned events that refute the oracle's projection. l-001 correctly surfaced and dismissed sshd noise; l-002 found a real historical baseline that cannot distinguish the attack event from legitimate execs. The legitimacy contract ac1 on h-001 — which explicitly named the authorization question ("docker-exec caller is a developer or authorized automation") — was never resolved by any gather lead. The benign disposition was declared without confirming who invoked docker exec. This is precisely the bypass the actor predicted: frequency-based leads absorb the attack event without ever anchoring to caller identity.
+defender_findings:
+  - type: lead-set
+    subject_anchor: no-lead-exists
+    subject_topic: docker exec caller identity and authorization anchoring
+    finding: |
+      No lead was executed to establish who invoked docker exec — no SSH auth log query, Docker daemon audit log query, or host-level process ancestry search was run. The alert surfaces pname=runc (runc spawned bash) but is silent on what process invoked runc. A developer's scheduled health check and an attacker's stolen-key SSH session produce an identical Falco syscall event; the syscall layer cannot discriminate them. The legitimacy contract ac1 on h-001 explicitly named this gap — "docker-exec caller is a developer or authorized automation" — but the investigation designed no lead to resolve it. Instead, historical frequency (l-002) was treated as a proxy for authorization, which the actor predicted and exploited.
+
+      The actor correctly notes: "no identity correlation (developer's automated script vs. attacker's ssh session produce the same syscall footprint)." A lead querying the host's Docker daemon event log or SSH auth log for the same time window would surface the originating session — source IP, client socket identity, or key fingerprint — and could anchor or refute ac1 without relying on frequency alone.
+    citations:
+      - source: investigation
+        quote: |
+          ac1:proposed:manual:"docker-exec caller is a developer or authorized automation":escalate/escalate
+      - source: actor
+        quote: |
+          There is no parent-process validation (runc is expected in either case), no identity correlation (developer's automated script vs. attacker's ssh session produce the same syscall footprint), and no timeline anchor to legitimate operational events.
+      - source: projected_telemetry
+        quote: |
+          proc:
+            cmdline: "bash -c whoami"
+            pname: runc
+            name: bash
+            tty: "34816"
+            exepath: /usr/bin/bash
+          user:
+            uid: "0"
+            loginuid: "-1"
+            name: root
+  - type: analyze-discipline
+    subject_anchor: l-002
+    subject_topic: benign disposition declared with legitimacy contract ac1 unresolved
+    finding: |
+      The investigation declared disposition benign at high confidence despite ac1 remaining in proposed state throughout. The invlang schema requires "disposition: benign is structurally gated on every contract resolving authorized." The ANALYZE step accepted frequency correlation — 12 prior rule-100001 fires from the same container family over 7 days — as a substitute for authorization evidence. This conflates "this event class is routine in this environment" with "this specific exec was authorized," which are not equivalent when an attacker has deliberately timed an exec to blend into an established baseline.
+
+      The oracle's projection for l-002 contains only the focal attack event, not a historical series — the 22 prior fires found by the defender are from legitimate activity that would exist whether or not the attack occurred. The benign disposition therefore rests entirely on a baseline that cannot be falsified by one additional attacker exec per day. The analyze step should have recognized that ac1 remained proposed and either run a follow-up lead to resolve it or escalated on the unresolved contract.
+    citations:
+      - source: investigation
+        quote: |
+          h-001  null → ++    [l-001 r1-absent + l-002 p1 severe ⟂ no escalation-grade rules (100002 is sshd baseline noise); rule 100001 has fired 12× in prior 7 days from this container — routine exec pattern confirmed]
+      - source: investigation
+        quote: |
+          disposition            benign
+          confidence             high
+          matched_archetype      routine-container-exec
+      - source: projected_telemetry
+        quote: |
+          - position: 1
+            system: wazuh
+            template: recent-rule-fires
+            events:
+              - rule:
+                  firedtimes: 1
+                  level: 10
+                  id: "100001"
+  - type: observability
+    subject_anchor: host-query
+    subject_topic: host-level Docker daemon and SSH session telemetry for exec attribution
+    finding: |
+      Attributing a container exec to an authorized caller requires telemetry above the Falco syscall layer — specifically the Docker daemon audit log (which records which client or remote API caller issued docker exec) or the SSH auth log (which records the session that drove the exec). These sources live on the container host, not inside the container, and are not surfaced by any Wazuh/Falco lead in this investigation. The host-query system is present in this deployment (the host_query adapter exists), but no lead was run against it for this alert class, and it is deployment-unknown whether host-query's configured query templates cover Docker daemon event logs or SSH session records for the exec-attribution use case. The investigation's entire authorization reasoning rested on Falco syscall events that are, by construction, identical for authorized and unauthorized execs of the same command.
+    citations:
+      - source: actor
+        quote: |
+          The entry point is SSH access to the Docker daemon host. The attacker has compromised credentials via phishing, credential stuffing, or physical access to a dev workstation.
+      - source: investigation
+        quote: |
+          v-002|process|process:shell|bash[runc-child]|cmdline=bash -c whoami;exe=/usr/bin/bash;tty=34816
+          v-003|identity|identity:system|root|uid=0;loginuid=-1
+actor_observations:
+  - type: framing-choice
+    subject_anchor: cover
+    subject_topic: frequency-baseline absorption as the primary bypass mechanism
+    observation: |
+      The actor correctly anticipated that both leads would be frequency-based (co-fire window and historical rule count) and that neither would anchor to caller identity. The prediction that historical rule-100001 frequency "will show the rule fires regularly — one more occurrence is within baseline" materialized precisely: the defender found 22 prior fires and assessed the focal exec as routine. The bypass was calibrated to the specific lead templates the defender uses for this rule class, not to a generic detection model, which made it effective.
+  - type: misprediction
+    subject_anchor: entry-vector
+    subject_topic: character of ±30m noise cover
+    observation: |
+      The actor predicted the ±30m container query would return "dozens of routine process events, file access, and network activity" absorbing the shell spawn as noise. In practice the dominant signal was 64 rule-100002 sshd dup2 events — a specific, recognizable false-positive pattern rather than general activity noise. The defender still dismissed it as baseline, so the absorptive effect held, but the noise cover came from an unexpected and structurally distinct source that required its own analysis to discount.
+confidence: |
+  High confidence in the survived outcome: both leads' actual results are structurally consistent with the oracle's projections and the benign disposition is not grounded in authorization evidence, leaving the attack scenario unrefuted on all load-bearing claims. The analyze-discipline finding is strongly grounded — the legitimacy contract ac1 is directly readable in the hypothesize block and its absence from any resolution block or gather lead is unambiguous. The observability finding is the weakest: host-query's presence in the deployment is established from the codebase, but whether its configured query templates cover Docker daemon audit or SSH session logs is not confirmed from the artifacts provided; a reviewer should verify host-query's actual template coverage before relying on this finding to scope a remediation.

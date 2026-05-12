@@ -1,0 +1,7 @@
+user prompt: 21774 bytes
+[baseline/1] rc=0 t=146.6s stdout=11486B stderr=0B
+[baseline/2] rc=0 t=169.8s stdout=12507B stderr=0B
+[baseline/3] rc=0 t=126.1s stdout=11112B stderr=0B
+[proposed/1] rc=0 t=214.8s stdout=11445B stderr=0B
+[proposed/2] rc=0 t=282.1s stdout=12218B stderr=0B
+[proposed/3] rc=0 t=234.0s stdout=14977B stderr=0B

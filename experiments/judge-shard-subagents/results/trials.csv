@@ -1,0 +1,7 @@
+variant,trial,rc,seconds
+baseline,1,0,146.6
+baseline,2,0,169.8
+baseline,3,0,126.1
+proposed,1,0,214.8
+proposed,2,0,282.1
+proposed,3,0,234.0

@@ -1,0 +1,3 @@
+rc=0
+seconds=169.8
+cmd=claude -p --model claude-sonnet-4-6 --output-format text --system-prompt-file /workspace/experiments/judge-shard-subagents/variants/judge_baseline.md

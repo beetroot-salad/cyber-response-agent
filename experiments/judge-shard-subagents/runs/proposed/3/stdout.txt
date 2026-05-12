@@ -1,0 +1,96 @@
+Now I have the three framings. Let me synthesize:
+
+- **Subagent A** (red-teamer): The single load-bearing gap is identity/authorization grounding — syscall footprint of `runc→bash` is identical whether the exec was a developer or an attacker; frequency queries are baseline-poisoning targets.
+- **Subagent B** (attack-true): The h-002 refutation (`--`) conflates "matches statistical shape" with "this event's granular properties are legitimate" — frequency-match is exactly what a baseline-aware attacker exploits; the analysis should have flagged that "fits baseline shape ≠ authorized."
+- **Subagent C** (absence): The oracle's single-event projection assumes attack novelty; the actual 22-event result shows sustained prior activity that exists regardless of whether the attack occurred — the tension isn't refutation, it's that the authorization question remains entirely unasked.
+
+The most productive disagreement: Subagent C initially reads the 22-event result as undermining the oracle's assumption, but Subagents A and B clarify that the 22 prior events are background that exist independent of the attack, so they don't refute the oracle's projection — they merely confirm the cover story works.
+
+**Synthesis:** Both leads returned results entirely consistent with the oracle's projections (oracle projects attack-generated events; the background events exist regardless). The defender's benign conclusion rests on frequency statistics that are structurally incapable of distinguishing authorized from unauthorized exec, exactly as the actor predicted. The attack **survived**.
+
+outcome: survived
+outcome_rationale: |
+  Both lead positions returned results consistent with the oracle's projected telemetry. For l-001, the oracle projected only the focal shell event; the actual 64 co-firing events were sshd dup2 baseline noise — not adversarial co-fires — so the projection is not refuted. For l-002, the oracle projected only the focal event (the attack's single contribution); the actual 22-event 7d baseline exists as background independent of whether the attack occurred. The defender used the 22-event frequency to resolve h-002 as "--," but frequency-match is exactly the bypass mechanism the actor designed around — it does not constitute refutation of the attack scenario. No lead produced results incompatible with the attack having occurred.
+encounter_analysis: |
+  **l-001 (position 0) — falco-context-around-focal-event, wazuh/falco-rules-by-container, ±30m window**
+
+  The lead was designed to surface adversarial co-firing signals: enumeration, net redirection, binary drops, or log clearing clustered around the focal timestamp. The oracle projected only the focal rule 100001 event — consistent with the attack being a clean, single-command execution foothold test that generates no secondary signals.
+
+  The actual result returned 66 events: 2 rule 100001 fires and 64 rule 100002 (sshd dup2 / "STDOUT/STDIN redirect") events. The defender correctly identified the 64 rule 100002 events as sshd baseline noise — periodic batches of ~4 events every ~5 minutes pre-dating the focal event, arising from SSH session establishment wiring network sockets to stdio via dup2. This is the canonical false-positive pattern for that Falco rule. The oracle's projection (no adversarial co-fires) is **consistent** with the actual result; the sshd events are background activity, not attack-generated.
+
+  The defender's assessment that "co-fires are periodic sshd, not novel adversarial signals" is correct for what was observed. However, this lead only tests whether the attacker was sloppy enough to generate secondary behavioral signals immediately after the exec — it does not test authorization of the exec itself.
+
+  **l-002 (position 1) — rule-100001-historical-baseline, wazuh/recent-rule-fires, 7d lookback**
+
+  The lead was designed to establish whether rule 100001 fires from this container family are a recurring baseline or a novel event, to discriminate between h-001 (routine exec) and h-002 (adversarial). The oracle projected only the focal event — which, taken literally, implies the attack scenario produces one new event in the 7d window, with the pre-existing background existing independently.
+
+  The actual result returned 22 rule 100001 events over 7 days: 12 from target-endpoint container variants at 3–6 per day, plus 10 from the response-devcontainer. The defender used this to resolve h-001 as "++" ("routine exec pattern confirmed") and h-002 as "--" ("exec pattern is recurring baseline, not first-time novelty").
+
+  This resolution is **not a refutation of the attack scenario**. The 12 prior fires exist as background regardless of whether the focal event was adversarial. An attacker who verified that this container family generates routine rule 100001 fires — as the actor explicitly describes — would deliberately choose this container and timing to ensure their exec lands within the baseline distribution. The defender's analyze step conflates "this event fits the frequency shape of prior events" with "this event is authorized." The oracle's projection is **consistent** with the actual result: the attack contributes 1 new event to a window that already contains 12 pre-existing background events. Nothing in the actual result contradicts the attack story.
+
+  **Cross-lead synthesis:** Both leads returned results the oracle projected the attack would produce. l-001 found no adversarial co-fires (consistent with oracle), and l-002 found a rich frequency baseline (consistent with oracle, since background events exist regardless). The attack scenario survives both leads because: (a) the attacker chose a benign one-liner that generates no secondary behavioral signals, and (b) the attacker selected a container with established exec history. The defender's benign conclusion rests entirely on frequency/cadence analysis, which the actor explicitly designed to exploit. The load-bearing missing piece — an authorization anchor correlating the runc invocation to an authenticated, approved human or automation identity — was never queried.
+defender_findings:
+  - type: lead-set
+    subject_anchor: no-lead-exists
+    subject_topic: exec-initiator identity and authorization correlation
+    finding: |
+      The investigation has no lead querying the authorization chain from the Docker host's perspective: which SSH session or API call triggered `docker exec`, which human or automation identity was authenticated on the host at 08:28 UTC, and whether that identity is in an approved operator list. The Falco syscall record shows `pname=runc` as the process parent and `loginuid=-1` (non-interactive, no PAM session) for the bash process, but these are consistent with both a legitimate `docker exec` from a developer terminal and an attacker's `docker exec` over a compromised SSH session. The actor explicitly predicted: "There is no parent-process validation (runc is expected in either case), no identity correlation (developer's automated script vs. attacker's ssh session produce the same syscall footprint)." Without a lead querying Docker daemon audit logs, host SSH auth logs, or OS-level audit records that map the runc invocation to an authenticated session, the investigation cannot answer the authorization question at all.
+    citations:
+      - source: actor
+        quote: |
+          Neither query anchors to deployment identity, authorization, or approved activity profiles. There is no parent-process validation (runc is expected in either case), no identity correlation (developer's automated script vs. attacker's ssh session produce the same syscall footprint), and no timeline anchor to legitimate operational events.
+      - source: investigation
+        quote: |
+          h-001|?legitimate-admin-exec|v-001|spawned|identity|developer-or-automation||p1:proposed_parent:"container has a history of periodic terminal-shell fires consistent with dev or health-check cadence";p2:proposed_edge:"no escalation-grade Falco rules co-fire from same container in the window (no file-reads, net-redirect, binary-drop)"||r1[p1,p2]:"first or rare terminal-shell event from this container, or co-firing escalation rules present"|ac1:proposed:manual:"docker-exec caller is a developer or authorized automation":escalate/escalate||null|active
+  - type: analyze-discipline
+    subject_anchor: l-002
+    subject_topic: frequency-match conflated with authorization confirmation
+    finding: |
+      The ANALYZE step for l-002 resolves h-002 as "--" (strongly refuted) on the basis that "exec pattern is recurring baseline, not first-time novelty." This is the actor's bypass mechanism, not its refutation. A baseline-aware attacker who verified that this container family generates 3–6 rule 100001 fires per day would deliberately select this container and window to ensure their exec lands within the frequency distribution. The assess step correctly set up a legitimacy contract (`ac1`) requiring the docker-exec caller to be identified as authorized — but this contract is never fulfilled, yet the analysis proceeds to `h-002 → --` and `disposition: benign`. The frequency evidence (12 prior fires in 7d) shows that the event type is routine for this container; it does not show that this specific execution at 08:28 with loginuid=-1 was authorized. The h-002 refutation should be limited to the absence of adversarial co-fires (l-001 evidence), with the authorization question left open pending a legitimacy-resolution lead.
+    citations:
+      - source: investigation
+        quote: |
+          h-002  null → --    [l-001 r1 + l-002 r1 severe ⟂ co-fires are periodic sshd, not novel adversarial signals; exec pattern is recurring baseline, not first-time novelty]
+      - source: actor
+        quote: |
+          Query 1: Historical frequency of rule 100001 over 7 days (will show the rule fires regularly in a dev environment with container testing and restarts; one more occurrence is within baseline)
+      - source: investigation
+        quote: |
+          ac1:proposed:manual:"docker-exec caller is a developer or authorized automation":escalate/escalate
+  - type: observability
+    subject_anchor: no-system-covers-this
+    subject_topic: Docker host exec-to-session attribution surface
+    finding: |
+      No deployed system surfaces the correlation between a container exec event and the authenticated session on the Docker host that triggered it. Falco (via wazuh) observes the syscall layer inside the container — the execve, the process hierarchy, the TTY assignment — but `pname=runc` is always the immediate parent for any `docker exec` invocation, whether legitimate or adversarial. The host-query system can query host-level process state but is not shown to cover Docker daemon audit logs or SSH session-to-docker-exec correlation. To close the authorization gap identified above, a system that records "user X's SSH session at time T called docker exec on container Y" would be required. Without this surface, any alert of this class in a dev environment with a sufficiently dense exec baseline is structurally undecidable from Falco telemetry alone. The investigation correctly noted `loginuid=-1` (a diagnostic signal that the bash process has no PAM login session, consistent with both daemon automation and an attacker's remote session) but had no system to resolve it.
+    citations:
+      - source: alert
+        quote: |
+          user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=runc command=bash -c whoami terminal=34816
+      - source: investigation
+        quote: |
+          **Need:** historical baseline for rule 100001 across a 7-day lookback to determine whether bash-via-runc execs are routine for this container.
+      - source: projected_telemetry
+        quote: |
+          - position: 1
+            system: wazuh
+            template: recent-rule-fires
+            events:
+              - rule:
+                  id: "100001"
+                data:
+                  output_fields:
+                    user:
+                      loginuid: "-1"
+actor_observations:
+  - type: framing-choice
+    subject_anchor: entry-vector
+    subject_topic: business-hours timing and trivial command as baseline-poisoning
+    observation: |
+      The actor's central framing choice — executing `bash -c whoami` during business hours in a dev container with established exec history — is precisely calibrated to exploit frequency-based triage. The actor correctly predicted that both leads (±30m co-fire scan and 7d frequency baseline) would yield results favoring a benign verdict, and both predictions held. The technique is not about generating no signal; it relies on the signal being indistinguishable from noise within a high-baseline environment. The attacker's constraint is that it works only once as a foothold test — follow-on commands (env enumeration, mount inspection, secret reads) would likely produce Falco signals that frequency analysis cannot explain away, which is the defender's actual detection opportunity for this actor class.
+  - type: misprediction
+    subject_anchor: cover
+    subject_topic: co-fire composition prediction was imprecise but outcome-neutral
+    observation: |
+      The actor predicted l-001 would surface "dozens of routine process events, file access, and network activity." The actual co-fires were not diverse process noise but were dominated by 64 sshd dup2 events under a single rule (100002) at a regular 5-minute cadence — a narrower and more mechanically explainable pattern than the actor anticipated. The defender correctly identified this as sshd baseline, which is more favorable to the attacker than a noisy diverse event stream (a diverse stream might have prompted a deeper look). The misprediction was outcome-neutral for the bypass, but it reveals the actor did not have precise knowledge of the container's runtime profile, only that a dev environment baseline would be sufficiently noisy.
+confidence: |
+  High confidence in the survived outcome: both lead projections are consistent with actual results, and the absence of an authorization lead is structural, not contingent on a single quoted phrase. Moderate confidence in the analyze-discipline finding: the legitimacy contract (ac1) was never explicitly resolved, but the investigation did flag the authorization question as an open concern in the legitimacy contract — the gap is in not escalating when that contract went unresolved, which is a judgment call that a downstream author might read differently. The observability finding is grounded in the absence of any Docker host auth system in the deployed surface, which is consistent with the project's known architecture (wazuh + host-query + Falco), but I have not affirmatively confirmed that host-query cannot surface auditd or Docker daemon logs — a human should verify whether host-query's query capabilities extend to daemon-level audit records before treating this as a hard deployment gap.
