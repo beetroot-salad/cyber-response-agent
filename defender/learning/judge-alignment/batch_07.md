@@ -122,21 +122,19 @@ choice to run.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on lead 0 + lead 1 joined (encryption-type +
-  cross-DC scope). All-RC4 from an AES-capable principal is the canonical
-  Kerberoasting downgrade signature; fan-out across all four KDCs in 92
-  seconds is incompatible with a service that has a preferred DC affinity.
-  The oracle's projection mixed AES with RC4 and contacted one DC — a real
-  monitoring tool's shape; the actual events deviate on both axes.
+- **`detection-confirmed`** on lead 0 (encryption type). All-RC4 requests from
+  an AES-capable principal are the canonical Kerberoasting downgrade signature.
+  The oracle projected a mix of AES and RC4 for a real monitoring tool; the
+  actual burst was exclusively RC4.
+- **`detection-confirmed`** on lead 1 (cross-DC scope). Fan-out across all four
+  KDCs in 92 seconds is incompatible with a service that has preferred-DC
+  affinity. The oracle projected contact with one DC; the actual requests
+  spread evenly across DC01-DC04.
 - **`detection-confirmed`** on lead 3 (SPN inventory of requested
   services). svc-monitor's operational dependencies are HTTP monitors;
   the 84 requested SPNs include 11 Domain Admin and 14 Tier-0 service
   accounts that have no operational relationship to svc-monitor. The
   request *content* is the load-bearing signal, not the request *count*.
-- **`detection-confirmed`** on lead 4 (CrowdStrike process tree on the source
-  workstation). Rubeus on dthompson's workstation with a renamed binary in
-  Downloads independently grounds the Kerberoasting-from-compromised-developer
-  hypothesis and names the carrier host.
 
 ---
 
@@ -323,8 +321,9 @@ themselves" story does not survive the token + IP join.
 
 Lead 0: m365.exchange_audit (ngrey, ±2h)
   → New-InboxRule by ngrey at 03:53:11 UTC creating the rule above.
-    Operation source: ExchangeWebServices (EWS), client IP 91.234.18.7.
-    No prior inbox-rule activity from this user in the last 90 days.
+    Operation source: Microsoft Graph app-id 4b91a…, client IP
+    185.220.101.45. No prior inbox-rule activity from this user in the last
+    90 days.
 
 Lead 1: azure.sign_in_logs (ngrey, ±2h)
   → 1 interactive sign-in at 03:38:21 UTC from 91.234.18.7 (Bulgaria
@@ -402,13 +401,16 @@ consent and the app's token usage reveals the carrier.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on leads 2 + 3 joined (consent_grants +
-  app_token_usage). The illicit-consent + Graph-driven-rule-create chain
-  is the load-bearing refutation. The actor's story projects no OAuth
-  grant and no third-party app token; the actual telemetry contains an
-  unverified-publisher app consented at 03:47 with token usage from a
-  different IP than the sign-in. Cross-source IP between sign-in and
-  token usage is the canonical AiTM-with-illicit-consent signature.
+- **`detection-confirmed`** on lead 2 (consent grant). The actor's
+  user-self-service story projects no OAuth grant, but the actual telemetry
+  contains an unverified-publisher app consented at 03:47 with Mail.ReadWrite,
+  Mail.Send, and offline_access. That is the authorization carrier the
+  self-service framing omits.
+- **`detection-confirmed`** on lead 3 (app token usage). The third-party app's
+  token usage from `185.220.101.45`, a different IP than the user's sign-in,
+  performed the Graph rule-create call and then read and sent mail. The
+  cross-source IP plus Graph-driven rule creation is the canonical
+  AiTM-with-illicit-consent signature.
 - **`detection-confirmed`** on lead 4 (rule effect). The forwarded set
   was payment-redirect-shaped client invoice replies, not "personal
   invoices for follow-up". Downstream-effect leads turn an ambiguous

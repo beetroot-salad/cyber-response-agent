@@ -12,10 +12,10 @@ the judge prompt drifts on easy cases.
 **Expected outcome:** `caught`
 
 **Rationale:** Actor claims a single-username monitoring probe; oracle projects
-nagios-only failures; defender lead actually returned 11 distinct dictionary
-usernames against multiple targets. Direct refutation.
+nagios-only failures; defender leads actually returned 11 distinct dictionary
+usernames plus the same dictionary against multiple targets. Direct refutation.
 
-**Expected actor observation (gist):** Actor's single-username Nagios monitoring-probe framing crumbled against the 11-username dictionary spanning OS service accounts (root, admin, oracle, postgres, …) swept across three hosts that lead 0 surfaced.
+**Expected actor observation (gist):** Actor's single-username Nagios monitoring-probe framing crumbled once lead 0 surfaced an 11-username dictionary spanning OS service accounts (root, admin, oracle, postgres, …) and lead 1 showed the same dictionary swept across three hosts.
 
 **Expected findings:**
 

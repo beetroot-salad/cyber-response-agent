@@ -112,24 +112,21 @@ joins are what refute, and each is a separate lead.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on lead 0 + lead 1 joined (process tree +
-  file-events). The Word ancestry plus a non-Microsoft DLL written
-  by Word into `%APPDATA%` 4 minutes earlier is the load-bearing
-  carrier-chain refutation. Neither lead alone is decisive — Word can
-  legitimately drop user-data files; rundll32 with a Word parent is
-  not unique to attacks — but together they classify into the
-  canonical macro-dropped-DLL pattern.
+- **`detection-confirmed`** on lead 1 (file events). A non-Microsoft DLL was
+  created in `%APPDATA%\OfficeUpdater\` by Word 4 minutes before rundll32
+  loaded it. Lead 0 supplies the ancestry context, but the dropped DLL is the
+  anchor that refutes the benign Office COM add-in projection.
 - **`detection-confirmed`** on lead 2 (scheduled-task creation in
   same window). Persistence registration co-located in time with the
   initial dropper is a durable invariant; surface as a discipline
   note — when the alert is a child-process anomaly, the scheduled-
   task / service / registry-run-key creations in ±10 min are usually
   the strongest confirmation.
-- **`detection-confirmed`** on lead 3 + lead 4 joined (network +
-  email). The 7-day-old domain, C2-shaped JA3, and matching `.docm`
-  attachment hash tie the Word-rundll32 execution back to the
-  inbound phish and outbound command channel. This closes the
-  carrier chain end-to-end, rather than merely adding IOCs.
+- **`detection-confirmed`** on lead 3 (network). The 7-day-old domain, no prior
+  tenant contact, and Cobalt-Strike-shaped JA3 refute the benign Office
+  plumbing story at the command-channel edge. Lead 4's matching `.docm`
+  delivery closes the inbound carrier chain, but the network lead is the
+  expected finding anchor.
 
 ---
 
@@ -304,7 +301,7 @@ disconfirms. The actor emits SKIP with rationale. Per `judge.md`, the
 judge emits `outcome: skip-passthrough` + `outcome_rationale` (actor's
 rationale) + `defender_findings: []` and stops.
 
-**Expected actor observation (gist):** Actor emitted SKIP; no story was authored, citing the 60-day cadence stability, CMDB + Nagios runbook match on `mon-probe-01`, and absence of any rule-5715 success in the 60-day record as making every adversarial framing structurally untenable.
+**Expected skip rationale (gist):** Actor emitted SKIP; no story was authored, citing the 60-day cadence stability, CMDB + Nagios runbook match on `mon-probe-01`, and absence of any rule-5715 success in the 60-day record as making every adversarial framing structurally untenable.
 
 ### alert.json (trimmed)
 

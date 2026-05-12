@@ -113,7 +113,7 @@ oracle projects the same diff shape (one new user, root-owned write). No lead
 tested source attribution (config-management push vs operator shell vs
 adversary), so the story's load-bearing claim is untouched.
 
-**Expected actor observation (gist):** Actor's adversary-persistence story rested on source-of-change attribution (auditd / process-write) that no available lead could supply — the single syscheck diff cannot name the responsible process or account.
+**Expected actor observation (gist):** Actor's adversary-persistence story rested on source-of-change attribution (auditd / process-write) that no lead in this run supplied — the single syscheck diff cannot name the responsible process or account.
 
 ### alert.json (trimmed)
 
@@ -291,11 +291,14 @@ authorized benign test rather than a manual RCE attempt.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on leads 0 + 1 (URL/host breadth). The oracle
-  projected scanner-typical breadth (multiple URLs, multiple hosts); actual
-  data confined all activity to a single URL on a single host. The breadth
-  pattern is the load-bearing discriminator between a scanner and a manual
-  operator.
+- **`detection-confirmed`** on lead 0 (URL breadth). The oracle projected
+  scanner-typical URL breadth across multiple admin endpoints; actual data
+  confined all activity to `/admin/upload.php`. The URL-breadth pattern is the
+  load-bearing discriminator between a scanner and a manual operator.
+- **`detection-confirmed`** on lead 1 (host/rule scope). The oracle projected
+  scanner-typical host breadth for the same admin-upload rule; actual data
+  confined all fires to a single host and URL. This independently corroborates
+  lead 0 while remaining anchorable to one lead in the judge schema.
 - **`detection-confirmed`** on lead 2 (UA distribution). Absence of any
   scanner-tool UA fingerprint over 30 days from the source refutes the
   "contracted scanner" framing as written — the actor projected recognizable

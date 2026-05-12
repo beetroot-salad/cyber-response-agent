@@ -139,14 +139,13 @@ alert's metadata.
 
 **Rationale:** Actor frames a large query against the customer-PII table
 as a routine analytics job by the data-science team's warehouse user.
-Three joined leads refute: the Snowflake query-history lead shows the
-query was issued by a *role* not in the analytics team's bound roles,
-the masking-policy lead shows the role was elevated 11 minutes earlier
-via a privilege grant that the column-level masking-policy audit logs
-as bypassing the standard `analytics_pii_masked` policy, and the
-warehouse-billing lead shows the warehouse cost for the query window is
-5× the analytics team's documented per-job ceiling. Cover dies on the
-join.
+Several leads refute: the Snowflake query-history / grant / role-catalog
+surface shows the query used a privacy-team role granted 11 minutes earlier,
+the masking-policy lead shows that role bypassed the standard analytics PII
+mask, and the login history shows the service account signed in from a
+Frankfurt DigitalOcean droplet instead of the team's usual AWS NAT. The
+warehouse-billing lead adds cost-shape corroboration, but the role, masking,
+and sign-in axes are the load-bearing actor-observation anchors.
 
 **Expected actor observation (gist):** Actor's analytics-team framing fell to the query running under `DATA_SCIENTIST_ROLE` (privacy-team-owned, granted to svc-analytics 11 minutes earlier by `SECURITYADMIN`) with masking-policy bypassed and the sign-in from a Frankfurt DigitalOcean droplet.
 
@@ -260,26 +259,21 @@ did an analytics query" will not refute.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on lead 0 + lead 1 + lead 5 joined (role
-  used vs role-catalog vs grants timeline). The load-bearing
-  refutation is the *role mismatch*: the query ran under
-  `DATA_SCIENTIST_ROLE`, which is owned by the privacy team and
-  was granted to svc-analytics 11 minutes before the query by
-  `SECURITYADMIN`. The actor's story projects an analytics-team
-  role; the role on the actual query is a different team's. Surface
-  that role-vs-team-catalog is the durable signal under most
-  cover variants.
+- **`detection-confirmed`** on lead 0 (query role). The load-bearing role
+  refutation is that the alert query ran under `DATA_SCIENTIST_ROLE`, not the
+  analytics team's documented `ANALYTICS_VIEWER` / `ANALYTICS_WRITER` roles.
+  Lead 1's recent grant and lead 5's role catalog corroborate the mismatch,
+  but the query-history role field is the anchor.
 - **`detection-confirmed`** on lead 2 (masking-policy audit). The
   masking-policy audit log explicitly records the bypass tag for
   this query. Affirmative-bypass surfaces are high-leverage and
   often forgotten; preserve as a discipline note (always check
   masking-bypass audits on PII reads).
-- **`detection-confirmed`** on lead 3 (warehouse billing) + lead 4
-  (sign-in origin). Cost anomaly (5× daily baseline in a single
-  14-min query) + non-corporate sign-in IP each independently
-  corroborate. The billing axis is unusual but durable — exfil
-  workloads have a cost shape that is hard to forge without
-  blowing the cover.
+- **`detection-confirmed`** on lead 4 (sign-in origin). The service account
+  signed in from a Frankfurt DigitalOcean droplet instead of the org's
+  us-east-1 AWS NAT. That directly contradicts the actor's expected analytics
+  execution environment; lead 3's 5× warehouse-cost spike remains useful
+  corroboration but is not the primary anchor.
 
 ---
 

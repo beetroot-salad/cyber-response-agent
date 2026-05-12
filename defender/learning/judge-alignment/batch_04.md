@@ -146,9 +146,9 @@ the product hashes account IDs into subdomains under a vendor parent, so
 high-entropy subdomains are expected. The framing implies the *parent domain*
 appears across the fleet (every customer's host using the SaaS hits it). The
 defender's recent-rule-fires lead by parent domain shows fires from this one
-host only, while a baseline lead shows the host is otherwise quiet on this
-parent. Single-host concentration is incompatible with shared SaaS adoption
-and is the load-bearing refutation.
+host only, while the host baseline shows `telemetry-cloud.io` is high-volume
+on that host but has rank 0 for fleet share. Single-host concentration is
+incompatible with shared SaaS adoption and is the load-bearing refutation.
 
 **Expected actor observation (gist):** Actor's managed-SaaS-SDK cover required fleet-wide presence of `telemetry-cloud.io`, but the 7-day parent-domain history and 30-day rule-fire scope confined all activity to `marketing-laptop-07` alone.
 
@@ -243,12 +243,16 @@ inventory or SBOM the defender has no direct way to rule out the SDK.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on leads 0 + 1 joined (`wazuh.dns-query-history`
-  + `wazuh.recent-rule-fires`). Both leads independently restrict
-  telemetry-cloud.io activity to a single host across a 7–30d window. The
-  oracle projected fleet-wide presence — the SaaS framing structurally
-  requires it. Single-host concentration is the load-bearing refutation
-  and is robust to the actor's "vendor SDK" cover.
+- **`detection-confirmed`** on lead 0 (`wazuh.dns-query-history`). The
+  parent-domain query history confines 1,182 `telemetry-cloud.io` events and
+  612 distinct subdomains to `marketing-laptop-07`; the oracle projected many
+  hosts across the fleet. Single-host parent-domain concentration directly
+  refutes the managed-SaaS framing.
+- **`detection-confirmed`** on lead 1 (`wazuh.recent-rule-fires`). The
+  30-day rule-fire scope independently confines all 47 rule-100110 fires for
+  the parent to `marketing-laptop-07`, where the oracle projected fleet-wide
+  high-entropy fires. This corroborates lead 0 while remaining anchorable to
+  one lead in the judge schema.
 - **`detection-confirmed`** on lead 3 (`wazuh.agent-alerts-in-window`).
   The co-occurring rule-32152 fire (unprivileged process spawn from
   Downloads two hours before the DNS burst) gives the responder a
@@ -368,11 +372,14 @@ install actually occurred.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on lead 1 + lead 2 joined. The load-bearing
-  refutation is the *absence* of package-manager rule fires combined with
-  the *presence* of a falco shell-in-container + network-redirect pair
-  seconds before the FIM event. Neither lead is decisive alone — no
-  package-manager fires could mean a quiet install method; falco fires
-  alone do not name the persistence mechanism. The temporal join
-  (shell-redirect → 47s gap → FIM write of a cron entry pointing into
-  /tmp/.cache) is the signal.
+- **`detection-confirmed`** on lead 1 (`wazuh.recent-rule-fires`). The
+  load-bearing refutation is the *absence* of package-manager rule fires
+  combined with the *presence* of a falco shell-in-container +
+  network-redirect pair seconds before the FIM event. The oracle projected a
+  package-manager fire and no falco shell / network-redirect fires; lead 1
+  returned the inverse.
+- **`detection-confirmed`** on lead 2 (`wazuh.agent-alerts-in-window`). The
+  full alert window corroborates lead 1 by showing the same rule-100001 /
+  rule-100002 pair, no package-manager fires, and a high-entropy DNS query
+  12 minutes earlier. This anchors the temporal sequence around the FIM write
+  without combining multiple leads into a single subject.
