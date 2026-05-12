@@ -32,7 +32,8 @@ infra/
 ├── bin/
 │   ├── down.sh                  # Lever down: snapshot + destroy server
 │   ├── up.sh                    # Lever up: restore from latest snapshot
-│   └── update-ssh-config.sh     # Sync /workspace/.ssh/config with current server IP
+│   ├── update-ssh-config.sh     # Sync /workspace/.ssh/config with current server IP
+│   └── es.sh                    # curl helper for the playground Elasticsearch (`es.sh --help`)
 ├── terraform.tfvars             # Local overrides (gitignored; see .example)
 ├── terraform.tfvars.example     # Template
 ├── image.auto.tfvars            # Written by up.sh to pin snapshot (gitignored)
