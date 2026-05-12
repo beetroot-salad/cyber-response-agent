@@ -1,0 +1,78 @@
+outcome: survived
+outcome_rationale: |
+  Both leads' actual results are consistent with the oracle's projections. For l-001 (falco-rules-by-container), the oracle projected only the focal bash event; the investigation found that event plus 64 sshd dup2 fires and a second rule 100001 event — all baseline noise unrelated to whether the attack occurred. For l-002 (recent-rule-fires), the oracle again projected only the focal event; the investigation found 22 historical rule 100001 fires constituting a routine daily cadence. Neither lead queried the authorization chain (who initiated docker exec, from which host) — the projected events for both positions are fully present in the actual results, and the baseline activity drove a benign disposition. No projected event was refuted; no lead tested the actor's entry vector.
+
+encounter_analysis: |
+  **l-001 (position 0) — wazuh.falco-rules-by-container, ±30m around focal event.**
+  Goal: surface co-firing escalation rules that would discriminate between routine exec (h-001) and adversarial shell spawn (h-002). Oracle projected exactly one event: the focal bash execve alert (rule 100001, container 2427c46c4575). The investigation returned 66 events: 2 rule 100001 fires and 64 rule 100002 (STDOUT/STDIN redirect) fires attributed to sshd performing dup2 at ~5-minute intervals. The 64 sshd events are background noise independent of whether the attack occurred — the oracle correctly projected only the attack's contribution (the focal event), and that event is present in the actual results. The investigation's interpretation of 100002 as "sshd baseline noise" is plausible and the actual events match the oracle. Result: **consistent** with the projection. The co-fire clause of h-002 (escalation-grade signals) was not satisfied by the sshd events, so h-002 took a refuting assessment — this is the correct read of the evidence but does not address the authorization chain.
+
+  **l-002 (position 1) — wazuh.recent-rule-fires, 7-day lookback for rule 100001.**
+  Goal: establish whether bash-via-runc execs are a recurring baseline for this container. Oracle projected one event: again the focal bash alert. The investigation found 22 rule 100001 fires in the prior 7 days, 12 from target-endpoint variants, 3–6 per active day. These historical fires existed before the attack and are independent of whether the attacker's single exec occurred; the oracle's projection of the focal event is present in the actual results. Result: **consistent** with the projection. The baseline cadence data drove h-001 to ++ and h-002 to -- and ultimately the benign disposition. No element of the projection was refuted.
+
+  **Synthesis.** The oracle's projections for both leads contain only what the attack would add — the single focal execve event. The investigation found that event plus extensive baseline activity. The baseline activity, rather than exposing the attack, provided the pattern evidence that justified a benign verdict. The actor's primary surviving claim — that runc-spawned bash as root with loginuid=-1 is indistinguishable from a legitimate docker exec in this environment — was never tested. No lead queried the Docker daemon audit log, SSH authentication records, or host-level process lineage to identify who issued the docker exec command. The legitimacy contract declared in h-001 (`ac1:proposed:manual:"docker-exec caller is a developer or authorized automation"`) was never resolved to `authorized`; the investigation disposed benign without satisfying it.
+
+defender_findings:
+  - type: lead-set
+    subject_anchor: no-lead-exists
+    subject_topic: docker exec caller identity and authorization
+    finding: |
+      The investigation never queried the authorization chain for the docker exec itself. The actor's entry vector — SSH to the Docker daemon host followed by `docker exec target-endpoint bash -c whoami` — would produce an authentication record (SSH login event, source IP, user identity) and a Docker daemon audit entry (exec call with the initiating user). No lead reached for host-level SSH logs, Docker daemon audit, or process lineage upstream of runc. Both leads stayed entirely within the Falco/Wazuh alerting surface, which records only what Falco observed inside the container. As the actor correctly noted: "There is no parent-process validation... no identity correlation (developer's automated script vs. attacker's ssh session produce the same syscall footprint)." The benign disposition therefore rests solely on the statistical pattern of the container's exec history, not on any evidence about who initiated this particular exec.
+    citations:
+      - source: actor
+        quote: |
+          Neither query anchors to deployment identity, authorization, or approved activity profiles. There is no parent-process validation (runc is expected in either case), no identity correlation (developer's automated script vs. attacker's ssh session produce the same syscall footprint), and no timeline anchor to legitimate operational events.
+      - source: investigation
+        quote: |
+          :H hypothesize.hypotheses [id|name|...]
+          h-001|?legitimate-admin-exec|...|ac1:proposed:manual:"docker-exec caller is a developer or authorized automation":escalate/escalate||null|active
+      - source: projected_telemetry
+        quote: |
+          position: 1
+          system: wazuh
+          template: recent-rule-fires
+          events:
+            - ... proc.cmdline: "bash -c whoami" ... proc.pname: runc ... user.loginuid: "-1"
+  - type: analyze-discipline
+    subject_anchor: l-002
+    subject_topic: unresolved legitimacy contract permitting benign disposition
+    finding: |
+      The investigation declared a legitimacy contract `ac1` on h-001 requiring confirmation that the docker exec caller was a developer or authorized automation, with escalate-on-indeterminate semantics. The invlang schema (rule #21) gates `disposition: benign` on every active legitimacy contract resolving to `authorized`. Neither l-001 nor l-002 gathered any evidence about the caller's identity — the leads were scoped entirely to Falco alert counts. The ANALYZE phase after l-002 assessed h-001 as ++ based on the baseline cadence alone, then the REPORT set `disposition: benign` and `matched_archetype: routine-container-exec` without emitting a `legitimacy_resolutions` block resolving ac1 as `authorized`. The benign verdict was structurally under-supported: the frequency pattern is consistent with h-001 but does not constitute authorization evidence.
+    citations:
+      - source: investigation
+        quote: |
+          h-001  null → ++    [l-001 r1-absent + l-002 p1 severe ⟂ no escalation-grade rules (100002 is sshd baseline noise); rule 100001 has fired 12× in prior 7 days from this container — routine exec pattern confirmed]
+      - source: investigation
+        quote: |
+          disposition            benign
+          matched_archetype      routine-container-exec
+      - source: actor
+        quote: |
+          The command (bash -c whoami) is trivially harmless—a read-only probe indistinguishable from a health check or a developer's quick verification that the container can execute commands.
+  - type: observability
+    subject_anchor: no-system-covers-this
+    subject_topic: docker daemon exec audit and host SSH session logs
+    finding: |
+      The Falco syscall surface records what happens inside the container namespace; it does not capture who on the host issued the `docker exec` call. Docker daemon audit logs (recording exec invocations with the initiating Unix socket credential or API caller) and SSH authentication logs (recording the session that gave the attacker host access) are not exposed by any system queried in this investigation. The `wazuh` adapter and `host-query` system cover process-level and file-integrity events on monitored endpoints, but neither surfaces the Docker daemon's exec audit trail or SSH session records in a form that would tie a specific exec to an authenticated host user. This observability gap is structural: the signal needed to falsify the authorization assumption does not appear in any available query surface.
+    citations:
+      - source: investigation
+        quote: |
+          l-001|1|falco-context-around-focal-event|v-001||h-001,h-002|wazuh|falco-rules-by-container|container_id=2427c46c4575 start=2026-04-19T07:58:29Z end=2026-04-19T08:58:29Z|±30m
+          l-002|2|rule-100001-historical-baseline|v-001||h-001,h-002|wazuh|recent-rule-fires|rule_id=100001 start=2026-04-12T08:28:29Z end=2026-04-19T08:28:29Z|7d
+      - source: actor
+        quote: |
+          The entry point is SSH access to the Docker daemon host. The attacker has compromised credentials via phishing, credential stuffing, or physical access to a dev workstation.
+
+actor_observations:
+  - type: framing-choice
+    subject_anchor: cover
+    subject_topic: single trivial command as execution confirmation probe
+    observation: |
+      The actor chose `bash -c whoami` — a non-destructive, non-persistent, read-only probe — as the foothold-confirmation step. This framing was effective because it produces no secondary Falco rules (no file writes, no network connections, no privilege escalation signals) and its syscall footprint is structurally identical to a health-check or CI pipeline exec. The investigation's co-fire analysis correctly found no escalation-grade signals but had no basis to distinguish a legitimate health check from a malicious execution confirmation. The framing survived both leads.
+  - type: misprediction
+    subject_anchor: entry-vector
+    subject_topic: actor overestimated defender query diversity
+    observation: |
+      The actor predicted both queries would "surface dozens of routine process events" for l-001 and routine historical fires for l-002 — and both predictions were accurate. However, the actor's bypass analysis implicitly assumed the defender might also run authorization or host-identity leads and focused bypass argument on why those would fail. In practice, the investigation never attempted any such lead; the actor's most load-bearing bypass claim (no identity correlation is possible from the Falco surface alone) was never stress-tested. The bypass argument was sound but over-specified for the actual defensive posture.
+
+confidence: |
+  High confidence on the `survived` outcome — both leads' actual results are demonstrably consistent with the oracle's projections, and the benign disposition was reached without ever testing the actor's entry vector. Moderate-to-high confidence on the first two findings (missing authorization lead, unresolved legitimacy contract); both are directly grounded in investigation text. The third finding (observability gap) is high confidence on the structural claim but depends on the assumption that neither `wazuh` nor `host-query` surfaces Docker daemon exec audit — the investigation neither confirms nor refutes that these systems have such a capability, so a reviewer should check whether `host-query` or a separate Docker audit adapter exists in the deployment.

@@ -1,0 +1,8 @@
+alert_rule_key: rule-100001
+normalized_disposition: benign
+paths:
+  alert: /tmp/defender-runs/rerun-100001-envelope-split/alert.json
+  investigation: /tmp/defender-runs/rerun-100001-envelope-split/investigation.md
+  lead_sequence: /tmp/defender-runs/rerun-100001-envelope-split/lead_sequence.yaml
+  report: /tmp/defender-runs/rerun-100001-envelope-split/report.md
+  source_run_dir: /tmp/defender-runs/rerun-100001-envelope-split

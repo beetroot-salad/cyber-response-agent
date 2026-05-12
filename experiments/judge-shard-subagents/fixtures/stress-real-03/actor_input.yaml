@@ -1,0 +1,15 @@
+case_id: stress-real-03
+alert_ref: alert.json
+entries:
+  - position: 0
+    queries:
+      - id: wazuh.falco-container-shell-history
+        params: {container_name: target-endpoint, window: 7d}
+  - position: 1
+    queries:
+      - id: wazuh.alerts-around-event
+        params: {container_name: target-endpoint, t0: "2026-05-07T14:25:22Z", window: ±15m}
+  - position: 2
+    queries:
+      - id: wazuh.falco-reverse-shell-events
+        params: {container_name: target-endpoint, rule_id: 100002, t0: "2026-05-07T14:25:18Z", window: ±5m}

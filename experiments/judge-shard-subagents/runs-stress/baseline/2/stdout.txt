@@ -1,0 +1,102 @@
+outcome: survived
+outcome_rationale: |
+  All three lead positions are consistent with the attack story. Position 0 (l-001) projected only the focal exec event; the defender's actual result of 18 identical events over 7 days is consistent — M's one malicious exec is indistinguishable from the ambient pattern. Position 1 (l-002) projected the focal event only; the 12 rule 100002 sshd-FP events in the actual result are ambient SSH activity unrelated to M's attack and do not refute the story. Position 2 (l-003) projected empty; the defender found 8 sshd FP events, consistent with M producing zero reverse-shell telemetry. No lead position tested for the attack's actual payload — file writes, credential reads, or in-container network activity — leaving the story's post-entry operations entirely untested.
+
+encounter_analysis: |
+  **l-001 / wazuh falco-container-shell-history (loop 1)**
+  Goal: establish whether this container has a baseline of prior shell spawns consistent with dev or automated operations.
+  Oracle projection: a single event matching the focal alert — the one exec M performed.
+  Actual result: 18 rule 100001 events over 7 days, all with identical cmdline `bash -c whoami`, clustered in bursts (2026-05-01:5, 2026-05-03:8, 2026-05-07:1). The defender interpreted this as an automated health-check probe pattern.
+  Assessment: consistent. The 18-event history is ambient legitimate traffic predating M's attack. M's exec is the 18th event and is indistinguishable from the prior 17. The oracle projected only the attack's contribution (one event); the ambient history is not contradicted by the story. The key inference the defender derived — recurring pattern implies automated probe implies benign — is consistent with the attack story because the story deliberately parasitizes that pattern.
+
+  **l-002 / wazuh alerts-around-event (loop 1)**
+  Goal: identify whether surrounding alerts form an intrusion chain.
+  Oracle projection: the focal event only; no additional attack-produced alerts in the ±15m window. Under M's story, operations inside the shell (file reads, .bashrc write, SSH key injection, bash ping sweep) produce no Falco events that would appear as surrounding Wazuh alerts.
+  Actual result: 93 fleet alerts including 12 rule 100002 events from sshd starting 4s before the focal alert, attributed to SSH session dup2 syscalls from Docker-internal 172.22.0.10.
+  Assessment: consistent. The 100002 events are ambient sshd FPs from legitimate SSH sessions; M's story does not produce them and does not require them to be absent. The finding that no non-sshd process was involved in 100002 does not address M's in-container activities at all.
+
+  **l-003 / wazuh falco-reverse-shell-events (loop 2)**
+  Goal: characterize the 12 rule 100002 events — real reverse shell or sshd FP.
+  Oracle projection: empty (events: []). M's attack does not involve outbound connections or stdio redirection from a non-sshd process.
+  Actual result: 8 rule 100002 events, all sshd, all involving dup2 for normal SSH session FD setup from Docker-internal IP 172.22.0.10. The defender concluded sshd FP, no malicious process.
+  Assessment: consistent. The empty oracle projection matches — M produced no reverse-shell telemetry. The actual sshd FP events are ambient and do not speak to M's in-shell activities.
+
+  **Synthesis:** All three leads tested the same narrow dimension — shell spawn frequency and reverse-shell co-occurrence — and returned results consistent with the attack story. The attack's entire payload (credential harvest from /workspace/.env and /etc/shadow, SSH key injection to /root/.ssh/authorized_keys, .bashrc callback persistence, bash ping sweep of internal RFC-1918 space, curl to Wazuh API port 55000) occurred inside the container shell session as file reads, small file writes, and bash-native network probes. None of these operations were queried at any lead position. The benign conclusion rested on two pillars — the 18-event recurring pattern as automated-probe proxy, and the sshd FP explanation for 100002 — neither of which addresses what M actually did inside the shell.
+
+defender_findings:
+  - type: lead-set
+    subject_anchor: no-lead-exists
+    subject_topic: in-container file write and sensitive file read events
+    finding: |
+      The investigation ran no lead querying for Falco or FIM events covering file writes or sensitive file reads inside the container. The actor's story stages T1552.001 (reading /workspace/.env, /etc/wazuh-agent/ossec.conf), T1003.008 (reading /etc/shadow), T1098.004 (writing /root/.ssh/authorized_keys), and T1546.004 (appending to /root/.bashrc) as the attack's core payload — all occurring inside the root shell session the focal alert captured. Falco's sensitive file access and write rules, or Wazuh FIM if configured on the container filesystem, would produce observable events for these operations. The actor notes this gap explicitly: "reads generate no Falco write events; the .bashrc write is a single small edit that does not match outbound connection patterns."
+
+      A lead querying for Falco rule families matching sensitive file reads (shadow, credentials) or SSH key modification, scoped to container target-endpoint in the ±5m window after the focal shell spawn, is the minimum discriminating test for this attack class. The three leads collectively answer "was this exec unusual in frequency and context?" but not "what did the exec do?"
+    citations:
+      - source: actor
+        quote: |
+          reads generate no Falco write events; the `.bashrc` write is a single small edit that does not match outbound connection patterns; the ping sweep uses bash builtins and system ping rather than any tool Falco flags by rule
+      - source: investigation
+        quote: |
+          Loop decision: h-001 is now `++`, h-002 is `--`. The case is:
+          - Shell was spawned via SSH from Docker-internal 172.22.0.10 → target-endpoint:22
+          - Pattern: 18 identical `bash -c whoami` events over 7 days → automated monitoring/health-check probe
+          - Rule 100002 co-occurrences are sshd FPs (normal dup2 syscalls for SSH session setup)
+          - No escalating commands, no persistence, no lateral movement
+      - source: projected_telemetry
+        quote: |
+          position: 2
+          system: wazuh
+          template: falco-reverse-shell-events
+          events: []
+
+  - type: analyze-discipline
+    subject_anchor: l-001
+    subject_topic: recurring-command pattern used as authorization proxy without identity verification
+    finding: |
+      The defender elevated h-001 from `+` to `++` based on two signals: the 18-event recurring identical-command history interpreted as automated monitoring probe cadence, and the sshd FP explanation for rule 100002. Neither signal addresses the identity of the executor. The story's attack is a legitimate account holder (M) whose credentials and docker group membership are indistinguishable from routine operator activity; M's malicious exec is one of those 18 events or added to them.
+
+      The legitimacy contract on h-001 in the PLAN block specifies "developer issued docker exec for diagnostics: escalate/escalate," but resolution never verified against a ticket, change record, or identity/IAM source. The analyze step treated "recurring pattern matches automated monitoring probe cadence" as an authorization confirmation, which is a behavioral proxy. For an insider-threat story class where the actor holds legitimate access and the bypass is specifically that loginuid=-1 plus pname=null are identical for legitimate and malicious docker exec, this proxy is exactly what the story exploits.
+    citations:
+      - source: investigation
+        quote: |
+          h-001  + → ++   [l-003 r1 severe ⟂ all stdio-redirect alerts are sshd FPs (dup2 for normal SSH); SSH from internal Docker IP 172.22.0.10; recurring bash -c whoami matches automated monitoring-probe pattern]
+      - source: investigation
+        quote: |
+          h-001|?authorized-docker-exec|v-001|spawned_in|identity|developer-operator||p1:proposed_parent:"this container has a history of similar shell spawns consistent with dev ops";p2:proposed_edge:"no co-occurring alerts suggesting intrusion chain"|p1:proposed_parent||r1[p1]:"no prior similar events, or co-occurring intrusion-chain alerts present"|ac1:proposed:ops-pattern:"developer issued docker exec for diagnostics":escalate/escalate||null|active
+      - source: actor
+        quote: |
+          M authenticates to the Docker host using their standard domain credentials (T1078.002) — a normal SSH session to the development host, indistinguishable from daily work. M's account already has `docker` group membership; no privilege escalation is required on the host.
+
+  - type: observability
+    subject_anchor: host-query
+    subject_topic: host-level process and network visibility inside containers not queried
+    finding: |
+      The host-query system was not invoked at any lead position. Under the story's T1018 step — a bash ping sweep of 172.18.0.0/24 and curl to the Wazuh management port (55000) with harvested credentials — host-level process and network connection visibility would be the primary instrument for observing outbound network activity originating from the container. A host-query lead scoped to outbound connections from container 2a124a5fc6d9 in the ±15m window would surface the RFC-1918 probes and the curl to the Wazuh API.
+
+      The actor explicitly designed around Falco's coverage: "a pure bash probe that emits no unusual binary executions." Host-query inspection of process genealogy and network connections from the host perspective does not share Falco's blind spots on bash-native network activity. With host-query at deployment-unknown status (it appears in the skills surface but was not invoked), this is an uninvestigated coverage dimension for post-shell container activity in this story class.
+    citations:
+      - source: actor
+        quote: |
+          M runs `for i in $(seq 1 254); do (ping -c1 -W1 172.18.0.$i &>/dev/null && echo 172.18.0.$i) & done; wait` — a pure bash probe that emits no unusual binary executions. M records live IPs and manually probes Wazuh's management port (`55000`) using `curl` with the harvested credentials to confirm API access and enumerate registered agents.
+      - source: actor
+        quote: |
+          the ping sweep uses bash builtins and system ping rather than any tool Falco flags by rule
+      - source: investigation
+        quote: |
+          **l-003 (reverse-shell-alert-detail):** All 8 rule 100002 events in the window are from `sshd`. Connection tuples: 172.22.0.10→172.22.0.13:22
+
+actor_observations:
+  - type: framing-choice
+    subject_anchor: entry-vector
+    subject_topic: legitimate-insider framing eliminates standard field-based discrimination
+    observation: |
+      The actor correctly identified that the alert's most suspicious indicators — pname=null, loginuid=-1, TTY attached — are structurally identical for both legitimate docker exec and malicious container entry. By anchoring the story in T1078.002 plus T1199 (legitimate domain credentials, pre-authorized Docker socket access), the actor eliminated the defender's primary triage signals before investigation began. The bypass section makes this explicit: "every legitimate `docker exec` produces exactly these field values." This framing requires no field suppression to fit the alert surface — the story arrives pre-matched.
+
+  - type: framing-choice
+    subject_anchor: cover
+    subject_topic: bash-native post-shell operations correctly anticipate Falco coverage boundary
+    observation: |
+      The actor explicitly designed all post-shell operations to remain below Falco's write-rule and binary-execution detection boundary: file reads leave no Falco events, the .bashrc modification is a small write that does not match outbound-connection patterns, and the network enumeration uses bash builtins rather than tools Falco rules on. The story demonstrates accurate awareness that Falco's coverage is binary-execution and network-connection centric, not file-read or small-write centric. The prediction that no FIM or sensitive-file-access lead would be run proved correct in this encounter, and the persistence payload (T1098.004, T1546.004) survived undetected.
+
+confidence: |
+  High confidence in the survived outcome — all three projections are straightforwardly consistent with the actual results, and the post-shell attack payload is genuinely absent from every lead position. The analyze-discipline finding is the judgment call most worth human review: the investigation records a legitimacy_contract on h-001 with escalate/escalate consequences, but the resolution text ("recurring bash -c whoami matches automated monitoring-probe pattern") reads as behavioral inference rather than positive authorization confirmation against a ticket or identity source. I am moderately confident this constitutes an analyze-discipline gap rather than a satisfied contract. The host-query observability finding is the weakest: deployment status is unknown, and it is possible the environment does not have host-query instrumented for container network visibility at the fidelity the story requires.

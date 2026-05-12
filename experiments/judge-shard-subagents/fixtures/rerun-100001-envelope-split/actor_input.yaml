@@ -1,0 +1,11 @@
+case_id: rerun-100001-envelope-split
+alert_ref: alert.json
+entries:
+  - position: 0
+    queries:
+      - id: wazuh.falco-rules-by-container
+        params: {container_id: 2427c46c4575, start: "2026-04-19T07:58:29Z", end: "2026-04-19T08:58:29Z", window: ±30m}
+  - position: 1
+    queries:
+      - id: wazuh.recent-rule-fires
+        params: {rule_id: 100001, start: "2026-04-12T08:28:29Z", end: "2026-04-19T08:28:29Z", window: 7d}

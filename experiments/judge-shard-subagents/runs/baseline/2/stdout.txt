@@ -1,0 +1,95 @@
+outcome: survived
+outcome_rationale: |
+  Neither lead's actual result refuted a load-bearing claim of the attack story. l-001 (±30m Falco context) returned 64 sshd dup2 events as periodic baseline noise plus only 2 terminal-shell events — exactly the "dozens of routine events making one shell spawn look like noise" the actor explicitly predicted; the co-fires did not satisfy h-002's escalation-grade co-fire prediction. l-002 (7-day historical baseline) returned 22 rule 100001 fires with a 3–6/day cadence including 12 from target-endpoint variants — consistent with the actor's explicit prediction that "the rule fires regularly in a dev environment; one more occurrence is within baseline." The oracle for l-002 projected only the focal event (implying a novel/first-time pattern), but the actual result showed a busy baseline that confirmed h-001 rather than h-002, exactly as the actor's bypass required. No lead queried host-level identity telemetry; the legitimacy contract on h-001 was declared but never resolved; and the defender disposed as benign — the outcome the bypass targeted.
+encounter_analysis: |
+  **l-001 (position 0): falco-rules-by-container, ±30m window**
+
+  Goal: surface any co-firing escalation-grade Falco rules that would discriminate adversarial activity from routine container exec.
+
+  Oracle projected only the focal 100001 event — no additional events. Actual returned 66 alerts: 2x rule 100001 and 64x rule 100002 (sshd dup2 stdio-redirect events firing at 5-minute intervals pre-dating the focal event, over the internal 172.22.0.10→172.22.0.13:22 connection). The oracle substantially underprojected; the 64 sshd events were absent from its synthesis.
+
+  Despite that underprojection, the actual result is consistent with the actor's bypass. The actor predicted "dozens of routine process events" would absorb the focal shell as noise. The investigator correctly identified the 100002 events as periodic sshd baseline noise rather than adversarial co-fires, which is accurate — they pre-date the focal event, are regular, and are connected to an internal SSH port. h-002's prediction of "escalation-grade co-fires (T1059 paired with reconnaissance or exfil rules)" was not supported, but that is because the attack story is precisely designed to produce no follow-on signals. Result is **consistent with** the attack story.
+
+  **l-002 (position 1): recent-rule-fires, 7-day window**
+
+  Goal: establish whether bash-via-runc execs are a routine baseline for this container or a novel anomaly.
+
+  Oracle projected only the focal event — effectively modeling a first-time occurrence (1 event in 7 days), which would have supported h-002. Actual returned 22 rule 100001 fires, 12 from target-endpoint variants, with a regular 3–6/day cadence.
+
+  This is the most telling comparison. The oracle's projection (novelty) and the actual result (routine baseline) are directly opposed. However, this divergence does not refute the attack story — it reveals that the oracle failed to model the pre-existing legitimate stream. A real attacker operating in this environment contributes one event to a stream of 11+ prior legitimate fires; the historical baseline survives regardless of whether the focal event was authorized. The actor explicitly predicted the busy baseline: "will show the rule fires regularly in a dev environment with container testing and restarts; one more occurrence is within baseline." The actual result confirmed that prediction. Result is **consistent with** the attack story.
+
+  **Authorization gap: no lead was issued**
+
+  h-001's legitimacy contract ac1 ("docker-exec caller is a developer or authorized automation") was declared proposed but was never resolved by any lead or analysis block. The investigation concluded with disposition benign and h-001 ++ without producing a legitimacy_resolutions record for ac1. No lead queried host-level identity telemetry — Docker daemon API audit logs, host SSH session logs, or process lineage outside the container — that could distinguish who issued the docker exec call. loginuid=-1 in the alert is a known indicator of a non-interactive session (consistent with either an automation script or an attacker pivoting via SSH), but this signal was noted and not pursued. The actor's bypass was designed precisely around this gap: "no identity correlation — developer's automated script vs. attacker's ssh session produce the same syscall footprint."
+
+  **Synthesis**
+
+  The oracle's sparse l-002 projection would have predicted a caught outcome if taken at face value, but the actual investigation found a busy baseline that validated the actor's bypass framing. The story survived on two mutually reinforcing gaps: (1) the legitimacy contract on h-001 was self-declared but never resolved, allowing benign without authorization evidence; (2) no lead existed to query the host-level identity trail that is the only telemetry that would distinguish admin from attacker at this syscall surface.
+defender_findings:
+  - type: analyze-discipline
+    subject_anchor: l-002
+    subject_topic: legitimacy contract resolution before benign disposition
+    finding: |
+      The investigation declared disposition: benign and h-001 ++ after l-002 without ever resolving legitimacy contract ac1. The contract was declared as "docker-exec caller is a developer or authorized automation" with escalate/escalate as the unresolved-action, yet no legitimacy_resolutions block appears anywhere in the companion document. Validator rule #21 gates disposition: benign on every contract resolving authorized; that gate was not enforced here.
+
+      The actor's bypass depends entirely on this gap: "no identity correlation — developer's automated script vs. attacker's ssh session produce the same syscall footprint." By disposing as benign without resolving ac1, the investigation accepted the null — routine baseline — as authorization evidence. The historical frequency data from l-002 shows the exec pattern is routine, but frequency is not authorization; it merely confirms that authorized execs recur. The actor's one unauthorized exec is indistinguishable from those authorized recurrences at the syscall layer alone.
+    citations:
+      - source: investigation
+        quote: |
+          h-001  null → ++    [l-001 r1-absent + l-002 p1 severe ⟂ no escalation-grade rules (100002 is sshd baseline noise); rule 100001 has fired 12× in prior 7 days from this container — routine exec pattern confirmed]
+      - source: investigation
+        quote: |
+          disposition            benign
+      - source: investigation
+        quote: |
+          ac1:proposed:manual:"docker-exec caller is a developer or authorized automation":escalate/escalate
+      - source: actor
+        quote: |
+          no identity correlation (developer's automated script vs. attacker's ssh session produce the same syscall footprint)
+  - type: lead-set
+    subject_anchor: no-lead-exists
+    subject_topic: host-level docker exec caller identity
+    finding: |
+      Neither lead queries the host-level telemetry that would identify who issued the `docker exec` command — Docker daemon API audit logs, host SSH session records, or PAM/loginuid attribution outside the container. The alert already surfaces loginuid=-1 as a signal of a non-interactive session (attacker via SSH daemon or automation service), but no lead was constructed to correlate that against active SSH sessions or Docker API calls on the host at the focal timestamp.
+
+      The actor's entry vector is SSH credentials to the Docker host; that SSH session and the subsequent docker exec API call are the only artifacts that distinguish the attacker from a legitimate developer. The actor correctly predicted that neither issued lead would reach that surface: "The defender's queries surface only: Query 0 — Falco rules by container; Query 1 — historical frequency. Neither query anchors to deployment identity, authorization, or approved activity profiles."
+    citations:
+      - source: actor
+        quote: |
+          There is no parent-process validation (runc is expected in either case), no identity correlation (developer's automated script vs. attacker's ssh session produce the same syscall footprint), and no timeline anchor to legitimate operational events.
+      - source: alert
+        quote: |
+          "user.loginuid": -1
+      - source: investigation
+        quote: |
+          However, p2 of h-002 is not fully addressed: we lack a baseline for whether `bash -c whoami` execs via runc are a routine pattern for this container or a novel event.
+  - type: observability
+    subject_anchor: host-query
+    subject_topic: docker exec caller identity outside container syscall layer
+    finding: |
+      Falco's syscall telemetry captures what executes inside the container (process name, cmdline, tty, uid, parent name) but provides no visibility into who issued the `docker exec` call at the host. The parent name runc is structurally identical whether the exec was triggered by an authorized developer, a CI/CD pipeline, or an attacker with a stolen SSH key — all three paths produce the same kernel-visible event. The host-query system, which could provide SSH session data, Docker daemon audit entries, or process lineage anchored outside the container, was not queried in this investigation.
+
+      The actor built the bypass explicitly around this blind spot: "runc is expected in either case." Without host-level identity telemetry, the syscall surface is insufficient to resolve the legitimacy contract on h-001 — frequency analysis from l-002 can confirm the exec pattern is routine but cannot confirm the caller is authorized for this specific invocation.
+    citations:
+      - source: actor
+        quote: |
+          The entry point is SSH access to the Docker daemon host. The attacker has compromised credentials via phishing, credential stuffing, or physical access to a dev workstation.
+      - source: actor
+        quote: |
+          There is no parent-process validation (runc is expected in either case), no identity correlation
+      - source: investigation
+        quote: |
+          v-003|identity|identity:system|root|uid=0;loginuid=-1
+actor_observations:
+  - type: framing-choice
+    subject_anchor: bypass
+    subject_topic: single-command probe to avoid secondary Falco signal
+    observation: |
+      The actor limited the attack story to a single `bash -c whoami` probe with no follow-on activity, which prevented any secondary Falco rules from firing that could distinguish the intrusion from a health check. The actor explicitly noted that `whoami` "produces no observable output change and triggers no secondary alerts — it is pure execution confirmation." This framing ensured h-002's escalation-grade co-fire prediction would never be satisfied, while making the story's bypass argument structurally dependent only on the frequency/identity gap rather than on signal suppression.
+  - type: misprediction
+    subject_anchor: entry-vector
+    subject_topic: oracle projected novelty where actor predicted busy baseline
+    observation: |
+      The actor explicitly predicted that the 7-day historical query "will show the rule fires regularly in a dev environment; one more occurrence is within baseline," but the oracle for position 1 projected only the focal event — modeling a first-time/novel occurrence rather than a busy pre-existing baseline. The story's bypass was contingent on the baseline being full, not sparse; the oracle's synthesis of "what events would the attack produce" omitted the prior legitimate fires that the attacker was blending into. The story survived because the actual baseline was busy, not because the oracle modeled it correctly.
+confidence: |
+  High confidence in the survived outcome: the legitimacy contract gap and the missing host-identity lead are both directly grounded in verbatim quotes from the investigation and the actor's story, and the benign disposition without ac1 resolution is unambiguous from the companion document. The analyze-discipline finding turns on a single structural absence — no legitimacy_resolutions block for ac1 — which I am confident in, but a human reviewer should confirm whether the invlang validator's rule #21 enforcement was active on this run or whether the hook was bypassed. The observability finding (host-query deployment-unknown) is correct as stated; the system appears in the knowledge base but the investigation neither invokes nor negates it.

@@ -1,0 +1,18 @@
+Credential Access:
+  - T1552.001 Unsecured Credentials: Credentials In Files
+  - T1003.008 OS Credential Dumping: /etc/passwd and /etc/shadow
+Defense Evasion:
+  - T1027.009 Obfuscated Files or Information: Embedded Payloads
+  - T1222.002 File and Directory Permissions Modification: Linux/Mac
+Discovery:
+  - T1018 Remote System Discovery
+Impact:
+  - T1486 Data Encrypted for Impact
+  - T1485 Data Destruction
+Initial Access:
+  - T1199 Trusted Relationship
+  - T1078.002 Valid Accounts: Domain Accounts
+Persistence:
+  - T1546.004 Event Triggered Execution: Unix Shell Configuration
+  - T1554 Compromise Host Software Binary
+  - T1098.004 Account Manipulation: SSH Authorized Keys

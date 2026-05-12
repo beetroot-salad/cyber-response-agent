@@ -1,0 +1,69 @@
+outcome: survived
+
+outcome_rationale: |
+  Both leads' actual results are consistent with the oracle's projected events. Position 0 (falco-rules-by-container) returned rule 100001 (focal shell spawn) plus rule 100002 (sshd baseline noise), matching the projection. Position 1 (recent-rule-fires) returned 12 rule 100001 fires in the prior 7 days, establishing routine frequency. Neither lead contradicts the oracle's synthesis. The investigation concluded benign based on frequency baseline and absence of novel escalation signals — exactly the lead-set blindness the actor's story was designed to exploit. The actor correctly predicted that syscall-level telemetry coupled with frequency analysis cannot distinguish an attacker's `docker exec` from legitimate dev container testing.
+
+encounter_analysis: |
+  **Lead l-001 (position 0): falco-rules-by-container**
+
+  The lead measured whether co-firing escalation-grade rules would appear alongside the focal rule 100001 shell spawn, intending to refute h-002 (adversarial shell spawn). The oracle projected the focal rule 100001 event would be present. Actual result: 66 total alerts over ±30m window; rule 100001 fired 2× (including the focal event); rule 100002 (STDOUT/STDIN redirect, sshd-related) fired 64× in a periodic pattern (every ~5 minutes, predating the focal event).
+
+  Assessment: The actual results are **consistent with** the oracle's projection. The focal event appears as predicted. Rule 100002's presence could have supported h-002's prediction p2 ("expect co-firing escalation rules present"), but the investigation correctly identified it as baseline sshd noise (dup2 during SSH session establishment) rather than a novel adversarial signal. This **refutes h-002's specific prediction** of escalation-grade co-fires, but does not contradict what the oracle would synthesize from the actor's story — the attacker's `docker exec bash -c whoami` would indeed produce the focal rule 100001 event alongside baseline container noise.
+
+  **Lead l-002 (position 1): recent-rule-fires**
+
+  The lead measured whether rule 100001 fires are routine or novel from this container over 7 days, establishing baseline frequency. The oracle projected the focal rule 100001 event would appear in the historical query window. Actual result: 22 rule 100001 fires in the 7-day prior window; 12 from target-endpoint or variants; pattern consistent (3–6 per active day).
+
+  Assessment: The actual results are **consistent with** the oracle's projection. The event appears in the 7-day window as predicted. This supports h-001 (legitimate-admin-exec) by confirming routine baseline — the container fires rule 100001 regularly, consistent with recurring docker-exec health checks or development activity. However, **this consistency is exactly what the actor's story predicted**. The actor states: "The timing (2026-04-19 08:28 UTC) is chosen during business hours when development and testing activity is routine, and the alert signature blends into expected noise." The defender's discovery of routine baseline frequency is consistent with the attacker's scenario of an exec blending into dev noise.
+
+  **Cross-lead synthesis**: Both leads' actual results align with the oracle's projection of what a routine shell spawn (focal rule 100001) plus baseline container activity (rule 100002) would generate. The investigation concluded benign with high confidence based on (1) rule 100001's routine 7-day frequency and (2) rule 100002's baseline sshd pattern. The actor's story was designed precisely to satisfy these conditions: a read-only health-check probe (`bash -c whoami`) that blends into expected development-environment noise. The investigation's lead set cannot distinguish the attacker's SSH-initiated `docker exec` from an authorized developer's `docker exec` or a CI/CD system's automation, because both produce identical syscalls and both would appear as routine frequency in a development container environment.
+
+defender_findings:
+  - type: lead-set
+    subject_anchor: no-lead-exists
+    subject_topic: SSH session identity and deployment authorization anchoring
+    finding: |
+      The investigation has no lead that correlates the shell spawn to **who initiated the exec** or **which authorized activity context** the exec belongs to. The actor explicitly identifies this gap: "There is no parent-process validation (runc is expected in either case), no identity correlation (developer's automated script vs. attacker's ssh session produce the same syscall footprint), and no timeline anchor to legitimate operational events." An attacker with stolen SSH credentials executing `docker exec target-endpoint bash -c whoami` is indistinguishable at the syscall level from a developer running the same command. The investigation concludes benign based on frequency baseline and absence of escalation signals, but never verifies whether the exec came from an SSH session on the Docker host (attacker vector) or from approved automation. This gap is load-bearing: it is the entire reason the actor's story survives — the defender's queries cannot address deployment identity.
+    citations:
+      - source: actor
+        quote: |
+          There is no parent-process validation (runc is expected in either case), no identity correlation (developer's automated script vs. attacker's ssh session produce the same syscall footprint), and no timeline anchor to legitimate operational events.
+      - source: investigation
+        quote: |
+          **Need:** historical baseline for rule 100001 across a 7-day lookback to determine whether bash-via-runc execs are routine for this container.
+      - source: investigation
+        quote: |
+          **Lead:** l-001|1|falco-context-around-focal-event|v-001||h-001,h-002|wazuh|falco-rules-by-container
+  - type: lead-quality
+    subject_anchor: l-002
+    subject_topic: Frequency baseline without operational-context anchoring
+    finding: |
+      Lead l-002 (recent-rule-fires) measures whether rule 100001 fires are routine from the container across 7 days. The investigation found 12 fires from target-endpoint variants over the window, establishing routine baseline. However, frequency alone does not answer **who performed the execs** or **under which operational context** — developer manual verification, CI/CD automation, or attacker-initiated SSH. The actor's bypass relies on this ambiguity: "The timing (2026-04-19 08:28 UTC) is chosen during business hours when development and testing activity is routine, and the alert signature blends into expected noise." The lead l-002 confirms the alert does blend into routine noise, but without anchoring to deployment identity or approved activity windows, "routine frequency" is consistent with both benign dev testing and attacker activity. A tighter lead would correlate rule 100001 fires to approved CI/CD job windows or developer automation schedules, or would anchor to host-level identity logs (SSH session user, timestamp).
+    citations:
+      - source: actor
+        quote: |
+          The timing (2026-04-19 08:28 UTC) is chosen during business hours when development and testing activity is routine, and the alert signature blends into expected noise.
+      - source: investigation
+        quote: |
+          Daily pattern shows 3–6 events per active day. Pattern is consistent and routine across the observation window.
+      - source: investigation
+        quote: |
+          Under h-001 (routine exec): expect rule 100001 to have fired multiple times in the prior 7 days from this container, consistent with recurring docker-exec health checks.
+  - type: observability
+    subject_anchor: no-system-covers-this
+    subject_topic: SSH audit logs and host-level exec invocation tracing
+    finding: |
+      The investigation has observability of syscall-level events (Falco detects the bash exec), but no visibility into how runc was invoked — i.e., whether the `docker exec` command originated from an SSH session (attacker entry point), an approved CI/CD system, or a local developer terminal. The actor's story hinges on SSH-compromised credentials: "The entry point is SSH access to the Docker daemon host. The attacker has compromised credentials via phishing, credential stuffing, or physical access to a dev workstation." Deployed systems that would answer this question (syslog/auditd on the Docker host, SSH session audit logs, Docker daemon audit trail) are not integrated into the lead set. This observability gap means the investigation cannot refute the attacker's entry vector — it only sees the outcome (a shell executed as root) and infers benignity from frequency baseline.
+    citations:
+      - source: actor
+        quote: |
+          The entry point is SSH access to the Docker daemon host. The attacker has compromised credentials via phishing, credential stuffing, or physical access to a dev workstation. ... docker exec target-endpoint bash -c whoami
+      - source: alert
+        quote: |
+          "hostname": "falco"
+      - source: investigation
+        quote: |
+          **Triage question.** Wazuh rule 100001 (Falco "Terminal shell in container") fired on `target-endpoint`: a bash process with a TTY was spawned via `runc` running `bash -c whoami` as root with loginuid=-1.
+
+confidence: |
+  High confidence in the survived outcome. The oracle's projection — that the attack would produce a rule 100001 shell-spawn event alongside baseline container activity — is entirely consistent with the investigation's actual findings (rule 100001 + rule 100002 sshd noise + routine 7-day frequency). The investigation concluded benign based on frequency baseline and absence of escalation signals, which aligns with the actor's explicit prediction that the attack "blends into expected noise" in a dev environment. The three findings are strongly grounded in the actor's stated bypass strategy ("no identity correlation," "no timeline anchor," "no parent-process validation") and the investigation's reliance on frequency-only analysis without deployment-identity anchoring. The main confidence caveat is that the investigation's conclusion (benign) is based on absence of contradiction rather than affirmative evidence of legitimate authorization — but this absence-of-contradiction is precisely what the actor designed the story to achieve.

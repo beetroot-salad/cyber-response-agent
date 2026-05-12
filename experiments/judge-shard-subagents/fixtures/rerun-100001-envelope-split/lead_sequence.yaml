@@ -1,0 +1,26 @@
+case_id: rerun-100001-envelope-split
+alert_ref: alert.json
+entries:
+  - position: 0
+    lead_description:
+      goal: "Retrieve all Falco alerts from container 2427c46c4575 in the \u00b130-minute window around the focal alert (2026-04-19T08:28:29Z) to characterize whether co-firing escalation-grade rules are present."
+      what_to_characterize:
+        - Total alert count from this container in the window
+        - "Distinct rule IDs and descriptions, especially escalation-grade rules"
+        - Timing pattern (burst vs. steady; clustering around focal timestamp)
+        - "Whether high-risk rules are present (net redirection, sensitive file reads, binary drops, log clearing)"
+    queries:
+      - id: wazuh.falco-rules-by-container
+        params: {container_id: 2427c46c4575, start: "2026-04-19T07:58:29Z", end: "2026-04-19T08:58:29Z", window: ±30m}
+    result_ref: gather_raw/0.json
+  - position: 1
+    lead_description:
+      goal: Establish the 7-day historical frequency of rule 100001 (Terminal shell in container) to determine whether bash-via-runc execs are a recurring baseline pattern or a novel event for this environment.
+      what_to_characterize:
+        - "Total count of rule 100001 fires in the prior 7 days (2026-04-12 to 2026-04-19T08:28:29Z)"
+        - Frequency pattern (daily count distribution — routine vs. rare)
+        - Whether the count suggests this is routine or a first/rare occurrence
+    queries:
+      - id: wazuh.recent-rule-fires
+        params: {rule_id: 100001, start: "2026-04-12T08:28:29Z", end: "2026-04-19T08:28:29Z", window: 7d}
+    result_ref: gather_raw/1.json

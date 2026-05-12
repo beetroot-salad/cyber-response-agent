@@ -1,0 +1,156 @@
+projections:
+  - position: 0
+    system: wazuh
+    template: falco-container-shell-history
+    events:
+      - agent:
+          name: wazuh.manager
+          id: "000"
+        manager:
+          name: wazuh.manager
+        data:
+          output: "2026-05-07T14:25:22.570026876+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=<NA> command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>"
+          output_fields:
+            container:
+              image:
+                tag: latest
+                repository: cyber-response-agent_devcontainer-target-endpoint
+              name: target-endpoint
+              id: 2a124a5fc6d9
+            evt:
+              arg:
+                flags: EXE_WRITABLE|EXE_LOWER_LAYER
+              time:
+                iso8601: "1778163922570026752.000000"
+              type: execve
+            proc:
+              cmdline: bash -c whoami
+              pname: "null"
+              name: bash
+              tty: "34816"
+              exepath: /usr/bin/bash
+            k8s:
+              pod:
+                name: "null"
+              ns:
+                name: "null"
+            user:
+              uid: "0"
+              loginuid: "-1"
+              name: root
+          hostname: falco
+          rule: Terminal shell in container
+          source: syscall
+          time: "2026-05-07T14:25:22.570026876Z"
+          priority: Notice
+          tags:
+            - T1059
+            - container
+            - maturity_stable
+            - mitre_execution
+            - shell
+        rule:
+          firedtimes: 1
+          mail: true
+          level: 10
+          description: "Falco: Terminal shell spawned in container"
+          groups:
+            - falco
+            - security
+            - falco_process_anomaly
+            - attack.execution
+          id: "100001"
+        decoder:
+          name: json
+        full_log: "{\"hostname\":\"falco\",\"output\":\"2026-05-07T14:25:22.570026876+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=<NA> command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>\",\"priority\":\"Notice\",\"rule\":\"Terminal shell in container\",\"source\":\"syscall\",\"tags\":[\"T1059\",\"container\",\"maturity_stable\",\"mitre_execution\",\"shell\"],\"time\":\"2026-05-07T14:25:22.570026876Z\"}"
+        input:
+          type: log
+        "@timestamp": "2026-05-07T14:25:07.815Z"
+        location: /var/log/falco/events.json
+        id: "1778163907.21414463"
+        timestamp: "2026-05-07T14:25:07.815+0000"
+
+  - position: 1
+    system: wazuh
+    template: alerts-around-event
+    events:
+      - agent:
+          name: wazuh.manager
+          id: "000"
+        manager:
+          name: wazuh.manager
+        data:
+          output: "2026-05-07T14:25:22.570026876+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=<NA> command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>"
+          output_fields:
+            container:
+              start_ts: "<container-start-ts>"
+              image:
+                tag: latest
+                repository: cyber-response-agent_devcontainer-target-endpoint
+              name: target-endpoint
+              id: 2a124a5fc6d9
+            evt:
+              arg:
+                flags: EXE_WRITABLE|EXE_LOWER_LAYER
+              time:
+                iso8601: "1778163922570026752.000000"
+              type: execve
+            proc:
+              cwd: /root
+              cmdline: bash -c whoami
+              exe: /usr/bin/bash
+              pname: "null"
+              sname: bash
+              name: bash
+              tty: "34816"
+              exepath: /usr/bin/bash
+              exe_ino:
+                ctime: "<bash-exe-inode-ctime>"
+                mtime: "<bash-exe-inode-mtime>"
+                ctime_duration_proc_start: "<bash-exe-inode-ctime-duration-proc-start>"
+              "aname[2]": "<container-runtime-ancestor>"
+            k8s:
+              pod:
+                name: "null"
+              ns:
+                name: "null"
+            user:
+              uid: "0"
+              loginuid: "-1"
+              name: root
+          hostname: falco
+          rule: Terminal shell in container
+          source: syscall
+          time: "2026-05-07T14:25:22.570026876Z"
+          priority: Notice
+          tags:
+            - T1059
+            - container
+            - maturity_stable
+            - mitre_execution
+            - shell
+        rule:
+          firedtimes: 1
+          mail: true
+          level: 10
+          description: "Falco: Terminal shell spawned in container"
+          groups:
+            - falco
+            - security
+            - falco_process_anomaly
+            - attack.execution
+          id: "100001"
+        decoder:
+          name: json
+        full_log: "{\"hostname\":\"falco\",\"output\":\"2026-05-07T14:25:22.570026876+0000: Notice A shell was spawned in a container with an attached terminal | evt_type=execve user=root user_uid=0 user_loginuid=-1 process=bash proc_exepath=/usr/bin/bash parent=<NA> command=bash -c whoami terminal=34816 exe_flags=EXE_WRITABLE|EXE_LOWER_LAYER container_id=2a124a5fc6d9 container_name=target-endpoint container_image_repository=cyber-response-agent_devcontainer-target-endpoint container_image_tag=latest k8s_pod_name=<NA> k8s_ns_name=<NA>\",\"priority\":\"Notice\",\"rule\":\"Terminal shell in container\",\"source\":\"syscall\",\"tags\":[\"T1059\",\"container\",\"maturity_stable\",\"mitre_execution\",\"shell\"],\"time\":\"2026-05-07T14:25:22.570026876Z\"}"
+        input:
+          type: log
+        "@timestamp": "2026-05-07T14:25:07.815Z"
+        location: /var/log/falco/events.json
+        id: "1778163907.21414463"
+        timestamp: "2026-05-07T14:25:07.815+0000"
+
+  - position: 2
+    system: wazuh
+    template: falco-reverse-shell-events
+    events: []
