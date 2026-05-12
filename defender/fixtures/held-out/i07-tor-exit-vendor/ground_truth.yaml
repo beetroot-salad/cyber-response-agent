@@ -1,0 +1,7 @@
+held_out: true
+disposition: inconclusive
+class_axes:
+  vendor: suricata
+  rule_class: egress-overlap
+rationale: |
+  Destination IP is on the live Tor exit list *and* on a published Red Hat update mirror list. Traffic shape (1.8KB out / 22KB in over TLS) is consistent with a yum update GET. No way from the alert alone to tell which role the IP was playing at request time.

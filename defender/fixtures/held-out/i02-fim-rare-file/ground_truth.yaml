@@ -1,0 +1,7 @@
+held_out: true
+disposition: inconclusive
+class_axes:
+  vendor: wazuh
+  rule_class: fim-rare-config
+rationale: |
+  Tiny 4-byte change on an application config file untouched for 9 months. No apt/dpkg, no deploy, no surrounding process telemetry retained (agent process-audit was off on this host). Could be a manual ops edit (no change ticket filed) or stealth tampering.

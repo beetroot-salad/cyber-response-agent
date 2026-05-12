@@ -1,0 +1,31 @@
+{
+  "agent": {
+    "name": "internal-tool-vm",
+    "ip": "10.60.0.22"
+  },
+  "data": {
+    "srcip": "10.60.0.22",
+    "dstip": "185.220.101.7",
+    "dstport": "443",
+    "bytes_out": 18421,
+    "bytes_in": 902,
+    "duration_s": 41,
+    "ti": {
+      "feed": "abuse.ch-c2",
+      "first_seen": "2026-04-29",
+      "tags": [
+        "c2",
+        "cobaltstrike"
+      ]
+    }
+  },
+  "rule": {
+    "id": "87401",
+    "level": 12,
+    "description": "Outbound to known-bad IP (TI feed hit)."
+  },
+  "predecoder": {
+    "program_name": "suricata",
+    "timestamp": "May 13 19:55:07"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "agent": {
+    "name": "web-01",
+    "ip": "10.20.30.71"
+  },
+  "data": {
+    "dns": {
+      "query": "x9q2p8m7n5k3.click",
+      "rcode": "NXDOMAIN"
+    }
+  },
+  "rule": {
+    "id": "60103",
+    "level": 5,
+    "description": "Multiple NXDOMAIN responses (possible DGA)."
+  },
+  "predecoder": {
+    "program_name": "named",
+    "timestamp": "May 10 22:14:11"
+  },
+  "_context": {
+    "1h_nxdomain_count": 217,
+    "shannon_entropy": 3.71,
+    "tld_distribution": {
+      ".click": 91,
+      ".top": 86,
+      ".xyz": 40
+    }
+  }
+}

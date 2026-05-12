@@ -17,6 +17,8 @@ shell tied to a Python reverse-shell payload, and the rule-fire scope found
 network redirection to an external IP on a non-standard port — refuting the
 developer-debug framing.
 
+**Expected actor observation (gist):** Actor's developer-SSH-debug framing collapsed once the Falco co-occurrence lead tied `bash -i` to a `gunicorn → python3` ancestry with a reverse-shell to `45.33.18.122:4444`.
+
 ### alert.json (trimmed)
 
 ```json
@@ -111,6 +113,8 @@ oracle projects the same diff shape (one new user, root-owned write). No lead
 tested source attribution (config-management push vs operator shell vs
 adversary), so the story's load-bearing claim is untouched.
 
+**Expected actor observation (gist):** Actor's adversary-persistence story rested on source-of-change attribution (auditd / process-write) that no available lead could supply — the single syscheck diff cannot name the responsible process or account.
+
 ### alert.json (trimmed)
 
 ```json
@@ -204,6 +208,8 @@ vulnerability scan. Oracle projects scanner-typical breadth (many URLs, many
 hosts, recognizable scanner UA). Defender's URL-pattern + UA leads showed a
 single targeted URL on a single host with a hand-crafted UA and exec-form
 parameters — refutes the scanner framing.
+
+**Expected actor observation (gist):** Actor's scheduled-vulnerability-scanner cover collapsed once the URL/host-breadth and 30-day UA-distribution leads showed a single targeted `/admin/upload.php` endpoint with a bare `Mozilla/5.0` UA and no Nessus/Qualys/Rapid7 fingerprint.
 
 ### alert.json (trimmed)
 

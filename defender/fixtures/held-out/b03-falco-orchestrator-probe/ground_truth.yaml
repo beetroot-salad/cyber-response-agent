@@ -1,0 +1,7 @@
+held_out: true
+disposition: benign
+class_axes:
+  vendor: falco
+  rule_class: container-shell
+rationale: |
+  kube-probe is the orchestrator liveness-probe service account; shell-in-container fires every 30s at minute boundaries against this container set. Probe command is a documented healthcheck (sh -c 'curl -sf localhost:8080/health'). Cadence and user match established baseline.

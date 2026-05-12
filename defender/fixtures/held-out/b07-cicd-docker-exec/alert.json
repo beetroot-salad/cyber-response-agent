@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "name": "build-runner-04",
+    "ip": "10.40.0.4"
+  },
+  "data": {
+    "falco": {
+      "rule": "Terminal shell in container",
+      "priority": "Notice",
+      "output": "container exec pid=8821 user=ci-runner container=test-sandbox image=registry.local/sandbox:ci exe=/bin/bash cmd='-c npm test'"
+    }
+  },
+  "rule": {
+    "id": "100001",
+    "level": 5,
+    "description": "Falco: Terminal shell in container"
+  },
+  "predecoder": {
+    "program_name": "falco",
+    "timestamp": "May 08 02:15:00"
+  }
+}

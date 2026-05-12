@@ -1,0 +1,7 @@
+held_out: true
+disposition: benign
+class_axes:
+  vendor: wazuh
+  rule_class: listening-port-new
+rationale: |
+  Port 9100 is the documented node_exporter metrics port. apt log shows node-exporter package was installed 30 seconds prior by unattended config-management within the agreed change window. Process owner is the prometheus user.

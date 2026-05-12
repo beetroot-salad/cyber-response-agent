@@ -23,6 +23,8 @@ out; there is no CASB, SSE, or forward-proxy in production." This is the
 affirmative `not-deployed` signature the judge prompt names; the encounter is
 undecidable on instrumentation surface, not on lead-set quality.
 
+**Expected actor observation (gist):** Story's load-bearing exfil claim required per-tab outbound attribution from a CASB / SSE forward-proxy that the tenant affirmatively did not deploy (Netskope and Cloudflare CASB evaluated Q3 2025 and not rolled out).
+
 ### alert.json (trimmed)
 
 ```json
@@ -154,6 +156,8 @@ change, no `/bucket-policy` slash command was issued in the relevant
 channel, and the bot's own outbound log shows no STS:AssumeRole call in
 window. The change was driven by stolen long-lived credentials that
 impersonated the bot session.
+
+**Expected actor observation (gist):** Actor's SRE-via-ChatOps framing collapsed against the Slack audit and ChatOpsBot Lambda log both showing zero activity in the 4-hour window around the `PutBucketPolicy`, with kpark's deprecated access key driving the `STS:AssumeRole` instead.
 
 ### alert.json (trimmed)
 
@@ -290,6 +294,8 @@ which Git commit produced the chart artefact and whether the artefact
 signature chains to a trusted source — sits in a signed-provenance /
 GitOps PR-audit layer the available leads do not cover. Competent
 investigation; structural provenance gap.
+
+**Expected actor observation (gist):** Story's load-bearing claim about who authored the hot-fix commit and whether the image SBOM chains to trusted source sat in GitHub PR-audit + sigstore / SLSA-attestation layers that the K8s / ArgoCD / registry / GHA leads do not reach.
 
 ### alert.json (trimmed)
 

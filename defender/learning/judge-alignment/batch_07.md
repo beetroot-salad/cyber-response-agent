@@ -22,6 +22,8 @@ AES-capable accounts, and the requests spanned all four domain controllers
 in the forest within 90 seconds. None of those shapes fit a misconfigured
 application server.
 
+**Expected actor observation (gist):** Actor's "service-account SPN-cache refresh" framing fell to the all-RC4 downgrade from an AES-capable principal, fan-out across all four KDCs in 92 seconds, and SPN-content targeting Domain Admins + Tier-0 accounts svc-monitor has no operational relationship to.
+
 ### alert.json (trimmed)
 
 ```json
@@ -155,6 +157,8 @@ whether the signing identity's binary collection matches the corp-allowed
 set, and whether the CDN destination is the publisher's actual endpoint —
 sits in an MDM allowlist / threat-intel pivot the available leads do
 not cross-reference.
+
+**Expected actor observation (gist):** Story relied on cross-referencing the ByteWright LLC signing identity against an MDM-approved-app allowlist or compromised-Developer-ID threat-intel feed, neither of which the Jamf + macOS codesigning surface chains to.
 
 ### alert.json (trimmed)
 
@@ -292,6 +296,8 @@ refutes by surfacing a recent OAuth grant to a third-party app with
 create, alongside a refresh-token usage from a non-corporate IP at 03:52
 UTC that performed the rule create via MS Graph. The "user set it up
 themselves" story does not survive the token + IP join.
+
+**Expected actor observation (gist):** Actor's user-self-service-forward framing fell to the unverified-publisher OAuth consent grant at T-6min and the Graph-driven `New-InboxRule` token usage from `185.220.101.45` — a different IP than the user's `91.234.18.7` sign-in.
 
 ### alert.json (trimmed)
 

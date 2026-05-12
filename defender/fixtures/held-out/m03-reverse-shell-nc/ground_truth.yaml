@@ -1,0 +1,7 @@
+held_out: true
+disposition: malicious
+class_axes:
+  vendor: falco
+  rule_class: reverse-shell
+rationale: |
+  nc -e to external IP from inside a service container, off-hours, with no surrounding deploy/CI activity. Command shape is textbook interactive reverse-shell. External destination 198.51.100.66 is not in any documented allowlist.

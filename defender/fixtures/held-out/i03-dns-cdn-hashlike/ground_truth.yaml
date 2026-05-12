@@ -1,0 +1,7 @@
+held_out: true
+disposition: inconclusive
+class_axes:
+  vendor: bind
+  rule_class: dns-cdn-or-c2
+rationale: |
+  Hex-shaped 12-char subdomain under fastly.net resolving to a real Fastly edge IP. Fastly customer hostnames are sometimes hash-shaped for cache-busting; equally consistent with DNS tunneling through a CDN-fronted C2. No corroborating volume/entropy signal in surrounding traffic.

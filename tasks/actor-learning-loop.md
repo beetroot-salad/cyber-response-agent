@@ -24,22 +24,21 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
 
 ## Sequencing — one PR each
 
-- [ ] **Held-out fixture set + persist-stage filter.** 24–30 alerts with
-  ground-truth labels, ≥8 per disposition class (benign/malicious/
-  inconclusive).
-  Persist stage drops both `defender_findings` and `actor_observations`
-  from held-out runs before either `_pending/` queue is touched.
-  Unblocks primary-metric baseline against current defender.
-- [ ] **Actor-side judge calibration set.** ~30 rows. Humans label
-  **two things** on the judge's full input tuple
-  `(alert, investigation.md, actor story, projected_telemetry.yaml)`:
-  (a) outcome enum (`caught/survived/incoherent/undecidable`),
-  (b) expected-observation gist — one sentence on what the
-  load-bearing actor observation should be. **Acceptance criteria
-  for enabling actor learning**: outcome agreement ≥80%, observation
-  pertinence ≥70%, zero parse failures. Below either floor → judge
-  prompt iteration precedes rollout. Mirrors
-  `defender/learning/judge-alignment/`.
+- [x] **Held-out fixture set + persist-stage filter.** 24 alerts under
+  `defender/fixtures/held-out/{slug}/{alert.json,ground_truth.yaml}`,
+  8 per class. `defender/run.py` propagates the sidecar
+  `ground_truth.yaml` into the run dir; `defender/learning/loop.py`
+  `is_held_out()` gate short-circuits the persist stage before
+  `append_findings` is called. Baseline harness:
+  `defender/learning/eval_held_out.py`. Synthesis caveat (alerts are
+  bootstrap synthetic shapes) called out in the held-out README.
+- [x] **Actor-side judge calibration set.** Existing
+  `defender/learning/judge-alignment/` extended in place. Each of the
+  30 samples now carries an `Expected actor observation (gist)` line
+  alongside the existing expected outcome and findings. README adds
+  the acceptance criteria block: outcome agreement ≥80%, observation
+  pertinence ≥70%, zero parse failures; below either floor → judge
+  prompt iteration precedes actor-author rollout.
 - [ ] **`defender/lessons-actor/` corpus structure** — tradecraft +
   environment channels, schemas, seed lessons. No code yet.
 - [ ] **Actor.md edit — grep-after-Section-0 phase.** Validate retrieval

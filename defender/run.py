@@ -81,6 +81,12 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
         sys.exit(f"run dir already exists: {run_dir}")
     (run_dir / "gather_raw").mkdir(parents=True)
     shutil.copy(alert, run_dir / "alert.json")
+    # Propagate a sibling ground_truth.yaml into the run dir so the learning
+    # loop's persist stage can recognise held-out cases and suppress
+    # queue appends. Fixture layout: {fixture-dir}/{alert.json,ground_truth.yaml}.
+    gt = alert.parent / "ground_truth.yaml"
+    if gt.is_file():
+        shutil.copy(gt, run_dir / "ground_truth.yaml")
     return run_dir
 
 

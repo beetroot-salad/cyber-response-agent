@@ -1,0 +1,7 @@
+held_out: true
+disposition: benign
+class_axes:
+  vendor: wazuh
+  rule_class: ssh-monitoring-probe
+rationale: |
+  Source IP is the documented Nagios monitoring host; account 'nagios' is the configured check user but the target has no local nagios user (monitoring uses key-based ssh nagios@db-02 which fails on this host by design — the check tolerates failure). 5-minute cadence, single username, single source, single target. Matches monitoring baseline.

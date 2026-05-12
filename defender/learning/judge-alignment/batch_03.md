@@ -17,6 +17,8 @@ claimed user has a simultaneously active shell on the office IP, which a
 "moved homes, new ISP" story cannot accommodate. No single lead refutes; the
 join does.
 
+**Expected actor observation (gist):** Actor's "moved to Boston" framing could not absorb the simultaneously active office shell (`198.18.4.214`) with a keystroke 8 seconds after the new Boston session started, surfaced by the active-sessions lead.
+
 ### alert.json (trimmed)
 
 ```json
@@ -131,6 +133,8 @@ Story's load-bearing claim ("rare cadence, single-host beaconing process")
 sits squarely in the unobservable region. This is not a stupid defender — it
 is a saturated lead set against a structurally hidden process.
 
+**Expected actor observation (gist):** Story's load-bearing claim required per-process DNS attribution behind the local `dnsmasq` resolver, which the available host-side surface cannot reach — every breadth/timing/flow lead saturated without naming the beacon process.
+
 ### alert.json (trimmed)
 
 ```json
@@ -244,6 +248,8 @@ footprint. The single load-bearing refutation is that the container image
 running the workload does not include the claimed backup binary — the leads
 that match the cover are matching a *fabricated* footprint. Caught only
 because the defender ran an image-inventory lead.
+
+**Expected actor observation (gist):** Actor's scheduled-backup framing required `/opt/backup/run.sh` to live in the `internal/billing-worker:v3.1.2` image, but the registry SBOM showed no such path across three releases — the script was installed at runtime, not via the image.
 
 ### alert.json (trimmed)
 

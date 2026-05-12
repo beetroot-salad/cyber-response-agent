@@ -1,0 +1,7 @@
+held_out: true
+disposition: inconclusive
+class_axes:
+  vendor: wazuh
+  rule_class: ssh-single-failure
+rationale: |
+  Single 5710 from an internal /24 with no surrounding fires in 24h, no auth-success follow-up, no other rule activity on the target. Could be a typo'd `ssh deploy@app-01` from an engineer's terminal or a quiet probe. Telemetry does not discriminate.

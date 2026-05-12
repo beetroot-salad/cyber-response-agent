@@ -1,0 +1,7 @@
+held_out: true
+disposition: benign
+class_axes:
+  vendor: wazuh
+  rule_class: fim-system-file
+rationale: |
+  Endpoint host with NetworkManager-managed /etc/hosts; hostname entries refreshed at link-up (08:02 — post-boot DHCP). systemd-resolved journal shows the corresponding hostname-resolver refresh. 25-byte delta is consistent with adding the local hostname line.

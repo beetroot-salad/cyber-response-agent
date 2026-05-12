@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "name": "app-01",
+    "ip": "10.20.30.41"
+  },
+  "data": {
+    "path": "/opt/app/config.yml",
+    "mode": "realtime",
+    "uid_after": "0",
+    "size_before": 3204,
+    "size_after": 3208
+  },
+  "rule": {
+    "id": "550",
+    "level": 7,
+    "description": "Integrity checksum changed."
+  },
+  "predecoder": {
+    "program_name": "syscheck",
+    "timestamp": "May 15 23:01:45"
+  }
+}

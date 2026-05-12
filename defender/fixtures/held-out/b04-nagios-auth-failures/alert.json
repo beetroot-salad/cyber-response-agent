@@ -1,0 +1,20 @@
+{
+  "agent": {
+    "name": "db-02",
+    "ip": "10.20.30.52"
+  },
+  "data": {
+    "srcuser": "nagios",
+    "srcip": "10.20.30.9",
+    "srcport": "55102"
+  },
+  "rule": {
+    "id": "5710",
+    "level": 5,
+    "description": "sshd: Attempt to login using a non-existent user"
+  },
+  "predecoder": {
+    "program_name": "sshd",
+    "timestamp": "May 04 12:00:14"
+  }
+}

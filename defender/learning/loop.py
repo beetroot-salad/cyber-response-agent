@@ -63,6 +63,8 @@ PROJECT_SCRIPT = REPO_ROOT / "defender" / "scripts" / "project_lead_sequence.py"
 DISPOSITION_ENUM = {"benign", "inconclusive", "malicious"}
 DISPOSITION_RUN = {"benign", "inconclusive"}  # malicious skipped at MVP
 
+GROUND_TRUTH_FILE = "ground_truth.yaml"
+
 OUTCOME_ENUM = {"caught", "survived", "undecidable", "incoherent", "skip-passthrough"}
 QUEUEABLE_FINDING_TYPES = {
     "lead-set",
@@ -632,6 +634,29 @@ def _log(msg: str) -> None:
     print(f"[loop] {msg}", file=sys.stderr)
 
 
+def read_ground_truth(run_dir: Path) -> dict | None:
+    """Return parsed ground_truth.yaml if the run dir carries one, else None.
+
+    Held-out runs carry a ``ground_truth.yaml`` propagated from the fixture
+    by ``defender/run.py``. The persist stage uses this to suppress queue
+    appends — ``defender_findings`` and ``actor_observations`` from held-out
+    runs must never feed back into the learning corpora.
+    """
+    path = run_dir / GROUND_TRUTH_FILE
+    if not path.is_file():
+        return None
+    doc = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(doc, dict):
+        raise LoopError(f"{path}: expected a mapping at top level")
+    return doc
+
+
+def is_held_out(run_dir: Path) -> bool:
+    """True if this run dir's ground_truth.yaml declares ``held_out: true``."""
+    gt = read_ground_truth(run_dir)
+    return bool(gt and gt.get("held_out") is True)
+
+
 def run_one(run_dir: Path) -> int:
     run_id = run_dir.name
     _log(f"run_id={run_id} step=normalize")
@@ -722,6 +747,13 @@ def run_one(run_dir: Path) -> int:
         alert_rule_key,
         oracle_yaml_text=oracle_yaml_stripped,
     )
+
+    if is_held_out(run_dir):
+        _log(
+            "step=append held_out=true — defender_findings and "
+            "actor_observations suppressed from _pending/ queues"
+        )
+        return 0
 
     _log("step=append")
     n_appended = append_findings(judge_doc, run_id, alert_rule_key, learning_run_dir)

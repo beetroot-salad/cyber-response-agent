@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "name": "edge-bastion-01",
+    "ip": "10.10.0.5"
+  },
+  "data": {
+    "srcuser": "alice",
+    "srcip": "104.16.132.229",
+    "srcport": "61203",
+    "dstuser": "alice",
+    "auth_result": "success"
+  },
+  "rule": {
+    "id": "5715",
+    "level": 3,
+    "description": "sshd: authentication success."
+  },
+  "predecoder": {
+    "program_name": "sshd",
+    "timestamp": "May 17 15:45:00"
+  }
+}

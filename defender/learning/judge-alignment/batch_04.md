@@ -21,6 +21,8 @@ actually ran after the recorded `sudo -i` — sits in auditd / process-exec
 telemetry. Story survives across a competent investigation that lacks that
 execution-level view.
 
+**Expected actor observation (gist):** Story rests on the actual command stream inside jcho's post-sudo root shell — discriminating evidence in auditd / EDR / shell-history that the wazuh-only lead set (sudo, auth, FIM, rule-fires) never reached.
+
 ### alert.json (trimmed)
 
 ```json
@@ -148,6 +150,8 @@ host only, while a baseline lead shows the host is otherwise quiet on this
 parent. Single-host concentration is incompatible with shared SaaS adoption
 and is the load-bearing refutation.
 
+**Expected actor observation (gist):** Actor's managed-SaaS-SDK cover required fleet-wide presence of `telemetry-cloud.io`, but the 7-day parent-domain history and 30-day rule-fire scope confined all activity to `marketing-laptop-07` alone.
+
 ### alert.json (trimmed)
 
 ```json
@@ -266,6 +270,8 @@ recent-rule-fires lookup finds no package-manager-related rule fires in the
 concurrent rule-100001 (Falco shell-in-container) fire from the same host in
 the same minute. FIM-only or recent-rule-fires-only would not be decisive;
 the join is.
+
+**Expected actor observation (gist):** Actor's package-install framing fell to the absence of any apt/yum/dpkg rule fires plus the falco shell-in-container + network-redirect pair seconds before the `/etc/cron.d/system-cache` write.
 
 ### alert.json (trimmed)
 

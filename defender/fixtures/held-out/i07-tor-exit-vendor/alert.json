@@ -1,0 +1,27 @@
+{
+  "agent": {
+    "name": "build-runner-04",
+    "ip": "10.40.0.4"
+  },
+  "data": {
+    "srcip": "10.40.0.4",
+    "dstip": "199.249.230.103",
+    "dstport": "443",
+    "bytes_out": 1812,
+    "bytes_in": 22941,
+    "ti_overlap": {
+      "feed_tor_exit": true,
+      "vendor_update_host": true,
+      "vendor": "redhat-update-mirror"
+    }
+  },
+  "rule": {
+    "id": "87410",
+    "level": 7,
+    "description": "Outbound to dual-listed IP (TOR exit + vendor mirror)."
+  },
+  "predecoder": {
+    "program_name": "suricata",
+    "timestamp": "May 18 03:30:22"
+  }
+}

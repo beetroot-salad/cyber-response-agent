@@ -21,6 +21,8 @@ active, screen-unlocked session with keystrokes interleaved with the new
 sign-in's timestamp. The "VPN reroute" story has no place for a separate
 authenticating device.
 
+**Expected actor observation (gist):** Actor's VPN-reroute framing could not absorb the simultaneously active compliant-device Azure AD sign-in from `LAPTOP-RKAPOOR` with live CrowdStrike keystrokes, paired with the Lagos sign-in carrying `deviceId=null`.
+
 ### alert.json (trimmed)
 
 ```json
@@ -156,6 +158,8 @@ through the CI/IaC path while preserving the normal apply shape — is consisten
 with every observation. The load-bearing claim — *which Git commit, by which
 author, drove the apply* — sits in a Git/CI provenance chain the investigation
 does not cross-reference.
+
+**Expected actor observation (gist):** Story's load-bearing claim about who authored the Terraform driving the IAM change sat in a Git commit-author / PR-approval / signed-source-provenance chain that no CloudTrail / CodeBuild / Splunk / Config lead crossed.
 
 ### alert.json (trimmed)
 
@@ -293,6 +297,8 @@ outbound web request to a recently-registered domain, and email-security
 shows a .docm attachment opened two minutes earlier. The carrier-chain
 refutation is decisive: management tooling does not spawn from Outlook two
 minutes after a macro-enabled document opens.
+
+**Expected actor observation (gist):** Actor's "Microsoft management tooling using EncodedCommand" framing fell to the `outlook → winword → cmd → powershell` lineage tied to a `.docm` opened 2 minutes earlier and HTTPS to `financial-update.co.uk` registered 9 days prior.
 
 ### alert.json (trimmed)
 

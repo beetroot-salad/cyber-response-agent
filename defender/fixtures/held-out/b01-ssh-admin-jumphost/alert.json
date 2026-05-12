@@ -1,0 +1,21 @@
+{
+  "agent": {
+    "name": "app-01",
+    "ip": "10.20.30.41"
+  },
+  "data": {
+    "srcuser": "alice",
+    "srcip": "10.20.30.5",
+    "srcport": "44012",
+    "dstuser": "alice"
+  },
+  "rule": {
+    "id": "5715",
+    "level": 3,
+    "description": "sshd: authentication success."
+  },
+  "predecoder": {
+    "program_name": "sshd",
+    "timestamp": "Apr 22 09:14:02"
+  }
+}

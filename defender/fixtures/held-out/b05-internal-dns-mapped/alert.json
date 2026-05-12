@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "name": "web-01",
+    "ip": "10.20.30.71"
+  },
+  "data": {
+    "dns": {
+      "query": "ftp7x9.deploy.internal",
+      "rcode": "NOERROR",
+      "rdata": "10.20.31.14"
+    }
+  },
+  "rule": {
+    "id": "60106",
+    "level": 3,
+    "description": "DNS query observed."
+  },
+  "predecoder": {
+    "program_name": "named",
+    "timestamp": "May 06 11:22:08"
+  }
+}

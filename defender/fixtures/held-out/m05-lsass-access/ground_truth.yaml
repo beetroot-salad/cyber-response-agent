@@ -1,0 +1,7 @@
+held_out: true
+disposition: malicious
+class_axes:
+  vendor: sysmon
+  rule_class: lsass-access
+rationale: |
+  Non-system process named 'notepad.exe' from a user Downloads folder opening lsass.exe with 0x1010 (READ + VM_READ) — the classic Mimikatz credential-dump signature. notepad.exe has no legitimate need for lsass access; binary location is outside system32.

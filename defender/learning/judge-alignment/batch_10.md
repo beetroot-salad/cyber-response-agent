@@ -22,6 +22,8 @@ network lead (beacon-shaped TLS to a 7-day-old domain). The picture is built
 by chaining cheap leads, which is exactly the discipline the actor's
 "isolated rundll32 fire" framing tries to undercut.
 
+**Expected actor observation (gist):** Actor's isolated-rundll32-as-Office-COM framing fell to the chain of a Word-dropped non-Microsoft DLL into `%APPDATA%\OfficeUpdater\`, a same-window scheduled-task persistence entry, and Cobalt-Strike-JA3 TLS to `update-services.cloud` registered 7 days prior.
+
 ### alert.json (trimmed)
 
 ```json
@@ -148,6 +150,8 @@ existing destination. The story is *technically coherent* across every
 lead — a competent investigation with the right tools still cannot
 refute. The discriminator (volatile-memory acquisition + offline
 forensic analysis) sits outside the available surface.
+
+**Expected actor observation (gist):** Story's load-bearing claim required volatile-memory acquisition (LiME / AVML + Volatility) to detect the `memfd_create`-resident implant, which sits outside every disk-, syscall-, process-, kernel-module-, and flow-side audit lead available.
 
 ### alert.json (trimmed)
 
@@ -299,6 +303,8 @@ the load-bearing observations or requiring telemetry the alert already
 disconfirms. The actor emits SKIP with rationale. Per `judge.md`, the
 judge emits `outcome: skip-passthrough` + `outcome_rationale` (actor's
 rationale) + `defender_findings: []` and stops.
+
+**Expected actor observation (gist):** Actor emitted SKIP; no story was authored, citing the 60-day cadence stability, CMDB + Nagios runbook match on `mon-probe-01`, and absence of any rule-5715 success in the 60-day record as making every adversarial framing structurally untenable.
 
 ### alert.json (trimmed)
 
