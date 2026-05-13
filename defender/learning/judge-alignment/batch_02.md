@@ -17,6 +17,8 @@ shell tied to a Python reverse-shell payload, and the rule-fire scope found
 network redirection to an external IP on a non-standard port — refuting the
 developer-debug framing.
 
+**Expected actor observation (gist):** Actor's developer-SSH-debug framing collapsed once the Falco co-occurrence lead tied `bash -i` to a `gunicorn → python3` ancestry with a reverse-shell to `45.33.18.122:4444`.
+
 ### alert.json (trimmed)
 
 ```json
@@ -110,6 +112,8 @@ showed the same camouflaged service-account append the actor described. The
 oracle projects the same diff shape (one new user, root-owned write). No lead
 tested source attribution (config-management push vs operator shell vs
 adversary), so the story's load-bearing claim is untouched.
+
+**Expected actor observation (gist):** Actor's adversary-persistence story rested on source-of-change attribution (auditd / process-write) that no lead in this run supplied — the single syscheck diff cannot name the responsible process or account.
 
 ### alert.json (trimmed)
 
@@ -205,6 +209,8 @@ hosts, recognizable scanner UA). Defender's URL-pattern + UA leads showed a
 single targeted URL on a single host with a hand-crafted UA and exec-form
 parameters — refutes the scanner framing.
 
+**Expected actor observation (gist):** Actor's scheduled-vulnerability-scanner cover collapsed once the URL/host-breadth and 30-day UA-distribution leads showed a single targeted `/admin/upload.php` endpoint with a bare `Mozilla/5.0` UA and no Nessus/Qualys/Rapid7 fingerprint.
+
 ### alert.json (trimmed)
 
 ```json
@@ -285,11 +291,14 @@ authorized benign test rather than a manual RCE attempt.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on leads 0 + 1 (URL/host breadth). The oracle
-  projected scanner-typical breadth (multiple URLs, multiple hosts); actual
-  data confined all activity to a single URL on a single host. The breadth
-  pattern is the load-bearing discriminator between a scanner and a manual
-  operator.
+- **`detection-confirmed`** on lead 0 (URL breadth). The oracle projected
+  scanner-typical URL breadth across multiple admin endpoints; actual data
+  confined all activity to `/admin/upload.php`. The URL-breadth pattern is the
+  load-bearing discriminator between a scanner and a manual operator.
+- **`detection-confirmed`** on lead 1 (host/rule scope). The oracle projected
+  scanner-typical host breadth for the same admin-upload rule; actual data
+  confined all fires to a single host and URL. This independently corroborates
+  lead 0 while remaining anchorable to one lead in the judge schema.
 - **`detection-confirmed`** on lead 2 (UA distribution). Absence of any
   scanner-tool UA fingerprint over 30 days from the source refutes the
   "contracted scanner" framing as written — the actor projected recognizable

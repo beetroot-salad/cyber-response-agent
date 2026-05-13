@@ -1,0 +1,7 @@
+held_out: true
+disposition: benign
+class_axes:
+  vendor: bind
+  rule_class: dns-internal
+rationale: |
+  Query resolves inside *.deploy.internal — internal CI deploy domain where artifact bucket subdomains are intentionally random (`<artifact-id>.deploy.internal`). NOERROR with RFC1918 rdata. Last 24h shows 40+ similar queries from web-01 during deploys.

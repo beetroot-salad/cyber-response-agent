@@ -1,0 +1,20 @@
+{
+  "agent": {
+    "name": "app-01",
+    "ip": "10.20.30.41"
+  },
+  "data": {
+    "srcuser": "deploy",
+    "srcip": "10.20.30.55",
+    "srcport": "39144"
+  },
+  "rule": {
+    "id": "5710",
+    "level": 5,
+    "description": "sshd: Attempt to login using a non-existent user"
+  },
+  "predecoder": {
+    "program_name": "sshd",
+    "timestamp": "May 15 14:22:01"
+  }
+}

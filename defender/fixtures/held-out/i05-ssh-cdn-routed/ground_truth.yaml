@@ -1,0 +1,7 @@
+held_out: true
+disposition: inconclusive
+class_axes:
+  vendor: wazuh
+  rule_class: ssh-cdn-source
+rationale: |
+  Successful key-based SSH login as 'alice' from a Cloudflare edge IP. Alice's normal pattern is direct from corporate egress; key fingerprint matched her registered key. Plausible explanations: alice tunneling via a personal cloudflare-warp instance, or attacker proxying through Cloudflare with her stolen key. Without device-attestation evidence the alert does not discriminate.

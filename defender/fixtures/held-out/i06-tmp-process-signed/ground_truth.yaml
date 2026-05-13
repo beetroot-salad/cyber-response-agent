@@ -1,0 +1,7 @@
+held_out: true
+disposition: inconclusive
+class_axes:
+  vendor: auditd
+  rule_class: exec-tmp
+rationale: |
+  Process under /tmp is signed by a recognised vendor (Datadog) and was spawned by apt — looks like a legitimate installer that the vendor stages in /tmp. No vendor-installer ticket on file; /tmp-resident binaries are also a common adversary staging convention. The signed parent makes outright malicious unlikely but not impossible.

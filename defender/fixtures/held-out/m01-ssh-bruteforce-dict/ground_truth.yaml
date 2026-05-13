@@ -1,0 +1,7 @@
+held_out: true
+disposition: malicious
+class_axes:
+  vendor: wazuh
+  rule_class: ssh-credential-spray
+rationale: |
+  11 distinct service-account usernames against 3 targets at sub-second cadence from a single external source — classic credential spray pattern. Username dictionary spans OS service accounts (root, admin, oracle, postgres, www-data) not a single monitoring identity.

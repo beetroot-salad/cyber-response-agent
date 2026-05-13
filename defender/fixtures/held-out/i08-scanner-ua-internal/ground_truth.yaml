@@ -1,0 +1,7 @@
+held_out: true
+disposition: inconclusive
+class_axes:
+  vendor: modsecurity
+  rule_class: web-scanner
+rationale: |
+  Internal /24 source running Nikto against web-01. Subnet hosts both the security-team scanning jumpbox (sanctioned scans run weekly) and engineer laptops. No scan ticket open at the time, but ticket discipline is uneven. Could be either authorised baseline scan or an internal compromise enumerating webroots.

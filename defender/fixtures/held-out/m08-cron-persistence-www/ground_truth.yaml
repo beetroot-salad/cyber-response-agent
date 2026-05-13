@@ -1,0 +1,7 @@
+held_out: true
+disposition: malicious
+class_axes:
+  vendor: wazuh
+  rule_class: fim-cron-persistence
+rationale: |
+  New crontab entry for www-data scheduling /tmp/.x.sh every minute. Web service account should not own a crontab; /tmp executable with leading dot is hidden-file convention used by malware droppers. Pattern fires the classic web-compromise → persistence-via-cron chain.

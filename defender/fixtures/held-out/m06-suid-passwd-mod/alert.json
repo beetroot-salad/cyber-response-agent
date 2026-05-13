@@ -1,0 +1,23 @@
+{
+  "agent": {
+    "name": "app-01",
+    "ip": "10.20.30.41"
+  },
+  "data": {
+    "path": "/usr/bin/passwd",
+    "mode": "realtime",
+    "uid_after": "1001",
+    "perm_after": "rwsr-xr-x",
+    "size_before": 68208,
+    "size_after": 71304
+  },
+  "rule": {
+    "id": "554",
+    "level": 12,
+    "description": "Integrity: SUID binary modified by non-root user."
+  },
+  "predecoder": {
+    "program_name": "syscheck",
+    "timestamp": "May 13 02:18:04"
+  }
+}

@@ -1,0 +1,7 @@
+held_out: true
+disposition: benign
+class_axes:
+  vendor: falco
+  rule_class: container-shell
+rationale: |
+  ci-runner is the GitLab CI service account; build-runner-04 is a registered runner host. Container image (sandbox:ci) and command (`bash -c 'npm test'`) match the documented CI pipeline. Pipeline run ID corresponds to a green job in the CI audit log.

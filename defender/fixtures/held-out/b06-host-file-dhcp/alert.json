@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "name": "laptop-eng-22",
+    "ip": "10.30.0.118"
+  },
+  "data": {
+    "path": "/etc/hosts",
+    "mode": "realtime",
+    "uid_after": "0",
+    "size_before": 412,
+    "size_after": 437
+  },
+  "rule": {
+    "id": "550",
+    "level": 7,
+    "description": "Integrity checksum changed."
+  },
+  "predecoder": {
+    "program_name": "syscheck",
+    "timestamp": "May 07 08:02:11"
+  }
+}

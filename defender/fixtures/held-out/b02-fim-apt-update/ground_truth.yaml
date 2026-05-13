@@ -1,0 +1,7 @@
+held_out: true
+disposition: benign
+class_axes:
+  vendor: wazuh
+  rule_class: fim-package-update
+rationale: |
+  FIM change on python3.11 falls inside the host's documented apt auto-upgrade window (03:00-04:00 UTC). dpkg log on the host shows python3.11 was upgraded by unattended-upgrades 12s prior. Modifier is root via dpkg. Package-managed file under normal admin cadence.

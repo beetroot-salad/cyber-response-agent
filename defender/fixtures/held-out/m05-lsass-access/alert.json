@@ -1,0 +1,28 @@
+{
+  "agent": {
+    "name": "win-finance-04",
+    "ip": "10.50.0.118"
+  },
+  "data": {
+    "win": {
+      "system": {
+        "providerName": "Microsoft-Windows-Sysmon",
+        "eventID": "10"
+      },
+      "eventdata": {
+        "sourceImage": "C:\\Users\\jsmith\\Downloads\\notepad.exe",
+        "targetImage": "C:\\Windows\\System32\\lsass.exe",
+        "grantedAccess": "0x1010"
+      }
+    }
+  },
+  "rule": {
+    "id": "61615",
+    "level": 12,
+    "description": "Sysmon: Process accessed LSASS with read+vm rights."
+  },
+  "predecoder": {
+    "program_name": "sysmon",
+    "timestamp": "May 12 16:01:18"
+  }
+}

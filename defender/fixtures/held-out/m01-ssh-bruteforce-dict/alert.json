@@ -1,0 +1,37 @@
+{
+  "agent": {
+    "name": "target-endpoint",
+    "ip": "172.22.0.13"
+  },
+  "data": {
+    "srcuser": "root",
+    "srcip": "203.0.113.42",
+    "srcport": "55102"
+  },
+  "rule": {
+    "id": "5710",
+    "level": 5,
+    "description": "sshd: Attempt to login using a non-existent user"
+  },
+  "predecoder": {
+    "program_name": "sshd",
+    "timestamp": "May 10 03:12:14"
+  },
+  "_context": {
+    "24h_srcusers_from_srcip": [
+      "root",
+      "admin",
+      "oracle",
+      "postgres",
+      "ubuntu",
+      "test",
+      "git",
+      "jenkins",
+      "deploy",
+      "www-data",
+      "centos"
+    ],
+    "24h_target_count": 3,
+    "inter_arrival_ms": 220
+  }
+}

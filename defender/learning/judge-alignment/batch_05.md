@@ -21,6 +21,8 @@ active, screen-unlocked session with keystrokes interleaved with the new
 sign-in's timestamp. The "VPN reroute" story has no place for a separate
 authenticating device.
 
+**Expected actor observation (gist):** Actor's VPN-reroute framing could not absorb the simultaneously active compliant-device Azure AD sign-in from `LAPTOP-RKAPOOR` with live CrowdStrike keystrokes, paired with the Lagos sign-in carrying `deviceId=null`.
+
 ### alert.json (trimmed)
 
 ```json
@@ -119,7 +121,8 @@ Impossible-travel rules over-trigger on legitimate proxy reroutes.
     # not project a concurrent compliant-device session
     - {sign-in: {srcip: 41.218.84.6, mfa: approved, deviceId: null}}
 - lead_position: 3
-  events: []   # story has no expectation about LAPTOP-RKAPOOR
+  events:
+    - {host: LAPTOP-RKAPOOR, active_user_input: false, note: "no separate active SF laptop session projected"}
 - lead_position: 4
   events:
     - {device: LAPTOP-RKAPOOR, compliant: true}
@@ -128,13 +131,17 @@ Impossible-travel rules over-trigger on legitimate proxy reroutes.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on lead 2 + lead 3 joined (Azure AD sign-in log
-  + CrowdStrike host events). The load-bearing refutation is the
-  *simultaneously active compliant-device sign-in with live keystroke
-  activity at the alert moment*, paired with the new sign-in carrying
-  `deviceId=null`. The VPN-reroute story projects one sign-in; the surface
-  carries two from incompatible postures. Without crossing identity-side
-  (Azure AD) and endpoint-side (CrowdStrike) telemetry, the story holds.
+- **`detection-confirmed`** on lead 2 (Azure AD sign-in log). The
+  load-bearing identity-side refutation is two active interactive sign-ins at
+  the alert moment: the established compliant-device session from
+  `LAPTOP-RKAPOOR` and the Lagos session carrying `deviceId=null`. The
+  VPN-reroute story projects one sign-in; the surface carries two from
+  incompatible postures.
+- **`detection-confirmed`** on lead 3 (CrowdStrike host events). The endpoint
+  lead proves the compliant-device session was not stale: `LAPTOP-RKAPOOR` was
+  online, screen-unlocked, and receiving keystrokes around the alert. That
+  turns the Azure AD concurrency into a user-presence contradiction rather than
+  just an old token refresh.
 - **`detection-confirmed`** on lead 4 (Intune device inventory). The
   registered-device list closes the managed-device variant of the "third
   device" loophole — Intune carries only the SF laptop + managed iPhone, so
@@ -156,6 +163,8 @@ through the CI/IaC path while preserving the normal apply shape — is consisten
 with every observation. The load-bearing claim — *which Git commit, by which
 author, drove the apply* — sits in a Git/CI provenance chain the investigation
 does not cross-reference.
+
+**Expected actor observation (gist):** Story's load-bearing claim about who authored the Terraform driving the IAM change sat in a Git commit-author / PR-approval / signed-source-provenance chain that no CloudTrail / CodeBuild / Splunk / Config lead crossed.
 
 ### alert.json (trimmed)
 
@@ -294,6 +303,8 @@ shows a .docm attachment opened two minutes earlier. The carrier-chain
 refutation is decisive: management tooling does not spawn from Outlook two
 minutes after a macro-enabled document opens.
 
+**Expected actor observation (gist):** Actor's "Microsoft management tooling using EncodedCommand" framing fell to the `outlook → winword → cmd → powershell` lineage tied to a `.docm` opened 2 minutes earlier and HTTPS to `financial-update.co.uk` registered 9 days prior.
+
 ### alert.json (trimmed)
 
 ```json
@@ -392,20 +403,20 @@ workflow is not uncommon for finance staff.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on leads 0 + 2 joined (DeviceProcessEvents +
-  email_security). The Outlook → Word → cmd → powershell lineage paired
-  with the .docm attachment opened 2 minutes earlier (matching hash, lure-
-  shaped filename, sender domain registered 14d ago) is the load-bearing
-  carrier-chain refutation. Management tooling lineage runs from svchost /
-  MSI / scheduler; an Outlook ancestor 2 minutes after macro-enabled
-  attachment open is the canonical phishing-with-template-injection
-  carrier.
+- **`detection-confirmed`** on lead 0 (DeviceProcessEvents). The
+  Outlook → Word → cmd → powershell lineage refutes the management-tooling
+  projection, which expected svchost / MSI / scheduler ancestry. The decoded
+  downloader and follow-on rundll32 child make the alerting process an
+  interactive Office-carried execution chain, not enterprise management
+  automation.
+- **`detection-confirmed`** on lead 2 (email_security). The inbound
+  macro-enabled invoice attachment, matching the file Word opened, supplies
+  the carrier the actor story projected absent. The lure-shaped filename,
+  SPF/DKIM failures, and recently registered sender domain corroborate the
+  phishing-with-template-injection path while remaining anchorable to the
+  email lead.
 - **`detection-confirmed`** on lead 3 (network egress). The HTTPS
   destination is a 9-day-old domain with no prior tenant contact and a
   follow-on 2.4MB stream — incompatible with the actor's "vendor CDN with
   established history" framing. Cross-tenant first-contact is a robust
   invariant under reasonable cover variants.
-- **`detection-confirmed`** on lead 4 (Intune app inventory). The affirmative
-  absence of any EncodedCommand-using management agent directly refutes the
-  actor's "management tooling" framing and rules out the benign mechanism the
-  story depends on.

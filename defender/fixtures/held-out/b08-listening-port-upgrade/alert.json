@@ -1,0 +1,21 @@
+{
+  "agent": {
+    "name": "db-02",
+    "ip": "10.20.30.52"
+  },
+  "data": {
+    "process": "node_exporter",
+    "pid": 14411,
+    "listening_port": "9100",
+    "package_log": "node-exporter installed 30s prior via apt"
+  },
+  "rule": {
+    "id": "533",
+    "level": 7,
+    "description": "Listened ports status (netstat) changed (new port opened)."
+  },
+  "predecoder": {
+    "program_name": "ossec",
+    "timestamp": "May 09 04:30:42"
+  }
+}

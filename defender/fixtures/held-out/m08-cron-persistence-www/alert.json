@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "name": "web-01",
+    "ip": "10.20.30.71"
+  },
+  "data": {
+    "path": "/var/spool/cron/crontabs/www-data",
+    "mode": "realtime",
+    "uid_after": "33",
+    "size_after": 88,
+    "snippet": "* * * * * /tmp/.x.sh >/dev/null 2>&1"
+  },
+  "rule": {
+    "id": "551",
+    "level": 12,
+    "description": "Integrity: cron file added/modified."
+  },
+  "predecoder": {
+    "program_name": "syscheck",
+    "timestamp": "May 14 04:30:00"
+  }
+}

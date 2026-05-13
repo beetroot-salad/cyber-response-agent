@@ -1,0 +1,7 @@
+held_out: true
+disposition: malicious
+class_axes:
+  vendor: wazuh
+  rule_class: fim-suid-tamper
+rationale: |
+  Package-managed SUID binary /usr/bin/passwd modified by uid 1001 (non-root, non-package-manager) at 02:18 UTC with no apt/dpkg activity in the surrounding 24h. Size delta of +3096 bytes. Classic SUID-binary persistence / backdoor pattern.

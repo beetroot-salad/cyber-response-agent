@@ -1,0 +1,24 @@
+{
+  "agent": {
+    "name": "web-01",
+    "ip": "10.20.30.71"
+  },
+  "data": {
+    "http": {
+      "src_ip": "10.20.30.180",
+      "method": "GET",
+      "uri": "/.git/config",
+      "user_agent": "Nikto/2.1.6",
+      "status": 404
+    }
+  },
+  "rule": {
+    "id": "31108",
+    "level": 6,
+    "description": "Web log: known scanner User-Agent."
+  },
+  "predecoder": {
+    "program_name": "modsecurity",
+    "timestamp": "May 18 13:10:55"
+  }
+}

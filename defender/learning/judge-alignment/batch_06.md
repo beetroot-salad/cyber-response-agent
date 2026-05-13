@@ -23,6 +23,8 @@ out; there is no CASB, SSE, or forward-proxy in production." This is the
 affirmative `not-deployed` signature the judge prompt names; the encounter is
 undecidable on instrumentation surface, not on lead-set quality.
 
+**Expected actor observation (gist):** Story's load-bearing exfil claim required per-tab outbound attribution from a CASB / SSE forward-proxy that the tenant affirmatively did not deploy (Netskope and Cloudflare CASB evaluated Q3 2025 and not rolled out).
+
 ### alert.json (trimmed)
 
 ```json
@@ -155,6 +157,8 @@ channel, and the bot's own outbound log shows no STS:AssumeRole call in
 window. The change was driven by stolen long-lived credentials that
 impersonated the bot session.
 
+**Expected actor observation (gist):** Actor's SRE-via-ChatOps framing collapsed against the Slack audit and ChatOpsBot Lambda log both showing zero activity in the 4-hour window around the `PutBucketPolicy`, with kpark's deprecated access key driving the `STS:AssumeRole` instead.
+
 ### alert.json (trimmed)
 
 ```json
@@ -261,13 +265,16 @@ the bot's own audit log to refute the framing.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on leads 2 + 3 joined (Slack audit + bot's own
-  action log). The load-bearing refutation is the *affirmative absence*
-  of the Slack command and the *affirmative absence* of any bot Lambda
-  invocation in window. CloudTrail can only show that the role was used;
-  the bot's own log shows that the bot did not use it. Cross-tool joins
-  into the orchestrator's own audit are the durable defence against
-  "role-impersonation" framings.
+- **`detection-confirmed`** on lead 2 (Slack audit). The projected ChatOps
+  path requires a Slack command from kpark or another SRE, but the channel
+  audit shows zero SRE messages and no `/bucket` slash-command invocations in
+  the four-hour window. That directly refutes the human-command side of the
+  ChatOps framing.
+- **`detection-confirmed`** on lead 3 (ChatOpsBot action audit). The bot's own
+  log shows zero actions and no STS:AssumeRole invocation in the same window,
+  where the story projected a bot action chained to the Slack command.
+  CloudTrail can show the role was used; the bot audit shows the bot did not
+  use it.
 - **`detection-confirmed`** on lead 4 (kpark's access-key activity).
   Long-lived deprecated access key + MFA-not-enforced role assumption is the
   canonical stolen-credential signature. Together with the absent Slack/bot
@@ -290,6 +297,8 @@ which Git commit produced the chart artefact and whether the artefact
 signature chains to a trusted source — sits in a signed-provenance /
 GitOps PR-audit layer the available leads do not cover. Competent
 investigation; structural provenance gap.
+
+**Expected actor observation (gist):** Story's load-bearing claim about who authored the hot-fix commit and whether the image artifact/provenance chains to trusted source sat in GitHub PR-audit + sigstore / SLSA-attestation layers that the K8s / ArgoCD / registry / GHA leads do not reach.
 
 ### alert.json (trimmed)
 
@@ -415,10 +424,10 @@ surface.
   branch-protection audit + sigstore / SLSA-attestation ingestion, not more
   K8s telemetry.
 - **`lead-quality`** on lead 0 (K8s audit). The PolicyBinding
-  `payments-elevated` permitted hostPID for the `card-service-hotfix`
-  deployment-name pattern, which is a wildcard wide enough to admit any
-  pod whose name begins with that prefix. The audit log returned the
-  admission decision without flagging that the exception is broad.
-  Surface as a discipline note — policy-binding exceptions deserve width
-  audit when the alerting signature is the very behaviour the exception
+  `payments-elevated` permitted hostPID for `card-service` and
+  `card-service-hotfix` deployments, and the alerting pod used that exception
+  to land the privileged shape. The audit log returned the admission decision
+  without evaluating whether the documented exception was still appropriately
+  narrow. Surface as a discipline note — policy-binding exceptions deserve
+  width audit when the alerting signature is the very behaviour the exception
   permits.

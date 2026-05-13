@@ -1,0 +1,7 @@
+held_out: true
+disposition: malicious
+class_axes:
+  vendor: bind
+  rule_class: dns-dga
+rationale: |
+  217 NXDOMAIN queries in 1h, all 12-char [a-z0-9] subdomains across .click/.top/.xyz, high Shannon entropy (3.71), no resolved answers. Behavioural fingerprint of DGA-based C2 callback rotation.

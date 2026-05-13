@@ -1,0 +1,7 @@
+held_out: true
+disposition: benign
+class_axes:
+  vendor: wazuh
+  rule_class: ssh-auth-success
+rationale: |
+  Source 10.20.30.5 is the corporate bastion (RFC1918, /28 jumphost subnet). Username alice has prior 7-day auth-success history from this source. Single event, daytime business hours, no surrounding anomalies. Expected admin SSH access pattern.

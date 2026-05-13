@@ -12,8 +12,10 @@ the judge prompt drifts on easy cases.
 **Expected outcome:** `caught`
 
 **Rationale:** Actor claims a single-username monitoring probe; oracle projects
-nagios-only failures; defender lead actually returned 11 distinct dictionary
-usernames against multiple targets. Direct refutation.
+nagios-only failures; defender leads actually returned 11 distinct dictionary
+usernames plus the same dictionary against multiple targets. Direct refutation.
+
+**Expected actor observation (gist):** Actor's single-username Nagios monitoring-probe framing crumbled once lead 0 surfaced an 11-username dictionary spanning OS service accounts (root, admin, oracle, postgres, …) and lead 1 showed the same dictionary swept across three hosts.
 
 **Expected findings:**
 
@@ -104,6 +106,8 @@ triggering query. Actor's slow-beacon story projects exactly that — one query
 per 24h. No lead in the run touches the story's load-bearing claim (any other
 beacon channels, process attribution). Projection matches actual.
 
+**Expected actor observation (gist):** Actor's slow-beacon C2 story relied on the parent domain `beacon.example.org` never being enumerated for sibling high-entropy subdomains; the defender's domain-exact lookup tested only the alert's own subdomain.
+
 **Expected findings:**
 
 - **`lead-set`** gap: no lead used `wazuh.dns-query-history` to enumerate
@@ -183,6 +187,8 @@ and the alert's `srcuser` is `fakeadmin`. The actor explicitly treats that
 focal alert as the successful root SSH login. The contradiction is present on
 the alert surface before considering any lead result, so lead coverage is
 irrelevant.
+
+**Expected actor observation (gist):** Story read a rule-5710 invalid-user failure (`srcuser: fakeadmin`) as the attacker's successful root SSH login, contradicting the alert's failure-class signature directly.
 
 **Expected findings:** `defender_findings: []` (per judge.md, incoherent → empty
 list). Surface the alert/story contradiction in `actor_observations` instead:

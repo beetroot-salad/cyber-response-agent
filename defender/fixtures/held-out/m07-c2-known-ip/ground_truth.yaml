@@ -1,0 +1,7 @@
+held_out: true
+disposition: malicious
+class_axes:
+  vendor: suricata
+  rule_class: c2-ti
+rationale: |
+  Outbound connection from a backend host to an IP flagged on the abuse.ch-c2 feed (cobaltstrike tagged, first-seen 2 weeks ago). Host has no documented internet egress role. 18KB out / 0.9KB in / 41s duration matches beacon-with-staged-task profile.

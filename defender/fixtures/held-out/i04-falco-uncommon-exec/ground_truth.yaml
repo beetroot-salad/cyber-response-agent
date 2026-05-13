@@ -1,0 +1,7 @@
+held_out: true
+disposition: inconclusive
+class_axes:
+  vendor: falco
+  rule_class: container-shell
+rationale: |
+  User svc-debug exists in the cluster but appears rarely (3 hits in 90d). Command line was truncated at the falco buffer boundary so intent cannot be reconstructed. No follow-on egress or filesystem writes. Could be authorised on-call debugging or hand-off from an early compromise step.

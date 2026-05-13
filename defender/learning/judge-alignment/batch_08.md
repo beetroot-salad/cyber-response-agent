@@ -12,16 +12,16 @@ passthrough come in later batches.
 **Expected outcome:** `caught`
 
 **Rationale:** Actor frames an OIDC-federated AWS access from a GitHub
-Actions runner as a normal CI deploy. CloudTrail + GHA workflow leads
-corroborate: the workflow ran, the OIDC trust policy allowed it, the
-assumed-role activity matches a deploy shape. Refutation is the join of
-the OIDC token's actual `sub` claim against the trust policy: the trust
-policy restricts to `repo:example/api:ref:refs/heads/main`, but the
-issued token's `sub` carries `repo:example/api:pull_request` — a PR-from-
-fork run that should not have produced a session at all. AWS issued the
-session because the trust policy was written with a permissive
-`StringLike` wildcard. Caught only by reading the federated identity's
-claim trail, not by CloudTrail's `AssumedRole` summary alone.
+Actions runner as a normal CI deploy. The assumed-role activity matches a
+deploy shape, but the claim-bearing leads refute the framing: CloudTrail shows
+the OIDC token's `sub` claim was `repo:example/api:pull_request`, and the GHA
+run came from `attacker-fork/api`. The trust policy's documented intent was
+`repo:example/api:ref:refs/heads/main`; AWS issued the session only because
+the policy used a permissive `StringLike` wildcard. Caught by reading the
+federated identity's claim trail, not by CloudTrail's `AssumedRole` summary
+alone.
+
+**Expected actor observation (gist):** Actor's main-branch-deploy framing fell to the OIDC token's `sub=repo:example/api:pull_request` claim and the GHA run's `head_repo=attacker-fork/api`, both contradicting the trust policy's documented main-only intent.
 
 ### alert.json (trimmed)
 
@@ -123,14 +123,15 @@ rather than `ref:refs/heads/main`.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on lead 0 (CloudTrail `sub` claim) + lead 1
-  (workflow event/ref). The load-bearing refutation is the federated
-  identity's `sub` claim being `repo:example/api:pull_request` while the
-  workflow ran from `attacker-fork/api` head_repo. The actor's story
-  projects a `main` ref deploy; the federated identity carries a
-  fork-PR identity. CloudTrail's `userIdentity.webIdFederationData`
-  is the load-bearing field — surface this so future detections key on
-  the sub claim, not the role.
+- **`detection-confirmed`** on lead 0 (CloudTrail `sub` claim). The
+  federated identity's `sub` claim is `repo:example/api:pull_request`, where
+  the actor's story projected a `main` ref deploy. CloudTrail's
+  `userIdentity.webIdFederationData` is the load-bearing field — surface this
+  so future detections key on the sub claim, not just the role.
+- **`detection-confirmed`** on lead 1 (workflow event/ref). The workflow run
+  was `event=pull_request` from `head_repo=attacker-fork/api`, not a push to
+  main. That independently refutes the main-branch-deploy framing and explains
+  how the wrong OIDC subject was minted.
 - **`detection-confirmed`** on lead 2 (trust-policy condition).
   `StringLike "repo:example/api:*"` is a misconfiguration class, not
   an event — but a lead that reads the trust policy and flags
@@ -156,6 +157,8 @@ window) is consistent with every lead. The discriminating evidence —
 whether the `Enterprise Admins` add was authorised in the change-
 management system — sits in a ServiceNow + privileged-access-management
 join the available leads do not cross-reference.
+
+**Expected actor observation (gist):** Story's load-bearing claim required verifying the GPMC-referenced ticket `SVR-12477` against ServiceNow change-management and the PAM session recording on JUMP-PAM-02, neither of which the AD / Splunk surface chains to.
 
 ### alert.json (trimmed)
 
@@ -292,6 +295,8 @@ successful job on the host in 18 days (story implies recent backups),
 and the source workstation that drove the WMI call is the same one
 that hosted a Cobalt-Strike-shaped beacon two hours earlier per CrowdStrike.
 
+**Expected actor observation (gist):** Actor's Veeam backup-retention framing fell to the vssadmin parent being `wmiprvse` driven by remote DCOM from `FIN-DESKTOP-014` (hosting a Cobalt-Strike-shaped beacon), plus documented Veeam behaviour that uses VSS-provider APIs rather than `vssadmin delete`.
+
 ### alert.json (trimmed)
 
 ```json
@@ -393,25 +398,17 @@ air.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on lead 0 + lead 1 joined (parent-process
-  + carrier workstation). The vssadmin parent being `wmiprvse.exe`
-  driven by a *remote* DCOM session from `FIN-DESKTOP-014` is the
-  load-bearing carrier-chain refutation. The actor's story projects
-  a local scheduled-task or local-provider carrier; the actual carrier is a
-  remote-WMI call from a workstation that itself hosts a Cobalt-Strike-shaped
-  beacon. Surface that pivoting to the *source* of the remote WMI
-  is the highest-leverage move for any cross-host
-  living-off-the-land alert.
-- **`detection-confirmed`** on lead 2 + lead 3 joined (backup-vault
-  state + tool documentation). Affirmative ruleout of the backup-
-  retention framing through documentation of the deployed tool's
-  actual behaviour and the affirmative *absence* of recent
-  successful backups. Documentation-based affirmative ruleouts are
-  small but high-leverage; the encounter rewards an investigation
-  that reads vendor documentation as a structured field, not
-  freeform analyst recall.
-- **`detection-confirmed`** on lead 4 (peer workstation outbound).
-  The source workstation's beacon-shaped TLS to a newly registered
-  VPS independently confirms the remote-WMI carrier and names the
-  host that needs containment. This is not just enrichment; it
-  closes the cross-host execution chain.
+- **`detection-confirmed`** on lead 0 (parent process). The vssadmin parent is
+  `wmiprvse.exe` driven by a *remote* DCOM session from `FIN-DESKTOP-014`.
+  The actor's story projected a local scheduled-task or local-provider
+  carrier; the actual carrier is remote WMI.
+- **`detection-confirmed`** on lead 1 (carrier workstation). Pivoting to the
+  remote-WMI source shows `FIN-DESKTOP-014` running the command through a
+  hollowed rundll32 chain with Cobalt-Strike-shaped beaconing. This names the
+  carrier host and turns a suspicious local command into a cross-host
+  ransomware-precursor chain.
+- **`detection-confirmed`** on lead 3 (Veeam documentation). The deployed
+  backup tool's documented behaviour refutes the mechanism: Veeam v12 uses
+  VSS provider APIs and does not invoke `vssadmin.exe delete shadows`. The
+  vault state in lead 2 corroborates this by showing no recent successful
+  backup, but the documentation is the mechanism-level ruleout.
