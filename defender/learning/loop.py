@@ -74,9 +74,13 @@ QUEUEABLE_FINDING_TYPES = {
 }
 ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"detection-confirmed"}
 
-CLAUDE_MODEL = os.environ.get("LEARNING_CLAUDE_MODEL", "claude-sonnet-4-6")
-ORACLE_MODEL = os.environ.get("LEARNING_ORACLE_MODEL", "claude-haiku-4-5")
+ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
+ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-haiku-4-5")
+JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "300"))
+
+ACTOR_SETTINGS = LEARNING_DIR / "actor-settings.json"
+LESSONS_ACTOR_DIR = REPO_ROOT / "defender" / "lessons-actor"
 
 
 # ---------------------------------------------------------------------------
@@ -155,24 +159,46 @@ def project_actor_input(run_dir: Path, actor_out: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_claude(system_prompt_path: Path, user_prompt: str, model: str = CLAUDE_MODEL) -> str:
-    """One-shot ``claude -p`` call. Returns stdout."""
+def _run_claude(
+    system_prompt_path: Path,
+    user_prompt: str,
+    model: str,
+    *,
+    settings_path: Path | None = None,
+    add_dir: Path | None = None,
+    permission_mode: str | None = None,
+    session_id: str | None = None,
+) -> str:
+    """One-shot ``claude -p`` call. Returns stdout.
+
+    Optional kwargs scope the agent's tool surface (settings file +
+    add-dir + permission-mode) and pin the session id so the caller
+    can locate the persistent transcript at
+    ``~/.claude/projects/-{cwd}/{session_id}.jsonl`` after the call
+    returns. The whole subprocess is bounded by ``SUBAGENT_TIMEOUT``.
+    """
     cmd = [
         "claude",
         "-p",
-        "--model",
-        model,
-        "--output-format",
-        "text",
-        "--system-prompt-file",
-        str(system_prompt_path),
+        "--model", model,
+        "--output-format", "text",
+        "--system-prompt-file", str(system_prompt_path),
     ]
+    if settings_path is not None:
+        cmd += ["--settings", str(settings_path)]
+    if add_dir is not None:
+        cmd += ["--add-dir", str(add_dir)]
+    if permission_mode is not None:
+        cmd += ["--permission-mode", permission_mode]
+    if session_id is not None:
+        cmd += ["--session-id", session_id]
     proc = subprocess.run(
         cmd,
         input=user_prompt,
         capture_output=True,
         text=True,
         timeout=SUBAGENT_TIMEOUT,
+        cwd=str(REPO_ROOT),
     )
     if proc.returncode != 0:
         raise LoopError(
@@ -180,6 +206,17 @@ def _run_claude(system_prompt_path: Path, user_prompt: str, model: str = CLAUDE_
             f"stderr: {proc.stderr[-2000:]}"
         )
     return proc.stdout
+
+
+def _transcript_path(session_id: str) -> Path:
+    """Persistent transcript path Claude Code writes for ``--session-id``.
+
+    Path = ``~/.claude/projects/{sanitized-cwd}/{session_id}.jsonl``
+    where sanitization is ``cwd.replace('/', '-')`` (leading ``/`` →
+    leading ``-`` since the path starts with a slash).
+    """
+    cwd_slug = str(REPO_ROOT).replace("/", "-")
+    return Path.home() / ".claude" / "projects" / cwd_slug / f"{session_id}.jsonl"
 
 
 def _actor_seed(run_id: str) -> int:
@@ -215,7 +252,24 @@ def invoke_actor(
         f"{menu_text}\n"
         "</mitre_menu>\n"
     )
-    return _run_claude(ACTOR_PROMPT, user)
+    import uuid as _uuid
+    session_id = str(_uuid.uuid4())
+    story = _run_claude(
+        ACTOR_PROMPT,
+        user,
+        model=ACTOR_MODEL,
+        settings_path=ACTOR_SETTINGS,
+        add_dir=LESSONS_ACTOR_DIR,
+        permission_mode="acceptEdits",
+        session_id=session_id,
+    )
+    src = _transcript_path(session_id)
+    dst = learning_run_dir / "actor_trace.jsonl"
+    if src.is_file():
+        shutil.copy2(src, dst)
+    else:
+        _log(f"actor transcript not found at {src}; skipping actor_trace.jsonl")
+    return story
 
 
 _RAW_SAMPLE_HEADER_RE = re.compile(r"^### Raw Sample Events\b.*$", re.MULTILINE)
@@ -355,7 +409,7 @@ def invoke_judge(
         f"{projected_telemetry_path.read_text().rstrip()}\n"
         "</projected_telemetry>\n"
     )
-    return _run_claude(JUDGE_PROMPT, user)
+    return _run_claude(JUDGE_PROMPT, user, model=JUDGE_MODEL)
 
 
 def is_skip_story(actor_story: str) -> bool:
@@ -805,11 +859,13 @@ Outputs:
     the lessons curator (author.py) is invoked automatically.
 
 Environment:
-  LEARNING_CLAUDE_MODEL          claude model for actor + judge subagents
+  ACTOR_MODEL                    claude model for the adversarial actor
                                  (default: claude-sonnet-4-6)
-  LEARNING_ORACLE_MODEL          claude model for the telemetry oracle —
+  ORACLE_MODEL                   claude model for the telemetry oracle —
                                  cheap projection work, no reasoning
                                  (default: claude-haiku-4-5)
+  JUDGE_MODEL                    claude model for the outcome judge
+                                 (default: claude-sonnet-4-6)
   LEARNING_SUBAGENT_TIMEOUT_SECONDS  per-subagent timeout (default: 300)
   LEARNING_AUTHOR_THRESHOLD      pending findings before author runs (default: 5)
 

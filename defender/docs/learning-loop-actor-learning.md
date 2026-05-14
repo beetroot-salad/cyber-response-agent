@@ -255,53 +255,44 @@ filter for actor authoring below. Frontmatter:
 
 ```yaml
 techniques: [T1550.001, T1078.004]   # one or more — grep key
-archetype: [internal]                # multi-value, internal/external only
+actor_type: [internal]               # multi-value, internal/external only
+relevance_criteria: <one line — when this lesson applies to a story>
 recorded_at: <run_id>
-description: <one-line hook the actor sees in a grep listing>
 ```
 
-`archetype` is a coarse viability filter — `external` cover stories
+`actor_type` is a coarse viability filter — `external` cover stories
 don't transfer to `internal` actors. Multi-value list (`[internal,
 external]` for lessons that apply to both) — kept as a YAML list of
 those two literals so `grep -l "internal"` works reliably.
+`relevance_criteria` is the one-line hook the actor reads from the grep
+listing to decide whether to Read the full file.
 
 **Environment channel.** Cache-style; assertions about the
-deployment. Frontmatter:
+deployment. Discovered on the same path as tradecraft: the actor
+runs `defender/scripts/lessons_actor_index.py --channel environment
+--actor-type <archetype>` to scan `relevance_criteria` lines and
+Reads files whose criteria look pertinent. No preload.
+
+Frontmatter (lean MVP — retrieval-only fields):
 
 ```yaml
-subject: <stable equivalence key, e.g., "falco.rule.coverage.docker-exec">
-assertion: <the claim itself, one line>
+actor_type: [internal, external]     # multi-value, internal/external only
+relevance_criteria: <one line — when this assertion bears on a story>
 recorded_at: <run_id>
-status: live | stale
-superseded_by: <run_id, when status=stale>
-system_ref: defender/skills/{system}/SKILL.md#<anchor>  # required for live
 ```
 
-**Two invalidation modes:**
+**Invalidation/equivalence schema is intentionally deferred** to the
+actor-author PR (item #6). Two invalidation modes are still the design
+intent — contradiction-with-replacement on `caught` outcomes and
+stale-only invalidation on `incoherent` outcomes — but the on-disk
+fields that support them (an equivalence key like `subject`, a `status:
+live | stale` flag, a `superseded_by` ref) earn their place when the
+author actually mutates the corpus. Until then env lessons are
+append-only and the author PR decides the final shape against a
+concrete access pattern.
 
-- **Contradiction-with-replacement** (`caught` outcomes): the
-  author identifies the correct fact, writes a new live file with
-  the new `recorded_at`, and flips the prior live file's `status`
-  to `stale` with `superseded_by` set.
-- **Stale-only invalidation** (`incoherent` outcomes): the author
-  identifies that the actor's story contradicted itself because of a
-  specific live env claim, but cannot derive the correct replacement
-  fact from the incoherent encounter alone. The prior live file's
-  `status` flips to `stale`, `superseded_by` is recorded as the
-  run id that surfaced the contradiction, and **no new live file is
-  written**. The subject is left without a live claim until a
-  future `caught` case (or hand-authored knowledge) supplies one.
-
-Stale files persist for audit in both modes; the read path filters
-to `status: live`. No time-based TTL at MVP — environment claims
-aren't time-sensitive at our cadence, and the `system_ref` grounding
-gate is the stronger freshness check.
-
-The `subject` is the load-bearing equivalence key; the author prompt
-specifies how to coin one consistently (kebab-case, `{system}.{area}.{noun}`).
-`system_ref` is required for `status: live` files and must resolve to
-an existing path; the author validation gate enforces this. Stale
-files retain whatever `system_ref` they had — they're history.
+No time-based TTL at MVP. Stale-but-uncontradicted risk (below) is
+the only freshness check that remains.
 
 **Scope constraint — attacker-framed only, not the visibility surface.**
 
@@ -329,9 +320,7 @@ attacker-framed equivalent of "Falco covers docker-exec" is
 
 The author prompt enforces this with a framing rule: any environment
 lesson body that mentions the defender, leads, queries, or lead
-positions is rejected at write time. The grounding citation
-(`system_ref`) is allowed to *point at* a defender knowledge file
-because the citation is metadata, not actor-visible prose.
+positions is rejected at write time.
 
 This does not fully eliminate the collapse risk — actor and defender
 can still converge on the same surface implicitly (both learn "X is
@@ -364,23 +353,23 @@ Two-phase within the single actor call:
 1. **Commit to Section 0.** Actor reads `alert.json`,
    `lead_sequence.yaml`, archetype, MITRE menu — drafts the Section 0
    technique table. Same as today.
-2. **Grep + read lessons.** Actor greps `lessons-actor/tradecraft/`
-   for `techniques:` lines matching any of its chosen T-IDs, filtered
-   by `archetype`, and Reads matching files. Environment lessons are
-   small and global — all `live` rows are pre-loaded into the prompt.
+2. **Discover + read lessons.** Actor runs
+   `defender/scripts/lessons_actor_index.py` once per channel —
+   `--channel tradecraft --techniques <T-IDs> --actor-type <archetype>`
+   and `--channel environment --actor-type <archetype>` — to list
+   `<path>\t<relevance_criteria>` candidates, then Reads the files
+   whose criteria look pertinent. Same path for both channels.
 3. **Write Sections 1–3.** Story, goal, bypass — informed by the
    loaded lessons.
 
 **Actor model: Sonnet — via a stage-specific env var.** Retrieval is
 a model-behavior contract inside a single actor call; Sonnet handles
-grep+read reliably, Haiku misses occasionally. The current
-`defender/learning/loop.py` reads a single `CLAUDE_MODEL` shared
-across actor, oracle, and judge — flipping that to Sonnet globally
-would silently change oracle and judge behavior, invalidating both
-judge calibration and the secondary-metric replay. The actor-grep PR
+grep+read reliably, Haiku misses occasionally. The actor-grep PR
 introduces stage-specific env vars (`ACTOR_MODEL`, `ORACLE_MODEL`,
-`JUDGE_MODEL`) with `CLAUDE_MODEL` retained as the shared fallback;
-the actor default goes to Sonnet, oracle and judge stay on their
+`JUDGE_MODEL`), one default per stage with no shared fallback —
+flipping the actor default to Sonnet does not silently change oracle
+or judge behavior. The actor default is Sonnet, oracle and judge stay
+on their
 calibrated models. The author commit trailer records the actor model
 used at that generation (see §Generation boundary) — replay reads
 the trailer and sets `ACTOR_MODEL` accordingly without touching
@@ -396,16 +385,20 @@ current actor stage runs as a plain `claude -p` text invocation in
 `defender/learning/loop.py` and persists only the story output — no
 tool trace today. The actor-grep PR adds:
 
-- `claude -p --output-format stream-json` (or equivalent) on the
-  actor stage to capture per-tool-call events,
+- `claude -p --output-format stream-json` on the actor stage to
+  capture per-tool-call events,
 - a per-case `actor_trace.jsonl` artifact in the run dir,
-- an audit script that scans traces and flags generations where the
-  actor's chosen techniques had matching lessons on disk but the
-  trace shows zero reads.
+- `defender/scripts/lessons_actor_index.py` — a description-listing
+  CLI (one `<path>\t<relevance_criteria>` line per match, filterable
+  by channel + techniques + actor_type) so the actor scans
+  descriptions before deciding which files to Read.
 
 Audit-only because at MVP a missed retrieval means weaker actor
 performance, not unsafe behavior. Promotion to a gate is follow-up
-if audit shows consistent retrieval failures.
+if audit shows consistent retrieval failures. No standalone audit
+CLI ships in this PR — analytics on `actor_trace.jsonl` are ad-hoc
+until the trace becomes load-bearing for review (e.g. when the
+visualizer integrates it).
 
 #### 3. Actor author — concurrent with defender author
 
@@ -427,37 +420,14 @@ shape; distinct queue, distinct corpus, distinct threshold.
   prompt, not in a stricter judge contract.
 - Alert + story + investigation + projected telemetry — the same
   four artifacts the judge saw, so the author can ground claims.
-- **Env-lessons snapshot (`actor_env_lessons.yaml`)** and
-  **retrieval trace (`actor_trace.jsonl`)** — two distinct artifacts
-  the actor-grep PR persists per case:
-  - `actor_env_lessons.yaml` — a snapshot of every live env-lesson
-    file pre-loaded into the actor prompt at story time. Locked
-    schema, ordered list, order matches the order injected into the
-    prompt:
-
-    ```yaml
-    - order: 0                      # injection order; matters because
-                                    # prompt position can influence weight
-      path: defender/lessons-actor/environment/falco-rule-cov-XXX.md
-      subject: falco.rule.coverage.docker-exec
-      recorded_at: <run_id>
-      status: live                  # always live at story time; recorded for audit
-      system_ref: defender/skills/wazuh/SKILL.md#falco-rules
-      assertion: |
-        <verbatim one-line claim body the actor saw>
-      blob_sha: <git object SHA of the file at story time>
-    - order: 1
-      ...
-    ```
-
-    Both `assertion` (inlined for self-containment — survives later
-    edits or stale-flips) and `blob_sha` (cross-check against
-    history) are recorded. Identifier-only references would lose the
-    exact claim if files mutate between actor run and author run.
-    Env lessons are *injected* by the orchestrator, not grepped by
-    the actor, so the retrieval trace alone does not name them.
-  - `actor_trace.jsonl` — the actor's tool-call trace, including
-    grep + read calls into `lessons-actor/tradecraft/`.
+- **Retrieval trace (`actor_trace.jsonl`)** — the actor's tool-call
+  trace, capturing index-CLI invocations and Read calls into
+  `lessons-actor/{tradecraft,environment}/`. Both channels flow
+  through the same path now, so the trace alone names every lesson
+  file the actor was exposed to. The author Reads referenced lesson
+  files from disk at fold time; `blob_sha` pinning is a follow-up if
+  the corpus-mutation rate makes verbatim-snapshot recovery
+  necessary.
 - **Note on causality.** The retrieval trace proves *exposure*, not
   *influence*. A read does not prove the lesson shaped the story.
   The author should treat trace reads as exposure when attributing
@@ -500,7 +470,7 @@ Rules:
   other.
 - **Case-bundle reference, not inlined.** `case_bundle_ref` points
   to the per-case artifacts directory (alert, investigation, story,
-  projected telemetry, `actor_env_lessons.yaml`, `actor_trace.jsonl`).
+  projected telemetry, `actor_trace.jsonl`).
   The author Reads these from disk; inlining them would bloat the
   queue.
 - **Consumed-on-fold.** Successful fold (lesson written + committed)
@@ -579,9 +549,10 @@ tradecraft = claim about story shape or blending).
   reviewed first; (c) lessons that consistently fail to predict
   `caught` outcomes when their pattern is invoked are flagged for
   retirement (instrumentation, not enforcement, at MVP).
-- Environment: groundability check against `defender/skills/{system}/`
-  (the `system_ref` frontmatter field, required for `status: live`).
-  Plus the attacker-framing rule above.
+- Environment: attacker-framing rule (above) is the only validation
+  gate at MVP. Groundability check against `defender/skills/{system}/`
+  is deferred — it depends on the deferred grounding-ref schema field
+  and lands with that schema in the actor-author PR.
 
 **Concurrency.** Actor author and defender author write to disjoint
 corpora and read disjoint `_pending` queues, but they **share the
@@ -810,16 +781,16 @@ Land in this order, each as its own PR:
    actor can retrieve lessons reliably enough at MVP. **Includes
    artifact capture**: switch the actor invocation in
    `defender/learning/loop.py` to stream-json mode, persist per-case
-   `actor_trace.jsonl` (tradecraft grep+read events) **and**
-   `actor_env_lessons.yaml` (verbatim live env-lesson bodies +
-   blob SHAs), introduce stage-specific model env vars (`ACTOR_MODEL`,
-   `ORACLE_MODEL`, `JUDGE_MODEL`), and add the missed-retrieval audit
-   script.
+   `actor_trace.jsonl` (index-CLI / Grep / Read events for both
+   tradecraft and environment), introduce stage-specific model env
+   vars (`ACTOR_MODEL`, `ORACLE_MODEL`, `JUDGE_MODEL`) with one
+   default per stage, and ship the description-listing CLI
+   `defender/scripts/lessons_actor_index.py`. No standalone audit
+   script — analytics on the trace are ad-hoc.
 5. **Actor author** — `author_actor.py` + `author_actor.md`.
    Per-case input bundle: `outcome`, `actor_observations` (if
    present, else fall back to the full bundle), alert, investigation,
-   story, projected telemetry, `actor_env_lessons.yaml`,
-   `actor_trace.jsonl`. Outcome routing: `caught` → tradecraft +
+   story, projected telemetry, `actor_trace.jsonl`. Outcome routing: `caught` → tradecraft +
    environment (contradiction-with-replacement); `incoherent` →
    environment stale-only invalidation. Environment author prompt
    enforces the attacker-framing constraint. Acquires queue lock
