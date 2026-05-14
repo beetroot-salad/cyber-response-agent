@@ -335,6 +335,83 @@ def test_validate_judge_doc_accepts_apostrophe_in_subject_topic():
     loop.validate_judge_doc(doc)
 
 
+def test_validate_judge_doc_omitted_actor_observations_is_accepted():
+    # `actor_observations` is optional per judge.md — omitting the key is valid.
+    doc = _full_judge_doc()
+    assert "actor_observations" not in doc
+    loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_accepts_well_formed_actor_observations():
+    doc = _full_judge_doc()
+    doc["actor_observations"] = [
+        {
+            "type": "misprediction",
+            "subject_anchor": "entry-vector",
+            "subject_topic": "ssh credential reuse",
+            "observation": "story underweighted reuse risk.",
+        }
+    ]
+    loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_non_list_actor_observations():
+    doc = _full_judge_doc()
+    doc["actor_observations"] = {"type": "misprediction"}
+    with pytest.raises(LoopError, match="actor_observations.*is not a list"):
+        loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_non_mapping_observation():
+    doc = _full_judge_doc()
+    doc["actor_observations"] = ["a bare string"]
+    with pytest.raises(LoopError, match=r"actor_observations\[0\] is not a mapping"):
+        loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_observation_missing_split_field():
+    for missing in ("type", "subject_anchor", "subject_topic", "observation"):
+        doc = _full_judge_doc()
+        obs = {
+            "type": "misprediction",
+            "subject_anchor": "entry-vector",
+            "subject_topic": "ssh credential reuse",
+            "observation": "underweighted reuse risk.",
+        }
+        del obs[missing]
+        doc["actor_observations"] = [obs]
+        with pytest.raises(LoopError, match=missing):
+            loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_empty_observation_field():
+    doc = _full_judge_doc()
+    doc["actor_observations"] = [
+        {
+            "type": "misprediction",
+            "subject_anchor": "entry-vector",
+            "subject_topic": "   ",  # whitespace-only — not load-bearing
+            "observation": "underweighted reuse risk.",
+        }
+    ]
+    with pytest.raises(LoopError, match="subject_topic must be a non-empty string"):
+        loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_unknown_observation_type():
+    doc = _full_judge_doc()
+    doc["actor_observations"] = [
+        {
+            "type": "bogus-category",
+            "subject_anchor": "entry-vector",
+            "subject_topic": "ssh credential reuse",
+            "observation": "underweighted reuse risk.",
+        }
+    ]
+    with pytest.raises(LoopError, match="actor_observations\\[0\\].type="):
+        loop.validate_judge_doc(doc)
+
+
 # ---------------------------------------------------------------------------
 # strip_yaml_fence — envelope tolerance
 # ---------------------------------------------------------------------------
@@ -427,9 +504,13 @@ def _read_jsonl(path: Path) -> list[dict]:
 def _isolate(monkeypatch, tmp_path: Path) -> Path:
     """Point both queue constants at a tmp dir and return a learning_run_dir
     that resolves cleanly under loop.REPO_ROOT (so source_run_dir formatter
-    doesn't blow up on relative_to())."""
+    doesn't blow up on relative_to()).
+
+    The _pending dir is intentionally NOT pre-created — `_append_jsonl` is
+    expected to mkdir it on demand, so empty-case assertions can verify the
+    producer doesn't touch disk at all when there are zero rows to write.
+    """
     pending = tmp_path / "_pending"
-    pending.mkdir()
     queue = pending / "actor_observations.jsonl"
     monkeypatch.setattr(loop, "PENDING_DIR", pending)
     monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_FILE", queue)
@@ -490,6 +571,7 @@ def test_append_actor_observations_no_key_is_zero_rows(monkeypatch, tmp_path: Pa
 
     assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
     assert not loop.ACTOR_OBSERVATIONS_FILE.exists()
+    assert not loop.PENDING_DIR.exists()
 
 
 def test_append_actor_observations_empty_list_is_zero_rows(
@@ -500,6 +582,7 @@ def test_append_actor_observations_empty_list_is_zero_rows(
 
     assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
     assert not loop.ACTOR_OBSERVATIONS_FILE.exists()
+    assert not loop.PENDING_DIR.exists()
 
 
 def test_append_actor_observations_queues_survived_outcomes(

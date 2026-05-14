@@ -74,6 +74,7 @@ QUEUEABLE_FINDING_TYPES = {
     "observability",
 }
 ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"detection-confirmed"}
+ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-haiku-4-5")
@@ -555,6 +556,26 @@ def validate_judge_doc(doc: Any) -> dict[str, Any]:
             )
         if not isinstance(f["citations"], list):
             raise LoopError(f"finding[{i}].citations is not a list")
+    if "actor_observations" in doc:
+        observations = doc["actor_observations"]
+        if not isinstance(observations, list):
+            raise LoopError("judge `actor_observations` is not a list")
+        for i, o in enumerate(observations):
+            if not isinstance(o, dict):
+                raise LoopError(f"actor_observations[{i}] is not a mapping")
+            for k in ("type", "subject_anchor", "subject_topic", "observation"):
+                if k not in o:
+                    raise LoopError(f"actor_observations[{i}] missing key: {k}")
+                v = o[k]
+                if not isinstance(v, str) or not v.strip():
+                    raise LoopError(
+                        f"actor_observations[{i}].{k} must be a non-empty string"
+                    )
+            if o["type"] not in ACTOR_OBSERVATION_TYPES:
+                raise LoopError(
+                    f"actor_observations[{i}].type={o['type']!r} not in "
+                    f"{sorted(ACTOR_OBSERVATION_TYPES)}"
+                )
     return doc
 
 
@@ -898,11 +919,13 @@ def run_one(run_dir: Path) -> int:
 
     _log("step=append")
     n_appended = append_findings(judge_doc, run_id, alert_rule_key, learning_run_dir)
-    _log(f"appended {n_appended} finding(s) to {PENDING_FILE}")
     n_obs = append_actor_observations(
         judge_doc, run_id, alert_rule_key, learning_run_dir
     )
-    _log(f"appended {n_obs} actor observation(s) to {ACTOR_OBSERVATIONS_FILE}")
+    _log(
+        f"appended {n_appended} finding(s) to {PENDING_FILE}, "
+        f"{n_obs} actor observation(s) to {ACTOR_OBSERVATIONS_FILE}"
+    )
 
     threshold = int(os.environ.get("LEARNING_AUTHOR_THRESHOLD", "5"))
     pending_count = sum(
