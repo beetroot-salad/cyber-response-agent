@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F3",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 68.37,
+  "returncode": 0,
+  "stdout": "`network-analysis` directly covers characterizing outbound connections, their destinations, and traffic patterns; paired with `source-reputation` to verify whether those destinations are recognized or unrecognized.\n\nSELECT network-analysis, source-reputation\n",
+  "correct_leads": [
+    "network-analysis"
+  ]
+}

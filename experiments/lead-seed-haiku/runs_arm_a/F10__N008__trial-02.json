@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F10",
+  "class": "no-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 63.64,
+  "returncode": 0,
+  "stdout": "The goal requires host endpoint state information (kernel module inventory + load timestamps), which doesn't fit the existing event-correlation, authentication, or process-lineage patterns. This is a new class of seed for system configuration and kernel state snapshots.\n\nPROPOSE_NEW Retrieve kernel module state and load timestamps on a host endpoint to detect recently-introduced kernel persistence or rootkit indicators.\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

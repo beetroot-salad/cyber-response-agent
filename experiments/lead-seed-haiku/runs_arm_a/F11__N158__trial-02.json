@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F11",
+  "class": "no-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 42.09,
+  "returncode": 0,
+  "stdout": "The `firmware-update-history` seed directly surfaces firmware update events including version transitions and deployment channels.\n\nSELECT firmware-update-history\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

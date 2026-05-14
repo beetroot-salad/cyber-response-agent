@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F14",
+  "class": "ambiguous",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 55.97,
+  "returncode": 0,
+  "stdout": "Account classification and activity characterization need two distinct seeds: the former to determine account type and intent signals, the latter to profile authentication patterns comprehensively.\n\nSELECT user-analysis, authentication-history\n",
+  "correct_leads": [
+    "user-analysis",
+    "authentication-history"
+  ]
+}

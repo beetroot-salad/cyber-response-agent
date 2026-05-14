@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F10",
+  "class": "no-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 49.31,
+  "returncode": 0,
+  "stdout": "`kernel-module-events` directly surfaces kernel module load/unload events with timing, which matches the goal of identifying recently-loaded modules on the host.\n\nSELECT kernel-module-events\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

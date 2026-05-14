@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F5",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 25.55,
+  "returncode": 0,
+  "stdout": "The NL goal asks for co-firing detection rules on the same container within a tight time window\u2014a textbook match for surfacing sibling detection signals and their structural context.\n\nSELECT correlated-endpoint-events\n",
+  "correct_leads": [
+    "correlated-endpoint-events"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 53.32,
+  "returncode": 0,
+  "stdout": "The goal describes a bespoke, one-off query construction that falls outside standard recipe parameters \u2014 exactly what `ad-hoc` is designed for.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

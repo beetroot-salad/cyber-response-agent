@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F11",
+  "class": "no-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 64.61,
+  "returncode": 0,
+  "stdout": "Firmware version and update history require querying host system configuration state and update records, which is distinct from the asset-identity and behavioral-event focus of existing seeds.\n\nPROPOSE_NEW Host system configuration and update history \u2014 firmware/OS version, update channel, and version deltas.\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

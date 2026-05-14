@@ -1,0 +1,6 @@
+{
+  "id": "F5",
+  "class": "clear-match",
+  "nl_goal": "Did other detection rules fire on this same container around the same time as our alert? We want to see the surrounding context — which sibling rules tripped on the same entity in the minutes before and after, and what those rules looked at.",
+  "correct_leads": ["correlated-endpoint-events"]
+}

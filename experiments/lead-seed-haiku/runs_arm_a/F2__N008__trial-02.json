@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F2",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 45.16,
+  "returncode": 0,
+  "stdout": "The goal directly matches identifying and assessing a source entity's identity and legitimacy.\n\nSELECT source-reputation\n",
+  "correct_leads": [
+    "source-reputation"
+  ]
+}

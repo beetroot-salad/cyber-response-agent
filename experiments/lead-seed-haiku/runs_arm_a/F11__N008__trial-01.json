@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F11",
+  "class": "no-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 44.65,
+  "returncode": 0,
+  "stdout": "The goal requires querying **host system inventory and configuration state** \u2014 specifically firmware versions and update history. None of the catalog seeds address this directly. `correlated-endpoint-events` focuses on events around an alert timestamp, not historical system state; `source-reputation` (despite its `asset-state` tag) is about determining whether an entity is a known asset, not querying asset configuration details.\n\nPROPOSE_NEW host-inventory | [asset-state, inventory] | Query host system information including firmware version, installed packages, recent updates, and update channels.\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

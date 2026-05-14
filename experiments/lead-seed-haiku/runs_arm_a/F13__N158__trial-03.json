@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F13",
+  "class": "ambiguous",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 46.15,
+  "returncode": 0,
+  "stdout": "The goal requires two complementary evidence paths: reconstructing how the process itself was invoked (parent chain, command line), and identifying what other endpoint detections fired on the same container simultaneously.\n\nSELECT process-lineage, correlated-endpoint-events\n",
+  "correct_leads": [
+    "process-lineage",
+    "correlated-endpoint-events"
+  ]
+}

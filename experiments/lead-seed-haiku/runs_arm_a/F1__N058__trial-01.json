@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F1",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 38.21,
+  "returncode": 0,
+  "stdout": "The goal directly asks about detecting clustered burst patterns in authentication attempts from a source IP \u2014 distinguishing a one-off probe from an ongoing pattern. The `auth-failure-burst-detector` seed is purpose-built for exactly this: detecting burst clusters of auth failures within tight windows.\n\nSELECT auth-failure-burst-detector\n",
+  "correct_leads": [
+    "authentication-history"
+  ]
+}

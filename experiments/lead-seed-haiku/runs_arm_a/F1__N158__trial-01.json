@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F1",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 43.81,
+  "returncode": 0,
+  "stdout": "Looking at the goal: we need to characterize historical login-attempt patterns from a source IP, detect whether there's a burst cluster, analyze cadence, and determine if the current event is isolated or part of ongoing activity.\n\n`authentication-history` directly retrieves and characterizes authentication patterns for an IP over a time window, showing cadence, frequency, and historical context \u2014 which answers whether the current event is a one-off probe or part of an ongoing pattern.\n\nSELECT authentication-history\n",
+  "correct_leads": [
+    "authentication-history"
+  ]
+}

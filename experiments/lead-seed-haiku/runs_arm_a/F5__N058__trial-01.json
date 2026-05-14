@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F5",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 22.62,
+  "returncode": 0,
+  "stdout": "The goal seeks co-firing signals\u2014other detection rules that tripped on the same entity (container) in a tight window around the alert timestamp, along with the shape of each co-fire. The `correlated-endpoint-events` seed directly addresses this.\n\nSELECT correlated-endpoint-events\n",
+  "correct_leads": [
+    "correlated-endpoint-events"
+  ]
+}

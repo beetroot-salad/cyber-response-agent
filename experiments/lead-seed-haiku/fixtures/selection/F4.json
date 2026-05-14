@@ -1,0 +1,6 @@
+{
+  "id": "F4",
+  "class": "clear-match",
+  "nl_goal": "This process showed up unexpectedly on the host. We need to understand how it came to exist — what spawned it, what command line it ran with, what binary it executed, and what (if anything) it itself spawned.",
+  "correct_leads": ["process-lineage"]
+}

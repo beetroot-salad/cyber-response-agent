@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F11",
+  "class": "no-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 61.26,
+  "returncode": 0,
+  "stdout": "The goal requires tracking firmware version state changes and identifying the update source/channel. While `deploy-runs-history` could capture deployment events if firmware is managed that way, the catalog lacks a seed that explicitly surfaces firmware version history (before/after versions) and update channel provenance.\n\nPROPOSE_NEW Track firmware/BIOS version updates for a host \u2014 record current and prior versions, detection of recent updates, and identify the update mechanism or source (channel, repository, deployment system).\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

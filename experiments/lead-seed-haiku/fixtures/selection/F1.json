@@ -1,0 +1,6 @@
+{
+  "id": "F1",
+  "class": "clear-match",
+  "nl_goal": "We need to know whether this source IP has shown a clustered burst pattern of login attempts in the recent past, or whether the current event is isolated. Cadence and per-attempt counts matter — was this a one-off probe or part of an ongoing pattern?",
+  "correct_leads": ["authentication-history"]
+}

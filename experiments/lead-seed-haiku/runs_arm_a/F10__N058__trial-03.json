@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F10",
+  "class": "no-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 65.32,
+  "returncode": 0,
+  "stdout": "Looking at the goal: capture currently loaded kernel modules + their load timestamps to identify recently-introduced modules on a host.\n\nScanning the catalog:\n- `audit-log-replay` could capture module load events *if* auditing is enabled, but it's scoped to principal/resource and focused on event history, not runtime state snapshots\n- `correlated-endpoint-events` surfaces co-firing endpoint events around an alert, not specifically kernel module state\n- `cve-correlation` is about installed packages and CVE matching, not kernel module state\n- No other seed targets system state snapshots\n\nThe goal needs a specific runtime inspection (currently loaded modules + timestamps), which doesn't align with the existing event-replay or correlation seeds.\n\nPROPOSE_NEW kernel-module-snapshot | [system-state] | Retrieve currently loaded kernel modules and their load timestamps to identify recently-introduced modules.\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

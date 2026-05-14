@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F3",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 69.94,
+  "returncode": 0,
+  "stdout": "The goal requires two complementary investigation paths: characterizing the host's outbound connections (destinations, ports, traffic patterns, cadence) and then identifying which destinations are recognized or unknown. `network-analysis` directly profiles connection targets and patterns; `source-reputation` determines whether each destination is a known asset or service.\n\nSELECT network-analysis, source-reputation\n",
+  "correct_leads": [
+    "network-analysis"
+  ]
+}

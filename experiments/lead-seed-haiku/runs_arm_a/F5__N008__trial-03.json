@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F5",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 58.46,
+  "returncode": 0,
+  "stdout": "`correlated-endpoint-events` is purpose-built for this \u2014 it surfaces co-firing detection rules on the same endpoint entity in a tight window around the alert, exactly matching the request to see which sibling rules tripped at the same time and what they detected.\n\nSELECT correlated-endpoint-events\n",
+  "correct_leads": [
+    "correlated-endpoint-events"
+  ]
+}

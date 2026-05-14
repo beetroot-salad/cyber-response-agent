@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F8",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 61.12,
+  "returncode": 0,
+  "stdout": "The goal is to determine whether a zero-event result reflects genuine absence of activity or a broken data-collection pipeline. This is a source-health diagnostic, not an entity-activity investigation.\n\nSELECT data-source-debug\n",
+  "correct_leads": [
+    "data-source-debug"
+  ]
+}

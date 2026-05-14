@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F1",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 65.72,
+  "returncode": 0,
+  "stdout": "The goal requires detecting burst clusters (tight temporal clustering) and distinguishing isolated events from ongoing patterns. `auth-failure-burst-detector` directly detects bursts within windows; `authentication-history` provides broader temporal context and cadence baseline to confirm whether the source IP shows repeated pattern or one-off probe.\n\nSELECT auth-failure-burst-detector, authentication-history\n",
+  "correct_leads": [
+    "authentication-history"
+  ]
+}

@@ -1,0 +1,192 @@
+[
+  {
+    "fixture": "F-cust-01-baseline-shift",
+    "category": "baseline-shift",
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:sshd AND data.srcip:198.51.100.22'  --start 2026-04-10T09:30:00Z --window 2h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 11.89
+  },
+  {
+    "fixture": "F-cust-01-baseline-shift",
+    "category": "baseline-shift",
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:sshd AND data.srcip:198.51.100.22'  --start 2026-04-10T09:30:00Z --window 2h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 12.2
+  },
+  {
+    "fixture": "F-cust-01-baseline-shift",
+    "category": "baseline-shift",
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:sshd AND data.srcip:198.51.100.22'  --start 2026-04-10T09:30:00Z --window 2h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 28.23
+  },
+  {
+    "fixture": "F-cust-02-entity-swap",
+    "category": "entity-swap",
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:sshd AND data.srcuser:admin'  --start 2026-04-16T10:30:00Z --window 24h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 20.97
+  },
+  {
+    "fixture": "F-cust-02-entity-swap",
+    "category": "entity-swap",
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:sshd AND data.srcuser:admin'  --start 2026-04-16T10:30:00Z --window 24h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 51.55
+  },
+  {
+    "fixture": "F-cust-02-entity-swap",
+    "category": "entity-swap",
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:sshd AND data.srcuser:admin'  --start 2026-04-16T10:30:00Z --window 24h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 55.69
+  },
+  {
+    "fixture": "F-cust-03-rule-filter",
+    "category": "rule-filter",
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:sshd AND data.srcip:203.0.113.7 AND rule.id:(5710 OR 5712 OR 5716)'  --start 2026-04-17T08:30:00Z --window 2h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 23.17
+  },
+  {
+    "fixture": "F-cust-03-rule-filter",
+    "category": "rule-filter",
+    "trial": 2,
+    "verdict": "partially-correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:sshd AND data.srcip:203.0.113.7 AND rule.id:(5710 OR 5712 OR 5716)'  --start 2026-04-17T08:30:00Z --end 2026-04-17T10:31:00Z",
+      "missing_expected": [
+        "--window 2h"
+      ],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 57.2
+  },
+  {
+    "fixture": "F-cust-03-rule-filter",
+    "category": "rule-filter",
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:sshd AND rule.id:(5710 OR 5712 OR 5716) AND data.srcip:203.0.113.7'  --start 2026-04-17T08:30:00Z --window 2h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 73.26
+  },
+  {
+    "fixture": "F-cust-04-forward-bracket",
+    "category": "forward-bracket",
+    "trial": 1,
+    "verdict": "wrong",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'data.output_fields.container.id:17bc2dde3fb0 AND rule.id:[100000 TO 100099] AND NOT rule.id:100001'  --start 2026-04-24T15:02:23Z --window 30m",
+      "missing_expected": [
+        "2026-04-24T14:47:23"
+      ],
+      "forbidden_hits": [
+        "2026-04-24T15:02:23"
+      ]
+    },
+    "elapsed_s": 26.56
+  },
+  {
+    "fixture": "F-cust-04-forward-bracket",
+    "category": "forward-bracket",
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query --query 'data.output_fields.container.id:17bc2dde3fb0 AND rule.id:[100000 TO 100099] AND NOT rule.id:100001' --start 2026-04-24T14:47:23Z --window 30m",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 43.22
+  },
+  {
+    "fixture": "F-cust-04-forward-bracket",
+    "category": "forward-bracket",
+    "trial": 3,
+    "verdict": "wrong",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'data.output_fields.container.id:17bc2dde3fb0 AND rule.id:[100000 TO 100099] AND NOT rule.id:100001'  --start 2026-04-24T15:02:23Z --window 30m",
+      "missing_expected": [
+        "2026-04-24T14:47:23"
+      ],
+      "forbidden_hits": [
+        "2026-04-24T15:02:23"
+      ]
+    },
+    "elapsed_s": 51.63
+  },
+  {
+    "fixture": "F-cust-05-composite-filter",
+    "category": "composite-filter",
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:(firewall OR iptables) AND data.srcip:10.0.0.5 AND data.action:drop AND NOT data.dstip:(10.0.0.0/8 OR 172.16.0.0/12 OR 192.168.0.0/16)'  --start 2026-04-17T08:30:00Z --window 2h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 34.85
+  },
+  {
+    "fixture": "F-cust-05-composite-filter",
+    "category": "composite-filter",
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:(firewall OR iptables) AND data.srcip:10.0.0.5 AND data.action:drop AND NOT data.dstip:(10.0.0.0/8 OR 172.16.0.0/12 OR 192.168.0.0/16)'  --window 2h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 41.49
+  },
+  {
+    "fixture": "F-cust-05-composite-filter",
+    "category": "composite-filter",
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "query": "python3 scripts/tools/wazuh_cli.py query  --query 'rule.groups:(firewall OR iptables) AND data.srcip:10.0.0.5 AND data.action:drop AND NOT data.dstip:(10.0.0.0/8 OR 172.16.0.0/12 OR 192.168.0.0/16)'  --window 2h",
+      "missing_expected": [],
+      "forbidden_hits": []
+    },
+    "elapsed_s": 35.03
+  }
+]

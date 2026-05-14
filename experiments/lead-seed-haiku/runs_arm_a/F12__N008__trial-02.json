@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F12",
+  "class": "ambiguous",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 56.32,
+  "returncode": 0,
+  "stdout": "The goal requires both the IP's authentication history with your org and its external reputation/identity. These are two complementary views: one internal (your interaction pattern with it), one external (its general classification).\n\nSELECT source-reputation, authentication-history\n",
+  "correct_leads": [
+    "authentication-history",
+    "source-reputation"
+  ]
+}

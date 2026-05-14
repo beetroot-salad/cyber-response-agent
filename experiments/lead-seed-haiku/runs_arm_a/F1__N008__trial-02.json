@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F1",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 44.9,
+  "returncode": 0,
+  "stdout": "The goal asks for temporal characterization of authentication attempts from a specific source IP \u2014 pattern frequency, cadence, and clustering over a time window. This directly matches the authentication-history seed's purpose.\n\nSELECT authentication-history\n",
+  "correct_leads": [
+    "authentication-history"
+  ]
+}

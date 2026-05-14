@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F4",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 22.03,
+  "returncode": 0,
+  "stdout": "Process lineage is directly what's needed here \u2014 the parent chain explains how the process came to exist, and child processes show what it spawned.\n\nSELECT process-lineage\n",
+  "correct_leads": [
+    "process-lineage"
+  ]
+}

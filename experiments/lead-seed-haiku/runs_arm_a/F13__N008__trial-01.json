@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F13",
+  "class": "ambiguous",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 42.06,
+  "returncode": 0,
+  "stdout": "The goal requires reconstructing how the process was launched (parent chain, command line) and identifying co-firing detection rules on the same container in the surrounding window \u2014 both pieces are necessary for a complete picture.\n\nSELECT process-lineage, correlated-endpoint-events\n",
+  "correct_leads": [
+    "process-lineage",
+    "correlated-endpoint-events"
+  ]
+}

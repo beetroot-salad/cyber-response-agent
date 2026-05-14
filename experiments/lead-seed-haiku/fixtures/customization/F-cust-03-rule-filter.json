@@ -1,0 +1,26 @@
+{
+  "id": "F-cust-03-rule-filter",
+  "category": "rule-filter",
+  "seed_name": "authentication-history",
+  "alert_excerpt": {
+    "rule": {"id": "5710", "groups": ["sshd"], "description": "sshd: attempt to login using a non-existent user"},
+    "data": {"srcip": "203.0.113.7", "srcuser": "root", "srcport": "33214"},
+    "agent": {"name": "edge-gateway-02"},
+    "@timestamp": "2026-04-17T10:30:00.000Z"
+  },
+  "adaptation_note": "We want to characterize this source IP's authentication FAILURES specifically (not successes) over the last 2 hours - we already know it triggered a failed-auth rule and we want to see all sibling failures from this source, not the noise of successful logins.",
+  "reference_query": "python3 scripts/tools/wazuh_cli.py query --query 'rule.groups:sshd AND data.srcip:203.0.113.7 AND rule.id:(5710 OR 5712 OR 5716)' --window 2h",
+  "rubric": {
+    "expected_substrings": [
+      "data.srcip:203.0.113.7",
+      "rule.groups:sshd",
+      "rule.id:",
+      "5710",
+      "--window 2h"
+    ],
+    "forbidden_substrings": [
+      "data.srcuser:root",
+      "agent.name:edge-gateway-02"
+    ]
+  }
+}

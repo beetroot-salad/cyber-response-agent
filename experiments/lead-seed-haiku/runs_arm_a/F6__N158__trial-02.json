@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F6",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 58.06,
+  "returncode": 0,
+  "stdout": "The goal requires understanding whether an account exists, its purpose, and whether its name matches known organizational or security patterns (service account, admin, sentinel, wordlist).\n\n`user-analysis` provides account classification against known patterns and reveals account-choice intent. `account-naming-pattern` specifically validates the name against organization naming conventions to detect service accounts, admin conventions, monitoring sentinels, etc.\n\nSELECT user-analysis, account-naming-pattern\n",
+  "correct_leads": [
+    "user-analysis"
+  ]
+}

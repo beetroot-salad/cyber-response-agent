@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F9",
+  "class": "no-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 46.31,
+  "returncode": 0,
+  "stdout": "The goal requires retrieving identity/auth configuration change events tied to a specific user principal. Audit logs are the authoritative source for MFA setup changes (factor registration, device enrollment, bypass approvals), and should be scoped to the user over the last 24 hours.\n\nSELECT audit-log-replay\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F12",
+  "class": "ambiguous",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 34.34,
+  "returncode": 0,
+  "stdout": "The goal requires two distinct investigations: understanding the IP's past authentication patterns with your org, and assessing its general reputation/classification. These map directly to the catalog.\n\nSELECT authentication-history, source-reputation\n",
+  "correct_leads": [
+    "authentication-history",
+    "source-reputation"
+  ]
+}

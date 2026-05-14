@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F6",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 53.24,
+  "returncode": 0,
+  "stdout": "The goal requires account classification against organizational patterns, existence verification, and naming convention validation. `user-analysis` directly addresses classifying an account against known patterns and determining its nature, while `account-naming-pattern` specifically handles the naming-convention matching aspect.\n\nSELECT user-analysis, account-naming-pattern\n",
+  "correct_leads": [
+    "user-analysis"
+  ]
+}

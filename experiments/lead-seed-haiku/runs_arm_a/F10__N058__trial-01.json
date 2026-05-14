@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F10",
+  "class": "no-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 46.76,
+  "returncode": 0,
+  "stdout": "None of the catalog seeds directly address kernel module enumeration with load timestamps. The goal requires querying current kernel state (`/proc/modules` or `lsmod` output) paired with module load timestamps (from `dmesg`, audit logs, or module metadata) \u2014 this is a low-level system-state snapshot, not an event replay or correlated activity trace.\n\n`PROPOSE_NEW` Enumerate currently-loaded kernel modules and their load timestamps to detect recently-introduced kernel drivers or modules.\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

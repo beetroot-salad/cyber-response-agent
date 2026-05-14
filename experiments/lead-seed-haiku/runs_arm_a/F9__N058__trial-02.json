@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F9",
+  "class": "no-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 62.63,
+  "returncode": 0,
+  "stdout": "`audit-log-replay` directly captures identity-service audit events for a principal, including MFA configuration changes (device registration, factor updates, backup code generation) and approval events within the target time window.\n\nSELECT audit-log-replay\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

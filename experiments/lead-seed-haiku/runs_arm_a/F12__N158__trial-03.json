@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F12",
+  "class": "ambiguous",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 51.8,
+  "returncode": 0,
+  "stdout": "The goal requires two distinct evidence surfaces: authentication interaction history (org-specific), and IP reputation/classification (threat-intel). These map directly to two seeds.\n\nSELECT authentication-history, source-reputation\n",
+  "correct_leads": [
+    "authentication-history",
+    "source-reputation"
+  ]
+}

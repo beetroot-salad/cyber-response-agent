@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F3",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 56.69,
+  "returncode": 0,
+  "stdout": "The goal requires characterizing outbound network activity from a host \u2014 destinations, ports, and traffic patterns over a time window. This directly matches the network-analysis seed's purpose.\n\nSELECT network-analysis\n",
+  "correct_leads": [
+    "network-analysis"
+  ]
+}

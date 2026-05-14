@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 41.5,
+  "returncode": 0,
+  "stdout": "The goal explicitly states no standard recipe parametrizes both syscall name and filesystem path together, and the query construction is bespoke to this case \u2014 that's exactly the `ad-hoc` escape-hatch use case.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

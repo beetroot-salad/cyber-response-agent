@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F2",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 45.54,
+  "returncode": 0,
+  "stdout": "The goal is to classify a source entity \u2014 determine whether it's a known internal asset, a known external service, or an unrecognized peer. `source-reputation` is designed exactly for this classification task.\n\nSELECT source-reputation\n",
+  "correct_leads": [
+    "source-reputation"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F4",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 29.19,
+  "returncode": 0,
+  "stdout": "The goal requires reconstructing process ancestry, execution context, and descendants \u2014 exactly what process-lineage is designed for.\n\nSELECT process-lineage\n",
+  "correct_leads": [
+    "process-lineage"
+  ]
+}

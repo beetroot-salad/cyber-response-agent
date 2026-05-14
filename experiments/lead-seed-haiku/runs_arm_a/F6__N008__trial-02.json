@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F6",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 46.02,
+  "returncode": 0,
+  "stdout": "The goal is to validate account existence, purpose, and naming patterns \u2014 all core elements of account-centric classification that `user-analysis` is designed for.\n\nSELECT user-analysis\n",
+  "correct_leads": [
+    "user-analysis"
+  ]
+}

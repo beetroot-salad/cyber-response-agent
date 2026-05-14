@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F3",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 28.94,
+  "returncode": 0,
+  "stdout": "The goal is to retrieve outbound connections from a host, their destinations, ports, and traffic cadence \u2014 classic network traffic analysis.\n\nSELECT network-analysis\n",
+  "correct_leads": [
+    "network-analysis"
+  ]
+}

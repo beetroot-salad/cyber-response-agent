@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F4",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 35.18,
+  "returncode": 0,
+  "stdout": "The goal requires reconstructing a process's execution context: parent chain (what spawned it), command line and binary details, and child processes (what it spawned).\n\nSELECT process-lineage\n",
+  "correct_leads": [
+    "process-lineage"
+  ]
+}

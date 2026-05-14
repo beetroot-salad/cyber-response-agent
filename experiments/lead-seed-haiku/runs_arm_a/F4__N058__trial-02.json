@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F4",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 59.15,
+  "returncode": 0,
+  "stdout": "SELECT process-lineage\n\nThis seed directly reconstructs the process tree including parent chain, child processes, and execution context \u2014 exactly matching the need to understand what spawned the process, how it was invoked, what it executed, and what it spawned.\n",
+  "correct_leads": [
+    "process-lineage"
+  ]
+}

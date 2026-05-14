@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F2",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 56.47,
+  "returncode": 0,
+  "stdout": "The goal asks whether a source is an internal asset, known external service, or unrecognized \u2014 exactly what `source-reputation` is designed for.\n\nSELECT source-reputation\n",
+  "correct_leads": [
+    "source-reputation"
+  ]
+}

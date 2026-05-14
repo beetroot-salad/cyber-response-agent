@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F5",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 70.41,
+  "returncode": 0,
+  "stdout": "The goal directly matches a seed designed for this exact use case: surfacing other detection rules that fired on the same entity in a tight window around the alert.\n\nSELECT correlated-endpoint-events\n",
+  "correct_leads": [
+    "correlated-endpoint-events"
+  ]
+}

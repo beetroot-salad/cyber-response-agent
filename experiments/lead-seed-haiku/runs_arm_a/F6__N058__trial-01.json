@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F6",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 31.13,
+  "returncode": 0,
+  "stdout": "The goal requires three related checks: account existence, purpose determination, and name-pattern matching (service account, admin convention, monitoring sentinel, wordlist entry). `user-analysis` covers comprehensive account classification against known patterns; `account-naming-pattern` provides focused naming convention matching.\n\nSELECT user-analysis, account-naming-pattern\n",
+  "correct_leads": [
+    "user-analysis"
+  ]
+}

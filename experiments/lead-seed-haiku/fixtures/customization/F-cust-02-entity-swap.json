@@ -1,0 +1,24 @@
+{
+  "id": "F-cust-02-entity-swap",
+  "category": "entity-swap",
+  "seed_name": "authentication-history",
+  "alert_excerpt": {
+    "rule": {"id": "5710", "groups": ["sshd"], "description": "sshd: attempt to login using a non-existent user"},
+    "data": {"srcip": "10.0.0.5", "srcuser": "admin", "srcport": "55102"},
+    "agent": {"name": "db-01"},
+    "@timestamp": "2026-04-17T10:30:00.000Z"
+  },
+  "adaptation_note": "We've already characterized this IP's recent activity. Now we want to investigate this user's authentication history across ALL hosts in the environment over the last 24 hours - which hosts they've touched, success vs failure pattern, anything cross-host.",
+  "reference_query": "python3 scripts/tools/wazuh_cli.py query --query 'rule.groups:sshd AND data.srcuser:admin' --window 24h",
+  "rubric": {
+    "expected_substrings": [
+      "data.srcuser:admin",
+      "rule.groups:sshd",
+      "24h"
+    ],
+    "forbidden_substrings": [
+      "data.srcip:10.0.0.5",
+      "agent.name:db-01"
+    ]
+  }
+}

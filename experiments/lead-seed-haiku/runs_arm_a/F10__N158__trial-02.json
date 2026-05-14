@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F10",
+  "class": "no-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 43.11,
+  "returncode": 0,
+  "stdout": "The goal requires visibility into kernel module load events with timestamps to identify recent module introductions. The `kernel-module-events` seed is purpose-built for this.\n\nSELECT kernel-module-events\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

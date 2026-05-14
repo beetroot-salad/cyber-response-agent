@@ -1,0 +1,27 @@
+{
+  "id": "F-cust-05-composite-filter",
+  "category": "composite-filter",
+  "seed_name": "network-analysis",
+  "alert_excerpt": {
+    "rule": {"id": "4150", "groups": ["firewall", "iptables"], "description": "iptables drop"},
+    "data": {"srcip": "10.0.0.5", "dstip": "203.0.113.42", "dstport": "8443", "action": "drop", "protocol": "tcp"},
+    "agent": {"name": "fw-01"},
+    "@timestamp": "2026-04-17T10:30:00.000Z"
+  },
+  "adaptation_note": "Find OUTBOUND DROPPED connections from this source host (10.0.0.5) to EXTERNAL destinations only (exclude RFC1918 internal ranges) over the last 2 hours. We're looking for the host's pattern of attempted external connections that the firewall denied - so action=drop is required, RFC1918 destinations must be excluded.",
+  "reference_query": "python3 scripts/tools/wazuh_cli.py query --query 'rule.groups:(firewall OR iptables) AND data.srcip:10.0.0.5 AND data.action:drop AND NOT data.dstip:(10.0.0.0/8 OR 172.16.0.0/12 OR 192.168.0.0/16)' --window 2h",
+  "rubric": {
+    "expected_substrings": [
+      "data.srcip:10.0.0.5",
+      "data.action:drop",
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+      "--window 2h"
+    ],
+    "forbidden_substrings": [
+      "data.dstip:203.0.113.42",
+      "dstport:8443"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F11",
+  "class": "no-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 48.23,
+  "returncode": 0,
+  "stdout": "The goal requires host configuration and asset-state history (firmware version, prior version, update timestamp, channel source), which is distinct from the event-correlation, identity-pattern, and reputation assessment covered by the existing seeds.\n\nPROPOSE_NEW Host configuration and asset-inventory queries \u2014 retrieve current firmware/OS/package versions, update history, and source channels for a given host.\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F13",
+  "class": "ambiguous",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 61.52,
+  "returncode": 0,
+  "stdout": "The goal requires two complementary perspectives: understanding the specific process execution context (parent chain, command line) and detecting co-firing signals on the container. `process-lineage` reconstructs the execution tree for the suspicious process, while `correlated-endpoint-events` explicitly handles container-level co-firing patterns in a surrounding window.\n\nSELECT process-lineage, correlated-endpoint-events\n",
+  "correct_leads": [
+    "process-lineage",
+    "correlated-endpoint-events"
+  ]
+}

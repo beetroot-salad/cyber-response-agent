@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F6",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 24.61,
+  "returncode": 0,
+  "stdout": "The goal is to classify a user account against known patterns and understand its identity and purpose \u2014 this maps directly to account identity classification against behavioral and naming conventions.\n\nSELECT user-analysis\n",
+  "correct_leads": [
+    "user-analysis"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F12",
+  "class": "ambiguous",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 57.29,
+  "returncode": 0,
+  "stdout": "The goal requires two complementary evidence streams: org-specific authentication history with the IP, and its external reputation/classification. `authentication-history` surfaces the org's prior interactions with the IP over a time window; `source-reputation` determines its identity and standing as a network entity (internal asset, known external service, or unrecognized).\n\nSELECT authentication-history, source-reputation\n",
+  "correct_leads": [
+    "authentication-history",
+    "source-reputation"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 60.43,
+  "returncode": 0,
+  "stdout": "This goal describes a custom query combining two dimensions (syscall type + filesystem path) that existing recipes don't parametrize together. While `system-call-pattern` covers syscalls and `file-access-trace` covers paths independently, neither covers arbitrary syscall + path filtering in a single forensic query.\n\nPROPOSE_NEW Trace syscall invocations filtered by specific filesystem path patterns on a host.\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F8",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 51.18,
+  "returncode": 0,
+  "stdout": "The goal asks to diagnose why a query returned zero events and determine whether the issue is data source health vs. data availability \u2014 this directly matches the `data-source-debug` seed.\n\nSELECT data-source-debug\n",
+  "correct_leads": [
+    "data-source-debug"
+  ]
+}

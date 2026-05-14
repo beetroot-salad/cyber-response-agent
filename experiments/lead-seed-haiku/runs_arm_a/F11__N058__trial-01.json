@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F11",
+  "class": "no-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 58.99,
+  "returncode": 0,
+  "stdout": "Firmware/OS update tracking requires capturing version deltas, installation timestamps, and source channels\u2014information typically distinct from general system deployment or audit logs. The existing seeds (audit-log-replay, deploy-runs-history) are too generic for this specialized need.\n\nPROPOSE_NEW firmware-update-history \u2014 Track firmware and OS update history for a host, including current/previous versions and the update channel/source.\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

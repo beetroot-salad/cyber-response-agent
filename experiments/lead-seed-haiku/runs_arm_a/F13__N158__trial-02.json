@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F13",
+  "class": "ambiguous",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 52.58,
+  "returncode": 0,
+  "stdout": "The goal has two distinct evidence needs: reconstructing how the process was launched (parent chain + command line), and identifying what other detection rules fired on the same container in the surrounding time window.\n\nSELECT process-lineage, correlated-endpoint-events\n",
+  "correct_leads": [
+    "process-lineage",
+    "correlated-endpoint-events"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 51.51,
+  "returncode": 0,
+  "stdout": "The goal explicitly requires a bespoke query combining syscall and filesystem-path dimensions that no standard template parametrizes together\u2014a textbook fit for the `ad-hoc` escape hatch.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

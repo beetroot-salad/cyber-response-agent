@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F11",
+  "class": "no-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 57.03,
+  "returncode": 0,
+  "stdout": "The goal requires surfacing firmware update events with version transitions and update source/channel \u2014 `firmware-update-history` directly captures this.\n\nSELECT firmware-update-history\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

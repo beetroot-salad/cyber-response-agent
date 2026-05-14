@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 45.7,
+  "returncode": 0,
+  "stdout": "This goal explicitly requires a bespoke query combining fields (syscall + filesystem-path) that no standard template exposes or can be customized to match\u2014the exact use case `ad-hoc` is designed for.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

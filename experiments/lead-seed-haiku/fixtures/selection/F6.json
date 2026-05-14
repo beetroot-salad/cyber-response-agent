@@ -1,0 +1,6 @@
+{
+  "id": "F6",
+  "class": "clear-match",
+  "nl_goal": "We need to understand the account named in this event. Does it actually exist in the identity system? What's its purpose if so? Does its name match any known pattern — service account, admin convention, monitoring sentinel, common wordlist entry?",
+  "correct_leads": ["user-analysis"]
+}

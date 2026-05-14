@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F2",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 42.13,
+  "returncode": 0,
+  "stdout": "`source-reputation` directly answers the core question: identifying whether the source is a known internal asset, a recognized external service, or an unrecognized peer \u2014 exactly what's needed before classifying it as suspicious.\n\nSELECT source-reputation\n",
+  "correct_leads": [
+    "source-reputation"
+  ]
+}

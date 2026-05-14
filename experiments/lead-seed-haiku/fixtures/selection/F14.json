@@ -1,0 +1,6 @@
+{
+  "id": "F14",
+  "class": "ambiguous",
+  "nl_goal": "We need a comprehensive picture of this user account: what kind of account it is (service, admin, human user, wordlist hit) AND what its recent authentication activity has looked like (cadence, success/failure mix, source diversity).",
+  "correct_leads": ["user-analysis", "authentication-history"]
+}
