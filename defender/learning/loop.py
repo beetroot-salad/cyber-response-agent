@@ -55,6 +55,7 @@ RUNS_DIR = LEARNING_DIR / "runs"
 PENDING_DIR = LEARNING_DIR / "_pending"
 PENDING_FILE = PENDING_DIR / "findings.jsonl"
 ACTOR_OBSERVATIONS_FILE = PENDING_DIR / "actor_observations.jsonl"
+ACTOR_OBSERVATIONS_CONSUMED_FILE = PENDING_DIR / "actor_observations.consumed.jsonl"
 
 ACTOR_PROMPT = LEARNING_DIR / "actor.md"
 ORACLE_PROMPT = LEARNING_DIR / "oracle.md"
@@ -750,10 +751,12 @@ def append_actor_observations(
 ) -> int:
     """Append judge ``actor_observations`` to the actor pending queue.
 
-    One row per observation, deduped on ``observation_id`` so re-running
-    the persist stage on a case is idempotent. The producer's only
-    outcome filter is ``skip-passthrough`` (defensive — the judge does
-    not emit observations on SKIP); the author owns the
+    One row per observation, deduped on ``observation_id`` against both
+    the active queue and the consumed history so re-running the persist
+    stage on a case never replays observations the author has already
+    decided on (committed, skipped, or pre-consumed as idempotent). The
+    producer's only outcome filter is ``skip-passthrough`` (defensive —
+    the judge does not emit observations on SKIP); the author owns the
     caught/incoherent/survived policy.
     """
     outcome = _outcome_keyword(judge_doc["outcome"])
@@ -763,6 +766,9 @@ def append_actor_observations(
     if not observations:
         return 0
     existing = _load_jsonl_ids(ACTOR_OBSERVATIONS_FILE, "observation_id")
+    existing |= _load_jsonl_ids(
+        ACTOR_OBSERVATIONS_CONSUMED_FILE, "observation_id"
+    )
     src = _source_run_dir(learning_run_dir)
     rows: list[dict] = []
     for i, obs in enumerate(observations):

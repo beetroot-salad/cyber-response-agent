@@ -42,6 +42,10 @@ For each observation, decide one of:
 4. **fold** — an existing lesson in the right channel already targets this pattern. Rewrite the body holistically to subsume both teachings; append the new `observation_id` to `source_observation_ids`. Broaden `relevance_criteria` if the scope grew. Folding only applies within a channel.
 5. **skip** — already covered, low signal, or doesn't generalize. Note the reason in your final report; do not write a file.
 
+### Deleting stale env lessons
+
+Env lessons accumulate `status: stale` flips over time. When you flip a lesson to stale (workflow 2 or 3) and the same `subject` already has another stale predecessor that was flipped against an earlier `superseded_by` chain, delete the older stale file with `rm` and record it in the commit message under `Environment removed:`. Two rules: (a) only delete env lessons in `status: stale`; never delete a `live` lesson or anything under `tradecraft/`; (b) the deletion has to be a side effect of authoring this batch — don't go pruning unrelated stale files. Allow-listed `rm` paths are limited to `defender/lessons-actor/{tradecraft,environment}/*.md` as a backstop, but the policy here is narrower.
+
 To decide between `new` and `fold`: enumerate lessons in the relevant channel, read frontmatter `relevance_criteria` (and `subject` for env). If a description looks plausibly related, read the body before deciding. Don't fold across distinct underlying patterns.
 
 ## Discipline

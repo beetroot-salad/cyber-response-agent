@@ -512,8 +512,10 @@ def _isolate(monkeypatch, tmp_path: Path) -> Path:
     """
     pending = tmp_path / "_pending"
     queue = pending / "actor_observations.jsonl"
+    consumed = pending / "actor_observations.consumed.jsonl"
     monkeypatch.setattr(loop, "PENDING_DIR", pending)
     monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_FILE", queue)
+    monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_CONSUMED_FILE", consumed)
     # Make REPO_ROOT == tmp_path so learning_run_dir.relative_to(REPO_ROOT) works.
     monkeypatch.setattr(loop, "REPO_ROOT", tmp_path)
     learning_run_dir = tmp_path / "defender" / "learning" / "runs" / "case-x"
@@ -583,6 +585,26 @@ def test_append_actor_observations_empty_list_is_zero_rows(
     assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
     assert not loop.ACTOR_OBSERVATIONS_FILE.exists()
     assert not loop.PENDING_DIR.exists()
+
+
+def test_append_actor_observations_dedupes_against_consumed_history(
+    monkeypatch, tmp_path: Path
+):
+    """After the author rotates an observation into the consumed file,
+    re-running the persist stage on the same case must NOT replay it."""
+    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    doc = _judge_doc("caught", [_obs(0), _obs(1)])
+
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 2
+    # Simulate author rotation: move both rows into consumed and clear active.
+    loop.ACTOR_OBSERVATIONS_CONSUMED_FILE.write_text(
+        loop.ACTOR_OBSERVATIONS_FILE.read_text()
+    )
+    loop.ACTOR_OBSERVATIONS_FILE.write_text("")
+
+    # Replay — same case_id + same indices; producer must see consumed.
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
+    assert _read_jsonl(loop.ACTOR_OBSERVATIONS_FILE) == []
 
 
 def test_append_actor_observations_queues_survived_outcomes(

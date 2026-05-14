@@ -370,7 +370,27 @@ def test_actor_generation_count_starts_at_1(monkeypatch, tmp_path: Path):
     assert shared.actor_generation_count() == 1
 
 
-def test_actor_generation_count_increments_with_prior_commits(
+def test_actor_generation_count_ignores_pre_author_commits(
+    monkeypatch, tmp_path: Path
+):
+    """Pre-author commits that touch lessons-actor/ (corpus structure,
+    templates) must NOT advance the counter — only commits carrying the
+    Actor-Model: trailer do."""
+    ctx = _isolate(monkeypatch, tmp_path)
+    pre = ctx["lessons"] / "environment" / "_TEMPLATE.md"
+    pre.write_text("template\n")
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "add", str(pre.relative_to(ctx["repo"]))],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", "seed templates"],
+        check=True,
+    )
+    assert shared.actor_generation_count() == 1
+
+
+def test_actor_generation_count_increments_with_prior_author_commits(
     monkeypatch, tmp_path: Path
 ):
     ctx = _isolate(monkeypatch, tmp_path)
@@ -381,9 +401,12 @@ def test_actor_generation_count_increments_with_prior_commits(
             ["git", "-C", str(ctx["repo"]), "add", str(p.relative_to(ctx["repo"]))],
             check=True,
         )
+        msg = (
+            f"author batch {i}\n\nGeneration: {i + 1}\n"
+            f"Actor-Model: claude-sonnet-4-6\n"
+        )
         subprocess.run(
-            ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", f"gen {i}"],
-            check=True,
+            ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", msg], check=True
         )
     assert shared.actor_generation_count() == 3
 

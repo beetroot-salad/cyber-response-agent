@@ -80,14 +80,16 @@ def release_repo_lock(fh: Any) -> None:
 def actor_generation_count() -> int:
     """Return the generation number this commit would assert.
 
-    Equals 1 + the count of prior commits that touched
-    ``defender/lessons-actor/``. The first author commit asserts
-    ``Generation: 1``. No-op author runs do not advance the counter
-    because they produce no commit. Walking git log is the canonical
-    manifest per the design — there is no separate state file.
+    Equals 1 + the count of prior author commits, identified by the
+    ``Actor-Model:`` trailer they're required to carry. The first
+    author commit asserts ``Generation: 1``. No-op author runs do not
+    advance the counter because they produce no commit. The trailer is
+    the canonical manifest — counting path-touching commits would
+    miscount corpus-structure and template commits that predate the
+    author flow.
     """
     proc = subprocess.run(
-        ["git", "rev-list", "--count", "HEAD", "--", LESSONS_ACTOR_DIR_REL],
+        ["git", "rev-list", "--count", "--grep=^Actor-Model: ", "HEAD"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
