@@ -159,24 +159,46 @@ def project_actor_input(run_dir: Path, actor_out: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_claude(system_prompt_path: Path, user_prompt: str, model: str) -> str:
-    """One-shot ``claude -p`` call. Returns stdout."""
+def _run_claude(
+    system_prompt_path: Path,
+    user_prompt: str,
+    model: str,
+    *,
+    settings_path: Path | None = None,
+    add_dir: Path | None = None,
+    permission_mode: str | None = None,
+    session_id: str | None = None,
+) -> str:
+    """One-shot ``claude -p`` call. Returns stdout.
+
+    Optional kwargs scope the agent's tool surface (settings file +
+    add-dir + permission-mode) and pin the session id so the caller
+    can locate the persistent transcript at
+    ``~/.claude/projects/-{cwd}/{session_id}.jsonl`` after the call
+    returns. The whole subprocess is bounded by ``SUBAGENT_TIMEOUT``.
+    """
     cmd = [
         "claude",
         "-p",
-        "--model",
-        model,
-        "--output-format",
-        "text",
-        "--system-prompt-file",
-        str(system_prompt_path),
+        "--model", model,
+        "--output-format", "text",
+        "--system-prompt-file", str(system_prompt_path),
     ]
+    if settings_path is not None:
+        cmd += ["--settings", str(settings_path)]
+    if add_dir is not None:
+        cmd += ["--add-dir", str(add_dir)]
+    if permission_mode is not None:
+        cmd += ["--permission-mode", permission_mode]
+    if session_id is not None:
+        cmd += ["--session-id", session_id]
     proc = subprocess.run(
         cmd,
         input=user_prompt,
         capture_output=True,
         text=True,
         timeout=SUBAGENT_TIMEOUT,
+        cwd=str(REPO_ROOT),
     )
     if proc.returncode != 0:
         raise LoopError(
@@ -186,64 +208,15 @@ def _run_claude(system_prompt_path: Path, user_prompt: str, model: str) -> str:
     return proc.stdout
 
 
-def _run_claude_streamed(
-    system_prompt_path: Path,
-    user_prompt: str,
-    model: str,
-    trace_path: Path,
-) -> str:
-    """Stream-json ``claude -p`` call with Read/Grep/Bash on lessons-actor.
+def _transcript_path(session_id: str) -> Path:
+    """Persistent transcript path Claude Code writes for ``--session-id``.
 
-    Persists every stream event to ``trace_path`` as JSONL and returns
-    the final assistant text from the terminal ``type=result`` event.
+    Path = ``~/.claude/projects/{sanitized-cwd}/{session_id}.jsonl``
+    where sanitization is ``cwd.replace('/', '-')`` (leading ``/`` →
+    leading ``-`` since the path starts with a slash).
     """
-    cmd = [
-        "claude",
-        "-p",
-        "--model", model,
-        "--output-format", "stream-json",
-        "--include-hook-events",
-        "--verbose",
-        "--permission-mode", "acceptEdits",
-        "--settings", str(ACTOR_SETTINGS),
-        "--add-dir", str(LESSONS_ACTOR_DIR),
-        "--system-prompt-file", str(system_prompt_path),
-    ]
-    final_text: str | None = None
-    with trace_path.open("w") as out:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=str(REPO_ROOT),
-        )
-        assert proc.stdin is not None and proc.stdout is not None
-        proc.stdin.write(user_prompt)
-        proc.stdin.close()
-        for line in proc.stdout:
-            out.write(line)
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                ev = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if ev.get("type") == "result":
-                final_text = ev.get("result")
-        try:
-            rc = proc.wait(timeout=SUBAGENT_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            raise LoopError(f"actor stream-json call timed out after {SUBAGENT_TIMEOUT}s")
-    if rc != 0:
-        stderr_tail = (proc.stderr.read() if proc.stderr else "")[-2000:]
-        raise LoopError(f"actor claude -p failed (rc={rc}):\nstderr: {stderr_tail}")
-    if not final_text:
-        raise LoopError("actor stream-json did not yield a `result` event with text")
-    return final_text
+    cwd_slug = str(REPO_ROOT).replace("/", "-")
+    return Path.home() / ".claude" / "projects" / cwd_slug / f"{session_id}.jsonl"
 
 
 def _actor_seed(run_id: str) -> int:
@@ -279,12 +252,24 @@ def invoke_actor(
         f"{menu_text}\n"
         "</mitre_menu>\n"
     )
-    return _run_claude_streamed(
+    import uuid as _uuid
+    session_id = str(_uuid.uuid4())
+    story = _run_claude(
         ACTOR_PROMPT,
         user,
         model=ACTOR_MODEL,
-        trace_path=learning_run_dir / "actor_trace.jsonl",
+        settings_path=ACTOR_SETTINGS,
+        add_dir=LESSONS_ACTOR_DIR,
+        permission_mode="acceptEdits",
+        session_id=session_id,
     )
+    src = _transcript_path(session_id)
+    dst = learning_run_dir / "actor_trace.jsonl"
+    if src.is_file():
+        shutil.copy2(src, dst)
+    else:
+        _log(f"actor transcript not found at {src}; skipping actor_trace.jsonl")
+    return story
 
 
 _RAW_SAMPLE_HEADER_RE = re.compile(r"^### Raw Sample Events\b.*$", re.MULTILINE)
