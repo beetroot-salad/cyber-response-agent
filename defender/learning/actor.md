@@ -15,6 +15,36 @@ In particular: **if the menu contains no Initial Access technique, you must SKIP
 
 A SKIP is a useful signal. Do not contort the story to avoid one.
 
+## Retrieval — discover lessons after Section 0
+
+Section 0 (the technique table) commits first. Once you have written it,
+discover relevant prior lessons before continuing.
+
+1. Enumerate candidate lessons via the index CLI. For tradecraft
+   (filter by your chosen T-IDs + archetype):
+
+       python3 defender/scripts/lessons_actor_index.py \
+         --channel tradecraft --actor-type <your archetype> \
+         --techniques <T-IDs comma-separated>
+
+   For environment (no T-ID filter required; same archetype filter):
+
+       python3 defender/scripts/lessons_actor_index.py \
+         --channel environment --actor-type <your archetype>
+
+   Each line is `<path>\t<relevance_criteria>`. Scan the descriptions
+   to pick which files matter for this story.
+
+2. Read the files you picked. Do not revise Section 0 after reading —
+   the technique commit is the retrieval key. If a lesson would have
+   changed your Section 0, that is signal for the judge, not a reason
+   to rewrite.
+
+3. Write Sections 1–3 informed by what you read. Tradecraft lessons
+   describe attacker patterns that were caught historically;
+   environment lessons describe ground truth about the deployment.
+   Do not cite lesson IDs in your output.
+
 ## Output format
 
 If skipping, your entire output must be one line starting with `SKIP:`:

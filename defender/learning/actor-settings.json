@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(defender/lessons-actor/**)",
+      "Grep(defender/lessons-actor/**)",
+      "Glob(defender/lessons-actor/**)",
+      "Bash(python3 defender/scripts/lessons_actor_index.py *)"
+    ]
+  }
+}

@@ -74,9 +74,13 @@ QUEUEABLE_FINDING_TYPES = {
 }
 ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"detection-confirmed"}
 
-CLAUDE_MODEL = os.environ.get("LEARNING_CLAUDE_MODEL", "claude-sonnet-4-6")
-ORACLE_MODEL = os.environ.get("LEARNING_ORACLE_MODEL", "claude-haiku-4-5")
+ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
+ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-haiku-4-5")
+JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "300"))
+
+ACTOR_SETTINGS = LEARNING_DIR / "actor-settings.json"
+LESSONS_ACTOR_DIR = REPO_ROOT / "defender" / "lessons-actor"
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +159,7 @@ def project_actor_input(run_dir: Path, actor_out: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_claude(system_prompt_path: Path, user_prompt: str, model: str = CLAUDE_MODEL) -> str:
+def _run_claude(system_prompt_path: Path, user_prompt: str, model: str) -> str:
     """One-shot ``claude -p`` call. Returns stdout."""
     cmd = [
         "claude",
@@ -180,6 +184,66 @@ def _run_claude(system_prompt_path: Path, user_prompt: str, model: str = CLAUDE_
             f"stderr: {proc.stderr[-2000:]}"
         )
     return proc.stdout
+
+
+def _run_claude_streamed(
+    system_prompt_path: Path,
+    user_prompt: str,
+    model: str,
+    trace_path: Path,
+) -> str:
+    """Stream-json ``claude -p`` call with Read/Grep/Bash on lessons-actor.
+
+    Persists every stream event to ``trace_path`` as JSONL and returns
+    the final assistant text from the terminal ``type=result`` event.
+    """
+    cmd = [
+        "claude",
+        "-p",
+        "--model", model,
+        "--output-format", "stream-json",
+        "--include-hook-events",
+        "--verbose",
+        "--permission-mode", "acceptEdits",
+        "--settings", str(ACTOR_SETTINGS),
+        "--add-dir", str(LESSONS_ACTOR_DIR),
+        "--system-prompt-file", str(system_prompt_path),
+    ]
+    final_text: str | None = None
+    with trace_path.open("w") as out:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.write(user_prompt)
+        proc.stdin.close()
+        for line in proc.stdout:
+            out.write(line)
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if ev.get("type") == "result":
+                final_text = ev.get("result")
+        try:
+            rc = proc.wait(timeout=SUBAGENT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise LoopError(f"actor stream-json call timed out after {SUBAGENT_TIMEOUT}s")
+    if rc != 0:
+        stderr_tail = (proc.stderr.read() if proc.stderr else "")[-2000:]
+        raise LoopError(f"actor claude -p failed (rc={rc}):\nstderr: {stderr_tail}")
+    if not final_text:
+        raise LoopError("actor stream-json did not yield a `result` event with text")
+    return final_text
 
 
 def _actor_seed(run_id: str) -> int:
@@ -215,7 +279,12 @@ def invoke_actor(
         f"{menu_text}\n"
         "</mitre_menu>\n"
     )
-    return _run_claude(ACTOR_PROMPT, user)
+    return _run_claude_streamed(
+        ACTOR_PROMPT,
+        user,
+        model=ACTOR_MODEL,
+        trace_path=learning_run_dir / "actor_trace.jsonl",
+    )
 
 
 _RAW_SAMPLE_HEADER_RE = re.compile(r"^### Raw Sample Events\b.*$", re.MULTILINE)
@@ -355,7 +424,7 @@ def invoke_judge(
         f"{projected_telemetry_path.read_text().rstrip()}\n"
         "</projected_telemetry>\n"
     )
-    return _run_claude(JUDGE_PROMPT, user)
+    return _run_claude(JUDGE_PROMPT, user, model=JUDGE_MODEL)
 
 
 def is_skip_story(actor_story: str) -> bool:
@@ -805,11 +874,13 @@ Outputs:
     the lessons curator (author.py) is invoked automatically.
 
 Environment:
-  LEARNING_CLAUDE_MODEL          claude model for actor + judge subagents
+  ACTOR_MODEL                    claude model for the adversarial actor
                                  (default: claude-sonnet-4-6)
-  LEARNING_ORACLE_MODEL          claude model for the telemetry oracle —
+  ORACLE_MODEL                   claude model for the telemetry oracle —
                                  cheap projection work, no reasoning
                                  (default: claude-haiku-4-5)
+  JUDGE_MODEL                    claude model for the outcome judge
+                                 (default: claude-sonnet-4-6)
   LEARNING_SUBAGENT_TIMEOUT_SECONDS  per-subagent timeout (default: 300)
   LEARNING_AUTHOR_THRESHOLD      pending findings before author runs (default: 5)
 

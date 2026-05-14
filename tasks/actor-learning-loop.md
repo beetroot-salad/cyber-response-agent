@@ -44,12 +44,15 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   `_TEMPLATE.md`. No seed lessons; env invalidation/mutation fields
   (`subject`, `status`, `superseded_by`) deferred to actor-author PR
   below where the access pattern is concrete.
-- [ ] **Actor.md edit — grep-after-Section-0 phase.** Validate retrieval
-  reliability at MVP (Sonnet expected clean, Haiku may miss). Includes
-  switching the actor invocation to stream-json, persisting
-  `actor_trace.jsonl` (tradecraft grep+read events) **and**
-  `actor_env_lessons.yaml` (verbatim snapshot of preloaded live env
-  lessons), and adding the missed-retrieval audit script.
+- [x] **Actor.md edit — grep-after-Section-0 phase.** Validate retrieval
+  reliability at MVP (Sonnet expected clean, Haiku may miss). Switches
+  the actor invocation to stream-json, persists `actor_trace.jsonl`
+  (tradecraft + environment index/grep/read events), and ships
+  `defender/scripts/lessons_actor_index.py` — the description-listing
+  CLI the actor uses to scan `relevance_criteria` before reading
+  files. Env lessons flow through the same retrieval path (filtered by
+  archetype only); no preloaded snapshot artifact. No standalone audit
+  script — analytics fold into ad-hoc analysis on the trace JSONL.
 - [ ] **Actor pending queue + persist-stage rotation.** Implement
   `_pending/actor_observations.jsonl` per the design's queue
   contract: one entry per observation, stable ID
@@ -113,15 +116,18 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   advance the plateau test.
 - Environment lessons: attacker-framed only; no defender-visibility
   prose. Framing rule enforced at author write time.
-- Retrieval: audit-only at MVP via `actor_trace.jsonl` (captured by
-  the actor-grep PR via stream-json invocation); Section 0 may not
+- Retrieval: audit-only at MVP via `actor_trace.jsonl` (stream-json
+  capture of all index-CLI / Grep / Read calls); Section 0 may not
   be revised post-retrieval.
 - Stage-specific model env vars (`ACTOR_MODEL`, `ORACLE_MODEL`,
-  `JUDGE_MODEL`) introduced in the actor-grep PR; only `ACTOR_MODEL`
-  is overridden by the generation trailer at replay time.
+  `JUDGE_MODEL`), one default per stage, no shared fallback;
+  only `ACTOR_MODEL` is overridden by the generation trailer at
+  replay time.
 - Environment claims at MVP: lean retrieval-only frontmatter
-  (`relevance_criteria` + `recorded_at`), pre-loaded globally into
-  the actor prompt. Invalidation/mutation schema (equivalence key,
+  (`actor_type` + `relevance_criteria` + `recorded_at`), discovered
+  on the same path as tradecraft via
+  `defender/scripts/lessons_actor_index.py --channel environment`
+  (no preload). Invalidation/mutation schema (equivalence key,
   status, supersession ref, grounding ref) deferred to actor-author
   PR — its access pattern designs the fields. No time-based TTL.
   **Known unbounded risk**: stale-but-uncontradicted claims can

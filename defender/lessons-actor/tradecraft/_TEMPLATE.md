@@ -1,9 +1,11 @@
 <!--
 Template. Tradecraft lessons are authored from `caught` outcomes only.
-The actor greps this directory after committing Section 0: `techniques:`
-matches one or more of the chosen T-IDs, then `actor_type:` filters by
-the case's archetype. Authoring + invalidation mechanics land in
-item #6 (author_actor) of tasks/actor-learning-loop.md.
+The actor discovers candidates after committing Section 0 via
+`defender/scripts/lessons_actor_index.py --channel tradecraft
+--techniques <T-IDs> --actor-type <archetype>` and Reads the files
+whose `relevance_criteria` looks pertinent. Authoring + invalidation
+mechanics land in item #6 (author_actor) of
+tasks/actor-learning-loop.md.
 -->
 ---
 techniques: [T1078.004]              # MITRE T-IDs — grep retrieval key
