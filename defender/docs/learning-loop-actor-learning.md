@@ -255,53 +255,41 @@ filter for actor authoring below. Frontmatter:
 
 ```yaml
 techniques: [T1550.001, T1078.004]   # one or more — grep key
-archetype: [internal]                # multi-value, internal/external only
+actor_type: [internal]               # multi-value, internal/external only
+relevance_criteria: <one line — when this lesson applies to a story>
 recorded_at: <run_id>
-description: <one-line hook the actor sees in a grep listing>
 ```
 
-`archetype` is a coarse viability filter — `external` cover stories
+`actor_type` is a coarse viability filter — `external` cover stories
 don't transfer to `internal` actors. Multi-value list (`[internal,
 external]` for lessons that apply to both) — kept as a YAML list of
 those two literals so `grep -l "internal"` works reliably.
+`relevance_criteria` is the one-line hook the actor reads from the grep
+listing to decide whether to Read the full file.
 
 **Environment channel.** Cache-style; assertions about the
-deployment. Frontmatter:
+deployment. Pre-loaded globally into the actor prompt — no grep
+retrieval, the actor reads the full set and LLM-judges relevance.
+
+Frontmatter (lean MVP — retrieval-only fields):
 
 ```yaml
-subject: <stable equivalence key, e.g., "falco.rule.coverage.docker-exec">
-assertion: <the claim itself, one line>
+relevance_criteria: <one line — when this assertion bears on a story>
 recorded_at: <run_id>
-status: live | stale
-superseded_by: <run_id, when status=stale>
-system_ref: defender/skills/{system}/SKILL.md#<anchor>  # required for live
 ```
 
-**Two invalidation modes:**
+**Invalidation/equivalence schema is intentionally deferred** to the
+actor-author PR (item #6). Two invalidation modes are still the design
+intent — contradiction-with-replacement on `caught` outcomes and
+stale-only invalidation on `incoherent` outcomes — but the on-disk
+fields that support them (an equivalence key like `subject`, a `status:
+live | stale` flag, a `superseded_by` ref) earn their place when the
+author actually mutates the corpus. Until then env lessons are
+append-only and the author PR decides the final shape against a
+concrete access pattern.
 
-- **Contradiction-with-replacement** (`caught` outcomes): the
-  author identifies the correct fact, writes a new live file with
-  the new `recorded_at`, and flips the prior live file's `status`
-  to `stale` with `superseded_by` set.
-- **Stale-only invalidation** (`incoherent` outcomes): the author
-  identifies that the actor's story contradicted itself because of a
-  specific live env claim, but cannot derive the correct replacement
-  fact from the incoherent encounter alone. The prior live file's
-  `status` flips to `stale`, `superseded_by` is recorded as the
-  run id that surfaced the contradiction, and **no new live file is
-  written**. The subject is left without a live claim until a
-  future `caught` case (or hand-authored knowledge) supplies one.
-
-Stale files persist for audit in both modes; the read path filters
-to `status: live`. No time-based TTL at MVP — environment claims
-aren't time-sensitive at our cadence, and the `system_ref` grounding
-gate is the stronger freshness check.
-
-The `subject` is the load-bearing equivalence key; the author prompt
-specifies how to coin one consistently (kebab-case, `{system}.{area}.{noun}`).
-`system_ref` is required for `status: live` files and must resolve to
-an existing path; the author validation gate enforces this. Stale
-files retain whatever `system_ref` they had — they're history.
+No time-based TTL at MVP. Stale-but-uncontradicted risk (below) is
+the only freshness check that remains.
 
 **Scope constraint — attacker-framed only, not the visibility surface.**
 
@@ -329,9 +317,7 @@ attacker-framed equivalent of "Falco covers docker-exec" is
 
 The author prompt enforces this with a framing rule: any environment
 lesson body that mentions the defender, leads, queries, or lead
-positions is rejected at write time. The grounding citation
-(`system_ref`) is allowed to *point at* a defender knowledge file
-because the citation is metadata, not actor-visible prose.
+positions is rejected at write time.
 
 This does not fully eliminate the collapse risk — actor and defender
 can still converge on the same surface implicitly (both learn "X is
@@ -366,8 +352,8 @@ Two-phase within the single actor call:
    technique table. Same as today.
 2. **Grep + read lessons.** Actor greps `lessons-actor/tradecraft/`
    for `techniques:` lines matching any of its chosen T-IDs, filtered
-   by `archetype`, and Reads matching files. Environment lessons are
-   small and global — all `live` rows are pre-loaded into the prompt.
+   by `actor_type`, and Reads matching files. Environment lessons are
+   small and global — all rows are pre-loaded into the prompt.
 3. **Write Sections 1–3.** Story, goal, bypass — informed by the
    loaded lessons.
 
@@ -439,21 +425,23 @@ shape; distinct queue, distinct corpus, distinct threshold.
     - order: 0                      # injection order; matters because
                                     # prompt position can influence weight
       path: defender/lessons-actor/environment/falco-rule-cov-XXX.md
-      subject: falco.rule.coverage.docker-exec
       recorded_at: <run_id>
-      status: live                  # always live at story time; recorded for audit
-      system_ref: defender/skills/wazuh/SKILL.md#falco-rules
-      assertion: |
-        <verbatim one-line claim body the actor saw>
+      relevance_criteria: |
+        <verbatim relevance_criteria line from the file>
+      body: |
+        <verbatim body the actor saw — the assertion + detail>
       blob_sha: <git object SHA of the file at story time>
     - order: 1
       ...
     ```
 
-    Both `assertion` (inlined for self-containment — survives later
-    edits or stale-flips) and `blob_sha` (cross-check against
-    history) are recorded. Identifier-only references would lose the
-    exact claim if files mutate between actor run and author run.
+    Both `body` (inlined for self-containment — survives later edits)
+    and `blob_sha` (cross-check against history) are recorded.
+    Identifier-only references would lose the exact claim if files
+    mutate between actor run and author run. The schema follows the
+    lean env-lesson frontmatter — invalidation fields (`subject`,
+    `status`, `superseded_by`) land here when they land on the
+    on-disk lesson, in the actor-author PR.
     Env lessons are *injected* by the orchestrator, not grepped by
     the actor, so the retrieval trace alone does not name them.
   - `actor_trace.jsonl` — the actor's tool-call trace, including
@@ -579,9 +567,10 @@ tradecraft = claim about story shape or blending).
   reviewed first; (c) lessons that consistently fail to predict
   `caught` outcomes when their pattern is invoked are flagged for
   retirement (instrumentation, not enforcement, at MVP).
-- Environment: groundability check against `defender/skills/{system}/`
-  (the `system_ref` frontmatter field, required for `status: live`).
-  Plus the attacker-framing rule above.
+- Environment: attacker-framing rule (above) is the only validation
+  gate at MVP. Groundability check against `defender/skills/{system}/`
+  is deferred — it depends on the deferred grounding-ref schema field
+  and lands with that schema in the actor-author PR.
 
 **Concurrency.** Actor author and defender author write to disjoint
 corpora and read disjoint `_pending` queues, but they **share the
