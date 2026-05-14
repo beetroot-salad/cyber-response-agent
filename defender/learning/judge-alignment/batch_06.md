@@ -265,23 +265,16 @@ the bot's own audit log to refute the framing.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on lead 2 (Slack audit). The projected ChatOps
-  path requires a Slack command from kpark or another SRE, but the channel
-  audit shows zero SRE messages and no `/bucket` slash-command invocations in
-  the four-hour window. That directly refutes the human-command side of the
-  ChatOps framing.
-- **`detection-confirmed`** on lead 3 (ChatOpsBot action audit). The bot's own
-  log shows zero actions and no STS:AssumeRole invocation in the same window,
-  where the story projected a bot action chained to the Slack command.
-  CloudTrail can show the role was used; the bot audit shows the bot did not
-  use it.
+- **`detection-confirmed`** on lead 2 (Slack + ChatOpsBot audit chain). The
+  projected ChatOps path requires both a Slack command from kpark or another
+  SRE and a bot action chained to that command. The channel audit shows zero
+  SRE messages and no `/bucket` slash-command invocations, while the bot's own
+  log shows zero actions and no STS:AssumeRole invocation. CloudTrail can show
+  the role was used; these two leads show the ChatOps path was absent.
 - **`detection-confirmed`** on lead 4 (kpark's access-key activity).
   Long-lived deprecated access key + MFA-not-enforced role assumption is the
   canonical stolen-credential signature. Together with the absent Slack/bot
   activity it converts an ambiguous CloudTrail picture into a decisive one.
-  Worth preserving as a discipline: long-lived access keys that share a role
-  with a service principal are role-impersonation attack-surface, and
-  CMDB-flagged-for-rotation but unrotated keys deserve their own lead.
 ---
 
 ## Sample 18 — survived (suspicious K8s pod admitted via GitOps; provenance gap)
@@ -423,11 +416,3 @@ surface.
   when an attacker controls a commit. Closing this requires GitHub
   branch-protection audit + sigstore / SLSA-attestation ingestion, not more
   K8s telemetry.
-- **`lead-quality`** on lead 0 (K8s audit). The PolicyBinding
-  `payments-elevated` permitted hostPID for `card-service` and
-  `card-service-hotfix` deployments, and the alerting pod used that exception
-  to land the privileged shape. The audit log returned the admission decision
-  without evaluating whether the documented exception was still appropriately
-  narrow. Surface as a discipline note — policy-binding exceptions deserve
-  width audit when the alerting signature is the very behaviour the exception
-  permits.

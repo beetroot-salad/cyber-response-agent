@@ -22,7 +22,7 @@ AES-capable accounts, and the requests spanned all four domain controllers
 in the forest within 90 seconds. None of those shapes fit a misconfigured
 application server.
 
-**Expected actor observation (gist):** Actor's "service-account SPN-cache refresh" framing fell to the all-RC4 downgrade from an AES-capable principal, fan-out across all four KDCs in 92 seconds, and SPN-content targeting Domain Admins + Tier-0 accounts svc-monitor has no operational relationship to.
+**Expected actor observation (gist):** Actor's "service-account SPN-cache refresh" framing fell to request semantics: all-RC4 from an AES-capable principal, plus SPN content targeting Domain Admins and Tier-0 accounts svc-monitor has no operational relationship to.
 
 ### alert.json (trimmed)
 
@@ -126,15 +126,13 @@ choice to run.
   an AES-capable principal are the canonical Kerberoasting downgrade signature.
   The oracle projected a mix of AES and RC4 for a real monitoring tool; the
   actual burst was exclusively RC4.
-- **`detection-confirmed`** on lead 1 (cross-DC scope). Fan-out across all four
-  KDCs in 92 seconds is incompatible with a service that has preferred-DC
-  affinity. The oracle projected contact with one DC; the actual requests
-  spread evenly across DC01-DC04.
 - **`detection-confirmed`** on lead 3 (SPN inventory of requested
   services). svc-monitor's operational dependencies are HTTP monitors;
   the 84 requested SPNs include 11 Domain Admin and 14 Tier-0 service
   accounts that have no operational relationship to svc-monitor. The
   request *content* is the load-bearing signal, not the request *count*.
+  Lead 1's cross-DC fan-out corroborates enumeration, but it is not the
+  core expected finding.
 
 ---
 
@@ -411,9 +409,3 @@ consent and the app's token usage reveals the carrier.
   performed the Graph rule-create call and then read and sent mail. The
   cross-source IP plus Graph-driven rule creation is the canonical
   AiTM-with-illicit-consent signature.
-- **`detection-confirmed`** on lead 4 (rule effect). The forwarded set
-  was payment-redirect-shaped client invoice replies, not "personal
-  invoices for follow-up". Downstream-effect leads turn an ambiguous
-  rule-create event into a categorised payment-fraud picture and give
-  the responder concrete invoice references to alert client AR teams
-  on.

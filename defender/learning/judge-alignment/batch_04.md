@@ -147,8 +147,10 @@ high-entropy subdomains are expected. The framing implies the *parent domain*
 appears across the fleet (every customer's host using the SaaS hits it). The
 defender's recent-rule-fires lead by parent domain shows fires from this one
 host only, while the host baseline shows `telemetry-cloud.io` is high-volume
-on that host but has rank 0 for fleet share. Single-host concentration is
-incompatible with shared SaaS adoption and is the load-bearing refutation.
+on that host but has rank 0 for fleet share. The single-host concentration
+refutes this story because fleet-wide SaaS adoption is load-bearing in the
+actor/oracle projection; single-host DNS concentration would not be
+dispositive in isolation.
 
 **Expected actor observation (gist):** Actor's managed-SaaS-SDK cover required fleet-wide presence of `telemetry-cloud.io`, but the 7-day parent-domain history and 30-day rule-fire scope confined all activity to `marketing-laptop-07` alone.
 
@@ -246,20 +248,11 @@ inventory or SBOM the defender has no direct way to rule out the SDK.
 - **`detection-confirmed`** on lead 0 (`wazuh.dns-query-history`). The
   parent-domain query history confines 1,182 `telemetry-cloud.io` events and
   612 distinct subdomains to `marketing-laptop-07`; the oracle projected many
-  hosts across the fleet. Single-host parent-domain concentration directly
-  refutes the managed-SaaS framing.
-- **`detection-confirmed`** on lead 1 (`wazuh.recent-rule-fires`). The
-  30-day rule-fire scope independently confines all 47 rule-100110 fires for
-  the parent to `marketing-laptop-07`, where the oracle projected fleet-wide
-  high-entropy fires. This corroborates lead 0 while remaining anchorable to
-  one lead in the judge schema.
-- **`detection-confirmed`** on lead 3 (`wazuh.agent-alerts-in-window`).
-  The co-occurring rule-32152 fire (unprivileged process spawn from
-  Downloads two hours before the DNS burst) gives the responder a
-  pivot — the implant carrier candidate — that none of the DNS-only leads
-  could surface. Worth preserving as a discipline: pulling a 24h alert
-  window on the originating host catches carrier-of-carrier signal even
-  when the focal signature is DNS.
+  hosts across the fleet. This source of refutation is the projection mismatch:
+  actor/oracle expected fleet-wide parent-domain presence for a managed SaaS
+  deployment, but the actual parent-domain history was confined to one host.
+  Lead 1 corroborates the same fleet-scope mismatch; lead 3 gives a useful
+  next pivot, but neither should dilute the core expected finding.
 ---
 
 ## Sample 12 — caught (FIM cron drop, refuted by joining FIM with the alerts window)

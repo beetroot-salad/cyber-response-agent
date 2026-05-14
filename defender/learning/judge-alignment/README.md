@@ -30,6 +30,13 @@ miss for `survived`, or the missing-system pin for `undecidable`). The human
 reviewer compares the judge's actual `actor_observations[]` entries against
 this gist to score observation pertinence.
 
+Expected findings should name the load-bearing issue, not dump every issue the
+investigation surfaced. Most samples should have 1-2 findings: the core
+projection mismatch for `caught`, the core untested claim for `survived`, or
+the missing instrumentation surface for `undecidable`. Use a third finding only
+when it dismantles a separate load-bearing claim rather than merely
+corroborating, categorizing, or suggesting a next pivot.
+
 ## Acceptance criteria
 
 - Outcome agreement ≥80% between judge and human label across the 30-row set.

@@ -22,7 +22,7 @@ network lead (beacon-shaped TLS to a 7-day-old domain). The picture is built
 by chaining cheap leads, which is exactly the discipline the actor's
 "isolated rundll32 fire" framing tries to undercut.
 
-**Expected actor observation (gist):** Actor's isolated-rundll32-as-Office-COM framing fell to the chain of a Word-dropped non-Microsoft DLL into `%APPDATA%\OfficeUpdater\`, a same-window scheduled-task persistence entry, and Cobalt-Strike-JA3 TLS to `update-services.cloud` registered 7 days prior.
+**Expected actor observation (gist):** Actor's isolated-rundll32-as-Office-COM framing fell to the Word-dropped non-Microsoft DLL in `%APPDATA%\OfficeUpdater\` and same-window scheduled-task persistence; the Cobalt-Strike-shaped TLS corroborates C2 but is not the core observation.
 
 ### alert.json (trimmed)
 
@@ -118,15 +118,9 @@ joins are what refute, and each is a separate lead.
   anchor that refutes the benign Office COM add-in projection.
 - **`detection-confirmed`** on lead 2 (scheduled-task creation in
   same window). Persistence registration co-located in time with the
-  initial dropper is a durable invariant; surface as a discipline
-  note — when the alert is a child-process anomaly, the scheduled-
-  task / service / registry-run-key creations in ±10 min are usually
-  the strongest confirmation.
-- **`detection-confirmed`** on lead 3 (network). The 7-day-old domain, no prior
-  tenant contact, and Cobalt-Strike-shaped JA3 refute the benign Office
-  plumbing story at the command-channel edge. Lead 4's matching `.docm`
-  delivery closes the inbound carrier chain, but the network lead is the
-  expected finding anchor.
+  initial dropper refutes benign Office COM plumbing. The task re-runs
+  the same dropped DLL every 8 hours, turning the rundll32 event from an
+  isolated add-in load into persistence for the Word-dropped payload.
 
 ---
 
@@ -278,11 +272,10 @@ volatile-memory acquisition, which is not on the live audit surface.
 - **`lead-quality`** on lead 5 (Sysdig polling cadence). The eBPF
   surface is the most powerful tool the defender has against memfd
   workloads, but the *polling* mode misses jittered implants by
-  design. Surface as a discipline note — when the tool is the
-  load-bearing one for a threat class, its sampling parameters are a
-  load-bearing detection control and need their own audit. Streaming
-  (continuous) capture would have raised the cost-of-evasion
-  significantly without closing the gap.
+  design. When this tool is the load-bearing surface for a threat class,
+  its sampling parameters are part of the detection control. Streaming
+  (continuous) capture would have raised the cost-of-evasion significantly
+  without closing the gap.
 
 ---
 

@@ -142,13 +142,6 @@ Impossible-travel rules over-trigger on legitimate proxy reroutes.
   online, screen-unlocked, and receiving keystrokes around the alert. That
   turns the Azure AD concurrency into a user-presence contradiction rather than
   just an old token refresh.
-- **`detection-confirmed`** on lead 4 (Intune device inventory). The
-  registered-device list closes the managed-device variant of the "third
-  device" loophole — Intune carries only the SF laptop + managed iPhone, so
-  there is no registered corporate Windows device that can explain the Lagos
-  sign-in. It does not rule out every unmanaged personal device by itself, but
-  it strengthens the Azure AD + CrowdStrike refutation by removing the clean
-  corporate-device explanation.
 ---
 
 ## Sample 14 — survived (CloudTrail IAM change, IaC-provenance gap)
@@ -303,7 +296,7 @@ shows a .docm attachment opened two minutes earlier. The carrier-chain
 refutation is decisive: management tooling does not spawn from Outlook two
 minutes after a macro-enabled document opens.
 
-**Expected actor observation (gist):** Actor's "Microsoft management tooling using EncodedCommand" framing fell to the `outlook → winword → cmd → powershell` lineage tied to a `.docm` opened 2 minutes earlier and HTTPS to `financial-update.co.uk` registered 9 days prior.
+**Expected actor observation (gist):** Actor's "Microsoft management tooling using EncodedCommand" framing fell to the `outlook → winword → cmd → powershell` lineage tied to a `.docm` opened 2 minutes earlier; the first-contact HTTPS destination corroborates but is not the core observation.
 
 ### alert.json (trimmed)
 
@@ -415,8 +408,3 @@ workflow is not uncommon for finance staff.
   SPF/DKIM failures, and recently registered sender domain corroborate the
   phishing-with-template-injection path while remaining anchorable to the
   email lead.
-- **`detection-confirmed`** on lead 3 (network egress). The HTTPS
-  destination is a 9-day-old domain with no prior tenant contact and a
-  follow-on 2.4MB stream — incompatible with the actor's "vendor CDN with
-  established history" framing. Cross-tenant first-contact is a robust
-  invariant under reasonable cover variants.

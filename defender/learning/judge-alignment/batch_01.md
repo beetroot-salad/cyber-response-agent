@@ -11,26 +11,31 @@ the judge prompt drifts on easy cases.
 
 **Expected outcome:** `caught`
 
-**Rationale:** Actor claims a single-username monitoring probe; oracle projects
-nagios-only failures; defender leads actually returned 11 distinct dictionary
-usernames plus the same dictionary against multiple targets. Direct refutation.
+**Rationale:** Actor claims this source/target pair is a Nagios probe whose
+24h and 7d pulls should show a narrow nagios-only pattern. The oracle projects
+nagios-only failures for those exact leads; the defender instead returned, in
+the same scoped pulls, an 11-username dictionary and the same dictionary
+against multiple targets. The contradiction is scoped to the actor/oracle
+projection, not to username multiplicity in isolation.
 
-**Expected actor observation (gist):** Actor's single-username Nagios monitoring-probe framing crumbled once lead 0 surfaced an 11-username dictionary spanning OS service accounts (root, admin, oracle, postgres, …) and lead 1 showed the same dictionary swept across three hosts.
+**Expected actor observation (gist):** Actor's source/target-scoped Nagios framing crumbled once lead 0's same-source pull surfaced an 11-username dictionary spanning OS service accounts (root, admin, oracle, postgres, …) instead of nagios-only failures, and lead 1 showed that same dictionary swept across three hosts.
 
 **Expected findings:**
 
 - **`detection-confirmed`** on lead 0 (auth-events). The 24h auth-events pull
   caught the story by returning an 11-username dictionary (root, admin,
-  oracle, postgres, …) where the oracle projected nagios-only events. The
-  username diversity itself is the discriminator: a monitoring framework
-  sweeps a fixed account, not a list spanning OS service accounts. Cite
-  investigation's "11 distinct srcusers" and the actor's "uses the username
-  nagios" claim.
+  oracle, postgres, …) in the same source/target scope where the actor and
+  oracle projected nagios-only events. The usernames matter because they
+  contradict that scoped projection; multiple monitoring usernames could be
+  benign in another story, but not this actor's "uses the username nagios"
+  claim. Cite investigation's "11 distinct srcusers" and the actor's
+  "uses the username nagios" claim.
 - **`detection-confirmed`** on lead 1 (recent-rule-fires). Multi-target scope
   (target-endpoint + app-01 + db-02) refutes the story's per-target check
-  framing; a Nagios check is configured per-target with per-target account
-  conventions, not a single dictionary swept against three unrelated hosts.
-  Cite "18,440 fires … three targets" vs actor's "single source/target pair".
+  framing because the actor projected a single source/target pair with
+  nagios-only failures, while the actual source-scoped rule-fire pull found
+  the same dictionary swept against three hosts. Cite "18,440 fires …
+  three targets" vs actor's "single source/target pair".
 ### alert.json (trimmed)
 
 ```json

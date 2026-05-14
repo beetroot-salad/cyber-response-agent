@@ -132,12 +132,6 @@ rather than `ref:refs/heads/main`.
   was `event=pull_request` from `head_repo=attacker-fork/api`, not a push to
   main. That independently refutes the main-branch-deploy framing and explains
   how the wrong OIDC subject was minted.
-- **`detection-confirmed`** on lead 2 (trust-policy condition).
-  `StringLike "repo:example/api:*"` is a misconfiguration class, not
-  an event — but a lead that reads the trust policy and flags
-  wildcard-`sub` conditions turns a one-time alert into a
-  population-of-misconfigurations finding. Worth preserving as a
-  routine companion lead for any OIDC-federated alert.
 
 ---
 
@@ -398,15 +392,12 @@ air.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on lead 0 (parent process). The vssadmin parent is
-  `wmiprvse.exe` driven by a *remote* DCOM session from `FIN-DESKTOP-014`.
-  The actor's story projected a local scheduled-task or local-provider
-  carrier; the actual carrier is remote WMI.
-- **`detection-confirmed`** on lead 1 (carrier workstation). Pivoting to the
-  remote-WMI source shows `FIN-DESKTOP-014` running the command through a
-  hollowed rundll32 chain with Cobalt-Strike-shaped beaconing. This names the
-  carrier host and turns a suspicious local command into a cross-host
-  ransomware-precursor chain.
+- **`detection-confirmed`** on lead 0 (remote-WMI carrier). The vssadmin
+  parent is `wmiprvse.exe` driven by a *remote* DCOM session from
+  `FIN-DESKTOP-014`, and pivoting to that source shows a hollowed rundll32
+  chain with Cobalt-Strike-shaped beaconing. The actor projected a local
+  scheduled-task or local-provider carrier; the actual carrier is remote WMI
+  from a beaconed peer host.
 - **`detection-confirmed`** on lead 3 (Veeam documentation). The deployed
   backup tool's documented behaviour refutes the mechanism: Veeam v12 uses
   VSS provider APIs and does not invoke `vssadmin.exe delete shadows`. The

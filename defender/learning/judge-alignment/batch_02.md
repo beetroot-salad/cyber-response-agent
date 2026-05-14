@@ -205,9 +205,10 @@ specifically to make the diff indistinguishable.
 
 **Rationale:** Actor frames a high-anomaly POST as a vendor's scheduled
 vulnerability scan. Oracle projects scanner-typical breadth (many URLs, many
-hosts, recognizable scanner UA). Defender's URL-pattern + UA leads showed a
-single targeted URL on a single host with a hand-crafted UA and exec-form
-parameters — refutes the scanner framing.
+hosts, recognizable scanner UA). Defender's source-scoped URL-pattern + UA
+leads showed none of that projected breadth: the same source only hit the
+alert URL on one host and used a bare browser UA with exec-form parameters.
+That refutes this scanner framing as written.
 
 **Expected actor observation (gist):** Actor's scheduled-vulnerability-scanner cover collapsed once the URL/host-breadth and 30-day UA-distribution leads showed a single targeted `/admin/upload.php` endpoint with a bare `Mozilla/5.0` UA and no Nessus/Qualys/Rapid7 fingerprint.
 
@@ -291,14 +292,14 @@ authorized benign test rather than a manual RCE attempt.
 
 **Expected findings:**
 
-- **`detection-confirmed`** on lead 0 (URL breadth). The oracle projected
+- **`detection-confirmed`** on lead 0 (URL/host breadth). The oracle projected
   scanner-typical URL breadth across multiple admin endpoints; actual data
-  confined all activity to `/admin/upload.php`. The URL-breadth pattern is the
-  load-bearing discriminator between a scanner and a manual operator.
-- **`detection-confirmed`** on lead 1 (host/rule scope). The oracle projected
-  scanner-typical host breadth for the same admin-upload rule; actual data
-  confined all fires to a single host and URL. This independently corroborates
-  lead 0 while remaining anchorable to one lead in the judge schema.
+  confined that same source's activity to `/admin/upload.php`. The
+  load-bearing signal is the contradiction between the actor/oracle's
+  source-scoped breadth projection and the actual confined URL set, not a
+  general rule that scanners can never focus on one endpoint. Lead 1
+  corroborates the same confined-host pattern, but it should not become a
+  separate finding.
 - **`detection-confirmed`** on lead 2 (UA distribution). Absence of any
   scanner-tool UA fingerprint over 30 days from the source refutes the
   "contracted scanner" framing as written — the actor projected recognizable
