@@ -11,7 +11,10 @@ Usage:
     lessons_actor_index.py --channel environment --actor-type external
 
 Filters are AND-combined. `--techniques` is OR within the list.
-Lessons missing a filtered field are skipped silently.
+Lessons missing a filtered field are skipped silently. Environment
+lessons with `status: stale` are hidden by default; `--include-stale`
+surfaces them (author-only — the runtime actor must never see stale
+env claims).
 """
 from __future__ import annotations
 
@@ -76,6 +79,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--channel", required=True, choices=CHANNELS)
     ap.add_argument("--actor-type", choices=("internal", "external"))
     ap.add_argument("--techniques", help="Comma-separated MITRE T-IDs; matches if any appear in the lesson's techniques: list")
+    ap.add_argument("--include-stale", action="store_true", help="Include env lessons with status: stale (author-only)")
     ns = ap.parse_args(argv[1:])
 
     want_techniques = set()
@@ -83,6 +87,9 @@ def main(argv: list[str]) -> int:
         want_techniques = {t.strip() for t in ns.techniques.split(",") if t.strip()}
 
     for path, fm in iter_lessons(ns.channel):
+        if ns.channel == "environment" and not ns.include_stale:
+            if str(fm.get("status") or "live").strip() == "stale":
+                continue
         if ns.actor_type:
             if ns.actor_type not in _as_list(fm.get("actor_type")):
                 continue

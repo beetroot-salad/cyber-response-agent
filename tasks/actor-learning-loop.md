@@ -66,25 +66,29 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   retried entries; the actor author can adopt the same pattern when
   it lands. Shared helpers (`_source_run_dir`, `_load_jsonl_ids`,
   `_append_jsonl`) factored in `loop.py` for the next queue caller.
-- [ ] **Actor author** — `defender/learning/author_actor.py` +
-  `author_actor.md`. Designs and lands the env-channel invalidation
-  schema (equivalence key, status, supersession refs — shape TBD
-  against the concrete access pattern) on top of the lean retrieval-
-  only frontmatter shipped by the corpus-structure PR.
-  `caught` → tradecraft + environment authoring
-  (contradiction-with-replacement); `incoherent` → environment
-  stale-only invalidation (closes the contradiction-only loop for
-  stale env claims; no replacement live file written). Per-case
-  inputs include `actor_env_lessons.yaml` + `actor_trace.jsonl` so
-  the author can identify the specific stale subject. Environment
-  prompt enforces attacker-framing constraint (no visibility-surface
-  prose). Repo-level lock
-  (`defender/learning/_author.lock`) wraps the **entire fold-and-
-  commit flow** including child-agent execution that mutates files —
-  not just the final `git commit`. Order: acquire queue lock first,
-  then repo lock; release in reverse. Author commit on fire is the
-  generation boundary; trailer asserts `Generation: N` +
-  actor-model identifier (for replay pinning).
+- [x] **Actor author** — `defender/learning/author_actor.py` +
+  `author_actor.md`. Lands the env-channel invalidation schema
+  (`subject` equivalence key, `status: live|stale`, `superseded_by`,
+  `source_observation_ids`) on top of the lean retrieval-only
+  frontmatter shipped by the corpus-structure PR. `caught` →
+  tradecraft + environment authoring (contradiction-with-replacement);
+  `incoherent` → environment stale-only invalidation (closes the
+  contradiction-only loop for stale env claims; no replacement live
+  file written). Per-case inputs are read from disk via
+  `source_run_dir` on each queue row — `actor_trace.jsonl` names every
+  lesson file the actor was exposed to. Environment prompt enforces
+  attacker-framing constraint (no visibility-surface prose).
+  Repo-level lock (`defender/learning/_author.lock`) wraps the
+  **entire fold-and-commit flow** including child-agent execution
+  that mutates files — not just the final `git commit`. Order:
+  acquire queue lock first, then repo lock; release in reverse.
+  `author_actor.py` acquires both today; the defender `author.py`
+  retrofit lands with item #8 concurrency wiring (the index-share
+  race only opens once both authors run concurrently). Author commit
+  on fire is the generation boundary; trailer asserts `Generation: N`
+  + `Actor-Model:` identifier (for replay pinning). Index CLI
+  (`lessons_actor_index.py`) hides env lessons with `status: stale`
+  by default — `--include-stale` is author-only.
 - [ ] **Secondary metric harness.** Two-worktree replay: current
   defender investigates held-out from HEAD; frozen actor from
   `gen-{N-3}` writes a story against that lead sequence; current

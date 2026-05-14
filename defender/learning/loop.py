@@ -946,6 +946,33 @@ def run_one(run_dir: Path) -> int:
     else:
         _log(f"pending={pending_count} threshold={threshold} — author not invoked")
 
+    actor_threshold = int(os.environ.get("LEARNING_AUTHOR_ACTOR_THRESHOLD", "5"))
+    actor_pending_count = 0
+    if ACTOR_OBSERVATIONS_FILE.is_file():
+        actor_pending_count = sum(
+            1
+            for line in ACTOR_OBSERVATIONS_FILE.read_text().splitlines()
+            if line.strip()
+        )
+    if actor_pending_count >= actor_threshold:
+        _log(
+            f"step=author_actor pending={actor_pending_count} "
+            f"threshold={actor_threshold}"
+        )
+        sys.path.insert(0, str(LEARNING_DIR))
+        try:
+            import author_actor as _author_actor  # type: ignore[import-not-found]
+        finally:
+            sys.path.pop(0)
+        rc = _author_actor.run_batch()
+        if rc != 0:
+            _log(f"author_actor returned rc={rc} (queue intact, retry next tick)")
+    else:
+        _log(
+            f"actor_pending={actor_pending_count} threshold={actor_threshold} "
+            f"— author_actor not invoked"
+        )
+
     return 0
 
 
@@ -967,17 +994,24 @@ Outputs:
   defender/learning/_pending/findings.jsonl
     appended queueable findings; when count >= LEARNING_AUTHOR_THRESHOLD,
     the lessons curator (author.py) is invoked automatically.
+  defender/learning/_pending/actor_observations.jsonl
+    appended actor observations; when count >= LEARNING_AUTHOR_ACTOR_THRESHOLD,
+    the actor lessons curator (author_actor.py) is invoked automatically.
 
 Environment:
-  ACTOR_MODEL                    claude model for the adversarial actor
-                                 (default: claude-sonnet-4-6)
-  ORACLE_MODEL                   claude model for the telemetry oracle —
-                                 cheap projection work, no reasoning
-                                 (default: claude-haiku-4-5)
-  JUDGE_MODEL                    claude model for the outcome judge
-                                 (default: claude-sonnet-4-6)
-  LEARNING_SUBAGENT_TIMEOUT_SECONDS  per-subagent timeout (default: 300)
-  LEARNING_AUTHOR_THRESHOLD      pending findings before author runs (default: 5)
+  ACTOR_MODEL                          claude model for the adversarial actor
+                                       (default: claude-sonnet-4-6)
+  ORACLE_MODEL                         claude model for the telemetry oracle —
+                                       cheap projection work, no reasoning
+                                       (default: claude-haiku-4-5)
+  JUDGE_MODEL                          claude model for the outcome judge
+                                       (default: claude-sonnet-4-6)
+  LEARNING_SUBAGENT_TIMEOUT_SECONDS    per-subagent timeout (default: 300)
+  LEARNING_AUTHOR_THRESHOLD            pending findings before author runs (default: 5)
+  LEARNING_AUTHOR_ACTOR_THRESHOLD      pending actor observations before
+                                       author_actor runs (default: 5)
+  LEARNING_AUTHOR_ACTOR_MODEL          claude model for the actor lessons curator
+                                       (default: claude-sonnet-4-6)
 
 Typical use: invoked in-process by `defender/run.py` after the runtime loop
 exits. Run standalone with `python3 defender/learning/loop.py <run_dir>` to
