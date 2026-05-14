@@ -360,6 +360,28 @@ def test_post_flight_rejects_commit_outside_lessons_actor(monkeypatch, tmp_path:
     assert aa.head_changed_only_lessons_actor() is False
 
 
+def test_post_flight_rejects_no_commit_result_when_head_changed(
+    monkeypatch, tmp_path: Path
+):
+    ctx = _isolate(monkeypatch, tmp_path)
+    pre_agent_head = aa.git_head_sha()
+    p = ctx["lessons"] / "tradecraft" / "x.md"
+    p.write_text("hello\n")
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/tradecraft/x.md"],
+        check=True,
+    )
+    msg = "lesson batch\n\nGeneration: 1\nActor-Model: claude-sonnet-4-6\n"
+    subprocess.run(
+        ["git", "-C", str(ctx["repo"]), "commit", "-q", "-m", msg],
+        check=True,
+    )
+    result = {"committed": [], "consumed_skip": [], "commit_sha": None}
+
+    with pytest.raises(AuthorError, match="HEAD changed"):
+        aa.verify_agent_state(result, 1, "claude-sonnet-4-6", pre_agent_head)
+
+
 # ---------------------------------------------------------------------------
 # Generation counter
 # ---------------------------------------------------------------------------

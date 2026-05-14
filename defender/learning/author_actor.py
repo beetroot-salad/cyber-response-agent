@@ -33,7 +33,8 @@ Mirrors ``defender/learning/author.py`` but works on the actor side:
        claimed, HEAD must match, touch only defender/lessons-actor/
        *.md files, and carry both ``Generation: N`` and
        ``Actor-Model: M`` trailers matching the values handed to the
-       agent. If no commit, defender/lessons-actor/ must be clean.
+       agent. If no commit, HEAD must be unchanged from before the
+       agent ran and defender/lessons-actor/ must be clean.
     9. Rotate the queue atomically (tmp file + os.replace). Held rows
        stay in actor_observations.jsonl with a held_reason annotation;
        consumed rows append to actor_observations.consumed.jsonl with
@@ -224,11 +225,14 @@ def invoke_agent(
     the actor model id. Stream-json driver lives in
     ``_author_runner.invoke_claude_print``.
     """
+    verifier_py = _runner.resolve_verifier_python(REPO_ROOT)
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: defender/lessons-actor/\n"
         f"generation: {generation}\n"
         f"actor_model: {actor_model}\n"
+        f"verify_forward_command: {verifier_py} defender/learning/verify_forward_actor.py "
+        f"<lesson_path> <observation_id>\n"
         f"observations ({len(observations)}):\n"
         f"{json.dumps(observations, indent=2)}\n"
     )
@@ -238,6 +242,7 @@ def invoke_agent(
         "Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),"
         "Bash(git rev-parse:*),Bash(git status:*),Bash(git diff:*),"
         "Bash(git log:*),"
+        f"Bash({verifier_py} defender/learning/verify_forward_actor.py:*),"
         "Bash(rm defender/lessons-actor/tradecraft/*.md),"
         "Bash(rm defender/lessons-actor/environment/*.md),"
         f"Bash(rm {LESSONS_ACTOR_DIR}/tradecraft/*.md),"
@@ -412,7 +417,10 @@ def validate_agent_result_partition(result: dict, to_author: list[dict]) -> None
 
 
 def verify_agent_state(
-    result: dict, expected_generation: int, expected_model: str
+    result: dict,
+    expected_generation: int,
+    expected_model: str,
+    pre_agent_head: str,
 ) -> None:
     commit_sha = result.get("commit_sha")
     committed = _result_list(result, "committed")
@@ -439,6 +447,12 @@ def verify_agent_state(
             )
         assert_head_trailers(expected_generation, expected_model)
     else:
+        head = git_head_sha()
+        if head != pre_agent_head:
+            raise AuthorError(
+                "author skipped commit but HEAD changed "
+                f"from {pre_agent_head} to {head}; refusing to rotate queue"
+            )
         if not lessons_actor_dir_clean():
             raise AuthorError(
                 "author skipped commit but defender/lessons-actor/ has uncommitted edits"
@@ -569,13 +583,14 @@ def run_batch() -> int:
         consumed_skip: list[dict] = []
 
         if to_author:
+            pre_agent_head = git_head_sha()
             try:
                 result = invoke_agent(to_author, batch_id, generation, ACTOR_MODEL)
             except AuthorError as e:
                 _log(f"FATAL: {e}")
                 return 2
             try:
-                verify_agent_state(result, generation, ACTOR_MODEL)
+                verify_agent_state(result, generation, ACTOR_MODEL, pre_agent_head)
                 validate_agent_result_partition(result, to_author)
             except AuthorError as e:
                 _log(f"FATAL: {e}")

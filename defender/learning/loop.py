@@ -36,6 +36,7 @@ _VENV_PY = Path(__file__).resolve().parents[2] / "defender" / ".venv" / "bin" / 
 if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
+import fcntl
 import hashlib
 import json
 import random
@@ -56,6 +57,7 @@ PENDING_DIR = LEARNING_DIR / "_pending"
 PENDING_FILE = PENDING_DIR / "findings.jsonl"
 ACTOR_OBSERVATIONS_FILE = PENDING_DIR / "actor_observations.jsonl"
 ACTOR_OBSERVATIONS_CONSUMED_FILE = PENDING_DIR / "actor_observations.consumed.jsonl"
+ACTOR_OBSERVATIONS_LOCK_FILE = PENDING_DIR / ".actor.lock"
 
 ACTOR_PROMPT = LEARNING_DIR / "actor.md"
 ORACLE_PROMPT = LEARNING_DIR / "oracle.md"
@@ -706,6 +708,20 @@ def _append_jsonl(path: Path, rows: list[dict]) -> int:
     return len(rows)
 
 
+def _acquire_actor_observations_lock() -> Any:
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    fh = ACTOR_OBSERVATIONS_LOCK_FILE.open("a+")
+    fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    return fh
+
+
+def _release_actor_observations_lock(fh: Any) -> None:
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
 def append_findings(
     judge_doc: dict,
     run_id: str,
@@ -765,29 +781,33 @@ def append_actor_observations(
     observations = judge_doc.get("actor_observations") or []
     if not observations:
         return 0
-    existing = _load_jsonl_ids(ACTOR_OBSERVATIONS_FILE, "observation_id")
-    existing |= _load_jsonl_ids(
-        ACTOR_OBSERVATIONS_CONSUMED_FILE, "observation_id"
-    )
-    src = _source_run_dir(learning_run_dir)
-    rows: list[dict] = []
-    for i, obs in enumerate(observations):
-        obs_id = f"{run_id}/{i}"
-        if obs_id in existing:
-            continue
-        rows.append({
-            "observation_id": obs_id,
-            "run_id": run_id,
-            "observation_index": i,
-            "alert_rule_key": alert_rule_key,
-            "type": obs["type"],
-            "subject_anchor": obs["subject_anchor"],
-            "subject_topic": obs["subject_topic"],
-            "observation": obs["observation"],
-            "judge_outcome": outcome,
-            "source_run_dir": src,
-        })
-    return _append_jsonl(ACTOR_OBSERVATIONS_FILE, rows)
+    lock_fh = _acquire_actor_observations_lock()
+    try:
+        existing = _load_jsonl_ids(ACTOR_OBSERVATIONS_FILE, "observation_id")
+        existing |= _load_jsonl_ids(
+            ACTOR_OBSERVATIONS_CONSUMED_FILE, "observation_id"
+        )
+        src = _source_run_dir(learning_run_dir)
+        rows: list[dict] = []
+        for i, obs in enumerate(observations):
+            obs_id = f"{run_id}/{i}"
+            if obs_id in existing:
+                continue
+            rows.append({
+                "observation_id": obs_id,
+                "run_id": run_id,
+                "observation_index": i,
+                "alert_rule_key": alert_rule_key,
+                "type": obs["type"],
+                "subject_anchor": obs["subject_anchor"],
+                "subject_topic": obs["subject_topic"],
+                "observation": obs["observation"],
+                "judge_outcome": outcome,
+                "source_run_dir": src,
+            })
+        return _append_jsonl(ACTOR_OBSERVATIONS_FILE, rows)
+    finally:
+        _release_actor_observations_lock(lock_fh)
 
 
 # ---------------------------------------------------------------------------

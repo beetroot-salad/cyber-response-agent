@@ -516,6 +516,7 @@ def _isolate(monkeypatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(loop, "PENDING_DIR", pending)
     monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_FILE", queue)
     monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_CONSUMED_FILE", consumed)
+    monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_LOCK_FILE", pending / ".actor.lock")
     # Make REPO_ROOT == tmp_path so learning_run_dir.relative_to(REPO_ROOT) works.
     monkeypatch.setattr(loop, "REPO_ROOT", tmp_path)
     learning_run_dir = tmp_path / "defender" / "learning" / "runs" / "case-x"
@@ -555,6 +556,23 @@ def test_append_actor_observations_dedupes_on_observation_id(
     # Replay — same case_id + same indices.
     assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
     assert len(_read_jsonl(loop.ACTOR_OBSERVATIONS_FILE)) == 2
+
+
+def test_append_actor_observations_takes_actor_lock(monkeypatch, tmp_path: Path):
+    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    doc = _judge_doc("caught", [_obs(0)])
+    calls: list[int] = []
+    real_flock = loop.fcntl.flock
+
+    def fake_flock(fd, op):
+        calls.append(op)
+        return real_flock(fd, op)
+
+    monkeypatch.setattr(loop.fcntl, "flock", fake_flock)
+
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 1
+    assert calls == [loop.fcntl.LOCK_EX, loop.fcntl.LOCK_UN]
+    assert loop.ACTOR_OBSERVATIONS_LOCK_FILE.is_file()
 
 
 def test_append_actor_observations_skips_passthrough_outcome(
