@@ -262,13 +262,10 @@ did an analytics query" will not refute.
 - **`detection-confirmed`** on lead 0 (query role). The load-bearing role
   refutation is that the alert query ran under `DATA_SCIENTIST_ROLE`, not the
   analytics team's documented `ANALYTICS_VIEWER` / `ANALYTICS_WRITER` roles.
-  Lead 1's recent grant and lead 5's role catalog corroborate the mismatch,
-  but the query-history role field is the anchor.
-- **`detection-confirmed`** on lead 2 (masking-policy audit). The
-  masking-policy audit log explicitly records the bypass tag for
-  this query. Affirmative-bypass surfaces are high-leverage and
-  often forgotten; preserve as a discipline note (always check
-  masking-bypass audits on PII reads).
+  The masking-policy audit in lead 2 belongs inside the same core finding:
+  the role mismatch mattered because it bypassed the standard analytics PII
+  mask. Lead 1's recent grant and lead 5's role catalog corroborate the
+  mismatch, but the query-history role field is the anchor.
 - **`detection-confirmed`** on lead 4 (sign-in origin). The service account
   signed in from a Frankfurt DigitalOcean droplet instead of the org's
   us-east-1 AWS NAT. That directly contradicts the actor's expected analytics
