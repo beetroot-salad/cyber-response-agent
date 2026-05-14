@@ -53,12 +53,19 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   files. Env lessons flow through the same retrieval path (filtered by
   archetype only); no preloaded snapshot artifact. No standalone audit
   script — analytics fold into ad-hoc analysis on the trace JSONL.
-- [ ] **Actor pending queue + persist-stage rotation.** Implement
-  `_pending/actor_observations.jsonl` per the design's queue
-  contract: one entry per observation, stable ID
-  `{case_id}:{observation_index}`, dedup on ID, consumed-on-fold,
-  rejected-after-3-attempts side queue. Persist stage writes
-  entries from non-held-out `caught`/`incoherent` cases only.
+- [x] **Actor pending queue + persist-stage rotation.** Producer half
+  only: persist stage writes `_pending/actor_observations.jsonl` with
+  one self-contained entry per judge `actor_observations[i]`, stable
+  ID `{run_id}/{observation_index}`, dedup on ID. Schema mirrors
+  `findings.jsonl` style (inlined `type` / `subject_anchor` /
+  `subject_topic` / `observation` / `judge_outcome` /
+  `alert_rule_key` / `source_run_dir`). Producer's only outcome
+  filter is `skip-passthrough`; the caught / incoherent / survived
+  authoring policy is the **author's** job (item #6). No rejected
+  side queue — defender's `author.py` uses hold-with-reason on
+  retried entries; the actor author can adopt the same pattern when
+  it lands. Shared helpers (`_source_run_dir`, `_load_jsonl_ids`,
+  `_append_jsonl`) factored in `loop.py` for the next queue caller.
 - [ ] **Actor author** — `defender/learning/author_actor.py` +
   `author_actor.md`. Designs and lands the env-channel invalidation
   schema (equivalence key, status, supersession refs — shape TBD

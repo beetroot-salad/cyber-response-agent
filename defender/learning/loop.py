@@ -54,6 +54,7 @@ LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 RUNS_DIR = LEARNING_DIR / "runs"
 PENDING_DIR = LEARNING_DIR / "_pending"
 PENDING_FILE = PENDING_DIR / "findings.jsonl"
+ACTOR_OBSERVATIONS_FILE = PENDING_DIR / "actor_observations.jsonl"
 
 ACTOR_PROMPT = LEARNING_DIR / "actor.md"
 ORACLE_PROMPT = LEARNING_DIR / "oracle.md"
@@ -643,6 +644,46 @@ def derive_alert_rule_key(alert: dict) -> str:
     return "unkeyed"
 
 
+def _source_run_dir(learning_run_dir: Path) -> str:
+    """Repo-relative path with trailing slash — the source_run_dir
+    convention shared by both ``_pending/`` queues."""
+    return str(learning_run_dir.relative_to(REPO_ROOT)) + "/"
+
+
+def _load_jsonl_ids(path: Path, key: str) -> set[str]:
+    """Return the set of ``entry[key]`` strings in a JSONL file.
+
+    Missing file → empty set. Malformed lines are skipped, matching
+    the tolerance ``author.read_batch`` applies on the consumer side.
+    """
+    if not path.is_file():
+        return set()
+    ids: set[str] = set()
+    for line in path.read_text().splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            obj = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        v = obj.get(key)
+        if isinstance(v, str):
+            ids.add(v)
+    return ids
+
+
+def _append_jsonl(path: Path, rows: list[dict]) -> int:
+    """Append ``rows`` to ``path`` as JSONL (one row per line)."""
+    if not rows:
+        return 0
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+    return len(rows)
+
+
 def append_findings(
     judge_doc: dict,
     run_id: str,
@@ -678,6 +719,48 @@ def append_findings(
             fh.write(json.dumps(entry) + "\n")
             appended += 1
     return appended
+
+
+def append_actor_observations(
+    judge_doc: dict,
+    run_id: str,
+    alert_rule_key: str,
+    learning_run_dir: Path,
+) -> int:
+    """Append judge ``actor_observations`` to the actor pending queue.
+
+    One row per observation, deduped on ``observation_id`` so re-running
+    the persist stage on a case is idempotent. The producer's only
+    outcome filter is ``skip-passthrough`` (defensive — the judge does
+    not emit observations on SKIP); the author owns the
+    caught/incoherent/survived policy.
+    """
+    outcome = _outcome_keyword(judge_doc["outcome"])
+    if outcome == "skip-passthrough":
+        return 0
+    observations = judge_doc.get("actor_observations") or []
+    if not observations:
+        return 0
+    existing = _load_jsonl_ids(ACTOR_OBSERVATIONS_FILE, "observation_id")
+    src = _source_run_dir(learning_run_dir)
+    rows: list[dict] = []
+    for i, obs in enumerate(observations):
+        obs_id = f"{run_id}/{i}"
+        if obs_id in existing:
+            continue
+        rows.append({
+            "observation_id": obs_id,
+            "run_id": run_id,
+            "observation_index": i,
+            "alert_rule_key": alert_rule_key,
+            "type": obs["type"],
+            "subject_anchor": obs["subject_anchor"],
+            "subject_topic": obs["subject_topic"],
+            "observation": obs["observation"],
+            "judge_outcome": outcome,
+            "source_run_dir": src,
+        })
+    return _append_jsonl(ACTOR_OBSERVATIONS_FILE, rows)
 
 
 # ---------------------------------------------------------------------------
@@ -816,6 +899,10 @@ def run_one(run_dir: Path) -> int:
     _log("step=append")
     n_appended = append_findings(judge_doc, run_id, alert_rule_key, learning_run_dir)
     _log(f"appended {n_appended} finding(s) to {PENDING_FILE}")
+    n_obs = append_actor_observations(
+        judge_doc, run_id, alert_rule_key, learning_run_dir
+    )
+    _log(f"appended {n_obs} actor observation(s) to {ACTOR_OBSERVATIONS_FILE}")
 
     threshold = int(os.environ.get("LEARNING_AUTHOR_THRESHOLD", "5"))
     pending_count = sum(
