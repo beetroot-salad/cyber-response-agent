@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F3",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 40.87,
+  "returncode": 0,
+  "stdout": "`network-analysis` directly addresses the core query: enumerate outbound connections, their destinations, ports, and traffic patterns over a time window.\n\nSELECT network-analysis\n",
+  "correct_leads": [
+    "network-analysis"
+  ]
+}

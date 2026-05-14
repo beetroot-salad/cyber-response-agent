@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F14",
+  "class": "ambiguous",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 63.97,
+  "returncode": 0,
+  "stdout": "The goal requires both account classification (service vs admin vs human vs wordlist hit) and authentication behavioral analysis (cadence, success/failure patterns, source diversity). `user-analysis` directly addresses account type classification, while `authentication-history` directly addresses the activity patterns requested.\n\nSELECT user-analysis, authentication-history\n",
+  "correct_leads": [
+    "user-analysis",
+    "authentication-history"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F10",
+  "class": "no-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 38.28,
+  "returncode": 0,
+  "stdout": "The goal requires enumerating current host asset state (kernel modules + load timestamps) to detect recently-introduced suspicious modules \u2014 a host-inventory operation that doesn't fit the existing seeds, which focus on event timelines, entity reputation, or process lineage rather than static asset state snapshots.\n\nPROPOSE_NEW host-asset-state enumeration to capture system configurations (kernel modules, drivers, loaded libraries) with installation/load timestamps for anomaly detection\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

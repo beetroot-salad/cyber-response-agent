@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F5",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 31.04,
+  "returncode": 0,
+  "stdout": "The goal asks for detection rules that co-fired on the same container in a tight window around the alert timestamp, along with what those rules examined. This directly matches a seed designed for that purpose.\n\nSELECT correlated-endpoint-events\n",
+  "correct_leads": [
+    "correlated-endpoint-events"
+  ]
+}

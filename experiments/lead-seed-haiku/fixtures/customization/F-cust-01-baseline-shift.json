@@ -1,0 +1,27 @@
+{
+  "id": "F-cust-01-baseline-shift",
+  "category": "baseline-shift",
+  "seed_name": "authentication-history",
+  "alert_excerpt": {
+    "rule": {"id": "5710", "groups": ["sshd"], "description": "sshd: attempt to login using a non-existent user"},
+    "data": {"srcip": "198.51.100.22", "srcuser": "monitorprobe", "srcport": "44318"},
+    "agent": {"name": "web-server-01"},
+    "@timestamp": "2026-04-17T10:30:00.000Z"
+  },
+  "adaptation_note": "Foreground was queried with --start 2026-04-17T09:30:00Z --window 2h, scoped to data.srcip:198.51.100.22. Produce the baseline shift query: same IP, same window duration, shifted 7 days earlier. This will be compared to foreground dimension-by-dimension.",
+  "reference_query": "python3 scripts/tools/wazuh_cli.py query --query 'rule.groups:sshd AND data.srcip:198.51.100.22' --start 2026-04-10T09:30:00Z --window 2h",
+  "rubric": {
+    "expected_substrings": [
+      "data.srcip:198.51.100.22",
+      "rule.groups:sshd",
+      "2026-04-10T09:30:00",
+      "--window 2h"
+    ],
+    "forbidden_substrings": [
+      "2026-04-17",
+      "monitorprobe",
+      "data.srcuser",
+      "web-server-01"
+    ]
+  }
+}

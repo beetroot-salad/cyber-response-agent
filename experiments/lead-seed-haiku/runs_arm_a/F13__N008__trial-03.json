@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F13",
+  "class": "ambiguous",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 61.61,
+  "returncode": 0,
+  "stdout": "The goal requires both process ancestry (how it was launched) and signal correlation (what else fired on the same container). `process-lineage` reconstructs the parent chain and execution context; `correlated-endpoint-events` surfaces co-firing rules in the surrounding window.\n\nSELECT process-lineage, correlated-endpoint-events\n",
+  "correct_leads": [
+    "process-lineage",
+    "correlated-endpoint-events"
+  ]
+}

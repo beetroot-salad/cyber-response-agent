@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F3",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 56.01,
+  "returncode": 0,
+  "stdout": "`network-analysis` directly retrieves outbound connections, destination endpoints, and traffic patterns \u2014 exactly what's needed to characterize unrecognized peer communication.\n\nSELECT network-analysis\n",
+  "correct_leads": [
+    "network-analysis"
+  ]
+}

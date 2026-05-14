@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F2",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 70.36,
+  "returncode": 0,
+  "stdout": "The NL goal asks to classify a source entity's identity and reputation against known categories (internal, known-external, unrecognized), which is exactly what the source-reputation seed addresses.\n\nSELECT source-reputation\n",
+  "correct_leads": [
+    "source-reputation"
+  ]
+}

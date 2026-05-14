@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 38.12,
+  "returncode": 0,
+  "stdout": "The goal describes constructing and debugging a bespoke SIEM query for a specific syscall + filesystem-path combination. The `data-source-debug` seed is designed exactly for this: working through field naming, query construction, and data availability when standard parametrized recipes don't apply.\n\nSELECT data-source-debug\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

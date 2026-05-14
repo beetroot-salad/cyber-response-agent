@@ -43,29 +43,29 @@ The agent should always exclude the alerting rule itself from the foreground que
 
 ## Example Invocations
 
-Co-fires on a container in ±15 min around the alert:
+Co-fires on a container in ±15 min around the alert (T0 = 15:02:23Z; bracket starts at T0−15min):
 ```bash
 python3 scripts/tools/wazuh_cli.py query \
   --query 'data.output_fields.container.id:17bc2dde3fb0 AND rule.id:[100000 TO 100099] AND NOT rule.id:100001' \
-  --start 2026-04-24T15:02:23Z --window 30m
+  --start 2026-04-24T14:47:23Z --window 30m
 ```
 
-Co-fires on a host in ±15 min around the alert:
+Co-fires on a host in ±15 min around the alert (T0 = 17:48:27Z; bracket starts at T0−15min):
 ```bash
 python3 scripts/tools/wazuh_cli.py query \
   --query 'agent.name:web-server-01 AND rule.groups:sshd AND NOT rule.id:5710' \
-  --start 2026-04-24T17:48:27Z --window 30m
+  --start 2026-04-24T17:33:27Z --window 30m
 ```
 
 ## Baseline (Shift Query)
 
 The baseline is the entity's recurring co-fire pattern over a 7d window — same entity binding, no time-of-day restriction. Compare foreground per-rule counts and geometry against the 7d aggregation. The baseline query is structurally identical to the foreground except for window:
 
-Foreground (±15 min around alert):
+Foreground (±15 min around alert; T0 = 15:02:23Z; bracket starts at T0−15min):
 ```bash
 python3 scripts/tools/wazuh_cli.py query \
   --query 'data.output_fields.container.id:17bc2dde3fb0 AND rule.id:[100000 TO 100099] AND NOT rule.id:100001' \
-  --start 2026-04-24T15:02:23Z --window 30m
+  --start 2026-04-24T14:47:23Z --window 30m
 ```
 
 Baseline (same entity, 7d window):

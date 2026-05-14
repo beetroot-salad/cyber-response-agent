@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F6",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 73.14,
+  "returncode": 0,
+  "stdout": "The goal requires understanding account existence, functional purpose, and naming patterns (service vs admin vs monitoring sentinel).\n\n`user-analysis` provides comprehensive account classification against known patterns and reveals intent; `account-naming-pattern` adds specific naming-convention matching to catch organizational conventions and standard patterns.\n\nSELECT user-analysis, account-naming-pattern\n",
+  "correct_leads": [
+    "user-analysis"
+  ]
+}

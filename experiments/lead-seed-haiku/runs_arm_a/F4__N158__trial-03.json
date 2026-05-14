@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F4",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 51.11,
+  "returncode": 0,
+  "stdout": "`process-lineage` directly addresses all four evidence needs: it reconstructs the parent chain (what spawned the process), captures the process itself with its binary and command line (context of execution), and identifies child processes (what it spawned).\n\nSELECT process-lineage\n",
+  "correct_leads": [
+    "process-lineage"
+  ]
+}

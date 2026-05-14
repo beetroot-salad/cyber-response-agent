@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F9",
+  "class": "no-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 70.62,
+  "returncode": 0,
+  "stdout": "The goal requires retrieving and analyzing changes to an account's authentication configuration (MFA factors, devices, backup codes, bypasses) over a recent time window. This falls under authentication system state and audit logs rather than general authentication patterns or endpoint events.\n\nSELECT authentication-history\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "F-cust-04-forward-bracket",
+  "category": "forward-bracket",
+  "seed_name": "correlated-endpoint-events",
+  "alert_excerpt": {
+    "rule": {"id": "100001", "description": "Container drift - shell spawned in container"},
+    "data": {"output_fields": {"container": {"id": "17bc2dde3fb0"}, "proc": {"pname": "runc"}}},
+    "agent": {"name": "wazuh-manager"},
+    "@timestamp": "2026-04-24T15:02:23.000Z"
+  },
+  "adaptation_note": "Alert is rule.id 100001 at T0=2026-04-24T15:02:23Z on container 17bc2dde3fb0. Find co-firing Falco rules on this same container in a 30min window BRACKETING the alert - 15min before T0 through 15min after T0. Exclude the alerting rule itself. We need the bracketed window because if T0 is the first event of a cluster, a backward-only window would miss the rest of the cluster.",
+  "reference_query": "python3 scripts/tools/wazuh_cli.py query --query 'data.output_fields.container.id:17bc2dde3fb0 AND NOT rule.id:100001' --start 2026-04-24T14:47:23Z --window 30m",
+  "rubric": {
+    "expected_substrings": [
+      "data.output_fields.container.id:17bc2dde3fb0",
+      "NOT rule.id:100001",
+      "2026-04-24T14:47:23",
+      "--window 30m"
+    ],
+    "forbidden_substrings": [
+      "2026-04-24T15:02:23",
+      "agent.name"
+    ]
+  }
+}

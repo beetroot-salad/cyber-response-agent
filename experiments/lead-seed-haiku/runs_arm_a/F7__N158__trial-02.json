@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 48.78,
+  "returncode": 0,
+  "stdout": "The goal requires a custom, ad-hoc query that combines syscall and path filtering in a way the standard catalog doesn't cover. The `ad-hoc` seed is designed for exactly this use case: bespoke, one-off queries that fall outside pre-built recipes.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

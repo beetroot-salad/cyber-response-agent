@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F8",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 46.87,
+  "returncode": 0,
+  "stdout": "The NL goal is to verify data source health after receiving zero results when events should exist \u2014 specifically to check if the pipeline is ingesting normally or if it's broken upstream.\n\n`data-source-debug` explicitly handles this scenario: diagnosing why a query returned suspect results by checking data availability, field naming, query construction, or source health.\n\nSELECT data-source-debug\n",
+  "correct_leads": [
+    "data-source-debug"
+  ]
+}

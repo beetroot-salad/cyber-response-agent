@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F14",
+  "class": "ambiguous",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 40.72,
+  "returncode": 0,
+  "stdout": "The goal requires both account classification (type/role) and authentication pattern analysis. `user-analysis` addresses what kind of account it is; `authentication-history` covers recent auth cadence, success/failure mix, and source diversity.\n\nSELECT user-analysis, authentication-history\n",
+  "correct_leads": [
+    "user-analysis",
+    "authentication-history"
+  ]
+}

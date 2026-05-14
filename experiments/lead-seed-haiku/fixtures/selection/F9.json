@@ -1,0 +1,6 @@
+{
+  "id": "F9",
+  "class": "no-match",
+  "nl_goal": "We need to check whether this user's multi-factor authentication setup changed in the last 24 hours — did they swap factors, add a backup code, register a new device, or have an MFA bypass approved by an admin?",
+  "correct_leads": ["PROPOSE_NEW"]
+}

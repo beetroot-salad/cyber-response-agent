@@ -1,0 +1,6 @@
+{
+  "id": "F10",
+  "class": "no-match",
+  "nl_goal": "We need a snapshot of which kernel modules are currently loaded on this host, and what timestamps each was loaded at — so we can check for recently-introduced modules that might explain the rootkit-shaped indicators.",
+  "correct_leads": ["PROPOSE_NEW"]
+}

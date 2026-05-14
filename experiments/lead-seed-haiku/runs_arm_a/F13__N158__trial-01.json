@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F13",
+  "class": "ambiguous",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 22.84,
+  "returncode": 0,
+  "stdout": "The goal requires two distinct evidence layers: the process execution context (parent chain + command line) and the container's co-fire pattern (other rules tripping simultaneously).\n\n`process-lineage` reconstructs the parent chain and execution context; `correlated-endpoint-events` surfaces the co-firing signals from other rules on the same container entity in the surrounding window.\n\nSELECT process-lineage, correlated-endpoint-events\n",
+  "correct_leads": [
+    "process-lineage",
+    "correlated-endpoint-events"
+  ]
+}

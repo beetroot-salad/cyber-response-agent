@@ -1,0 +1,6 @@
+{
+  "id": "F7",
+  "class": "clear-match",
+  "nl_goal": "We need to run a one-off query against the SIEM for a very specific syscall + filesystem-path combination on this host, where none of our standard recipes parametrize the syscall name and the path together. The query construction is bespoke to this case.",
+  "correct_leads": ["ad-hoc"]
+}

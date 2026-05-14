@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F3",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 49.45,
+  "returncode": 0,
+  "stdout": "Outbound connections, traffic patterns, ports, and cadence are all attributes of network activity characterization \u2014 this is a direct match for `network-analysis`.\n\nSELECT network-analysis\n",
+  "correct_leads": [
+    "network-analysis"
+  ]
+}

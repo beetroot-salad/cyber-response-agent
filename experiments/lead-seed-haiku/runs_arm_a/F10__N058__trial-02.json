@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F10",
+  "class": "no-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 80.64,
+  "returncode": 0,
+  "stdout": "The goal requires a kernel module inventory with load timestamps \u2014 a system state snapshot that isn't covered by the existing event-based seeds. Audit logs might capture module-loading events, but the catalog doesn't have a dedicated seed for querying kernel module history.\n\nPROPOSE_NEW Kernel module load history \u2014 Surface currently-loaded kernel modules with their load timestamps to detect recently-introduced modules.\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

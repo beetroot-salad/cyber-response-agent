@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F13",
+  "class": "ambiguous",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 55.87,
+  "returncode": 0,
+  "stdout": "The goal requires understanding both the suspicious process's execution context (parent chain, command) and the broader endpoint activity (other rules firing on the same container). These are two complementary investigations.\n\nSELECT process-lineage, correlated-endpoint-events\n",
+  "correct_leads": [
+    "process-lineage",
+    "correlated-endpoint-events"
+  ]
+}

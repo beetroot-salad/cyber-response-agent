@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F1",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 73.24,
+  "returncode": 0,
+  "stdout": "The goal requires characterizing login attempt patterns from a source IP over a time window \u2014 clustering, cadence, frequency \u2014 to distinguish isolated probes from ongoing patterns. This is exactly what authentication-history provides: pattern retrieval for an IP entity across a time window.\n\nSELECT authentication-history\n",
+  "correct_leads": [
+    "authentication-history"
+  ]
+}

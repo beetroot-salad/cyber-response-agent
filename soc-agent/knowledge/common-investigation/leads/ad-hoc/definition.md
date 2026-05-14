@@ -3,6 +3,10 @@ name: ad-hoc
 data_tags: []
 ---
 
+## Goal
+
+Construct and execute a bespoke SIEM query when no other seed in the catalog parametrizes the evidence need. Use this when (a) no existing seed's intent matches the goal, or (b) an existing seed's intent matches but its template cannot be customized to the required shape (e.g., the query needs to combine fields no template's base query joins, or filter on a dimension no template exposes). Prefer any other matching seed first — ad-hoc is the procedural escape hatch, not the default.
+
 ## When this applies
 
 The main agent requested a lead with no pre-built definition or script.

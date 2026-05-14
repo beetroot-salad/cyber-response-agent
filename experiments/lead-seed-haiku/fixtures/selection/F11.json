@@ -1,0 +1,6 @@
+{
+  "id": "F11",
+  "class": "no-match",
+  "nl_goal": "We need to know whether the firmware on this host was recently updated, what version it's running now, what version it was upgraded from, and which update channel pushed the change.",
+  "correct_leads": ["PROPOSE_NEW"]
+}

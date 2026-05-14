@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F2",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 25.94,
+  "returncode": 0,
+  "stdout": "The goal is to classify a source entity's identity and trustworthiness \u2014 whether it's an owned internal asset, an expected external service, or an unknown peer. This is precisely what source-reputation provides.\n\nSELECT source-reputation\n",
+  "correct_leads": [
+    "source-reputation"
+  ]
+}

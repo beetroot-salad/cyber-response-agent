@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 48.5,
+  "returncode": 0,
+  "stdout": "The goal requires a bespoke, one-off query for a specific syscall + filesystem-path combination that doesn't fit standard parametrized recipes \u2014 exactly what the `ad-hoc` seed is designed for.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

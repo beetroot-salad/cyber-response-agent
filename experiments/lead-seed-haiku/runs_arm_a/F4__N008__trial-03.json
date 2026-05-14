@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F4",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 59.08,
+  "returncode": 0,
+  "stdout": "The goal asks for complete process ancestry and descendants \u2014 parent chain, command line, executable, and spawned children. This is exactly what process-lineage reconstructs.\n\nSELECT process-lineage\n",
+  "correct_leads": [
+    "process-lineage"
+  ]
+}

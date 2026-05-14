@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F1",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 70.45,
+  "returncode": 0,
+  "stdout": "The goal is to detect whether a source IP shows a clustered burst pattern of authentication attempts or if the current event is isolated. This requires identifying burst clusters and understanding the timing/frequency patterns.\n\n`SELECT auth-failure-burst-detector, authentication-history`\n\nThe burst detector is optimized for identifying tight-window burst clusters, while authentication-history provides the broader temporal context and cadence metrics needed to characterize the pattern and confirm whether the current event is an outlier or part of an established rhythm.\n",
+  "correct_leads": [
+    "authentication-history"
+  ]
+}

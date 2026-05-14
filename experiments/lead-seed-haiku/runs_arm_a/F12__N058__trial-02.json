@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F12",
+  "class": "ambiguous",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 67.24,
+  "returncode": 0,
+  "stdout": "The goal requires two complementary perspectives: authentication interactions specific to this org, and general reputation classification of the external IP.\n\nSELECT authentication-history, source-reputation\n",
+  "correct_leads": [
+    "authentication-history",
+    "source-reputation"
+  ]
+}

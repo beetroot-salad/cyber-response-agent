@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F5",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 51.15,
+  "returncode": 0,
+  "stdout": "`correlated-endpoint-events` directly addresses the goal: it retrieves events from the same container entity in a tight window around the alert timestamp and surfaces co-firing signals (other detection rules tripping on the same entity at the same time).\n\nSELECT correlated-endpoint-events\n",
+  "correct_leads": [
+    "correlated-endpoint-events"
+  ]
+}

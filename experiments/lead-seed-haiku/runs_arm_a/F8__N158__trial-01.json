@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F8",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 41.49,
+  "returncode": 0,
+  "stdout": "The goal is to diagnose why a query returned zero events by verifying whether the data source itself is healthy and ingesting at normal rates. This is explicitly a source-health diagnostic task.\n\nSELECT data-source-debug\n",
+  "correct_leads": [
+    "data-source-debug"
+  ]
+}

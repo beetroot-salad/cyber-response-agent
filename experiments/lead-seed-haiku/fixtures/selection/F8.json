@@ -1,0 +1,6 @@
+{
+  "id": "F8",
+  "class": "clear-match",
+  "nl_goal": "Our previous query returned zero events on this data source, but we have reason to believe events should be present. Before concluding the entity has no activity, we need to verify the data source itself is healthy — is it ingesting events at a normal rate, or has the pipeline broken upstream?",
+  "correct_leads": ["data-source-debug"]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F3",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 46.3,
+  "returncode": 0,
+  "stdout": "`network-analysis` directly covers the request: destinations (communication targets), ports, and traffic patterns of outbound connections. It retrieves the characterization of network activity needed to determine what peers the host is reaching out to and their communication cadence.\n\nSELECT network-analysis\n",
+  "correct_leads": [
+    "network-analysis"
+  ]
+}

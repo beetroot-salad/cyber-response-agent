@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F1",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 25.4,
+  "returncode": 0,
+  "stdout": "The goal asks about historical login-attempt cadence and burst patterns for a source IP\u2014whether clustered or isolated. This directly maps to retrieving and characterizing authentication patterns over a time window.\n\nSELECT authentication-history\n",
+  "correct_leads": [
+    "authentication-history"
+  ]
+}

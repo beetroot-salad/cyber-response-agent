@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F8",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 29.63,
+  "returncode": 0,
+  "stdout": "The goal is explicitly about diagnosing why a query returned zero results and whether the data source itself is healthy \u2014 source availability, pipeline status, and field validation.\n\nSELECT data-source-debug\n",
+  "correct_leads": [
+    "data-source-debug"
+  ]
+}

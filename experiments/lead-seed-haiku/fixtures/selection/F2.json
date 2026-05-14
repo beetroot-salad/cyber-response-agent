@@ -1,0 +1,6 @@
+{
+  "id": "F2",
+  "class": "clear-match",
+  "nl_goal": "Before treating this source as suspicious, we need to know what it actually is. Is it an internal asset we own, a known external service we expect to talk to, or an unrecognized peer we have no prior interaction with?",
+  "correct_leads": ["source-reputation"]
+}

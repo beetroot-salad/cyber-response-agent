@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F13",
+  "class": "ambiguous",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 34.1,
+  "returncode": 0,
+  "stdout": "The goal requires evidence on two fronts: process launch context (parent chain, command line) and co-firing signals (other rules on the same container). Both are load-bearing for the investigation.\n\nSELECT process-lineage, correlated-endpoint-events\n",
+  "correct_leads": [
+    "process-lineage",
+    "correlated-endpoint-events"
+  ]
+}

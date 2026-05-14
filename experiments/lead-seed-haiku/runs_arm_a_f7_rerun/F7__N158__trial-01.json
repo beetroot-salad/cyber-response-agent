@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 45.69,
+  "returncode": 0,
+  "stdout": "The goal requires combining syscall name and filesystem path as co-filtered dimensions in a single query \u2014 a non-standard shape that existing syscall (`system-call-pattern`) and file-access (`file-access-trace`) seeds don't jointly parametrize.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

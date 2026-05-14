@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F12",
+  "class": "ambiguous",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 32.96,
+  "returncode": 0,
+  "stdout": "The goal has two dimensions: (1) auth interaction history with the external IP, and (2) the IP's reputation/identity as a network entity. These map directly to distinct seeds.\n\nSELECT authentication-history, source-reputation\n",
+  "correct_leads": [
+    "authentication-history",
+    "source-reputation"
+  ]
+}

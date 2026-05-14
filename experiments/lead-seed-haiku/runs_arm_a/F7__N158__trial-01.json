@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 47.32,
+  "returncode": 0,
+  "stdout": "The goal requires parametrizing both syscall name and filesystem path in a single bespoke query \u2014 a combination not covered by existing seeds like `system-call-pattern` (baseline comparison) or `file-access-trace` (path-centric). This is a custom query that falls outside the standard recipe catalog.\n\nPROPOSE_NEW Custom syscall+path query \u2014 execute a one-off SIEM query combining a specific syscall type and target filesystem path.\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

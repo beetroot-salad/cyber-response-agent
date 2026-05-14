@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F14",
+  "class": "ambiguous",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 34.15,
+  "returncode": 0,
+  "stdout": "The goal needs two complementary perspectives: account classification (what type of account) and authentication pattern characterization (cadence, success/failure mix, sources).\n\nSELECT user-analysis, authentication-history\n",
+  "correct_leads": [
+    "user-analysis",
+    "authentication-history"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F5",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 3,
+  "elapsed_s": 61.01,
+  "returncode": 0,
+  "stdout": "The goal is to surface co-firing detection rules on the same container entity in a tight time window around the alert \u2014 exactly what `correlated-endpoint-events` is designed to retrieve.\n\nSELECT correlated-endpoint-events\n",
+  "correct_leads": [
+    "correlated-endpoint-events"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F12",
+  "class": "ambiguous",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 33.2,
+  "returncode": 0,
+  "stdout": "The goal requires two complementary evidence streams: authentication history with the org (to surface prior interactions), and external reputation classification (to assess the IP's general threat posture).\n\nSELECT authentication-history, source-reputation\n",
+  "correct_leads": [
+    "authentication-history",
+    "source-reputation"
+  ]
+}

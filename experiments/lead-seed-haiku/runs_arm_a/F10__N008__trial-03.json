@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F10",
+  "class": "no-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 59.33,
+  "returncode": 0,
+  "stdout": "The goal requires querying current host system state (kernel modules and their load timestamps), which differs from the catalog's event-focused and historical-analysis seeds. None of the available seeds are designed for this system-artifact collection task.\n\nPROPOSE_NEW Retrieve kernel module inventory with load timestamps to detect recently-loaded suspicious artifacts.\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

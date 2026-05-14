@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F5",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 52.35,
+  "returncode": 0,
+  "stdout": "The goal asks for sibling detection rules that fired on the same container in a tight time window \u2014 which is the exact use case for correlated-endpoint-events.\n\nSELECT correlated-endpoint-events\n",
+  "correct_leads": [
+    "correlated-endpoint-events"
+  ]
+}

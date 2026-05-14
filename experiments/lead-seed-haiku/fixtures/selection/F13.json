@@ -1,0 +1,6 @@
+{
+  "id": "F13",
+  "class": "ambiguous",
+  "nl_goal": "This unexpected process inside the container triggered an alert. We want to understand both how the process was launched (parent chain, command line) AND what other security rules tripped on the same container in the surrounding window.",
+  "correct_leads": ["process-lineage", "correlated-endpoint-events"]
+}

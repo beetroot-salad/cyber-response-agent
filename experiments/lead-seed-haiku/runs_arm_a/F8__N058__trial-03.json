@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F8",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 58.34,
+  "returncode": 0,
+  "stdout": "The goal explicitly requires diagnosing data-source health after an unexpected empty result. The `data-source-debug` seed is purpose-built for this: it covers data availability, field naming, query construction, and source health \u2014 exactly the decision tree needed to distinguish a truly inactive entity from a broken pipeline.\n\nSELECT data-source-debug\n",
+  "correct_leads": [
+    "data-source-debug"
+  ]
+}

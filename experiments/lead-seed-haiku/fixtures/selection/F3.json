@@ -1,0 +1,6 @@
+{
+  "id": "F3",
+  "class": "clear-match",
+  "nl_goal": "Has this host been reaching out to peers we don't recognize? We want the destinations and traffic patterns of its outbound connections over recent hours — where it connected, on what ports, and with what cadence.",
+  "correct_leads": ["network-analysis"]
+}

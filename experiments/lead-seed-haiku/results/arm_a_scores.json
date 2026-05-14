@@ -1,0 +1,2327 @@
+[
+  {
+    "fixture": "F10",
+    "class": "no-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW host-asset-state enumeration to capture system configurations (kernel modules, drivers, loaded libraries) with installation/load timestamps for anomaly detection",
+    "elapsed_s": 38.28
+  },
+  {
+    "fixture": "F10",
+    "class": "no-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW Retrieve kernel module state and load timestamps on a host endpoint to detect recently-introduced kernel persistence or rootkit indicators.",
+    "elapsed_s": 63.64
+  },
+  {
+    "fixture": "F10",
+    "class": "no-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW Retrieve kernel module inventory with load timestamps to detect recently-loaded suspicious artifacts.",
+    "elapsed_s": 59.33
+  },
+  {
+    "fixture": "F10",
+    "class": "no-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW` Enumerate currently-loaded kernel modules and their load timestamps to detect recently-introduced kernel drivers or modules.",
+    "elapsed_s": 46.76
+  },
+  {
+    "fixture": "F10",
+    "class": "no-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW Kernel module load history \u2014 Surface currently-loaded kernel modules with their load timestamps to detect recently-introduced modules.",
+    "elapsed_s": 80.64
+  },
+  {
+    "fixture": "F10",
+    "class": "no-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW kernel-module-snapshot | [system-state] | Retrieve currently loaded kernel modules and their load timestamps to identify recently-introduced modules.",
+    "elapsed_s": 65.32
+  },
+  {
+    "fixture": "F10",
+    "class": "no-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "kernel-module-events"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['kernel-module-events'] when no match exists"
+    },
+    "decision_line": "SELECT kernel-module-events",
+    "elapsed_s": 27.79
+  },
+  {
+    "fixture": "F10",
+    "class": "no-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "kernel-module-events"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['kernel-module-events'] when no match exists"
+    },
+    "decision_line": "SELECT kernel-module-events",
+    "elapsed_s": 43.11
+  },
+  {
+    "fixture": "F10",
+    "class": "no-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "kernel-module-events"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['kernel-module-events'] when no match exists"
+    },
+    "decision_line": "SELECT kernel-module-events",
+    "elapsed_s": 49.31
+  },
+  {
+    "fixture": "F11",
+    "class": "no-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW host-inventory | [asset-state, inventory] | Query host system information including firmware version, installed packages, recent updates, and update channels.",
+    "elapsed_s": 44.65
+  },
+  {
+    "fixture": "F11",
+    "class": "no-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW Host system configuration and update history \u2014 firmware/OS version, update channel, and version deltas.",
+    "elapsed_s": 64.61
+  },
+  {
+    "fixture": "F11",
+    "class": "no-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW Host configuration and asset-inventory queries \u2014 retrieve current firmware/OS/package versions, update history, and source channels for a given host.",
+    "elapsed_s": 48.23
+  },
+  {
+    "fixture": "F11",
+    "class": "no-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW firmware-update-history \u2014 Track firmware and OS update history for a host, including current/previous versions and the update channel/source.",
+    "elapsed_s": 58.99
+  },
+  {
+    "fixture": "F11",
+    "class": "no-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "deploy-runs-history",
+        "change-management-lookup"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['deploy-runs-history', 'change-management-lookup'] when no match exists"
+    },
+    "decision_line": "SELECT deploy-runs-history, change-management-lookup",
+    "elapsed_s": 63.6
+  },
+  {
+    "fixture": "F11",
+    "class": "no-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW Track firmware/BIOS version updates for a host \u2014 record current and prior versions, detection of recent updates, and identify the update mechanism or source (channel, repository, deployment system).",
+    "elapsed_s": 61.26
+  },
+  {
+    "fixture": "F11",
+    "class": "no-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "firmware-update-history"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['firmware-update-history'] when no match exists"
+    },
+    "decision_line": "SELECT firmware-update-history",
+    "elapsed_s": 31.49
+  },
+  {
+    "fixture": "F11",
+    "class": "no-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "firmware-update-history"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['firmware-update-history'] when no match exists"
+    },
+    "decision_line": "SELECT firmware-update-history",
+    "elapsed_s": 42.09
+  },
+  {
+    "fixture": "F11",
+    "class": "no-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "firmware-update-history"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['firmware-update-history'] when no match exists"
+    },
+    "decision_line": "SELECT firmware-update-history",
+    "elapsed_s": 57.03
+  },
+  {
+    "fixture": "F12",
+    "class": "ambiguous",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history",
+        "source-reputation"
+      ],
+      "expected": [
+        "authentication-history",
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT authentication-history, source-reputation",
+    "elapsed_s": 34.34
+  },
+  {
+    "fixture": "F12",
+    "class": "ambiguous",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation",
+        "authentication-history"
+      ],
+      "expected": [
+        "authentication-history",
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation, authentication-history",
+    "elapsed_s": 56.32
+  },
+  {
+    "fixture": "F12",
+    "class": "ambiguous",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation",
+        "authentication-history"
+      ],
+      "expected": [
+        "authentication-history",
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation, authentication-history",
+    "elapsed_s": 48.47
+  },
+  {
+    "fixture": "F12",
+    "class": "ambiguous",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history",
+        "source-reputation"
+      ],
+      "expected": [
+        "authentication-history",
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT authentication-history, source-reputation",
+    "elapsed_s": 32.96
+  },
+  {
+    "fixture": "F12",
+    "class": "ambiguous",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history",
+        "source-reputation"
+      ],
+      "expected": [
+        "authentication-history",
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT authentication-history, source-reputation",
+    "elapsed_s": 67.24
+  },
+  {
+    "fixture": "F12",
+    "class": "ambiguous",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history",
+        "source-reputation"
+      ],
+      "expected": [
+        "authentication-history",
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT authentication-history, source-reputation",
+    "elapsed_s": 57.36
+  },
+  {
+    "fixture": "F12",
+    "class": "ambiguous",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history",
+        "source-reputation"
+      ],
+      "expected": [
+        "authentication-history",
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT authentication-history, source-reputation",
+    "elapsed_s": 33.2
+  },
+  {
+    "fixture": "F12",
+    "class": "ambiguous",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history",
+        "source-reputation"
+      ],
+      "expected": [
+        "authentication-history",
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT authentication-history, source-reputation",
+    "elapsed_s": 57.29
+  },
+  {
+    "fixture": "F12",
+    "class": "ambiguous",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history",
+        "source-reputation"
+      ],
+      "expected": [
+        "authentication-history",
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT authentication-history, source-reputation",
+    "elapsed_s": 51.8
+  },
+  {
+    "fixture": "F13",
+    "class": "ambiguous",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT process-lineage, correlated-endpoint-events",
+    "elapsed_s": 42.06
+  },
+  {
+    "fixture": "F13",
+    "class": "ambiguous",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT process-lineage, correlated-endpoint-events",
+    "elapsed_s": 55.87
+  },
+  {
+    "fixture": "F13",
+    "class": "ambiguous",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT process-lineage, correlated-endpoint-events",
+    "elapsed_s": 61.61
+  },
+  {
+    "fixture": "F13",
+    "class": "ambiguous",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT process-lineage, correlated-endpoint-events",
+    "elapsed_s": 34.1
+  },
+  {
+    "fixture": "F13",
+    "class": "ambiguous",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT process-lineage, correlated-endpoint-events",
+    "elapsed_s": 55.81
+  },
+  {
+    "fixture": "F13",
+    "class": "ambiguous",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT process-lineage, correlated-endpoint-events",
+    "elapsed_s": 61.52
+  },
+  {
+    "fixture": "F13",
+    "class": "ambiguous",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT process-lineage, correlated-endpoint-events",
+    "elapsed_s": 22.84
+  },
+  {
+    "fixture": "F13",
+    "class": "ambiguous",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT process-lineage, correlated-endpoint-events",
+    "elapsed_s": 52.58
+  },
+  {
+    "fixture": "F13",
+    "class": "ambiguous",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "process-lineage",
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT process-lineage, correlated-endpoint-events",
+    "elapsed_s": 46.15
+  },
+  {
+    "fixture": "F14",
+    "class": "ambiguous",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "authentication-history"
+      ],
+      "expected": [
+        "user-analysis",
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, authentication-history",
+    "elapsed_s": 40.72
+  },
+  {
+    "fixture": "F14",
+    "class": "ambiguous",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "authentication-history"
+      ],
+      "expected": [
+        "user-analysis",
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, authentication-history",
+    "elapsed_s": 63.97
+  },
+  {
+    "fixture": "F14",
+    "class": "ambiguous",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "authentication-history"
+      ],
+      "expected": [
+        "user-analysis",
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, authentication-history",
+    "elapsed_s": 62.51
+  },
+  {
+    "fixture": "F14",
+    "class": "ambiguous",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "authentication-history"
+      ],
+      "expected": [
+        "user-analysis",
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, authentication-history",
+    "elapsed_s": 34.15
+  },
+  {
+    "fixture": "F14",
+    "class": "ambiguous",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "authentication-history"
+      ],
+      "expected": [
+        "user-analysis",
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, authentication-history",
+    "elapsed_s": 65.13
+  },
+  {
+    "fixture": "F14",
+    "class": "ambiguous",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "authentication-history"
+      ],
+      "expected": [
+        "user-analysis",
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, authentication-history",
+    "elapsed_s": 57.69
+  },
+  {
+    "fixture": "F14",
+    "class": "ambiguous",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "authentication-history"
+      ],
+      "expected": [
+        "user-analysis",
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, authentication-history",
+    "elapsed_s": 28.08
+  },
+  {
+    "fixture": "F14",
+    "class": "ambiguous",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "authentication-history"
+      ],
+      "expected": [
+        "user-analysis",
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, authentication-history",
+    "elapsed_s": 55.97
+  },
+  {
+    "fixture": "F14",
+    "class": "ambiguous",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "authentication-history"
+      ],
+      "expected": [
+        "user-analysis",
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, authentication-history",
+    "elapsed_s": 54.29
+  },
+  {
+    "fixture": "F1",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history"
+      ],
+      "expected": [
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT authentication-history",
+    "elapsed_s": 25.4
+  },
+  {
+    "fixture": "F1",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history"
+      ],
+      "expected": [
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT authentication-history",
+    "elapsed_s": 44.9
+  },
+  {
+    "fixture": "F1",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history"
+      ],
+      "expected": [
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT authentication-history",
+    "elapsed_s": 73.24
+  },
+  {
+    "fixture": "F1",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "auth-failure-burst-detector"
+      ],
+      "expected": [
+        "authentication-history"
+      ],
+      "reason": "selected auth-failure-burst-detector, expected authentication-history"
+    },
+    "decision_line": "SELECT auth-failure-burst-detector",
+    "elapsed_s": 38.21
+  },
+  {
+    "fixture": "F1",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "partial-not-first",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "auth-failure-burst-detector",
+        "authentication-history"
+      ],
+      "expected": [
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT auth-failure-burst-detector, authentication-history",
+    "elapsed_s": 60.87
+  },
+  {
+    "fixture": "F1",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "partial-not-first",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "auth-failure-burst-detector",
+        "authentication-history"
+      ],
+      "expected": [
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT auth-failure-burst-detector, authentication-history",
+    "elapsed_s": 70.45
+  },
+  {
+    "fixture": "F1",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history"
+      ],
+      "expected": [
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT authentication-history",
+    "elapsed_s": 43.81
+  },
+  {
+    "fixture": "F1",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "auth-failure-burst-detector"
+      ],
+      "expected": [
+        "authentication-history"
+      ],
+      "reason": "selected auth-failure-burst-detector, expected authentication-history"
+    },
+    "decision_line": "SELECT auth-failure-burst-detector",
+    "elapsed_s": 76.39
+  },
+  {
+    "fixture": "F1",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "partial-not-first",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "auth-failure-burst-detector",
+        "authentication-history"
+      ],
+      "expected": [
+        "authentication-history"
+      ]
+    },
+    "decision_line": "SELECT auth-failure-burst-detector, authentication-history",
+    "elapsed_s": 65.72
+  },
+  {
+    "fixture": "F2",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation"
+      ],
+      "expected": [
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation",
+    "elapsed_s": 25.94
+  },
+  {
+    "fixture": "F2",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation"
+      ],
+      "expected": [
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation",
+    "elapsed_s": 45.16
+  },
+  {
+    "fixture": "F2",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation"
+      ],
+      "expected": [
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation",
+    "elapsed_s": 70.36
+  },
+  {
+    "fixture": "F2",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation"
+      ],
+      "expected": [
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation",
+    "elapsed_s": 34.0
+  },
+  {
+    "fixture": "F2",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation"
+      ],
+      "expected": [
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation",
+    "elapsed_s": 61.92
+  },
+  {
+    "fixture": "F2",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation"
+      ],
+      "expected": [
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation",
+    "elapsed_s": 56.47
+  },
+  {
+    "fixture": "F2",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation"
+      ],
+      "expected": [
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation",
+    "elapsed_s": 37.94
+  },
+  {
+    "fixture": "F2",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation"
+      ],
+      "expected": [
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation",
+    "elapsed_s": 45.54
+  },
+  {
+    "fixture": "F2",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "source-reputation"
+      ],
+      "expected": [
+        "source-reputation"
+      ]
+    },
+    "decision_line": "SELECT source-reputation",
+    "elapsed_s": 42.13
+  },
+  {
+    "fixture": "F3",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "network-analysis"
+      ],
+      "expected": [
+        "network-analysis"
+      ]
+    },
+    "decision_line": "SELECT network-analysis",
+    "elapsed_s": 28.94
+  },
+  {
+    "fixture": "F3",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "network-analysis"
+      ],
+      "expected": [
+        "network-analysis"
+      ]
+    },
+    "decision_line": "SELECT network-analysis",
+    "elapsed_s": 56.69
+  },
+  {
+    "fixture": "F3",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "network-analysis"
+      ],
+      "expected": [
+        "network-analysis"
+      ]
+    },
+    "decision_line": "SELECT network-analysis",
+    "elapsed_s": 49.45
+  },
+  {
+    "fixture": "F3",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "network-analysis"
+      ],
+      "expected": [
+        "network-analysis"
+      ]
+    },
+    "decision_line": "SELECT network-analysis",
+    "elapsed_s": 40.87
+  },
+  {
+    "fixture": "F3",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "network-analysis"
+      ],
+      "expected": [
+        "network-analysis"
+      ]
+    },
+    "decision_line": "SELECT network-analysis",
+    "elapsed_s": 62.13
+  },
+  {
+    "fixture": "F3",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "network-analysis"
+      ],
+      "expected": [
+        "network-analysis"
+      ]
+    },
+    "decision_line": "SELECT network-analysis",
+    "elapsed_s": 56.01
+  },
+  {
+    "fixture": "F3",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "network-analysis"
+      ],
+      "expected": [
+        "network-analysis"
+      ]
+    },
+    "decision_line": "SELECT network-analysis",
+    "elapsed_s": 46.3
+  },
+  {
+    "fixture": "F3",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "partial-overselected",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "network-analysis",
+        "source-reputation"
+      ],
+      "expected": [
+        "network-analysis"
+      ]
+    },
+    "decision_line": "SELECT network-analysis, source-reputation",
+    "elapsed_s": 69.94
+  },
+  {
+    "fixture": "F3",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "partial-overselected",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "network-analysis",
+        "source-reputation"
+      ],
+      "expected": [
+        "network-analysis"
+      ]
+    },
+    "decision_line": "SELECT network-analysis, source-reputation",
+    "elapsed_s": 68.37
+  },
+  {
+    "fixture": "F4",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage"
+      ],
+      "expected": [
+        "process-lineage"
+      ]
+    },
+    "decision_line": "SELECT process-lineage",
+    "elapsed_s": 22.03
+  },
+  {
+    "fixture": "F4",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage"
+      ],
+      "expected": [
+        "process-lineage"
+      ]
+    },
+    "decision_line": "SELECT process-lineage",
+    "elapsed_s": 45.59
+  },
+  {
+    "fixture": "F4",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage"
+      ],
+      "expected": [
+        "process-lineage"
+      ]
+    },
+    "decision_line": "SELECT process-lineage",
+    "elapsed_s": 59.08
+  },
+  {
+    "fixture": "F4",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage"
+      ],
+      "expected": [
+        "process-lineage"
+      ]
+    },
+    "decision_line": "SELECT process-lineage",
+    "elapsed_s": 29.19
+  },
+  {
+    "fixture": "F4",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage"
+      ],
+      "expected": [
+        "process-lineage"
+      ]
+    },
+    "decision_line": "SELECT process-lineage",
+    "elapsed_s": 59.15
+  },
+  {
+    "fixture": "F4",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage"
+      ],
+      "expected": [
+        "process-lineage"
+      ]
+    },
+    "decision_line": "SELECT process-lineage",
+    "elapsed_s": 52.7
+  },
+  {
+    "fixture": "F4",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage"
+      ],
+      "expected": [
+        "process-lineage"
+      ]
+    },
+    "decision_line": "SELECT process-lineage",
+    "elapsed_s": 35.18
+  },
+  {
+    "fixture": "F4",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage"
+      ],
+      "expected": [
+        "process-lineage"
+      ]
+    },
+    "decision_line": "SELECT process-lineage",
+    "elapsed_s": 64.48
+  },
+  {
+    "fixture": "F4",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "process-lineage"
+      ],
+      "expected": [
+        "process-lineage"
+      ]
+    },
+    "decision_line": "SELECT process-lineage",
+    "elapsed_s": 51.11
+  },
+  {
+    "fixture": "F5",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT correlated-endpoint-events",
+    "elapsed_s": 25.55
+  },
+  {
+    "fixture": "F5",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT correlated-endpoint-events",
+    "elapsed_s": 52.35
+  },
+  {
+    "fixture": "F5",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT correlated-endpoint-events",
+    "elapsed_s": 58.46
+  },
+  {
+    "fixture": "F5",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT correlated-endpoint-events",
+    "elapsed_s": 22.62
+  },
+  {
+    "fixture": "F5",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT correlated-endpoint-events",
+    "elapsed_s": 51.15
+  },
+  {
+    "fixture": "F5",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT correlated-endpoint-events",
+    "elapsed_s": 70.41
+  },
+  {
+    "fixture": "F5",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT correlated-endpoint-events",
+    "elapsed_s": 31.04
+  },
+  {
+    "fixture": "F5",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT correlated-endpoint-events",
+    "elapsed_s": 62.32
+  },
+  {
+    "fixture": "F5",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "correlated-endpoint-events"
+      ],
+      "expected": [
+        "correlated-endpoint-events"
+      ]
+    },
+    "decision_line": "SELECT correlated-endpoint-events",
+    "elapsed_s": 61.01
+  },
+  {
+    "fixture": "F6",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis"
+      ],
+      "expected": [
+        "user-analysis"
+      ]
+    },
+    "decision_line": "SELECT user-analysis",
+    "elapsed_s": 24.61
+  },
+  {
+    "fixture": "F6",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis"
+      ],
+      "expected": [
+        "user-analysis"
+      ]
+    },
+    "decision_line": "SELECT user-analysis",
+    "elapsed_s": 46.02
+  },
+  {
+    "fixture": "F6",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis"
+      ],
+      "expected": [
+        "user-analysis"
+      ]
+    },
+    "decision_line": "SELECT user-analysis",
+    "elapsed_s": 60.92
+  },
+  {
+    "fixture": "F6",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "partial-overselected",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "account-naming-pattern"
+      ],
+      "expected": [
+        "user-analysis"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, account-naming-pattern",
+    "elapsed_s": 31.13
+  },
+  {
+    "fixture": "F6",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "partial-overselected",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "account-naming-pattern"
+      ],
+      "expected": [
+        "user-analysis"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, account-naming-pattern",
+    "elapsed_s": 72.68
+  },
+  {
+    "fixture": "F6",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "partial-overselected",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "account-naming-pattern"
+      ],
+      "expected": [
+        "user-analysis"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, account-naming-pattern",
+    "elapsed_s": 73.14
+  },
+  {
+    "fixture": "F6",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis"
+      ],
+      "expected": [
+        "user-analysis"
+      ]
+    },
+    "decision_line": "SELECT user-analysis",
+    "elapsed_s": 36.61
+  },
+  {
+    "fixture": "F6",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "partial-overselected",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "account-naming-pattern"
+      ],
+      "expected": [
+        "user-analysis"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, account-naming-pattern",
+    "elapsed_s": 58.06
+  },
+  {
+    "fixture": "F6",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "partial-overselected",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "user-analysis",
+        "account-naming-pattern"
+      ],
+      "expected": [
+        "user-analysis"
+      ]
+    },
+    "decision_line": "SELECT user-analysis, account-naming-pattern",
+    "elapsed_s": 53.24
+  },
+  {
+    "fixture": "F7",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "ad-hoc"
+      ],
+      "expected": [
+        "ad-hoc"
+      ]
+    },
+    "decision_line": "SELECT ad-hoc",
+    "elapsed_s": 34.67
+  },
+  {
+    "fixture": "F7",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "ad-hoc"
+      ],
+      "expected": [
+        "ad-hoc"
+      ]
+    },
+    "decision_line": "SELECT ad-hoc",
+    "elapsed_s": 48.5
+  },
+  {
+    "fixture": "F7",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "ad-hoc"
+      ],
+      "expected": [
+        "ad-hoc"
+      ]
+    },
+    "decision_line": "SELECT ad-hoc",
+    "elapsed_s": 53.32
+  },
+  {
+    "fixture": "F7",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "data-source-debug"
+      ],
+      "expected": [
+        "ad-hoc"
+      ],
+      "reason": "selected data-source-debug, expected ad-hoc"
+    },
+    "decision_line": "SELECT data-source-debug",
+    "elapsed_s": 38.12
+  },
+  {
+    "fixture": "F7",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "ad-hoc"
+      ],
+      "expected": [
+        "ad-hoc"
+      ]
+    },
+    "decision_line": "SELECT ad-hoc",
+    "elapsed_s": 67.82
+  },
+  {
+    "fixture": "F7",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "ad-hoc"
+      ],
+      "expected": [
+        "ad-hoc"
+      ]
+    },
+    "decision_line": "SELECT ad-hoc",
+    "elapsed_s": 61.89
+  },
+  {
+    "fixture": "F7",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "ad-hoc"
+      ],
+      "reason": "proposed new when catalog has match"
+    },
+    "decision_line": "PROPOSE_NEW Custom syscall+path query \u2014 execute a one-off SIEM query combining a specific syscall type and target filesystem path.",
+    "elapsed_s": 47.32
+  },
+  {
+    "fixture": "F7",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "ad-hoc"
+      ],
+      "expected": [
+        "ad-hoc"
+      ]
+    },
+    "decision_line": "SELECT ad-hoc",
+    "elapsed_s": 48.78
+  },
+  {
+    "fixture": "F7",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "ad-hoc"
+      ],
+      "reason": "proposed new when catalog has match"
+    },
+    "decision_line": "PROPOSE_NEW Trace syscall invocations filtered by specific filesystem path patterns on a host.",
+    "elapsed_s": 60.43
+  },
+  {
+    "fixture": "F8",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "data-source-debug"
+      ],
+      "expected": [
+        "data-source-debug"
+      ]
+    },
+    "decision_line": "SELECT data-source-debug",
+    "elapsed_s": 29.63
+  },
+  {
+    "fixture": "F8",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "data-source-debug"
+      ],
+      "expected": [
+        "data-source-debug"
+      ]
+    },
+    "decision_line": "SELECT data-source-debug",
+    "elapsed_s": 44.01
+  },
+  {
+    "fixture": "F8",
+    "class": "clear-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "data-source-debug"
+      ],
+      "expected": [
+        "data-source-debug"
+      ]
+    },
+    "decision_line": "SELECT data-source-debug",
+    "elapsed_s": 51.18
+  },
+  {
+    "fixture": "F8",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "data-source-debug"
+      ],
+      "expected": [
+        "data-source-debug"
+      ]
+    },
+    "decision_line": "SELECT data-source-debug",
+    "elapsed_s": 38.18
+  },
+  {
+    "fixture": "F8",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "data-source-debug"
+      ],
+      "expected": [
+        "data-source-debug"
+      ]
+    },
+    "decision_line": "SELECT data-source-debug",
+    "elapsed_s": 61.12
+  },
+  {
+    "fixture": "F8",
+    "class": "clear-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "data-source-debug"
+      ],
+      "expected": [
+        "data-source-debug"
+      ]
+    },
+    "decision_line": "SELECT data-source-debug",
+    "elapsed_s": 58.34
+  },
+  {
+    "fixture": "F8",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "data-source-debug"
+      ],
+      "expected": [
+        "data-source-debug"
+      ]
+    },
+    "decision_line": "SELECT data-source-debug",
+    "elapsed_s": 41.49
+  },
+  {
+    "fixture": "F8",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "data-source-debug"
+      ],
+      "expected": [
+        "data-source-debug"
+      ]
+    },
+    "decision_line": "SELECT data-source-debug",
+    "elapsed_s": 40.66
+  },
+  {
+    "fixture": "F8",
+    "class": "clear-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "data-source-debug"
+      ],
+      "expected": [
+        "data-source-debug"
+      ]
+    },
+    "decision_line": "SELECT data-source-debug",
+    "elapsed_s": 46.87
+  },
+  {
+    "fixture": "F9",
+    "class": "no-match",
+    "catalog_size": 8,
+    "trial": 1,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['authentication-history'] when no match exists"
+    },
+    "decision_line": "SELECT authentication-history",
+    "elapsed_s": 36.38
+  },
+  {
+    "fixture": "F9",
+    "class": "no-match",
+    "catalog_size": 8,
+    "trial": 2,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "authentication-history"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['authentication-history'] when no match exists"
+    },
+    "decision_line": "SELECT authentication-history",
+    "elapsed_s": 70.62
+  },
+  {
+    "fixture": "F9",
+    "class": "no-match",
+    "catalog_size": 8,
+    "trial": 3,
+    "verdict": "correct",
+    "detail": {
+      "mode": "PROPOSE_NEW",
+      "selected": [],
+      "expected": [
+        "PROPOSE_NEW"
+      ]
+    },
+    "decision_line": "PROPOSE_NEW Identity-configuration audit: Retrieve identity provider or MFA service audit logs to detect configuration changes (factor registration/removal, device enrollment, bypass approvals, etc.) over a time window.",
+    "elapsed_s": 58.2
+  },
+  {
+    "fixture": "F9",
+    "class": "no-match",
+    "catalog_size": 58,
+    "trial": 1,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "audit-log-replay"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['audit-log-replay'] when no match exists"
+    },
+    "decision_line": "SELECT audit-log-replay",
+    "elapsed_s": 46.31
+  },
+  {
+    "fixture": "F9",
+    "class": "no-match",
+    "catalog_size": 58,
+    "trial": 2,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "audit-log-replay"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['audit-log-replay'] when no match exists"
+    },
+    "decision_line": "SELECT audit-log-replay",
+    "elapsed_s": 62.63
+  },
+  {
+    "fixture": "F9",
+    "class": "no-match",
+    "catalog_size": 58,
+    "trial": 3,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "audit-log-replay"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['audit-log-replay'] when no match exists"
+    },
+    "decision_line": "SELECT audit-log-replay",
+    "elapsed_s": 60.79
+  },
+  {
+    "fixture": "F9",
+    "class": "no-match",
+    "catalog_size": 158,
+    "trial": 1,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "mfa-enrollment-events"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['mfa-enrollment-events'] when no match exists"
+    },
+    "decision_line": "SELECT mfa-enrollment-events",
+    "elapsed_s": 32.13
+  },
+  {
+    "fixture": "F9",
+    "class": "no-match",
+    "catalog_size": 158,
+    "trial": 2,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "mfa-enrollment-events"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['mfa-enrollment-events'] when no match exists"
+    },
+    "decision_line": "SELECT mfa-enrollment-events",
+    "elapsed_s": 49.7
+  },
+  {
+    "fixture": "F9",
+    "class": "no-match",
+    "catalog_size": 158,
+    "trial": 3,
+    "verdict": "wrong",
+    "detail": {
+      "mode": "SELECT",
+      "selected": [
+        "mfa-enrollment-events"
+      ],
+      "expected": [
+        "PROPOSE_NEW"
+      ],
+      "reason": "selected ['mfa-enrollment-events'] when no match exists"
+    },
+    "decision_line": "SELECT mfa-enrollment-events",
+    "elapsed_s": 54.07
+  }
+]

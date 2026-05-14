@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F9",
+  "class": "no-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 60.79,
+  "returncode": 0,
+  "stdout": "Audit logs are the authoritative source for MFA configuration changes, device registrations, factor swaps, and admin-approved MFA bypasses.\n\nSELECT audit-log-replay\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

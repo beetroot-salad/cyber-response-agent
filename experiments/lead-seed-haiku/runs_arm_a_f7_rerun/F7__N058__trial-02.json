@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 44.45,
+  "returncode": 0,
+  "stdout": "The goal requires combining two dimensions (syscall name + filesystem path) in a single query, with no parametrized recipe covering that specific joint constraint. This is the archetypal use case for the ad-hoc seed.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F9",
+  "class": "no-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 3,
+  "elapsed_s": 58.2,
+  "returncode": 0,
+  "stdout": "The goal requires auditing changes to identity/MFA configuration settings (factor swaps, device registrations, bypass approvals), which differs from authentication event patterns \u2014 those are login histories, not configuration audits.\n\nPROPOSE_NEW Identity-configuration audit: Retrieve identity provider or MFA service audit logs to detect configuration changes (factor registration/removal, device enrollment, bypass approvals, etc.) over a time window.\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

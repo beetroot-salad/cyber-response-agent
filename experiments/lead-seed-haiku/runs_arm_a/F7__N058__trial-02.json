@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 67.82,
+  "returncode": 0,
+  "stdout": "`ad-hoc` is the explicit catalog entry for queries outside the standard recipe set, making it the right choice for bespoke syscall + path combinations that don't parameterize via existing seeds.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

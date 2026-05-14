@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F9",
+  "class": "no-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 32.13,
+  "returncode": 0,
+  "stdout": "`mfa-enrollment-events` directly surfaces factor changes, enrollment events (new device registration), and MFA bypass approvals\u2014exactly the set of changes needed to audit MFA setup modifications in the last 24 hours.\n\nSELECT mfa-enrollment-events\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

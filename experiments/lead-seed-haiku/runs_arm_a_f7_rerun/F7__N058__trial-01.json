@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 1,
+  "elapsed_s": 43.93,
+  "returncode": 0,
+  "stdout": "The goal requires a one-off query combining syscall name and filesystem path \u2014 a dimension combination not exposed by any catalog seed's template. `ad-hoc` is the explicit procedural escape hatch for this case.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

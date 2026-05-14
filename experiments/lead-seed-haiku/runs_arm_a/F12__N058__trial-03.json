@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F12",
+  "class": "ambiguous",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 57.36,
+  "returncode": 0,
+  "stdout": "The goal requires evidence from two dimensions: the org's local auth history with the IP, and the IP's external reputation. `authentication-history` captures the former; `source-reputation` captures the latter.\n\nSELECT authentication-history, source-reputation\n",
+  "correct_leads": [
+    "authentication-history",
+    "source-reputation"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F1",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 60.87,
+  "returncode": 0,
+  "stdout": "The goal requires detecting burst clusters of login attempts and establishing whether the current activity is part of a broader pattern\u2014two distinct but complementary needs. The burst detector identifies tight-window clusters, while the authentication history provides temporal context to assess whether this is a recurring pattern or a one-off event.\n\n`SELECT auth-failure-burst-detector, authentication-history`\n",
+  "correct_leads": [
+    "authentication-history"
+  ]
+}

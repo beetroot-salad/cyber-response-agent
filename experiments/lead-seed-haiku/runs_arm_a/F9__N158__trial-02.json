@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F9",
+  "class": "no-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 49.7,
+  "returncode": 0,
+  "stdout": "The goal directly aligns with listing MFA setup changes \u2014 factor swaps, new devices, backup codes, and bypass events \u2014 all of which are covered by the enrollment seed.\n\nSELECT mfa-enrollment-events\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F6",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 36.61,
+  "returncode": 0,
+  "stdout": "The goal asks for account existence validation, purpose determination, and naming-pattern analysis against known conventions. The `user-analysis` seed directly addresses classifying accounts against known patterns and understanding account context, which encompasses naming conventions (service account, admin, monitoring sentinel patterns).\n\nSELECT user-analysis\n",
+  "correct_leads": [
+    "user-analysis"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F1",
+  "class": "clear-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 2,
+  "elapsed_s": 76.39,
+  "returncode": 0,
+  "stdout": "The goal is asking whether a source IP shows a **clustered burst pattern** of login attempts or if the event is isolated, with focus on cadence and per-attempt counts. `auth-failure-burst-detector` is purpose-built to identify exactly this \u2014 burst clusters within tight windows. If historical baseline context is needed to establish normal cadence, `authentication-history` provides the time-windowed pattern characterization.\n\nSELECT auth-failure-burst-detector\n",
+  "correct_leads": [
+    "authentication-history"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F11",
+  "class": "no-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 63.6,
+  "returncode": 0,
+  "stdout": "Firmware updates would be tracked as deployed changes targeting a host. `deploy-runs-history` captures execution history and timing; `change-management-lookup` provides context on the change ticket that initiated the update, including which channel (MDM, patch group, Wazuh deployment, etc.) pushed it. Together these seeds answer: recency (deploy history), versions (deploy metadata), and channel (change ticket).\n\nSELECT deploy-runs-history, change-management-lookup\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

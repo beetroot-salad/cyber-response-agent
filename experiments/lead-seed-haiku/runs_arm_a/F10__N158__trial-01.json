@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F10",
+  "class": "no-match",
+  "catalog_size": 158,
+  "actual_catalog_size": 158,
+  "trial": 1,
+  "elapsed_s": 27.79,
+  "returncode": 0,
+  "stdout": "The goal directly matches a seed designed for kernel-level host introspection \u2014 tracking loaded modules and their lifecycle events.\n\nSELECT kernel-module-events\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

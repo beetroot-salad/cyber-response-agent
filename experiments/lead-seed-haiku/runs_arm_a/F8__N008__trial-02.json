@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F8",
+  "class": "clear-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 2,
+  "elapsed_s": 44.01,
+  "returncode": 0,
+  "stdout": "Diagnosis of empty results requires verifying the data source itself is responding and ingesting at normal rates, not just refining the query \u2014 a classic data-source-health check.\n\nSELECT data-source-debug\n",
+  "correct_leads": [
+    "data-source-debug"
+  ]
+}

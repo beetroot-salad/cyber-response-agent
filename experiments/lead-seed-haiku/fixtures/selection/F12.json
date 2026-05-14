@@ -1,0 +1,6 @@
+{
+  "id": "F12",
+  "class": "ambiguous",
+  "nl_goal": "We want to know if this external IP has been involved in suspicious activity from this org's perspective — both its prior authentication interactions with us AND its general reputation/classification as a network entity.",
+  "correct_leads": ["authentication-history", "source-reputation"]
+}

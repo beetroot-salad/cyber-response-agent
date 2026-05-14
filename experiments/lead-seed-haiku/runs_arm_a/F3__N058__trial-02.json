@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F3",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 62.13,
+  "returncode": 0,
+  "stdout": "The goal is to enumerate outbound connection destinations, ports, and traffic cadence from a host. This maps directly to network-activity characterization.\n\n`SELECT network-analysis`\n",
+  "correct_leads": [
+    "network-analysis"
+  ]
+}

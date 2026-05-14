@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F9",
+  "class": "no-match",
+  "catalog_size": 8,
+  "actual_catalog_size": 8,
+  "trial": 1,
+  "elapsed_s": 36.38,
+  "returncode": 0,
+  "stdout": "`authentication-history` directly covers retrieving auth events for a user over a time window; MFA configuration changes (factor registration, backup code generation, device enrollment, admin bypasses) should surface as distinct auth-event types or state changes in the identity system logs.\n\nSELECT authentication-history\n",
+  "correct_leads": [
+    "PROPOSE_NEW"
+  ]
+}

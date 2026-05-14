@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F14",
+  "class": "ambiguous",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 57.69,
+  "returncode": 0,
+  "stdout": "`user-analysis` classifies the account type, and `authentication-history` profiles its authentication patterns including cadence, success/failure mix, and source diversity.\n\nSELECT user-analysis, authentication-history\n",
+  "correct_leads": [
+    "user-analysis",
+    "authentication-history"
+  ]
+}

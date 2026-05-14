@@ -1,0 +1,13 @@
+{
+  "fixture_id": "F7",
+  "class": "clear-match",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 3,
+  "elapsed_s": 61.89,
+  "returncode": 0,
+  "stdout": "The goal requires a custom SIEM query that parametrizes both syscall and filesystem path together\u2014a bespoke combination not covered by the standard templated recipes (which either focus on specific syscalls like AppArmor denials, or on endpoint events without syscall-level drilling). The `ad-hoc` seed is the appropriate placeholder for one-off queries that fall outside the standard catalog.\n\nSELECT ad-hoc\n",
+  "correct_leads": [
+    "ad-hoc"
+  ]
+}

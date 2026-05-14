@@ -1,0 +1,14 @@
+{
+  "fixture_id": "F13",
+  "class": "ambiguous",
+  "catalog_size": 58,
+  "actual_catalog_size": 58,
+  "trial": 2,
+  "elapsed_s": 55.81,
+  "returncode": 0,
+  "stdout": "The goal requires two parallel lines of evidence: the process tree and execution context, plus the co-firing signal pattern from the same container in the surrounding window.\n\nSELECT process-lineage, correlated-endpoint-events\n",
+  "correct_leads": [
+    "process-lineage",
+    "correlated-endpoint-events"
+  ]
+}
