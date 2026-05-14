@@ -91,3 +91,7 @@ defender/run-transcripts/
 # Ephemeral scratch work happens in git worktrees under .claude/worktrees/,
 # not at the repo root. Kept experiment writeups live in /experiments/ (tracked).
 /.claude/worktrees/
+experiments/actor-author-discipline/runs/
+experiments/actor-author-discipline/results/
+experiments/actor-author-discipline/__pycache__/
+experiments/actor-author-discipline/**/__pycache__/
