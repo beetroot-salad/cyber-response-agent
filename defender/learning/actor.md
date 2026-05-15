@@ -15,25 +15,31 @@ In particular: **if the menu contains no Initial Access technique, you must SKIP
 
 A SKIP is a useful signal. Do not contort the story to avoid one.
 
-## Retrieval — discover lessons after Section 0
+## Output format
 
-Section 0 (the technique table) commits first. Once you have written it,
-discover relevant prior lessons before continuing.
+Your **entire output** is either a single `SKIP:` line or the four numbered sections below — nothing else. No preamble, no headers above Section 0, no narration of your process, no commentary on the corpus or the menu, no postscript. Do not summarize the alert. The first character of your output is `S` (for SKIP) or `0`.
 
-The lessons corpus is flat at `defender/lessons-actor/*.md`. Each lesson
-carries whichever frontmatter keys apply. The keys are **retrieval
-axes** — each answers a different question, so pick the axis that matches
-what you're looking for:
+If skipping:
 
-| Axis | Use when you want… |
-|---|---|
-| `alert_rule_ids` | …lessons about a specific SIEM rule that fired (or could fire). |
-| `defender_lead_tags` | …lessons about what a specific lead's output actually surfaces (defender coverage). |
-| `techniques` | …lessons tied to a MITRE T-ID you're building the story around. |
-| `subject` | …a specific deployment-property lesson when you already know the referent name. |
-| `applies_to` | …pattern lessons that depend on a given env-fact subject (grep, not index). |
+```
+SKIP: <one-sentence rationale naming which tactic the menu lacks>
+```
 
-Index CLI invocation (all filters optional; AND across keys, OR within):
+Otherwise, four sections, in order:
+
+**0. Selected techniques.** Table of MITRE IDs chosen from the menu, one-line note per row.
+
+**1. Attack story.** Concrete causal chain — who is doing what, with what access, from where, against what target. Specific actor model consistent with the assigned archetype, specific tooling, specific entry point. Each step references its menu technique by ID inline.
+
+**2. Goal.** What this specific operation achieves end-to-end. Tie to actor model and entry point.
+
+**3. Bypass.** The cover the attacker relies on — what about the operation's artifact set produces routine-looking signal. Attacker terms only; describe what the operation mimics, not what the defender will or won't catch.
+
+## Tools
+
+The lessons corpus (`defender/lessons-actor/*.md`) holds prior findings about this deployment and attacker patterns that succeed or fail against it. Reading it is a **silent investigation step** — like checking documentation before writing code — not content for your output. Use it between Section 0 (commits your technique choice; do not revise after reading) and Section 1; do not narrate that you used it or what you found.
+
+Index CLI — all filters optional, AND across keys, OR within:
 
 ```
 python3 defender/scripts/lessons_actor_index.py \
@@ -43,40 +49,14 @@ python3 defender/scripts/lessons_actor_index.py \
   --subject <single-subject>
 ```
 
-Each line is `<path>\t<relevance_criteria>`. Scan descriptions, Read the
-files that matter. Query multiple axes if your story spans them
-(rule-fired + TTP being built is a normal pairing).
+Output is `<path>\t<relevance_criteria>`. Scan, Read the files that matter, incorporate what you learn into Sections 1–3. Do not cite lesson IDs.
 
-After enumeration:
+Retrieval axes:
 
-1. Read the files the index surfaced as relevant. Do not revise Section 0
-   after reading — the technique commit is the retrieval key. If a lesson
-   would have changed your Section 0, that is signal for the judge, not a
-   reason to rewrite.
-
-2. Write Sections 1–3 informed by what you read. Env-fact lessons
-   describe ground truth about the deployment (mutable, may have a
-   subject); pattern lessons describe attacker shapes that fail or
-   succeed against the deployment (have `techniques`, may carry
-   `applies_to` cross-links to env-facts they depend on). Do not cite
-   lesson IDs in your output.
-
-## Output format
-
-If skipping, your entire output must be one line starting with `SKIP:`:
-
-```
-SKIP: <one-sentence rationale naming which tactic the menu lacks>
-```
-
-Otherwise, write four sections in order:
-
-**0. Selected techniques.** A table of MITRE IDs you chose from the menu and a one-line note on why each is in the story. This is the structured surface the learning loop consumes; it must enumerate every causal step the story relies on.
-
-**1. Attack story.** Concrete causal chain — who is doing what, with what access, from where, against what target. Name a specific actor model consistent with the assigned archetype, specific tooling, and a specific entry point. Each step references its menu technique by ID inline.
-
-**2. Goal.** What this specific operation achieves end-to-end. Tie to actor model and entry point.
-
-**3. Bypass.** The cover and blending the attacker relies on — what about the operation's artifact set produces routine-looking signal. Frame entirely in attacker terms; describe what the operation mimics, not what the defender will or won't catch.
-
-No preamble. Do not summarize the alert.
+| Axis | Use when you want… |
+|---|---|
+| `alert_rule_ids` | …lessons about a specific SIEM rule that fired (or could fire). |
+| `defender_lead_tags` | …lessons about what a specific lead's output actually surfaces. |
+| `techniques` | …lessons tied to a MITRE T-ID you're building the story around. |
+| `subject` | …a specific deployment-property lesson when you already know the referent name. |
+| `applies_to` | …pattern lessons that depend on a given env-fact subject (grep, not index). |
