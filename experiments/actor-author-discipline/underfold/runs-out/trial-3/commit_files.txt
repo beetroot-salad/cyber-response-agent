@@ -1,0 +1,7 @@
+defender/lessons-actor/breach-corpus-enricher.md
+defender/lessons-actor/container-argv-obfuscation-bypassed-by-host-record.md
+defender/lessons-actor/container-side-execve-omits-argv.md
+defender/lessons-actor/credential-spray-stagger.md
+defender/lessons-actor/ssh-keyscan-pre-recon-attributed.md
+defender/lessons-actor/wazuh-rule-5701-banner-probe.md
+defender/lessons-actor/wazuh-rule-5712-threshold.md

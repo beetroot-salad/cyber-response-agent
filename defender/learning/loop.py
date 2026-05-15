@@ -36,6 +36,7 @@ _VENV_PY = Path(__file__).resolve().parents[2] / "defender" / ".venv" / "bin" / 
 if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
+import fcntl
 import hashlib
 import json
 import random
@@ -54,6 +55,9 @@ LEARNING_DIR = REPO_ROOT / "defender" / "learning"
 RUNS_DIR = LEARNING_DIR / "runs"
 PENDING_DIR = LEARNING_DIR / "_pending"
 PENDING_FILE = PENDING_DIR / "findings.jsonl"
+ACTOR_OBSERVATIONS_FILE = PENDING_DIR / "actor_observations.jsonl"
+ACTOR_OBSERVATIONS_CONSUMED_FILE = PENDING_DIR / "actor_observations.consumed.jsonl"
+ACTOR_OBSERVATIONS_LOCK_FILE = PENDING_DIR / ".actor.lock"
 
 ACTOR_PROMPT = LEARNING_DIR / "actor.md"
 ORACLE_PROMPT = LEARNING_DIR / "oracle.md"
@@ -73,6 +77,7 @@ QUEUEABLE_FINDING_TYPES = {
     "observability",
 }
 ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"detection-confirmed"}
+ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-haiku-4-5")
@@ -554,6 +559,26 @@ def validate_judge_doc(doc: Any) -> dict[str, Any]:
             )
         if not isinstance(f["citations"], list):
             raise LoopError(f"finding[{i}].citations is not a list")
+    if "actor_observations" in doc:
+        observations = doc["actor_observations"]
+        if not isinstance(observations, list):
+            raise LoopError("judge `actor_observations` is not a list")
+        for i, o in enumerate(observations):
+            if not isinstance(o, dict):
+                raise LoopError(f"actor_observations[{i}] is not a mapping")
+            for k in ("type", "subject_anchor", "subject_topic", "observation"):
+                if k not in o:
+                    raise LoopError(f"actor_observations[{i}] missing key: {k}")
+                v = o[k]
+                if not isinstance(v, str) or not v.strip():
+                    raise LoopError(
+                        f"actor_observations[{i}].{k} must be a non-empty string"
+                    )
+            if o["type"] not in ACTOR_OBSERVATION_TYPES:
+                raise LoopError(
+                    f"actor_observations[{i}].type={o['type']!r} not in "
+                    f"{sorted(ACTOR_OBSERVATION_TYPES)}"
+                )
     return doc
 
 
@@ -643,6 +668,60 @@ def derive_alert_rule_key(alert: dict) -> str:
     return "unkeyed"
 
 
+def _source_run_dir(learning_run_dir: Path) -> str:
+    """Repo-relative path with trailing slash — the source_run_dir
+    convention shared by both ``_pending/`` queues."""
+    return str(learning_run_dir.relative_to(REPO_ROOT)) + "/"
+
+
+def _load_jsonl_ids(path: Path, key: str) -> set[str]:
+    """Return the set of ``entry[key]`` strings in a JSONL file.
+
+    Missing file → empty set. Malformed lines are skipped, matching
+    the tolerance ``author.read_batch`` applies on the consumer side.
+    """
+    if not path.is_file():
+        return set()
+    ids: set[str] = set()
+    for line in path.read_text().splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            obj = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        v = obj.get(key)
+        if isinstance(v, str):
+            ids.add(v)
+    return ids
+
+
+def _append_jsonl(path: Path, rows: list[dict]) -> int:
+    """Append ``rows`` to ``path`` as JSONL (one row per line)."""
+    if not rows:
+        return 0
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+    return len(rows)
+
+
+def _acquire_actor_observations_lock() -> Any:
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    fh = ACTOR_OBSERVATIONS_LOCK_FILE.open("a+")
+    fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    return fh
+
+
+def _release_actor_observations_lock(fh: Any) -> None:
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
 def append_findings(
     judge_doc: dict,
     run_id: str,
@@ -678,6 +757,57 @@ def append_findings(
             fh.write(json.dumps(entry) + "\n")
             appended += 1
     return appended
+
+
+def append_actor_observations(
+    judge_doc: dict,
+    run_id: str,
+    alert_rule_key: str,
+    learning_run_dir: Path,
+) -> int:
+    """Append judge ``actor_observations`` to the actor pending queue.
+
+    One row per observation, deduped on ``observation_id`` against both
+    the active queue and the consumed history so re-running the persist
+    stage on a case never replays observations the author has already
+    decided on (committed, skipped, or pre-consumed as idempotent). The
+    producer's only outcome filter is ``skip-passthrough`` (defensive —
+    the judge does not emit observations on SKIP); the author owns the
+    caught/incoherent/survived policy.
+    """
+    outcome = _outcome_keyword(judge_doc["outcome"])
+    if outcome == "skip-passthrough":
+        return 0
+    observations = judge_doc.get("actor_observations") or []
+    if not observations:
+        return 0
+    lock_fh = _acquire_actor_observations_lock()
+    try:
+        existing = _load_jsonl_ids(ACTOR_OBSERVATIONS_FILE, "observation_id")
+        existing |= _load_jsonl_ids(
+            ACTOR_OBSERVATIONS_CONSUMED_FILE, "observation_id"
+        )
+        src = _source_run_dir(learning_run_dir)
+        rows: list[dict] = []
+        for i, obs in enumerate(observations):
+            obs_id = f"{run_id}/{i}"
+            if obs_id in existing:
+                continue
+            rows.append({
+                "observation_id": obs_id,
+                "run_id": run_id,
+                "observation_index": i,
+                "alert_rule_key": alert_rule_key,
+                "type": obs["type"],
+                "subject_anchor": obs["subject_anchor"],
+                "subject_topic": obs["subject_topic"],
+                "observation": obs["observation"],
+                "judge_outcome": outcome,
+                "source_run_dir": src,
+            })
+        return _append_jsonl(ACTOR_OBSERVATIONS_FILE, rows)
+    finally:
+        _release_actor_observations_lock(lock_fh)
 
 
 # ---------------------------------------------------------------------------
@@ -815,7 +945,13 @@ def run_one(run_dir: Path) -> int:
 
     _log("step=append")
     n_appended = append_findings(judge_doc, run_id, alert_rule_key, learning_run_dir)
-    _log(f"appended {n_appended} finding(s) to {PENDING_FILE}")
+    n_obs = append_actor_observations(
+        judge_doc, run_id, alert_rule_key, learning_run_dir
+    )
+    _log(
+        f"appended {n_appended} finding(s) to {PENDING_FILE}, "
+        f"{n_obs} actor observation(s) to {ACTOR_OBSERVATIONS_FILE}"
+    )
 
     threshold = int(os.environ.get("LEARNING_AUTHOR_THRESHOLD", "5"))
     pending_count = sum(
@@ -835,6 +971,33 @@ def run_one(run_dir: Path) -> int:
             _log(f"author returned rc={rc} (queue intact, retry next tick)")
     else:
         _log(f"pending={pending_count} threshold={threshold} — author not invoked")
+
+    actor_threshold = int(os.environ.get("LEARNING_AUTHOR_ACTOR_THRESHOLD", "5"))
+    actor_pending_count = 0
+    if ACTOR_OBSERVATIONS_FILE.is_file():
+        actor_pending_count = sum(
+            1
+            for line in ACTOR_OBSERVATIONS_FILE.read_text().splitlines()
+            if line.strip()
+        )
+    if actor_pending_count >= actor_threshold:
+        _log(
+            f"step=author_actor pending={actor_pending_count} "
+            f"threshold={actor_threshold}"
+        )
+        sys.path.insert(0, str(LEARNING_DIR))
+        try:
+            import author_actor as _author_actor  # type: ignore[import-not-found]
+        finally:
+            sys.path.pop(0)
+        rc = _author_actor.run_batch()
+        if rc != 0:
+            _log(f"author_actor returned rc={rc} (queue intact, retry next tick)")
+    else:
+        _log(
+            f"actor_pending={actor_pending_count} threshold={actor_threshold} "
+            f"— author_actor not invoked"
+        )
 
     return 0
 
@@ -857,17 +1020,24 @@ Outputs:
   defender/learning/_pending/findings.jsonl
     appended queueable findings; when count >= LEARNING_AUTHOR_THRESHOLD,
     the lessons curator (author.py) is invoked automatically.
+  defender/learning/_pending/actor_observations.jsonl
+    appended actor observations; when count >= LEARNING_AUTHOR_ACTOR_THRESHOLD,
+    the actor lessons curator (author_actor.py) is invoked automatically.
 
 Environment:
-  ACTOR_MODEL                    claude model for the adversarial actor
-                                 (default: claude-sonnet-4-6)
-  ORACLE_MODEL                   claude model for the telemetry oracle —
-                                 cheap projection work, no reasoning
-                                 (default: claude-haiku-4-5)
-  JUDGE_MODEL                    claude model for the outcome judge
-                                 (default: claude-sonnet-4-6)
-  LEARNING_SUBAGENT_TIMEOUT_SECONDS  per-subagent timeout (default: 300)
-  LEARNING_AUTHOR_THRESHOLD      pending findings before author runs (default: 5)
+  ACTOR_MODEL                          claude model for the adversarial actor
+                                       (default: claude-sonnet-4-6)
+  ORACLE_MODEL                         claude model for the telemetry oracle —
+                                       cheap projection work, no reasoning
+                                       (default: claude-haiku-4-5)
+  JUDGE_MODEL                          claude model for the outcome judge
+                                       (default: claude-sonnet-4-6)
+  LEARNING_SUBAGENT_TIMEOUT_SECONDS    per-subagent timeout (default: 300)
+  LEARNING_AUTHOR_THRESHOLD            pending findings before author runs (default: 5)
+  LEARNING_AUTHOR_ACTOR_THRESHOLD      pending actor observations before
+                                       author_actor runs (default: 5)
+  LEARNING_AUTHOR_ACTOR_MODEL          claude model for the actor lessons curator
+                                       (default: claude-sonnet-4-6)
 
 Typical use: invoked in-process by `defender/run.py` after the runtime loop
 exits. Run standalone with `python3 defender/learning/loop.py <run_dir>` to

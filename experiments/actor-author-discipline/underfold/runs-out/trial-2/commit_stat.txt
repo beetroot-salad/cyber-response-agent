@@ -1,0 +1,7 @@
+ defender/lessons-actor/auth-pipeline-breach-enricher.md  | 16 ++++++++++++++++
+ .../lessons-actor/container-side-execve-omits-argv.md    |  2 +-
+ defender/lessons-actor/credential-spray-stagger.md       | 12 +++++++-----
+ defender/lessons-actor/ssh-keyscan-pre-recon.md          | 16 ++++++++++++++++
+ defender/lessons-actor/wazuh-rule-5701-ssh-probe.md      | 16 ++++++++++++++++
+ defender/lessons-actor/wazuh-rule-5712-threshold.md      | 16 ++++++++++++++++
+ 6 files changed, 72 insertions(+), 6 deletions(-)

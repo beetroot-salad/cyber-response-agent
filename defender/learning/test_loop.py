@@ -8,6 +8,7 @@ test cheaply without spawning ``claude -p``.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -27,6 +28,7 @@ LoopError = loop.LoopError
 assemble_exemplar_bundle = loop.assemble_exemplar_bundle
 redact_exemplar = loop.redact_exemplar
 validate_oracle_doc = loop.validate_oracle_doc
+append_actor_observations = loop.append_actor_observations
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +335,83 @@ def test_validate_judge_doc_accepts_apostrophe_in_subject_topic():
     loop.validate_judge_doc(doc)
 
 
+def test_validate_judge_doc_omitted_actor_observations_is_accepted():
+    # `actor_observations` is optional per judge.md — omitting the key is valid.
+    doc = _full_judge_doc()
+    assert "actor_observations" not in doc
+    loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_accepts_well_formed_actor_observations():
+    doc = _full_judge_doc()
+    doc["actor_observations"] = [
+        {
+            "type": "misprediction",
+            "subject_anchor": "entry-vector",
+            "subject_topic": "ssh credential reuse",
+            "observation": "story underweighted reuse risk.",
+        }
+    ]
+    loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_non_list_actor_observations():
+    doc = _full_judge_doc()
+    doc["actor_observations"] = {"type": "misprediction"}
+    with pytest.raises(LoopError, match="actor_observations.*is not a list"):
+        loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_non_mapping_observation():
+    doc = _full_judge_doc()
+    doc["actor_observations"] = ["a bare string"]
+    with pytest.raises(LoopError, match=r"actor_observations\[0\] is not a mapping"):
+        loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_observation_missing_split_field():
+    for missing in ("type", "subject_anchor", "subject_topic", "observation"):
+        doc = _full_judge_doc()
+        obs = {
+            "type": "misprediction",
+            "subject_anchor": "entry-vector",
+            "subject_topic": "ssh credential reuse",
+            "observation": "underweighted reuse risk.",
+        }
+        del obs[missing]
+        doc["actor_observations"] = [obs]
+        with pytest.raises(LoopError, match=missing):
+            loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_empty_observation_field():
+    doc = _full_judge_doc()
+    doc["actor_observations"] = [
+        {
+            "type": "misprediction",
+            "subject_anchor": "entry-vector",
+            "subject_topic": "   ",  # whitespace-only — not load-bearing
+            "observation": "underweighted reuse risk.",
+        }
+    ]
+    with pytest.raises(LoopError, match="subject_topic must be a non-empty string"):
+        loop.validate_judge_doc(doc)
+
+
+def test_validate_judge_doc_rejects_unknown_observation_type():
+    doc = _full_judge_doc()
+    doc["actor_observations"] = [
+        {
+            "type": "bogus-category",
+            "subject_anchor": "entry-vector",
+            "subject_topic": "ssh credential reuse",
+            "observation": "underweighted reuse risk.",
+        }
+    ]
+    with pytest.raises(LoopError, match="actor_observations\\[0\\].type="):
+        loop.validate_judge_doc(doc)
+
+
 # ---------------------------------------------------------------------------
 # strip_yaml_fence — envelope tolerance
 # ---------------------------------------------------------------------------
@@ -388,3 +467,174 @@ def test_strip_yaml_fence_strips_system_thinking_variant():
 def test_strip_yaml_fence_passes_through_when_no_thinking_tag():
     text = "outcome: caught\nconfidence: high\n"
     assert loop.strip_yaml_fence(text) == "outcome: caught\nconfidence: high"
+
+
+# ---------------------------------------------------------------------------
+# append_actor_observations
+# ---------------------------------------------------------------------------
+
+
+def _judge_doc(outcome: str, observations: list[dict] | None) -> dict:
+    doc: dict = {"outcome": outcome}
+    if observations is not None:
+        doc["actor_observations"] = observations
+    return doc
+
+
+def _obs(i: int) -> dict:
+    return {
+        "type": "misprediction",
+        "subject_anchor": f"anchor-{i}",
+        "subject_topic": f"topic phrase {i}",
+        "observation": f"observation paragraph {i}\n",
+    }
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    out = []
+    for line in path.read_text().splitlines():
+        s = line.strip()
+        if s:
+            out.append(json.loads(s))
+    return out
+
+
+def _isolate(monkeypatch, tmp_path: Path) -> Path:
+    """Point both queue constants at a tmp dir and return a learning_run_dir
+    that resolves cleanly under loop.REPO_ROOT (so source_run_dir formatter
+    doesn't blow up on relative_to()).
+
+    The _pending dir is intentionally NOT pre-created — `_append_jsonl` is
+    expected to mkdir it on demand, so empty-case assertions can verify the
+    producer doesn't touch disk at all when there are zero rows to write.
+    """
+    pending = tmp_path / "_pending"
+    queue = pending / "actor_observations.jsonl"
+    consumed = pending / "actor_observations.consumed.jsonl"
+    monkeypatch.setattr(loop, "PENDING_DIR", pending)
+    monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_FILE", queue)
+    monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_CONSUMED_FILE", consumed)
+    monkeypatch.setattr(loop, "ACTOR_OBSERVATIONS_LOCK_FILE", pending / ".actor.lock")
+    # Make REPO_ROOT == tmp_path so learning_run_dir.relative_to(REPO_ROOT) works.
+    monkeypatch.setattr(loop, "REPO_ROOT", tmp_path)
+    learning_run_dir = tmp_path / "defender" / "learning" / "runs" / "case-x"
+    learning_run_dir.mkdir(parents=True)
+    return learning_run_dir
+
+
+def test_append_actor_observations_writes_one_row_per_observation(
+    monkeypatch, tmp_path: Path
+):
+    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    doc = _judge_doc("caught", [_obs(0), _obs(1)])
+
+    n = append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir)
+
+    assert n == 2
+    rows = _read_jsonl(loop.ACTOR_OBSERVATIONS_FILE)
+    assert [r["observation_id"] for r in rows] == ["case-x/0", "case-x/1"]
+    assert [r["observation_index"] for r in rows] == [0, 1]
+    assert all(r["run_id"] == "case-x" for r in rows)
+    assert all(r["alert_rule_key"] == "rule-5710" for r in rows)
+    assert all(r["judge_outcome"] == "caught" for r in rows)
+    assert all(
+        r["source_run_dir"] == "defender/learning/runs/case-x/" for r in rows
+    )
+    assert rows[0]["subject_anchor"] == "anchor-0"
+    assert rows[1]["observation"] == "observation paragraph 1\n"
+
+
+def test_append_actor_observations_dedupes_on_observation_id(
+    monkeypatch, tmp_path: Path
+):
+    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    doc = _judge_doc("caught", [_obs(0), _obs(1)])
+
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 2
+    # Replay — same case_id + same indices.
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
+    assert len(_read_jsonl(loop.ACTOR_OBSERVATIONS_FILE)) == 2
+
+
+def test_append_actor_observations_takes_actor_lock(monkeypatch, tmp_path: Path):
+    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    doc = _judge_doc("caught", [_obs(0)])
+    calls: list[int] = []
+    real_flock = loop.fcntl.flock
+
+    def fake_flock(fd, op):
+        calls.append(op)
+        return real_flock(fd, op)
+
+    monkeypatch.setattr(loop.fcntl, "flock", fake_flock)
+
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 1
+    assert calls == [loop.fcntl.LOCK_EX, loop.fcntl.LOCK_UN]
+    assert loop.ACTOR_OBSERVATIONS_LOCK_FILE.is_file()
+
+
+def test_append_actor_observations_skips_passthrough_outcome(
+    monkeypatch, tmp_path: Path
+):
+    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    doc = _judge_doc("skip-passthrough", [_obs(0)])
+
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
+    assert _read_jsonl(loop.ACTOR_OBSERVATIONS_FILE) == []
+
+
+def test_append_actor_observations_no_key_is_zero_rows(monkeypatch, tmp_path: Path):
+    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    doc = _judge_doc("caught", None)  # actor_observations omitted entirely
+
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
+    assert not loop.ACTOR_OBSERVATIONS_FILE.exists()
+    assert not loop.PENDING_DIR.exists()
+
+
+def test_append_actor_observations_empty_list_is_zero_rows(
+    monkeypatch, tmp_path: Path
+):
+    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    doc = _judge_doc("caught", [])
+
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
+    assert not loop.ACTOR_OBSERVATIONS_FILE.exists()
+    assert not loop.PENDING_DIR.exists()
+
+
+def test_append_actor_observations_dedupes_against_consumed_history(
+    monkeypatch, tmp_path: Path
+):
+    """After the author rotates an observation into the consumed file,
+    re-running the persist stage on the same case must NOT replay it."""
+    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    doc = _judge_doc("caught", [_obs(0), _obs(1)])
+
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 2
+    # Simulate author rotation: move both rows into consumed and clear active.
+    loop.ACTOR_OBSERVATIONS_CONSUMED_FILE.write_text(
+        loop.ACTOR_OBSERVATIONS_FILE.read_text()
+    )
+    loop.ACTOR_OBSERVATIONS_FILE.write_text("")
+
+    # Replay — same case_id + same indices; producer must see consumed.
+    assert append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir) == 0
+    assert _read_jsonl(loop.ACTOR_OBSERVATIONS_FILE) == []
+
+
+def test_append_actor_observations_queues_survived_outcomes(
+    monkeypatch, tmp_path: Path
+):
+    """Producer's only outcome filter is skip-passthrough; the author owns
+    the caught/incoherent/survived policy."""
+    learning_run_dir = _isolate(monkeypatch, tmp_path)
+    doc = _judge_doc("survived", [_obs(0)])
+
+    n = append_actor_observations(doc, "case-x", "rule-5710", learning_run_dir)
+
+    assert n == 1
+    rows = _read_jsonl(loop.ACTOR_OBSERVATIONS_FILE)
+    assert rows[0]["judge_outcome"] == "survived"

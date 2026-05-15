@@ -1,0 +1,18 @@
+defender/actor: lesson batch 120300ec954c
+
+Source runs:
+- uf-P1
+- uf-P2
+- uf-P3
+- uf-P4
+
+New: wazuh-rule-5712-threshold, breach-corpus-enricher, wazuh-rule-5701-banner-probe, ssh-keyscan-pre-recon-attributed, container-argv-obfuscation-bypassed-by-host-record
+Folded: credential-spray-stagger (added uf-P1/0, uf-P4/0), container-side-execve-omits-argv (added uf-P2/0)
+Decomposed: uf-P1/0 → wazuh-rule-5712-threshold, credential-spray-stagger
+Decomposed: uf-P2/0 → container-side-execve-omits-argv, container-argv-obfuscation-bypassed-by-host-record
+Decomposed: uf-P3/0 → wazuh-rule-5701-banner-probe, ssh-keyscan-pre-recon-attributed
+Decomposed: uf-P4/0 → breach-corpus-enricher, credential-spray-stagger
+
+Generation: 1
+Actor-Model: claude-sonnet-4-6
+

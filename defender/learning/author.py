@@ -50,6 +50,13 @@ from typing import Any
 
 import yaml
 
+# Subprocess driver shared with author_actor.py — see _author_runner.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import _author_runner as _runner  # type: ignore[import-not-found]
+finally:
+    sys.path.pop(0)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LEARNING_DIR = REPO_ROOT / "defender" / "learning"
@@ -177,148 +184,19 @@ def existing_finding_ids() -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-# Marker the agent emits before the final JSON object. Tolerate
-# wrapping in backticks / a code fence.
-_RESULT_MARKER = re.compile(r"AUTHOR_RESULT:\s*(?=\{)")
-
-
-def _extract_author_result(text: str) -> str | None:
-    """Return the JSON object body following the last AUTHOR_RESULT marker.
-
-    Walks forward from the opening brace counting balanced braces while
-    respecting JSON string quoting; this handles nested objects/arrays
-    that the previous non-greedy regex truncated. Returns ``None`` if
-    no marker or no balanced object is found.
-    """
-    matches = list(_RESULT_MARKER.finditer(text))
-    if not matches:
-        return None
-    start = matches[-1].end()  # index of the '{'
-    depth = 0
-    in_str = False
-    esc = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return None
-
-
-def _resolve_verifier_python() -> Path:
-    """Locate a python interpreter that has pyyaml available.
-
-    Preference order: env override → ``defender/.venv/bin/python3`` next
-    to repo root → walking up the parents (so a git-worktree that has
-    no venv of its own resolves to the parent checkout's) →
-    ``sys.executable`` (the current process already imported yaml, so
-    it is a safe fallback).
-    """
-    env = os.environ.get("LEARNING_VERIFIER_PYTHON")
-    if env:
-        return Path(env).resolve()
-    candidates = [REPO_ROOT / "defender" / ".venv" / "bin" / "python3"]
-    p = REPO_ROOT.resolve().parent
-    for _ in range(5):
-        cand = p / "defender" / ".venv" / "bin" / "python3"
-        if cand.is_file():
-            candidates.append(cand)
-        if p.parent == p:
-            break
-        p = p.parent
-    for c in candidates:
-        if c.is_file():
-            # Do NOT resolve() — venv launchers are typically symlinks
-            # that point to the system interpreter, but pyyaml lives in
-            # the venv's site-packages reachable only via the venv path.
-            return c
-    return Path(sys.executable)
-
-
 AUTHOR_RUN_LOG = PENDING_DIR / "author_run.jsonl"
-
-
-def _summarize_event(evt: dict) -> str | None:
-    """One-liner for a stream-json event; None to suppress."""
-    etype = evt.get("type")
-    if etype == "system":
-        return f"system subtype={evt.get('subtype')}"
-    if etype == "assistant":
-        msg = evt.get("message") or {}
-        for blk in msg.get("content") or []:
-            btype = blk.get("type")
-            if btype == "tool_use":
-                name = blk.get("name", "?")
-                inp = blk.get("input") or {}
-                if name == "Bash":
-                    cmd = (inp.get("command") or "").splitlines()[0][:120]
-                    return f"tool:Bash {cmd}"
-                if name in ("Read", "Glob", "Grep"):
-                    target = inp.get("file_path") or inp.get("pattern") or ""
-                    return f"tool:{name} {target}"
-                if name in ("Edit", "Write"):
-                    return f"tool:{name} {inp.get('file_path', '')}"
-                return f"tool:{name}"
-            if btype == "text":
-                txt = (blk.get("text") or "").strip().splitlines()
-                head = txt[0][:140] if txt else ""
-                return f"text {head}" if head else None
-        return "assistant (empty)"
-    if etype == "user":
-        msg = evt.get("message") or {}
-        for blk in msg.get("content") or []:
-            if blk.get("type") == "tool_result":
-                content = blk.get("content")
-                if isinstance(content, list):
-                    body = "".join(
-                        b.get("text", "") for b in content if isinstance(b, dict)
-                    )
-                else:
-                    body = str(content or "")
-                size = len(body)
-                err = " ERR" if blk.get("is_error") else ""
-                return f"tool_result{err} {size}B"
-        return None
-    if etype == "result":
-        return f"result subtype={evt.get('subtype')} duration_ms={evt.get('duration_ms')}"
-    return None
-
-
-def _assistant_text(evt: dict) -> str:
-    """Concatenate assistant text blocks from one event; empty string otherwise."""
-    if evt.get("type") != "assistant":
-        return ""
-    msg = evt.get("message") or {}
-    out = []
-    for blk in msg.get("content") or []:
-        if blk.get("type") == "text":
-            out.append(blk.get("text") or "")
-    return "".join(out)
 
 
 def invoke_agent(findings: list[dict], batch_id: str) -> dict:
     """Spawn the curator agent. Returns parsed AUTHOR_RESULT dict.
 
-    Uses stream-json output so each turn (tool call, tool result, text
-    chunk) appears as a JSONL event we can tee to disk and summarize
-    to stderr in real time. ``--print`` text mode buffers the entire
-    response until the agent exits, which hides AUTHOR's mid-run
-    behavior and makes ordinary slowness indistinguishable from a hang.
+    Subprocess driver lives in ``_author_runner.invoke_claude_print`` —
+    shared with ``author_actor.py``. This wrapper builds the
+    defender-specific user prompt + allowed-tools spec and translates
+    ``RunnerError`` into ``AuthorError`` so the caller's error path is
+    unchanged.
     """
-    verifier_py = _resolve_verifier_python()
+    verifier_py = _runner.resolve_verifier_python(REPO_ROOT)
     user_prompt = (
         f"batch_id: {batch_id}\n"
         f"lessons_dir: defender/lessons/\n"
@@ -327,176 +205,32 @@ def invoke_agent(findings: list[dict], batch_id: str) -> dict:
         f"findings ({len(findings)}):\n"
         f"{json.dumps(findings, indent=2)}\n"
     )
-    cmd = [
-        "claude",
-        "--print",
-        "--model",
-        AUTHOR_MODEL,
-        "--system-prompt-file",
-        str(AUTHOR_PROMPT),
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--include-hook-events",
-        *(["--effort", AUTHOR_EFFORT] if AUTHOR_EFFORT else []),
-        # Tight allowlist — Bash needs to run git add/commit and the
-        # forward-check wrapper. File edits inside defender/lessons/
-        # are allowed; everything else still prompts (and in --print
-        # mode therefore declines, which the post-flight catches).
-        "--allowed-tools",
-        (
-            "Read,Glob,Grep,"
-            "Edit(defender/lessons/**),Write(defender/lessons/**),"
-            "Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),"
-            "Bash(git rev-parse:*),Bash(git status:*),Bash(git diff:*),"
-            f"Bash({verifier_py} defender/learning/verify_forward.py:*),"
-            "Bash(rm defender/lessons/*.md),"
-            f"Bash(rm {LESSONS_DIR}/*.md)"
-        ),
-    ]
-
-    import fcntl as _fcntl
-    import os as _os_local
-    import select as _select
-    import time as _time
+    allowed_tools = (
+        "Read,Glob,Grep,"
+        "Edit(defender/lessons/**),Write(defender/lessons/**),"
+        "Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),"
+        "Bash(git rev-parse:*),Bash(git status:*),Bash(git diff:*),"
+        f"Bash({verifier_py} defender/learning/verify_forward.py:*),"
+        "Bash(rm defender/lessons/*.md),"
+        f"Bash(rm {LESSONS_DIR}/*.md)"
+    )
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    log_fh = AUTHOR_RUN_LOG.open("wb")
-    log_fh.write(
-        (json.dumps({"batch_id": batch_id, "started_at": _now_iso()}) + "\n").encode()
-    )
-    log_fh.flush()
-
-    # Binary streams + manual line buffering: a text-mode iterator
-    # (`for raw in proc.stdout`) blocks waiting for a newline, so the
-    # wall-clock check below never fires when the child stops emitting
-    # mid-line (e.g., a stuck verify_forward subprocess, a hung tool).
-    # select() on the raw fds lets us bound every read by the remaining
-    # deadline. stderr is drained in the same loop so a full stderr
-    # pipe (64KiB on Linux) can't deadlock the child either. stdin is
-    # written through the same select loop so a child that hangs
-    # before reading the prompt cannot block the parent in write() —
-    # the findings JSON regularly clears 64KiB once a batch grows.
-    proc = subprocess.Popen(
-        cmd,
-        cwd=REPO_ROOT,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=0,
-    )
-    assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
-
-    # Start the deadline *before* we touch stdin — a hung child must
-    # not give us an unbounded grace period during prompt delivery.
-    deadline = _time.monotonic() + AUTHOR_TIMEOUT
-
-    stdin_fd = proc.stdin.fileno()
-    _fcntl.fcntl(stdin_fd, _fcntl.F_SETFL, _fcntl.fcntl(stdin_fd, _fcntl.F_GETFL) | _os_local.O_NONBLOCK)
-    prompt_bytes = user_prompt.encode()
-
-    text_buf: list[str] = []
-    stderr_chunks: list[bytes] = []
-    stdout_buf = b""
-    t0 = _time.monotonic()
-
-    def _handle_line(raw: bytes) -> None:
-        log_fh.write(raw + b"\n")
-        log_fh.flush()
-        try:
-            line = raw.decode("utf-8", errors="replace").strip()
-        except Exception:
-            return
-        if not line:
-            return
-        try:
-            evt = json.loads(line)
-        except json.JSONDecodeError:
-            return
-        text_buf.append(_assistant_text(evt))
-        summary = _summarize_event(evt)
-        if summary:
-            elapsed = _time.monotonic() - t0
-            _log(f"+{elapsed:5.1f}s {summary}")
-
-    rc: int | None = None
     try:
-        stdout_fd = proc.stdout.fileno()
-        stderr_fd = proc.stderr.fileno()
-        open_read_fds: set[int] = {stdout_fd, stderr_fd}
-        stdin_offset = 0
-        stdin_closed = False
-        while open_read_fds or not stdin_closed:
-            remaining = deadline - _time.monotonic()
-            if remaining <= 0:
-                proc.kill()
-                raise AuthorError(
-                    f"author agent timed out after {AUTHOR_TIMEOUT}s "
-                    f"(see {AUTHOR_RUN_LOG})"
-                )
-            # Cap the select wait so the deadline check runs at least
-            # once per second even when the child is fully silent.
-            write_fds = [stdin_fd] if not stdin_closed else []
-            ready_r, ready_w, _x = _select.select(
-                list(open_read_fds), write_fds, [], min(remaining, 1.0)
-            )
-            if not ready_r and not ready_w:
-                continue
-            for fd in ready_r:
-                chunk = os.read(fd, 65536)
-                if not chunk:
-                    open_read_fds.discard(fd)
-                    continue
-                if fd == stdout_fd:
-                    stdout_buf += chunk
-                    while b"\n" in stdout_buf:
-                        raw, stdout_buf = stdout_buf.split(b"\n", 1)
-                        _handle_line(raw)
-                else:
-                    stderr_chunks.append(chunk)
-            if ready_w and not stdin_closed:
-                try:
-                    n = os.write(stdin_fd, prompt_bytes[stdin_offset:])
-                except BlockingIOError:
-                    n = 0
-                except BrokenPipeError:
-                    # Child closed stdin before we finished — finish the
-                    # read loop and surface the rc/stderr the caller sees.
-                    stdin_closed = True
-                    proc.stdin.close()
-                    n = 0
-                stdin_offset += n
-                if stdin_offset >= len(prompt_bytes):
-                    proc.stdin.close()
-                    stdin_closed = True
-        # Flush any trailing partial stdout line (no terminating newline).
-        if stdout_buf.strip():
-            _handle_line(stdout_buf)
-        rc = proc.wait(timeout=max(1.0, deadline - _time.monotonic()))
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        raise AuthorError(
-            f"author agent timed out after {AUTHOR_TIMEOUT}s "
-            f"(see {AUTHOR_RUN_LOG})"
+        return _runner.invoke_claude_print(
+            system_prompt_file=AUTHOR_PROMPT,
+            user_prompt=user_prompt,
+            allowed_tools=allowed_tools,
+            model=AUTHOR_MODEL,
+            effort=AUTHOR_EFFORT,
+            timeout_seconds=AUTHOR_TIMEOUT,
+            cwd=REPO_ROOT,
+            log_path=AUTHOR_RUN_LOG,
+            result_marker="AUTHOR_RESULT:",
+            log_fn=_log,
+            batch_id=batch_id,
         )
-    finally:
-        log_fh.close()
-
-    stderr_tail = b"".join(stderr_chunks).decode("utf-8", errors="replace")[-2000:]
-    if rc != 0:
-        raise AuthorError(
-            f"author agent failed (rc={rc}):\nstderr: {stderr_tail}"
-        )
-    full_text = "".join(text_buf)
-    body = _extract_author_result(full_text)
-    if body is None:
-        raise AuthorError(
-            "author agent did not emit AUTHOR_RESULT line:\n"
-            + full_text[-2000:]
-        )
-    try:
-        return json.loads(body)
-    except json.JSONDecodeError as e:
-        raise AuthorError(f"AUTHOR_RESULT JSON invalid: {e}\n{body}") from e
+    except _runner.RunnerError as e:
+        raise AuthorError(str(e)) from e
 
 
 # ---------------------------------------------------------------------------

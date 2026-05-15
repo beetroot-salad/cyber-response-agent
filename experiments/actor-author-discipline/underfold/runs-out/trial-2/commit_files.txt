@@ -1,0 +1,6 @@
+defender/lessons-actor/auth-pipeline-breach-enricher.md
+defender/lessons-actor/container-side-execve-omits-argv.md
+defender/lessons-actor/credential-spray-stagger.md
+defender/lessons-actor/ssh-keyscan-pre-recon.md
+defender/lessons-actor/wazuh-rule-5701-ssh-probe.md
+defender/lessons-actor/wazuh-rule-5712-threshold.md

@@ -20,30 +20,46 @@ A SKIP is a useful signal. Do not contort the story to avoid one.
 Section 0 (the technique table) commits first. Once you have written it,
 discover relevant prior lessons before continuing.
 
-1. Enumerate candidate lessons via the index CLI. For tradecraft
-   (filter by your chosen T-IDs + archetype):
+The lessons corpus is flat at `defender/lessons-actor/*.md`. Each lesson
+carries whichever frontmatter keys apply. The keys are **retrieval
+axes** — each answers a different question, so pick the axis that matches
+what you're looking for:
 
-       python3 defender/scripts/lessons_actor_index.py \
-         --channel tradecraft --actor-type <your archetype> \
-         --techniques <T-IDs comma-separated>
+| Axis | Use when you want… |
+|---|---|
+| `alert_rule_ids` | …lessons about a specific SIEM rule that fired (or could fire). |
+| `defender_lead_tags` | …lessons about what a specific lead's output actually surfaces (defender coverage). |
+| `techniques` | …lessons tied to a MITRE T-ID you're building the story around. |
+| `subject` | …a specific deployment-property lesson when you already know the referent name. |
+| `applies_to` | …pattern lessons that depend on a given env-fact subject (grep, not index). |
 
-   For environment (no T-ID filter required; same archetype filter):
+Index CLI invocation (all filters optional; AND across keys, OR within):
 
-       python3 defender/scripts/lessons_actor_index.py \
-         --channel environment --actor-type <your archetype>
+```
+python3 defender/scripts/lessons_actor_index.py \
+  --alert-rule-ids <ids,...> \
+  --defender-lead-tags <tags,...> \
+  --techniques <T-IDs,...> \
+  --subject <single-subject>
+```
 
-   Each line is `<path>\t<relevance_criteria>`. Scan the descriptions
-   to pick which files matter for this story.
+Each line is `<path>\t<relevance_criteria>`. Scan descriptions, Read the
+files that matter. Query multiple axes if your story spans them
+(rule-fired + TTP being built is a normal pairing).
 
-2. Read the files you picked. Do not revise Section 0 after reading —
-   the technique commit is the retrieval key. If a lesson would have
-   changed your Section 0, that is signal for the judge, not a reason
-   to rewrite.
+After enumeration:
 
-3. Write Sections 1–3 informed by what you read. Tradecraft lessons
-   describe attacker patterns that were caught historically;
-   environment lessons describe ground truth about the deployment.
-   Do not cite lesson IDs in your output.
+1. Read the files the index surfaced as relevant. Do not revise Section 0
+   after reading — the technique commit is the retrieval key. If a lesson
+   would have changed your Section 0, that is signal for the judge, not a
+   reason to rewrite.
+
+2. Write Sections 1–3 informed by what you read. Env-fact lessons
+   describe ground truth about the deployment (mutable, may have a
+   subject); pattern lessons describe attacker shapes that fail or
+   succeed against the deployment (have `techniques`, may carry
+   `applies_to` cross-links to env-facts they depend on). Do not cite
+   lesson IDs in your output.
 
 ## Output format
 

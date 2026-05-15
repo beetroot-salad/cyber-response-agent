@@ -1,0 +1,8 @@
+defender/lessons-actor/asset-graph-cross-window-stitching.md
+defender/lessons-actor/auth-pipeline-breach-enricher.md
+defender/lessons-actor/container-argv-obfuscation-host-recovery.md
+defender/lessons-actor/container-side-execve-omits-argv.md
+defender/lessons-actor/credential-spray-stagger.md
+defender/lessons-actor/ssh-keyscan-pre-recon.md
+defender/lessons-actor/wazuh-rule-5701-banner-fetch.md
+defender/lessons-actor/wazuh-rule-5712-threshold.md
