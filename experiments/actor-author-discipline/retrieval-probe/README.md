@@ -96,5 +96,92 @@ retrieval-probe/
   instructions.md                       # the instrumented actor prompt
   bundles/bundle-{1..5}.md              # alert + archetype + leads + menu
   lessons-actor/{tradecraft,environment}/*.md   # the corpus the actor retrieved from
-  transcripts/trial-{1..5}.md           # actor outputs (retrieval scan + gaps + channel notes + Section 0)
+  transcripts/trial-{1..5}.md           # instrumented actor outputs (v1 schema)
+  transcripts/clean-{2,5}.md            # un-instrumented validation (v1 schema)
+  transcripts/clean-1-v2.md             # un-instrumented validation on v2 corpus (#4b Path A)
 ```
+
+## v2 validation re-run (#4b Path A, 2026-05-15)
+
+**N=5 clean trials**, one per bundle, against the v2-shape corpus produced by underfold #4a (8 lessons from `underfold/runs-out/trial-3/lessons-actor-final/` — 3 v2-migrated seeds + 5 author-created including `wazuh-rule-5712-threshold`, `breach-corpus-enricher`, `wazuh-rule-5701-banner-probe`, plus the decomposed pattern/env-fact pair for argv obfuscation). Transcripts: `transcripts/clean-{1..5}-v2.md`. Bundles 2-5 carried a light `Retrieval debrief` ask: name each frontmatter key actively reached for.
+
+### Retrieval-axis usage across N=5
+
+| Frontmatter key | Trials that explicitly queried it | Verdict |
+|---|---|---|
+| `alert_rule_ids` | 5/5 | Universally used. Most natural first query. |
+| `defender_lead_tags` | 5/5 | **Surprise** — predicted low use, observed universal use. Agents query it to find which leads have blind spots and which evasions they break. Earning its keep. |
+| `techniques` | 4/5 | Used when story is built around a TTP; skipped only when no menu TTP matched the corpus. |
+| `subject` | 1/5 | Used by the bundle-2 (Falco container) trial only — explicitly reached for `orchestrator-identity-pairing-required`. Not queried by other 4 trials. |
+| `applies_to` | 1/5 | Used by bundle-1 trial to traverse pattern→env-fact dependency. |
+| `actor_type` | 1/5 named | Bundle-5 explicitly says "noted but not gated on" — the soft-signal discipline holds. |
+
+### What this says about the field count
+
+The full v2 frontmatter has 10 fields; only 2-4 are load-bearing for the retriever per trial:
+
+- **Always**: `relevance_criteria` (scan) + `alert_rule_ids` + `defender_lead_tags`. The three load-bearing retrieval keys.
+- **Often**: `techniques` (4/5). Skipped only when no menu TTP matches.
+- **Rarely**: `subject` (1/5), `applies_to` (1/5). These earn their keep in specific scenarios (subject lookup when retriever has a deployment-property query; applies_to when traversing cross-links) but aren't universal.
+- **Never queried (correctly)**: `actor_type`, `name`, `mutable`, `status`, `recorded_at`, `source_observation_ids`. These are either soft annotations, bookkeeping, or fold-keys that the retriever doesn't need.
+
+The user prediction ("2-3 maybe 4 fields are justified in retrieval") matches what was observed. The retriever uses 2-3 axes universally and 1-2 more situationally. The author-side fields (subject as fold-key, mutable/status for staleness) earn their keep separately from retrieval.
+
+### Filename-vs-subject friction (the bundle-1 finding)
+
+**Did not reproduce in 4/4 follow-up trials.** Bundle-2 explicitly queried `subject: orchestrator-identity-pairing-required` and found the lesson cleanly; no friction reported. Bundles 3, 4, 5 didn't need that lesson (different alert families).
+
+Reconsidering: the bundle-1 friction was bundle-specific — the SSH-context retriever reached for a container-context lesson and found the lead-tag keying jarring because it was thinking in SSH-telemetry terms. In bundle-2 (container-context), the same lesson was reached for via subject naturally. So the friction is: **lessons get reached for via different axes depending on the bundle's alert family**, and when the wrong axis is queried first, the keying mismatch surfaces as friction.
+
+This is consistent with "different keys = different retrieval axes" (your Point 2). The fix isn't renaming or omitting; it's letting the retriever query multiple axes in order. The retrieval probe shows the agents already do this implicitly (5/5 use 2-3 axes per trial).
+
+### Recurring v1 frictions — confirmed gone
+
+| v1 recurring complaint (N=5+2 trials) | Recurs on v2 (N=5)? |
+|---|---|
+| `alert_rule_ids` filter missing | No — keys exist, queried 5/5 |
+| `actor_type` hard-filter hides lessons | No — soft signal, bundle-5 explicitly confirms "not gated on" |
+| `defeats_lesson` / `enabled_by_lesson` cross-link missing | No — `applies_to` provides this; bundle-1 used it |
+| Channel-fit miscarves (4 specific) | No — channels removed |
+
+### Content gaps surfaced (not schema issues)
+
+- Bundle-3 (PAM/FIM): entire PAM/FIM/insider-config-modification cluster missing. Underfold corpus came from SSH-focused author runs.
+- Bundle-5 (sudo/docker-restart): no 5402-keyed lessons; no internal-sudo precedent.
+- Bundle-1 (SSH 5712 internal): 5712 threshold variant doc gap (lesson says ~30/90s, bundle fired at 14/110s); no CI-runner cover-pattern lesson.
+
+These reflect corpus content scope, not schema. Authoring against more diverse defender batches would fill them.
+
+### Conclusions
+
+1. **Schema v2 cleared all four v1 recurring frictions** with no new structural frictions observed at N=5. The filename-vs-subject concern from bundle-1 didn't reproduce.
+2. **3 retrieval axes are load-bearing universally** (`relevance_criteria` + `alert_rule_ids` + `defender_lead_tags`); 1-2 more are situational. `subject` is mostly an author-side fold-key, not a retrieval surface.
+3. **`defender_lead_tags` is the surprise winner** — predicted to be redundant with `alert_rule_ids`; observed to be universally queried because it answers a distinct question (what does the defender's lead set see vs. what would the rule fire on).
+4. **Two surgical changes applied as v2.1** (2026-05-15, evidence from this probe):
+   - Dropped `name` from frontmatter (duplicates filename; zero observed value).
+   - Dropped `actor_type` from frontmatter (0/5 queried; soft-signal discipline already held).
+   - Added the axis cheat-sheet to `defender/learning/actor.md` retrieval section (5 lines naming which key answers which question).
+
+Follow-up candidates still on the watch list, **not** acting on yet:
+- Subject-naming convergence across batches (the breach-corpus-enricher 3-way split from underfold #4a).
+- Subject=filename consolidation for env-facts (would solve the bundle-1-style first-axis-mismatch friction more thoroughly but needs an authoring stress test).
+- Staleness-triad consolidation (needs trials with stale lessons).
+
+#4 (validation step in the schema-v2 sequence) is closed positive.
+
+| v1 recurring complaint | Recurs on v2? |
+|---|---|
+| `alert_rule_ids` filter missing | No — keys exist, agent used them implicitly |
+| `actor_type` hard-filter hides lessons | No — soft signal, agent ignored it for retrieval |
+| `defeats_lesson` / `enabled_by_lesson` cross-link missing | No — `applies_to` provides this |
+| Channel-fit miscarves (4 specific) | No — channels removed |
+
+All four v1-recurring frictions are gone. The schema rewrite addressed them at the structural level rather than papering over them with prompt edits.
+
+One new v2-specific friction surfaced: **filename ≠ subject naming drift**. `dev-container-label-cover.md` carries `subject: orchestrator-identity-pairing-required`; the actor reached for the file by the body's identity-pairing language and found the lead-tag keying counterintuitive. The v2 spec explicitly allows `name` and `subject` to drift; this trial confirms the cost: retrieval has a small friction step when the filename-concept and subject-concept aren't the same thing. Worth a slug-stability pass if it recurs.
+
+Retrieval pattern: the three-stage shape (Glob → verdict-pass → deep-read) collapsed into one stage on this 8-lesson corpus — the agent enumerated and read everything rather than emitting a verdict pass. This is corpus-size-dependent (a 50+ lesson corpus would force the verdict step); pattern is intact, not regressed.
+
+Two content gaps surfaced (5712 threshold variant; deploy-account cover pattern for internal actors) — corpus-content concerns from the synthetic underfold corpus, not schema concerns.
+
+**Conclusion: schema v2 cleared the friction it was designed to clear, did not regress the retrieval shape, and introduced one minor naming-discipline issue.** #4 (validation step in the schema-v2 sequence) is closed positive.

@@ -15,8 +15,6 @@ Two lesson shapes share the schema:
 
 `subject` is the smallest independently-mutable deployment referent the lesson is about. Two lessons with the same subject **must** be reconciled — fold them or supersede one with the other. Granularity rule: if a single config diff would invalidate the lesson, that's the subject's scope. `subject: falco-shell-in-container-rule` ✓; `subject: falco` (too coarse, would force-fold heterogeneous facts) ✗; `subject: stagger-the-spray` (pattern, not a referent) ✗.
 
-`actor_type` is a soft annotation only — do not use it as a hard filter when authoring or reviewing. Env-fact lessons are usually `[external, internal]`.
-
 ## Workflow
 
 For each observation, in order:

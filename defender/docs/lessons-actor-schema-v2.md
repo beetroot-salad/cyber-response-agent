@@ -1,6 +1,24 @@
-# Lessons-actor schema v2 — design draft
+# Lessons-actor schema v2 — design + v2.1 delta
 
-**Status: design draft, not yet implemented.** v1 (the env/tradecraft channel split) is what's checked in under `defender/lessons-actor/{tradecraft,environment}/` and what `defender/learning/author_actor.md` and `defender/learning/actor.md` currently target. v2 supersedes v1 once the migration in §Migration lands. When this doc and the code disagree, the code wins.
+**Status: v2 implemented; v2.1 simplification applied 2026-05-15.** v2 (flat corpus, multi-key index) is live under `defender/lessons-actor/*.md` and is what `defender/learning/author_actor.md` and `defender/learning/actor.md` target. The v2.1 delta (this section) drops two fields the empirical N=5 retrieval probe showed had no retrieval value. When this doc and the code disagree, the code wins.
+
+## v2.1 delta — dropped fields
+
+Empirical motivation: the N=5 retrieval probe (`experiments/actor-author-discipline/retrieval-probe/`, transcripts `clean-{1..5}-v2.md`) measured which frontmatter keys retrievers actually queried. Results: `alert_rule_ids` 5/5, `defender_lead_tags` 5/5, `techniques` 4/5, `subject` 1/5, `applies_to` 1/5, `actor_type` 0/5 (the soft-signal discipline held — bundle-5 explicitly: "noted but not gated on").
+
+Two fields had no observed retrieval value AND no observed authoring value:
+
+- **`name`** — duplicated the filename. Spec already said "filename matches name." Dropped.
+- **`actor_type`** — explicitly soft-signal in v2 spec, never gated on by index or retriever. Dropped from frontmatter; if a lesson's framing is actor-specific, mention it in the body.
+
+Kept fields whose retrieval rate is low but whose role is load-bearing elsewhere:
+- `subject` (1/5 retrieval, but the author-side fold equivalence key)
+- `applies_to` (1/5 retrieval, but the structural cross-link surface enabling decomposition)
+- `mutable` / `status` / `superseded_by` (staleness machinery; not exercised in this probe but load-bearing when world-facts change)
+
+Also: the `--show-actor-type` flag on `lessons_actor_index.py` is removed.
+
+Migration: existing v2 lessons drop the two fields in-place (no rename, no semantic change).
 
 ## Why v2
 

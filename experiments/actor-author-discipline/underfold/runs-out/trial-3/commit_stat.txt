@@ -1,2 +1,8 @@
- defender/lessons-actor/tradecraft/credential-spray-stagger.md | 6 +++---
- 1 file changed, 3 insertions(+), 3 deletions(-)
+ defender/lessons-actor/breach-corpus-enricher.md   | 22 +++++++++++++++++++++
+ ...ner-argv-obfuscation-bypassed-by-host-record.md | 23 ++++++++++++++++++++++
+ .../container-side-execve-omits-argv.md            |  2 +-
+ defender/lessons-actor/credential-spray-stagger.md | 12 ++++++-----
+ .../ssh-keyscan-pre-recon-attributed.md            | 23 ++++++++++++++++++++++
+ .../lessons-actor/wazuh-rule-5701-banner-probe.md  | 22 +++++++++++++++++++++
+ .../lessons-actor/wazuh-rule-5712-threshold.md     | 22 +++++++++++++++++++++
+ 7 files changed, 120 insertions(+), 6 deletions(-)

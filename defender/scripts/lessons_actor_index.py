@@ -7,8 +7,6 @@ so the actor scans descriptions before deciding which files to Read.
 
 v2 (schema-v2): one flat corpus at ``defender/lessons-actor/*.md``.
 No channel split. Filters compose AND across keys, OR within a key.
-``actor_type`` is a soft annotation only — never a filter (see
-``defender/docs/lessons-actor-schema-v2.md`` §Lesson shape).
 
 Usage:
     lessons_actor_index.py                                # whole corpus (live only)
@@ -17,7 +15,6 @@ Usage:
     lessons_actor_index.py --defender-lead-tags wazuh.auth-events-by-srcip
     lessons_actor_index.py --subject wazuh-rule-5712-threshold
     lessons_actor_index.py --include-stale                # author-only
-    lessons_actor_index.py --show-actor-type              # add actor_type column
 
 Lessons missing a filtered field are skipped silently. Lessons with
 ``status: stale`` (only meaningful when ``mutable: true``) are hidden
@@ -97,7 +94,6 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--defender-lead-tags", help="Comma-separated lead-template tags ({system}.{kebab-name}); OR within the list")
     ap.add_argument("--subject", help="Exact subject match (single value — subject is the equivalence key)")
     ap.add_argument("--include-stale", action="store_true", help="Include lessons with status: stale (author-only)")
-    ap.add_argument("--show-actor-type", action="store_true", help="Append actor_type as an extra tab-separated column")
     ns = ap.parse_args(argv[1:])
 
     want_techniques = _csv_set(ns.techniques)
@@ -131,11 +127,7 @@ def main(argv: list[str]) -> int:
         criteria = fm.get("relevance_criteria") or ""
         criteria = str(criteria).strip().replace("\t", " ").replace("\n", " ")
         rel = path.relative_to(REPO_ROOT)
-        if ns.show_actor_type:
-            actor_type = ",".join(_as_list(fm.get("actor_type"))) or "-"
-            print(f"{rel}\t{criteria}\t{actor_type}")
-        else:
-            print(f"{rel}\t{criteria}")
+        print(f"{rel}\t{criteria}")
     return 0
 
 

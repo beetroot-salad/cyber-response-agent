@@ -204,7 +204,7 @@ def snapshot(worktree: Path, baseline_sha: str, out_dir: Path) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--variant", required=True, choices=["current", "verbose"])
+    ap.add_argument("--variant", required=True, choices=["current", "verbose", "v2"])
     ap.add_argument("--model", required=True, choices=["sonnet", "haiku"])
     ap.add_argument("--trial", type=int, required=True)
     ap.add_argument("--worktree", required=True, help="dedicated worktree path")

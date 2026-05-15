@@ -1,9 +1,7 @@
 ---
-name: wazuh-rule-5712-threshold
 subject: wazuh-rule-5712-threshold
 alert_rule_ids: [5712]
 defender_lead_tags: [wazuh.auth-events-by-host, wazuh.auth-events-by-srcip]
-actor_type: [external, internal]
 mutable: true
 status: live
 recorded_at: synth-seed-v2-01

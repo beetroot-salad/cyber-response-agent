@@ -1,4 +1,4 @@
-defender/actor: lesson batch 3daa4ce35e92
+defender/actor: lesson batch 120300ec954c
 
 Source runs:
 - uf-P1
@@ -6,10 +6,13 @@ Source runs:
 - uf-P3
 - uf-P4
 
-Tradecraft new: ssh-keyscan-banner-probe (added uf-P3/0)
-Tradecraft folded: credential-spray-stagger (added uf-P1/0)
-Environment folded: docker-exec-args-not-in-audit (added uf-P2/0)
+New: wazuh-rule-5712-threshold, breach-corpus-enricher, wazuh-rule-5701-banner-probe, ssh-keyscan-pre-recon-attributed, container-argv-obfuscation-bypassed-by-host-record
+Folded: credential-spray-stagger (added uf-P1/0, uf-P4/0), container-side-execve-omits-argv (added uf-P2/0)
+Decomposed: uf-P1/0 → wazuh-rule-5712-threshold, credential-spray-stagger
+Decomposed: uf-P2/0 → container-side-execve-omits-argv, container-argv-obfuscation-bypassed-by-host-record
+Decomposed: uf-P3/0 → wazuh-rule-5701-banner-probe, ssh-keyscan-pre-recon-attributed
+Decomposed: uf-P4/0 → breach-corpus-enricher, credential-spray-stagger
 
-Generation: 2
+Generation: 1
 Actor-Model: claude-sonnet-4-6
 

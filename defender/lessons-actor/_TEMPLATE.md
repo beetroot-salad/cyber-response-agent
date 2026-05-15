@@ -1,6 +1,5 @@
 ---
-# Identity
-name: {kebab-case-slug-matching-filename}
+# Identity (subject is the filename for env-facts; pattern lessons have no subject)
 subject: {kebab-case-deployment-referent}     # OPTIONAL; required for env-fact lessons. Equivalence key for folding.
 
 # Retrieval keys (all optional; AND across keys, OR within a key)
@@ -8,9 +7,8 @@ techniques: []                                  # MITRE T-IDs; primary key for p
 alert_rule_ids: []                              # SIEM rule IDs the lesson bites or describes
 defender_lead_tags: []                          # {system}.{kebab-name} lead families this lesson is relevant to
 
-# Soft signals (annotation, not filter)
-actor_type: [external, internal]                # who this is most directly framed for; the index never gates on this
-applies_to: []                                  # cross-link to subjects of env-fact lessons this depends on
+# Cross-links
+applies_to: []                                  # subjects of env-fact lessons this pattern depends on
 
 # Mutability
 mutable: true                                   # true = world-fact that can change; false = append-only pattern

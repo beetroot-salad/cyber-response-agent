@@ -29,7 +29,7 @@ run_one() {
   local worktree="/tmp/exp-actor-author/uf-trial-$i"
   mkdir -p "$trial_out"
   python3 "$EXP_DIR/harness.py" \
-    --variant current \
+    --variant v2 \
     --model sonnet \
     --trial "$i" \
     --worktree "$worktree" \

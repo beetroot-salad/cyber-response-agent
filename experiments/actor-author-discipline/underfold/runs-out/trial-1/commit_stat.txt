@@ -1,5 +1,9 @@
- .../environment/docker-exec-args-not-in-audit.md              |  8 ++++----
- .../lessons-actor/tradecraft/container-argv-obfuscation.md    | 11 +++++++++++
- defender/lessons-actor/tradecraft/credential-spray-stagger.md |  6 +++---
- defender/lessons-actor/tradecraft/ssh-banner-preflight.md     | 11 +++++++++++
- 4 files changed, 29 insertions(+), 7 deletions(-)
+ .../lessons-actor/asset-graph-cross-window-stitching.md  | 16 ++++++++++++++++
+ defender/lessons-actor/auth-pipeline-breach-enricher.md  | 16 ++++++++++++++++
+ .../container-argv-obfuscation-host-recovery.md          | 16 ++++++++++++++++
+ .../lessons-actor/container-side-execve-omits-argv.md    |  2 +-
+ defender/lessons-actor/credential-spray-stagger.md       |  6 +++---
+ defender/lessons-actor/ssh-keyscan-pre-recon.md          | 16 ++++++++++++++++
+ defender/lessons-actor/wazuh-rule-5701-banner-fetch.md   | 16 ++++++++++++++++
+ defender/lessons-actor/wazuh-rule-5712-threshold.md      | 16 ++++++++++++++++
+ 8 files changed, 100 insertions(+), 4 deletions(-)

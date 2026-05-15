@@ -182,9 +182,7 @@ def test_idempotency_consumes_already_cited_observations(monkeypatch, tmp_path: 
         ctx["lessons"],
         "existing",
         {
-            "name": "existing",
             "techniques": ["T1078"],
-            "actor_type": ["internal"],
             "mutable": False,
             "relevance_criteria": "x",
             "recorded_at": "old",
@@ -501,9 +499,7 @@ def test_index_cli_hides_stale_lessons_by_default(monkeypatch, tmp_path: Path):
         ctx["lessons"],
         "live-claim",
         {
-            "name": "live-claim",
             "subject": "docker-auditing",
-            "actor_type": ["internal"],
             "mutable": True,
             "status": "live",
             "relevance_criteria": "live one",
@@ -515,9 +511,7 @@ def test_index_cli_hides_stale_lessons_by_default(monkeypatch, tmp_path: Path):
         ctx["lessons"],
         "stale-claim",
         {
-            "name": "stale-claim",
             "subject": "docker-auditing",
-            "actor_type": ["internal"],
             "mutable": True,
             "status": "stale",
             "superseded_by": "live-claim",

@@ -1,4 +1,51 @@
-# Underfold stress test — results (N=4)
+# Underfold stress test — results
+
+## v2 re-run (N=4, 2026-05-15) — flat corpus + decomposition
+
+**Verdict: no regression on fold rate; decomposition discipline lands on the load-bearing probes. The v2 prompt + flat corpus survive the same fold-pressure that v1 cleared and do the new work it was rewritten to do.**
+
+Setup: re-run the same 4 probes against the v2 author prompt (`defender/learning/author_actor.md` as of `ec2a36a`), with seeds migrated to v2 shape — flat layout under `lessons-actor/`, frontmatter rewritten (`subject`, `mutable`, `applies_to`). The migration: `credential-spray-stagger` kept as a pattern lesson (`techniques: [T1110.003]`, `applies_to: [wazuh-rule-5712-threshold]`, no seeded env-fact — dangling on purpose), `dev-container-label-cover` converted to env-fact (`subject: orchestrator-identity-pairing-required`), `docker-exec-args-not-in-audit` renamed to `container-side-execve-omits-argv` and kept as env-fact. Variant `v2.md` added to the harness; underfold/run.sh switched from `--variant current` to `--variant v2`.
+
+### Rollup
+
+| Probe | Expected | n=4 outcomes | Decomposed |
+|---|---|---|---|
+| P1 (5712 volume detector) | fold into `credential-spray-stagger` | **fold = 4/4** | **4/4** |
+| P2 (host-side argv recovery) | fold into `container-side-execve-omits-argv` | **fold = 4/4** | 2/4 |
+| P3 (5701 ssh-keyscan, no seed) | new | **new = 4/4** | **4/4** |
+| P4 (breach-corpus enricher) | fold-extends `credential-spray-stagger` | **fold = 4/4** | **4/4** |
+
+### Findings
+
+- **Fold regression: none.** P1+P2 fold 8/8 (vs. 8/8 in v1). The schema rewrite did not break the basic "an existing lesson with the same `subject`/`techniques` already covers this" decision.
+- **Decomposition discipline lands.** P1 decomposed 4/4: every trial extended the existing `credential-spray-stagger` pattern *and* authored a new `wazuh-rule-5712-threshold` env-fact citing the same `observation_id`. The `applies_to` cross-link to the env-fact's subject landed in 4/4 cases. This is the new v2 behavior that the prompt rewrite was meant to produce; it does.
+- **P3 decomposed 4/4 too.** Pre-recon observation is more obviously a "two halves" case (banner-fetch rule = env-fact; the pattern of doing keyscan before a spray = pattern lesson), and every trial wrote both files with `applies_to` linking them. One trial also authored an `asset-graph-cross-window-stitching` env-fact — a third decomposition that picks up the "associated with the eventual spray source IP via the asset graph" half of the observation.
+- **P4 decomposed in 4/4 trials**, every one of which authored a *new* `*-breach-enricher` env-fact AND extended the existing `credential-spray-stagger` pattern by adding the new subject to its `applies_to`. The v1 gray-zone ("fold-extends maybe new") collapses cleanly under v2 because the decomposition step routes the two halves to two homes.
+- **P2 decomposed in only 2/4.** The two outliers (trials 2, 3) folded into the existing env-fact only and skipped the optional pattern half. This is acceptable — P2's load-bearing teaching is the env-fact ("container-side audit lacks argv") and the pattern is a thin restatement. The prompt's "decompose first" wording is not so strict that it forces a pattern lesson for every observation; that flexibility is probably correct (an "always pair" rule would create corpus debt for pattern files whose body is one sentence).
+
+### Subject-as-equivalence-key — within-trial passes, cross-trial fragments
+
+Within any single trial, the same subject is reused consistently (P1 + P4 both author/extend `wazuh-rule-5712-threshold`, and the spray-stagger pattern's `applies_to` correctly references it). The equivalence-key role works *within* a batch.
+
+*Across* trials, the breach-corpus enricher landed under three different subjects: `auth-pipeline-breach-enricher` (trials 1, 2), `breach-corpus-enricher` (trial 3), `auth-breach-corpus-enricher` (trial 4). Same teaching, three subjects. This is the v1 slug-variance failure mode reappearing on subject choice — a problem the v2 spec explicitly identifies as "bounded by subject, not name." Subject *is* doing the bounding job within a trial, but as a free-form kebab-case slug it still varies across independent authoring runs. **This is not a v2 regression** (v1 had it on slugs too) and it's not blocking — within-batch folding works, and the within-trial corpus is internally consistent. But it does mean a real-batch corpus growing over many independent authoring runs will accrete near-duplicate env-facts under different subjects unless there's an across-batch fold pass or a subject-normalization step.
+
+### Cost / time
+
+- Wall time per trial: ~395-440s (sonnet author + Haiku forward-check gates). Higher than v1's ~285s because each trial authors more files (decomposition produces 2-3 files per observation rather than 1).
+- 4 trials in parallel completed in ~440s wall.
+
+### Open questions for follow-up
+
+1. **Subject-naming variance across batches.** Worth a small probe (one fixture, N=2 batches authored against an evolving corpus) to see if the second batch folds into the first batch's subjects or invents new ones. Not blocking schema v2.
+2. **`applies_to` to non-existent subjects.** The seeded pattern lesson references `wazuh-rule-5712-threshold` even though no such file exists in the seed; all 4 trials authored the env-fact and the cross-link resolved post-hoc. This is the "dangling `applies_to` is allowed" affordance from the spec; behavior under it looks healthy.
+
+### Decision
+
+v2 schema + prompt clear the underfold bar. Move on. The next-step validation is the un-instrumented retrieval probe (#4b) against the v2 corpus shape — does the actor's three-stage retrieval pattern still emerge and do the new index keys get used.
+
+---
+
+## v1 results (N=4) — original writeup, retained for context
 
 **Verdict: underfolding is not the dominant failure mode of the current actor-author prompt.** Across 4 independent trials against 3 seeded lessons + 4 probes, the agent folded into existing lessons whenever a clear fold target existed, did not false-positive into the distractor seed, and skipped rather than fragmenting when its self-check gate failed.
 

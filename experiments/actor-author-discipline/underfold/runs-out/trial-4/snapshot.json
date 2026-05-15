@@ -1,18 +1,20 @@
 {
-  "baseline_sha": "36d5660343ab484859ec506449e4cf6281e2d0b1",
-  "head_sha": "e38430c6d73598def4ba1ef96ccc96c13c45df06",
+  "baseline_sha": "01a89f2920def2477a6fdb045875595fdb31fea6",
+  "head_sha": "373345d0fcad88517c0525340ab161bb817db907",
   "head_moved": true,
   "touched_files": [
-    "defender/lessons-actor/environment/docker-exec-args-not-in-audit.md",
-    "defender/lessons-actor/tradecraft/container-argv-obfuscation.md",
-    "defender/lessons-actor/tradecraft/credential-spray-stagger.md",
-    "defender/lessons-actor/tradecraft/ssh-keyscan-pre-recon.md"
+    "defender/lessons-actor/auth-breach-corpus-enricher.md",
+    "defender/lessons-actor/container-side-execve-omits-argv.md",
+    "defender/lessons-actor/credential-spray-stagger.md",
+    "defender/lessons-actor/ssh-keyscan-pre-recon-attribution.md",
+    "defender/lessons-actor/wazuh-rule-5701-ssh-banner-probe.md",
+    "defender/lessons-actor/wazuh-rule-5712-threshold.md"
   ],
-  "variant": "current",
+  "variant": "v2",
   "model": "sonnet",
   "model_id": "claude-sonnet-4-6",
   "trial": 4,
   "rc": 0,
-  "elapsed_seconds": 369.9,
-  "overlay_sha": "36d5660343ab484859ec506449e4cf6281e2d0b1"
+  "elapsed_seconds": 389.0,
+  "overlay_sha": "01a89f2920def2477a6fdb045875595fdb31fea6"
 }

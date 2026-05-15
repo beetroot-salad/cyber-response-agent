@@ -1,4 +1,6 @@
-defender/lessons-actor/environment/docker-exec-args-not-in-audit.md
-defender/lessons-actor/tradecraft/container-argv-obfuscation.md
-defender/lessons-actor/tradecraft/credential-spray-stagger.md
-defender/lessons-actor/tradecraft/ssh-keyscan-pre-recon.md
+defender/lessons-actor/auth-breach-corpus-enricher.md
+defender/lessons-actor/container-side-execve-omits-argv.md
+defender/lessons-actor/credential-spray-stagger.md
+defender/lessons-actor/ssh-keyscan-pre-recon-attribution.md
+defender/lessons-actor/wazuh-rule-5701-ssh-banner-probe.md
+defender/lessons-actor/wazuh-rule-5712-threshold.md
