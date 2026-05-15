@@ -1,7 +1,6 @@
 """Lead-author post-flight: HEAD invariants + scope + executed_leads validation."""
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest

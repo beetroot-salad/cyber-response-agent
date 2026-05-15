@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 
 import pytest
-import yaml
 
 from defender.learning import lead_author
 
