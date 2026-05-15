@@ -1,6 +1,6 @@
 ---
 title: Actor-learning loop — defender capability against a learning actor
-status: doing
+status: done
 groups: defender, learning-loop, actor
 ---
 
@@ -107,8 +107,13 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   pre-dates `replay_actor.py`) writes a row and exits 0 —
   non-blocking. Ship-gate slope rule (3-checkpoint linear fit +
   bootstrap CI) deferred to a separate workstream.
-- [ ] **End-to-end wiring** — defender author + actor author concurrent
-  on independent queues + thresholds (default 5 each).
+- [x] **End-to-end wiring** — defender author + actor author concurrent
+  on independent queues + thresholds (default 5 each). Defender
+  `author.py` now acquires the shared repo lock after its queue lock
+  (mirroring `author_actor.py`), releasing in reverse, so cross-process
+  fold-and-commit flows serialize at the repo boundary. Independent
+  queues, queue locks, and default-5 thresholds were already in place
+  from items #5 and #6; `_author.lock` added to `.gitignore`.
 
 ## Locked decisions (see design doc)
 

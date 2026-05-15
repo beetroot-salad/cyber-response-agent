@@ -22,6 +22,52 @@ def test_lock_refuses_concurrent_run(tmp_repo, helpers):
     a.release_lock(third)
 
 
+def test_repo_lock_held_returns_zero(tmp_repo, helpers, monkeypatch):
+    """run_batch exits cleanly when the shared repo lock is unavailable.
+
+    Mirrors the actor-author behavior: queue stays intact, no agent
+    invocation, rc=0 so the next tick retries.
+    """
+    import fcntl
+
+    a = tmp_repo.author
+    helpers.write_source_refs(a.RUNS_DIR, "run-A", "benign")
+    helpers.write_finding(a.PENDING_FILE, finding_id="run-A/0", run_id="run-A")
+
+    # Hold the repo lock from a separate fd.
+    shared = a._shared
+    shared.REPO_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    holder = shared.REPO_LOCK_FILE.open("a+")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
+
+    # Short timeout so the test doesn't sleep for half an hour.
+    monkeypatch.setattr(shared, "REPO_LOCK_WAIT_SECONDS", 1)
+
+    invoked = {"count": 0}
+
+    def fake_invoke(findings, batch_id):
+        invoked["count"] += 1
+        return {"committed": [], "held_forward_bad": [], "consumed_skip": [], "commit_sha": None}
+
+    monkeypatch.setattr(a, "invoke_agent", fake_invoke)
+    try:
+        rc = a.run_batch()
+    finally:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+        holder.close()
+
+    assert rc == 0
+    assert invoked["count"] == 0, "agent must not run while repo lock is held"
+
+    # Queue still has the original finding — nothing was rotated out.
+    pending = [
+        json.loads(line)
+        for line in a.PENDING_FILE.read_text().splitlines()
+        if line.strip()
+    ]
+    assert [p["finding_id"] for p in pending] == ["run-A/0"]
+
+
 def test_clean_scope_check_refuses_dirty_lessons(tmp_repo):
     a = tmp_repo.author
     (a.LESSONS_DIR / "drift.md").write_text("uncommitted\n")

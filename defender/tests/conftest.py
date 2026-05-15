@@ -41,6 +41,8 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     for name in (
         "author.py",
         "author.md",
+        "_author_shared.py",
+        "_author_runner.py",
         "verify_forward.py",
         "verify_forward.md",
     ):
@@ -58,7 +60,9 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Mirror the real repo's gitignore so transient state under
     # _pending/ and runs/ doesn't sneak into git add -A.
     (repo / ".gitignore").write_text(
-        "defender/learning/_pending/\ndefender/learning/runs/\n"
+        "defender/learning/_pending/\n"
+        "defender/learning/_author.lock\n"
+        "defender/learning/runs/\n"
     )
 
     run_git("init", "-q", "-b", "main")
@@ -68,9 +72,20 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run_git("commit", "-q", "-m", "init")
 
     # Re-import author with REPO_ROOT pointed at the tmp tree.
+    import _author_shared as shared_mod  # type: ignore[import-not-found]
     import author as author_mod  # type: ignore[import-not-found]
 
+    importlib.reload(shared_mod)
     importlib.reload(author_mod)
+    monkeypatch.setattr(shared_mod, "REPO_ROOT", repo)
+    monkeypatch.setattr(
+        shared_mod, "LEARNING_DIR", repo / "defender" / "learning"
+    )
+    monkeypatch.setattr(
+        shared_mod,
+        "REPO_LOCK_FILE",
+        repo / "defender" / "learning" / "_author.lock",
+    )
     monkeypatch.setattr(author_mod, "REPO_ROOT", repo)
     monkeypatch.setattr(author_mod, "LEARNING_DIR", repo / "defender" / "learning")
     monkeypatch.setattr(author_mod, "LESSONS_DIR", repo / "defender" / "lessons")

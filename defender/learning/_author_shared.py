@@ -12,12 +12,9 @@ flow.
 
 This module exposes the shared repo-lock acquire/release pair and the
 actor-generation counter helper. Queue locks remain per-author because
-the queue paths differ.
-
-Defender-side retrofit (``author.py`` taking the repo lock too) lands
-with item #8 wiring, when both authors actually run concurrently. The
-actor side acquires the repo lock now so item #8 only needs to retrofit
-``author.py``.
+the queue paths differ. Both ``author.py`` and ``author_actor.py``
+acquire this lock after their queue lock and hold it across the
+child-agent invocation through queue rotation.
 """
 from __future__ import annotations
 
