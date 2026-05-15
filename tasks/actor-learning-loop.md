@@ -89,17 +89,24 @@ curriculum; defender is the artifact. Equilibrium-mode self-play
   + `Actor-Model:` identifier (for replay pinning). Index CLI
   (`lessons_actor_index.py`) hides env lessons with `status: stale`
   by default — `--include-stale` is author-only.
-- [ ] **Secondary metric harness.** Two-worktree replay: current
-  defender investigates held-out from HEAD; frozen actor from
-  `gen-{N-3}` writes a story against that lead sequence; current
-  oracle + judge grade. Reads actor-model pin from `gen-{N-3}` commit
-  trailer. **Scope rules**: eligibility by ground-truth label
-  (benign/inconclusive only — malicious held-out is primary-only);
-  executed set is the eligible subset where current defender did not
-  escalate. **Metric reporting**: three numbers per generation —
-  eligible set size (fixed), executed/eligible ratio, catch rate over
-  executed (skip-passthrough excluded from denominator, reported
-  separately as SKIP rate). Divergence diagnostic.
+- [x] **Secondary metric harness.** `defender/learning/eval_secondary.py`
+  + `defender/learning/replay_actor.py` (compatibility boundary —
+  every future gen ships it). HEAD defender produces
+  `lead_sequence.yaml` via `defender/run.py --no-learn`; frozen actor
+  runs inside `.claude/worktrees/replay-gen-{N-k}/` (detached at the
+  pinned SHA, idempotent reuse) with `ACTOR_MODEL` set from the
+  commit's `Actor-Model:` trailer; HEAD oracle + judge grade.
+  Eligibility = ground-truth `benign|inconclusive`; executed =
+  eligible minus HEAD false-escalations (reported as
+  `not_executed`/eligible alongside catch rate). Catch rate =
+  `caught/(caught+survived+incoherent+undecidable)` over executed;
+  `skip-passthrough` excluded from denominator and reported as SKIP
+  rate. Outputs `eval/secondary/gen-{N}.summary.md`,
+  per-alert `gen-{N}/{slug}.json`, and append-only `index.jsonl`.
+  `replay-incompatible` (history shorter than k, or pinned worktree
+  pre-dates `replay_actor.py`) writes a row and exits 0 —
+  non-blocking. Ship-gate slope rule (3-checkpoint linear fit +
+  bootstrap CI) deferred to a separate workstream.
 - [ ] **End-to-end wiring** — defender author + actor author concurrent
   on independent queues + thresholds (default 5 each).
 
