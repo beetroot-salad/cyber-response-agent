@@ -466,15 +466,15 @@ def test_rotate_queue_preserves_held_and_appends_consumed(
     aa.rotate_queue(held=held, consumed=consumed, commit_sha="abc123")
 
     left = [
-        json.loads(l)
-        for l in (ctx["pending"] / "actor_observations.jsonl").read_text().splitlines()
-        if l.strip()
+        json.loads(line)
+        for line in (ctx["pending"] / "actor_observations.jsonl").read_text().splitlines()
+        if line.strip()
     ]
     assert [r["observation_id"] for r in left] == ["h/0"]
 
     consumed_rows = [
-        json.loads(l)
-        for l in (ctx["pending"] / "actor_observations.consumed.jsonl")
+        json.loads(line)
+        for line in (ctx["pending"] / "actor_observations.consumed.jsonl")
         .read_text()
         .splitlines()
     ]
