@@ -291,7 +291,7 @@ def test_write_summary_emits_md_per_alert_json_and_index_jsonl(tmp_path: Path):
     alpha = json.loads((detail_dir / "alpha.json").read_text())
     assert alpha["judge_outcome"] == "caught"
     assert (out / "index.jsonl").is_file()
-    rows = [json.loads(l) for l in (out / "index.jsonl").read_text().splitlines() if l.strip()]
+    rows = [json.loads(line) for line in (out / "index.jsonl").read_text().splitlines() if line.strip()]
     assert len(rows) == 1
     assert rows[0]["current_generation"] == 7
     assert rows[0]["pinned_generation"] == 4
@@ -480,5 +480,5 @@ def test_write_summary_appends_to_existing_index(tmp_path: Path):
     )
     sec.write_summary(s1, out)
     sec.write_summary(s2, out)
-    rows = [json.loads(l) for l in (out / "index.jsonl").read_text().splitlines() if l.strip()]
+    rows = [json.loads(line) for line in (out / "index.jsonl").read_text().splitlines() if line.strip()]
     assert [r["current_generation"] for r in rows] == [4, 5]
