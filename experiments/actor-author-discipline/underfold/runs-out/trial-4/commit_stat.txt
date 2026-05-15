@@ -1,0 +1,5 @@
+ .../environment/docker-exec-args-not-in-audit.md              |  8 ++++----
+ .../lessons-actor/tradecraft/container-argv-obfuscation.md    | 11 +++++++++++
+ defender/lessons-actor/tradecraft/credential-spray-stagger.md | 10 +++++-----
+ defender/lessons-actor/tradecraft/ssh-keyscan-pre-recon.md    | 11 +++++++++++
+ 4 files changed, 31 insertions(+), 9 deletions(-)

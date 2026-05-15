@@ -1,0 +1,3 @@
+defender/lessons-actor/environment/docker-exec-args-not-in-audit.md
+defender/lessons-actor/tradecraft/credential-spray-stagger.md
+defender/lessons-actor/tradecraft/ssh-keyscan-banner-probe.md

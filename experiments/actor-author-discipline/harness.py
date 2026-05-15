@@ -46,10 +46,19 @@ def sh(cmd: list[str], cwd: Path, check: bool = True, capture: bool = True) -> s
     )
 
 
-def setup_baseline(worktree: Path, base_branch: str) -> str:
+def setup_baseline(worktree: Path, base_branch: str, fixture_dir: Path | None = None) -> str:
     """Ensure the worktree exists, branched off base_branch, with the
     fixture committed as a single baseline commit. Returns the baseline
-    sha so trials can reset to it."""
+    sha so trials can reset to it.
+
+    fixture_dir overrides the default FIXTURE_DIR. The override must
+    contain a ``lessons-actor/`` subtree and an
+    ``_pending/actor_observations.jsonl``. A ``runs/`` subtree is
+    copied if present (the underfold subexperiment commits its source
+    bundles in-tree instead, so this is optional).
+    """
+    fixture = fixture_dir or FIXTURE_DIR
+
     if not worktree.exists():
         wt_branch = f"exp-actor-author-{worktree.name}"
         sh(
@@ -62,7 +71,7 @@ def setup_baseline(worktree: Path, base_branch: str) -> str:
     pending_dst = worktree / "defender" / "learning" / "_pending"
     if lessons_dst.exists():
         shutil.rmtree(lessons_dst)
-    shutil.copytree(FIXTURE_DIR / "lessons-actor", lessons_dst)
+    shutil.copytree(fixture / "lessons-actor", lessons_dst)
     pending_dst.mkdir(parents=True, exist_ok=True)
     # Clear any stale queue / consumed history from prior trials
     for f in [
@@ -74,7 +83,7 @@ def setup_baseline(worktree: Path, base_branch: str) -> str:
         if p.exists():
             p.unlink()
     shutil.copy2(
-        FIXTURE_DIR / "_pending" / "actor_observations.jsonl",
+        fixture / "_pending" / "actor_observations.jsonl",
         pending_dst / "actor_observations.jsonl",
     )
 
@@ -83,17 +92,18 @@ def setup_baseline(worktree: Path, base_branch: str) -> str:
     # "experiments/actor-author-discipline/fixtures/runs/{run_id}",
     # a repo-relative path that exists in the worktree because the
     # experiments/ dir is committed.
-    runs_dst = (
-        worktree
-        / "experiments"
-        / "actor-author-discipline"
-        / "fixtures"
-        / "runs"
-    )
-    runs_dst.parent.mkdir(parents=True, exist_ok=True)
-    if runs_dst.exists():
-        shutil.rmtree(runs_dst)
-    shutil.copytree(FIXTURE_DIR / "runs", runs_dst)
+    if (fixture / "runs").is_dir():
+        runs_dst = (
+            worktree
+            / "experiments"
+            / "actor-author-discipline"
+            / "fixtures"
+            / "runs"
+        )
+        runs_dst.parent.mkdir(parents=True, exist_ok=True)
+        if runs_dst.exists():
+            shutil.rmtree(runs_dst)
+        shutil.copytree(fixture / "runs", runs_dst)
 
     sh(["git", "add", "-A"], cwd=worktree)
     # Allow empty if nothing changed since last setup
@@ -200,6 +210,10 @@ def main() -> int:
     ap.add_argument("--worktree", required=True, help="dedicated worktree path")
     ap.add_argument("--base-branch", default="actor-pending-queue")
     ap.add_argument("--out", required=True, help="output dir for this trial")
+    ap.add_argument(
+        "--fixture-dir", default=None,
+        help="Override fixture root (must contain lessons-actor/ and _pending/actor_observations.jsonl)",
+    )
     args = ap.parse_args()
 
     model_id = {
@@ -211,7 +225,8 @@ def main() -> int:
     out_dir = Path(args.out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    baseline_sha = setup_baseline(worktree, args.base_branch)
+    fixture_override = Path(args.fixture_dir).resolve() if args.fixture_dir else None
+    baseline_sha = setup_baseline(worktree, args.base_branch, fixture_override)
     reset_to_baseline(worktree, baseline_sha)
     overlay_variant(worktree, args.variant)
     overlay_sha = sh(["git", "rev-parse", "HEAD"], cwd=worktree).stdout.strip()

@@ -1,0 +1,15 @@
+defender/actor: lesson batch eda29973780a
+
+Source runs:
+- uf-P1
+- uf-P2
+- uf-P3
+- uf-P4
+
+Tradecraft new: container-argv-obfuscation (added uf-P2/0), ssh-keyscan-pre-recon (added uf-P3/0)
+Tradecraft folded: credential-spray-stagger (added uf-P1/0, uf-P4/0)
+Environment folded: docker-exec-args-not-in-audit (added uf-P2/0)
+
+Generation: 1
+Actor-Model: claude-sonnet-4-6
+

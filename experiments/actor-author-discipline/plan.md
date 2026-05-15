@@ -98,3 +98,31 @@ experiments/actor-author-discipline/
 6. If clean, scale-up Exp 1.
 7. Mid-run at N=2, then proceed or adjust.
 8. Repeat for Exp 2.
+
+## Follow-up arms (not yet scheduled)
+
+### Exp 3 — parallel forward-check via Agent tool
+
+**Motivation.** In trial 1 of the underfold subexperiment, `verify_forward_actor.py` (Haiku, sequential per write) accounted for ~38% of the author's wall time: 4 writes × ~30s ≈ 110s of 285s. The author waits on each gate before moving to the next probe; cost scales linearly with batch size.
+
+**Variant.** Register a `verify_forward_actor` plugin subagent (system prompt = `verify_forward_actor.md`, read-only tools). Replace the prompt's "run the exact command…" stanza with: "after you've written all lessons in the batch, spawn one `verify_forward_actor` subagent per written file in a single tool block; handle BADs in a second pass." Drops the python shim, removes the path-substitution failure modes the prompt currently guards against, and parallelizes the gate via the Agent tool's native concurrency.
+
+**Question.** Does the parallel-gate variant preserve verdict fidelity (no drift in GOOD/BAD distribution vs. sequential) while cutting wall time roughly proportionally to batch size?
+
+**Setup.** Reuse the underfold fixture (3 seeds + 4 probes) as a tractable batch with mixed fold/new outcomes. Two arms:
+- `seq` — current prompt + per-write Bash gate (baseline; reuses underfold trials).
+- `parallel` — modified prompt + Agent-tool gate.
+
+**Metrics.**
+- Wall time per trial; gate-time share.
+- GOOD/BAD distribution per arm per probe. Same observations should reach the same verdicts; drift signals isolation or context-bleed problems.
+- Retry incidence — how often BAD lands on a finished pass; does the second-pass fix flow work end-to-end.
+- Touched-files count + analyzer outcome parity with the sequential arm.
+
+**Decision.**
+- Adopt `parallel` if: wall-time drop ≥30%, GOOD/BAD distribution within ±1 verdict of `seq` across probes, no new failure modes in retry handling.
+- Stay sequential if: verdict drift ≥2 cases or any silent failure in BAD propagation.
+
+**Pre-flight verification (cheap, before standing up the arm).** Confirm the author runner's `claude -p --print` invocation actually permits nested Agent/Task tool calls — same shape investigate uses, so it should work, but worth a one-shot check before migrating the prompt.
+
+**Sequencing.** Pending the underfold result. Worth doing regardless of underfolding outcome — the time savings are independent of the prompt-discipline question.

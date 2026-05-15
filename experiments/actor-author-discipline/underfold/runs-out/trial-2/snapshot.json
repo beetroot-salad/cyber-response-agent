@@ -1,0 +1,17 @@
+{
+  "baseline_sha": "654c4ff142a1d7499de87e6448c0fd8a2d623039",
+  "head_sha": "78b77d9bd9d2a635c7a1667f0c225c02167293f0",
+  "head_moved": true,
+  "touched_files": [
+    "defender/lessons-actor/environment/docker-exec-args-not-in-audit.md",
+    "defender/lessons-actor/tradecraft/credential-spray-stagger.md",
+    "defender/lessons-actor/tradecraft/ssh-prerecon-banner-fetch.md"
+  ],
+  "variant": "current",
+  "model": "sonnet",
+  "model_id": "claude-sonnet-4-6",
+  "trial": 2,
+  "rc": 0,
+  "elapsed_seconds": 214.6,
+  "overlay_sha": "654c4ff142a1d7499de87e6448c0fd8a2d623039"
+}

@@ -1,0 +1,4 @@
+ .../environment/docker-exec-args-not-in-audit.md              |  8 +++-----
+ defender/lessons-actor/tradecraft/credential-spray-stagger.md | 10 +++++-----
+ .../lessons-actor/tradecraft/ssh-prerecon-banner-fetch.md     | 11 +++++++++++
+ 3 files changed, 19 insertions(+), 10 deletions(-)
