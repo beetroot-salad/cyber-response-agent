@@ -37,10 +37,13 @@ from pathlib import Path
 # instructions live in defender/CLAUDE.md §Python environment.
 _DEFENDER_DIR = Path(__file__).resolve().parent
 _VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
-# Compare unresolved paths — the venv python is typically a symlink to the
-# system interpreter, so .resolve() would collapse both sides and skip the
-# re-exec even when site-packages differ.
-if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
+# Compare unresolved bin directories rather than executable paths — the
+# venv exposes both ``python`` and ``python3`` (one symlinks the other),
+# and tools like pytest dispatch via ``python`` while this script names
+# ``python3``, which spuriously triggers re-exec inside the very venv we
+# already run in. Comparing parents preserves the venv-vs-system
+# distinction without false positives on the python/python3 alias.
+if _VENV_PY.is_file() and Path(sys.executable).parent != _VENV_PY.parent:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
 import argparse

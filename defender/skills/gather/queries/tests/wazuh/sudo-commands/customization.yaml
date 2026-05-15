@@ -1,0 +1,26 @@
+cases:
+  - id: user-bound-on-host
+    category: filter-composition
+    alert_excerpt:
+      rule: {id: "5402", groups: ["sudo"], description: "First time user executed sudo"}
+      data: {srcuser: "jsmith", dstuser: "root", command: "/usr/bin/systemctl restart nginx"}
+      agent: {name: "bastion-01.corp"}
+      "@timestamp": "2026-05-09T11:45:00.000Z"
+    adaptation_note: |
+      Scope sudo events to host=bastion-01.corp AND invoking-user=jsmith
+      for the 24 hours leading up to the alert (--start 2026-05-08T11:45:00Z
+      --window 24h). The user filter must use data.srcuser (who ran sudo),
+      NOT data.dstuser (which is almost always root and would not narrow
+      the result set). Both filters are bound; both host_clause and
+      user_clause must be present.
+    rubric:
+      expected_substrings:
+        - "agent.name:bastion-01.corp"
+        - "data.srcuser:jsmith"
+        - "rule.groups:sudo"
+        - "2026-05-08T11:45:00"
+        - "--window 24h"
+      forbidden_substrings:
+        - "data.dstuser:jsmith"
+        - "data.dstuser:root"
+        - "/usr/bin/systemctl"

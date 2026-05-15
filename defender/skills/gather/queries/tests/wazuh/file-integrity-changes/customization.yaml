@@ -1,0 +1,25 @@
+cases:
+  - id: path-bound-etc
+    category: filter-composition
+    alert_excerpt:
+      rule: {id: "550", description: "Integrity checksum changed"}
+      syscheck: {path: "/etc/shadow", event: "modified"}
+      agent: {name: "db-prod-04"}
+      "@timestamp": "2026-05-10T14:22:00.000Z"
+    adaptation_note: |
+      Scope FIM events to host=db-prod-04 AND any path under /etc/
+      (use the syscheck.path wildcard form, e.g. syscheck.path:\/etc\/*)
+      over a 4-hour window centered on the alert timestamp. Both
+      host_clause and path_clause must be set; window is 4h around
+      2026-05-10T14:22:00Z so --start should be 2026-05-10T12:22:00Z.
+    rubric:
+      expected_substrings:
+        - "agent.name:db-prod-04"
+        - "rule.groups:syscheck"
+        - "syscheck.path"
+        - "/etc"
+        - "2026-05-10T12:22:00"
+        - "--window 4h"
+      forbidden_substrings:
+        - "syscheck.path:/etc/shadow"
+        - "rule.id:550"

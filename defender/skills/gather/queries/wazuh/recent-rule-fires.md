@@ -55,6 +55,12 @@ python3 defender/scripts/tools/wazuh_cli.py query \
 `--limit 5` keeps a handful of recent events for the Sample section;
 the aggregations carry the totals.
 
+## Filter binding
+
+- `rule_id` → the Wazuh rule id to look up (e.g. `5710` for the
+  non-existent-user signature). Must be the numeric id as a string;
+  rule names / descriptions are not accepted.
+
 ## Common pitfalls
 
 - Some rules fire every few seconds for healthcheck-style traffic — a

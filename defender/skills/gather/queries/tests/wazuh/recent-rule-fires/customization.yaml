@@ -1,0 +1,23 @@
+cases:
+  - id: rule-id-window
+    category: filter-composition
+    alert_excerpt:
+      rule: {id: "5710", description: "sshd: attempt to login using a non-existent user"}
+      data: {srcip: "198.51.100.22"}
+      agent: {name: "web-server-01"}
+      "@timestamp": "2026-04-17T10:30:00.000Z"
+    adaptation_note: |
+      Pull every fire of rule.id=5710 across the fleet for the 24 hours
+      leading up to the alert (--start 2026-04-16T10:30:00Z
+      --window 24h). Use the Lucene form — match_count is expected to be
+      well under --limit. The goal is to see how often this rule fires
+      organization-wide; do NOT scope to the alert's source IP or host.
+    rubric:
+      expected_substrings:
+        - "rule.id:5710"
+        - "2026-04-16T10:30:00"
+        - "--window 24h"
+      forbidden_substrings:
+        - "data.srcip:198.51.100.22"
+        - "agent.name:web-server-01"
+        - "by_agent"

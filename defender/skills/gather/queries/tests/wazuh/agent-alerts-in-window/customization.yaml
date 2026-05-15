@@ -1,0 +1,24 @@
+cases:
+  - id: host-window-around-alert
+    category: filter-composition
+    alert_excerpt:
+      rule: {id: "100110", description: "Falco: Outbound connection to known C2"}
+      agent: {name: "target-endpoint"}
+      "@timestamp": "2026-05-11T07:30:00.000Z"
+    adaptation_note: |
+      Pull every Wazuh alert for agent=target-endpoint in a 30-minute
+      window centered on 2026-05-11T07:30:00Z (so --start 2026-05-11T07:15:00Z
+      --end 2026-05-11T07:45:00Z). The query is parameterized via
+      --query-string substitution: agent.name binds to the literal
+      'target-endpoint'; start and end bind to the bracket above. The
+      template's aggregations are already correct — do NOT alter them.
+    rubric:
+      expected_substrings:
+        - "agent.name:target-endpoint"
+        - "2026-05-11T07:15:00"
+        - "2026-05-11T07:45:00"
+        - "by_rule_id"
+        - "--limit 100"
+      forbidden_substrings:
+        - "rule.id:100110"
+        - "2026-05-11T07:30:00Z"

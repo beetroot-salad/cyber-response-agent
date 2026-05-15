@@ -29,11 +29,15 @@ import sys
 from pathlib import Path
 
 # Re-exec into defender/.venv if launched against a different interpreter.
-# Compare unresolved paths — the venv python is typically a symlink to the
-# system interpreter, so .resolve() would collapse both sides and skip the
-# re-exec even when site-packages differ.
+# Compare unresolved bin directories rather than executable paths — the
+# venv exposes both ``python`` and ``python3`` (one symlinks the other),
+# and tooling like pytest dispatches via ``python`` while this script
+# previously named ``python3``, which spuriously triggered the re-exec
+# inside the very venv we were already running in. Comparing parents
+# preserves the venv-vs-system distinction (different ``bin/`` dirs)
+# without false positives on the python/python3 alias.
 _VENV_PY = Path(__file__).resolve().parents[2] / "defender" / ".venv" / "bin" / "python3"
-if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
+if _VENV_PY.is_file() and Path(sys.executable).parent != _VENV_PY.parent:
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
 import hashlib

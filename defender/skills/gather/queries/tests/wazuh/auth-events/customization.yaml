@@ -1,0 +1,49 @@
+cases:
+  - id: srcip-baseline-shift
+    category: baseline-shift
+    alert_excerpt:
+      rule: {id: "5710", groups: ["sshd"], description: "sshd: attempt to login using a non-existent user"}
+      data: {srcip: "198.51.100.22", srcuser: "monitorprobe"}
+      agent: {name: "web-server-01"}
+      "@timestamp": "2026-04-17T10:30:00.000Z"
+    adaptation_note: |
+      Foreground was queried with --start 2026-04-17T09:30:00Z --window 2h,
+      scoped to data.srcip:198.51.100.22. Produce the baseline shift query:
+      same source IP, same window duration, but shifted 7 days earlier.
+      This will be compared to the foreground dimension-by-dimension to
+      decide whether the source IP's activity is novel or routine.
+    rubric:
+      expected_substrings:
+        - "data.srcip:198.51.100.22"
+        - "rule.groups:(authentication_success OR authentication_failed)"
+        - "2026-04-10T09:30:00"
+        - "--window 2h"
+      forbidden_substrings:
+        - "2026-04-17"
+        - "monitorprobe"
+        - "data.dstuser"
+        - "web-server-01"
+
+  - id: host-bound-narrow-window
+    category: filter-composition
+    alert_excerpt:
+      rule: {id: "5710", groups: ["sshd"], description: "sshd: invalid user"}
+      data: {srcip: "10.42.7.183", dstuser: "root"}
+      agent: {name: "bastion-01.corp"}
+      "@timestamp": "2026-05-08T03:14:09.000Z"
+    adaptation_note: |
+      Narrow auth-events to host=bastion-01.corp for the 60 minutes
+      surrounding the alert (--start 2026-05-08T02:44:09Z --window 60m).
+      Do NOT bind data.srcip or data.dstuser — the goal is to see EVERY
+      auth event on the host in the window, not just the one for this
+      alert. Use the host_clause path; leave srcip_clause and user_clause
+      empty.
+    rubric:
+      expected_substrings:
+        - "agent.name:bastion-01.corp"
+        - "rule.groups:(authentication_success OR authentication_failed)"
+        - "2026-05-08T02:44:09"
+        - "--window 60m"
+      forbidden_substrings:
+        - "data.srcip:10.42.7.183"
+        - "data.dstuser:root"

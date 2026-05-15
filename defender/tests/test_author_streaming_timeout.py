@@ -125,3 +125,37 @@ def test_stderr_flood_does_not_deadlock(tmp_repo, _shim_claude, monkeypatch):
     # error — but only if the reader completed without deadlock first.
     with pytest.raises(a.AuthorError, match="did not emit AUTHOR_RESULT"):
         a.invoke_agent([{"finding_id": "x"}], batch_id="test")
+
+
+def test_agent_stream_error_translates_to_author_error(tmp_repo, monkeypatch):
+    """``_agent_stream.AgentStreamError`` must surface as ``AuthorError``.
+
+    Regression for the public API contract preserved across the
+    ``_agent_stream`` extraction: every existing test catches
+    ``AuthorError``, and the lower-level stream-layer errors must be
+    translated before they reach the caller.
+    """
+    a = tmp_repo.author
+    from defender.learning import _agent_stream
+
+    def boom(*args, **kwargs):
+        raise _agent_stream.AgentStreamError("agent failed (rc=42):\nstderr: x")
+
+    monkeypatch.setattr(a, "run_streaming", boom)
+    with pytest.raises(a.AuthorError, match="author agent failed"):
+        a.invoke_agent([{"finding_id": "x"}], batch_id="t")
+
+
+def test_agent_stream_timeout_translates_to_author_timeout(tmp_repo, monkeypatch):
+    """Timeout-flavoured AgentStreamError keeps the existing message shape."""
+    a = tmp_repo.author
+    from defender.learning import _agent_stream
+
+    monkeypatch.setattr(a, "AUTHOR_TIMEOUT", 7)
+
+    def boom(*args, **kwargs):
+        raise _agent_stream.AgentStreamError("agent timed out after 7s (see /tmp/x)")
+
+    monkeypatch.setattr(a, "run_streaming", boom)
+    with pytest.raises(a.AuthorError, match="timed out after 7s"):
+        a.invoke_agent([{"finding_id": "x"}], batch_id="t")

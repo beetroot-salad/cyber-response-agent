@@ -1,0 +1,25 @@
+cases:
+  - id: domain-window-shift
+    category: baseline-shift
+    alert_excerpt:
+      rule: {id: "61603", description: "Suspicious DNS query"}
+      data: {dns_domain: "api.ghostnebula.net"}
+      agent: {name: "web-server-01"}
+      "@timestamp": "2026-05-12T18:00:00.000Z"
+    adaptation_note: |
+      Foreground was queried with --start 2026-05-12T15:00:00Z
+      --end 2026-05-12T21:00:00Z scoped to ghostnebula.net (literal + any
+      subdomain). Produce the baseline-shift query: same domain, same
+      6-hour duration, shifted 7 days earlier (start 2026-05-05T15:00:00Z,
+      end 2026-05-05T21:00:00Z). The aggregations should remain the same
+      so the two query results are directly comparable.
+    rubric:
+      expected_substrings:
+        - "data.dns_domain:*ghostnebula.net"
+        - "data.dns_domain:ghostnebula.net"
+        - "2026-05-05T15:00:00"
+        - "2026-05-05T21:00:00"
+      forbidden_substrings:
+        - "2026-05-12T15"
+        - "2026-05-12T21"
+        - "api.ghostnebula.net"
