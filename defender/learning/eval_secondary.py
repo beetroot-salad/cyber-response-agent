@@ -41,37 +41,32 @@ The harness writes no commits and creates no queue entries.
 """
 from __future__ import annotations
 
-import argparse
-import importlib.util
-import json
 import os
-import re
-import shutil
-import subprocess
 import sys
-import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
-
-import yaml
 
 
 def _reexec_into_venv_if_needed() -> None:
-    """Re-exec into defender/.venv when invoked as a CLI.
+    """Re-exec into defender/.venv when invoked under a non-venv python.
 
-    loop.py has a top-level re-exec guard that calls ``os.execv`` when
-    ``sys.executable`` isn't the defender venv. If we let that fire
-    during ``importlib.exec_module(loop)`` it would replace the harness
-    process on the wrong argv. So this module pre-empts the re-exec
-    *before* importing loop — but only under CLI invocation. At
-    import-from-pytest time we must not re-exec (the venv's console
-    script names its interpreter ``python`` whereas this guard pins
-    ``python3``; tighter equality would replace the pytest collector
-    process with the harness CLI and exit 2).
+    Two failure modes this guards against:
 
-    Containment check on ``sys.prefix`` is permissive enough to treat
+    1. loop.py has its own top-level os.execv guard. If we let that
+       fire during ``importlib.exec_module(loop)`` later in this
+       module, it would replace the harness process on the wrong
+       argv. Pre-empting at our own top means loop's guard becomes a
+       no-op by the time we import it.
+    2. The module imports non-stdlib packages (``yaml``) below. A
+       system python without PyYAML would fail at our own import
+       line *before* this guard had a chance to switch interpreters.
+       So the guard must run before the first non-stdlib import.
+
+    At pytest-collection time we must NOT re-exec (the venv's console
+    script names its interpreter ``python``, not ``python3``; strict
+    equality would replace the collector process with the harness CLI
+    and exit 2). The ``sys.prefix == venv`` check is permissive:
     any same-venv interpreter (``python``, ``python3``, ``python3.11``)
-    as already valid.
+    is treated as already valid.
     """
     venv = Path(__file__).resolve().parents[2] / "defender" / ".venv"
     if not venv.is_dir():
@@ -85,6 +80,22 @@ def _reexec_into_venv_if_needed() -> None:
     venv_py = venv / "bin" / "python3"
     if venv_py.is_file():
         os.execv(str(venv_py), [str(venv_py), __file__, *sys.argv[1:]])
+
+
+# Must run before any non-stdlib import (yaml below) so a system
+# python without PyYAML can still reach the re-exec into the venv.
+_reexec_into_venv_if_needed()
+
+import argparse
+import importlib.util
+import json
+import re
+import shutil
+import subprocess
+import uuid
+from dataclasses import dataclass, field
+
+import yaml
 
 
 # ---------------------------------------------------------------------------
@@ -773,5 +784,7 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    _reexec_into_venv_if_needed()
+    # _reexec_into_venv_if_needed() ran at import time (before the
+    # PyYAML import) so by the time we get here we're already in the
+    # venv or there was no venv to re-exec into.
     sys.exit(main(sys.argv[1:]))
