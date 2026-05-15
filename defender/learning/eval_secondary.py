@@ -41,16 +41,29 @@ The harness writes no commits and creates no queue entries.
 """
 from __future__ import annotations
 
+import os
+import sys
+from pathlib import Path
+
+# Re-exec into defender/.venv before importing loop.py. loop.py has a
+# top-level re-exec guard that calls os.execv when sys.executable isn't
+# the defender venv — and that guard fires *during importlib's
+# exec_module*, replacing the current process with the learning-loop
+# CLI on the wrong argv. Mirror run.py's pattern by re-exec'ing this
+# script directly, so the loop import sees an interpreter it's happy
+# with and returns a module.
+_VENV_PY = Path(__file__).resolve().parents[2] / "defender" / ".venv" / "bin" / "python3"
+if _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
+    os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
+
 import argparse
 import importlib.util
 import json
-import os
 import re
 import shutil
 import subprocess
-import sys
+import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import yaml
 
@@ -194,16 +207,39 @@ def worktree_path_for(pin: GenerationPin) -> Path:
     return WORKTREES_DIR / f"replay-gen-{pin.generation}"
 
 
+def _worktree_head_sha(path: Path) -> str | None:
+    proc = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
 def ensure_worktree(pin: GenerationPin, repo_root: Path) -> Path:
     """Idempotent: create the gen-{N-K} worktree if missing.
 
     Detached HEAD at the pinned SHA. Re-uses an existing worktree
-    silently; the harness never mutates the worktree, so reuse is
-    safe across runs.
+    *only* when its HEAD already matches ``pin.sha`` — a worktree
+    left over from a different branch or a pre-rebase history would
+    otherwise let the harness attribute the frozen-actor catch rate
+    to the wrong generation. Mismatched worktrees are removed and
+    recreated.
     """
     path = worktree_path_for(pin)
     if path.is_dir() and (path / ".git").exists():
-        return path
+        head = _worktree_head_sha(path)
+        if head == pin.sha:
+            return path
+        print(
+            f"warning: worktree {path} at {head} != pin {pin.sha}; recreating",
+            file=sys.stderr,
+        )
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(path)],
+            cwd=repo_root, check=True, capture_output=True, text=True,
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["git", "worktree", "add", "--detach", str(path), pin.sha],
@@ -618,9 +654,16 @@ def run_secondary(
     eligible = eligible_for_secondary(fixtures)
     summary.eligible = len(eligible)
 
+    # Per-attempt suffix so reruns after an interruption don't collide
+    # with prior run dirs (``defender/run.py`` refuses to overwrite an
+    # existing one). One suffix per harness invocation so all alerts in
+    # a run share the same attempt id and per-alert artifacts cluster
+    # together on disk.
+    attempt = uuid.uuid4().hex[:8]
+
     loop_mod = _load_loop()
     for alert in eligible:
-        run_id = f"sec-eval-gen{n_committed}-{alert.slug}"
+        run_id = f"sec-eval-gen{n_committed}-{alert.slug}-{attempt}"
         result = AlertResult(
             slug=alert.slug,
             ground_truth=alert.ground_truth["disposition"],

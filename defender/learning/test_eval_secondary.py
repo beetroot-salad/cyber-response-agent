@@ -234,6 +234,39 @@ def test_ensure_worktree_idempotent(tmp_path: Path, monkeypatch):
     # Second call is a no-op (no exception, same path).
     p2 = sec.ensure_worktree(pin, repo)
     assert p2 == p1
+    assert sec._worktree_head_sha(p2) == pin.sha
+
+
+def test_ensure_worktree_recreates_when_head_mismatch(tmp_path: Path, monkeypatch):
+    """Reused worktree at the wrong SHA gets removed and rebuilt at pin.sha.
+
+    Simulates: a prior harness run on a different branch left a
+    worktree at this path checked out to a different commit. Without
+    recreation, the frozen actor would run with the wrong tree but
+    the summary would still claim ``pin.sha`` — silently
+    misattributing the catch rate to the wrong generation.
+    """
+    repo = _init_repo_with_actor_commits(tmp_path, n=4, model_name="m")
+    monkeypatch.setattr(sec, "WORKTREES_DIR", tmp_path / "wts")
+    pin = sec.resolve_target_pin(repo, k=3)  # gen 1 (4-3)
+    assert pin is not None
+
+    # Build the worktree pointing at gen 4 (a different SHA than the
+    # one resolve_target_pin returns).
+    all_commits = sec.list_actor_commits(repo)
+    other = next(c for c in all_commits if c.generation == 4)
+    assert other.sha != pin.sha
+    wrong_path = sec.worktree_path_for(pin)
+    wrong_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--detach", str(wrong_path), other.sha],
+        cwd=repo, check=True, capture_output=True, text=True,
+    )
+    assert sec._worktree_head_sha(wrong_path) == other.sha
+
+    rebuilt = sec.ensure_worktree(pin, repo)
+    assert rebuilt == wrong_path
+    assert sec._worktree_head_sha(rebuilt) == pin.sha
 
 
 # ---------------------------------------------------------------------------
