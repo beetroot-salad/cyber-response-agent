@@ -7,6 +7,9 @@ post-flight**:
 
   Pre-flight (Python):
     1. fcntl lock on _pending/.lock — concurrent ticks refuse cleanly.
+       Then acquire the shared repo lock (defender/learning/_author.lock)
+       so the actor author can't interleave its fold-and-commit with
+       ours. Queue lock first, repo lock second; release in reverse.
     2. Clean-scope check: defender/lessons/ must be git-clean. Atomicity
        assumes a clean baseline so we can roll back on failure.
     3. Read the batch from _pending/findings.jsonl.
@@ -50,10 +53,11 @@ from typing import Any
 
 import yaml
 
-# Subprocess driver shared with author_actor.py — see _author_runner.py.
+# Subprocess driver + repo-lock helpers shared with author_actor.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     import _author_runner as _runner  # type: ignore[import-not-found]
+    import _author_shared as _shared  # type: ignore[import-not-found]
 finally:
     sys.path.pop(0)
 
@@ -457,7 +461,15 @@ def run_batch() -> int:
     if lock_fh is None:
         _log("lock held by another process — skipping this tick")
         return 0
+
+    repo_lock = None
     try:
+        try:
+            repo_lock = _shared.acquire_repo_lock()
+        except TimeoutError as e:
+            _log(f"repo lock unavailable: {e}; queue intact")
+            return 0
+
         try:
             assert_clean_lessons_dir()
         except AuthorError as e:
@@ -583,6 +595,8 @@ def run_batch() -> int:
         )
         return 0
     finally:
+        if repo_lock is not None:
+            _shared.release_repo_lock(repo_lock)
         release_lock(lock_fh)
 
 

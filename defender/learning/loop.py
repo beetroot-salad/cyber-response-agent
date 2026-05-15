@@ -80,7 +80,7 @@ ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | {"detection-confirmed"}
 ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
-ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-haiku-4-5")
+ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
 SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "300"))
 
@@ -473,6 +473,12 @@ def strip_yaml_fence(text: str) -> str:
         s = s[m.end():].strip()
     m = re.match(r"\A```(?:yaml|yml)?\s*\n(.*?)\n```\s*\Z", s, re.DOTALL)
     if m:
+        s = m.group(1).strip()
+    # Drop a leading preamble before a fenced YAML block — models
+    # occasionally emit "Let me construct..." before the actual YAML
+    # despite the prompt's no-preamble contract.
+    m = re.search(r"^```(?:yaml|yml)?\s*\n(.*?)\n```", s, re.DOTALL | re.MULTILINE)
+    if m and not s.startswith("```"):
         s = m.group(1).strip()
     # Strip a wrapping <tag>...</tag> envelope (e.g. <content>, <output>).
     m = re.match(r"\A<([a-zA-Z_][\w-]*)\s*>\s*\n(.*?)\n\s*</\1>\s*\Z", s, re.DOTALL)
