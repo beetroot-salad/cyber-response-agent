@@ -47,8 +47,7 @@ def _isolate(monkeypatch, tmp_path: Path):
     learning = repo / "defender" / "learning"
     pending = learning / "_pending"
     lessons = repo / "defender" / "lessons-actor"
-    (lessons / "tradecraft").mkdir(parents=True)
-    (lessons / "environment").mkdir(parents=True)
+    lessons.mkdir(parents=True)
     pending.mkdir(parents=True)
 
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
@@ -113,13 +112,13 @@ def _write_queue(pending: Path, rows: list[dict]) -> None:
 
 def _write_lesson(
     lessons: Path,
-    channel: str,
     slug: str,
     frontmatter: dict,
     body: str = "x\n",
 ) -> Path:
+    """Write a flat-corpus v2 lesson file. Frontmatter dict is dumped as-is."""
     fm_text = yaml.safe_dump(frontmatter, sort_keys=False).strip()
-    path = lessons / channel / f"{slug}.md"
+    path = lessons / f"{slug}.md"
     path.write_text(f"---\n{fm_text}\n---\n\n{body}")
     return path
 
@@ -181,11 +180,12 @@ def test_idempotency_consumes_already_cited_observations(monkeypatch, tmp_path: 
     ctx = _isolate(monkeypatch, tmp_path)
     _write_lesson(
         ctx["lessons"],
-        "tradecraft",
         "existing",
         {
+            "name": "existing",
             "techniques": ["T1078"],
             "actor_type": ["internal"],
+            "mutable": False,
             "relevance_criteria": "x",
             "recorded_at": "old",
             "source_observation_ids": ["a/0"],
@@ -193,7 +193,7 @@ def test_idempotency_consumes_already_cited_observations(monkeypatch, tmp_path: 
     )
     # Pre-flight requires lessons-actor/ to be git-clean.
     subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/tradecraft/existing.md"],
+        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/existing.md"],
         check=True,
     )
     subprocess.run(
@@ -314,10 +314,10 @@ def test_result_partition_rejects_missing_observation(monkeypatch, tmp_path: Pat
 def test_post_flight_rejects_missing_generation_trailer(monkeypatch, tmp_path: Path):
     ctx = _isolate(monkeypatch, tmp_path)
     # Land a commit inside lessons-actor with no trailers.
-    p = ctx["lessons"] / "tradecraft" / "x.md"
+    p = ctx["lessons"] / "x.md"
     p.write_text("hello\n")
     subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/tradecraft/x.md"],
+        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
         check=True,
     )
     subprocess.run(
@@ -330,10 +330,10 @@ def test_post_flight_rejects_missing_generation_trailer(monkeypatch, tmp_path: P
 
 def test_post_flight_accepts_correct_trailers(monkeypatch, tmp_path: Path):
     ctx = _isolate(monkeypatch, tmp_path)
-    p = ctx["lessons"] / "tradecraft" / "x.md"
+    p = ctx["lessons"] / "x.md"
     p.write_text("hello\n")
     subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/tradecraft/x.md"],
+        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
         check=True,
     )
     msg = "lesson batch\n\nGeneration: 1\nActor-Model: claude-sonnet-4-6\n"
@@ -365,10 +365,10 @@ def test_post_flight_rejects_no_commit_result_when_head_changed(
 ):
     ctx = _isolate(monkeypatch, tmp_path)
     pre_agent_head = aa.git_head_sha()
-    p = ctx["lessons"] / "tradecraft" / "x.md"
+    p = ctx["lessons"] / "x.md"
     p.write_text("hello\n")
     subprocess.run(
-        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/tradecraft/x.md"],
+        ["git", "-C", str(ctx["repo"]), "add", "defender/lessons-actor/x.md"],
         check=True,
     )
     msg = "lesson batch\n\nGeneration: 1\nActor-Model: claude-sonnet-4-6\n"
@@ -399,7 +399,7 @@ def test_actor_generation_count_ignores_pre_author_commits(
     templates) must NOT advance the counter — only commits carrying the
     Actor-Model: trailer do."""
     ctx = _isolate(monkeypatch, tmp_path)
-    pre = ctx["lessons"] / "environment" / "_TEMPLATE.md"
+    pre = ctx["lessons"] / "_TEMPLATE.md"
     pre.write_text("template\n")
     subprocess.run(
         ["git", "-C", str(ctx["repo"]), "add", str(pre.relative_to(ctx["repo"]))],
@@ -417,7 +417,7 @@ def test_actor_generation_count_increments_with_prior_author_commits(
 ):
     ctx = _isolate(monkeypatch, tmp_path)
     for i in range(2):
-        p = ctx["lessons"] / "tradecraft" / f"gen{i}.md"
+        p = ctx["lessons"] / f"gen{i}.md"
         p.write_text("x\n")
         subprocess.run(
             ["git", "-C", str(ctx["repo"]), "add", str(p.relative_to(ctx["repo"]))],
@@ -492,52 +492,50 @@ def test_rotate_queue_preserves_held_and_appends_consumed(
 # ---------------------------------------------------------------------------
 
 
-def test_index_cli_hides_stale_env_by_default(monkeypatch, tmp_path: Path):
+def test_index_cli_hides_stale_lessons_by_default(monkeypatch, tmp_path: Path):
     """The runtime actor uses lessons_actor_index.py; stale lessons must
-    not be surfaced unless --include-stale is passed."""
+    not be surfaced unless --include-stale is passed. v2: stale-hiding
+    applies to any mutable=true lesson, not just env-channel."""
     ctx = _isolate(monkeypatch, tmp_path)
     _write_lesson(
         ctx["lessons"],
-        "environment",
         "live-claim",
         {
-            "actor_type": ["internal"],
+            "name": "live-claim",
             "subject": "docker-auditing",
+            "actor_type": ["internal"],
+            "mutable": True,
+            "status": "live",
             "relevance_criteria": "live one",
             "recorded_at": "r1",
-            "status": "live",
             "source_observation_ids": ["r1/0"],
         },
     )
     _write_lesson(
         ctx["lessons"],
-        "environment",
         "stale-claim",
         {
-            "actor_type": ["internal"],
+            "name": "stale-claim",
             "subject": "docker-auditing",
-            "relevance_criteria": "stale one",
-            "recorded_at": "r0",
+            "actor_type": ["internal"],
+            "mutable": True,
             "status": "stale",
             "superseded_by": "live-claim",
+            "relevance_criteria": "stale one",
+            "recorded_at": "r0",
             "source_observation_ids": ["r0/0"],
         },
     )
     script = (
         Path(__file__).resolve().parents[1] / "scripts" / "lessons_actor_index.py"
     )
-    # Stage a fake repo layout so the script's LESSONS_ROOT
-    # (= parents[2]/defender/lessons-actor) resolves under our tmp repo.
-    # Easiest: symlink the script into ctx["repo"]/defender/scripts/, and
-    # invoke via subprocess so the script's own .venv reexec doesn't fire.
     fake_scripts = ctx["repo"] / "defender" / "scripts"
     fake_scripts.mkdir(parents=True, exist_ok=True)
     (fake_scripts / "lessons_actor_index.py").write_text(script.read_text())
 
     def _run(extra: list[str]) -> str:
         proc = subprocess.run(
-            [sys.executable, str(fake_scripts / "lessons_actor_index.py"),
-             "--channel", "environment", *extra],
+            [sys.executable, str(fake_scripts / "lessons_actor_index.py"), *extra],
             capture_output=True,
             text=True,
             check=True,

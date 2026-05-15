@@ -5,16 +5,24 @@ Cheap discovery primitive for the actor stage: prints one
 `<path>\\t<relevance_criteria>` line per lesson that passes the filters,
 so the actor scans descriptions before deciding which files to Read.
 
-Usage:
-    lessons_actor_index.py --channel tradecraft --actor-type internal \\
-        --techniques T1078.004,T1550.001
-    lessons_actor_index.py --channel environment --actor-type external
+v2 (schema-v2): one flat corpus at ``defender/lessons-actor/*.md``.
+No channel split. Filters compose AND across keys, OR within a key.
+``actor_type`` is a soft annotation only — never a filter (see
+``defender/docs/lessons-actor-schema-v2.md`` §Lesson shape).
 
-Filters are AND-combined. `--techniques` is OR within the list.
-Lessons missing a filtered field are skipped silently. Environment
-lessons with `status: stale` are hidden by default; `--include-stale`
-surfaces them (author-only — the runtime actor must never see stale
-env claims).
+Usage:
+    lessons_actor_index.py                                # whole corpus (live only)
+    lessons_actor_index.py --techniques T1078.004,T1550.001
+    lessons_actor_index.py --alert-rule-ids 5712,5710
+    lessons_actor_index.py --defender-lead-tags wazuh.auth-events-by-srcip
+    lessons_actor_index.py --subject wazuh-rule-5712-threshold
+    lessons_actor_index.py --include-stale                # author-only
+    lessons_actor_index.py --show-actor-type              # add actor_type column
+
+Lessons missing a filtered field are skipped silently. Lessons with
+``status: stale`` (only meaningful when ``mutable: true``) are hidden
+by default; ``--include-stale`` surfaces them. The runtime actor must
+never see stale claims.
 """
 from __future__ import annotations
 
@@ -36,7 +44,6 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LESSONS_ROOT = REPO_ROOT / "defender" / "lessons-actor"
-CHANNELS = ("tradecraft", "environment")
 
 
 def _parse_frontmatter(text: str) -> dict | None:
@@ -60,11 +67,14 @@ def _as_list(v) -> list:
     return [v]
 
 
-def iter_lessons(channel: str):
-    chan_dir = LESSONS_ROOT / channel
-    if not chan_dir.is_dir():
+def _as_str_set(v) -> set[str]:
+    return {str(x) for x in _as_list(v)}
+
+
+def iter_lessons():
+    if not LESSONS_ROOT.is_dir():
         return
-    for path in sorted(chan_dir.glob("*.md")):
+    for path in sorted(LESSONS_ROOT.glob("*.md")):
         if path.name.startswith("_"):
             continue
         fm = _parse_frontmatter(path.read_text())
@@ -74,33 +84,58 @@ def iter_lessons(channel: str):
         yield path, fm
 
 
+def _csv_set(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {t.strip() for t in value.split(",") if t.strip()}
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--channel", required=True, choices=CHANNELS)
-    ap.add_argument("--actor-type", choices=("internal", "external"))
-    ap.add_argument("--techniques", help="Comma-separated MITRE T-IDs; matches if any appear in the lesson's techniques: list")
-    ap.add_argument("--include-stale", action="store_true", help="Include env lessons with status: stale (author-only)")
+    ap.add_argument("--techniques", help="Comma-separated MITRE T-IDs; OR within the list")
+    ap.add_argument("--alert-rule-ids", help="Comma-separated SIEM rule IDs; OR within the list")
+    ap.add_argument("--defender-lead-tags", help="Comma-separated lead-template tags ({system}.{kebab-name}); OR within the list")
+    ap.add_argument("--subject", help="Exact subject match (single value — subject is the equivalence key)")
+    ap.add_argument("--include-stale", action="store_true", help="Include lessons with status: stale (author-only)")
+    ap.add_argument("--show-actor-type", action="store_true", help="Append actor_type as an extra tab-separated column")
     ns = ap.parse_args(argv[1:])
 
-    want_techniques = set()
-    if ns.techniques:
-        want_techniques = {t.strip() for t in ns.techniques.split(",") if t.strip()}
+    want_techniques = _csv_set(ns.techniques)
+    want_rule_ids = _csv_set(ns.alert_rule_ids)
+    want_lead_tags = _csv_set(ns.defender_lead_tags)
+    want_subject = ns.subject.strip() if ns.subject else None
 
-    for path, fm in iter_lessons(ns.channel):
-        if ns.channel == "environment" and not ns.include_stale:
+    for path, fm in iter_lessons():
+        # Stale filter (default hide; mutable=false lessons never have
+        # status=stale, so they pass through unconditionally).
+        if not ns.include_stale:
             if str(fm.get("status") or "live").strip() == "stale":
                 continue
-        if ns.actor_type:
-            if ns.actor_type not in _as_list(fm.get("actor_type")):
+
+        # Subject is the equivalence key — exact match only when filter set.
+        if want_subject is not None:
+            if str(fm.get("subject") or "").strip() != want_subject:
                 continue
+
+        # Multi-key filters: AND across, OR within.
         if want_techniques:
-            have = set(_as_list(fm.get("techniques")))
-            if have.isdisjoint(want_techniques):
+            if _as_str_set(fm.get("techniques")).isdisjoint(want_techniques):
                 continue
+        if want_rule_ids:
+            if _as_str_set(fm.get("alert_rule_ids")).isdisjoint(want_rule_ids):
+                continue
+        if want_lead_tags:
+            if _as_str_set(fm.get("defender_lead_tags")).isdisjoint(want_lead_tags):
+                continue
+
         criteria = fm.get("relevance_criteria") or ""
         criteria = str(criteria).strip().replace("\t", " ").replace("\n", " ")
         rel = path.relative_to(REPO_ROOT)
-        print(f"{rel}\t{criteria}")
+        if ns.show_actor_type:
+            actor_type = ",".join(_as_list(fm.get("actor_type"))) or "-"
+            print(f"{rel}\t{criteria}\t{actor_type}")
+        else:
+            print(f"{rel}\t{criteria}")
     return 0
 
 

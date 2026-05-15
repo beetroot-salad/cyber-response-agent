@@ -23,9 +23,11 @@ Mirrors ``defender/learning/author.py`` but works on the actor side:
   Agent invocation (Claude Code, file-edit + Bash tools):
     Hand the remaining observations + generation + actor_model to the
     curator agent (``author_actor.md``). It enumerates existing
-    lessons, decides new/fold/skip per observation, runs the channel
-    test, performs contradiction-with-replacement on env, commits with
-    the required Generation/Actor-Model trailers, and emits a final
+    lessons, decomposes observations into env-fact + pattern halves
+    where applicable, decides fold/supersede/new/skip per resulting
+    lesson, performs contradiction-with-replacement on mutable lessons,
+    cross-links via ``applies_to``, commits with the required
+    Generation/Actor-Model trailers, and emits a final
     ``AUTHOR_RESULT: {...}`` line.
 
   Post-flight (Python):
@@ -40,8 +42,8 @@ Mirrors ``defender/learning/author.py`` but works on the actor side:
        consumed rows append to actor_observations.consumed.jsonl with
        category + consumed_at + commit_sha.
 
-The agent owns the channel-test, fold/new judgment, and the env
-invalidation flow; this module enforces the transaction envelope.
+The agent owns decomposition, fold/supersede/new judgment, and
+mutability/staleness flow; this module enforces the transaction envelope.
 """
 from __future__ import annotations
 
@@ -158,34 +160,31 @@ _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)
 def existing_observation_ids() -> set[str]:
     """Union of source_observation_ids across all actor lessons.
 
-    Walks both ``tradecraft/`` and ``environment/`` directories. Lessons
-    missing the field or with a non-list value are skipped silently.
+    Walks the flat ``defender/lessons-actor/`` corpus (v2 schema; no
+    channel subdirs). Lessons missing the field or with a non-list value
+    are skipped silently.
     """
     ids: set[str] = set()
     if not LESSONS_ACTOR_DIR.is_dir():
         return ids
-    for channel in ("tradecraft", "environment"):
-        chan_dir = LESSONS_ACTOR_DIR / channel
-        if not chan_dir.is_dir():
+    for path in sorted(LESSONS_ACTOR_DIR.glob("*.md")):
+        if path.name.startswith("_"):
             continue
-        for path in sorted(chan_dir.glob("*.md")):
-            if path.name.startswith("_"):
-                continue
-            text = path.read_text()
-            m = _FRONTMATTER_RE.match(text)
-            if not m:
-                continue
-            try:
-                doc = yaml.safe_load(m.group(1))
-            except yaml.YAMLError:
-                continue
-            if not isinstance(doc, dict):
-                continue
-            sids = doc.get("source_observation_ids") or []
-            if isinstance(sids, list):
-                for sid in sids:
-                    if isinstance(sid, str):
-                        ids.add(sid)
+        text = path.read_text()
+        m = _FRONTMATTER_RE.match(text)
+        if not m:
+            continue
+        try:
+            doc = yaml.safe_load(m.group(1))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        sids = doc.get("source_observation_ids") or []
+        if isinstance(sids, list):
+            for sid in sids:
+                if isinstance(sid, str):
+                    ids.add(sid)
     return ids
 
 
@@ -243,10 +242,8 @@ def invoke_agent(
         "Bash(git rev-parse:*),Bash(git status:*),Bash(git diff:*),"
         "Bash(git log:*),"
         f"Bash({verifier_py} defender/learning/verify_forward_actor.py:*),"
-        "Bash(rm defender/lessons-actor/tradecraft/*.md),"
-        "Bash(rm defender/lessons-actor/environment/*.md),"
-        f"Bash(rm {LESSONS_ACTOR_DIR}/tradecraft/*.md),"
-        f"Bash(rm {LESSONS_ACTOR_DIR}/environment/*.md)"
+        "Bash(rm defender/lessons-actor/*.md),"
+        f"Bash(rm {LESSONS_ACTOR_DIR}/*.md)"
     )
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     try:

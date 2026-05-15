@@ -4,37 +4,40 @@ Your corpus serves the *actor* at story-write time, so lessons are attacker-fram
 
 You will receive an observations JSON array plus a few commit-trailer values in the user prompt. Field names there are self-describing; if a row is unclear, read the source bundle at `{source_run_dir}` (`actor_story.md`, `projected_telemetry.yaml`, `judge_findings.yaml`, `actor_trace.jsonl`).
 
-## Channels
+## Lesson shape
 
-- `tradecraft/*.md` — failure-only lessons keyed by MITRE technique IDs. Frontmatter: `techniques` (list), `actor_type` (list of `internal`/`external`), `relevance_criteria` (one line), `recorded_at` (run_id), `source_observation_ids`.
-- `environment/*.md` — attacker-framed facts about the deployment. Frontmatter: `actor_type`, `subject` (kebab-case equivalence key), `relevance_criteria`, `recorded_at`, `status` (`live`/`stale`, default `live`), `superseded_by` (slug of newer lesson on stale entries, omitted otherwise), `source_observation_ids`.
+One flat corpus at `defender/lessons-actor/*.md`. No subdirectories. Each lesson is a frontmatter+body markdown file; full schema is in `defender/lessons-actor/_TEMPLATE.md` and the design doc at `defender/docs/lessons-actor-schema-v2.md`.
 
-Classify each observation:
+Two lesson shapes share the schema:
 
-- **tradecraft** — load-bearing point is about *story shape*: what the actor attempted, blended into, or framed as. Tagged with the MITRE techniques the actor cited in Section 0 of `{source_run_dir}/actor_story.md` (or the closest technique that names the pattern).
-- **environment** — load-bearing point is about *what the deployment actually produces*: audit artifacts, schedule windows, ambient noise, telemetry shapes, authorization patterns. `subject` is a kebab-case slug naming the world-fact.
+- **Env-fact lessons.** Body asserts a property of a specific deployment referent ("Wazuh rule 5712 fires at 10 failures / 120s per source-IP/destination pair"; "auditd does not capture stdin"). Frontmatter requires `subject:` (the equivalence key — see below) and `mutable: true`. `alert_rule_ids` and `defender_lead_tags` are usually filled in.
+- **Pattern lessons.** Body describes an attacker shape that fails or succeeds against the deployment ("staggering the spray below the volume detector still surfaces if creds are in the breach corpus"). Frontmatter requires `techniques:` and `mutable: false`. `subject:` is omitted unless the pattern is bound to one specific deployment referent. `applies_to:` lists the env-fact subjects the pattern exploits or is bounded by.
 
-If an observation carries both a tradecraft claim and an environment claim, split it into one lesson per channel, each citing the same `observation_id` in `source_observation_ids`.
+`subject` is the smallest independently-mutable deployment referent the lesson is about. Two lessons with the same subject **must** be reconciled — fold them or supersede one with the other. Granularity rule: if a single config diff would invalidate the lesson, that's the subject's scope. `subject: falco-shell-in-container-rule` ✓; `subject: falco` (too coarse, would force-fold heterogeneous facts) ✗; `subject: stagger-the-spray` (pattern, not a referent) ✗.
+
+`actor_type` is a soft annotation only — do not use it as a hard filter when authoring or reviewing. Env-fact lessons are usually `[external, internal]`.
 
 ## Workflow
 
 For each observation, in order:
 
-1. **Enumerate the relevant channel** — `Glob` the channel directory, read each frontmatter's `relevance_criteria` (and `subject` for env). If any description looks plausibly related, read the body before deciding.
+1. **Enumerate the corpus.** `Glob defender/lessons-actor/*.md`, read each frontmatter (`name`, `subject` if present, `techniques`, `relevance_criteria`). For any candidate that looks plausibly related, read the body before deciding.
 
-2. **Default: fold.** If an existing lesson in the right channel covers this pattern, rewrite the body holistically to subsume both teachings; append the new `observation_id` to `source_observation_ids`; broaden `relevance_criteria` if scope grew. Folding only applies within a channel.
+2. **Decompose first.** Most observations carry both an env-fact half (a deployment property the failure depends on) and a pattern half (the cover/bypass shape that exploits or is bounded by the property). Default action: author both, link the pattern's `applies_to` to the env-fact's subject, cite the same `observation_id` in both files. Decomposition is not an exception for "both signals are present" — it's the default, because most failures span both halves.
 
-3. **Fallback: new.** Only if nothing in the channel covers it, write `defender/lessons-actor/{channel}/{slug}.md` with the channel's frontmatter. `source_observation_ids` starts as `[{observation_id}]`. For new env lessons, do **contradiction-with-replacement**: any existing `live` env lesson with the same `subject` gets flipped to `status: stale` with `superseded_by: {new-slug}`.
+3. **For each lesson the decomposition produces, decide:**
+   - **Fold** — an existing lesson with the same `subject` (env-fact) or with overlapping `techniques` + body content (pattern) already covers this teaching. Rewrite the body holistically to subsume both teachings, append the new `observation_id` to `source_observation_ids`, broaden `relevance_criteria` if scope grew. Folding is corpus-wide, not channel-scoped.
+   - **Supersede** — an existing `mutable: true` lesson with the same `subject` is contradicted by this observation. Author the new lesson, flip the old one to `status: stale, superseded_by: {new-name}`. If the new world-fact isn't clear enough to author a replacement, do a stale-only flip (drop `superseded_by`); if no existing live lesson on that subject, route the observation to `consumed_skip` with reason `stale_no_live_target`.
+   - **New** — no existing lesson covers it. Write `defender/lessons-actor/{name}.md` per the template. `source_observation_ids` starts as `[{observation_id}]`. For env-facts, `subject` is required; pick the granularity carefully and check no live lesson already uses it (would be a Fold/Supersede instead).
+   - **Skip** — low signal or doesn't generalize. Note the reason in your final report; do not write a file.
 
-4. **Env stale-only flip.** If an observation reports that an existing `live` env lesson is no longer true *and* the new world-fact isn't clear enough to author a replacement, flip the contradicted lesson to `status: stale` and omit `superseded_by`. If no existing live lesson on that subject, route the observation to `consumed_skip` with reason `stale_no_live_target`.
-
-5. **Skip.** Low signal or doesn't generalize. Note the reason in your final report; do not write a file.
+4. **Cross-link, don't fold across shapes.** A pattern lesson and an env-fact lesson on the same situation are complementary — link the pattern's `applies_to` to the env-fact's subject. Do not merge them into one file.
 
 `judge_outcome` (`caught` / `incoherent` / `survived` / `undecidable`) is one signal among the row's fields — useful color, not a gate.
 
-### Deleting stale env lessons
+### Deleting stale lessons
 
-When you flip an env lesson to stale and the same `subject` already has another stale predecessor, delete the older stale file with `rm` and record it in the commit message under `Environment removed:`. Rules: (a) only delete env lessons in `status: stale`; never delete a `live` lesson or anything under `tradecraft/`; (b) deletion has to be a side effect of authoring this batch — don't prune unrelated stale files.
+When you flip a `mutable: true` lesson to stale and the same `subject` already has another stale predecessor, delete the older stale file with `rm` and record it in the commit message under `Removed:`. Rules: (a) only delete lessons with `status: stale`; never delete a `live` lesson; (b) deletion has to be a side effect of authoring this batch — don't prune unrelated stale files; (c) `mutable: false` pattern lessons are append-only and never deleted.
 
 ## Forward check
 
@@ -55,18 +58,21 @@ Stale-only flips don't need a forward check — there's no new body to evaluate.
 
 For folds where one observation produces GOOD and another BAD on the same target file, keep the GOOD edit and skip the BAD one. Each observation is gated independently.
 
+When decomposing into an env-fact + pattern pair, gate each file independently. If the env-fact passes and the pattern fails, keep the env-fact and route the pattern half to `consumed_skip`; the next batch can revisit. The observation is still considered `committed` if any file derived from it lands.
+
 ## Discipline
 
-- One file per lesson. Flat layout within each channel. No subdirectories.
-- Bodies are short — tradecraft's three short paragraphs are the ceiling; environment is one short paragraph. Strip preamble; lead with the claim.
+- One file per lesson. Flat layout under `defender/lessons-actor/`. No subdirectories.
+- Bodies are short — three short paragraphs is the ceiling for pattern lessons; one short paragraph for env-fact lessons. Strip preamble; lead with the claim.
 - Don't reference the observation text verbatim. Rewrite for the future actor who will consult the lesson without seeing the source case.
-- Don't add fields beyond what the templates carry. Retrieval surface is `relevance_criteria` (+ `techniques` / `actor_type` / `subject`); everything else is bookkeeping.
+- Don't add fields beyond what the template carries. Retrieval surface is `relevance_criteria` (+ `subject` / `techniques` / `alert_rule_ids` / `defender_lead_tags`); everything else is bookkeeping.
+- Filename matches `name`. For env-fact lessons, `name == subject` is the natural shape; you may diverge if a more readable name is warranted.
 
 ## Commit
 
 After processing every observation:
 
-1. `git add` each touched file explicitly (new files + status flips). Never `git add .`.
+1. `git add` each touched file explicitly (new files + status flips + deletes). Never `git add .`.
 2. `git commit -m "{message}" -- {each-touched-path}` — pass the same paths to `git commit` with `--` pathspec to scope the commit to your edits only. Use this message shape:
 
 ```
@@ -76,16 +82,18 @@ Source runs:
 - {run_id_1}
 - {run_id_2}
 
-Tradecraft new: {slug-1}, {slug-2}
-Tradecraft folded: {slug-3} (added {observation_id})
-Environment new: {slug-4} (subject={subject-1})
-Environment stale: {slug-5} (subject={subject-1}, superseded_by={slug-4})
-Environment stale-only: {slug-6} (subject={subject-2})
-Environment removed: {slug-7}
+New: {name-1}, {name-2}
+Folded: {name-3} (added {observation_id})
+Decomposed: {observation_id} → {env-name}, {pattern-name}
+Stale: {name-5} (subject={subject-1}, superseded_by={name-4})
+Stale-only: {name-6} (subject={subject-2})
+Removed: {name-7}
 
 Generation: {generation}
 Actor-Model: {actor_model}
 ```
+
+Omit any `New: / Folded: / Decomposed: / Stale: / Stale-only: / Removed:` line if it would be empty.
 
 The `Generation:` and `Actor-Model:` trailers are mandatory on any commit — the secondary metric harness reads them at replay time. Both go on their own lines at the bottom of the message. Substitute the exact integer and model id from the user prompt.
 
@@ -99,4 +107,4 @@ After committing (or deciding not to), emit a single JSON object on its own line
 AUTHOR_RESULT: {"committed": ["{observation_id}", ...], "consumed_skip": [{"observation_id": "...", "reason": "..."}], "commit_sha": "{sha}" or null}
 ```
 
-Every observation from the input must appear in exactly one of `committed` or `consumed_skip`. `commit_sha` is the HEAD sha after your commit, or `null` if you skipped the commit step. The orchestrator verifies HEAD touches only `defender/lessons-actor/**/*.md` and that the commit message contains the expected `Generation:` and `Actor-Model:` trailers — emitting a bogus sha or skipping the trailers fails the run and the queue stays intact for retry.
+Every observation from the input must appear in exactly one of `committed` or `consumed_skip`. `commit_sha` is the HEAD sha after your commit, or `null` if you skipped the commit step. The orchestrator verifies HEAD touches only `defender/lessons-actor/*.md` and that the commit message contains the expected `Generation:` and `Actor-Model:` trailers — emitting a bogus sha or skipping the trailers fails the run and the queue stays intact for retry.
