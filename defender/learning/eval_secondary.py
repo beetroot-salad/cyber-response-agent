@@ -377,10 +377,17 @@ def run_frozen_actor(
     staging_dir: Path,
     worktree: Path,
     pin: GenerationPin,
+    case_id: str,
     *,
     runner: "subprocess._RunFn" = subprocess.run,
 ) -> Path:
-    """Invoke replay_actor.py in the gen-{N-K} worktree. Returns staging."""
+    """Invoke replay_actor.py in the gen-{N-K} worktree. Returns staging.
+
+    ``case_id`` is the *stable* identifier (no attempt suffix) used to
+    seed the actor menu/archetype, so reruns of the same
+    (generation, alert) sample identically. The staging dir name is
+    allowed to carry a per-attempt suffix for filesystem uniqueness.
+    """
     staging_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(head_run_dir / "alert.json", staging_dir / "alert.json")
     shutil.copy2(
@@ -399,6 +406,7 @@ def run_frozen_actor(
             str(python),
             str(worktree / "defender" / "learning" / "replay_actor.py"),
             str(staging_dir),
+            "--case-id", case_id,
         ],
         cwd=str(worktree),
         env=env,
@@ -434,12 +442,19 @@ def run_head_oracle_and_judge(
     lead_seq_text = lead_seq_path.read_text()
     exemplar_bundle = loop_mod.assemble_exemplar_bundle(head_run_dir, lead_seq_text)
 
-    oracle_yaml = loop_mod.invoke_oracle(
-        head_run_dir / "alert.json",
-        actor_story_path,
-        lead_seq_path,
-        exemplar_bundle,
-    )
+    # Wrap invoke_oracle/invoke_judge themselves — they raise LoopError
+    # on subprocess rc!=0 / timeout, which would otherwise escape the
+    # per-alert handler in run_secondary() and abort the harness
+    # mid-loop with no summary written.
+    try:
+        oracle_yaml = loop_mod.invoke_oracle(
+            head_run_dir / "alert.json",
+            actor_story_path,
+            lead_seq_path,
+            exemplar_bundle,
+        )
+    except loop_mod.LoopError as e:
+        raise SecondaryError(f"oracle invocation failed: {e}") from e
     oracle_stripped = loop_mod.strip_yaml_fence(oracle_yaml)
     expected_positions = [
         e.get("position")
@@ -453,12 +468,15 @@ def run_head_oracle_and_judge(
     projected_path = staging_dir / "projected_telemetry.yaml"
     projected_path.write_text(oracle_stripped)
 
-    judge_yaml = loop_mod.invoke_judge(
-        head_run_dir / "alert.json",
-        head_run_dir / "investigation.md",
-        actor_story_path,
-        projected_path,
-    )
+    try:
+        judge_yaml = loop_mod.invoke_judge(
+            head_run_dir / "alert.json",
+            head_run_dir / "investigation.md",
+            actor_story_path,
+            projected_path,
+        )
+    except loop_mod.LoopError as e:
+        raise SecondaryError(f"judge invocation failed: {e}") from e
     judge_stripped = loop_mod.strip_yaml_fence(judge_yaml)
     (staging_dir / "judge_findings.yaml").write_text(judge_stripped)
     try:
@@ -669,6 +687,10 @@ def run_secondary(
             ground_truth=alert.ground_truth["disposition"],
             status="failed",
         )
+        # Stable case_id (no attempt suffix) for actor seeding —
+        # decoupled from the per-attempt run dir so reruns of the same
+        # (generation, alert) sample the identical menu/archetype.
+        case_id = f"sec-eval-gen{n_committed}-{alert.slug}"
         try:
             head_run_dir = run_head_defender(alert, run_id, runs_base)
             result.head_run_dir = str(head_run_dir)
@@ -678,9 +700,20 @@ def run_secondary(
                 result.status = "not_executed"
                 summary.results.append(result)
                 continue
+            if head_disp not in ELIGIBLE_DISPOSITIONS:
+                # Missing report.md / unparseable frontmatter / non-enum
+                # disposition. A broken HEAD run mustn't smuggle bogus
+                # rows into the metric — record as failed and skip the
+                # actor/oracle/judge stages.
+                result.error = (
+                    f"HEAD defender produced no eligible disposition "
+                    f"(got {head_disp!r})"
+                )
+                summary.results.append(result)
+                continue
 
             staging = runs_base / f"{run_id}-replay"
-            run_frozen_actor(head_run_dir, staging, worktree, pin)
+            run_frozen_actor(head_run_dir, staging, worktree, pin, case_id)
             result.replay_run_dir = str(staging)
             outcome = run_head_oracle_and_judge(head_run_dir, staging, loop_mod)
             result.judge_outcome = outcome

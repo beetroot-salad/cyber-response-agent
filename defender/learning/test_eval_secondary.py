@@ -300,6 +300,75 @@ def test_write_summary_emits_md_per_alert_json_and_index_jsonl(tmp_path: Path):
     assert rows[0]["catch_rate"] == 1.0
 
 
+def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
+    """Stable --case-id keeps actor seed constant across attempt-suffixed staging dirs.
+
+    Loads ``replay_actor.py`` directly, stubs out the heavy bits
+    (lead-sequence parsing it does itself, loop.invoke_actor /
+    project_actor / dump_actor_yaml), and asserts that the seed
+    captured during the invoke_actor call corresponds to the
+    ``--case-id`` value rather than ``staging.name``. This is the
+    invariant that protects catch rate from per-attempt noise.
+    """
+    replay = _load("replay_actor_t", _HERE / "replay_actor.py")
+
+    captured: dict = {}
+
+    class FakeLoop:
+        class LoopError(Exception):
+            pass
+
+        @staticmethod
+        def _actor_seed(run_id):
+            return f"seed-of-{run_id}"
+
+        @staticmethod
+        def invoke_actor(alert_path, actor_input_path, learning_run_dir):
+            # Mirrors the real signature; record what the seed
+            # function returns under the active override so the test
+            # can assert it's the *case_id* version, not staging.name.
+            captured["seed"] = fake_loop._actor_seed(learning_run_dir.name)
+            captured["learning_run_dir"] = str(learning_run_dir)
+            return "STORY\n"
+
+    fake_loop = FakeLoop()
+
+    class FakePLS:
+        @staticmethod
+        def project_actor(doc):
+            return doc
+
+        @staticmethod
+        def dump_actor_yaml(doc):
+            return "case_id: " + doc["case_id"] + "\n"
+
+    def fake_load_sibling(name, path):
+        if name.endswith("loop_replay"):
+            return fake_loop
+        return FakePLS()
+
+    import yaml as _yaml
+    staging = tmp_path / "stage-with-attempt-aaaaaaaa"
+    staging.mkdir()
+    (staging / "alert.json").write_text("{}")
+    (staging / "lead_sequence.yaml").write_text(
+        _yaml.safe_dump({"case_id": "ignored", "entries": []})
+    )
+
+    import unittest.mock as mock
+    with mock.patch.object(replay, "_load_sibling", side_effect=fake_load_sibling):
+        rc = replay.main([str(staging), "--case-id", "sec-eval-gen4-b01"])
+
+    assert rc == 0
+    assert (staging / "actor_story.md").read_text() == "STORY\n"
+    # The seed must reflect the stable case_id, NOT the attempt-suffixed
+    # staging dir name. (Real invoke_actor seeds from
+    # learning_run_dir.name; the override in replay_actor.py reroutes
+    # that to case_id, so the seed string passed to the captured
+    # invoke_actor matches the stable id.)
+    assert captured["seed"] == "seed-of-sec-eval-gen4-b01"
+
+
 def test_write_summary_appends_to_existing_index(tmp_path: Path):
     out = tmp_path / "eval-out"
     s1 = sec.SecondarySummary(

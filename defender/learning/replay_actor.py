@@ -56,6 +56,11 @@ def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("staging_dir", help="dir containing alert.json + lead_sequence.yaml")
+    p.add_argument("--case-id", default=None,
+                   help="stable case id for actor seed/menu/archetype "
+                        "(defaults to staging_dir.name). The harness should "
+                        "pass a value that does NOT include per-attempt "
+                        "suffixes so reruns sample the same menu.")
     ns = p.parse_args(argv)
 
     staging = Path(ns.staging_dir).resolve()
@@ -88,21 +93,34 @@ def main(argv: list[str]) -> int:
         print("lead_sequence.yaml missing top-level entries list", file=sys.stderr)
         return 2
 
-    # Re-stamp case_id to this staging dir so the actor's seed is
-    # derived from the replay run id (not the HEAD defender run id),
-    # giving a stable per-(generation, alert) menu/archetype.
+    # Re-stamp case_id to the caller-supplied stable id so the actor's
+    # seed/menu/archetype is keyed on (generation, alert) — independent
+    # of the staging dir name, which carries a per-attempt suffix so
+    # filesystem dirs don't collide across reruns. Without this split,
+    # retry identity would perturb catch rate.
+    case_id = ns.case_id or staging.name
     full_doc = dict(full_doc)
-    full_doc["case_id"] = staging.name
+    full_doc["case_id"] = case_id
     full_doc.setdefault("alert_ref", "alert.json")
 
     actor_input = staging / "actor_input.yaml"
     actor_input.write_text(pls.dump_actor_yaml(pls.project_actor(full_doc)))
 
+    # invoke_actor seeds menu/archetype from learning_run_dir.name —
+    # but in replay we want the seed keyed on the stable case_id
+    # (independent of any per-attempt suffix in the staging dir name).
+    # Pin the seed by overriding _actor_seed for the duration of the
+    # call; all other actor artifacts (archetype, menu, story,
+    # transcript) still land in `staging` as the harness expects.
+    original_seed = loop._actor_seed
+    loop._actor_seed = lambda _run_id, _stable=case_id: original_seed(_stable)
     try:
         story = loop.invoke_actor(alert, actor_input, staging)
     except loop.LoopError as e:
         print(f"actor invocation failed: {e}", file=sys.stderr)
         return 2
+    finally:
+        loop._actor_seed = original_seed
 
     (staging / "actor_story.md").write_text(story)
     return 0
