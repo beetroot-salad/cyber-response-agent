@@ -78,6 +78,7 @@ temp/
 
 # Defender learning-loop ephemeral state — never committed.
 defender/learning/_pending/
+defender/learning/_pending_leads/
 defender/learning/runs/
 defender/learning/eval/results/
 defender/learning/eval/_tmp/

@@ -52,6 +52,15 @@ LEARNING_FILES = (
     "author.md",
     "verify_forward.py",
     "verify_forward.md",
+    # PR 1 — Tier 1 gate
+    "customization_test.py",
+    "customization_prompt.md",
+    "lead_tier1.py",
+    # PR 2 — lead-author skill
+    "lead_author.py",
+    "lead_author.md",
+    "lead_extract.py",
+    "lead_neighbors.py",
 )
 
 
@@ -101,6 +110,7 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # ``head_changed_only_lessons`` flags the commit as out-of-scope.
     (repo / ".gitignore").write_text(
         "defender/learning/_pending/\n"
+        "defender/learning/_pending_leads/\n"
         "defender/learning/runs/\n"
         "__pycache__/\n"
     )
