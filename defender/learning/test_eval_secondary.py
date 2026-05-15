@@ -369,6 +369,105 @@ def test_replay_actor_uses_stable_case_id_for_seed(tmp_path: Path):
     assert captured["seed"] == "seed-of-sec-eval-gen4-b01"
 
 
+def test_module_import_does_not_reexec():
+    """Importing eval_secondary as a library must not os.execv.
+
+    The pytest invocation imports this module under the venv's
+    ``python`` console script (no ``3`` suffix). A strict-equality
+    re-exec guard at module top would replace the test collector
+    process with the harness CLI and exit 2. This test pins that the
+    import path is safe — the guard lives behind ``__main__`` only.
+    """
+    # If the guard were at module top, the importlib._load earlier in
+    # this file (or pytest collection) would already have re-exec'd
+    # away. Reaching this line is the assertion.
+    assert sec.__name__.endswith("eval_secondary_t")
+
+
+def test_run_head_oracle_and_judge_converts_oracle_timeout(tmp_path: Path):
+    """A subprocess.TimeoutExpired from invoke_oracle must surface as SecondaryError.
+
+    loop._run_claude wraps subprocess.run with a timeout, so a hung
+    oracle child raises ``subprocess.TimeoutExpired`` (not the loop's
+    LoopError). Earlier rev only caught LoopError; one timeout
+    aborted the whole harness and prevented the summary from being
+    written. This test pins the conversion.
+    """
+    actor_story = tmp_path / "actor_story.md"
+    actor_story.write_text("not a SKIP\n")
+    lead_seq = tmp_path / "lead_sequence.yaml"
+    lead_seq.write_text("entries: []\n")
+    alert = tmp_path / "alert.json"
+    alert.write_text("{}")
+    head_run = tmp_path
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    (staging / "actor_story.md").write_text("not a SKIP\n")
+
+    class FakeLoop:
+        class LoopError(Exception):
+            pass
+
+        @staticmethod
+        def is_skip_story(text):
+            return False
+
+        @staticmethod
+        def assemble_exemplar_bundle(run_dir, lead_text):
+            return ""
+
+        @staticmethod
+        def invoke_oracle(*a, **kw):
+            raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
+
+    with pytest.raises(sec.SecondaryError, match="oracle invocation failed"):
+        sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
+
+
+def test_run_head_oracle_and_judge_converts_judge_timeout(tmp_path: Path):
+    """Same protection for the judge invoke."""
+    head_run = tmp_path
+    (head_run / "alert.json").write_text("{}")
+    (head_run / "investigation.md").write_text("")
+    (head_run / "lead_sequence.yaml").write_text("entries: []\n")
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    (staging / "actor_story.md").write_text("not a SKIP\n")
+
+    valid_oracle = "projections: []\n"
+
+    class FakeLoop:
+        class LoopError(Exception):
+            pass
+
+        @staticmethod
+        def is_skip_story(text):
+            return False
+
+        @staticmethod
+        def assemble_exemplar_bundle(run_dir, lead_text):
+            return ""
+
+        @staticmethod
+        def invoke_oracle(*a, **kw):
+            return valid_oracle
+
+        @staticmethod
+        def strip_yaml_fence(text):
+            return text
+
+        @staticmethod
+        def validate_oracle_doc(doc, positions):
+            return doc
+
+        @staticmethod
+        def invoke_judge(*a, **kw):
+            raise subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
+
+    with pytest.raises(sec.SecondaryError, match="judge invocation failed"):
+        sec.run_head_oracle_and_judge(head_run, staging, FakeLoop)
+
+
 def test_write_summary_appends_to_existing_index(tmp_path: Path):
     out = tmp_path / "eval-out"
     s1 = sec.SecondarySummary(
