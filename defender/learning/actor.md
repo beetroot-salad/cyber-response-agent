@@ -25,15 +25,13 @@ If skipping:
 SKIP: <one-sentence rationale naming which tactic the menu lacks>
 ```
 
-Otherwise, four sections, in order:
+Otherwise, three sections, in order:
 
 **0. Selected techniques.** Table of MITRE IDs chosen from the menu, one-line note per row.
 
 **1. Attack story.** Concrete causal chain — who is doing what, with what access, from where, against what target. Specific actor model consistent with the assigned archetype, specific tooling, specific entry point. Each step references its menu technique by ID inline.
 
-**2. Goal.** What this specific operation achieves end-to-end. Tie to actor model and entry point.
-
-**3. Bypass.** The cover the attacker relies on — what about the operation's artifact set produces routine-looking signal. Attacker terms only; describe what the operation mimics, not what the defender will or won't catch.
+**2. Bypass.** The cover the attacker relies on — what about the operation's artifact set produces routine-looking signal. Attacker terms only; describe what the operation mimics, not what the defender will or won't catch.
 
 ## Tools
 

@@ -1,0 +1,15 @@
+case_id: 20260516T135250Z-live-5710-alert
+alert_ref: alert.json
+entries:
+  - position: 0
+    lead_description:
+      goal: "Characterize the full scope of auth attempts from 172.22.0.10 \u2014 how many distinct usernames, what cadence, and what outcome pattern across all targets in the last 7 days."
+      what_to_characterize:
+        - distinct usernames attempted from srcip 172.22.0.10
+        - attempt cadence and volume (burst vs. periodic)
+        - "auth outcomes (all failures, any successes)"
+        - target hosts reached by this source
+    queries:
+      - id: wazuh.auth-events
+        params: {srcip: 172.22.0.10, window: 7d}
+    result_ref: gather_raw/0.json

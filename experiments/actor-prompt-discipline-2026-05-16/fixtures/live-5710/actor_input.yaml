@@ -1,0 +1,7 @@
+case_id: 20260516T135250Z-live-5710-alert
+alert_ref: alert.json
+entries:
+  - position: 0
+    queries:
+      - id: wazuh.auth-events
+        params: {srcip: 172.22.0.10, window: 7d}
