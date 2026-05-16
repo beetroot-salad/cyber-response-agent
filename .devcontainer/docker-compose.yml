@@ -6,6 +6,11 @@ services:
     build:
       context: ../
       dockerfile: .devcontainer/Dockerfile.dev
+      args:
+        # Team-baseline pins. Override per-machine by setting these in
+        # .devcontainer/.env (gitignored) — no tracked diff required.
+        HCLOUD_VERSION: ${HCLOUD_VERSION:-1.62.2}
+        CODEX_VERSION: ${CODEX_VERSION:-0.128.0}
     container_name: response-devcontainer
     env_file:
       - ../.env
