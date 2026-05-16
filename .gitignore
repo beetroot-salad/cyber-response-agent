@@ -52,6 +52,7 @@ logs/
 soc-agent/knowledge/environment/systems/wazuh/config.env
 soc-agent/knowledge/environment/systems/playground-ticket/config.env
 soc-agent/knowledge/environment/systems/elastic/config.env
+defender/knowledge/environment/systems/wazuh/config.env
 
 # IDE
 .vscode/
