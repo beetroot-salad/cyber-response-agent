@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
-"""Render a defender run as a single self-contained HTML transcript.
+"""Render a defender run as two self-contained HTML pages.
 
-Reads `tool_trace.jsonl` (the stream-json output captured by run.py),
-the artifact files in the run dir, and — when present — the matching
-learning-loop artifacts under `defender/learning/runs/<run_id>/`. Writes
-`transcript.html` in the run dir.
+A run serves two first-class concerns:
 
-Layout: sticky TOC sidebar + temporally-ordered content stream.
+    transcript.html — Judge evaluation (default landing).
+        Optimized for assessing the learning loop's judgment: what did
+        the defender produce, what counterfactual story did the actor
+        write, what did the judge conclude. Surfaces report.md + a
+        compact lead list (the judge's *input*), the actor story, then
+        judge outcome + findings + encounter analysis. Oracle and raw
+        artifacts collapse below the fold.
 
-    Headline           disposition + report body + judge findings
-    § Alert            alert.json
-    § Defender         investigation.md / report.md / lead_sequence.yaml
-                       + gather subagent calls + gather_raw/*
-    § Learning         actor / oracle / judge artifacts
-    § Raw transcript   (collapsed) full stream-json
-    Footer             concurrent lesson commits (queue-decoupled,
-                       not necessarily caused by this run)
+    runtime.html — Defender run inspection.
+        Optimized for inspecting the runtime agent: investigation.md is
+        split per ``## PHASE`` header so each is a TOC entry; gather
+        subagents pair with their gather_raw/ payloads; raw stream-json
+        events sit collapsed at the bottom.
 
-Defender (runtime) and Learning (offline) are first-class siblings.
-Lesson commits are demoted to a footer because the author queue can
-flush findings from prior runs.
+The two pages cross-link via a header tab strip and share their CSS.
 
 Usage:
     python3 defender/scripts/visualize_run.py <run_dir>
@@ -29,6 +27,7 @@ from __future__ import annotations
 import datetime as _dt
 import html
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +39,13 @@ except ImportError:  # pragma: no cover — yaml is in defender deps
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+JUDGE_FILENAME = "transcript.html"
+RUNTIME_FILENAME = "runtime.html"
+
+
+# ---------------------------------------------------------------------------
+# Primitives
+# ---------------------------------------------------------------------------
 
 
 def esc(s) -> str:
@@ -71,9 +77,6 @@ def load_yaml(path: Path) -> dict | list | None:
 
 
 def block(kind: str, title: str, body: str, *, open_: bool = False, anchor: str | None = None) -> str:
-    """Collapsible disclosure. Inner blocks deliberately have no left-border
-    accent — accents are reserved for top-level stages to reduce nesting noise.
-    """
     open_attr = " open" if open_ else ""
     id_attr = f' id="{esc(anchor)}"' if anchor else ""
     return (
@@ -96,8 +99,13 @@ def pre_json(obj) -> str:
     return f'<pre class="json">{esc(rendered)}</pre>'
 
 
+def slugify(s: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+    return s or "section"
+
+
 # ---------------------------------------------------------------------------
-# Raw transcript helpers (used by § Raw transcript section)
+# Raw transcript event helpers (used by the Runtime view's § Raw section)
 # ---------------------------------------------------------------------------
 
 
@@ -206,7 +214,7 @@ def render_event(event: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Headline: disposition + report body + judge findings
+# Shared content fragments
 # ---------------------------------------------------------------------------
 
 
@@ -239,76 +247,7 @@ def load_judge_findings(run_id: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def render_findings_summary(judge: dict | None) -> str:
-    """Headline list of judge findings: type + subject_topic only.
-
-    Full detail lives in § Learning. Findings *are* the headline result
-    of the run, not a side panel.
-    """
-    if not judge:
-        return '<div class="empty">no judge findings (no learning-loop output)</div>'
-    findings = judge.get("defender_findings") or []
-    if not isinstance(findings, list) or not findings:
-        return '<div class="empty">judge ran but emitted no findings</div>'
-    rows: list[str] = []
-    for f in findings:
-        if not isinstance(f, dict):
-            continue
-        ftype = esc(str(f.get("type", "?")))
-        topic = esc(str(f.get("subject_topic", "")))
-        anchor = esc(str(f.get("subject_anchor", "")))
-        rows.append(
-            f'<li class="finding finding-{ftype}">'
-            f'<span class="ftype">{ftype}</span>'
-            f'<span class="ftopic">{topic}</span>'
-            f'<span class="fanchor">{anchor}</span>'
-            f'</li>'
-        )
-    return f'<ul class="findings-list">{"".join(rows)}</ul>'
-
-
-def render_headline(run_dir: Path, run_id: str, judge: dict | None) -> str:
-    report = parse_report(run_dir)
-    disposition = str(report.get("disposition", "?"))
-    confidence = str(report.get("confidence", "?"))
-    body = report.get("body", "").strip() or "(no report body)"
-    disp_class = f"disp-{esc(disposition)}"
-
-    outcome = str((judge or {}).get("outcome", "—"))
-    out_class = f"out-{esc(outcome)}"
-
-    return f"""
-<section class="headline">
-  <div class="tiles">
-    <div class="tile tile-disp {disp_class}">
-      <div class="tile-label">defender disposition</div>
-      <div class="tile-value">{esc(disposition)}</div>
-      <div class="tile-sub">confidence: {esc(confidence)}</div>
-    </div>
-    <div class="tile tile-out {out_class}">
-      <div class="tile-label">judge outcome</div>
-      <div class="tile-value">{esc(outcome)}</div>
-      <div class="tile-sub">{("findings: " + str(len((judge or {}).get("defender_findings") or []))) if judge else "no learning loop"}</div>
-    </div>
-  </div>
-  <div class="headline-body">
-    <div class="hb-label">report.md</div>
-    <div class="hb-text">{esc(body)}</div>
-  </div>
-  <div class="headline-findings">
-    <div class="hb-label">judge findings (this run)</div>
-    {render_findings_summary(judge)}
-  </div>
-</section>
-"""
-
-
-# ---------------------------------------------------------------------------
-# § Alert
-# ---------------------------------------------------------------------------
-
-
-def render_alert_section(run_dir: Path) -> str:
+def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec-alert") -> str:
     p = run_dir / "alert.json"
     if not p.is_file():
         body = '<div class="empty">no alert.json</div>'
@@ -319,16 +258,81 @@ def render_alert_section(run_dir: Path) -> str:
             text = p.read_text()
         body = pre_text(text)
     return f"""
-<section id="sec-alert" class="stage stage-alert">
-  <h2>§ Alert</h2>
-  <div class="stage-meta">input to the defender runtime</div>
+<section id="{esc(anchor)}" class="stage stage-alert">
+  <h2>§ Alert <span class="stage-sub">— input to the defender runtime</span></h2>
   {body}
 </section>
 """
 
 
+def render_lead_sequence_compact(run_dir: Path) -> str:
+    """Compact lead list — position, goal one-liner, queries[].id + params.
+
+    This is the judge's view of "what did the defender measure?". Raw
+    payloads stay collapsed under § Runtime.
+    """
+    p = run_dir / "lead_sequence.yaml"
+    data = load_yaml(p)
+    if not isinstance(data, dict):
+        return '<div class="empty">no lead_sequence.yaml</div>'
+    entries = data.get("entries") or []
+    if not entries:
+        return '<div class="empty">lead_sequence has no entries</div>'
+    rows: list[str] = []
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        pos = e.get("position", "?")
+        ld = e.get("lead_description") or {}
+        goal = ld.get("goal", "") if isinstance(ld, dict) else ""
+        queries = e.get("queries") or []
+        q_html = ""
+        if isinstance(queries, list):
+            q_rows: list[str] = []
+            for q in queries:
+                if not isinstance(q, dict):
+                    continue
+                qid = q.get("id", "?")
+                params = q.get("params") or {}
+                params_str = json.dumps(params, ensure_ascii=False) if params else ""
+                q_rows.append(
+                    f'<div class="lead-query"><span class="qid">{esc(qid)}</span> '
+                    f'<span class="qparams">{esc(params_str)}</span></div>'
+                )
+            q_html = "".join(q_rows)
+        rows.append(
+            f'<div class="lead-row">'
+            f'<div class="lead-head"><span class="lead-pos">#{esc(str(pos))}</span></div>'
+            f'<div class="lead-body">'
+            f'<div class="lead-goal">{esc(goal)}</div>'
+            f'{q_html}'
+            f'</div>'
+            f'</div>'
+        )
+    return f'<div class="lead-list">{"".join(rows)}</div>'
+
+
+def render_report_card(run_dir: Path) -> str:
+    """Report disposition + body, presented as a card (judge view)."""
+    report = parse_report(run_dir)
+    disposition = str(report.get("disposition", "?"))
+    confidence = str(report.get("confidence", "?"))
+    body = report.get("body", "").strip() or "(no report body)"
+    return (
+        f'<div class="report-card">'
+        f'<div class="report-meta">'
+        f'<span class="rm-key">disposition:</span> '
+        f'<span class="rm-val disp-{esc(disposition)}">{esc(disposition)}</span>'
+        f'  ·  <span class="rm-key">confidence:</span> '
+        f'<span class="rm-val">{esc(confidence)}</span>'
+        f'</div>'
+        f'<div class="report-body">{esc(body)}</div>'
+        f'</div>'
+    )
+
+
 # ---------------------------------------------------------------------------
-# § Defender (runtime)
+# Gather subagents (used by both views, configured differently)
 # ---------------------------------------------------------------------------
 
 
@@ -365,180 +369,409 @@ def extract_main_subagents(events: list[dict]) -> list[dict]:
     return [calls[i] for i in order]
 
 
-def render_artifact_file(run_dir: Path, name: str, *, open_: bool = False) -> str:
-    p = run_dir / name
+# ---------------------------------------------------------------------------
+# Investigation.md phase split (runtime view)
+# ---------------------------------------------------------------------------
+
+
+def split_investigation_phases(run_dir: Path) -> list[dict]:
+    """Split investigation.md on ``## `` headers into ordered phase blocks.
+
+    Returns ``[{name, anchor, body}, ...]`` in source order. The text
+    before the first ``## `` (preamble / frontmatter) is included as a
+    leading entry named "preamble" if non-empty.
+    """
+    p = run_dir / "investigation.md"
     if not p.is_file():
-        return block("artifact missing", name, '<div class="empty">(missing)</div>')
+        return []
     text = p.read_text()
-    if name.endswith(".json"):
-        try:
-            text = json.dumps(json.loads(text), indent=2)
-        except json.JSONDecodeError:
-            pass
-    return block("artifact", name, pre_text(text), open_=open_)
+    parts = re.split(r"(?m)^(## .*)$", text)
+    # re.split with one capturing group yields: [pre, header1, body1, header2, body2, ...]
+    out: list[dict] = []
+    pre = parts[0].strip()
+    if pre:
+        out.append({"name": "preamble", "anchor": "phase-preamble", "body": pre})
+    used_anchors: set[str] = set()
+    for i in range(1, len(parts), 2):
+        header_line = parts[i]
+        body = parts[i + 1] if i + 1 < len(parts) else ""
+        name = header_line[3:].strip() or f"phase-{i}"
+        slug = slugify(name)
+        anchor = f"phase-{slug}"
+        n = 2
+        while anchor in used_anchors:
+            anchor = f"phase-{slug}-{n}"
+            n += 1
+        used_anchors.add(anchor)
+        out.append({"name": name, "anchor": anchor, "body": body.strip()})
+    return out
 
 
-def render_gather_subagent(idx: int, call: dict) -> str:
-    inp = call.get("input", {}) or {}
-    description = inp.get("description") or "(no description)"
-    subagent_type = inp.get("subagent_type") or "(default)"
-    prompt = inp.get("prompt", "")
-    result = call.get("result")
-    err = " [error]" if call.get("is_error") else ""
-    title = f"#{idx} [{subagent_type}] {description}{err}"
-    inner = block("subagent-input", "input prompt", pre_text(prompt))
-    if result is not None:
-        inner += block(
-            "subagent-output",
-            "output",
-            pre_text(result if isinstance(result, str) else json.dumps(result, indent=2)),
-            open_=True,
-        )
-    else:
-        inner += '<div class="empty">(no result captured)</div>'
-    return block(
-        "subcall" + (" error" if call.get("is_error") else ""),
-        title,
-        inner,
-        anchor=f"sec-defender-gather-{idx}",
+# ---------------------------------------------------------------------------
+# Judge findings rendering (judge view)
+# ---------------------------------------------------------------------------
+
+
+def render_judge_finding(idx: int, f: dict) -> str:
+    ftype = str(f.get("type", "?"))
+    topic = str(f.get("subject_topic", ""))
+    anchor = str(f.get("subject_anchor", ""))
+    finding_text = str(f.get("finding", "")).strip()
+    citations = f.get("citations") or []
+
+    citation_html = ""
+    if isinstance(citations, list) and citations:
+        rows: list[str] = []
+        for c in citations:
+            if not isinstance(c, dict):
+                continue
+            src = str(c.get("source", "?"))
+            quote = str(c.get("quote", "")).strip()
+            rows.append(
+                f'<div class="citation citation-{esc(src)}">'
+                f'<div class="cite-src">{esc(src)}</div>'
+                f'<pre class="text">{esc(quote)}</pre>'
+                f'</div>'
+            )
+        citation_html = f'<div class="citations">{"".join(rows)}</div>'
+
+    return (
+        f'<div class="finding-card finding-{esc(ftype)}" id="finding-{idx}">'
+        f'<div class="finding-head">'
+        f'<span class="ftype">{esc(ftype)}</span>'
+        f'<span class="ftopic">{esc(topic)}</span>'
+        f'<span class="fanchor">{esc(anchor)}</span>'
+        f'</div>'
+        f'<div class="finding-body">{esc(finding_text)}</div>'
+        f'{citation_html}'
+        f'</div>'
     )
 
 
-def render_gather_raw(run_dir: Path) -> str:
-    gather_dir = run_dir / "gather_raw"
-    if not gather_dir.is_dir():
-        return '<div class="empty">no gather_raw/</div>'
-    panels: list[str] = []
-    for entry in sorted(gather_dir.iterdir()):
-        if not entry.is_file():
-            continue
-        try:
-            text = entry.read_text()
-            if entry.suffix == ".json":
-                text = json.dumps(json.loads(text), indent=2)
-        except (OSError, json.JSONDecodeError):
-            text = "<unreadable>"
-        panels.append(block("artifact gather-raw", entry.name, pre_text(text)))
-    return "\n".join(panels) if panels else '<div class="empty">gather_raw/ is empty</div>'
+# ---------------------------------------------------------------------------
+# Judge view sections
+# ---------------------------------------------------------------------------
 
 
-def render_defender_section(run_dir: Path, events: list[dict]) -> tuple[str, list[dict]]:
-    """Returns (html, subagent_calls). Caller needs the calls list for TOC."""
-    calls = extract_main_subagents(events)
-    gather_html = (
-        "\n".join(render_gather_subagent(i, c) for i, c in enumerate(calls))
-        if calls
-        else '<div class="empty">(no Task/Agent calls)</div>'
-    )
-    html_ = f"""
-<section id="sec-defender" class="stage stage-defender">
-  <h2>§ Defender <span class="stage-sub">— runtime: ORIENT → PLAN → GATHER → ANALYZE → REPORT</span></h2>
+def render_judge_defender_summary(run_dir: Path) -> str:
+    """The judge's input: report.md + compact lead list. No raw invlang.
 
-  <h3 id="sec-defender-artifacts">Run artifacts</h3>
-  {render_artifact_file(run_dir, "investigation.md")}
-  {render_artifact_file(run_dir, "report.md", open_=False)}
-  {render_artifact_file(run_dir, "lead_sequence.yaml")}
+    investigation.md is the agent's working memory and reads as dense
+    invlang; it is the wrong surface for evaluating judgment. The judge
+    is grading whether the disposition is supportable given the leads
+    that ran — those two pieces (report + lead list) are sufficient.
+    """
+    return f"""
+<section id="sec-defender-summary" class="stage stage-defender">
+  <h2>§ Defender summary <span class="stage-sub">— what the judge graded</span></h2>
 
-  <h3 id="sec-defender-gather">Gather subagents · {len(calls)} call(s)</h3>
-  {gather_html}
+  <h3>report.md</h3>
+  {render_report_card(run_dir)}
 
-  <h3 id="sec-defender-rawpayloads">gather_raw/ payloads</h3>
-  {render_gather_raw(run_dir)}
+  <h3>lead sequence ({_lead_count(run_dir)} lead(s))</h3>
+  {render_lead_sequence_compact(run_dir)}
 </section>
 """
-    return html_, calls
 
 
-# ---------------------------------------------------------------------------
-# § Learning pipeline
-# ---------------------------------------------------------------------------
+def _lead_count(run_dir: Path) -> int:
+    data = load_yaml(run_dir / "lead_sequence.yaml")
+    if isinstance(data, dict):
+        e = data.get("entries") or []
+        if isinstance(e, list):
+            return len(e)
+    return 0
 
 
-def render_learning_artifact(learn_dir: Path, name: str, *, label: str | None = None, open_: bool = False) -> str:
-    p = learn_dir / name
-    title = label or name
-    if not p.is_file():
-        return block("artifact missing", f"{title} (missing)", '<div class="empty">(file absent)</div>')
-    return block("artifact", title, pre_text(p.read_text()), open_=open_)
-
-
-def render_learning_section(run_id: str) -> tuple[str, list[str]]:
-    """Returns (html, stage_anchors_present) for TOC composition."""
+def render_judge_actor_section(run_id: str) -> str:
     learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
-    if not learn_dir.is_dir():
-        body = f'<div class="empty">no learning-loop artifacts at {esc(str(learn_dir))}</div>'
-        html_ = f"""
-<section id="sec-learning" class="stage stage-learning">
-  <h2>§ Learning pipeline <span class="stage-sub">— offline: actor → oracle → judge</span></h2>
+    archetype = learn_dir / "actor_archetype.txt"
+    menu = learn_dir / "actor_menu.txt"
+    story = learn_dir / "actor_story.md"
+
+    if not story.is_file():
+        body = '<div class="empty">no actor_story.md</div>'
+        return f"""
+<section id="sec-actor" class="stage stage-actor">
+  <h2>§ Actor <span class="stage-sub">— adversarial counterfactual</span></h2>
   {body}
 </section>
 """
-        return html_, []
+    arch = archetype.read_text().strip() if archetype.is_file() else "?"
+    menu_txt = menu.read_text().strip() if menu.is_file() else ""
+    meta_html = (
+        f'<div class="actor-meta"><span class="key">archetype:</span> '
+        f'<span class="val">{esc(arch)}</span></div>'
+    )
+    menu_block = ""
+    if menu_txt:
+        menu_block = block("actor-menu", "MITRE technique menu (sampled)", pre_text(menu_txt))
 
-    anchors: list[str] = []
-    blocks: list[str] = []
+    story_html = f'<pre class="text story">{esc(story.read_text())}</pre>'
 
-    actor_input = learn_dir / "actor_input.yaml"
-    actor_story = learn_dir / "actor_story.md"
-    actor_archetype = learn_dir / "actor_archetype.txt"
-    actor_menu = learn_dir / "actor_menu.txt"
-    if actor_story.is_file() or actor_input.is_file():
-        inner = ""
-        if actor_archetype.is_file() or actor_menu.is_file():
-            arch = actor_archetype.read_text().strip() if actor_archetype.is_file() else "?"
-            menu = actor_menu.read_text() if actor_menu.is_file() else "(missing)"
-            inner += block(
-                "subagent-input",
-                f"actor inputs (archetype={arch})",
-                pre_text(menu),
-            )
-        if actor_input.is_file():
-            inner += block("subagent-input", "actor_input.yaml", pre_text(actor_input.read_text()))
-        if actor_story.is_file():
-            inner += block("subagent-output", "actor_story.md", pre_text(actor_story.read_text()), open_=True)
-        blocks.append(block("subcall actor", "actor — adversarial counterfactual", inner, anchor="sec-learning-actor"))
-        anchors.append("sec-learning-actor")
+    return f"""
+<section id="sec-actor" class="stage stage-actor">
+  <h2>§ Actor <span class="stage-sub">— adversarial counterfactual</span></h2>
+  {meta_html}
+  {menu_block}
+  <h3>actor_story.md</h3>
+  {story_html}
+</section>
+"""
 
+
+def render_judge_judge_section(judge: dict | None) -> str:
+    if not judge:
+        return """
+<section id="sec-judge" class="stage stage-judge">
+  <h2>§ Judge <span class="stage-sub">— outcome + findings</span></h2>
+  <div class="empty">no judge_findings.yaml — learning loop did not run or aborted</div>
+</section>
+"""
+    outcome = str(judge.get("outcome", "?"))
+    rationale = str(judge.get("outcome_rationale", "")).strip()
+    encounter = str(judge.get("encounter_analysis", "")).strip()
+    findings = judge.get("defender_findings") or []
+
+    if isinstance(findings, list) and findings:
+        cards = "\n".join(render_judge_finding(i, f) for i, f in enumerate(findings) if isinstance(f, dict))
+    else:
+        cards = '<div class="empty">judge emitted no findings</div>'
+
+    encounter_html = (
+        f'<pre class="text encounter">{esc(encounter)}</pre>'
+        if encounter
+        else '<div class="empty">no encounter_analysis</div>'
+    )
+
+    return f"""
+<section id="sec-judge" class="stage stage-judge">
+  <h2>§ Judge <span class="stage-sub">— outcome + findings</span></h2>
+
+  <h3 id="sec-judge-outcome">Outcome</h3>
+  <div class="judge-outcome out-{esc(outcome)}">
+    <div class="outcome-value">{esc(outcome)}</div>
+    <div class="outcome-rationale">{esc(rationale)}</div>
+  </div>
+
+  <h3 id="sec-judge-findings">Findings ({len(findings) if isinstance(findings, list) else 0})</h3>
+  <div class="findings-grid">{cards}</div>
+
+  <h3 id="sec-judge-encounter">Encounter analysis</h3>
+  {encounter_html}
+</section>
+"""
+
+
+def render_judge_oracle_section(run_id: str) -> str:
+    learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
     proj = learn_dir / "projected_telemetry.yaml"
     proj_raw = learn_dir / "projected_telemetry.raw.txt"
-    if proj.is_file() or proj_raw.is_file():
-        inner = ""
-        if proj.is_file():
-            inner += block("subagent-output", "projected_telemetry.yaml", pre_text(proj.read_text()), open_=True)
-        if proj_raw.is_file():
-            inner += block("subagent-output raw", "projected_telemetry.raw.txt (raw)", pre_text(proj_raw.read_text()))
-        blocks.append(block("subcall oracle", "oracle — telemetry projection", inner, anchor="sec-learning-oracle"))
-        anchors.append("sec-learning-oracle")
-
-    judge = learn_dir / "judge_findings.yaml"
-    judge_raw = learn_dir / "judge_findings.raw.txt"
-    if judge.is_file() or judge_raw.is_file():
-        inner = ""
-        if judge.is_file():
-            inner += block("subagent-output", "judge_findings.yaml", pre_text(judge.read_text()), open_=True)
-        if judge_raw.is_file():
-            inner += block("subagent-output raw", "judge_findings.raw.txt (raw)", pre_text(judge_raw.read_text()))
-        blocks.append(block("subcall judge", "judge — outcome + defender findings", inner, anchor="sec-learning-judge"))
-        anchors.append("sec-learning-judge")
-
-    body = "\n".join(blocks) if blocks else f'<div class="empty">{esc(str(learn_dir))}: no recognised artifacts</div>'
-    html_ = f"""
-<section id="sec-learning" class="stage stage-learning">
-  <h2>§ Learning pipeline <span class="stage-sub">— offline: actor → oracle → judge</span></h2>
-  {body}
+    inner = ""
+    if proj.is_file():
+        inner += block("oracle-yaml", "projected_telemetry.yaml", pre_text(proj.read_text()))
+    if proj_raw.is_file():
+        inner += block("oracle-raw", "projected_telemetry.raw.txt (raw fallback)", pre_text(proj_raw.read_text()))
+    if not inner:
+        inner = '<div class="empty">no oracle artifacts</div>'
+    return f"""
+<section id="sec-oracle" class="stage stage-oracle">
+  <h2>§ Oracle <span class="stage-sub">— projected telemetry (collapsed by default)</span></h2>
+  {inner}
 </section>
 """
-    return html_, anchors
+
+
+def render_judge_raw_bundle(run_id: str) -> str:
+    learn_dir = REPO_ROOT / "defender" / "learning" / "runs" / run_id
+    if not learn_dir.is_dir():
+        return ""
+    panels: list[str] = []
+    for fname in ("actor_input.yaml", "source_refs.yaml", "lead_sequence.yaml", "alert.json"):
+        p = learn_dir / fname
+        if p.is_file():
+            panels.append(block("artifact", fname, pre_text(p.read_text())))
+    for raw in sorted(learn_dir.glob("*.raw.txt")):
+        panels.append(block("artifact raw", raw.name, pre_text(raw.read_text())))
+    trace = learn_dir / "actor_trace.jsonl"
+    if trace.is_file():
+        panels.append(block("artifact", "actor_trace.jsonl", pre_text(trace.read_text())))
+    if not panels:
+        return ""
+    return f"""
+<section id="sec-raw-bundle" class="stage stage-raw">
+  <h2>§ Raw bundle <span class="stage-sub">— learning-loop inputs &amp; fallbacks</span></h2>
+  {"".join(panels)}
+</section>
+"""
+
+
+def render_judge_toc(n_findings: int) -> str:
+    finding_links = "".join(
+        f'<li class="item"><a href="#finding-{i}">finding #{i}</a></li>'
+        for i in range(n_findings)
+    )
+    if n_findings == 0:
+        finding_links = '<li class="item muted">(none)</li>'
+    return f"""
+<nav class="toc">
+  <ul>
+    <li class="section">Headline</li>
+    <li class="item"><a href="#top">summary tiles</a></li>
+
+    <li class="section">§ Alert</li>
+    <li class="item"><a href="#sec-alert">alert.json</a></li>
+
+    <li class="section">§ Defender summary</li>
+    <li class="item"><a href="#sec-defender-summary">report + leads</a></li>
+
+    <li class="section">§ Actor</li>
+    <li class="item"><a href="#sec-actor">archetype + story</a></li>
+
+    <li class="section">§ Judge</li>
+    <li class="item"><a href="#sec-judge-outcome">outcome</a></li>
+    <li class="item"><a href="#sec-judge-findings">findings</a></li>
+    {finding_links}
+    <li class="item"><a href="#sec-judge-encounter">encounter analysis</a></li>
+
+    <li class="section">§ Oracle</li>
+    <li class="item"><a href="#sec-oracle">projected telemetry</a></li>
+
+    <li class="section">§ Raw bundle</li>
+    <li class="item"><a href="#sec-raw-bundle">inputs &amp; fallbacks</a></li>
+  </ul>
+</nav>
+"""
 
 
 # ---------------------------------------------------------------------------
-# § Raw transcript (collapsed)
+# Runtime view sections
 # ---------------------------------------------------------------------------
 
 
-def render_raw_transcript(events: list[dict]) -> str:
+def render_runtime_investigation(run_dir: Path) -> tuple[str, list[dict]]:
+    phases = split_investigation_phases(run_dir)
+    if not phases:
+        body = '<div class="empty">no investigation.md or empty</div>'
+        return (
+            f"""
+<section id="sec-investigation" class="stage stage-defender">
+  <h2>§ Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
+  {body}
+</section>
+""",
+            [],
+        )
+    blocks: list[str] = []
+    for ph in phases:
+        title = ph["name"]
+        body_html = f'<pre class="text invlang">{esc(ph["body"])}</pre>'
+        blocks.append(block("phase", title, body_html, open_=True, anchor=ph["anchor"]))
+    return (
+        f"""
+<section id="sec-investigation" class="stage stage-defender">
+  <h2>§ Investigation <span class="stage-sub">— investigation.md split by phase</span></h2>
+  {"".join(blocks)}
+</section>
+""",
+        phases,
+    )
+
+
+def render_runtime_gather(run_dir: Path, events: list[dict]) -> tuple[str, int]:
+    calls = extract_main_subagents(events)
+    gather_dir = run_dir / "gather_raw"
+    payloads_by_pos: dict[str, Path] = {}
+    if gather_dir.is_dir():
+        for entry in sorted(gather_dir.iterdir()):
+            if entry.is_file() and entry.suffix in (".json", ".txt"):
+                # match by leading position prefix (e.g. "0.json", "0a.json")
+                stem = entry.stem
+                payloads_by_pos.setdefault(stem, entry)
+
+    if not calls:
+        body = '<div class="empty">(no Task/Agent calls)</div>'
+        return (
+            f"""
+<section id="sec-gather" class="stage stage-defender">
+  <h2>§ Gather subagents <span class="stage-sub">— prompt → query → raw payload</span></h2>
+  {body}
+</section>
+""",
+            0,
+        )
+    blocks: list[str] = []
+    for i, call in enumerate(calls):
+        inp = call.get("input", {}) or {}
+        description = inp.get("description") or "(no description)"
+        subagent_type = inp.get("subagent_type") or "(default)"
+        prompt = inp.get("prompt", "")
+        result = call.get("result")
+        err = " [error]" if call.get("is_error") else ""
+        title = f"#{i} [{subagent_type}] {description}{err}"
+        inner = block("subagent-input", "input prompt", pre_text(prompt))
+        if result is not None:
+            inner += block(
+                "subagent-output",
+                "subagent output (summary back to defender)",
+                pre_text(result if isinstance(result, str) else json.dumps(result, indent=2)),
+                open_=True,
+            )
+        else:
+            inner += '<div class="empty">(no result captured)</div>'
+
+        # Pair with gather_raw payload by position prefix
+        if gather_dir.is_dir():
+            for entry in sorted(gather_dir.iterdir()):
+                if not entry.is_file() or entry.suffix not in (".json", ".txt"):
+                    continue
+                stem = entry.stem
+                if stem == str(i) or stem.startswith(f"{i}-") or stem.startswith(f"{i}.") or stem.startswith(f"{i}a") or stem.startswith(f"{i}b"):
+                    try:
+                        raw = entry.read_text()
+                        if entry.suffix == ".json":
+                            raw = json.dumps(json.loads(raw), indent=2)
+                    except (OSError, json.JSONDecodeError):
+                        raw = "<unreadable>"
+                    inner += block("gather-raw", f"gather_raw/{entry.name}", pre_text(raw))
+        blocks.append(block("subcall gather", title, inner, anchor=f"gather-{i}"))
+    return (
+        f"""
+<section id="sec-gather" class="stage stage-defender">
+  <h2>§ Gather subagents · {len(calls)} call(s) <span class="stage-sub">— each paired with its gather_raw/ payload</span></h2>
+  {"".join(blocks)}
+</section>
+""",
+        len(calls),
+    )
+
+
+def render_runtime_lead_sequence(run_dir: Path) -> str:
+    raw = ""
+    p = run_dir / "lead_sequence.yaml"
+    if p.is_file():
+        raw = block("artifact", "lead_sequence.yaml (raw)", pre_text(p.read_text()))
+    return f"""
+<section id="sec-lead-sequence" class="stage stage-defender">
+  <h2>§ Lead sequence</h2>
+  {render_lead_sequence_compact(run_dir)}
+  {raw}
+</section>
+"""
+
+
+def render_runtime_report(run_dir: Path) -> str:
+    return f"""
+<section id="sec-report" class="stage stage-defender">
+  <h2>§ Report</h2>
+  {render_report_card(run_dir)}
+</section>
+"""
+
+
+def render_runtime_raw(events: list[dict]) -> str:
     inner = "\n".join(render_event(e) for e in events) or '<div class="empty">(no events)</div>'
-    body = block("raw-stream", f"stream-json events ({len(events)})", inner, open_=False)
+    body = block("raw-stream", f"stream-json events ({len(events)})", inner)
     return f"""
 <section id="sec-raw" class="stage stage-raw">
   <h2>§ Raw transcript <span class="stage-sub">— full stream-json, for debugging</span></h2>
@@ -547,19 +780,56 @@ def render_raw_transcript(events: list[dict]) -> str:
 """
 
 
+def render_runtime_toc(phases: list[dict], n_gather: int) -> str:
+    phase_links = "".join(
+        f'<li class="item"><a href="#{esc(ph["anchor"])}">{esc(ph["name"])}</a></li>'
+        for ph in phases
+    )
+    if not phases:
+        phase_links = '<li class="item muted">(no phases)</li>'
+    gather_links = "".join(
+        f'<li class="item"><a href="#gather-{i}">gather #{i}</a></li>'
+        for i in range(n_gather)
+    )
+    if n_gather == 0:
+        gather_links = '<li class="item muted">(no calls)</li>'
+    return f"""
+<nav class="toc">
+  <ul>
+    <li class="section">Headline</li>
+    <li class="item"><a href="#top">disposition + report</a></li>
+
+    <li class="section">§ Alert</li>
+    <li class="item"><a href="#sec-alert">alert.json</a></li>
+
+    <li class="section">§ Investigation</li>
+    {phase_links}
+
+    <li class="section">§ Gather</li>
+    {gather_links}
+
+    <li class="section">§ Lead sequence</li>
+    <li class="item"><a href="#sec-lead-sequence">leads</a></li>
+
+    <li class="section">§ Report</li>
+    <li class="item"><a href="#sec-report">report.md</a></li>
+
+    <li class="section">§ Raw</li>
+    <li class="item"><a href="#sec-raw">stream-json</a></li>
+
+    <li class="section">Footer</li>
+    <li class="item"><a href="#sec-footer">lesson commits</a></li>
+  </ul>
+</nav>
+"""
+
+
 # ---------------------------------------------------------------------------
-# Footer: concurrent lesson commits
+# Footer (lesson commits, queue-decoupled — runtime view only)
 # ---------------------------------------------------------------------------
 
 
 def lesson_changes(run_dir: Path, run_id: str) -> dict:
-    """Commits to defender/lessons/ wall-clock-concurrent with this run.
-
-    These are NOT necessarily caused by this run — the author flushes the
-    pending queue when it crosses a threshold, so the folded finding can
-    come from any prior run. This is why lessons are footer-rank, not
-    headline-rank.
-    """
     trace = run_dir / "tool_trace.jsonl"
     if not trace.is_file():
         return {"available": False, "reason": "no tool_trace.jsonl"}
@@ -637,7 +907,7 @@ def render_footer(run_dir: Path, run_id: str) -> str:
   <div class="footer-caveat">
     The author flushes the pending-findings queue when it crosses the threshold,
     so commits below were authored during this run's wall-clock window but may
-    fold in findings from earlier runs. They are not the headline result.
+    fold in findings from earlier runs.
   </div>
   {body}
 </footer>
@@ -645,67 +915,79 @@ def render_footer(run_dir: Path, run_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# TOC
+# Header + tabs + CSS (shared)
 # ---------------------------------------------------------------------------
 
 
-def render_toc(n_gather: int, learning_anchors: list[str]) -> str:
-    learning_links = ""
-    label_map = {
-        "sec-learning-actor": "Actor",
-        "sec-learning-oracle": "Oracle",
-        "sec-learning-judge": "Judge",
-    }
-    for a in learning_anchors:
-        learning_links += f'<li class="item"><a href="#{a}">{label_map.get(a, a)}</a></li>'
-    if not learning_anchors:
-        learning_links = '<li class="item muted">(no artifacts)</li>'
-
-    gather_links = ""
-    for i in range(n_gather):
-        gather_links += f'<li class="item"><a href="#sec-defender-gather-{i}">gather #{i}</a></li>'
-    if n_gather == 0:
-        gather_links = '<li class="item muted">(no calls)</li>'
-
+def render_header(case_id: str, n_events: int, n_tool_calls: int, cost: float, run_dir: Path, active: str) -> str:
+    judge_active = " active" if active == "judge" else ""
+    runtime_active = " active" if active == "runtime" else ""
     return f"""
-<nav class="toc">
-  <ul>
-    <li class="section">Headline</li>
-    <li class="item"><a href="#top">disposition + findings</a></li>
-
-    <li class="section">§ Alert</li>
-    <li class="item"><a href="#sec-alert">alert.json</a></li>
-
-    <li class="section">§ Defender</li>
-    <li class="item"><a href="#sec-defender-artifacts">investigation / report</a></li>
-    <li class="item"><a href="#sec-defender-gather">gather subagents</a></li>
-    {gather_links}
-    <li class="item"><a href="#sec-defender-rawpayloads">gather_raw/</a></li>
-
-    <li class="section">§ Learning</li>
-    {learning_links}
-
-    <li class="section">§ Raw</li>
-    <li class="item"><a href="#sec-raw">stream-json events</a></li>
-
-    <li class="section">Footer</li>
-    <li class="item"><a href="#sec-footer">lesson commits</a></li>
-  </ul>
-</nav>
+<header class="top">
+  <div class="top-row">
+    <h1>defender run: {esc(case_id)}</h1>
+    <nav class="tabs">
+      <a class="tab{judge_active}" href="{JUDGE_FILENAME}">Judge eval</a>
+      <a class="tab{runtime_active}" href="{RUNTIME_FILENAME}">Runtime inspection</a>
+    </nav>
+  </div>
+  <div class="meta">events={n_events} · tool_calls={n_tool_calls} · cost=${cost:.4f} · run_dir={esc(str(run_dir))}</div>
+</header>
 """
 
 
-# ---------------------------------------------------------------------------
-# CSS — dark, lean, no animations. Themed scrollbars; nested blocks lose
-# their left-border accent (top-level stages keep theirs) so depth reads
-# as indentation, not as a wall of stacked colored bars.
-# ---------------------------------------------------------------------------
+def render_judge_headline(run_dir: Path, judge: dict | None) -> str:
+    report = parse_report(run_dir)
+    disposition = str(report.get("disposition", "?"))
+    confidence = str(report.get("confidence", "?"))
+    outcome = str((judge or {}).get("outcome", "—"))
+    n_findings = len((judge or {}).get("defender_findings") or []) if judge else 0
+    return f"""
+<section class="headline">
+  <div class="tiles">
+    <div class="tile tile-out out-{esc(outcome)}">
+      <div class="tile-label">judge outcome</div>
+      <div class="tile-value">{esc(outcome)}</div>
+      <div class="tile-sub">{n_findings} finding(s)</div>
+    </div>
+    <div class="tile tile-disp disp-{esc(disposition)}">
+      <div class="tile-label">defender disposition</div>
+      <div class="tile-value">{esc(disposition)}</div>
+      <div class="tile-sub">confidence: {esc(confidence)}</div>
+    </div>
+  </div>
+</section>
+"""
+
+
+def render_runtime_headline(run_dir: Path) -> str:
+    report = parse_report(run_dir)
+    disposition = str(report.get("disposition", "?"))
+    confidence = str(report.get("confidence", "?"))
+    body = report.get("body", "").strip() or "(no report body)"
+    return f"""
+<section class="headline">
+  <div class="tiles">
+    <div class="tile tile-disp disp-{esc(disposition)}">
+      <div class="tile-label">defender disposition</div>
+      <div class="tile-value">{esc(disposition)}</div>
+      <div class="tile-sub">confidence: {esc(confidence)}</div>
+    </div>
+  </div>
+  <div class="headline-body">
+    <div class="hb-label">report.md</div>
+    <div class="hb-text">{esc(body)}</div>
+  </div>
+</section>
+"""
+
 
 CSS = """
 :root {
   --bg: #0d1117;
   --bg-2: #161b22;
   --bg-3: #0f1620;
+  --bg-4: #1c2128;
   --border: #30363d;
   --border-2: #21262d;
   --text: #c9d1d9;
@@ -714,6 +996,9 @@ CSS = """
   --accent: #58a6ff;
   --accent-defender: #58a6ff;
   --accent-learning: #a371f7;
+  --accent-actor: #f85149;
+  --accent-judge: #3fb950;
+  --accent-oracle: #d29922;
   --accent-alert: #d29922;
   --accent-raw: #6e7681;
   --good: #3fb950;
@@ -739,16 +1024,43 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
+/* ----- Top header + tabs ----- */
 header.top {
-  padding: 14px 24px;
+  padding: 12px 24px 0;
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: 20;
 }
-header.top h1 { margin: 0 0 4px 0; font-size: 15px; font-weight: 600; color: var(--text-bright); }
-header.top .meta { font-size: 11px; color: var(--text-dim); font-family: 'SF Mono', Menlo, Consolas, monospace; }
+.top-row { display: flex; align-items: center; gap: 24px; }
+header.top h1 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-bright); flex-shrink: 0; }
+nav.tabs { display: flex; gap: 4px; margin-left: auto; }
+nav.tabs .tab {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  text-decoration: none;
+  position: relative;
+  top: 1px;
+}
+nav.tabs .tab:hover { color: var(--text-bright); text-decoration: none; background: var(--bg-3); }
+nav.tabs .tab.active {
+  color: var(--text-bright);
+  background: var(--bg);
+  border-color: var(--border);
+  border-bottom-color: var(--bg);
+  font-weight: 600;
+}
+header.top .meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  padding: 8px 0 10px;
+}
 
 /* ----- Headline ----- */
 section.headline {
@@ -756,7 +1068,7 @@ section.headline {
   background: var(--bg-3);
   border-bottom: 1px solid var(--border);
 }
-.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tile {
   padding: 12px 16px;
   border-radius: 6px;
@@ -776,7 +1088,7 @@ section.headline {
 .tile-out.out-incoherent { border-left-color: var(--bad); }
 .tile-out.out-skip-passthrough { border-left-color: var(--text-dim); }
 
-.headline-body, .headline-findings {
+.headline-body {
   padding: 12px 16px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -786,24 +1098,7 @@ section.headline {
 .hb-label { text-transform: uppercase; font-size: 10px; color: var(--text-dim); letter-spacing: 0.6px; margin-bottom: 8px; }
 .hb-text { white-space: pre-wrap; color: var(--text); font-size: 13px; line-height: 1.6; }
 
-.findings-list { list-style: none; padding: 0; margin: 0; }
-.finding {
-  display: grid;
-  grid-template-columns: 160px 1fr 200px;
-  gap: 12px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border-2);
-  font-size: 12px;
-}
-.finding:last-child { border-bottom: none; }
-.finding .ftype { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--code); font-size: 11px; }
-.finding .ftopic { color: var(--text); }
-.finding .fanchor { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--text-dim); font-size: 11px; text-align: right; }
-.finding-detection-confirmed .ftype { color: var(--good); }
-.finding-observability .ftype { color: var(--warn); }
-.finding-lead-set .ftype { color: var(--accent); }
-
-/* ----- Layout: TOC + content ----- */
+/* ----- Layout ----- */
 .layout {
   display: grid;
   grid-template-columns: 240px 1fr;
@@ -811,9 +1106,9 @@ section.headline {
 }
 nav.toc {
   position: sticky;
-  top: 53px;          /* header height */
+  top: 84px;
   align-self: start;
-  height: calc(100vh - 53px);
+  height: calc(100vh - 84px);
   overflow-y: auto;
   padding: 16px 12px 24px 20px;
   border-right: 1px solid var(--border);
@@ -849,13 +1144,13 @@ article.content {
 
 /* ----- Stages ----- */
 section.stage {
-  margin-bottom: 40px;
+  margin-bottom: 32px;
   padding: 16px 18px;
   border: 1px solid var(--border);
   border-left-width: 4px;
   border-radius: 6px;
   background: var(--bg-2);
-  scroll-margin-top: 64px;
+  scroll-margin-top: 96px;
 }
 section.stage h2 {
   margin: 0 0 4px;
@@ -877,12 +1172,136 @@ section.stage h3 {
   letter-spacing: 0.6px;
   border-bottom: 1px solid var(--border-2);
   padding-bottom: 4px;
+  scroll-margin-top: 96px;
 }
 section.stage .stage-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
 section.stage-alert { border-left-color: var(--accent-alert); }
 section.stage-defender { border-left-color: var(--accent-defender); }
-section.stage-learning { border-left-color: var(--accent-learning); }
+section.stage-actor { border-left-color: var(--accent-actor); }
+section.stage-judge { border-left-color: var(--accent-judge); }
+section.stage-oracle { border-left-color: var(--accent-oracle); }
 section.stage-raw { border-left-color: var(--accent-raw); }
+
+/* ----- Report card ----- */
+.report-card {
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: 5px;
+  padding: 12px 14px;
+  margin: 6px 0 12px;
+}
+.report-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+.report-meta .rm-key { text-transform: uppercase; letter-spacing: 0.4px; }
+.report-meta .rm-val { color: var(--text-bright); font-weight: 500; padding: 0 4px; }
+.report-meta .rm-val.disp-benign { color: var(--good); }
+.report-meta .rm-val.disp-inconclusive { color: var(--warn); }
+.report-meta .rm-val.disp-malicious { color: var(--bad); }
+.report-body { white-space: pre-wrap; line-height: 1.6; }
+
+/* ----- Compact lead list ----- */
+.lead-list { display: flex; flex-direction: column; gap: 8px; }
+.lead-row {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+}
+.lead-pos {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+.lead-goal { color: var(--text); margin-bottom: 4px; }
+.lead-query { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; }
+.lead-query .qid { color: var(--code); }
+.lead-query .qparams { color: var(--text-dim); margin-left: 6px; }
+
+/* ----- Actor ----- */
+.actor-meta { font-size: 12px; color: var(--text-dim); margin: 4px 0 8px; }
+.actor-meta .key { text-transform: uppercase; letter-spacing: 0.4px; }
+.actor-meta .val { color: var(--text-bright); margin-left: 4px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+pre.story { background: var(--bg-3); }
+
+/* ----- Judge outcome ----- */
+.judge-outcome {
+  padding: 12px 14px;
+  border-radius: 5px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-left: 4px solid var(--border);
+  margin: 6px 0 12px;
+}
+.judge-outcome.out-caught { border-left-color: var(--good); }
+.judge-outcome.out-survived { border-left-color: var(--bad); }
+.judge-outcome.out-undecidable { border-left-color: var(--warn); }
+.judge-outcome.out-incoherent { border-left-color: var(--bad); }
+.judge-outcome.out-skip-passthrough { border-left-color: var(--text-dim); }
+.outcome-value {
+  font-size: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-bright);
+  margin-bottom: 6px;
+  letter-spacing: 0.4px;
+}
+.outcome-rationale { white-space: pre-wrap; line-height: 1.55; }
+
+/* ----- Findings ----- */
+.findings-grid { display: flex; flex-direction: column; gap: 12px; margin: 8px 0; }
+.finding-card {
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-left: 4px solid var(--border);
+  border-radius: 5px;
+  padding: 12px 14px;
+  scroll-margin-top: 96px;
+}
+.finding-detection-confirmed { border-left-color: var(--good); }
+.finding-observability { border-left-color: var(--warn); }
+.finding-lead-set { border-left-color: var(--accent); }
+.finding-head {
+  display: grid;
+  grid-template-columns: 180px 1fr 200px;
+  gap: 12px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-2);
+  align-items: baseline;
+}
+.finding-head .ftype { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; color: var(--code); }
+.finding-detection-confirmed .ftype { color: var(--good); }
+.finding-observability .ftype { color: var(--warn); }
+.finding-lead-set .ftype { color: var(--accent); }
+.finding-head .ftopic { color: var(--text-bright); font-weight: 500; font-size: 13px; }
+.finding-head .fanchor { font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--text-dim); font-size: 11px; text-align: right; }
+.finding-body { white-space: pre-wrap; line-height: 1.6; color: var(--text); }
+.citations { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.citation {
+  background: var(--bg-4);
+  border: 1px solid var(--border-2);
+  border-left: 3px solid var(--text-dim);
+  border-radius: 3px;
+  padding: 8px 10px;
+}
+.citation .cite-src {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+}
+.citation pre { margin: 0; background: transparent; border: none; padding: 0; }
+.citation.citation-investigation { border-left-color: var(--accent-defender); }
+.citation.citation-actor { border-left-color: var(--accent-actor); }
+.citation.citation-projected_telemetry { border-left-color: var(--accent-oracle); }
+
+pre.encounter { background: var(--bg-3); line-height: 1.55; }
+pre.invlang { background: var(--bg-3); }
 
 /* ----- Footer ----- */
 footer.footer {
@@ -890,15 +1309,12 @@ footer.footer {
   padding: 24px 32px 80px;
   background: var(--bg-3);
   color: var(--text);
-  margin-left: 240px;        /* align with content column, not TOC */
+  margin-left: 240px;
 }
 footer.footer h2 { font-size: 12px; text-transform: uppercase; color: var(--text-dim); margin: 0 0 8px; letter-spacing: 0.6px; }
 footer.footer .footer-caveat { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; max-width: 760px; line-height: 1.5; }
 
-/* ----- Blocks (collapsibles) -----
-   Inner blocks intentionally have NO left-border accent — accents are
-   reserved for top-level stages. Inner nesting reads as indentation plus
-   a subtle background tint on hover. */
+/* ----- Collapsibles ----- */
 details.block { margin: 4px 0; }
 details.block > summary {
   cursor: pointer;
@@ -912,18 +1328,21 @@ details.block > summary {
 details.block > summary:hover { background: var(--bg-3); color: var(--text-bright); }
 details.block > .body { padding: 6px 0 6px 14px; }
 
-/* subcalls (gather/actor/oracle/judge) get a thin left accent so they
-   stand out from regular collapsibles. */
+details.block.phase > summary {
+  background: var(--bg-3);
+  border-left: 3px solid var(--accent-defender);
+  padding: 6px 10px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
 details.block.subcall > summary { background: var(--bg-3); border-left: 3px solid var(--border); padding-left: 10px; }
-details.block.subcall.actor > summary { border-left-color: var(--bad); }
-details.block.subcall.oracle > summary { border-left-color: var(--warn); }
-details.block.subcall.judge > summary { border-left-color: var(--good); }
-details.block.subcall.error > summary { border-left-color: var(--bad); }
+details.block.subcall.gather > summary { border-left-color: var(--accent-learning); }
 
 details.block.lesson-commit > summary { color: var(--text-bright); font-weight: 500; }
 .commit-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
 
-/* ----- Code blocks ----- */
+/* ----- Code ----- */
 pre {
   background: var(--bg);
   border: 1px solid var(--border-2);
@@ -937,7 +1356,6 @@ pre {
 }
 pre.json { color: var(--code); }
 pre.text { color: var(--text); }
-pre.diff { color: var(--text); }
 pre.files { font-size: 11px; color: var(--text-dim); }
 .text-block { padding: 4px 0; white-space: pre-wrap; }
 
@@ -946,14 +1364,11 @@ pre.files { font-size: 11px; color: var(--text-dim); }
 
 
 # ---------------------------------------------------------------------------
-# Top-level render
+# Page renderers
 # ---------------------------------------------------------------------------
 
 
-def render(run_dir: Path) -> str:
-    events = load_jsonl(run_dir / "tool_trace.jsonl")
-    case_id = run_dir.name
-
+def _stats(events: list[dict]) -> tuple[int, int, float]:
     n_events = len(events)
     cost = sum(e.get("total_cost_usd") or 0 for e in events if e.get("type") == "result")
     n_tool_calls = sum(
@@ -963,26 +1378,57 @@ def render(run_dir: Path) -> str:
         for blk in (e.get("message") or {}).get("content", [])
         if isinstance(blk, dict) and blk.get("type") == "tool_use"
     )
+    return n_events, n_tool_calls, cost
 
+
+def render_judge_page(run_dir: Path) -> str:
+    case_id = run_dir.name
+    events = load_jsonl(run_dir / "tool_trace.jsonl")
+    n_events, n_tool_calls, cost = _stats(events)
     judge = load_judge_findings(case_id)
-    defender_html, gather_calls = render_defender_section(run_dir, events)
-    learning_html, learning_anchors = render_learning_section(case_id)
+    n_findings = len((judge or {}).get("defender_findings") or []) if judge else 0
 
     return f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>defender run: {esc(case_id)}</title>
+<html><head><meta charset="utf-8"><title>judge eval — {esc(case_id)}</title>
 <style>{CSS}</style></head><body id="top">
-<header class="top">
-  <h1>defender run: {esc(case_id)}</h1>
-  <div class="meta">events={n_events} · tool_calls={n_tool_calls} · cost=${cost:.4f} · run_dir={esc(str(run_dir))}</div>
-</header>
-{render_headline(run_dir, case_id, judge)}
+{render_header(case_id, n_events, n_tool_calls, cost, run_dir, active="judge")}
+{render_judge_headline(run_dir, judge)}
 <div class="layout">
-  {render_toc(len(gather_calls), learning_anchors)}
+  {render_judge_toc(n_findings)}
   <article class="content">
-    {render_alert_section(run_dir)}
-    {defender_html}
-    {learning_html}
-    {render_raw_transcript(events)}
+    {render_alert_block(run_dir, open_=True)}
+    {render_judge_defender_summary(run_dir)}
+    {render_judge_actor_section(case_id)}
+    {render_judge_judge_section(judge)}
+    {render_judge_oracle_section(case_id)}
+    {render_judge_raw_bundle(case_id)}
+  </article>
+</div>
+</body></html>
+"""
+
+
+def render_runtime_page(run_dir: Path) -> str:
+    case_id = run_dir.name
+    events = load_jsonl(run_dir / "tool_trace.jsonl")
+    n_events, n_tool_calls, cost = _stats(events)
+    investigation_html, phases = render_runtime_investigation(run_dir)
+    gather_html, n_gather = render_runtime_gather(run_dir, events)
+
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>runtime — {esc(case_id)}</title>
+<style>{CSS}</style></head><body id="top">
+{render_header(case_id, n_events, n_tool_calls, cost, run_dir, active="runtime")}
+{render_runtime_headline(run_dir)}
+<div class="layout">
+  {render_runtime_toc(phases, n_gather)}
+  <article class="content">
+    {render_alert_block(run_dir, open_=False)}
+    {investigation_html}
+    {gather_html}
+    {render_runtime_lead_sequence(run_dir)}
+    {render_runtime_report(run_dir)}
+    {render_runtime_raw(events)}
   </article>
 </div>
 {render_footer(run_dir, case_id)}
@@ -998,9 +1444,12 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    out = run_dir / "transcript.html"
-    out.write_text(render(run_dir))
-    print(f"wrote {out}")
+    judge_out = run_dir / JUDGE_FILENAME
+    runtime_out = run_dir / RUNTIME_FILENAME
+    judge_out.write_text(render_judge_page(run_dir))
+    runtime_out.write_text(render_runtime_page(run_dir))
+    print(f"wrote {judge_out}")
+    print(f"wrote {runtime_out}")
     return 0
 
 

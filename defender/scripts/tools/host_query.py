@@ -37,10 +37,11 @@ Exit codes:
 """
 
 import argparse
+import json
 import re
 import subprocess
 import sys
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 # Hosts the CLI is allowed to docker exec against. Adding a host here is
 # a deliberate act — it must be a playground container whose inspection
@@ -96,6 +97,26 @@ def is_answer_key_path(path: str) -> bool:
     return False
 
 
+def persist_output(output: str, run_dir: str | None, position: str | None) -> None:
+    """Write output to gather_raw/{position}.json if run_dir and position are provided.
+
+    Output is parsed as JSON if possible; if not, it's wrapped in a text field.
+    """
+    if not run_dir or not position:
+        return
+    gather_raw = Path(run_dir) / "gather_raw"
+    gather_raw.mkdir(parents=True, exist_ok=True)
+    out_path = gather_raw / f"{position}.json"
+    try:
+        # Try to parse as JSON first
+        data = json.loads(output)
+    except (json.JSONDecodeError, ValueError):
+        # If not JSON, wrap in a text field
+        data = {"text": output}
+    with open(out_path, "w") as f:
+        json.dump(data, f)
+
+
 # ---------------------------------------------------------------------------
 # Subcommand implementations
 # ---------------------------------------------------------------------------
@@ -146,9 +167,12 @@ def cmd_file_stat(args: argparse.Namespace) -> int:
     if rc != 0:
         # stat returns non-zero when the file doesn't exist; surface that as
         # a clean negative rather than a tool error.
-        print(f"not found: {args.path}")
+        output = f"not found: {args.path}"
+        print(output)
+        persist_output(output, args.run_dir, args.position)
         return 0
     print(out)
+    persist_output(out, args.run_dir, args.position)
     return 0
 
 
@@ -156,12 +180,21 @@ def cmd_package_installed(args: argparse.Namespace) -> int:
     """Check if a debian package is installed on the host."""
     out, rc = docker_exec(args.host, ["dpkg-query", "-W", "-f", "${Status}", args.name])
     if rc != 0:
-        print(f"{args.name}: not installed")
+        output = f"{args.name}: not installed"
+        print(output)
+        persist_output(output, args.run_dir, args.position)
         return 0
     if "install ok installed" in out:
-        print(f"{args.name}: installed")
+        # Also get the version
+        ver_out, ver_rc = docker_exec(args.host, ["dpkg-query", "-W", "-f", "${Version}", args.name])
+        if ver_rc == 0:
+            output = f"{args.name}: installed, version={ver_out.strip()}"
+        else:
+            output = f"{args.name}: installed"
     else:
-        print(f"{args.name}: {out}")
+        output = f"{args.name}: {out}"
+    print(output)
+    persist_output(output, args.run_dir, args.position)
     return 0
 
 
@@ -238,6 +271,20 @@ def build_parser() -> argparse.ArgumentParser:
             f"Allowed: {', '.join(ALLOWED_HOSTS)}."
         ),
     )
+    p.add_argument(
+        "--run-dir",
+        help=(
+            "Run directory. When provided with --position, output is persisted "
+            "to {run_dir}/gather_raw/{position}.json in addition to stdout."
+        ),
+    )
+    p.add_argument(
+        "--position",
+        help=(
+            "Sequence position of this dispatch in the run (e.g. '0', '0a', '0b'). "
+            "Only used with --run-dir."
+        ),
+    )
     sub = p.add_subparsers(dest="subcommand", required=True)
 
     s = sub.add_parser(
@@ -294,7 +341,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    return args.func(args)
+    rc = args.func(args)
+    return rc
 
 
 if __name__ == "__main__":
