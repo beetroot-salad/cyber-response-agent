@@ -276,6 +276,82 @@ services:
       '
     restart: "no"
 
+  fleet-outputs-reconciler:
+    # Always-on sidecar that keeps `fleet-default-output` aligned with the
+    # current ES CA. The CA fingerprint is pinned in the Fleet output config
+    # (stored in `.fleet-*` indices on the `es_data` volume), but the CA
+    # itself lives in the `certs` volume. If either volume is reset while
+    # the other survives, the pinned fingerprint diverges from the live CA
+    # and every agent silently fails with `x509: certificate signed by
+    # unknown authority` — no telemetry lands in ES. The setup one-shot is
+    # idempotent on cert generation, so nothing else reconciles the drift.
+    #
+    # This loop reads /certs/ca/ca.crt every 60s, computes its SHA-256
+    # fingerprint, GETs the current Fleet output, and PUTs a fresh config
+    # if the fingerprint or ES host has drifted. Silent on match.
+    depends_on:
+      kibana:
+        condition: service_healthy
+      fleet-init:
+        condition: service_completed_successfully
+    image: alpine:3.20
+    container_name: fleet-outputs-reconciler
+    environment:
+      - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
+      - INTERVAL_S=60
+      - CA_PATH=/certs/ca/ca.crt
+      - KIBANA_URL=http://kibana:5601
+      - ES_URL=https://elasticsearch:9200
+    volumes:
+      - certs:/certs:ro
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        apk add --no-cache curl openssl >/dev/null
+        log() { printf "%s %s\n" "$$(date -u +%FT%TZ)" "$$*"; }
+        log "reconciler starting; interval=$${INTERVAL_S}s ca=$${CA_PATH}"
+        while true; do
+          if [ ! -f "$$CA_PATH" ]; then
+            log "ca not found at $$CA_PATH; retrying"
+            sleep "$$INTERVAL_S"; continue
+          fi
+          WANT_FP=$$(openssl x509 -in "$$CA_PATH" -fingerprint -sha256 -noout \
+            | sed 's/.*=//; s/://g' | tr '[:upper:]' '[:lower:]')
+          GOT=$$(curl -fsS -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+            "$$KIBANA_URL/api/fleet/outputs/fleet-default-output" 2>/dev/null || true)
+          if [ -z "$$GOT" ]; then
+            log "kibana fleet output endpoint unreachable; retrying"
+            sleep "$$INTERVAL_S"; continue
+          fi
+          GOT_FP=$$(printf '%s' "$$GOT" \
+            | sed -n 's/.*"ca_trusted_fingerprint":"\([a-f0-9]*\)".*/\1/p' \
+            | tr '[:upper:]' '[:lower:]')
+          GOT_HOSTS=$$(printf '%s' "$$GOT" \
+            | sed -n 's/.*"hosts":\(\[[^]]*\]\).*/\1/p')
+          if [ "$$GOT_FP" = "$$WANT_FP" ] && \
+             printf '%s' "$$GOT_HOSTS" | grep -q "$$ES_URL"; then
+            sleep "$$INTERVAL_S"; continue
+          fi
+          log "drift detected — want_fp=$$WANT_FP got_fp=$$GOT_FP hosts=$$GOT_HOSTS"
+          BODY=$$(printf '{"hosts":["%s"],"ca_trusted_fingerprint":"%s"}' \
+            "$$ES_URL" "$$WANT_FP")
+          HTTP=$$(curl -sS -o /tmp/resp -w '%{http_code}' \
+            -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+            -H 'Content-Type: application/json' \
+            -X PUT "$$KIBANA_URL/api/fleet/outputs/fleet-default-output" \
+            -d "$$BODY")
+          if [ "$$HTTP" = "200" ]; then
+            log "fleet-default-output updated fp=$$WANT_FP"
+          else
+            log "update FAILED http=$$HTTP body=$$(cat /tmp/resp)"
+          fi
+          sleep "$$INTERVAL_S"
+        done
+    mem_limit: 64m
+    restart: unless-stopped
+
   fleet-server:
     depends_on:
       elasticsearch:
