@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "name": "app-01",
+    "ip": "10.20.30.41"
+  },
+  "data": {
+    "path": "/usr/bin/python3.11",
+    "mode": "scheduled",
+    "uid_after": "0",
+    "size_before": 5907896,
+    "size_after": 5908120
+  },
+  "rule": {
+    "id": "550",
+    "level": 7,
+    "description": "Integrity checksum changed."
+  },
+  "predecoder": {
+    "program_name": "syscheck",
+    "timestamp": "May 02 03:14:55"
+  }
+}

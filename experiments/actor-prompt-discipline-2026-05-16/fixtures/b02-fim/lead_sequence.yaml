@@ -1,0 +1,26 @@
+case_id: 20260516T200706Z-alert
+alert_ref: alert.json
+entries:
+  - position: 0
+    lead_description:
+      goal: "Retrieve the full FIM event record for /usr/bin/python3.11 on app-01 (checksums, parent process fields) and any surrounding alerts on app-01 \u00b11h around 2026-05-02T03:14:55Z that indicate package manager activity."
+      what_to_characterize:
+        - "checksum_before and checksum_after fields from the FIM event (sha256, md5, or sha1)"
+        - any data.uid_before field that would show whether ownership changed
+        - apt/dpkg/unattended-upgrades rule fires on app-01 near the modification timestamp
+        - other alerts on app-01 in the ±1h window that could indicate how the modification occurred
+    queries:
+      - id: wazuh.file-integrity-changes
+        params: {agent: app-01, path: /usr/bin/python3.11, window: "24h around 2026-05-02T03:14:55Z"}
+    result_ref: gather_raw/0.json
+  - position: 1
+    lead_description:
+      goal: "Check current package installation state for python3.11 on app-01 and file metadata for /usr/bin/python3.11 to compare current state with the alert's size_after (5908120 bytes)."
+      what_to_characterize:
+        - whether the python3.11 debian package is installed on app-01 and at what version
+        - "current file metadata for /usr/bin/python3.11 (size, mtime, owner) from host-query file-stat"
+        - whether the current file size matches size_after from the alert (5908120) or has changed again
+    queries:
+      - id: host-query.package-installed+file-stat
+        params: {host: app-01, pkg: python3.11, path: /usr/bin/python3.11}
+    result_ref: gather_raw/1.json

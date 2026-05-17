@@ -1,0 +1,11 @@
+case_id: 20260516T200706Z-alert
+alert_ref: alert.json
+entries:
+  - position: 0
+    queries:
+      - id: wazuh.file-integrity-changes
+        params: {agent: app-01, path: /usr/bin/python3.11, window: "24h around 2026-05-02T03:14:55Z"}
+  - position: 1
+    queries:
+      - id: host-query.package-installed+file-stat
+        params: {host: app-01, pkg: python3.11, path: /usr/bin/python3.11}

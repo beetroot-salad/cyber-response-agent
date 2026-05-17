@@ -182,11 +182,18 @@ def _run_claude(
     ``~/.claude/projects/-{cwd}/{session_id}.jsonl`` after the call
     returns. The whole subprocess is bounded by ``SUBAGENT_TIMEOUT``.
     """
+    # stream-json + concat all assistant text messages. `--output-format text`
+    # returns only the final assistant message, which silently drops earlier
+    # assistant text when the prompt does tool calls mid-output (e.g. the
+    # actor emits Section 0, consults the lessons corpus, then emits Sections
+    # 1-3 — text mode loses Section 0). Concatenating across messages keeps
+    # the prompt's design intent intact regardless of tool use.
     cmd = [
         "claude",
         "-p",
         "--model", model,
-        "--output-format", "text",
+        "--output-format", "stream-json",
+        "--verbose",  # required for stream-json with -p
         "--system-prompt-file", str(system_prompt_path),
     ]
     if settings_path is not None:
@@ -210,7 +217,28 @@ def _run_claude(
             f"claude -p failed (rc={proc.returncode}):\n"
             f"stderr: {proc.stderr[-2000:]}"
         )
-    return proc.stdout
+    parts: list[str] = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        msg = ev.get("message") or {}
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    txt = item.get("text", "")
+                    if txt:
+                        parts.append(txt)
+        elif isinstance(content, str) and content:
+            parts.append(content)
+    return "\n\n".join(parts)
 
 
 def _transcript_path(session_id: str) -> Path:
