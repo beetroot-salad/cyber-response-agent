@@ -157,6 +157,30 @@ Depends on `kibana:service_healthy`. Creates the `fleet-server-policy` in Kibana
 - `127.0.0.1:8220` on the VPS — loopback only (agents on the same VPS reach via Docker DNS `https://fleet-server:8220`; external agents would need port exposed + a real hostname in `FLEET_URL`).
 - Named volume `soc-playground_fleet_data` holds agent state. Deleting it forces re-enrollment on next start.
 
+### fleet-outputs-reconciler (always-on)
+
+Sidecar that keeps `fleet-default-output` aligned with the live ES CA. The output config (in `.fleet-*` system indices on `es_data`) pins `ca_trusted_fingerprint`; the CA itself lives in the `certs` volume. If either volume is reset while the other survives, the pinned fingerprint diverges from the live CA — every agent silently fails with `x509: certificate signed by unknown authority`, no telemetry lands, and the `setup` one-shot is idempotent on cert generation so nothing else reconciles. The original deploy ran a one-time manual `PUT /api/fleet/outputs/fleet-default-output`; that fix didn't survive cert regeneration.
+
+The reconciler:
+
+- Image `alpine:3.20`, ~64 MB resident, installs `curl` + `openssl` once on start.
+- Mounts `certs:/certs:ro`.
+- Loops every 60s: reads `/certs/ca/ca.crt`, computes SHA-256 fingerprint, GETs `/api/fleet/outputs/fleet-default-output`, and PUTs `{hosts: ["https://elasticsearch:9200"], ca_trusted_fingerprint: <live>}` only on drift. Silent on match.
+- `restart: unless-stopped` so it survives lever-down/up cycles and self-heals within 60s of any cert or output regen.
+
+**What this fixes — and what it doesn't.** Drift in the centralized output config (cert regen, fleet config wipe, manual edit) self-heals. Drift in agent-side cached CA in the elastic-agent state vault (`/var/lib/elastic-agent`, `state.enc`) does **not** — once an agent has cached an old CA cert, it can't validate ES's new chain and the apikey-auth path keeps failing. Recovery for that case requires re-enrollment:
+
+```bash
+# For each affected host:
+docker --context soc-playground compose rm -sf <host>
+docker --context soc-playground volume rm soc-playground_agent_state_<host_underscored>
+docker --context soc-playground compose up -d <host>
+```
+
+The host's entrypoint sentinel triggers a fresh `elastic-agent enroll` against the current Fleet output. For fleet-server itself, the same pattern applies to `soc-playground_fleet_data`.
+
+To avoid that recovery path entirely: never wipe the `certs` volume alone. If you do regen certs, also wipe `fleet_data` + every `agent_state_*` so they all re-enroll fresh against the new CA. The reconciler buys you self-healing for the centralized output but cannot reach into agent vaults.
+
 ### Role-clustered host population (batch 7a)
 
 Eight role containers running on the compose network — the "population" half of v2 (docs/playground-environment-v2.md §Environment population). All 8 are built from a single multi-stage `hosts/Dockerfile` selected via compose `target:` + `BASE_OS` arg.
@@ -516,7 +540,7 @@ docker --context soc-playground compose up -d
 - **Self-signed CA** — the CA lives in the `certs` volume. To connect from outside the cluster (e.g., curl from your laptop), copy the CA out: `docker --context soc-playground exec elasticsearch cat config/certs/ca/ca.crt > /tmp/ca.crt` and pass `--cacert /tmp/ca.crt`.
 - **Fleet agentless sync error in Kibana logs** — Kibana's Fleet plugin tries to sync with Elastic's managed Agentless service and complains about missing client certs. Harmless for self-hosted; will be silenced when Fleet is properly configured in a later batch.
 - **Kibana `/internal/security/me` is unavailable in current Kibana config** — this is an internal-API restriction, not a bug. Use the UI login at `http://localhost:5601` or the basic-auth REST APIs for scripted access.
-- **`fleet-default-output` auto-defaults to `http://localhost:9200` — wrong for our setup.** `KIBANA_FLEET_SETUP=1` creates this output with a plaintext localhost URL; every enrolled agent ships monitoring data there. For us it must be `https://elasticsearch:9200` with `ca_trusted_fingerprint` set. This is a one-time fix via `PUT /api/fleet/outputs/fleet-default-output`. If you lever-down → lever-up, the output config persists in `es_data` — no re-do needed.
+- **`fleet-default-output` auto-defaults to `http://localhost:9200` — wrong for our setup.** `KIBANA_FLEET_SETUP=1` creates this output with a plaintext localhost URL; every enrolled agent ships monitoring data there. For us it must be `https://elasticsearch:9200` with `ca_trusted_fingerprint` set. Handled by the `fleet-outputs-reconciler` sidecar — it self-heals drift in either the URL or the fingerprint within 60s. Earlier deploys used a one-time manual `PUT /api/fleet/outputs/fleet-default-output`; that didn't survive cert regeneration when the `certs` volume was reset out-of-band.
 - **The VPS host needs `/etc/hosts` entries for Docker service names.** `127.0.0.1 elasticsearch` + `127.0.0.1 fleet-server` so host-based agents can resolve those names. **Persisted via `infra/cloud-init/bootstrap.yaml`** (runcmd with grep-gated append + `manage_etc_hosts: false` to stop cloud-init from clobbering it on lever-up).
 - **Fleet Server re-enrolls as a new agent on each container restart.** `KIBANA_FLEET_SETUP=1` on the fleet-server container requests a new service token + new enrollment on every start. Across a lever-down/up cycle the old record becomes an `offline` ghost in Kibana → Fleet → Agents. Cleanup: `POST /api/fleet/agents/<old-id>/unenroll -d '{"revoke":true}'` or via UI. The Fleet Server itself keeps working fine — this is a cosmetic bookkeeping issue.
 - **After lever-up, the host elastic-agent may need `systemctl restart elastic-agent`** to shake off cached DNS state and re-resolve `fleet-server` / `elasticsearch` through `/etc/hosts`. Symptom in `elastic-agent status`: fleet checkin `FAILED: lookup fleet-server on 127.0.0.53:53: server misbehaving`. Cure: restart the service. Could script this into the lever-up flow later if it proves recurring.
