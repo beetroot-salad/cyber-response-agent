@@ -174,15 +174,22 @@ def visualize(run_dir: Path) -> None:
     if proc.returncode != 0:
         sys.stderr.write(f"[run.py] visualize_run failed: {proc.stderr}")
         return
-    # Mirror the rendered transcript into defender/run-visualizations/
-    # so reviews aren't gated on /tmp/defender-runs/ surviving.
-    transcript = run_dir / "transcript.html"
-    if transcript.is_file():
-        dest_dir = DEFENDER_DIR / "run-visualizations"
-        dest_dir.mkdir(exist_ok=True)
-        dest = dest_dir / f"{run_dir.name}.html"
-        shutil.copyfile(transcript, dest)
-        sys.stderr.write(f"[run.py] copied transcript to {dest.relative_to(REPO_ROOT)}\n")
+    # Mirror the rendered pages into defender/run-visualizations/<run_id>/
+    # so reviews aren't gated on /tmp/defender-runs/ surviving. We mirror
+    # into a per-run subdir (not flat files) because the judge/runtime
+    # pages cross-link via relative hrefs.
+    dest_dir = DEFENDER_DIR / "run-visualizations" / run_dir.name
+    copied: list[str] = []
+    for fname in ("transcript.html", "runtime.html"):
+        src = run_dir / fname
+        if not src.is_file():
+            continue
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / fname
+        shutil.copyfile(src, dest)
+        copied.append(str(dest.relative_to(REPO_ROOT)))
+    for path in copied:
+        sys.stderr.write(f"[run.py] copied {path}\n")
 
 
 def run_learning_loop(run_dir: Path) -> int:
