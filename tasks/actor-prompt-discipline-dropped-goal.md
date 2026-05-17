@@ -17,21 +17,25 @@ groups: defender, learning-loop, actor
 Full writeup, per-cell grades, harness, and rubric:
 `experiments/actor-prompt-discipline-2026-05-16/`.
 
-**What did NOT ship.** Three E2 magnitude-tier formulations tested
-(freeform-rule, explicit-axes, load-bearing-aware) — each succeeded on
-one fixture and failed on another. The discipline doesn't generalize
-across alert shapes from a preamble nudge alone. Either reformulate it
-as a structural output-format instruction or scope per-signature.
-Filed as deferred follow-up below.
+**Update (2026-05-17).** The `freeform-rule` magnitude-tier append is
+now shipping in this PR after a follow-up sanity check
+(`experiments/actor-overspecificity-2026-05-17/`). At N=4 on the
+previously-failing `b02-fim` fixture under the streamed harness it
+passes 4/4 discipline; pooled with the PR's original stage-2 (1/3) =
+5/7. The "doesn't generalize on b02" conclusion was largely seed
+noise. Load-bearing density holds within 0.5 of baseline at N=4.
+
+Two alternative formulations were also tested in stage 0:
+- `e3-allow-estimates` (Section 1 wording relaxed to permit
+  category-level placeholders) — 1/2 discipline on b02, with the
+  lowest load-bearing density. Positive-permission framing didn't
+  deter invented counts.
+- `e4-forbid-enums` (Section 1 augmented with a negative instruction
+  against invented enumerations) — 2/2, indistinguishable from
+  freeform-rule at N=2. Larger edit, no clear win. Deferred.
 
 ## Deferred follow-ups
 
-- **Magnitude-tier discipline that generalizes** — actors writing
-  supply-chain / FIM narratives keep committing to specific payload
-  sizes and proxy-hop counts despite the rule. Brute-force / auth
-  shapes apply it cleanly. Next attempt should put the rule in
-  actor.md's Output-format section (alongside "first character is `0`")
-  rather than the preamble.
 - **Defense in depth for the actor-tools split** — `actor.md` instructs
   "use lessons between Section 0 and Section 1." Now safe under the
   loop.py fix, but could be rephrased to "use lessons before writing
