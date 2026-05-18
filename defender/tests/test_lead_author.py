@@ -253,3 +253,71 @@ def test_parse_status_z_handles_spaces_and_rename():
     # Rename: we key on the destination, the source record is consumed.
     assert "dest-name" in paths
     assert "src-name" not in paths
+
+
+# ---------------------------------------------------------------------------
+# verify_postflight — amend / rewrite detection
+# ---------------------------------------------------------------------------
+
+
+def _run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=cwd,
+                          capture_output=True, text=True, check=True)
+
+
+@pytest.fixture
+def tmp_git_repo(tmp_path: Path, monkeypatch):
+    """Stand up a tmp git repo with a catalog dir and point the driver at it."""
+    repo = tmp_path / "repo"
+    (repo / "defender" / "skills" / "gather" / "queries").mkdir(parents=True)
+    (repo / "defender" / "skills" / "gather" / "queries" / ".gitkeep").write_text("")
+    _run_git(repo, "init", "-q", "-b", "main")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test")
+    _run_git(repo, "add", "-A")
+    _run_git(repo, "commit", "-q", "-m", "init")
+
+    monkeypatch.setattr(lead_author, "REPO_ROOT", repo)
+    return repo
+
+
+def test_verify_postflight_rejects_amended_base(tmp_git_repo: Path):
+    """`git commit --amend` rewrites the base commit; must be rejected."""
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    # Agent runs `git commit --amend` on the base commit, rewriting history.
+    (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "x.md").write_text("x")
+    _run_git(tmp_git_repo, "add", "-A")
+    _run_git(tmp_git_repo, "commit", "-q", "--amend", "-m", "amended")
+
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    assert not ok
+    assert "ancestor" in reason
+
+
+def test_verify_postflight_accepts_clean_single_commit(tmp_git_repo: Path):
+    """Normal happy path: one catalog-only commit on top of base."""
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "x.md").write_text("x")
+    _run_git(tmp_git_repo, "add", "-A")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "add x")
+
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    assert ok, f"expected ok, got reason={reason}"
+
+
+def test_verify_postflight_rejects_reset_to_earlier(tmp_git_repo: Path):
+    """`git reset --hard <earlier>` makes base_sha not-an-ancestor; reject."""
+    # Add an extra commit first so we have somewhere to reset to.
+    (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "a.md").write_text("a")
+    _run_git(tmp_git_repo, "add", "-A")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "add a")
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    # Agent resets HEAD back past base_sha.
+    _run_git(tmp_git_repo, "reset", "--hard", "-q", "HEAD~1")
+
+    ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
+    assert not ok
+    assert "ancestor" in reason

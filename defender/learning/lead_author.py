@@ -421,6 +421,23 @@ def verify_postflight(
 ) -> tuple[bool, str, dict]:
     """Check post-flight git state. Returns (ok, reason, details)."""
     head_sha = _git_head()
+
+    # base_sha must still be an ancestor of HEAD. If it isn't, the agent
+    # rewrote history (`git commit --amend`, `git rebase`, `git reset`),
+    # which is a hard-rule violation and would make rev-list / diff
+    # comparisons against base_sha lie. ``merge-base --is-ancestor``
+    # exits 0 when ancestor, 1 when not, ≥2 on error.
+    anc = _git("merge-base", "--is-ancestor", base_sha, head_sha, check=False)
+    if anc.returncode == 1:
+        return False, "base_sha is not an ancestor of HEAD (history rewritten)", {
+            "base": base_sha, "head": head_sha,
+        }
+    if anc.returncode != 0:
+        return False, "merge-base --is-ancestor failed", {
+            "base": base_sha, "head": head_sha,
+            "stderr": anc.stderr.strip(),
+        }
+
     count = _git_rev_list_count(base_sha)
     if count > 1:
         return False, "more than one commit since base", {
