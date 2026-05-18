@@ -998,6 +998,19 @@ def run_one(run_dir: Path) -> int:
         f"{n_obs} actor observation(s) to {ACTOR_OBSERVATIONS_FILE}"
     )
 
+    _log("step=lead-author")
+    try:
+        sys.path.insert(0, str(LEARNING_DIR))
+        try:
+            import lead_author as _lead_author  # type: ignore[import-not-found]
+        finally:
+            sys.path.pop(0)
+        rc = _lead_author.run(run_dir)
+        if rc != 0:
+            _log(f"lead-author returned rc={rc} (continuing — defender is experimental)")
+    except Exception as e:  # noqa: BLE001 — experimental track, log and continue
+        _log(f"lead-author crashed: {e!r} (continuing)")
+
     threshold = int(os.environ.get("LEARNING_AUTHOR_THRESHOLD", "5"))
     pending_count = sum(
         1 for line in PENDING_FILE.read_text().splitlines() if line.strip()

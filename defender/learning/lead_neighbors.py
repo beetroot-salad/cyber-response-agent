@@ -1,0 +1,434 @@
+#!/usr/bin/env python3
+"""Deterministic top-k neighbor scoring for the defender query catalog.
+
+Used by ``lead_author.py`` to surface candidate sibling templates for
+the lead-author agent to consider when deciding fold / split / add.
+
+Two modes:
+
+Mode A — executed ``query_id`` resolves in the catalog. Score the
+executed template's ``## Query`` body against every other catalog
+template's ``## Query`` body using a per-variant weighted Jaccard with
+a CLI token firewall and TF-IDF weighting.
+
+Mode B — ad-hoc / unresolved ``query_id``. Tokenize the lead's
+``goal_text`` (English, with a small stoplist) and score against each
+template's ``## Goal`` prose. Less validated than Mode A — the neighbor
+list is a hint, not a verdict.
+
+The regression-pin sanity fixture from the original PR lives in
+``defender/tests/test_lead_neighbors.py`` rather than here, so the
+production module stays free of fixture data.
+"""
+from __future__ import annotations
+
+import argparse
+import math
+import re
+import sys
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CATALOG_ROOT = REPO_ROOT / "defender" / "skills" / "gather" / "queries"
+
+
+PLUMBING_TOKENS = frozenset(
+    {"run_dir", "position", "window", "start", "end", "limit"}
+)
+
+GOAL_STOPLIST = frozenset(
+    {
+        "a", "an", "and", "are", "as", "at", "be", "but", "by", "for",
+        "from", "has", "have", "he", "her", "his", "i", "if", "in",
+        "into", "is", "it", "its", "of", "on", "or", "she", "so", "than",
+        "that", "the", "their", "them", "then", "there", "these", "they",
+        "this", "to", "too", "was", "we", "were", "what", "when", "where",
+        "which", "who", "whom", "why", "will", "with", "would", "you",
+        "your", "any", "all", "each", "such", "use", "used", "using",
+        "via", "do", "does", "did", "over", "under", "while", "between",
+        "across", "around", "many", "much", "more", "less", "most",
+        "least", "some", "other", "another", "very", "also", "however",
+    }
+)
+
+
+_SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
+_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)
+
+
+# ---------------------------------------------------------------------------
+# Catalog loading
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Template:
+    id: str
+    system: str
+    path: Path
+    goal_text: str
+    query_variants: tuple[frozenset[str], ...]
+    cli: str
+
+
+def _parse_id(text: str) -> str | None:
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return None
+    for line in m.group(1).splitlines():
+        line = line.strip()
+        if line.startswith("id:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _sections(body: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    matches = list(_SECTION_RE.finditer(body))
+    for i, m in enumerate(matches):
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        out[m.group(1).strip()] = body[start:end].strip()
+    return out
+
+
+def _query_variants(query_section: str) -> tuple[frozenset[str], ...]:
+    """Split the ## Query section into per-fence variants, tokenize each.
+
+    Some templates document multiple query forms (e.g. a Lucene one and
+    a JSON+aggs one) inside a single ``## Query`` section. Per-variant
+    tokenization + per-pair max preserves the strength of each variant
+    rather than diluting it across the average.
+    """
+    variants: list[frozenset[str]] = []
+    for m in re.finditer(r"```(?:bash|json)?\n(.*?)```", query_section, re.DOTALL):
+        body = m.group(1)
+        variants.append(tokenize_query(body))
+    if not variants:
+        variants.append(tokenize_query(query_section))
+    return tuple(variants)
+
+
+def tokenize_query(text: str) -> frozenset[str]:
+    """Argument-side tokenizer for Mode A query-body scoring.
+
+    Splits on non-identifier/dot characters, drops pure-numeric tokens
+    and ``PLUMBING_TOKENS``, lowercases. Dotted field references
+    (``rule.id``, ``data.srcip``) are preserved as single tokens so a
+    template scoring on ``data.srcip`` matches another using the same
+    field — not just one that happens to mention ``data``.
+    """
+    raw = re.split(r"[^\w.]+", text.lower())
+    toks: list[str] = []
+    for tok in raw:
+        if not tok:
+            continue
+        stripped = tok.replace(".", "")
+        if stripped.isdigit():
+            continue
+        if tok in PLUMBING_TOKENS:
+            continue
+        toks.append(tok)
+    return frozenset(toks)
+
+
+def tokenize_goal(text: str) -> frozenset[str]:
+    """Prose tokenizer for Mode B goal-prose scoring."""
+    raw = re.split(r"[^\w.]+", text.lower())
+    toks: list[str] = []
+    for tok in raw:
+        if not tok:
+            continue
+        stripped = tok.replace(".", "")
+        if stripped.isdigit():
+            continue
+        if tok in GOAL_STOPLIST:
+            continue
+        toks.append(tok)
+    return frozenset(toks)
+
+
+def _resolve_cli(template_id: str) -> str:
+    """Map a template id to its CLI prefix for the firewall."""
+    if "." in template_id:
+        return template_id.split(".", 1)[0]
+    return "unknown"
+
+
+def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
+    """Walk the catalog and return one Template per ``.md`` file.
+
+    ``catalog_dir`` defaults to module-level ``CATALOG_ROOT`` resolved
+    lazily so tests can rebind it.
+    """
+    root = catalog_dir if catalog_dir is not None else CATALOG_ROOT
+    out: list[Template] = []
+    for path in sorted(root.glob("*/*.md")):
+        if "tests" in path.parts:
+            continue
+        text = path.read_text()
+        tid = _parse_id(text)
+        if tid is None:
+            continue
+        body = text
+        if body.startswith("---\n"):
+            end = body.find("\n---", 4)
+            if end != -1:
+                body = body[end + 4:].lstrip("\n")
+        sections = _sections(body)
+        goal = sections.get("Goal", "")
+        query = sections.get("Query", "")
+        out.append(
+            Template(
+                id=tid,
+                system=path.parent.name,
+                path=path,
+                goal_text=goal,
+                query_variants=_query_variants(query),
+                cli=_resolve_cli(tid),
+            )
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Scoring
+# ---------------------------------------------------------------------------
+
+
+def build_idf(token_sets: list[frozenset[str]]) -> dict[str, float]:
+    """Smoothed inverse document frequency over a token-set corpus."""
+    n = len(token_sets)
+    df: Counter[str] = Counter()
+    for ts in token_sets:
+        for tok in ts:
+            df[tok] += 1
+    return {tok: math.log((n + 1) / (count + 1)) + 1.0 for tok, count in df.items()}
+
+
+def weighted_jaccard(
+    a: frozenset[str], b: frozenset[str], idf: dict[str, float]
+) -> float:
+    """IDF-weighted Jaccard similarity. Empty inputs return 0."""
+    if not a or not b:
+        return 0.0
+    inter_w = sum(idf.get(t, 1.0) for t in a & b)
+    union_w = sum(idf.get(t, 1.0) for t in a | b)
+    return inter_w / union_w if union_w else 0.0
+
+
+def _all_query_variants(catalog: list[Template]) -> list[frozenset[str]]:
+    out: list[frozenset[str]] = []
+    for t in catalog:
+        out.extend(t.query_variants)
+    return out
+
+
+def _max_variant_score(
+    src: tuple[frozenset[str], ...],
+    tgt: tuple[frozenset[str], ...],
+    idf: dict[str, float],
+) -> float:
+    best = 0.0
+    for s in src:
+        for t in tgt:
+            score = weighted_jaccard(s, t, idf)
+            if score > best:
+                best = score
+    return best
+
+
+@dataclass(frozen=True)
+class Neighbor:
+    template_id: str
+    template_path: Path
+    score: float
+
+
+def top_k_neighbors(
+    executed: dict,
+    catalog: list[Template],
+    *,
+    idf_query: dict[str, float] | None = None,
+    idf_goal: dict[str, float] | None = None,
+    k: int = 3,
+) -> tuple[str, list[Neighbor]]:
+    """Pick the top-k siblings for an executed lead.
+
+    Returns ``(mode, neighbors)`` where ``mode`` is ``"A"`` (resolved
+    ``query_id`` → query-body scoring + CLI firewall) or ``"B"`` (ad-hoc
+    → goal-prose scoring). Neighbors are returned in descending score
+    order; the executed template is excluded from the result list under
+    Mode A.
+    """
+    by_id = {t.id: t for t in catalog}
+    query_id = executed.get("query_id")
+
+    if query_id and query_id in by_id:
+        src = by_id[query_id]
+        idf = idf_query or build_idf(_all_query_variants(catalog))
+        scored: list[Neighbor] = []
+        for t in catalog:
+            if t.id == src.id:
+                continue
+            if t.cli != src.cli:
+                continue
+            score = _max_variant_score(src.query_variants, t.query_variants, idf)
+            scored.append(Neighbor(t.id, t.path, round(score, 4)))
+        scored.sort(key=lambda n: (-n.score, n.template_id))
+        return "A", scored[:k]
+
+    goal_text = executed.get("goal_text") or ""
+    src_tokens = tokenize_goal(goal_text)
+    goal_token_sets = [tokenize_goal(t.goal_text) for t in catalog]
+    idf = idf_goal or build_idf(goal_token_sets)
+    scored = []
+    for t, tokens in zip(catalog, goal_token_sets):
+        score = weighted_jaccard(src_tokens, tokens, idf)
+        scored.append(Neighbor(t.id, t.path, round(score, 4)))
+    scored.sort(key=lambda n: (-n.score, n.template_id))
+    return "B", scored[:k]
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+_HELP_DESCRIPTION = """\
+Score the defender query-template catalog and surface the top-k
+siblings for a given executed lead.
+
+The lead-author driver uses this internally to build per-lead handoff
+blocks. As a standalone CLI it's useful for inspecting why one
+template ranked over another, sanity-checking a catalog edit before
+shipping, or debugging a Mode-B fallback.
+"""
+
+
+_HELP_EPILOG = """\
+Modes
+  Mode A   The executed query_id resolves in the catalog. Scores the
+           executed template's ## Query body against every other
+           catalog template's ## Query body using IDF-weighted Jaccard
+           with a CLI firewall (wazuh templates never get host-query
+           siblings and vice versa). This is the validated mode.
+
+  Mode B   The query_id is ad-hoc or doesn't resolve. Falls back to
+           tokenizing the lead's goal_text and scoring against each
+           template's ## Goal prose. Less reliable — the neighbor list
+           is a hint, not a verdict.
+
+Examples
+  # Mode A — top-3 siblings for a known template
+  python -m defender.learning.lead_neighbors score \\
+      --query-id wazuh.auth-events
+
+  # Mode B — prose-based fallback for a one-off lead
+  python -m defender.learning.lead_neighbors score \\
+      --goal-text "list privileged command executions on a host"
+
+  # Dump every template's id, system, cli, and goal-first-line
+  python -m defender.learning.lead_neighbors dump
+
+Common mistakes
+  * If a query_id doesn't resolve you fell into Mode B silently — run
+    `dump` to see what ids the catalog actually exposes.
+  * Mode B compares prose, not queries. A close-prose neighbor is not
+    a guarantee that the *query* is similar — verify by reading the
+    file before using it as a template.
+  * The CLI firewall blocks cross-system neighbors. If you expected a
+    cross-system match, the answer is "no neighbor", not "bug".
+  * Tokens are lowercased and dotted-field-preserving (`rule.id` stays
+    one token). If you grep results and your case doesn't match, you
+    are not seeing the truth.
+"""
+
+
+def _cmd_score(args: argparse.Namespace) -> int:
+    catalog = load_catalog(args.catalog)
+    if not catalog:
+        print(f"no templates found under {args.catalog}", file=sys.stderr)
+        return 2
+    executed: dict = {}
+    if args.query_id:
+        executed["query_id"] = args.query_id
+    if args.goal_text:
+        executed["goal_text"] = args.goal_text
+    if not executed:
+        print("score: at least one of --query-id or --goal-text required",
+              file=sys.stderr)
+        return 2
+    mode, neighbors = top_k_neighbors(executed, catalog, k=args.k)
+    print(f"mode: {mode}")
+    if not neighbors:
+        print("no neighbors (catalog filtered to empty after CLI firewall)")
+        return 0
+    width = max(len(n.template_id) for n in neighbors)
+    for n in neighbors:
+        print(f"  {n.template_id:<{width}}  score={n.score:.4f}  {n.template_path}")
+    return 0
+
+
+def _cmd_dump(args: argparse.Namespace) -> int:
+    catalog = load_catalog(args.catalog)
+    if not catalog:
+        print(f"no templates found under {args.catalog}", file=sys.stderr)
+        return 2
+    width_id = max(len(t.id) for t in catalog)
+    width_sys = max(len(t.system) for t in catalog)
+    for t in catalog:
+        first_line = (t.goal_text.splitlines() or [""])[0].strip()
+        if len(first_line) > 80:
+            first_line = first_line[:77] + "..."
+        print(f"  {t.id:<{width_id}}  system={t.system:<{width_sys}}  cli={t.cli:<8}  {first_line}")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(
+        prog="lead_neighbors",
+        description=_HELP_DESCRIPTION,
+        epilog=_HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "--catalog",
+        type=Path,
+        default=CATALOG_ROOT,
+        help=f"Catalog dir (defaults to {CATALOG_ROOT}).",
+    )
+    sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
+
+    p_score = sub.add_parser(
+        "score",
+        help="print top-k neighbors for one lead",
+        description="Score one executed lead against the catalog. "
+                    "Supply --query-id (Mode A) and/or --goal-text (Mode B).",
+    )
+    p_score.add_argument("--query-id",
+                         help="executed template id, e.g. wazuh.auth-events")
+    p_score.add_argument("--goal-text",
+                         help="lead goal text for Mode B fallback")
+    p_score.add_argument("-k", "--k", type=int, default=3,
+                         help="number of neighbors to return (default 3)")
+    p_score.set_defaults(func=_cmd_score)
+
+    p_dump = sub.add_parser(
+        "dump",
+        help="list every template's id, system, cli, goal-first-line",
+        description="Walk the catalog and print one line per template. "
+                    "Use this when a score command returns Mode B unexpectedly "
+                    "— it shows what ids actually exist.",
+    )
+    p_dump.set_defaults(func=_cmd_dump)
+
+    args = p.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
