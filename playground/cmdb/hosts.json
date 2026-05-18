@@ -1,0 +1,33 @@
+{
+  "hosts": [
+    {
+      "ip": "172.22.0.13",
+      "hostname": "target-endpoint",
+      "owner_team": "app-platform",
+      "role": "workload-host",
+      "criticality": "medium",
+      "authorized_inbound": ["app-lb:443", "monitoring-host:22", "bastion:22"],
+      "status": "active",
+      "notes_ref": "target-endpoint"
+    },
+    {
+      "ip": "172.22.0.20",
+      "hostname": "monitoring-host",
+      "owner_team": "sre",
+      "role": "monitoring",
+      "criticality": "medium",
+      "authorized_outbound": ["target-endpoint:22 (nrpe-check, account=nrpe-check)"],
+      "status": "active",
+      "notes_ref": "monitoring-host"
+    },
+    {
+      "ip": "172.22.0.5",
+      "hostname": "bastion-01",
+      "owner_team": "platform",
+      "role": "bastion",
+      "criticality": "high",
+      "status": "active",
+      "notes_ref": "bastion-01"
+    }
+  ]
+}

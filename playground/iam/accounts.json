@@ -1,0 +1,48 @@
+{
+  "accounts": [
+    {
+      "name": "nrpe-check",
+      "kind": "service",
+      "owner_team": "sre",
+      "active": true,
+      "allowed_source_hosts": ["monitoring-host"],
+      "allowed_target_hosts": ["target-endpoint"],
+      "purpose": "SSH-based NRPE health checks against workload hosts",
+      "notes_ref": "nrpe-check"
+    },
+    {
+      "name": "deploy-bot",
+      "kind": "service",
+      "owner_team": "platform",
+      "active": true,
+      "allowed_source_hosts": ["ci-runner-01", "ci-runner-02"],
+      "allowed_target_hosts": ["target-endpoint", "bastion-01"],
+      "purpose": "CD pipeline ssh user for application deploys",
+      "notes_ref": "deploy-bot"
+    },
+    {
+      "name": "nagios",
+      "kind": "service",
+      "owner_team": null,
+      "active": false,
+      "purpose": "Legacy monitoring account; never provisioned in this environment",
+      "notes_ref": "legacy-monitoring-accounts"
+    },
+    {
+      "name": "zabbix",
+      "kind": "service",
+      "owner_team": null,
+      "active": false,
+      "purpose": "Legacy monitoring account; never provisioned in this environment",
+      "notes_ref": "legacy-monitoring-accounts"
+    },
+    {
+      "name": "healthcheck",
+      "kind": "service",
+      "owner_team": null,
+      "active": false,
+      "purpose": "Generic name common in opportunistic SSH credential sweeps",
+      "notes_ref": "legacy-monitoring-accounts"
+    }
+  ]
+}

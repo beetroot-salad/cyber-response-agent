@@ -101,6 +101,28 @@ If PLAN can't name a real branch the next move resolves, scaffold a
 single mechanism + legitimacy contract and proceed; don't loop on
 prediction.
 
+**Authz/legitimacy questions are leads.** "Is this source IP
+documented?", "Is this account provisioned?", "Is there a change
+window covering this action?" — these are data-source queries
+against registry systems (CMDB, IAM, change calendar). Author them
+as `:L` entries like any other lead, attached to the hypothesis they
+discriminate; declare the corresponding `authz?` contract on the
+relevant `:H` row so the resolution lands as contract status, not
+just prediction grading. Do not fetch from registry systems inline
+at ORIENT or PLAN; the registry is a system of record and its
+queries belong in the lead sequence.
+
+**One question = one lead = one gather Task.** Independent questions
+that happen to ground the same hypothesis ("is the source IP
+documented?" + "is the account active?") are *separate* leads,
+dispatched as separate parallel `Task` calls — not bundled into one
+lead. A composition lead is only the right shape when the answer is
+a **correlation across raw data** (which session was open when this
+file changed, which process initiated this connection); when the
+defender combines two independent facts by reasoning, it's two leads.
+Example B shows a single-fact lead (CMDB lookup); when adding an IAM
+check, that's a second `:L` row dispatched in parallel.
+
 **Lessons.** The learning loop builds up a corpus of pitfall lessons
 under `defender/lessons/` — each is a markdown file with `name` +
 `description` frontmatter and a freeform pitfall body. At PLAN time,
@@ -167,6 +189,14 @@ strongly supports, `+` weakly supports, `-` weakly refutes, `--`
 strongly refutes). Then decide whether you have enough to disposition;
 if not, loop back to PLAN.
 
+If a lead resolved a legitimacy contract declared in `:H` (e.g.
+`ac1: proposed:cmdb:…`), record the resolution in `:R` as a contract
+status — `authorized | unauthorized | indeterminate` — alongside the
+prediction grading. `unauthorized` on any live-weight hypothesis's
+contract forces escalation regardless of behavioral grading; an
+`indeterminate` contract is the right trigger to loop back to PLAN
+with a follow-up lead, not to fetch inline.
+
 If gather's summary feels thin, Grep `gather_raw/{position}.json`
 for the specific signal first; Read it whole only if Grep doesn't
 narrow it down.
@@ -210,10 +240,11 @@ Loaded on demand:
   load when authoring `investigation.md`.
 - `defender/skills/gather/SKILL.md` — the gather subagent reads this
   itself when dispatched; you do not need to load it.
-- `defender/skills/{system}/SKILL.md` (e.g. `wazuh`, `host-query`) —
-  per-system reference: what data the system holds, what its CLI looks
-  like, sample queries. Load when ORIENT or PLAN needs to know whether
-  a question is answerable in this environment.
+- `defender/skills/{system}/SKILL.md` — per-system reference: what
+  data the system holds, what its CLI looks like, sample queries.
+  Enumerate `defender/skills/*/SKILL.md` at ORIENT to discover what's
+  reachable in this environment, then load the ones whose `description:`
+  frontmatter looks relevant to the alert.
 
 ## Worked examples
 
