@@ -999,16 +999,18 @@ def run_one(run_dir: Path) -> int:
     )
 
     _log("step=lead-author")
+    sys.path.insert(0, str(LEARNING_DIR))
     try:
-        sys.path.insert(0, str(LEARNING_DIR))
-        try:
-            import lead_author as _lead_author  # type: ignore[import-not-found]
-        finally:
-            sys.path.pop(0)
+        import lead_author as _lead_author  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    try:
         rc = _lead_author.run(run_dir)
         if rc != 0:
             _log(f"lead-author returned rc={rc} (continuing — defender is experimental)")
-    except Exception as e:  # noqa: BLE001 — experimental track, log and continue
+    except (subprocess.SubprocessError, OSError) as e:
+        # Narrow swallow: child-process / filesystem hiccups don't tank the loop.
+        # ImportError, NameError, TypeError, etc. propagate so regressions fail loudly.
         _log(f"lead-author crashed: {e!r} (continuing)")
 
     threshold = int(os.environ.get("LEARNING_AUTHOR_THRESHOLD", "5"))

@@ -321,3 +321,75 @@ def test_verify_postflight_rejects_reset_to_earlier(tmp_git_repo: Path):
     ok, reason, _ = lead_author.verify_postflight(base_sha, baseline)
     assert not ok
     assert "ancestor" in reason
+
+
+def test_verify_postflight_rejects_multi_commit(tmp_git_repo: Path):
+    """Two commits since base is a hard-rule violation (one commit per tick)."""
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    for stem in ("a", "b"):
+        (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / f"{stem}.md").write_text(stem)
+        _run_git(tmp_git_repo, "add", "-A")
+        _run_git(tmp_git_repo, "commit", "-q", "-m", f"add {stem}")
+
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    assert not ok
+    assert "more than one commit" in reason
+    assert detail["rev_list_count"] == 2
+
+
+def test_verify_postflight_rejects_commit_outside_catalog(tmp_git_repo: Path):
+    """Single commit that touches a path outside the catalog must be rejected."""
+    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    # Agent commits a file outside the catalog.
+    (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
+    _run_git(tmp_git_repo, "add", "-A")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "stray edit")
+
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    assert not ok
+    assert "outside catalog" in reason
+    assert "defender/other/stray.md" in detail["diff_paths"]
+
+
+def test_verify_postflight_rejects_dirt_without_commit(tmp_git_repo: Path):
+    """No commit but new dirty/untracked records ⇒ violation (agent edited and bailed)."""
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    # Agent wrote a file but never committed.
+    (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "uncommitted.md").write_text("u")
+
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    assert not ok
+    assert "no commit" in reason
+    assert "defender/skills/gather/queries/uncommitted.md" in detail["new_paths"]
+
+
+def test_verify_postflight_rejects_sibling_dirt_alongside_commit(tmp_git_repo: Path):
+    """Commit landed cleanly but agent also left dirt under defender/ outside catalog."""
+    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    # Clean catalog commit…
+    (tmp_git_repo / "defender" / "skills" / "gather" / "queries" / "x.md").write_text("x")
+    _run_git(tmp_git_repo, "add", "-A")
+    _run_git(tmp_git_repo, "commit", "-q", "-m", "add x")
+    # …plus an uncommitted edit in a sibling defender/ path.
+    (tmp_git_repo / "defender" / "other" / "leak.md").write_text("leak")
+
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    assert not ok
+    assert "outside catalog" in reason
+    assert "defender/other/leak.md" in detail["new_paths"]
+
+
+def test_verify_postflight_accepts_no_commit_clean(tmp_git_repo: Path):
+    """Agent decided every handoff was skip ⇒ no commit, no dirt, exit 0."""
+    base_sha = lead_author._git_head()
+    baseline = lead_author._git_status_records()
+    # No edits.
+    ok, reason, detail = lead_author.verify_postflight(base_sha, baseline)
+    assert ok, f"expected ok, got reason={reason}"
+    assert detail["rev_list_count"] == 0
