@@ -76,12 +76,6 @@ LEAD_AUTHOR_MODEL = os.environ.get("LEAD_AUTHOR_MODEL", "claude-sonnet-4-6")
 LEAD_AUTHOR_TIMEOUT = int(os.environ.get("LEAD_AUTHOR_TIMEOUT_SECONDS", "1800"))
 
 
-CLI_REGISTRY: dict[str, str] = {
-    "wazuh": "wazuh_cli.py",
-    "host": "host_query.py",
-}
-
-
 # ---------------------------------------------------------------------------
 # Lead extraction (inlined from PR-209's lead_extract.py)
 # ---------------------------------------------------------------------------
@@ -96,20 +90,19 @@ class ExecutedLead:
     goal_text: str
     what_to_characterize: tuple[str, ...]
     result_refs: tuple[Path, ...]
-    cli: str | None
 
 
-def _resolve_cli(query_id: str) -> str | None:
+def _resolve_system(query_id: str, known_systems: set[str]) -> str | None:
+    """Return the system prefix iff it names a real catalog subdirectory.
+
+    The catalog dir layout (``defender/skills/gather/queries/{system}/``)
+    is the single source of truth for what systems exist. No hand-kept
+    registry to drift.
+    """
     if not query_id or "." not in query_id:
         return None
-    return CLI_REGISTRY.get(query_id.split(".", 1)[0])
-
-
-def _resolve_system(query_id: str) -> str | None:
-    if not query_id or "." not in query_id:
-        return None
-    system = query_id.split(".", 1)[0]
-    return system if system in CLI_REGISTRY else None
+    prefix = query_id.split(".", 1)[0]
+    return prefix if prefix in known_systems else None
 
 
 def _resolve_result_refs(run_dir: Path, position: int) -> tuple[Path, ...]:
@@ -177,7 +170,6 @@ def extract(run_dir: Path) -> list[ExecutedLead]:
                     goal_text=goal,
                     what_to_characterize=wtc,
                     result_refs=result_refs,
-                    cli=_resolve_cli(query_id),
                 )
             )
     return out
@@ -302,6 +294,7 @@ def build_handoff(
     """Build per-lead handoff blocks for the agent prompt."""
     catalog = lead_neighbors.load_catalog()
     by_id = {t.id: t for t in catalog}
+    known_systems = {t.system for t in catalog}
     idf_query = lead_neighbors.build_idf(
         lead_neighbors._all_query_variants(catalog)
     )
@@ -324,7 +317,7 @@ def build_handoff(
                 "query_index": lead.query_index,
                 "query_id": lead.query_id,
                 "mode": mode,
-                "system": _resolve_system(lead.query_id),
+                "system": _resolve_system(lead.query_id, known_systems),
                 "executed_template_path": (
                     str(executed_tpl.path.relative_to(REPO_ROOT))
                     if executed_tpl is not None else None
@@ -339,7 +332,6 @@ def build_handoff(
                 "goal_text": lead.goal_text,
                 "what_to_characterize": list(lead.what_to_characterize),
                 "params": dict(lead.params),
-                "cli": lead.cli,
                 "result_refs": [
                     str(p.relative_to(run_dir)) for p in lead.result_refs
                 ],

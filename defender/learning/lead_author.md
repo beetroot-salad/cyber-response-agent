@@ -14,7 +14,8 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
     "query_index": 0,
     "query_id": "wazuh.auth-events",     // or "" / unresolved for Mode B
     "mode": "A",                          // "A" if query_id resolves; "B" if ad-hoc
-    "system": "wazuh",                    // null when ad-hoc (Mode B with no resolvable prefix)
+    "system": "wazuh",                    // catalog subdir prefix; null if the prefix
+                                          //   doesn't name an existing system dir
     "executed_template_path":             // null for Mode B; set for Mode A
       "defender/skills/gather/queries/wazuh/auth-events.md",
     "neighbors": [                        // top-3 candidates the driver pre-computed
@@ -25,7 +26,6 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
     "goal_text": "...",
     "what_to_characterize": ["..."],
     "params": {"host": "...", "window": "..."},
-    "cli": "wazuh_cli.py",                // null for Mode B
     "result_refs": ["gather_raw/0.json"]
   }
   ```
