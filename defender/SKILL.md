@@ -101,6 +101,28 @@ If PLAN can't name a real branch the next move resolves, scaffold a
 single mechanism + legitimacy contract and proceed; don't loop on
 prediction.
 
+**Authz/legitimacy questions are leads.** "Is this source IP
+documented?", "Is this account provisioned?", "Is there a change
+window covering this action?" — these are data-source queries
+against registry systems (CMDB, IAM, change calendar). Author them
+as `:L` entries like any other lead, attached to the hypothesis they
+discriminate; declare the corresponding `authz?` contract on the
+relevant `:H` row so the resolution lands as contract status, not
+just prediction grading. Do not fetch from registry systems inline
+at ORIENT or PLAN; the registry is a system of record and its
+queries belong in the lead sequence.
+
+**One question = one lead = one gather Task.** Independent questions
+that happen to ground the same hypothesis ("is the source IP
+documented?" + "is the account active?") are *separate* leads,
+dispatched as separate parallel `Task` calls — not bundled into one
+lead. A composition lead is only the right shape when the answer is
+a **correlation across raw data** (which session was open when this
+file changed, which process initiated this connection); when the
+defender combines two independent facts by reasoning, it's two leads.
+Example B shows a single-fact lead (CMDB lookup); when adding an IAM
+check, that's a second `:L` row dispatched in parallel.
+
 **Lessons.** The learning loop builds up a corpus of pitfall lessons
 under `defender/lessons/` — each is a markdown file with `name` +
 `description` frontmatter and a freeform pitfall body. At PLAN time,
@@ -167,6 +189,14 @@ strongly supports, `+` weakly supports, `-` weakly refutes, `--`
 strongly refutes). Then decide whether you have enough to disposition;
 if not, loop back to PLAN.
 
+If a lead resolved a legitimacy contract declared in `:H` (e.g.
+`ac1: proposed:cmdb:…`), record the resolution in `:R` as a contract
+status — `authorized | unauthorized | indeterminate` — alongside the
+prediction grading. `unauthorized` on any live-weight hypothesis's
+contract forces escalation regardless of behavioral grading; an
+`indeterminate` contract is the right trigger to loop back to PLAN
+with a follow-up lead, not to fetch inline.
+
 If gather's summary feels thin, Grep `gather_raw/{position}.json`
 for the specific signal first; Read it whole only if Grep doesn't
 narrow it down.
@@ -210,10 +240,11 @@ Loaded on demand:
   load when authoring `investigation.md`.
 - `defender/skills/gather/SKILL.md` — the gather subagent reads this
   itself when dispatched; you do not need to load it.
-- `defender/skills/{system}/SKILL.md` (e.g. `wazuh`, `host-query`) —
-  per-system reference: what data the system holds, what its CLI looks
-  like, sample queries. Load when ORIENT or PLAN needs to know whether
-  a question is answerable in this environment.
+- `defender/skills/{system}/SKILL.md` — per-system reference: what
+  data the system holds, what its CLI looks like, sample queries.
+  Enumerate `defender/skills/*/SKILL.md` at ORIENT to discover what's
+  reachable in this environment, then load the ones whose `description:`
+  frontmatter looks relevant to the alert.
 
 ## Worked examples
 
@@ -325,61 +356,110 @@ all, not anything `l-001` returns. A defender whose `:H` set on the
 bait fixture only proposes upstream-of-write parents will close on
 the same single lead and miss it.
 
-### Example B — Internal horizontal port scan
+### Example B — SSH login by a non-stereotyped account from a documented monitoring source
 
-A horizontal port scan from `vuln-scanner-02.sec`. The question is
-whether this is internal reconnaissance by an unauthorized source or
-sanctioned scanning by a documented tool on schedule.
+An SSH auth-success on `app-host-12.prod` from `mon-poller-04.sre`
+using account `metrics-shipper` — a name the SRE team's monitoring
+runbook does not stereotype. The question is whether this is a
+sanctioned SRE rollout whose IAM catalog update lagged the deployment,
+or an unfamiliar process on the source that shouldn't be there.
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|endpoint|endpoint:ipv4|10.50.1.41|hostname=vuln-scanner-02.sec
-v-002|endpoint|endpoint:network|10.0.0.0/8|
+v-001|endpoint|endpoint:ipv4|10.20.5.41|hostname=mon-poller-04.sre
+v-002|endpoint|endpoint:ipv4|10.20.7.118|hostname=app-host-12.prod
+v-003|identity|identity:account|metrics-shipper|
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|scanned|v-001|v-002|2026-05-05T01:00:14Z..01:22:08Z|siem-event:wazuh|targets=1842;ports=top-100-tcp
+e-001|ssh_auth_success|v-001|v-002|2026-05-05T03:42:11Z|siem-event:wazuh|account=metrics-shipper;port=22
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|preds|refuts|authz?|weight|status]
-h-001|?scheduled-vuln-scan|v-001|scanned|process|tenable-scanner|p1:proposed_parent:"CMDB classifies source as trusted-scanner";p2:proposed_edge:"scan window matches a change calendar entry"|r1[p1,p2]:"source is unclassified or window has no change entry"|ac1:proposed:cmdb+change-cal:"source is documented scanner running an approved scan":escalate/escalate|null|active
-h-002|?adversary-internal-recon|v-001|scanned|identity|adversary-shell|p1:proposed_parent:"source has no documented scanner role";p2:proposed_edge:"scan timing is opportunistic, not on schedule"|r1[p1,p2]:"source is documented scanner and scan is on schedule"||null|active
+h-001|?sre-rollout-lag-in-iam|e-001|ssh_auth_success|process|monitoring-agent|p1:proposed_parent:"source is documented monitoring infrastructure";p2:proposed_parent:"metrics-shipper runs as a packaged systemd daemon on source, fleet-wide on the monitoring role"|r1[p1,p2]:"source undocumented, or no such daemon on host"|ac1:proposed:iam:"metrics-shipper is provisioned and authorized for this source→target SSH path":escalate/escalate|null|active
+h-002|?adversary-on-monitoring-source|e-001|ssh_auth_success|process|adversary-shell|p1:proposed_parent:"process initiating SSH is not a packaged systemd unit"|r1[p1]:"process is a distro-packaged, systemd-spawned daemon"||null|active
 
 :L findings [id|loop|name|target|tests|system|template|query|window]
-l-001|1|scanner-role-and-change|v-001|h-001,h-002|host-query|cmdb+change-cal|host=vuln-scanner-02.sec t=2026-05-05T01:00:14Z|n/a
+l-001|1|cmdb-source-lookup|v-001|h-001,h-002|cmdb|host-by-ip|ip=10.20.5.41|n/a
+l-002|1|iam-account-lookup|v-003|h-001|iam|account-by-name|name=metrics-shipper|n/a
 ```
 
-GATHER returned: CMDB role `tenable-scanner` (owner `infosec-vm-team`),
-change calendar entry `CHG-44120` (recurring Tuesdays 01:00–03:00 UTC),
-scan job `9981` in the scanner's audit log covering identical targets
-and timestamps.
+PLAN dispatches `l-001` and `l-002` as **two parallel `Task` calls** —
+independent single-fact registry questions, not a correlation across
+raw data. Templates `cmdb.host-by-ip` and `iam.account-by-name` are
+minted by gather (catalog had neither).
+
+GATHER returned:
+- `l-001` (cmdb): `10.20.5.41` documented as `mon-poller-04.sre`,
+  role `monitoring`, status `active`, `authorized_outbound:
+  ["app-host-12.prod:22 (account=sre-healthcheck)"]`. Source is
+  documented; the listed path constrains to `sre-healthcheck`, not
+  `metrics-shipper`.
+- `l-002` (iam): `metrics-shipper` not present in the IAM catalog — a
+  lookup miss, distinct from an `active: false` "explicitly
+  disauthorized" entry.
+
+ANALYZE:
 
 ```invlang
 :R attr_updates [resolved_by|target|key|value]
-l-001|v-001|cmdb_role|tenable-scanner
-l-001|v-001|authz_grant|CHG-44120
+l-002|h-001.ac1|status|indeterminate
+l-002|h-001.ac1|rationale|"IAM lookup miss; per sparse-registry semantics, ambiguous between 'never provisioned' and 'recently rolled out, not yet in IAM' — neither IAM alone nor CMDB's account-pinned authorized_outbound resolves it"
 
 :T resolutions
-h-001  null → ++    [l-001 p1,p2,ac1 severe ⟂ CMDB + change calendar + scanner audit log all aligned]
-h-002  null → --    [l-001 r1 severe ⟂ source is documented scanner running scheduled scan]
+h-001  null → +    [l-001 p1 weak ⟂ source documented as monitoring infra; p2 unresolved without host-side evidence]
+h-002  null → -    [l-001 weak ⟂ source is sanctioned monitoring infra, not raw adversary footprint — but documented hosts can still be compromised]
 ```
 
-REPORT: one dispatch, all three authority signals (CMDB, change
-calendar, scanner-side audit) aligning. The `ac1` legitimacy contract
-resolves `authorized`.
+`ac1` lands `indeterminate`, which blocks `disposition: benign`
+regardless of the behavioral grading on `h-001`. The loop-back is
+structural: ask host-query the question IAM couldn't answer — is
+`metrics-shipper` a packaged daemon on the source?
+
+Loop 2 PLAN:
+
+```invlang
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-003|2|metrics-shipper-daemon-on-source|v-001|h-001,h-002|host-query|systemd-unit-history|host=mon-poller-04.sre name=metrics-shipper|±14d
+```
+
+GATHER returned: `metrics-shipper.service` enabled and active since
+`2026-04-29T11:02:14Z`; installed by `apt install
+metrics-shipper-agent` triggered by the SRE config-management run;
+the same package + version landed on every host carrying `role:
+monitoring` in the same window.
+
+```invlang
+:R attr_updates [resolved_by|target|key|value]
+l-003|h-001.ac1|status|authorized
+l-003|h-001.ac1|rationale|"daemon is apt-installed metrics-shipper-agent, fleet-wide on role=monitoring; IAM stale, not unauthorized. Flag to sre-iam-team for catalog update."
+
+:T resolutions
+h-001  + → ++   [l-003 p2 severe ⟂ packaged daemon, install traced to SRE config-management, fleet-wide]
+h-002  - → --   [l-003 r1 severe ⟂ process is a packaged systemd-spawned daemon, not an adversary shell]
+```
+
+REPORT:
 
 ```invlang
 :T conclude
 termination.category   adversarial-refuted
 disposition            benign
 confidence             high
-matched_archetype      scheduled-vuln-scan
-summary                "Horizontal scan traces to documented Tenable scanner running CHG-44120; CMDB role + change calendar + scanner audit all aligned."
+matched_archetype      sre-rollout-lag-in-iam
+summary                "SSH from mon-poller-04.sre using metrics-shipper traces to a fleet-wide metrics-shipper-agent rollout on 2026-04-29 via SRE config-management. IAM not yet updated; flag to sre-iam-team. Behavior sanctioned; documentation stale."
 ```
 
-This is the shape PLAN should aim for when the answer might be one
-dispatch away: write the prediction set such that a single
-authority-aligned observation either confirms or refutes both
-hypotheses. Don't generate a second lead "to be sure" once the
-authority chain is closed.
+Three things to read off this shape. **One**, the three legitimacy
+statuses do distinct work: `authorized` would have closed `ac1` in
+Loop 1; `unauthorized` would have escalated immediately; `indeterminate`
+did neither — it kept the contract open and structurally forced the
+next move into PLAN with a sharper question. **Two**, CMDB and IAM
+dispatched as two parallel single-fact leads, not one composite — the
+defender combines those facts by reasoning, so per the
+"one-question = one-lead" rule they're separate `:L` rows. **Three**,
+the Loop-2 follow-up is the registry-sparseness escape hatch: when
+the registry of record has a gap, the right move is a different
+system (host-query) answering the underlying mechanism question, not
+a louder query against the same registry.
 
 ### Example C — Novel outbound DNS from a CI runner
 

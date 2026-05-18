@@ -82,7 +82,7 @@ ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 ACTOR_MODEL = os.environ.get("ACTOR_MODEL", "claude-sonnet-4-6")
 ORACLE_MODEL = os.environ.get("ORACLE_MODEL", "claude-sonnet-4-6")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-sonnet-4-6")
-SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "300"))
+SUBAGENT_TIMEOUT = int(os.environ.get("LEARNING_SUBAGENT_TIMEOUT_SECONDS", "450"))
 
 ACTOR_SETTINGS = LEARNING_DIR / "actor-settings.json"
 LESSONS_ACTOR_DIR = REPO_ROOT / "defender" / "lessons-actor"
@@ -427,6 +427,7 @@ def invoke_judge(
     investigation_path: Path,
     actor_story_path: Path,
     projected_telemetry_path: Path,
+    learning_run_dir: Path,
 ) -> str:
     user = (
         "<alert>\n"
@@ -442,7 +443,17 @@ def invoke_judge(
         f"{projected_telemetry_path.read_text().rstrip()}\n"
         "</projected_telemetry>\n"
     )
-    return _run_claude(JUDGE_PROMPT, user, model=JUDGE_MODEL)
+    import uuid as _uuid
+    session_id = str(_uuid.uuid4())
+    _log(f"step=judge session_id={session_id}")
+    try:
+        out = _run_claude(JUDGE_PROMPT, user, model=JUDGE_MODEL, session_id=session_id)
+    finally:
+        src = _transcript_path(session_id)
+        dst = learning_run_dir / "judge_trace.jsonl"
+        if src.is_file():
+            shutil.copy2(src, dst)
+    return out
 
 
 def is_skip_story(actor_story: str) -> bool:
@@ -942,12 +953,12 @@ def run_one(run_dir: Path) -> int:
     if oracle_yaml_stripped != oracle_yaml_text:
         (learning_run_dir / "projected_telemetry.raw.txt").write_text(oracle_yaml_text)
 
-    _log("step=judge")
     judge_yaml_text = invoke_judge(
         run_dir / "alert.json",
         run_dir / "investigation.md",
         actor_story_path,
         projected_telemetry_path,
+        learning_run_dir,
     )
     judge_yaml_stripped = strip_yaml_fence(judge_yaml_text)
     try:
