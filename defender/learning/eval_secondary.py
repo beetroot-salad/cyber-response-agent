@@ -507,6 +507,7 @@ def run_head_oracle_and_judge(
             head_run_dir / "investigation.md",
             actor_story_path,
             projected_path,
+            staging_dir,
         )
     except (loop_mod.LoopError, subprocess.TimeoutExpired) as e:
         raise SecondaryError(f"judge invocation failed: {e}") from e
