@@ -47,7 +47,6 @@ import datetime as _dt
 import fcntl
 import json
 import os
-import re
 import subprocess
 import sys
 from dataclasses import dataclass

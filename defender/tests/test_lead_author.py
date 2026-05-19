@@ -9,9 +9,7 @@ scope check is shell-and-git logic verifiable by reading the code.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
