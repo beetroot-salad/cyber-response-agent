@@ -52,11 +52,27 @@ A template is the right reuse if its `## Goal` describes the same
 **measurement** — even if the lead binds different parameters than a
 prior dispatch did. Don't fork on parameter axis; fork on capability.
 
-If nothing in the catalog fits, **author a new template** at
-`{catalog_dir}/{system}/{kebab-name}.md` per
-`defender/skills/gather/queries/SCHEMA.md`. Bias toward authoring a
-fresh template over wedging a near-match — duplicates normalize
-later; mis-keyed cross-case joins do not.
+If nothing in the catalog fits, **author a new template as a draft**
+at `{catalog_dir}/{system}/_draft/{kebab-name}.md` with `status: draft`
+in the frontmatter, per `defender/skills/gather/queries/SCHEMA.md`.
+You may **not** write directly to the established system root
+(`{system}/{kebab-name}.md`) — the offline lead-author promotes
+drafts to established after reviewing them. Bias toward authoring a
+fresh draft over wedging a near-match — duplicates normalize later;
+mis-keyed cross-case joins do not.
+
+The frontmatter for a freshly-authored draft looks like:
+
+```
+---
+id: {system}.{kebab-name}
+status: draft
+---
+```
+
+Drafts resolve under their full `{system}.{id}` identifier exactly
+like established templates — the lead-sequence projection treats them
+identically; only the on-disk location and `status` field differ.
 
 A single lead may need more than one query (e.g. foreground + baseline,
 or two systems compared). Run them; each becomes one element in your
@@ -152,7 +168,53 @@ knows which kind of empty it is. Do not run the full debug protocol
 on your own (that's the defender's explicit dispatch — §Debug
 leads); one round of smell-check, then report.
 
-### 5. Return
+### 5. Write the observation sidecar
+
+For every dispatched query, write a small JSON sidecar next to its
+raw payload so the offline lead-author can see the outcome at a
+glance without parsing the body:
+
+```
+gather_raw/{position}.observations.json     # single-query dispatch
+gather_raw/{position}{a..z}.observations.json   # multi-query
+```
+
+Shape:
+
+```jsonc
+{
+  "payload_status": "ok",            // see classification below
+  "payload_digest": "847 events; 12 distinct dstuser; 95% authentication_failed"
+}
+```
+
+The sidecar is mandatory; the lead-author refuses to author against
+a run that lacks it.
+
+**`payload_status` classification rules:**
+
+- `ok` — query returned structured data; the result is informative.
+- `empty` — query returned no rows and the smell test confirms the
+  emptiness is genuine (broader query also empty, or unfiltered
+  window populated and the filter legitimately rules events out).
+- `suspect_empty` — query returned no rows *and* you suspect silent
+  failure: a bound param violates the template's declared shape
+  (hostname literal on an IP-typed field, etc.), or the unfiltered
+  window is populated and the most-specific clause is the load-
+  bearing exclusion. Mark this when you'd run the debug protocol
+  if the defender dispatched one.
+- `error` — the CLI returned a non-success exit code, the JSON body
+  has an `error` key, or stderr matches an indexer rejection.
+- `partial` — the result hit a truncation cap (Lucene `limit`,
+  aggregation bucket cap, etc.) and the breakdown is incomplete.
+
+**`payload_digest`** — ≤ 200 char one-line summary. The most useful
+characterization in a glance: event count + the most discriminating
+distinct-count + the dominant rule/category. For host-query, an
+`stdout: N lines, exit=N` shape works. For errors, the first 200
+chars of the error message verbatim.
+
+### 6. Return
 
 Emit a summary with three sections:
 
@@ -172,12 +234,12 @@ Emit a summary with three sections:
 gather_raw/{position}.json
 ```
 
-If you authored a new template, mention it explicitly so the defender
-knows the catalog grew during this run:
+If you authored a new draft template, mention it explicitly so the
+defender knows the catalog grew during this run:
 
 ```
 ## Authored
-- defender/skills/gather/queries/wazuh/{kebab-name}.md
+- defender/skills/gather/queries/wazuh/_draft/{kebab-name}.md
 ```
 
 ## Lead kinds

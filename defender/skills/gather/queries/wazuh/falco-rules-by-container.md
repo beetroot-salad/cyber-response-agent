@@ -1,5 +1,6 @@
 ---
 id: wazuh.falco-rules-by-container
+status: established
 ---
 
 ## Goal

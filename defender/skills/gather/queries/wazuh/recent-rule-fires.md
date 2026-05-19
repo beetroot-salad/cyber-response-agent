@@ -1,5 +1,6 @@
 ---
 id: wazuh.recent-rule-fires
+status: established
 ---
 
 ## Goal

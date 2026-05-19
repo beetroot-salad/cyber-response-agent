@@ -56,10 +56,17 @@ from typing import Any
 import yaml
 
 try:
-    from defender.learning import _author_shared, lead_neighbors
+    from defender.learning import (
+        _author_shared,
+        lead_classifier,
+        lead_neighbors,
+        lead_render,
+    )
 except ImportError:  # pragma: no cover — direct-script execution fallback
     import _author_shared  # type: ignore[no-redef]
+    import lead_classifier  # type: ignore[no-redef]
     import lead_neighbors  # type: ignore[no-redef]
+    import lead_render  # type: ignore[no-redef]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -84,34 +91,40 @@ LEAD_AUTHOR_TIMEOUT = int(os.environ.get("LEAD_AUTHOR_TIMEOUT_SECONDS", "1800"))
 class ExecutedLead:
     position: int
     query_index: int
+    is_multi_query: bool          # parent entry had >1 query
+    entry_index: int              # index into the raw entries list
     query_id: str
     params: dict[str, Any]
     goal_text: str
     what_to_characterize: tuple[str, ...]
-    result_refs: tuple[Path, ...]
+    result_ref: Path              # this invocation's payload file
+    sidecar_path: Path            # this invocation's .observations.json
 
 
-def _resolve_result_refs(run_dir: Path, position: int) -> tuple[Path, ...]:
-    """Find ``{position}.json`` + fan-out variants under ``gather_raw/``.
+_VALID_PAYLOAD_STATUSES = frozenset(
+    {"ok", "empty", "suspect_empty", "error", "partial"}
+)
 
-    Allowed names: ``{N}.json`` and ``{N}{a..z}.json``. Excludes
-    multi-dot stems (filters ``0.lead.json`` sidecars) and avoids the
-    ``10.json`` collision a bare glob would produce.
+
+def _result_ref_for(run_dir: Path, position: int, query_index: int, is_multi: bool) -> Path:
+    """Canonical payload path for one invocation.
+
+    Single-query lead → ``gather_raw/{position}.json``.
+    Multi-query lead  → ``gather_raw/{position}{a..z}.json`` by index.
     """
     raw_dir = run_dir / "gather_raw"
-    if not raw_dir.is_dir():
-        return tuple()
-    canonical = f"{position}.json"
-    variants = {f"{position}{c}.json" for c in "abcdefghijklmnopqrstuvwxyz"}
-    out: list[Path] = []
-    for entry in sorted(raw_dir.iterdir()):
-        if entry.name == canonical or entry.name in variants:
-            out.append(entry)
-    return tuple(out)
+    if is_multi:
+        suffix = chr(ord("a") + query_index)
+        return raw_dir / f"{position}{suffix}.json"
+    return raw_dir / f"{position}.json"
 
 
-def extract(run_dir: Path) -> list[ExecutedLead]:
-    """Read ``lead_sequence.yaml`` and emit one ExecutedLead per query."""
+def _sidecar_for(result_ref: Path) -> Path:
+    """``foo.json`` → ``foo.observations.json`` (same dir, same stem)."""
+    return result_ref.with_name(result_ref.stem + ".observations.json")
+
+
+def _load_entries(run_dir: Path) -> list[dict]:
     seq_path = run_dir / "lead_sequence.yaml"
     if not seq_path.is_file():
         raise FileNotFoundError(seq_path)
@@ -121,9 +134,20 @@ def extract(run_dir: Path) -> list[ExecutedLead]:
     entries = doc.get("entries") or []
     if not isinstance(entries, list):
         raise ValueError(f"{seq_path}: entries must be a list")
+    return entries
 
+
+def extract(run_dir: Path) -> list[ExecutedLead]:
+    """Read ``lead_sequence.yaml`` and emit one ExecutedLead per query.
+
+    Invocations whose canonical payload file is missing are dropped
+    silently (the dispatch never landed or the projection is stale).
+    Observation sidecars are *not* checked here — that happens in
+    ``build_handoff``, where a missing sidecar is a hard error.
+    """
+    entries = _load_entries(run_dir)
     out: list[ExecutedLead] = []
-    for raw_entry in entries:
+    for entry_idx, raw_entry in enumerate(entries):
         if not isinstance(raw_entry, dict):
             continue
         position = raw_entry.get("position")
@@ -137,12 +161,13 @@ def extract(run_dir: Path) -> list[ExecutedLead]:
         queries = raw_entry.get("queries") or []
         if not isinstance(queries, list) or not queries:
             continue
-        result_refs = _resolve_result_refs(run_dir, position)
-        if not result_refs:
-            continue
+        is_multi = len(queries) > 1
 
         for q_idx, q in enumerate(queries):
             if not isinstance(q, dict):
+                continue
+            result_ref = _result_ref_for(run_dir, position, q_idx, is_multi)
+            if not result_ref.is_file():
                 continue
             query_id = q.get("id") or ""
             params_raw = q.get("params") or {}
@@ -151,11 +176,14 @@ def extract(run_dir: Path) -> list[ExecutedLead]:
                 ExecutedLead(
                     position=position,
                     query_index=q_idx,
+                    is_multi_query=is_multi,
+                    entry_index=entry_idx,
                     query_id=query_id,
                     params=params,
                     goal_text=goal,
                     what_to_characterize=wtc,
-                    result_refs=result_refs,
+                    result_ref=result_ref,
+                    sidecar_path=_sidecar_for(result_ref),
                 )
             )
     return out
@@ -256,6 +284,42 @@ def _diff_name_only_z(base_sha: str, head_sha: str) -> list[str]:
     return [p for p in proc.stdout.split("\0") if p]
 
 
+def _diff_name_status_z(base_sha: str, head_sha: str) -> list[tuple[str, list[str]]]:
+    """Parse ``git diff --name-status -z`` into ``[(code, [paths])]``.
+
+    Status codes: ``M``/``A``/``D``/``T`` carry one path each; ``R<score>``
+    and ``C<score>`` carry two (source then destination). With ``-z``
+    each field is NUL-separated.
+    """
+    proc = _git("diff", "--name-status", "-z", f"{base_sha}..{head_sha}")
+    parts = [p for p in proc.stdout.split("\0") if p]
+    out: list[tuple[str, list[str]]] = []
+    i = 0
+    while i < len(parts):
+        code = parts[i]
+        i += 1
+        if code[:1] in ("R", "C"):
+            if i + 1 >= len(parts):
+                break
+            out.append((code, [parts[i], parts[i + 1]]))
+            i += 2
+        else:
+            if i >= len(parts):
+                break
+            out.append((code, [parts[i]]))
+            i += 1
+    return out
+
+
+def _under_draft(path: str) -> bool:
+    """True if ``path`` lies under any ``{system}/_draft/`` subdirectory."""
+    if not path.startswith(CATALOG_REL):
+        return False
+    rest = path[len(CATALOG_REL):]
+    parts = rest.split("/")
+    return len(parts) >= 3 and parts[1] == "_draft"
+
+
 def _git_head() -> str:
     return _git("rev-parse", "HEAD").stdout.strip()
 
@@ -274,10 +338,44 @@ def _git_status_records() -> set[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 
+def _read_sidecar(sidecar_path: Path) -> dict[str, str]:
+    """Read ``gather_raw/{position}.observations.json`` for one invocation.
+
+    Missing or malformed sidecars are a gather-prompt regression — the
+    loop refuses to author against a run that lacks the loud-failure
+    signal, rather than silently masking it.
+    """
+    if not sidecar_path.is_file():
+        raise LeadAuthorError(
+            f"missing observation sidecar: {sidecar_path} "
+            "(gather must write a sidecar per dispatch — see "
+            "defender/skills/gather/SKILL.md §Return)"
+        )
+    try:
+        data = json.loads(sidecar_path.read_text())
+    except json.JSONDecodeError as e:
+        raise LeadAuthorError(f"{sidecar_path}: invalid JSON ({e})") from e
+    if not isinstance(data, dict):
+        raise LeadAuthorError(f"{sidecar_path}: top-level mapping required")
+    status = data.get("payload_status")
+    if status not in _VALID_PAYLOAD_STATUSES:
+        raise LeadAuthorError(
+            f"{sidecar_path}: payload_status must be one of "
+            f"{sorted(_VALID_PAYLOAD_STATUSES)}, got {status!r}"
+        )
+    digest = str(data.get("payload_digest") or "")
+    return {"payload_status": status, "payload_digest": digest[:200]}
+
+
 def build_handoff(
     run_dir: Path, executed: list[ExecutedLead]
 ) -> list[dict]:
-    """Build per-lead handoff blocks for the agent prompt.
+    """Build per-*template* handoff blocks for the agent prompt.
+
+    One handoff per ``executed_template_path``, even when the same
+    template was touched multiple times in this run — the invocations
+    list collapses what would otherwise be three sequential edit
+    cycles on the same file into one decision.
 
     Leads whose ``query_id`` doesn't resolve in the catalog are dropped
     with a corpus-health warning. Per ``defender/CLAUDE.md`` every id
@@ -288,25 +386,73 @@ def build_handoff(
     catalog = lead_neighbors.load_catalog()
     by_id = {t.id: t for t in catalog}
     idf = lead_neighbors.build_idf(lead_neighbors._all_query_variants(catalog))
-    handoffs: list[dict] = []
+    entries = _load_entries(run_dir)
+    template_path_by_id = {
+        tid: str(tpl.path.relative_to(REPO_ROOT))
+        for tid, tpl in by_id.items()
+    }
+
+    # Group invocations by the executed template path. Preserve
+    # first-seen order so the handoff stream is deterministic.
+    grouped: dict[Path, list[ExecutedLead]] = {}
+    seen_order: list[Path] = []
     for lead in executed:
-        executed_tpl = by_id.get(lead.query_id)
-        if executed_tpl is None:
+        tpl = by_id.get(lead.query_id)
+        if tpl is None:
             _log(
                 f"WARN unresolved query_id={lead.query_id!r} at position "
-                f"{lead.position} (runtime contract violation; dropping handoff)"
+                f"{lead.position} (runtime contract violation; dropping invocation)"
             )
             continue
+        if tpl.path not in grouped:
+            grouped[tpl.path] = []
+            seen_order.append(tpl.path)
+        grouped[tpl.path].append(lead)
+
+    handoffs: list[dict] = []
+    for tpl_path in seen_order:
+        invocations_raw = grouped[tpl_path]
+        tpl = by_id[invocations_raw[0].query_id]
         neighbors = lead_neighbors.top_k_neighbors(
-            lead.query_id, catalog, idf=idf, k=3,
+            tpl.id, catalog, idf=idf, k=3,
         )
+        invocations: list[dict] = []
+        for lead in invocations_raw:
+            entry = entries[lead.entry_index] if lead.entry_index < len(entries) else {}
+            sidecar = _read_sidecar(lead.sidecar_path)
+            query = (entry.get("queries") or [])[lead.query_index] \
+                if isinstance(entry.get("queries"), list) else {}
+            composite_kind = lead_classifier.infer_composite_kind(
+                entry, query, entries,
+            )
+            co_dispatched = lead_classifier.co_dispatched_template_paths(
+                entry, lead.query_index, template_path_by_id,
+            )
+            try:
+                rendered_query = lead_render.render_query(tpl.path, lead.params)
+            except OSError as e:
+                _log(f"WARN render_query failed for {tpl.path}: {e}")
+                rendered_query = ""
+            invocations.append(
+                {
+                    "position": lead.position,
+                    "query_index": lead.query_index,
+                    "goal_text": lead.goal_text,
+                    "what_to_characterize": list(lead.what_to_characterize),
+                    "params": dict(lead.params),
+                    "rendered_query": rendered_query,
+                    "payload_status": sidecar["payload_status"],
+                    "payload_digest": sidecar["payload_digest"],
+                    "result_refs": [str(lead.result_ref.relative_to(run_dir))],
+                    "composite_kind": composite_kind,
+                    "co_dispatched_with": co_dispatched,
+                }
+            )
         handoffs.append(
             {
-                "position": lead.position,
-                "query_index": lead.query_index,
-                "query_id": lead.query_id,
-                "executed_template_path":
-                    str(executed_tpl.path.relative_to(REPO_ROOT)),
+                "executed_template_path": str(tpl.path.relative_to(REPO_ROOT)),
+                "query_id": tpl.id,
+                "status": tpl.status,
                 "neighbors": [
                     {
                         "template_path": str(n.template_path.relative_to(REPO_ROOT)),
@@ -314,12 +460,7 @@ def build_handoff(
                     }
                     for n in neighbors
                 ],
-                "goal_text": lead.goal_text,
-                "what_to_characterize": list(lead.what_to_characterize),
-                "params": dict(lead.params),
-                "result_refs": [
-                    str(p.relative_to(run_dir)) for p in lead.result_refs
-                ],
+                "invocations": invocations,
             }
         )
     return handoffs
@@ -335,6 +476,8 @@ _ALLOWLIST = (
     f"Edit({CATALOG_REL}**),"
     f"Write({CATALOG_REL}**),"
     f"Bash(git add {CATALOG_REL}:*),"
+    "Bash(git mv:*),"
+    "Bash(git rm:*),"
     "Bash(git commit:*),"
     "Bash(git status:*),"
     "Bash(git diff:*)"
@@ -430,6 +573,28 @@ def verify_postflight(
                     "rev_list_count": count, "head": head_sha,
                     "diff_paths": diff_paths,
                 }
+        # Deletions are only allowed for drafts. Renames may move a
+        # draft to the system root (promotion) but not the reverse.
+        status_records = _diff_name_status_z(base_sha, head_sha)
+        for code, paths in status_records:
+            if code == "D":
+                if not _under_draft(paths[0]):
+                    return False, "commit deletes an established template", {
+                        "rev_list_count": count, "head": head_sha,
+                        "diff_paths": diff_paths,
+                        "deleted_path": paths[0],
+                    }
+            elif code.startswith("R") or code.startswith("C"):
+                src, dst = paths[0], paths[1]
+                # Allow within-_draft renames and _draft → system-root
+                # (promotion). Reject system-root → _draft (demotion of
+                # an established template).
+                if _under_draft(dst) and not _under_draft(src):
+                    return False, "commit demotes an established template to _draft", {
+                        "rev_list_count": count, "head": head_sha,
+                        "rename_src": src,
+                        "rename_dst": dst,
+                    }
 
     post = _git_status_records()
     new_records = post - baseline
@@ -571,7 +736,11 @@ def run(run_dir: Path) -> int:
             _log("no executed leads with on-disk payloads — nothing to do")
             return 0
 
-        handoffs = build_handoff(run_dir, executed)
+        try:
+            handoffs = build_handoff(run_dir, executed)
+        except LeadAuthorError as e:
+            _log(f"FATAL: cannot build handoffs: {e}")
+            return 2
         if not handoffs:
             _log(
                 f"all {len(executed)} extracted lead(s) had unresolved "

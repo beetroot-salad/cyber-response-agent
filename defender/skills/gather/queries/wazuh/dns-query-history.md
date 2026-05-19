@@ -1,5 +1,6 @@
 ---
 id: wazuh.dns-query-history
+status: established
 ---
 
 ## Goal

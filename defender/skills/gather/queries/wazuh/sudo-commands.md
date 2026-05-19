@@ -1,5 +1,6 @@
 ---
 id: wazuh.sudo-commands
+status: established
 ---
 
 ## Goal

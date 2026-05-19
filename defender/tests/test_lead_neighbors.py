@@ -145,3 +145,39 @@ def test_unresolved_query_id_raises(catalog):
     """Caller must filter unresolvable ids; an unfiltered call is a hard error."""
     with pytest.raises(KeyError):
         ln.top_k_neighbors("nonexistent.lookup", catalog, k=3)
+
+
+# ---------------------------------------------------------------------------
+# Catalog walk — _draft/ + status tagging
+# ---------------------------------------------------------------------------
+
+
+def test_load_catalog_walks_draft_subdir(tmp_path):
+    catalog_dir = tmp_path / "queries"
+    (catalog_dir / "wazuh" / "_draft").mkdir(parents=True)
+    (catalog_dir / "wazuh" / "auth-events.md").write_text(
+        "---\nid: wazuh.auth-events\nstatus: established\n---\n\n## Goal\n\nx\n\n## Query\n\n```\nq\n```\n"
+    )
+    (catalog_dir / "wazuh" / "_draft" / "novel-thing.md").write_text(
+        "---\nid: wazuh.novel-thing\nstatus: draft\n---\n\n## Goal\n\ny\n\n## Query\n\n```\nq2\n```\n"
+    )
+    cat = ln.load_catalog(catalog_dir)
+    by_id = {t.id: t for t in cat}
+    assert "wazuh.auth-events" in by_id
+    assert "wazuh.novel-thing" in by_id
+    assert by_id["wazuh.auth-events"].status == "established"
+    assert by_id["wazuh.novel-thing"].status == "draft"
+    # System derivation: draft entry's system is still "wazuh", not "_draft".
+    assert by_id["wazuh.novel-thing"].system == "wazuh"
+
+
+def test_load_catalog_defaults_missing_status_to_established(tmp_path):
+    """Templates with no `status:` field default to established."""
+    catalog_dir = tmp_path / "queries"
+    (catalog_dir / "wazuh").mkdir(parents=True)
+    (catalog_dir / "wazuh" / "x.md").write_text(
+        "---\nid: wazuh.x\n---\n\n## Goal\n\nx\n\n## Query\n\n```\nq\n```\n"
+    )
+    cat = ln.load_catalog(catalog_dir)
+    assert len(cat) == 1
+    assert cat[0].status == "established"

@@ -1,5 +1,6 @@
 ---
 id: host-query.file-stat
+status: established
 ---
 
 ## Goal

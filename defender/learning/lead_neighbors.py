@@ -53,17 +53,21 @@ class Template:
     goal_text: str
     query_variants: tuple[frozenset[str], ...]
     cli: str
+    status: str  # "established" | "draft"
 
 
-def _parse_id(text: str) -> str | None:
+def _parse_frontmatter(text: str) -> dict[str, str]:
     m = _FRONTMATTER_RE.match(text)
     if not m:
-        return None
+        return {}
+    out: dict[str, str] = {}
     for line in m.group(1).splitlines():
         line = line.strip()
-        if line.startswith("id:"):
-            return line.split(":", 1)[1].strip()
-    return None
+        if not line or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        out[key.strip()] = value.strip()
+    return out
 
 
 def _sections(body: str) -> dict[str, str]:
@@ -126,18 +130,26 @@ def _resolve_cli(template_id: str) -> str:
 def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
     """Walk the catalog and return one Template per ``.md`` file.
 
+    Walks both established templates at ``{system}/*.md`` and drafts at
+    ``{system}/_draft/*.md``. The ``status`` frontmatter field
+    distinguishes them; for compatibility with pre-refinement templates
+    the field defaults to ``"established"`` when absent.
+
     ``catalog_dir`` defaults to module-level ``CATALOG_ROOT`` resolved
     lazily so tests can rebind it.
     """
     root = catalog_dir if catalog_dir is not None else CATALOG_ROOT
     out: list[Template] = []
-    for path in sorted(root.glob("*/*.md")):
+    paths = sorted(list(root.glob("*/*.md")) + list(root.glob("*/_draft/*.md")))
+    for path in paths:
         if "tests" in path.parts:
             continue
         text = path.read_text()
-        tid = _parse_id(text)
-        if tid is None:
+        fm = _parse_frontmatter(text)
+        tid = fm.get("id")
+        if not tid:
             continue
+        status = fm.get("status") or "established"
         body = text
         if body.startswith("---\n"):
             end = body.find("\n---", 4)
@@ -146,14 +158,18 @@ def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
         sections = _sections(body)
         goal = sections.get("Goal", "")
         query = sections.get("Query", "")
+        # The system dir is the parent's parent for _draft/ files,
+        # otherwise the immediate parent.
+        system = path.parent.parent.name if path.parent.name == "_draft" else path.parent.name
         out.append(
             Template(
                 id=tid,
-                system=path.parent.name,
+                system=system,
                 path=path,
                 goal_text=goal,
                 query_variants=_query_variants(query),
                 cli=_resolve_cli(tid),
+                status=status,
             )
         )
     return out
@@ -313,7 +329,10 @@ def _cmd_dump(args: argparse.Namespace) -> int:
         first_line = (t.goal_text.splitlines() or [""])[0].strip()
         if len(first_line) > 80:
             first_line = first_line[:77] + "..."
-        print(f"  {t.id:<{width_id}}  system={t.system:<{width_sys}}  cli={t.cli:<8}  {first_line}")
+        print(
+            f"  {t.id:<{width_id}}  system={t.system:<{width_sys}}  "
+            f"cli={t.cli:<8}  status={t.status:<11}  {first_line}"
+        )
     return 0
 
 

@@ -5,41 +5,65 @@ You are NOT the lessons curator. That actor (`defender/learning/author.py`) writ
 ## What you receive
 
 - **`run_dir`** — absolute path of the defender run that triggered this tick. Read-only.
-- **`catalog_dir`** — `defender/skills/gather/queries/`. One file per template, namespaced by system (e.g. `wazuh/auth-events.md`). Schema lives in `defender/skills/gather/queries/SCHEMA.md`.
-- **`handoffs`** — a JSON array, one entry per executed query for you to consider. Schema:
+- **`catalog_dir`** — `defender/skills/gather/queries/`. One file per template, namespaced by system (e.g. `wazuh/auth-events.md`). Established templates live at `{system}/{id}.md`; gather-authored drafts live at `{system}/_draft/{id}.md` with `status: draft` frontmatter. Schema lives in `defender/skills/gather/queries/SCHEMA.md`.
+- **`handoffs`** — a JSON array, one entry per *executed template* (not per invocation). When the same template was dispatched multiple times in this run, those invocations collapse to one handoff so you make one decision per file. Schema:
 
   ```jsonc
   {
-    "position": 0,
-    "query_index": 0,
-    "query_id": "wazuh.auth-events",
     "executed_template_path":
       "defender/skills/gather/queries/wazuh/auth-events.md",
-    "neighbors": [                        // top-3 catalog siblings (same CLI)
+    "query_id": "wazuh.auth-events",
+    "status": "established",                // or "draft"
+    "neighbors": [                          // top-3 catalog siblings (same CLI)
       {"template_path": "...", "score": 0.41},
-      {"template_path": "...", "score": 0.33},
-      {"template_path": "...", "score": 0.29}
+      {"template_path": "...", "score": 0.33}
     ],
-    "goal_text": "...",
-    "what_to_characterize": ["..."],
-    "params": {"host": "...", "window": "..."},
-    "result_refs": ["gather_raw/0.json"]
+    "invocations": [
+      {
+        "position": 0,
+        "query_index": 0,
+        "goal_text": "...",
+        "what_to_characterize": ["..."],
+        "params": {"host": "...", "window": "1h"},
+        "rendered_query": "<the literal query body, params substituted>",
+        "payload_status": "ok",             // ok|empty|suspect_empty|error|partial
+        "payload_digest": "847 events; 12 distinct dstuser; ...",
+        "result_refs": ["gather_raw/0.json"],
+        "composite_kind": "atomic",         // atomic|sweep|join|baseline_shift|drill_down
+        "co_dispatched_with": []            // sibling template paths in same lead
+      }
+    ]
   }
   ```
 
-  `executed_template_path` and `neighbors` are **pre-computed by the driver** — trust them; do not recompute.
+  `executed_template_path`, `neighbors`, `rendered_query`, `payload_status`, `payload_digest`, and `composite_kind` are **pre-computed by the driver** — trust them; do not recompute. Read the payload at `result_refs` only when the digest leaves a question the digest can't answer.
 
 ## Decision procedure
 
-Process the handoffs **in order**. For each, read `executed_template_path` plus each neighbor file (`Read` the paths). Decide one of:
+Process the handoffs **in order**. For each, read `executed_template_path` plus each neighbor file. Then inspect `invocations[]` as a population:
 
-1. **fold** — the executed template's `## Goal` / `## Filter binding` / `## Common pitfalls` should grow to cover the new usage pattern. Edit the executed template only. Most common outcome.
-2. **split** — the executed template is doing too much. Carve out a subset into a new template; leave the rest.
-3. **skip** — nothing useful to fold. No edit.
+- **Union of `goal_text`** — does `## Goal` cover the keywords a future analyst would type?
+- **Spread of `params`** — does `## Filter binding` name the dimensions actually exercised?
+- **`payload_status` distribution** — are there `error` or `suspect_empty` invocations?
+- **`composite_kind` distribution** — was this template used in `baseline_shift` / `sweep` / `join` patterns? `## Baseline` becomes load-bearing for `baseline_shift`; `## Filter binding` for `sweep`; `co_dispatched_with` is the surface for `join` documentation.
 
-`merge` is intentionally **not** an option — combining two templates would require deleting the dropped file, and the driver's allowlist does not grant a delete primitive. If you would otherwise want to merge two templates, fold the lessons into the surviving one and skip the redundant; a human can clean up the duplicate in a follow-up PR.
+Then pick one action.
 
-Every handoff arrives with a resolved `executed_template_path`. Unresolved query_ids are dropped by the driver upstream with a corpus-health warning — you will never see them.
+**For `status: established` templates:**
+
+1. **fold** — grow `## Goal` / `## Filter binding` / `## Common pitfalls` to cover the new usage. Edit the executed template only. Most common outcome.
+2. **split** — the template is doing too much; carve a subset into a new file at `{system}/{new-id}.md` (you may author established directly here — split is the one path that mints a non-draft template).
+3. **skip** — nothing useful to fold. No edit. This should dominate in steady-state.
+
+**For `status: draft` templates:**
+
+1. **promote** — `git mv {system}/_draft/{id}.md {system}/{id}.md`, then Edit the moved file to change `status: draft` → `status: established`. Fold in any keyword recall or pitfalls from the invocations before promoting.
+2. **discard** — `git rm {system}/_draft/{id}.md`. Use when the draft duplicates an established template or measures something already covered.
+3. **skip** — leave the draft in place for a future tick to decide. Use when invocations don't give you enough signal yet.
+
+**Hard rule:** an invocation with `payload_status: error` or `payload_status: suspect_empty` is a load-bearing signal. The default is to fold a pitfall or `## Filter binding` REFUSE clause covering the failure mode. Skip is only acceptable if the pitfall is already documented.
+
+`merge` of two established templates is intentionally **not** an option — combining them would require deleting one, and the driver refuses to delete established files. If two siblings are near-duplicates, fold lessons into the one with broader coverage and skip the redundant; a human can clean up in a follow-up PR.
 
 ## Commit envelope
 
@@ -58,13 +82,14 @@ EOF
 )"
 ```
 
-Use `case_id` from the `run_dir` name. Do **not** commit anything outside `defender/skills/gather/queries/`. Do **not** push.
+For promotions, use `git add -A defender/skills/gather/queries/` (or `git mv` already stages the rename — followed by `git add` for the status frontmatter Edit). Use `case_id` from the `run_dir` name. Do **not** commit anything outside `defender/skills/gather/queries/`. Do **not** push.
 
 ## Hard rules
 
-- **One commit per tick.** Driver enforces `git rev-list --count base..HEAD ≤ 1`. Multi-commit history, rebases, and amends are rejected.
-- **Stay in scope.** Every edit must land under `defender/skills/gather/queries/`. Driver enforces with whole-tree `git status --porcelain --untracked-files=all` and `git diff --name-only`.
-- **No-edit runs exit zero.** If you decide every handoff is `skip`, exit zero without committing — that's a legitimate outcome.
+- **One commit per tick.** Driver enforces `git rev-list --count base..HEAD ≤ 1`.
+- **Stay in scope.** Every edit, rename, and removal must land under `defender/skills/gather/queries/`. Driver enforces with whole-tree `git status` and `git diff`.
+- **Established templates are delete-prohibited.** `git rm` may only target paths under `{system}/_draft/`. Demotions (renaming an established template into `_draft/`) are rejected.
+- **No-edit runs exit zero.** If you decide every handoff is `skip`, exit zero without committing.
 - **Non-zero exit ⇒ retry blocked.** If you exit non-zero, the driver writes `failure.txt` and refuses to retry until a human clears it. Do not exit non-zero just because some handoffs were skipped.
-- **Trust pre-computed fields.** `executed_template_path` and `neighbors` were computed by the driver. Read them, do not recompute.
+- **Trust pre-computed fields.** `executed_template_path`, `neighbors`, `rendered_query`, `payload_status`, `payload_digest`, and `composite_kind` were computed by the driver. Read them, do not recompute.
 - **Do not push.** The driver may push after verifying your commit.
