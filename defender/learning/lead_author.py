@@ -536,6 +536,11 @@ def _is_catalog_path(p: str) -> bool:
     return p.startswith(CATALOG_REL)
 
 
+def _dirty_established_paths(baseline: set[tuple[str, str]]) -> list[str]:
+    """Catalog paths present in ``baseline`` that aren't under ``_draft/``."""
+    return [p for _, p in baseline if _is_catalog_path(p) and not _under_draft(p)]
+
+
 def verify_postflight(
     base_sha: str, baseline: set[tuple[str, str]]
 ) -> tuple[bool, str, dict]:
@@ -720,8 +725,10 @@ def run(run_dir: Path) -> int:
         # Baseline snapshot.
         base_sha = _git_head()
         baseline = _git_status_records()
-        # Refuse if catalog is already dirty.
-        dirty_catalog = [p for _, p in baseline if _is_catalog_path(p)]
+        # Refuse if the established catalog is already dirty. Untracked drafts
+        # under {system}/_draft/ are the expected gather output that this
+        # author is being run to process — they belong in the baseline.
+        dirty_catalog = _dirty_established_paths(baseline)
         if dirty_catalog:
             _log(f"FATAL preflight: catalog dirty before authoring: {dirty_catalog}")
             return 2

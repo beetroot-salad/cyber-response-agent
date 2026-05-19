@@ -358,6 +358,25 @@ def test_under_draft_classifier():
     assert not lead_author._under_draft("defender/lessons/x.md")
 
 
+def test_dirty_established_paths_excludes_drafts():
+    """gather-authored drafts must NOT trip the pre-author dirty-catalog brake."""
+    baseline = {
+        ("??", "defender/skills/gather/queries/wazuh/_draft/newthing.md"),
+        ("??", "defender/skills/gather/queries/wazuh/_draft/another.md"),
+    }
+    assert lead_author._dirty_established_paths(baseline) == []
+
+
+def test_dirty_established_paths_catches_established_dirt():
+    baseline = {
+        ("??", "defender/skills/gather/queries/wazuh/_draft/ok.md"),
+        (" M", "defender/skills/gather/queries/wazuh/auth-events.md"),
+    }
+    assert lead_author._dirty_established_paths(baseline) == [
+        "defender/skills/gather/queries/wazuh/auth-events.md"
+    ]
+
+
 # ---------------------------------------------------------------------------
 # verify_postflight — git-history checks
 # ---------------------------------------------------------------------------
