@@ -51,9 +51,9 @@ Then pick one action.
 
 **For `status: established` templates:**
 
-1. **fold** — grow `## Goal` / `## Filter binding` / `## Common pitfalls` to cover the new usage. Edit the executed template only. Most common outcome.
-2. **split** — the template is doing too much; carve a subset into a new file at `{system}/{new-id}.md` (you may author established directly here — split is the one path that mints a non-draft template).
-3. **skip** — nothing useful to fold. No edit. This should dominate in steady-state.
+1. **skip** — no edit. This is the default. Established templates have already been vetted; a single run rarely surfaces signal strong enough to justify changing them. Skip when: the digest reports `payload_status: ok` and the invocations exercise dimensions the template already documents; or the gap is too narrow to generalize from one run; or the only "lesson" is a restatement of what the template already says.
+2. **fold** — edit `## Goal` / `## Filter binding` / `## Common pitfalls` to cover behavior this run actually exhibited. Each bullet you add must trace to at least one invocation (see "Grounded edits only" under Hard rules). Reach for fold when: a `payload_status: error` or `suspect_empty` invocation surfaces a failure mode the template doesn't warn about; a new params dimension was bound that `## Filter binding` doesn't name; the payload exposed a documented field (e.g. a sidecar pointer) the template never mentioned.
+3. **split** — the template is doing two distinct jobs and one invocation surfaced the second; carve the subset into a new file at `{system}/{new-id}.md` (split is the one path that mints a non-draft template). Rare.
 
 **For `status: draft` templates:**
 
@@ -61,7 +61,7 @@ Then pick one action.
 2. **discard** — `git rm {system}/_draft/{id}.md`. Use when the draft duplicates an established template or measures something already covered.
 3. **skip** — leave the draft in place for a future tick to decide. Use when invocations don't give you enough signal yet.
 
-**Hard rule:** an invocation with `payload_status: error` or `payload_status: suspect_empty` is a load-bearing signal. The default is to fold a pitfall or `## Filter binding` REFUSE clause covering the failure mode. Skip is only acceptable if the pitfall is already documented.
+**Pitfall signal — `error` / `suspect_empty`:** an invocation with `payload_status: error` or `payload_status: suspect_empty` is the strongest signal you'll see for a fold. Before folding, still confirm: (a) the failure mode isn't already documented in the template, (b) you can describe what happened from the payload itself (not from imagined related failures), (c) the description names what the agent did or saw, not what it might do in adjacent cases. If any of those fails, skip.
 
 `merge` of two established templates is intentionally **not** an option — combining them would require deleting one, and the driver refuses to delete established files. If two siblings are near-duplicates, fold lessons into the one with broader coverage and skip the redundant; a human can clean up in a follow-up PR.
 
@@ -87,6 +87,15 @@ For promotions, use `git add -A defender/skills/gather/queries/` (or `git mv` al
 ## Hard rules
 
 - **One commit per tick.** Driver enforces `git rev-list --count base..HEAD ≤ 1`.
+- **Grounded edits only.** Every Goal refinement, Filter-binding clause,
+  or pitfall must describe behavior that at least one invocation in this
+  run actually exhibited. Do not extrapolate to field values, payload
+  shapes, or failure modes that none of the invocations surfaced. Concrete
+  checks: if you write *"when X is null"*, *"X-less"*, *"without Y"*,
+  *"missing X"*, or *"X may be absent"* — open the relevant `result_refs`
+  payload and confirm at least one record exhibits that state. If none
+  does, the claim is speculation; drop it. The catalog documents observed
+  reality, not schema possibility.
 - **Stay in scope.** Every edit, rename, and removal must land under `defender/skills/gather/queries/`. Driver enforces with whole-tree `git status` and `git diff`.
 - **Established templates are delete-prohibited.** `git rm` may only target paths under `{system}/_draft/`. Demotions (renaming an established template into `_draft/`) are rejected.
 - **No-edit runs exit zero.** If you decide every handoff is `skip`, exit zero without committing.
