@@ -92,19 +92,6 @@ class ExecutedLead:
     result_refs: tuple[Path, ...]
 
 
-def _resolve_system(query_id: str, known_systems: set[str]) -> str | None:
-    """Return the system prefix iff it names a real catalog subdirectory.
-
-    The catalog dir layout (``defender/skills/gather/queries/{system}/``)
-    is the single source of truth for what systems exist. No hand-kept
-    registry to drift.
-    """
-    if not query_id or "." not in query_id:
-        return None
-    prefix = query_id.split(".", 1)[0]
-    return prefix if prefix in known_systems else None
-
-
 def _resolve_result_refs(run_dir: Path, position: int) -> tuple[Path, ...]:
     """Find ``{position}.json`` + fan-out variants under ``gather_raw/``.
 
@@ -291,37 +278,36 @@ def _git_status_records() -> set[tuple[str, str]]:
 def build_handoff(
     run_dir: Path, executed: list[ExecutedLead]
 ) -> list[dict]:
-    """Build per-lead handoff blocks for the agent prompt."""
+    """Build per-lead handoff blocks for the agent prompt.
+
+    Leads whose ``query_id`` doesn't resolve in the catalog are dropped
+    with a corpus-health warning. Per ``defender/CLAUDE.md`` every id
+    is supposed to resolve at lead-author time; a miss is a runtime
+    contract violation worth surfacing in the log but not worth taking
+    the catalog out for.
+    """
     catalog = lead_neighbors.load_catalog()
     by_id = {t.id: t for t in catalog}
-    known_systems = {t.system for t in catalog}
-    idf_query = lead_neighbors.build_idf(
-        lead_neighbors._all_query_variants(catalog)
-    )
-    idf_goal = lead_neighbors.build_idf(
-        [lead_neighbors.tokenize_goal(t.goal_text) for t in catalog]
-    )
+    idf = lead_neighbors.build_idf(lead_neighbors._all_query_variants(catalog))
     handoffs: list[dict] = []
     for lead in executed:
-        mode, neighbors = lead_neighbors.top_k_neighbors(
-            {"query_id": lead.query_id, "goal_text": lead.goal_text},
-            catalog,
-            idf_query=idf_query,
-            idf_goal=idf_goal,
-            k=3,
-        )
         executed_tpl = by_id.get(lead.query_id)
+        if executed_tpl is None:
+            _log(
+                f"WARN unresolved query_id={lead.query_id!r} at position "
+                f"{lead.position} (runtime contract violation; dropping handoff)"
+            )
+            continue
+        neighbors = lead_neighbors.top_k_neighbors(
+            lead.query_id, catalog, idf=idf, k=3,
+        )
         handoffs.append(
             {
                 "position": lead.position,
                 "query_index": lead.query_index,
                 "query_id": lead.query_id,
-                "mode": mode,
-                "system": _resolve_system(lead.query_id, known_systems),
-                "executed_template_path": (
-                    str(executed_tpl.path.relative_to(REPO_ROOT))
-                    if executed_tpl is not None else None
-                ),
+                "executed_template_path":
+                    str(executed_tpl.path.relative_to(REPO_ROOT)),
                 "neighbors": [
                     {
                         "template_path": str(n.template_path.relative_to(REPO_ROOT)),
@@ -587,6 +573,16 @@ def run(run_dir: Path) -> int:
             return 0
 
         handoffs = build_handoff(run_dir, executed)
+        if not handoffs:
+            _log(
+                f"all {len(executed)} extracted lead(s) had unresolved "
+                "query_ids — nothing to do"
+            )
+            _write_state(
+                _done_sentinel(run_dir),
+                f"head_sha: {base_sha}\nat: {_now_iso()}\ncommit_made: False\n",
+            )
+            return 0
         _log(f"built {len(handoffs)} handoff block(s); base_sha={base_sha[:12]}")
 
         # Spawn agent.

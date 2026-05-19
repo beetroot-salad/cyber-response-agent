@@ -13,7 +13,7 @@ import lead_neighbors as ln  # type: ignore[import-not-found]
 
 
 # ---------------------------------------------------------------------------
-# tokenize_query — Mode A argument-side tokenizer
+# tokenize_query — argument-side tokenizer
 # ---------------------------------------------------------------------------
 
 
@@ -41,25 +41,6 @@ def test_tokenize_query_lowercases():
 
 def test_tokenize_query_empty_input_yields_empty_set():
     assert ln.tokenize_query("") == frozenset()
-
-
-# ---------------------------------------------------------------------------
-# tokenize_goal — Mode B prose tokenizer
-# ---------------------------------------------------------------------------
-
-
-def test_tokenize_goal_drops_stopwords():
-    toks = ln.tokenize_goal("Retrieve sudo commands on a given host")
-    assert "the" not in toks
-    assert "a" not in toks
-    assert "on" not in toks
-    assert "sudo" in toks
-    assert "host" in toks
-
-
-def test_tokenize_goal_preserves_dotted_field_references():
-    toks = ln.tokenize_goal("Find high data.srcip diversity per agent")
-    assert "data.srcip" in toks
 
 
 # ---------------------------------------------------------------------------
@@ -122,18 +103,6 @@ REGRESSION_FIXTURE: tuple[dict, ...] = (
             "wazuh.agent-alerts-in-window",
         ),
     },
-    {
-        "case_id": "mode-b-novel-goal",
-        "query_id": "wazuh.nonexistent",
-        "goal_text": (
-            "Retrieve sudo and privileged command executions on a given host"
-        ),
-        "expected_top3": (
-            "wazuh.sudo-commands",
-            "wazuh.auth-events",
-            "wazuh.dns-query-history",
-        ),
-    },
 )
 
 
@@ -146,20 +115,14 @@ def catalog():
 
 
 @pytest.fixture(scope="module")
-def idfs(catalog):
-    return (
-        ln.build_idf(ln._all_query_variants(catalog)),
-        ln.build_idf([ln.tokenize_goal(t.goal_text) for t in catalog]),
-    )
+def idf(catalog):
+    return ln.build_idf(ln._all_query_variants(catalog))
 
 
 @pytest.mark.parametrize("case", REGRESSION_FIXTURE,
                          ids=[c["case_id"] for c in REGRESSION_FIXTURE])
-def test_top3_pinned(catalog, idfs, case):
-    idf_query, idf_goal = idfs
-    _, neighbors = ln.top_k_neighbors(
-        case, catalog, idf_query=idf_query, idf_goal=idf_goal, k=3
-    )
+def test_top3_pinned(catalog, idf, case):
+    neighbors = ln.top_k_neighbors(case["query_id"], catalog, idf=idf, k=3)
     actual = tuple(n.template_id for n in neighbors[:3])
     expected = tuple(case["expected_top3"])
     assert actual == expected, (
@@ -169,23 +132,16 @@ def test_top3_pinned(catalog, idfs, case):
     )
 
 
-def test_mode_a_cli_firewall(catalog):
+def test_cli_firewall(catalog):
     """A wazuh template's neighbors must all be wazuh (CLI firewall)."""
-    _, neighbors = ln.top_k_neighbors(
-        {"query_id": "wazuh.auth-events"}, catalog, k=10
-    )
+    neighbors = ln.top_k_neighbors("wazuh.auth-events", catalog, k=10)
     for n in neighbors:
         assert n.template_id.startswith("wazuh."), (
             f"CLI firewall leaked: {n.template_id} returned for wazuh source"
         )
 
 
-def test_mode_b_returns_results_for_unknown_query_id(catalog):
-    """Unresolved query_id falls back to Mode B against goal_text."""
-    mode, neighbors = ln.top_k_neighbors(
-        {"query_id": "nonexistent.lookup", "goal_text": "list sudo commands"},
-        catalog,
-        k=3,
-    )
-    assert mode == "B"
-    assert len(neighbors) > 0
+def test_unresolved_query_id_raises(catalog):
+    """Caller must filter unresolvable ids; an unfiltered call is a hard error."""
+    with pytest.raises(KeyError):
+        ln.top_k_neighbors("nonexistent.lookup", catalog, k=3)

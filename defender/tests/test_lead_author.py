@@ -124,7 +124,7 @@ def test_extract_result_refs_filter_multi_dot_sidecars(run_dir: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_build_handoff_mode_a_populates_executed_template_path(run_dir: Path):
+def test_build_handoff_populates_executed_template_path(run_dir: Path):
     _write_payload(run_dir, 0)
     _write_lead_sequence(run_dir, [
         {"position": 0, "lead_description": {"goal": "list auth events"},
@@ -134,9 +134,7 @@ def test_build_handoff_mode_a_populates_executed_template_path(run_dir: Path):
     handoffs = lead_author.build_handoff(run_dir, leads)
     assert len(handoffs) == 1
     h = handoffs[0]
-    assert h["mode"] == "A"
-    assert h["system"] == "wazuh"
-    assert h["executed_template_path"] is not None
+    assert h["query_id"] == "wazuh.auth-events"
     assert h["executed_template_path"].endswith("wazuh/auth-events.md")
     assert isinstance(h["neighbors"], list)
     assert len(h["neighbors"]) <= 3
@@ -144,47 +142,33 @@ def test_build_handoff_mode_a_populates_executed_template_path(run_dir: Path):
     json.dumps(h)
 
 
-def test_build_handoff_mode_b_executed_template_path_null(run_dir: Path):
+def test_build_handoff_drops_unresolved_query_id(run_dir: Path, caplog):
+    """Unresolved query_id ⇒ skip with a corpus-health warning, don't crash."""
     _write_payload(run_dir, 0)
+    _write_payload(run_dir, 1)
     _write_lead_sequence(run_dir, [
-        {"position": 0, "lead_description": {"goal": "novel intent"},
-         "queries": [{"id": "wazuh.does-not-exist", "params": {}}]}
+        {"position": 0, "lead_description": {"goal": "novel"},
+         "queries": [{"id": "wazuh.does-not-exist", "params": {}}]},
+        {"position": 1, "lead_description": {"goal": "real one"},
+         "queries": [{"id": "wazuh.auth-events", "params": {}}]},
     ])
     leads = lead_author.extract(run_dir)
+    assert len(leads) == 2
     handoffs = lead_author.build_handoff(run_dir, leads)
-    h = handoffs[0]
-    assert h["mode"] == "B"
-    assert h["executed_template_path"] is None
-    # system inferred from prefix iff that prefix names an existing catalog subdir.
-    assert h["system"] == "wazuh"
+    # Only the resolved lead survives.
+    assert len(handoffs) == 1
+    assert handoffs[0]["query_id"] == "wazuh.auth-events"
 
 
-@pytest.mark.parametrize("query_id,expected", [
-    ("wazuh.something", "wazuh"),
-    # host-query is the regression case: the old CLI_REGISTRY keyed it as
-    # "host", silently dropping every host-query lead's system to null.
-    ("host-query.something", "host-query"),
-    ("unknown-system.something", None),
-    ("noprefix", None),
-    ("", None),
-])
-def test_resolve_system_against_catalog(query_id, expected):
-    """System resolution reads the live catalog dir layout — no hand-kept registry."""
-    catalog = __import__("lead_neighbors").load_catalog()
-    known = {t.system for t in catalog}
-    assert lead_author._resolve_system(query_id, known) == expected
-
-
-def test_build_handoff_ad_hoc_has_null_system(run_dir: Path):
+def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path):
     _write_payload(run_dir, 0)
     _write_lead_sequence(run_dir, [
         {"position": 0, "lead_description": {"goal": "ad-hoc"},
          "queries": [{"id": "", "params": {}}]}
     ])
     leads = lead_author.extract(run_dir)
-    h = lead_author.build_handoff(run_dir, leads)[0]
-    assert h["mode"] == "B"
-    assert h["system"] is None
+    handoffs = lead_author.build_handoff(run_dir, leads)
+    assert handoffs == []
 
 
 # ---------------------------------------------------------------------------
