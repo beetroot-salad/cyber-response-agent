@@ -18,6 +18,9 @@ which source/target hosts it is authorized to use, and owning team.
 - Allowed source hosts (which hosts the account may authenticate from)
 - Allowed target hosts (which hosts the account may authenticate to)
 - Purpose / use case
+- `narrative_ref` block (when returned) — `group` names the account-family cluster this
+  account belongs to; `notes` carries pre-authored investigation context for that family;
+  report `narrative_ref.notes` verbatim, not just the `notes_ref` pointer value
 
 ## Query
 
