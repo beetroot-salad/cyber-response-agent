@@ -4,6 +4,7 @@
 Usage:
     python3 cmdb_cli.py lookup --ip 172.22.0.10
     python3 cmdb_cli.py lookup --hostname monitoring-host
+    python3 cmdb_cli.py lookup --ip 172.22.0.10 --run-dir /tmp/run-123 --position 0
     python3 cmdb_cli.py list-all
 """
 
@@ -79,13 +80,39 @@ def main():
     lookup_parser = subparsers.add_parser("lookup", help="Look up a host by IP or hostname")
     lookup_parser.add_argument("--ip", help="IPv4 or IPv6 address")
     lookup_parser.add_argument("--hostname", help="Hostname or FQDN")
+    lookup_parser.add_argument("--run-dir", help="Investigation run directory (when set, output is persisted to gather_raw/)")
+    lookup_parser.add_argument("--position", help="Sequence position of this dispatch (e.g. '0', '0a', '0b')")
 
     subparsers.add_parser("list-all", help="List all documented hosts")
 
     args = parser.parse_args()
 
     if args.command == "lookup":
-        return lookup(ip=args.ip, hostname=args.hostname)
+        result_exit = lookup(ip=args.ip, hostname=args.hostname)
+
+        # If --run-dir and --position are set, persist the output
+        if args.run_dir and args.position:
+            run_dir = Path(args.run_dir)
+            gather_raw = run_dir / "gather_raw"
+            gather_raw.mkdir(parents=True, exist_ok=True)
+
+            # Reload and output to file
+            cmdb = load_cmdb()
+            for host in cmdb.get("hosts", []):
+                if args.ip and host.get("ip") == args.ip:
+                    output_path = gather_raw / f"{args.position}.json"
+                    output_path.write_text(json.dumps(host))
+                    break
+                if args.hostname and host.get("hostname") == args.hostname:
+                    output_path = gather_raw / f"{args.position}.json"
+                    output_path.write_text(json.dumps(host))
+                    break
+            else:
+                # Not found
+                output_path = gather_raw / f"{args.position}.json"
+                output_path.write_text(json.dumps({}))
+
+        return result_exit
     elif args.command == "list-all":
         return list_all()
     else:

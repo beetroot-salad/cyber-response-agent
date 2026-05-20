@@ -208,8 +208,12 @@ def extract_metrics(run_dir: Path, arm: str, case: dict) -> dict:
                         continue
                     name = c.get("name", "")
                     payload = c.get("input", {}) or {}
-                    if name == "Bash" and "invlang.cli advisory" in str(payload.get("command", "")):
-                        advisory_calls += 1
+                    if name == "Bash":
+                        cmd = str(payload.get("command", ""))
+                        # Match both old (cli advisory <root>) and new (cli <root> advisory)
+                        # invocations. Defensive against the bug we just fixed.
+                        if "invlang.cli" in cmd and " advisory" in cmd:
+                            advisory_calls += 1
                     elif name in ("Task", "Agent"):
                         prompt = str(payload.get("prompt", ""))
                         if "defender/skills/advisory" in prompt:
