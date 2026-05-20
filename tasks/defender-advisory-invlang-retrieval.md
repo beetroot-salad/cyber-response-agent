@@ -6,13 +6,34 @@ groups: defender, invlang, knowledge, retrieval
 
 ## Progress (2026-05-20)
 
-Compatibility step #2 from the original §Compatibility Work is **done**:
-a strict defender-side loader ships under
-`defender/scripts/invlang/{parser,corpus}.py`. Standalone (no
-soc-agent imports). Aligned with the current schema in
-`defender/skills/dense-language/SKILL.md` — no tolerance for
-historical iteration noise or LLM hiccups; per-row recovery so
-one bad row doesn't take down the rest of a file.
+### Done
+
+- **Schema-aligned loader** — `defender/scripts/invlang/{parser,corpus}.py`.
+  Standalone (no soc-agent imports). Aligned with the current schema
+  in `defender/skills/dense-language/SKILL.md`. No tolerance for
+  historical iteration noise or LLM hiccups; per-row recovery so one
+  bad row doesn't take down the rest of a file. Every non-conformant
+  row lands as a structured `ParseWarning`.
+
+Maps to original §Compatibility Work items:
+
+- ✅ #2 Corpus root selection — explicit `corpus_root` arg + env var
+- ✅ #3 Parser hygiene — strict to current schema; visible warnings
+- ✅ #5 Signature + time metadata — `rule.id` from sibling
+  `alert.json`; `created_at` from run-dir mtime
+- ⏭ #1 Dependency / invocation boundary — N/A (standalone)
+- ⏭ #4 Lead schema alias (`tests` vs `tests_hypotheses`) — not
+  needed under strict mode; the schema declares `tests`, query code
+  will read that field directly
+- ⏭ #6 Authz recall data — defender already emits `:R authz`, the
+  loader projects it; whether it's *populated* enough for Class 14
+  queries is a downstream question
+
+### Remaining
+
+- Query helpers (Class 1/5/6/8/13/14/15-style) on top of the loader
+- Empirical A/B test (baseline / deterministic retrieval / subagent
+  retrieval) per §Empirical Test Plan
 
 Schema gaps catalogued (each is an LLM hiccup, not a real schema
 variant — verified by checking which dates each pattern appears on
