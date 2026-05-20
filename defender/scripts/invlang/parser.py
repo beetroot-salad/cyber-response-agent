@@ -181,6 +181,52 @@ def _split_csv(s: str) -> list[str]:
     return [t.strip() for t in s.split(",") if t.strip()] if s else []
 
 
+def _split_csv_or_semi(s: str) -> list[str]:
+    """Split on `;` if present, else `,`. Drops empties, trims."""
+    if not s:
+        return []
+    sep = ";" if ";" in s else ","
+    return [t.strip() for t in s.split(sep) if t.strip()]
+
+
+# Maps dense `:R` column names to the canonical companion-dict field
+# names downstream consumers (and soc-agent corpus queries) expect.
+# Dense column headers use short forms (`grounding`, `authority`,
+# `fulfills`, `resolved_by`); canonical companion uses long forms.
+_RESOLUTION_KEY_CANONICAL = {
+    "conditioning": "conditioning_context",
+    "grounding": "grounding_kind",
+    "authority": "authority_for_question",
+    "fulfills": "fulfills_contract",
+    "resolved_by": "resolved_by_lead",
+    "lead": "resolved_by_lead",
+    "pred_ref": "prediction_ref",
+    "dim": "dimension",
+    "matched_pred": "matched_prediction",
+}
+# Resolution columns whose values are semicolon-packed lists, projected
+# to list[str] on the canonical record.
+_RESOLUTION_LIST_KEYS = {"conditioning", "concerns"}
+
+
+def _canonicalize_resolution_row(rec: dict[str, str]) -> dict[str, Any]:
+    """Project a dense `:R` row dict onto canonical field names.
+
+    Empty cells are dropped (no point carrying `verdict: ""` around).
+    Semicolon-packed columns (`conditioning`, `concerns`) become lists.
+    """
+    out: dict[str, Any] = {}
+    for k, v in rec.items():
+        if not v:
+            continue
+        canonical = _RESOLUTION_KEY_CANONICAL.get(k, k)
+        if k in _RESOLUTION_LIST_KEYS:
+            out[canonical] = _split_csv_or_semi(v)
+        else:
+            out[canonical] = v
+    return out
+
+
 def _split_subcells(cell: str) -> list[str]:
     """Top-level semicolon-split that honors double-quoted spans."""
     out: list[str] = []
@@ -538,11 +584,55 @@ _RESOLUTION_LINE_RE = re.compile(
 )
 
 
+# Matches `p\d+`, `ap\d+`, `r\d+` literals inside the iff annotation RHS.
+_IFF_LITERAL_RE = re.compile(r"\b(ap\d+|p\d+|r\d+)\b")
+
+
+def _extract_iff_literals(annotation: str) -> tuple[list[str], list[str]]:
+    """Pull (pred_ids, refut_ids) from the iff RHS literal set.
+
+    Multiple iffs separated by `;`. For each iff (`⟺` or ASCII
+    fallback `<=>`), only the RHS contributes literals — LHS tokens
+    name the *current* observation, RHS names the predictions /
+    refutations the resolution matched. Polarity (`p1` vs `¬p1`) is
+    reasoning prose; both count as "p1 was tested by this resolution".
+    """
+    if not annotation:
+        return [], []
+    pred_ids: list[str] = []
+    refut_ids: list[str] = []
+    seen_pred: set[str] = set()
+    seen_refut: set[str] = set()
+    normalized = annotation.replace("<=>", "⟺")
+    for clause in normalized.split(";"):
+        if "⟺" not in clause:
+            continue
+        _lhs, rhs = clause.split("⟺", 1)
+        for token in _IFF_LITERAL_RE.findall(rhs):
+            if token.startswith("r"):
+                if token not in seen_refut:
+                    seen_refut.add(token)
+                    refut_ids.append(token)
+            else:
+                if token not in seen_pred:
+                    seen_pred.add(token)
+                    pred_ids.append(token)
+    return pred_ids, refut_ids
+
+
 def _resolution_record(row: str) -> tuple[str | None, dict[str, Any]]:
     """Parse `<hyp> <before> → <after> [<lead> <pred-refs> <sev> ⟂ <edges> :: <ann>]`.
 
     The `⟂` separator is required by the current schema. Rows that omit
     it raise RowError and are dropped with a warning.
+
+    Matched prediction/refutation ids are derived from the iff RHS
+    literal set in the annotation (`p1 ⟺ ¬r1; ...`). Pre-iff tokens
+    in the head (between lead-id and severity, e.g. `r1,r2` in
+    `[l-001 r1,r2 severe ⟂ ...]`) are accepted as a fallback so
+    rows that elide the iff annotation still attribute correctly.
+    `hypothesis_id` is emitted as an alias of `hypothesis` for
+    consumers that index on the soc-agent name.
     """
     m = _RESOLUTION_LINE_RE.match(row)
     if not m:
@@ -562,13 +652,24 @@ def _resolution_record(row: str) -> tuple[str | None, dict[str, Any]]:
         raise RowError("resolution head needs lead-id + severity")
     lead_id = head_tokens[0]
     severity = head_tokens[-1]
+    # Pre-iff positional tokens between lead-id and severity. Split
+    # each on `,` so `r1,r2` lands as two ids.
+    head_refs: list[str] = []
+    for tok in head_tokens[1:-1]:
+        head_refs.extend(t.strip() for t in tok.split(",") if t.strip())
     supp_text = supp.strip()
+    iff_pred_ids, iff_refut_ids = _extract_iff_literals(annotation)
+    matched_pred_ids = iff_pred_ids or [t for t in head_refs if t.startswith("p")]
+    matched_refut_ids = iff_refut_ids or [t for t in head_refs if t.startswith("r")]
     record: dict[str, Any] = {
         "hypothesis": m.group("hyp"),
+        "hypothesis_id": m.group("hyp"),  # alias, matches soc-agent shape
         "before": m.group("before"),
         "after": m.group("after"),
         "severity_of_test": severity,
         "supporting_edges": re.findall(r"e-[A-Za-z0-9]+", supp_text),
+        "matched_prediction_ids": matched_pred_ids,
+        "matched_refutation_ids": matched_refut_ids,
     }
     if supp_text and not supp_text.startswith("e-"):
         record["supporting_marker"] = supp_text
@@ -815,6 +916,9 @@ def companion_from_blocks(
                     ))
                     continue
                 rec = dict(zip(cols, cells, strict=False))
+                # `resolved_by` / `lead` are the dense column names for
+                # the back-pointer; look them up *before* canonicalization
+                # so attribution still works.
                 lead_id = rec.get("resolved_by") or rec.get("lead") or current_lead
                 if not lead_id:
                     warnings.append(ParseWarning(
@@ -847,7 +951,7 @@ def companion_from_blocks(
                 else:
                     lead.setdefault("outcome", {}).setdefault(
                         bucket_key, []
-                    ).append(rec)
+                    ).append(_canonicalize_resolution_row(rec))
             continue
 
         if tag == "T" and name == "conclude":

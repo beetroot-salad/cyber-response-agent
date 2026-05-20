@@ -264,6 +264,116 @@ def test_resolution_missing_perp_raises():
         )
 
 
+# ---------------------------------------------------------------------------
+# Matched-id extraction on :T resolutions (review note #1)
+# ---------------------------------------------------------------------------
+
+
+def test_resolution_extracts_matched_ids_from_iff_annotation():
+    """The iff RHS literal set names which predictions / refutations the
+    lead actually tested. Downstream Class 8 / Class 13 queries depend on
+    these fields; they cannot be silently dropped."""
+    lead_id, rec = _resolution_record(
+        "h-001  null → ++   "
+        "[l-001 p1,p2 severe ⟂ e-002 :: p1 ⟺ src=monitor; p2 ⟺ cadence=5m]"
+    )
+    assert lead_id == "l-001"
+    assert rec["hypothesis"] == "h-001"
+    # Alias matches the soc-agent canonical shape.
+    assert rec["hypothesis_id"] == "h-001"
+    assert rec["matched_prediction_ids"] == ["p1", "p2"]
+    assert rec["matched_refutation_ids"] == []
+
+
+def test_resolution_falls_back_to_head_tokens_when_no_iff():
+    """Rows without iff annotation should still attribute matched ids
+    via the pre-`⟂` head tokens (`r1,r2 severe` form)."""
+    lead_id, rec = _resolution_record(
+        "h-001  null → --   [l-001 r1,r2 severe ⟂ e-002 :: refutation triggered]"
+    )
+    assert lead_id == "l-001"
+    assert rec["matched_refutation_ids"] == ["r1", "r2"]
+    assert rec["matched_prediction_ids"] == []
+    assert rec["reasoning"] == "refutation triggered"
+
+
+def test_resolution_negated_iff_literal_still_attributes():
+    """Polarity is reasoning-prose only; `¬p1` still counts as 'p1 was
+    tested' for downstream attribution purposes."""
+    _lead, rec = _resolution_record(
+        "h-001  null → --   [l-001 r1 severe ⟂ e-001 :: r1 ⟺ ¬p1]"
+    )
+    assert rec["matched_refutation_ids"] == ["r1"]
+    assert rec["matched_prediction_ids"] == ["p1"]
+
+
+# ---------------------------------------------------------------------------
+# Canonical :R block key mapping (review note #2)
+# ---------------------------------------------------------------------------
+
+
+_AUTHZ_R_BLOCK = """\
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|endpoint|endpoint:linux|host|
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|read|v-001|v-001|2026-05-07T00:00:00Z|siem-event:wazuh|outcome=success
+
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?service-read|v-001|read|identity|service-account||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"x"
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|iam-policy|"service account configured reader"|escalate|escalate
+
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|iam-policy-lookup|v-001|h-001|iam|policy-by-account|account=svc-x|n/a
+
+:R authz [resolved_by|edge|fulfills|verdict|grounding|authority|anchor_kind|anchor_id|conditioning|concerns]
+l-001|e-001|ac1|authorized|policy-check|iam-system|iam-policy|policy-742|effective_window=2026-05-01_to_2026-05-31;principal=svc-x|
+
+:T resolutions
+h-001  null → ++   [l-001 p1 severe ⟂ e-001 :: p1]
+
+:T conclude
+disposition            benign
+matched_archetype      approved-service-read
+summary                "x"
+
+:T conclude.surviving [hyp_id|final_weight]
+h-001|++
+```
+"""
+
+
+def test_authz_block_emits_canonical_field_names():
+    body, warnings = parse_dense_companion(_AUTHZ_R_BLOCK)
+    assert warnings == []
+    lead = next(l for l in body["findings"] if l["id"] == "l-001")
+    authz_rows = lead["outcome"]["authorization_resolutions"]
+    assert len(authz_rows) == 1
+    row = authz_rows[0]
+    # Short dense names get rewritten to the canonical companion-dict
+    # forms so downstream consumers indexing on the long names work.
+    assert row["fulfills_contract"] == "ac1"
+    assert row["resolved_by_lead"] == "l-001"
+    assert row["grounding_kind"] == "policy-check"
+    assert row["authority_for_question"] == "iam-system"
+    # Semicolon-packed conditioning lands as a list.
+    assert row["conditioning_context"] == [
+        "effective_window=2026-05-01_to_2026-05-31",
+        "principal=svc-x",
+    ]
+    # Empty cells are dropped; verdict/anchor still land.
+    assert row["verdict"] == "authorized"
+    assert row["anchor_kind"] == "iam-policy"
+    assert row["anchor_id"] == "policy-742"
+    assert "concerns" not in row
+
+
 _MIXED_RESOLUTIONS = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
