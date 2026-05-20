@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """Per-arm runner for the advisory A/B/C/D experiment.
 
-Spawns one defender run per (arm, case) and writes a metrics JSON to
-results/<timestamp>/<arm>-<case_id>.json. The arm overlay (a/b/c/d.md)
-is prepended to the standard defender prompt so the SKILL.md on disk
-stays untouched.
+Spawns one defender run per (arm, case, trial) and writes a metrics
+JSON to results/<timestamp>/<arm>-<case_id>-t<trial>.json. The arm
+overlay (a/b/c/d.md) is prepended to the standard defender prompt so
+the SKILL.md on disk stays untouched.
 
-The corpus visible to B/C/D is filtered: held-out cases listed in
-cases.json.exclude_from_corpus are temporarily moved aside before the
-run, then restored afterward. (Loud-fail if the move fails — we don't
-want to silently leak ground-truth cases into the corpus.)
+Cases live as synthetic fixtures under fixtures/<id>/{alert.json,
+ground_truth.yaml}. The corpus visible to B/C/D is the unmodified
+/tmp/defender-runs tree — test alerts are net-new entities, so they
+do not appear in the corpus and no exclusion plumbing is needed.
 
 Usage:
-    python3 run.py --arm b --case POS-1
-    python3 run.py --all                 # runs every (arm, case) sequentially
+    python3 run.py --arm b --case POS-1 --trial 1
+    python3 run.py --all --trials 3            # pilot: 1 pos + 1 neg × 4 arms × 3 trials
 """
 from __future__ import annotations
 
@@ -34,7 +34,6 @@ DEFENDER_RUN_PY = DEFENDER_DIR / "run.py"
 ARMS_DIR = HERE / "arms"
 CASES_FILE = HERE / "cases.json"
 RESULTS_DIR = HERE / "results"
-CORPUS_HOLDOUT_DIR = Path("/tmp/defender-runs-holdout-advisory-ab")
 
 
 def load_cases() -> dict:
@@ -56,28 +55,13 @@ def arm_overlay(arm: str) -> str:
     return path.read_text()
 
 
-def move_holdouts(cases: dict, restore: bool) -> None:
-    """Temporarily move held-out source_runs out of the corpus.
-
-    On entry (restore=False): move /tmp/defender-runs/<id> → holdout dir.
-    On exit  (restore=True):  move them back.
-    """
-    corpus = Path(cases["corpus_root"])
-    CORPUS_HOLDOUT_DIR.mkdir(exist_ok=True)
-    excludes = cases["exclude_from_corpus"]
-    by_id = {c["id"]: c for bucket in ("positives", "negatives") for c in cases[bucket]}
-    for case_id in excludes:
-        c = by_id.get(case_id)
-        if c is None or c["source_run"] in (None, "", "PLACEHOLDER"):
-            continue
-        src = corpus / c["source_run"]
-        dst = CORPUS_HOLDOUT_DIR / c["source_run"]
-        if restore:
-            if dst.exists() and not src.exists():
-                shutil.move(str(dst), str(src))
-        else:
-            if src.exists() and not dst.exists():
-                shutil.move(str(src), str(dst))
+def fixture_alert(case: dict) -> Path:
+    """Resolve the synthetic alert.json from the case's fixture_dir."""
+    fixture = HERE / case["fixture_dir"]
+    alert = fixture / "alert.json"
+    if not alert.is_file():
+        sys.exit(f"fixture alert missing for case {case['id']}: {alert}")
+    return alert
 
 
 def build_prompt(arm: str, run_id: str, run_dir: Path) -> str:
@@ -106,21 +90,14 @@ def build_prompt(arm: str, run_id: str, run_dir: Path) -> str:
     )
 
 
-def spawn_run(arm: str, case: dict, *, model: str | None) -> Path:
-    """Spawn defender/run.py-equivalent for this arm/case and return run_dir."""
+def spawn_run(arm: str, case: dict, trial: int, *, model: str | None) -> Path:
+    """Spawn defender against the case's synthetic alert and return run_dir."""
     cases = load_cases()
     corpus = Path(cases["corpus_root"])
-
-    # Source alert.json from the original case dir (now moved to the holdout
-    # dir if it was an excluded case). Try both.
-    src_run = case["source_run"]
-    candidates = [corpus / src_run / "alert.json", CORPUS_HOLDOUT_DIR / src_run / "alert.json"]
-    alert = next((p for p in candidates if p.is_file()), None)
-    if alert is None:
-        sys.exit(f"alert.json missing for case {case['id']} (source_run={src_run})")
+    alert = fixture_alert(case)
 
     ts = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run_id = f"advisory-ab-{arm}-{case['id'].lower()}-{ts}"
+    run_id = f"advisory-ab-{arm}-{case['id'].lower()}-t{trial}-{ts}"
     run_dir = corpus / run_id
     (run_dir / "gather_raw").mkdir(parents=True)
     shutil.copy(alert, run_dir / "alert.json")
@@ -146,6 +123,7 @@ def spawn_run(arm: str, case: dict, *, model: str | None) -> Path:
         "category": case["_category"],
         "gold": case["gold"],
         "predicted_relevance": case["predicted_relevance"],
+        "trial": trial,
         "rc": rc,
         "wall_clock_seconds": wall_clock,
         "model": model,
@@ -162,6 +140,7 @@ def extract_metrics(run_dir: Path, arm: str, case: dict) -> dict:
         "category": case["_category"],
         "gold": case["gold"],
         "predicted_relevance": case["predicted_relevance"],
+        "trial": meta.get("trial", 1),
         "run_dir": str(run_dir),
         "rc": meta["rc"],
         "wall_clock_seconds": meta["wall_clock_seconds"],
@@ -233,18 +212,15 @@ def extract_metrics(run_dir: Path, arm: str, case: dict) -> dict:
     return metrics
 
 
-def run_one(arm: str, case_id: str, results_dir: Path, *, model: str | None = None) -> dict:
+def run_one(arm: str, case_id: str, results_dir: Path, *,
+            trial: int = 1, model: str | None = None) -> dict:
     cases = load_cases()
     case = case_by_id(cases, case_id)
-    move_holdouts(cases, restore=False)
-    try:
-        run_dir = spawn_run(arm, case, model=model)
-        metrics = extract_metrics(run_dir, arm, case)
-    finally:
-        move_holdouts(cases, restore=True)
-    out_path = results_dir / f"{arm}-{case_id}.json"
+    run_dir = spawn_run(arm, case, trial, model=model)
+    metrics = extract_metrics(run_dir, arm, case)
+    out_path = results_dir / f"{arm}-{case_id}-t{trial}.json"
     out_path.write_text(json.dumps(metrics, indent=2))
-    print(f"[advisory-ab] {arm}/{case_id}: "
+    print(f"[advisory-ab] {arm}/{case_id}/t{trial}: "
           f"disposition={metrics['disposition_observed']} "
           f"match={metrics['disposition_match']} "
           f"loops={metrics['loops_count']} leads={metrics['leads_count']} "
@@ -254,22 +230,22 @@ def run_one(arm: str, case_id: str, results_dir: Path, *, model: str | None = No
     return metrics
 
 
-def run_all(results_dir: Path, *, model: str | None = None) -> None:
+def run_all(results_dir: Path, *, trials: int = 1, model: str | None = None) -> None:
     cases = load_cases()
     for arm in cases["arms"]:
         for bucket in ("positives", "negatives"):
             for c in cases[bucket]:
-                if c["source_run"] == "PLACEHOLDER":
-                    print(f"[advisory-ab] skipping placeholder case {c['id']}", file=sys.stderr)
-                    continue
-                run_one(arm, c["id"], results_dir, model=model)
+                for trial in range(1, trials + 1):
+                    run_one(arm, c["id"], results_dir, trial=trial, model=model)
 
 
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--arm", choices=["a", "b", "c", "d"])
     p.add_argument("--case", help="case_id from cases.json")
-    p.add_argument("--all", action="store_true", help="run every (arm, case) sequentially")
+    p.add_argument("--trial", type=int, default=1, help="trial index for single-run mode (default 1)")
+    p.add_argument("--trials", type=int, default=3, help="trials per (arm, case) in --all mode (default 3)")
+    p.add_argument("--all", action="store_true", help="run every (arm, case, trial) sequentially")
     p.add_argument("--model", default=None)
     p.add_argument("--results-dir", default=None, help="override results subdir (default: results/<timestamp>)")
     ns = p.parse_args(argv)
@@ -285,9 +261,9 @@ def main(argv: list[str]) -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
 
     if ns.all:
-        run_all(results_dir, model=ns.model)
+        run_all(results_dir, trials=ns.trials, model=ns.model)
     else:
-        run_one(ns.arm, ns.case, results_dir, model=ns.model)
+        run_one(ns.arm, ns.case, results_dir, trial=ns.trial, model=ns.model)
     print(f"[advisory-ab] results in {results_dir}", file=sys.stderr)
     return 0
 

@@ -42,19 +42,44 @@ load-bearing API.
   balance it; C (Sonnet inline) higher cost-per-call but no
   duplication of context.
 
-## Cases
+## Cases — synthetic fixtures
 
-`cases.json` — 8 hand-picked cases drawn from `/tmp/defender-runs`:
-- **Positives (4)** — past-case memory plausibly helps. Pick by
-  scanning inconclusives where a high-discrimination Class-8 lead in
-  the corpus *wasn't* tried in the original run.
-- **Negatives (4)** — cases the original landed correctly + quickly.
-  Measure overhead (cost/latency) for arms that always-or-often call.
+Test alerts are **synthetic** — modeled on the patterns in real
+`/tmp/defender-runs` 5710 cases but with net-new entity values so the
+test alerts are not in the corpus. No exclusion plumbing needed.
 
-Held-out cases are excluded from the corpus visible to B/C (the runner
-passes a filtered `--corpus-root`). Ground truth = hand-labeled
-disposition stored in `cases.json` (not the original-run disposition,
-which is itself agent-generated).
+Each fixture lives under `fixtures/<id>/`:
+- `alert.json` — the input defender receives at ORIENT
+- `ground_truth.yaml` — hand-labeled disposition + relevance prediction
+  + rationale
+- `README.md` — short story + construction notes
+
+**Pilot (v1):** 1 positive + 1 negative, both rule-5710 (the signature
+with the richest corpus support):
+- `POS-1` — undocumented source `172.22.0.42` + uncommon-but-plausible
+  username `apt-mirror`. Two competing explanations equally plausible
+  from the alert content alone; the discriminator beyond CMDB+IAM is
+  `wazuh-auth-pattern` (cadence). Advisory should surface it. Gold:
+  `inconclusive`.
+- `NEG-1` — exact replay of the recurring `172.22.0.10` + `nagios`
+  pattern. CMDB+IAM resolves cleanly on loop 1 from first principles.
+  Advisory has nothing marginal to add; arm D pays the cost overhead.
+  Gold: `malicious`.
+
+**Next pass** (after pilot signal): expand to rule-100001 and
+rule-100110 variants per the original ask.
+
+### A note on gather behavior
+
+Defender's gather subagent hits live CLIs (playground CMDB jq, IAM
+jq, Wazuh CLI, host-query). CMDB and IAM are stub registries against
+`/workspace/playground/{cmdb,iam}/*.json` — both fixtures resolve
+faithfully against the real registry data. The Wazuh side will
+return empty for synthetic source IPs (the alerts aren't in the
+index). That's accepted noise for the pilot; the load-bearing
+metrics (lead choice, cost, loops) are unaffected. If gather-noise
+contaminates outcome too much in the pilot results, we layer in
+seeded Wazuh data in v2.
 
 ## Metrics
 
@@ -80,22 +105,26 @@ Output per run goes to `results/<timestamp>/<arm>-<case>.json`.
 
 ## Sample size
 
-32 runs (8 cases × 4 arms), single trial each. Scale up only if a
-comparison is ambiguous after the first pass.
+**Pilot:** 24 runs = 2 cases × 4 arms × **N=3 trials** to absorb
+within-arm variance. Trials are necessary here because a single
+defender run is stochastic on lead choice and loop count, and the
+pilot only has 2 cases — without trials, single-run noise dominates
+arm-level signal.
+
+Scale up the case count (next pass: 100001 + 100110 fixtures) before
+scaling trials further.
 
 ## Running
 
 ```bash
-# One run:
-python3 defender/learning/eval/advisory_ab/run.py \
-  --arm b --case live-5710-spray-1 \
-  --corpus-root /tmp/defender-runs
+# Pilot (full matrix, N=3 trials):
+python3 defender/learning/eval/advisory_ab/run.py --all --trials 3
 
-# Full matrix:
-python3 defender/learning/eval/advisory_ab/run.py --all
+# Single run:
+python3 defender/learning/eval/advisory_ab/run.py --arm b --case POS-1 --trial 1
 
 # Aggregate:
-python3 defender/learning/eval/advisory_ab/score.py results/<timestamp>/
+python3 defender/learning/eval/advisory_ab/score.py defender/learning/eval/advisory_ab/results/<timestamp>/
 ```
 
 ## What we are NOT measuring in v1

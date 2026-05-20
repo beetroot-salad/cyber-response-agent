@@ -49,7 +49,7 @@ def fmt(v, n=2):
 def render_outcome_table(grouped: dict) -> str:
     arms = sorted({a for a, _ in grouped.keys()})
     cats = ["positive", "negative"]
-    lines = ["## Outcome: disposition_match by arm × category", ""]
+    lines = ["## Outcome: disposition_match by arm × category (across trials)", ""]
     lines.append("| arm | positive (match/total) | negative (match/total) |")
     lines.append("|---|---|---|")
     for arm in arms:

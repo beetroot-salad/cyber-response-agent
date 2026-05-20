@@ -1,7 +1,8 @@
 ## PLAN — always-on advisory retrieval (no discretion)
 
-At every PLAN turn (loop 1, 2, 3, ...) — *before* authoring any `:L`
-rows — Bash the advisory CLI with the current frontier:
+At every PLAN turn **once you have authored at least one `?:H`** —
+*before* authoring any `:L` rows for that turn — Bash the advisory
+CLI with the current frontier:
 
 ```bash
 python3 -m defender.scripts.invlang.cli advisory \
@@ -13,14 +14,17 @@ python3 -m defender.scripts.invlang.cli advisory \
 ```
 
 Pass `--signature` from `alert.rule.id`. Pass `--frontier` as the
-comma-separated list of currently live `?:H` names (empty allowed on
-loop 1 if you have not yet authored hypotheses; in that case the CLI
-falls back to the top-K recurring leads for the signature).
+comma-separated list of currently live `?:H` names. If you have not
+yet authored any `:H` rows for this PLAN turn, **author them first,
+then call**. Do not call with an empty frontier — the loop-1 fallback
+is degenerate and the experiment is asking what always-on costs at
+the frontier you actually have.
 
 This arm tests whether always-on advisory is worth the cost on cases
 where it does not help. You do **not** decide whether the block is
-useful — you call every PLAN turn unconditionally and ignore the
-output if it is loud-empty or does not bear on your current branch.
+useful — once you have a frontier you call every PLAN turn
+unconditionally and ignore the output if it is loud-empty or does
+not bear on your current branch.
 
 Treat the block as **precedent, not evidence**. Do not cite
 `case_id`s in `:R` or `:T`.

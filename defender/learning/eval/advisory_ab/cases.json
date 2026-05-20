@@ -1,35 +1,30 @@
 {
-  "_comment": "Hand-picked cases for the advisory A/B/C/D experiment. Fill source_run with the /tmp/defender-runs directory we draw alert.json from. gold is the hand-labeled disposition (NOT the disposition the original run produced — that's agent-generated). predicted_relevance is our prior on whether advisory would help; we measure whether the experiment confirms it.",
+  "_comment": "Synthetic fixtures (alert.json + ground_truth.yaml) live under fixtures/<id>/. fixture_dir is resolved relative to advisory_ab/. gold is the hand-labeled disposition. predicted_relevance is our prior on whether advisory would help; we measure whether the experiment confirms it.",
 
   "positives": [
     {
       "id": "POS-1",
-      "source_run": "20260518T040450Z-alert",
+      "fixture_dir": "fixtures/POS-1",
       "signature_id": "wazuh-rule-5710",
-      "gold": "malicious",
+      "gold": "inconclusive",
       "predicted_relevance": "high",
-      "rationale": "PLACEHOLDER — replace with the actual reason this case needs precedent (e.g. 'original run took 4 loops to land on cmdb-source-ip-lookup; corpus shows it as the discriminating lead from loop 1')."
-    },
-    {"id": "POS-2", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-5710", "gold": "PLACEHOLDER", "predicted_relevance": "high", "rationale": "PLACEHOLDER"},
-    {"id": "POS-3", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-100110", "gold": "PLACEHOLDER", "predicted_relevance": "high", "rationale": "PLACEHOLDER"},
-    {"id": "POS-4", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-100001", "gold": "PLACEHOLDER", "predicted_relevance": "high", "rationale": "PLACEHOLDER"}
+      "rationale": "Apt-mirror from undocumented 172.22.0.42 — two competing explanations equally plausible. Discriminator beyond CMDB+IAM is wazuh-auth-pattern (cadence); advisory should surface it."
+    }
   ],
 
   "negatives": [
     {
       "id": "NEG-1",
-      "source_run": "PLACEHOLDER",
+      "fixture_dir": "fixtures/NEG-1",
       "signature_id": "wazuh-rule-5710",
-      "gold": "benign",
+      "gold": "malicious",
       "predicted_relevance": "low",
-      "rationale": "PLACEHOLDER — replace with the reason advisory is not expected to help (e.g. 'monitoring-probe shape; gather-the-source-IP enrichment resolves it on loop 1 regardless of precedent')."
-    },
-    {"id": "NEG-2", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-5710", "gold": "PLACEHOLDER", "predicted_relevance": "low", "rationale": "PLACEHOLDER"},
-    {"id": "NEG-3", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-100110", "gold": "PLACEHOLDER", "predicted_relevance": "low", "rationale": "PLACEHOLDER"},
-    {"id": "NEG-4", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-100001", "gold": "PLACEHOLDER", "predicted_relevance": "low", "rationale": "PLACEHOLDER"}
+      "rationale": "Exact replay of the recurring 172.22.0.10 + nagios pattern — CMDB+IAM resolves cleanly on loop 1. Advisory redundant; D's cost is the measurement."
+    }
   ],
 
   "arms": ["a", "b", "c", "d"],
   "corpus_root": "/tmp/defender-runs",
-  "exclude_from_corpus": ["POS-1", "POS-2", "POS-3", "POS-4", "NEG-1", "NEG-2", "NEG-3", "NEG-4"]
+  "exclude_from_corpus": [],
+  "_corpus_note": "Test alerts are synthetic (net-new entity values), so they are not in the corpus. No exclusion needed — the corpus stays intact across runs."
 }
