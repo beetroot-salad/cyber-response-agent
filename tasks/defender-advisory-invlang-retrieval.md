@@ -8,6 +8,53 @@ groups: defender, invlang, knowledge, retrieval
 
 ### Done
 
+- **Three cross-case query helpers (Classes 5/6/8)** —
+  `defender/scripts/invlang/queries.py` + minimal CLI at
+  `defender/scripts/invlang/cli.py`. Ported from
+  `soc-agent/scripts/invlang/queries_{lookup,effectiveness}.py` and
+  reshaped per the PLAN-time advisory contract agreed in 2026-05-20
+  discussion:
+    - **Class 5** `lead_sequence_pattern` — per-case
+      `lead1→lead2→...→termination:disposition` trace, with `:FAIL` /
+      `:consult` annotations. Filters: `contains`, `disposition`,
+      `signature_id`.
+    - **Class 6** `hypothesis_name_wildcard` — fnmatch over hypothesis
+      names; emits `case_id`, `name`, `final_weight`, `disposition`,
+      `status`. Investigation-scoped `hypothesis_id` deliberately
+      stripped (cross-case query, not record handle).
+    - **Class 8** `lead_branch_effects` — per-lead `n`, `empty_rate`,
+      and `per_hypothesis_effect` (histogram of `{++, +, -, --}` shifts
+      per touched hypothesis). NO ranking, NO generated reasoning
+      prose, NO `prediction_fidelity` (defender hypotheses carry
+      predictions, leads don't — that scoring axis doesn't exist
+      here). `hypothesis_patterns` arg restricts to a current frontier.
+- 14 query unit tests + sanity-checked against `/tmp/defender-runs` (42
+  cases). Class 8 immediately surfaced high-empty-rate leads
+  (`cmdb-source-lookup` empty 3/4, `source-ip-auth-history` empty 3/3)
+  — the loud-failure signal the soc-agent variant doesn't expose.
+
+Output-shape principles (load-bearing for the adapter step):
+
+- Retrieval surfaces *data*, not directives. PLAN does the picking.
+- Branch-conditioning (per-hypothesis breakdown) > single global rank.
+  A lead that refutes ?A and confirms ?B is different intel from one
+  that refutes both; collapsing to "best lead" hides that.
+- Reasoning prose is hallucinated post-hoc from the assessment
+  direction — show the distribution, let the caller reason.
+- Low-support rows (n<3) should be flagged or dropped via
+  `min_support`, not ranked.
+- Investigation-scoped ids (`hypothesis_id`, `lead_id`) are never
+  surfaced cross-case — they're meaningless outside the case.
+
+Deferred query classes:
+
+- **Class 1** (coarse case lookup) — too generic to drive PLAN
+  decisions; doesn't justify the port cost.
+- **Classes 13/14** (lead exemplars, authz calibration) — ANALYZE-time;
+  defer until PLAN-time retrieval is wired and proven.
+- **Class 15** (loop lead distribution) — needs current-loop context
+  defender doesn't expose yet; revisit alongside ANALYZE recall.
+
 - **Schema delta (LLM-native rewrite of `:H`)** — `defender/SKILL.md`
   and `defender/skills/dense-language/SKILL.md` updated and
   harmonized (they previously disagreed on the `:H` column set).
@@ -44,9 +91,32 @@ Maps to original §Compatibility Work items:
 
 ### Remaining
 
-- Query helpers (Class 1/5/6/8/13/14/15-style) on top of the loader
-- Empirical A/B test (baseline / deterministic retrieval / subagent
-  retrieval) per §Empirical Test Plan
+- **Advisory retrieval adapter** — `defender/scripts/advisory_invlang_retrieval.py`.
+  Composes the three helpers above into a single compact JSON block
+  suitable for prompt injection (current prologue + intent + top-K →
+  `{class_5, class_6, class_8}` with parse telemetry + caveat).
+- **PLAN-time wiring** — inject the advisory block after ORIENT;
+  mark as advisory memory; exclude from `lead_sequence.yaml`.
+- **A/B experiment** — three variants per §Subagent vs Main Agent /
+  §Empirical Test Plan, with the fair-comparison constraints from the
+  2026-05-20 discussion:
+    1. **Floor — deterministic recipes**: fixed `intent → primitive
+       call` map, no LLM in the retrieval step.
+    2. **A — Haiku NL→structured subagent**: defender emits NL
+       intent; Haiku selects class + filters. Doesn't pollute
+       defender's window; pays roundtrip + Haiku tokens.
+    3. **B — in-defender structured**: defender authors the primitive
+       call directly; preloads retrieval vocab in its system prompt.
+       No roundtrip; pays context-window cost + larger-model tokens.
+  Variants must share input contract (`{prologue, signature, intent}`),
+  output contract (identical JSON shape), and wiring point (PLAN-only
+  first). Compare on total-run cost, precision/recall against a
+  hand-curated oracle, query-misuse rate, and anchoring exposure.
+- **N-loop subagent comparison** (downstream of A/B) — after loop 1,
+  the subagent has no memory of what defender already tried. Either
+  re-inject updated prologue (kills its window-isolation advantage)
+  or accept that the subagent gets dumber as the investigation
+  deepens. Bound how much weight a single-loop subagent win gets.
 
 Schema gaps catalogued (each is an LLM hiccup, not a real schema
 variant — verified by checking which dates each pattern appears on
@@ -92,20 +162,12 @@ Baseline against `/tmp/defender-runs` (41 cases):
   that's now visibly skipped instead of silently routed.)
 - Disposition mix: 14 malicious, 13 benign, 9 inconclusive, 5 escalate.
 
-Tests: `defender/tests/test_invlang_parser.py` — 6 tests:
-schema-conformant baseline parses cleanly with zero warnings; each
-of the three drift patterns has a paired "logs a warning, keeps the
-good sibling" test; the corpus loader's three-way classification
-(loaded / partial / skipped) is verified end-to-end.
-
-Remaining work toward the original task scope:
-
-- Class 1/5/6/8/13/14/15-style query helpers on top of the loader
-  (advisory retrieval surface). The loader produces canonical
-  companion dicts so query code can be ported straight from soc-agent
-  with minor field-name adaptations.
-- The A/B test plan in §Empirical Test Plan (baseline vs deterministic
-  retrieval vs subagent retrieval).
+Tests: `defender/tests/test_invlang_parser.py` (parser, 9 tests) +
+`defender/tests/test_invlang_queries.py` (queries, 14 tests). Parser
+covers schema-conformant baseline + the three drift patterns + the
+loader's three-way file classification (loaded / partial / skipped).
+Queries cover the per-class output shape, filters, sort order, and
+edge cases (nameless leads dropped, unknown assessment shifts ignored).
 
 
 ## Summary

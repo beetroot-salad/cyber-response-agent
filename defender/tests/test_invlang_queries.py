@@ -1,0 +1,301 @@
+"""Defender invlang cross-case query helpers (Classes 5/6/8).
+
+Tests run against hand-constructed Companion objects, so the surface
+under test is the query logic itself — the parser has its own coverage
+in test_invlang_parser.py. Constructing the dicts inline also documents
+the canonical companion shape these helpers expect.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from defender.scripts.invlang.corpus import Companion
+from defender.scripts.invlang.queries import (
+    hypothesis_name_wildcard,
+    lead_branch_effects,
+    lead_sequence_pattern,
+)
+
+
+def _case(
+    case_id: str,
+    *,
+    signature_id: str | None = "wazuh-rule-5710",
+    hypotheses: list[dict] | None = None,
+    leads: list[dict] | None = None,
+    disposition: str | None = None,
+    termination: str | None = None,
+) -> Companion:
+    body = {
+        "prologue": {"vertices": [], "edges": []},
+        "hypothesize": {"hypotheses": hypotheses or []},
+        "findings": leads or [],
+        "conclude": {
+            "disposition": disposition,
+            "termination": {"category": termination} if termination else {},
+        },
+    }
+    return Companion(
+        case_id=case_id,
+        source_path=Path(f"/tmp/fake/{case_id}/investigation.md"),
+        body=body,
+        signature_id=signature_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Class 5: lead_sequence_pattern
+# ---------------------------------------------------------------------------
+
+
+def test_lead_sequence_pattern_emits_trace_per_case():
+    corpus = [
+        _case(
+            "case-a",
+            leads=[
+                {"name": "auth-events", "outcome": {}},
+                {"name": "user-activity", "outcome": {}},
+            ],
+            disposition="benign",
+            termination="natural",
+        ),
+        _case(
+            "case-b",
+            leads=[
+                {"name": "auth-events", "outcome": {"failure_reason": "empty_result"}},
+            ],
+            disposition="inconclusive",
+            termination="natural",
+        ),
+    ]
+    out = lead_sequence_pattern(corpus)
+    assert out["count"] == 2
+    traces = {h["case_id"]: h["trace"] for h in out["hits"]}
+    assert traces["case-a"] == "auth-events→user-activity→natural:benign"
+    assert traces["case-b"] == "auth-events:FAIL→natural:inconclusive"
+
+
+def test_lead_sequence_pattern_contains_filter():
+    corpus = [
+        _case("case-a", leads=[{"name": "auth-events", "outcome": {}}], disposition="benign"),
+        _case("case-b", leads=[{"name": "process-tree", "outcome": {}}], disposition="benign"),
+    ]
+    out = lead_sequence_pattern(corpus, contains="auth-events")
+    assert out["count"] == 1
+    assert out["hits"][0]["case_id"] == "case-a"
+
+
+def test_lead_sequence_pattern_disposition_and_signature_filters_compose():
+    corpus = [
+        _case("case-a", signature_id="wazuh-rule-5710", disposition="benign"),
+        _case("case-b", signature_id="wazuh-rule-5710", disposition="malicious"),
+        _case("case-c", signature_id="wazuh-rule-100001", disposition="benign"),
+    ]
+    out = lead_sequence_pattern(corpus, disposition="benign", signature_id="wazuh-rule-5710")
+    assert {h["case_id"] for h in out["hits"]} == {"case-a"}
+
+
+def test_lead_sequence_pattern_sorts_by_lead_count_desc():
+    corpus = [
+        _case("short", leads=[{"name": "a", "outcome": {}}]),
+        _case("long", leads=[{"name": "a", "outcome": {}}, {"name": "b", "outcome": {}}, {"name": "c", "outcome": {}}]),
+    ]
+    out = lead_sequence_pattern(corpus)
+    assert [h["case_id"] for h in out["hits"]] == ["long", "short"]
+
+
+# ---------------------------------------------------------------------------
+# Class 6: hypothesis_name_wildcard
+# ---------------------------------------------------------------------------
+
+
+def test_hypothesis_name_wildcard_matches_fnmatch():
+    corpus = [
+        _case(
+            "case-a",
+            hypotheses=[
+                {"id": "h-001", "name": "?brute-force", "weight": "+"},
+                {"id": "h-002", "name": "?monitoring-probe", "weight": "+"},
+            ],
+            leads=[
+                {"name": "auth-events", "resolutions": [
+                    {"hypothesis": "h-001", "before": "+", "after": "--"},
+                ]},
+            ],
+            disposition="benign",
+        ),
+    ]
+    out = hypothesis_name_wildcard(corpus, "?brute*")
+    assert out["count"] == 1
+    hit = out["hits"][0]
+    assert hit["name"] == "?brute-force"
+    assert hit["final_weight"] == "--"
+    # investigation-scoped id must not surface
+    assert "hypothesis_id" not in hit
+
+
+def test_hypothesis_name_wildcard_final_weight_filter():
+    corpus = [
+        _case(
+            "case-a",
+            hypotheses=[
+                {"id": "h-001", "name": "?brute-force", "weight": "+"},
+                {"id": "h-002", "name": "?monitoring-probe", "weight": "+"},
+            ],
+            leads=[
+                {"name": "L", "resolutions": [
+                    {"hypothesis": "h-001", "before": "+", "after": "++"},
+                    {"hypothesis": "h-002", "before": "+", "after": "--"},
+                ]},
+            ],
+        ),
+    ]
+    out = hypothesis_name_wildcard(corpus, "?*", final_weight="++")
+    names = [h["name"] for h in out["hits"]]
+    assert names == ["?brute-force"]
+
+
+def test_hypothesis_name_wildcard_uses_initial_weight_when_unassessed():
+    corpus = [
+        _case(
+            "case-a",
+            hypotheses=[{"id": "h-001", "name": "?never-touched", "weight": "+"}],
+            leads=[],
+        ),
+    ]
+    out = hypothesis_name_wildcard(corpus, "?never*")
+    assert out["hits"][0]["final_weight"] == "+"
+
+
+def test_hypothesis_name_wildcard_sorts_by_final_weight_desc():
+    corpus = [
+        _case("c1", hypotheses=[{"id": "h-001", "name": "?h", "weight": "-"}]),
+        _case("c2", hypotheses=[{"id": "h-001", "name": "?h", "weight": "++"}]),
+        _case("c3", hypotheses=[{"id": "h-001", "name": "?h", "weight": "+"}]),
+    ]
+    out = hypothesis_name_wildcard(corpus, "?h")
+    assert [h["case_id"] for h in out["hits"]] == ["c2", "c3", "c1"]
+
+
+# ---------------------------------------------------------------------------
+# Class 8: lead_branch_effects
+# ---------------------------------------------------------------------------
+
+
+def test_lead_branch_effects_aggregates_per_hypothesis():
+    corpus = [
+        _case(
+            f"case-{i}",
+            hypotheses=[
+                {"id": "h-001", "name": "?monitoring-probe", "weight": "+"},
+                {"id": "h-002", "name": "?brute-force", "weight": "+"},
+            ],
+            leads=[
+                {"name": "auth-events", "outcome": {"observations": {"vertices": ["v1"], "edges": []}},
+                 "resolutions": [
+                     {"hypothesis": "h-001", "before": "+", "after": "--"},
+                     {"hypothesis": "h-002", "before": "+", "after": "++"},
+                 ]},
+            ],
+        )
+        for i in range(4)
+    ]
+    out = lead_branch_effects(corpus, hypothesis_patterns=("?monitoring-probe", "?brute-force"))
+    assert out["count"] == 1
+    row = out["leads"][0]
+    assert row["lead_name"] == "auth-events"
+    assert row["n"] == 4
+    assert row["per_hypothesis_effect"]["?monitoring-probe"]["--"] == 4
+    assert row["per_hypothesis_effect"]["?brute-force"]["++"] == 4
+    assert out["frontier"] == ["?monitoring-probe", "?brute-force"]
+
+
+def test_lead_branch_effects_empty_rate_counts_missing_observations():
+    corpus = [
+        _case(
+            "case-a",
+            hypotheses=[{"id": "h-001", "name": "?h", "weight": "+"}],
+            leads=[
+                {"name": "L", "outcome": {"observations": {"vertices": [], "edges": []}}},
+                {"name": "L", "outcome": {"observations": {"vertices": ["v1"], "edges": []}}},
+                {"name": "L", "outcome": {}},  # no observations block → empty
+            ],
+        ),
+    ]
+    out = lead_branch_effects(corpus)
+    row = next(r for r in out["leads"] if r["lead_name"] == "L")
+    assert row["n"] == 3
+    assert row["empty_rate"] == "2/3"
+
+
+def test_lead_branch_effects_pattern_filter_excludes_unrelated_hypotheses():
+    corpus = [
+        _case(
+            "case-a",
+            hypotheses=[
+                {"id": "h-001", "name": "?brute-force", "weight": "+"},
+                {"id": "h-002", "name": "?config-error", "weight": "+"},
+            ],
+            leads=[
+                {"name": "L", "outcome": {"observations": {"vertices": ["v"], "edges": []}},
+                 "resolutions": [
+                     {"hypothesis": "h-001", "before": "+", "after": "++"},
+                     {"hypothesis": "h-002", "before": "+", "after": "--"},
+                 ]},
+            ],
+        ),
+    ]
+    out = lead_branch_effects(corpus, hypothesis_patterns=("?brute*",))
+    row = out["leads"][0]
+    assert list(row["per_hypothesis_effect"].keys()) == ["?brute-force"]
+
+
+def test_lead_branch_effects_min_support_drops_low_n_rows():
+    corpus = [
+        _case("a", leads=[{"name": "rare", "outcome": {}}]),
+        _case("b", leads=[{"name": "common", "outcome": {}}]),
+        _case("c", leads=[{"name": "common", "outcome": {}}]),
+        _case("d", leads=[{"name": "common", "outcome": {}}]),
+    ]
+    out = lead_branch_effects(corpus, min_support=2)
+    assert [r["lead_name"] for r in out["leads"]] == ["common"]
+
+
+def test_lead_branch_effects_caps_hypotheses_per_lead_without_patterns():
+    """Without a frontier filter, runaway hypothesis tables stay terse."""
+    hypotheses = [{"id": f"h-{i:03}", "name": f"?h{i}", "weight": "+"} for i in range(10)]
+    resolutions = [{"hypothesis": h["id"], "before": "+", "after": "++"} for h in hypotheses]
+    corpus = [
+        _case(
+            "case-a",
+            hypotheses=hypotheses,
+            leads=[{"name": "L", "outcome": {}, "resolutions": resolutions}],
+        ),
+    ]
+    out = lead_branch_effects(corpus, max_hypotheses_per_lead=3)
+    row = out["leads"][0]
+    assert len(row["per_hypothesis_effect"]) == 3
+
+
+def test_lead_branch_effects_ignores_unknown_assessment_shifts():
+    """A malformed `after` value (e.g. None or 'abstain') must not crash;
+    it just doesn't contribute to a bucket.
+    """
+    corpus = [
+        _case(
+            "case-a",
+            hypotheses=[{"id": "h-001", "name": "?h", "weight": "+"}],
+            leads=[
+                {"name": "L", "outcome": {},
+                 "resolutions": [
+                     {"hypothesis": "h-001", "before": "+", "after": None},
+                     {"hypothesis": "h-001", "before": "+", "after": "abstain"},
+                     {"hypothesis": "h-001", "before": "+", "after": "++"},
+                 ]},
+            ],
+        ),
+    ]
+    out = lead_branch_effects(corpus, hypothesis_patterns=("?h",))
+    bucket = out["leads"][0]["per_hypothesis_effect"]["?h"]
+    assert bucket == {"++": 1, "+": 0, "-": 0, "--": 0}
