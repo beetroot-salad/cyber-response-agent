@@ -276,9 +276,23 @@ e-001|modified|v-001|v-002|2026-05-05T02:14:01Z|siem-event:wazuh|checksum_before
 ```
 
 ```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|preds|refuts|authz?|weight|status]
-h-001|?managed-package-upgrade|v-002|modified|process|package-manager|p1:proposed_parent:"upgrade event in apt history at modification time";p2:proposed_edge:"checksum_after matches upstream package SHA"|r1[p1,p2]:"no apt event near modification time, or checksum diverges from upstream"||null|active
-h-002|?adversary-controlled-write|v-002|modified|process|adversary-shell|p1:proposed_parent:"write traces to interactive session or non-package process";p2:proposed_edge:"checksum_after diverges from any published package SHA"|r1[p1,p2]:"write traces to package-manager process tree, checksum matches upstream"||null|active
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?managed-package-upgrade|v-002|modified|process|package-manager||null|active
+h-002|?adversary-controlled-write|v-002|modified|process|adversary-shell||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"upgrade event in apt history at modification time"
+p2|proposed_edge|"checksum_after matches upstream package SHA"
+
+:H h-001.refuts [id|refutes|claim]
+r1|p1,p2|"no apt event near modification time, or checksum diverges from upstream"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_parent|"write traces to interactive session or non-package process"
+p2|proposed_edge|"checksum_after diverges from any published package SHA"
+
+:H h-002.refuts [id|refutes|claim]
+r1|p1,p2|"write traces to package-manager process tree, checksum matches upstream"
 
 :L findings [id|loop|name|target|tests|system|template|query|window]
 l-001|1|apt-upgrade-correlation|v-001|h-001,h-002|host-query|apt-history-around|host=web-frontend-04.prod t0=2026-05-05T02:14:01Z|±10m
@@ -373,9 +387,25 @@ v-003|identity|identity:account|metrics-shipper|
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
 e-001|ssh_auth_success|v-001|v-002|2026-05-05T03:42:11Z|siem-event:wazuh|account=metrics-shipper;port=22
 
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|preds|refuts|authz?|weight|status]
-h-001|?sre-rollout-lag-in-iam|e-001|ssh_auth_success|process|monitoring-agent|p1:proposed_parent:"source is documented monitoring infrastructure";p2:proposed_parent:"metrics-shipper runs as a packaged systemd daemon on source, fleet-wide on the monitoring role"|r1[p1,p2]:"source undocumented, or no such daemon on host"|ac1:proposed:iam:"metrics-shipper is provisioned and authorized for this source→target SSH path":escalate/escalate|null|active
-h-002|?adversary-on-monitoring-source|e-001|ssh_auth_success|process|adversary-shell|p1:proposed_parent:"process initiating SSH is not a packaged systemd unit"|r1[p1]:"process is a distro-packaged, systemd-spawned daemon"||null|active
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?sre-rollout-lag-in-iam|e-001|ssh_auth_success|process|monitoring-agent||null|active
+h-002|?adversary-on-monitoring-source|e-001|ssh_auth_success|process|adversary-shell||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"source is documented monitoring infrastructure"
+p2|proposed_parent|"metrics-shipper runs as a packaged systemd daemon on source, fleet-wide on the monitoring role"
+
+:H h-001.refuts [id|refutes|claim]
+r1|p1,p2|"source undocumented, or no such daemon on host"
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|proposed|iam|"metrics-shipper is provisioned and authorized for this source→target SSH path"|escalate|escalate
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_parent|"process initiating SSH is not a packaged systemd unit"
+
+:H h-002.refuts [id|refutes|claim]
+r1|p1|"process is a distro-packaged, systemd-spawned daemon"
 
 :L findings [id|loop|name|target|tests|system|template|query|window]
 l-001|1|cmdb-source-lookup|v-001|h-001,h-002|cmdb|host-by-ip|ip=10.20.5.41|n/a
@@ -484,10 +514,33 @@ e-002|loaded|v-002|v-004|2026-05-05T...|runtime-audit:github-runner|via=npm-inst
 PLAN authors three competing topologies under `v-002`'s `loaded`/`queried_dns` parents — they are mutually exclusive on parent class:
 
 ```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|preds|refuts|authz?|weight|status]
-h-001|?legitimate-dependency-telemetry|v-002|loaded|package|legitimate-published-library|p1:proposed_parent:"package source repo declares telemetry endpoint and opt-out"|r1[p1]:"no documented telemetry, or endpoint not declared in source"|ac1:proposed:org-policy:"CI runner egress to package telemetry endpoints permitted":escalate/escalate|null|active
-h-002|?developer-tooling-phone-home|v-002|queried_dns|process|build-tool|p1:proposed_parent:"node child of npm-exec under github-runner job, no other runtime in process tree";p2:proposed_edge:"queries cease when build job ends"|r1[p1,p2]:"queries persist past job lifetime, or process tree includes a non-build runtime"||null|active
-h-003|?malicious-dependency-c2|v-002|loaded|package|adversary-published-library|p1:proposed_parent:"maintainer published recently and has no other packages";p2:proposed_edge:"destination IP has no historical reputation and was registered shortly before package publication"|r1[p1,p2]:"maintainer has long publication history, or destination IP has prior reputation"||null|active
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?legitimate-dependency-telemetry|v-002|loaded|package|legitimate-published-library||null|active
+h-002|?developer-tooling-phone-home|v-002|queried_dns|process|build-tool||null|active
+h-003|?malicious-dependency-c2|v-002|loaded|package|adversary-published-library||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"package source repo declares telemetry endpoint and opt-out"
+
+:H h-001.refuts [id|refutes|claim]
+r1|p1|"no documented telemetry, or endpoint not declared in source"
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|proposed|org-policy|"CI runner egress to package telemetry endpoints permitted"|escalate|escalate
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_parent|"node child of npm-exec under github-runner job, no other runtime in process tree"
+p2|proposed_edge|"queries cease when build job ends"
+
+:H h-002.refuts [id|refutes|claim]
+r1|p1,p2|"queries persist past job lifetime, or process tree includes a non-build runtime"
+
+:H h-003.preds [id|subject|claim]
+p1|proposed_parent|"maintainer published recently and has no other packages"
+p2|proposed_edge|"destination IP has no historical reputation and was registered shortly before package publication"
+
+:H h-003.refuts [id|refutes|claim]
+r1|p1,p2|"maintainer has long publication history, or destination IP has prior reputation"
 
 :L findings [id|loop|name|target|tests|system|template|query|window]
 l-001|1|package-source-and-maintainer|v-004|h-001,h-003|host-query|npm-package-meta|name=@quickmetrics/runtime-collector version=0.1.2|n/a

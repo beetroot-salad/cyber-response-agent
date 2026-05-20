@@ -1,23 +1,35 @@
 """Strict ```invlang parser aligned with the current defender schema.
 
-Source of truth: `defender/skills/dense-language/SKILL.md`. Cell counts
-and required separators (`⟂` on `:T resolutions`) are enforced; rows
-that don't match are dropped *with a warning* and parsing continues
-past them, so a single bad row never silently corrupts a file or
-takes down the rest of the load.
+Source of truth: `defender/skills/dense-language/SKILL.md`.
+
+Schema highlights
+-----------------
+- `:V prologue.vertices`, `:E prologue.edges` — unchanged 5/7-col rows.
+- `:H hypothesize.hypotheses` — slim 9-col header (identity only).
+  Multi-row optional content (predictions, refutations, authorization
+  contracts, parent attributes) lives in namespaced sub-blocks under
+  the same `:H` tag:
+
+      :H h-NNN.preds        [id|subject|claim]
+      :H h-NNN.attr_preds   [id|target|attribute|claim]
+      :H h-NNN.refuts       [id|refutes|claim]      # `refutes` is csv of pred ids
+      :H h-NNN.authz        [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+      :H h-NNN.parent_attrs [key|value]
+
+  This mirrors the lead-scoped sub-block pattern (`:V l-NNN.observations.vertices`).
+  No new top-level concept; scoping is in the block name.
+
+- Cell values containing a literal `|` must be wrapped in double quotes
+  (`flags="EXE_WRITABLE|EXE_LOWER_LAYER"`). The row tokenizer skips
+  `|` inside a quoted span.
 
 What we don't do
 ----------------
-- No tolerance for unescaped `|` inside attrs cells (Falco
-  `flags=A|B` etc.). The schema delimits cells with `|`; literal
-  values containing `|` must escape it as `\|` or go in raw payloads
-  (per the SKILL's "keep high-cardinality details in raw gather
-  payloads, not invlang cells" guideline).
-- No tolerance for `:H` rows with extra empty cells. The schema
-  declares 14 columns; rows with more are rejected.
+- No tolerance for old-format `:H` rows (the wide 14-col surface or
+  the alternate 11-col surface). Both are rejected at the column-
+  header check with a clear warning.
 - No tolerance for `:T resolutions` without the `⟂` supporting-edges
-  separator. The annotation grammar is `<lead> <pred-refs> <severity>
-  ⟂ <supporting-edges> :: <annotation>`.
+  separator.
 
 What we surface
 ---------------
@@ -82,9 +94,18 @@ class Block:
 
 
 def _split_cells(row: str) -> list[str]:
-    """Split a row on `|`, honoring `\\|` as an escape."""
+    """Split a row on `|`, honoring two ways to escape:
+
+    - `\\|` inside a cell: passes through as a literal `|`.
+    - `|` inside a double-quoted span: not a delimiter.
+
+    The quoted-span form is the LLM-friendly one and is what the
+    current schema expects (`flags="EXE_WRITABLE|EXE_LOWER_LAYER"`).
+    The backslash form is retained because it's free and harmless.
+    """
     parts: list[str] = []
     cur: list[str] = []
+    in_q = False
     i = 0
     while i < len(row):
         ch = row[i]
@@ -92,7 +113,12 @@ def _split_cells(row: str) -> list[str]:
             cur.append("|")
             i += 2
             continue
-        if ch == "|":
+        if ch == '"':
+            in_q = not in_q
+            cur.append(ch)
+            i += 1
+            continue
+        if ch == "|" and not in_q:
             parts.append("".join(cur).strip())
             cur = []
             i += 1
@@ -120,15 +146,21 @@ def _row_cells(block: Block, row: str, expected: int) -> list[str]:
 
 
 def _parse_attrs(cell: str) -> dict[str, str]:
+    """Parse a `key=value;key=value` attrs cell.
+
+    Splits on `;` outside double-quoted spans (so a value can contain
+    `;`), and unquotes values whose form is `key="value"`. The cell-
+    level row tokenizer already handles the `|` escape, so by this
+    point we're working on a single cell's contents.
+    """
     out: dict[str, str] = {}
     if not cell:
         return out
-    for kv in cell.split(";"):
-        kv = kv.strip()
-        if not kv or "=" not in kv:
+    for kv in _split_subcells(cell):
+        if "=" not in kv:
             continue
         k, v = kv.split("=", 1)
-        out[k.strip()] = v.strip()
+        out[k.strip()] = _unquote(v.strip())
     return out
 
 
@@ -232,80 +264,6 @@ def _tokenize_fence(body: str) -> list[Block]:
 # ---------------------------------------------------------------------------
 
 
-_PRED_RE = re.compile(r"^(?P<id>p\d+):(?P<subject>[^:]+):(?P<claim>.*)$")
-_ATTR_PRED_RE = re.compile(
-    r"^(?P<id>ap\d+):(?P<target>[^:]+):(?P<attribute>[^:]+):(?P<claim>.*)$"
-)
-_REFUT_RE = re.compile(r"^(?P<id>r\d+)(?:\[(?P<refs>[^\]]*)\])?:(?P<claim>.*)$")
-_AUTHZ_RE = re.compile(
-    r"^(?P<id>ac\d+):(?P<edge_ref>[^:]+):(?P<anchor_kind>[^:]+):"
-    r"(?P<predicate>\"[^\"]*\"|[^:]+):(?P<on_unauth>[^/]+)/(?P<on_indet>.+)$"
-)
-
-
-def _parse_pred_subcells(cell: str) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for sub in _split_subcells(cell):
-        m = _PRED_RE.match(sub)
-        if not m:
-            raise RowError(f"prediction sub-cell malformed: {sub!r}")
-        out.append({
-            "id": m.group("id"),
-            "subject": m.group("subject").strip(),
-            "claim": _unquote(m.group("claim").strip()),
-        })
-    return out
-
-
-def _parse_attr_pred_subcells(cell: str) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for sub in _split_subcells(cell):
-        m = _ATTR_PRED_RE.match(sub)
-        if not m:
-            raise RowError(f"attribute_prediction sub-cell malformed: {sub!r}")
-        out.append({
-            "id": m.group("id"),
-            "target": m.group("target").strip(),
-            "attribute": m.group("attribute").strip(),
-            "claim": _unquote(m.group("claim").strip()),
-        })
-    return out
-
-
-def _parse_refut_subcells(cell: str) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for sub in _split_subcells(cell):
-        m = _REFUT_RE.match(sub)
-        if not m:
-            raise RowError(f"refutation sub-cell malformed: {sub!r}")
-        rec: dict[str, Any] = {
-            "id": m.group("id"),
-            "claim": _unquote(m.group("claim").strip()),
-        }
-        refs = m.group("refs")
-        if refs:
-            rec["refutes_predictions"] = _split_csv(refs)
-        out.append(rec)
-    return out
-
-
-def _parse_authz_subcells(cell: str) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for sub in _split_subcells(cell):
-        m = _AUTHZ_RE.match(sub)
-        if not m:
-            raise RowError(f"authz contract sub-cell malformed: {sub!r}")
-        out.append({
-            "id": m.group("id"),
-            "edge_ref": m.group("edge_ref").strip(),
-            "anchor_kind": m.group("anchor_kind").strip(),
-            "predicate": _unquote(m.group("predicate").strip()),
-            "on_unauthorized": m.group("on_unauth").strip(),
-            "on_indeterminate": m.group("on_indet").strip(),
-        })
-    return out
-
-
 # ---------------------------------------------------------------------------
 # Row → record projections
 # ---------------------------------------------------------------------------
@@ -354,6 +312,30 @@ def _edge_record(block: Block, row: str) -> dict[str, Any]:
     return out
 
 
+# Current `:H hypothesize.hypotheses` schema: 9-col identity row.
+# Multi-row optional content (preds/refuts/authz/parent_attrs) lives
+# in `:H h-NNN.<sub>` sub-blocks; legacy packed-cell forms are rejected
+# at the column-header check, not silently mis-projected.
+_HYP_HEADER_COLS = {
+    "id", "name", "attached_to", "rel",
+    "parent_type", "parent_class",
+    "integrity_waived", "weight", "status",
+}
+
+
+def _is_current_hyp_header(cols: list[str] | None) -> bool:
+    """Return True iff `cols` looks like the current 9-col :H header.
+
+    The check is tolerant of column order and accepts the optional
+    `integrity_waived?` column (the `?` is stripped at tokenization).
+    Rows from legacy 14-col or 11-col headers fail this and the block
+    is rejected wholesale with one warning instead of N-row noise.
+    """
+    if not cols:
+        return False
+    return set(cols) == _HYP_HEADER_COLS
+
+
 def _hypothesis_record(block: Block, row: str) -> dict[str, Any]:
     cols = block.columns or []
     cells = _row_cells(block, row, len(cols))
@@ -372,18 +354,6 @@ def _hypothesis_record(block: Block, row: str) -> dict[str, Any]:
         if rec.get("parent_class"):
             pv["classification"] = rec["parent_class"]
         out.setdefault("proposed_edge", {})["parent_vertex"] = pv
-    if rec.get("parent_attrs"):
-        out.setdefault("proposed_edge", {}).setdefault(
-            "parent_vertex", {}
-        )["attributes"] = _parse_attrs(rec["parent_attrs"])
-    if rec.get("preds"):
-        out["predictions"] = _parse_pred_subcells(rec["preds"])
-    if rec.get("attr_preds"):
-        out["attribute_predictions"] = _parse_attr_pred_subcells(rec["attr_preds"])
-    if rec.get("refuts"):
-        out["refutation_shape"] = _parse_refut_subcells(rec["refuts"])
-    if rec.get("authz"):
-        out["authorization_contract"] = _parse_authz_subcells(rec["authz"])
     if rec.get("integrity_waived"):
         out["integrity_waived"] = rec["integrity_waived"]
     if rec.get("weight"):
@@ -391,6 +361,133 @@ def _hypothesis_record(block: Block, row: str) -> dict[str, Any]:
     if rec.get("status"):
         out["status"] = rec["status"]
     return out
+
+
+# ---------------------------------------------------------------------------
+# `:H h-NNN.<sub>` sub-block projections
+# ---------------------------------------------------------------------------
+
+
+_HYP_PREFIX_RE = re.compile(
+    r"^(?P<hyp>h-[A-Za-z0-9]+)\.(?P<sub>preds|attr_preds|refuts|authz|parent_attrs)$"
+)
+
+
+def _hyp_sub_pred_row(block: Block, row: str) -> dict[str, Any]:
+    cols = block.columns or ["id", "subject", "claim"]
+    cells = _row_cells(block, row, len(cols))
+    rec = dict(zip(cols, cells, strict=False))
+    if not rec.get("id") or not rec.get("subject"):
+        raise RowError("preds row missing id/subject")
+    return {
+        "id": rec["id"],
+        "subject": rec["subject"],
+        "claim": _unquote(rec.get("claim", "")),
+    }
+
+
+def _hyp_sub_attr_pred_row(block: Block, row: str) -> dict[str, Any]:
+    cols = block.columns or ["id", "target", "attribute", "claim"]
+    cells = _row_cells(block, row, len(cols))
+    rec = dict(zip(cols, cells, strict=False))
+    if not rec.get("id") or not rec.get("target") or not rec.get("attribute"):
+        raise RowError("attr_preds row missing id/target/attribute")
+    return {
+        "id": rec["id"],
+        "target": rec["target"],
+        "attribute": rec["attribute"],
+        "claim": _unquote(rec.get("claim", "")),
+    }
+
+
+def _hyp_sub_refut_row(block: Block, row: str) -> dict[str, Any]:
+    cols = block.columns or ["id", "refutes", "claim"]
+    cells = _row_cells(block, row, len(cols))
+    rec = dict(zip(cols, cells, strict=False))
+    if not rec.get("id"):
+        raise RowError("refuts row missing id")
+    out: dict[str, Any] = {
+        "id": rec["id"],
+        "claim": _unquote(rec.get("claim", "")),
+    }
+    if rec.get("refutes"):
+        out["refutes_predictions"] = _split_csv(rec["refutes"])
+    return out
+
+
+def _hyp_sub_authz_row(block: Block, row: str) -> dict[str, Any]:
+    cols = block.columns or [
+        "id", "edge_ref", "anchor_kind", "predicate", "on_unauth", "on_indet",
+    ]
+    cells = _row_cells(block, row, len(cols))
+    rec = dict(zip(cols, cells, strict=False))
+    if not rec.get("id") or not rec.get("anchor_kind"):
+        raise RowError("authz row missing id/anchor_kind")
+    return {
+        "id": rec["id"],
+        "edge_ref": rec.get("edge_ref", "proposed") or "proposed",
+        "anchor_kind": rec["anchor_kind"],
+        "predicate": _unquote(rec.get("predicate", "")),
+        "on_unauthorized": rec.get("on_unauth", "escalate") or "escalate",
+        "on_indeterminate": rec.get("on_indet", "escalate") or "escalate",
+    }
+
+
+def _hyp_sub_parent_attrs_row(block: Block, row: str) -> tuple[str, str]:
+    cols = block.columns or ["key", "value"]
+    cells = _row_cells(block, row, len(cols))
+    rec = dict(zip(cols, cells, strict=False))
+    if not rec.get("key"):
+        raise RowError("parent_attrs row missing key")
+    return rec["key"], _unquote(rec.get("value", ""))
+
+
+_HYP_SUB_DISPATCH = {
+    "preds": ("predictions", _hyp_sub_pred_row),
+    "attr_preds": ("attribute_predictions", _hyp_sub_attr_pred_row),
+    "refuts": ("refutation_shape", _hyp_sub_refut_row),
+    "authz": ("authorization_contract", _hyp_sub_authz_row),
+}
+
+
+def _project_hyp_subblock(
+    block: Block,
+    hyp_id: str,
+    sub: str,
+    hypotheses_by_id: dict[str, dict[str, Any]],
+    warnings: list[ParseWarning],
+) -> None:
+    """Route a `:H h-NNN.<sub>` sub-block onto its parent hypothesis."""
+    hyp = hypotheses_by_id.get(hyp_id)
+    if hyp is None:
+        warnings.append(ParseWarning(
+            block=f":H {block.name}", row_index=-1, row="",
+            reason=f"sub-block references unknown hypothesis {hyp_id!r}",
+        ))
+        return
+    if sub == "parent_attrs":
+        attrs: dict[str, str] = {}
+        for idx, row in enumerate(block.rows):
+            try:
+                k, v = _hyp_sub_parent_attrs_row(block, row)
+            except RowError as e:
+                warnings.append(ParseWarning(
+                    block=f":H {block.name}", row_index=idx,
+                    row=row, reason=str(e),
+                ))
+                continue
+            attrs[k] = v
+        if attrs:
+            hyp.setdefault("proposed_edge", {}).setdefault(
+                "parent_vertex", {}
+            )["attributes"] = attrs
+        return
+    if sub not in _HYP_SUB_DISPATCH:
+        return
+    out_key, row_proj = _HYP_SUB_DISPATCH[sub]
+    rows = _project_rows(block, row_proj, warnings)
+    if rows:
+        hyp[out_key] = rows
 
 
 def _lead_header_record(
@@ -617,6 +714,7 @@ def companion_from_blocks(
     out: dict[str, Any] = {}
     warnings: list[ParseWarning] = []
     findings: dict[str, dict[str, Any]] = {}
+    hypotheses_by_id: dict[str, dict[str, Any]] = {}
     current_lead: str | None = None
 
     def lead_bucket(lead_id: str) -> dict[str, Any]:
@@ -640,8 +738,33 @@ def companion_from_blocks(
             )
             continue
         if tag == "H" and name == "hypothesize.hypotheses":
-            out.setdefault("hypothesize", {})["hypotheses"] = (
-                _project_rows(block, _hypothesis_record, warnings)
+            if not _is_current_hyp_header(block.columns):
+                warnings.append(ParseWarning(
+                    block=f":H {name}", row_index=-1, row="",
+                    reason=(
+                        f"column header {block.columns!r} does not match the "
+                        f"current schema (id|name|attached_to|rel|parent_type|"
+                        f"parent_class|integrity_waived?|weight|status); whole "
+                        f"block rejected"
+                    ),
+                ))
+                continue
+            hyps = _project_rows(block, _hypothesis_record, warnings)
+            out.setdefault("hypothesize", {})["hypotheses"] = hyps
+            for h in hyps:
+                hid = h.get("id")
+                if isinstance(hid, str):
+                    hypotheses_by_id[hid] = h
+            continue
+
+        m_hyp_sub = _HYP_PREFIX_RE.match(name) if tag == "H" else None
+        if m_hyp_sub:
+            _project_hyp_subblock(
+                block,
+                hyp_id=m_hyp_sub.group("hyp"),
+                sub=m_hyp_sub.group("sub"),
+                hypotheses_by_id=hypotheses_by_id,
+                warnings=warnings,
             )
             continue
 

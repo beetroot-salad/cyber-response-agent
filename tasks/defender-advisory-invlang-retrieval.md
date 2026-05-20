@@ -8,12 +8,25 @@ groups: defender, invlang, knowledge, retrieval
 
 ### Done
 
+- **Schema delta (LLM-native rewrite of `:H`)** — `defender/SKILL.md`
+  and `defender/skills/dense-language/SKILL.md` updated and
+  harmonized (they previously disagreed on the `:H` column set).
+  The 14-col wide row with 5 packed optional sub-cell columns is
+  retired. New shape:
+    - `:H hypothesize.hypotheses` is a 9-col identity row
+    - Predictions, refutations, authorization contracts, and
+      parent-vertex attributes each live in `:H h-NNN.<sub>`
+      sub-blocks (mirroring the lead-scoped pattern, no new
+      top-level concept)
+    - Cell values containing literal `|` (e.g. Falco
+      `flags="EXE_WRITABLE|EXE_LOWER_LAYER"`) must be wrapped in
+      double quotes; the tokenizer skips `|` inside quoted spans
 - **Schema-aligned loader** — `defender/scripts/invlang/{parser,corpus}.py`.
-  Standalone (no soc-agent imports). Aligned with the current schema
-  in `defender/skills/dense-language/SKILL.md`. No tolerance for
-  historical iteration noise or LLM hiccups; per-row recovery so one
-  bad row doesn't take down the rest of a file. Every non-conformant
-  row lands as a structured `ParseWarning`.
+  Standalone (no soc-agent imports). Strict to the new schema; per-row
+  recovery so one bad row doesn't take down the rest of a file. Every
+  non-conformant row lands as a structured `ParseWarning`. Legacy
+  `:H` headers are rejected wholesale (one warning per block, not
+  per row) for a clean post-mortem trail.
 
 Maps to original §Compatibility Work items:
 
