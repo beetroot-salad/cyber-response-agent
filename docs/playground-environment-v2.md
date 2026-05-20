@@ -133,7 +133,8 @@ Constraints: OSS or free-tier, lightweight enough to fit the CCX33 footprint alo
 | Ticketing stub | Existing FastAPI `ticket-server` | Keep stub over Elastic Cases per §Open questions |
 | CMDB stub | YAML + thin FastAPI | Asset queries + mutation overlay for stale-CMDB chaos |
 | Threat intel stub | FastAPI stub | Local VT/OTX shape |
-| Change mgmt stub | YAML + thin FastAPI | Authorized-change context |
+| Change mgmt stub | YAML + thin FastAPI | Authorized-change context. Adds rolling standing CRs (daily/weekly) so baseline-aligned windows are CR-backed; attack runner can post synthetic CRs with `--cr-mode {valid,stale,scope-mismatch}` to exercise host/time/identity scope checks |
+| Identity stub | FastAPI over `keycloak/realm.yaml × hosts/inventory.yaml` | Authz API — `can_access?host=`, `authorized_hosts` per user. Surfaces the realm×inventory join that seed-users.py applies on hosts, so agents can resolve legitimacy contracts authoritatively without reading `/etc/passwd` |
 
 ### Telemetry sources — who produces what
 

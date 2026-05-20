@@ -833,6 +833,20 @@ services:
       - "127.0.0.1:8004:8080"
     healthcheck: *stub-health
 
+  identity:
+    # Authz API over keycloak/realm.yaml × hosts/inventory.yaml. Root build
+    # context so the image can COPY both source files (same pattern as cmdb/).
+    build:
+      context: .
+      dockerfile: identity/Dockerfile
+    image: soc-playground/identity:local
+    container_name: identity
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:8005:8080"
+    healthcheck: *stub-health
+
 volumes:
   certs:
     driver: local

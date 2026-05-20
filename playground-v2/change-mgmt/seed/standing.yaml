@@ -1,0 +1,39 @@
+# Standing (recurring) change windows. Materialized into STORE on startup +
+# every STANDING_REFRESH_SECONDS (default 300s) so /changes/active queries land
+# on a CR whenever the current time falls inside one of these windows — without
+# needing a human to POST a fresh CR each day.
+#
+# Kept tiny on purpose: this layer is for the small slice of baseline that *is*
+# legitimately CR-covered (overnight backups, weekly maintenance). Ad-hoc
+# activity stays CR-free — that's realistic and is what keeps "is there a CR?"
+# from being a degenerate yes-for-everything signal.
+#
+# Recurrence kinds supported (kept minimal — no croniter dependency):
+#   daily            : {kind: daily,  hour_utc, minute_utc}
+#   weekly           : {kind: weekly, weekday (1=Mon..7=Sun), hour_utc, minute_utc}
+#
+# CR ids are materialized as `${id_prefix}${YYYYMMDDTHHMMZ}` so a stable id maps
+# back to a specific occurrence — query semantics match the ad-hoc CRs.
+
+standing_changes:
+  - id_prefix: CHG-DB-BACKUP-
+    summary: "Nightly db-1 backup window"
+    description: "Standing change for svc.backups overnight pg_dump (baseline action db-backup)."
+    hosts: [db-1]
+    requester: svc.backups
+    approver: change-board
+    status: approved
+    recurrence: {kind: daily, hour_utc: 2, minute_utc: 0}
+    duration_minutes: 60
+    ticket_ref: OPS-STANDING-DB-BACKUP
+
+  - id_prefix: CHG-WEB-PATCH-
+    summary: "Weekly web tier patching window"
+    description: "Standing maintenance window covering web-1 and web-2 OS patching (inventory.yaml change_window: tue 02:00-04:00 UTC)."
+    hosts: [web-1, web-2]
+    requester: team.web
+    approver: change-board
+    status: approved
+    recurrence: {kind: weekly, weekday: 2, hour_utc: 2, minute_utc: 0}
+    duration_minutes: 120
+    ticket_ref: OPS-STANDING-WEB-PATCH

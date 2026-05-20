@@ -34,7 +34,25 @@ cd /workspace/playground-v2/attacks
 
 # Preview without dispatching:
 ./runner.py run persistence-authorized-keys --dry-run
+
+# Stage CR context before firing (exercises agent's CR scope-check):
+./runner.py run cross-tier-ssh-probe --cr-mode valid
+./runner.py run ssh-brute-force-canary --cr-mode stale
+./runner.py run living-off-the-land --cr-mode scope-mismatch
 ```
+
+## `--cr-mode` — synthetic change-request context
+
+A run with `--cr-mode {valid|stale|scope-mismatch}` POSTs a synthetic CR to the `change-mgmt` stub immediately before the attack fires. The CR is captured in `meta.json.pre_run` and lives in change-mgmt's STORE until the next container restart. CR ids use the prefix `CHG-RUNNER-<run_id_short>` so the runner artifact and the CR record are easy to correlate.
+
+| `--cr-mode` | CR scope | Intended agent verdict |
+|---|---|---|
+| `none` (default) | — (no CR posted) | Unauthorized — classic escalate. |
+| `valid` | target host + current window, requester = source user | Authorized-window cover. The agent should resolve the legitimacy contract as `authorized` *iff* it also confirms host + identity + timing match. |
+| `stale` | target host but window is in the past (now-3h..now-1h) | Tests the agent's temporal-scope check. CR exists but doesn't cover *now*. |
+| `scope-mismatch` | a different host (sibling in same inventory role, or `canary-1` fallback) | Tests the agent's host-scope check. CR exists for the wrong host. |
+
+Posting happens via `docker exec change-mgmt python -c …` so the runner doesn't need an SSH tunnel and adds no new Python dependencies — it reuses the docker context it already uses for `exec`-based dispatch.
 
 ## Scenario catalog
 
@@ -48,6 +66,7 @@ See `catalog.yaml` for the full schema header; see the scenarios in the same fil
 
 - `run_id`, `scenario_id`, `category`, `description`
 - `seed`, `overrides`, `resolved` (intensity / source_user / target_host after defaults apply)
+- `pre_run` — `{cr_mode, cr_request?, cr_post_rc?, cr_post_response?}` capturing the synthetic CR (when `--cr-mode != none`)
 - `started_at`, `finished_at` (UTC ISO8601, second precision) — investigation-context hint, not a hard query boundary
 - `aborted` — true iff a non-`allow_fail` step returned non-zero
 - `steps[]` — per-step `{source_host, source_user, cmd, rc, stdout_tail, stderr_tail, started_at, ended_at, duration_s}` (outputs truncated to 500 bytes each)
