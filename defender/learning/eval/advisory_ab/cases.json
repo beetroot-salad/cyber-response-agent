@@ -1,0 +1,35 @@
+{
+  "_comment": "Hand-picked cases for the advisory A/B/C/D experiment. Fill source_run with the /tmp/defender-runs directory we draw alert.json from. gold is the hand-labeled disposition (NOT the disposition the original run produced — that's agent-generated). predicted_relevance is our prior on whether advisory would help; we measure whether the experiment confirms it.",
+
+  "positives": [
+    {
+      "id": "POS-1",
+      "source_run": "20260518T040450Z-alert",
+      "signature_id": "wazuh-rule-5710",
+      "gold": "malicious",
+      "predicted_relevance": "high",
+      "rationale": "PLACEHOLDER — replace with the actual reason this case needs precedent (e.g. 'original run took 4 loops to land on cmdb-source-ip-lookup; corpus shows it as the discriminating lead from loop 1')."
+    },
+    {"id": "POS-2", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-5710", "gold": "PLACEHOLDER", "predicted_relevance": "high", "rationale": "PLACEHOLDER"},
+    {"id": "POS-3", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-100110", "gold": "PLACEHOLDER", "predicted_relevance": "high", "rationale": "PLACEHOLDER"},
+    {"id": "POS-4", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-100001", "gold": "PLACEHOLDER", "predicted_relevance": "high", "rationale": "PLACEHOLDER"}
+  ],
+
+  "negatives": [
+    {
+      "id": "NEG-1",
+      "source_run": "PLACEHOLDER",
+      "signature_id": "wazuh-rule-5710",
+      "gold": "benign",
+      "predicted_relevance": "low",
+      "rationale": "PLACEHOLDER — replace with the reason advisory is not expected to help (e.g. 'monitoring-probe shape; gather-the-source-IP enrichment resolves it on loop 1 regardless of precedent')."
+    },
+    {"id": "NEG-2", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-5710", "gold": "PLACEHOLDER", "predicted_relevance": "low", "rationale": "PLACEHOLDER"},
+    {"id": "NEG-3", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-100110", "gold": "PLACEHOLDER", "predicted_relevance": "low", "rationale": "PLACEHOLDER"},
+    {"id": "NEG-4", "source_run": "PLACEHOLDER", "signature_id": "wazuh-rule-100001", "gold": "PLACEHOLDER", "predicted_relevance": "low", "rationale": "PLACEHOLDER"}
+  ],
+
+  "arms": ["a", "b", "c", "d"],
+  "corpus_root": "/tmp/defender-runs",
+  "exclude_from_corpus": ["POS-1", "POS-2", "POS-3", "POS-4", "NEG-1", "NEG-2", "NEG-3", "NEG-4"]
+}

@@ -129,23 +129,42 @@ Maps to original §Compatibility Work items:
 
 ### Remaining
 
-- **PLAN-time wiring** — inject the advisory block after ORIENT;
-  mark as advisory memory; exclude from `lead_sequence.yaml`.
-- **A/B experiment** — three variants per §Subagent vs Main Agent /
-  §Empirical Test Plan, with the fair-comparison constraints from the
-  2026-05-20 discussion:
-    1. **Floor — deterministic recipes**: fixed `intent → primitive
-       call` map, no LLM in the retrieval step.
-    2. **A — Haiku NL→structured subagent**: defender emits NL
-       intent; Haiku selects class + filters. Doesn't pollute
-       defender's window; pays roundtrip + Haiku tokens.
-    3. **B — in-defender structured**: defender authors the primitive
-       call directly; preloads retrieval vocab in its system prompt.
-       No roundtrip; pays context-window cost + larger-model tokens.
-  Variants must share input contract (`{prologue, signature, intent}`),
-  output contract (identical JSON shape), and wiring point (PLAN-only
-  first). Compare on total-run cost, precision/recall against a
-  hand-curated oracle, query-misuse rate, and anchoring exposure.
+- **A/B/C/D experiment** — harness scaffolded under
+  `defender/learning/eval/advisory_ab/` on branch
+  `advisory-ab-harness`. Scope narrowed to Class 8 only; experiment
+  reframed around the **relevance question** (2026-05-20 discussion):
+  advisory is plausibly useful on only some cases — is the cost of
+  firing every time worth it on cases where it doesn't help?
+    - **A** baseline (no retrieval)
+    - **B** Haiku subagent (`defender/skills/advisory/SKILL.md`),
+      agent discretion
+    - **C** main agent inline Bash, agent discretion
+    - **D** main agent inline Bash, **every PLAN turn** (no discretion)
+
+  **Comparisons we are buying:**
+    - A vs D — upper-bound value of always-on advisory.
+    - D vs {B, C} — does agent discretion recover negative-case cost
+      without losing positive-case value?
+    - B vs C — for discretion mode, which caller is cheaper?
+
+  **Cases:** 8 hand-picked from `/tmp/defender-runs`, stratified into
+  4 positives (`predicted_relevance: high` — past memory should help)
+  and 4 negatives (`predicted_relevance: low` — model lands quickly
+  without it). Hand-labeled gold disposition. Case IDs in
+  `cases.json.exclude_from_corpus` are moved aside during the run.
+
+  **Metrics, split by category:** disposition_match vs gold, total
+  cost / tokens / wall-clock / loops / leads, advisory invocation
+  rate (B/C only). All reported as **ratios against total
+  investigation cost** — the compounding factor matters because C/D
+  carry the markdown forward in the main context across PLAN turns.
+
+  **Scale:** 32 runs (8 × 4), single trial each. Scale up only if a
+  comparison is ambiguous after the first pass.
+
+  **Out of scope v1:** Class 5/6 helpfulness, anchoring (loud cases
+  caught by raw-log eyeball), hidden-disposition variant. Revisit if
+  results invite the comparison.
 - **N-loop subagent comparison** (downstream of A/B) — after loop 1,
   the subagent has no memory of what defender already tried. Either
   re-inject updated prologue (kills its window-isolation advantage)
