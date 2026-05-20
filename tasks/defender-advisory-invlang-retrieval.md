@@ -7,48 +7,62 @@ groups: defender, invlang, knowledge, retrieval
 ## Progress (2026-05-20)
 
 Compatibility step #2 from the original §Compatibility Work is **done**:
-a tolerant defender-side loader ships under
+a strict defender-side loader ships under
 `defender/scripts/invlang/{parser,corpus}.py`. Standalone (no
-soc-agent imports). Loads 41/41 cases under `/tmp/defender-runs/`,
-up from 23/41 with the strict soc-agent loader.
+soc-agent imports). Aligned with the current schema in
+`defender/skills/dense-language/SKILL.md` — no tolerance for
+historical iteration noise or LLM hiccups; per-row recovery so
+one bad row doesn't take down the rest of a file.
 
-Schema gaps catalogued and absorbed:
+Schema gaps catalogued (each is an LLM hiccup, not a real schema
+variant — verified by checking which dates each pattern appears on
+in `/tmp/defender-runs`):
 
-1. **Unescaped `|` inside `attrs` cells** (8 cases) — Falco fields
-   `flags=EXE_WRITABLE|EXE_LOWER_LAYER` written verbatim. Resolved by
-   `_collapse_extra_cells_into_attrs`: rows whose final column is
-   `attrs` rejoin any over-cells with `|`.
-2. **Extra empty cell in `:H` hypothesize rows** (5 cases, 15 cells
-   where the spec declares 14) — the defender writer occasionally
-   inserts an extra `||` between refuts and authz. Resolved by
-   `_normalize_hypothesis_cells`: leading 7 + trailing 3 cells stay
-   positional; the middle 4 columns (preds, attr_preds, refuts,
-   authz) are *content-routed* by sub-cell marker (`p<n>:`, `ap<n>:`,
-   `r<n>...`, `ac<n>:`), so misalignment cannot shift content
-   between columns.
-3. **`:T resolutions` rows missing `⟂`** (2 cases) — inline-anchor
-   resolutions without cited supporting edges. Resolved by tolerant
-   parsing in `_parse_resolution_line`: when `⟂` is absent the
-   bracketed body lands as `reasoning`, supporting_edges is `[]`.
-4. **Signature ID source** — `defender/scripts/invlang/corpus.py`
-   reads `rule.id` from the sibling `alert.json` and exposes it as
-   `Companion.signature_id` (`wazuh-rule-<N>`). Path-based `ruleNNN`
-   extraction did not match defender path conventions.
-5. **`created_at` source** — corpus loader stamps the companion with
-   the run directory's mtime since defender investigation.md does
-   not carry `<!-- created: -->`. Sufficient for recency filtering
-   at ≥day granularity.
+1. **Unescaped `|` inside `attrs` cells** — Falco fields
+   `flags=EXE_WRITABLE|EXE_LOWER_LAYER` written without escaping the
+   literal `|`. Most recent occurrence: 2026-05-19 (still current).
+   The schema requires `\|` or pushing the value to raw payloads.
+   Parser: reject the row with `"row has N cells but K expected
+   (check for unescaped \|)"`. Logged as `ParseWarning`.
+2. **Extra empty cell in `:H` rows** (15 cells where the schema
+   declares 14) — intermittent LLM emission of `||` between refuts
+   and authz. Most recent: 2026-05-17. Parser: reject the row.
+   Logged.
+3. **`:T resolutions` rows missing `⟂`** — historical only
+   (2026-05-07). Parser: reject the row. Logged.
 
-Coverage (41 cases):
+Loader contract:
 
-- prologue + findings + conclude all present for every case.
-- Hypotheses: 168 predictions, 95 refutation rows, 27 authorization
-  contracts.
-- Findings: 55 leads have at least one resolution.
+- Per-row recovery: a single bad row never takes down the rest of a
+  file. The bad row is dropped, a `ParseWarning` is recorded, the
+  remaining rows continue to land.
+- `Companion.parse_warnings` carries every per-row skip for the file
+  it loaded from.
+- `LoadReport` distinguishes whole-file rejects (`skipped`) from
+  files that loaded with at least one row dropped (`partial`).
+  `LoadReport.total_warnings` aggregates the row count.
+- CLI: `python -m defender.scripts.invlang.corpus <root> [--verbose]`
+  emits the file-level + row-level breakdown.
+- Signature ID: read from sibling `alert.json` `rule.id` →
+  `wazuh-rule-<N>`.
+- `created_at`: run-dir mtime (defender investigation.md doesn't
+  carry the `<!-- created: -->` header soc-agent uses).
+
+Baseline against `/tmp/defender-runs` (41 cases):
+
+- 41/41 files load (zero whole-file rejects).
+- 18 files are partial loads with 31 row-level warnings total.
+- Hypotheses: 140 predictions, 79 refutations, 18 authorization
+  contracts across loaded rows. (Lower than the previous tolerant
+  parser's 168/95/27 — the difference is non-conformant content
+  that's now visibly skipped instead of silently routed.)
 - Disposition mix: 14 malicious, 13 benign, 9 inconclusive, 5 escalate.
 
-Tests: `defender/tests/test_invlang_parser.py` (9 unit tests covering
-each drift pattern + an end-to-end synthetic corpus).
+Tests: `defender/tests/test_invlang_parser.py` — 6 tests:
+schema-conformant baseline parses cleanly with zero warnings; each
+of the three drift patterns has a paired "logs a warning, keeps the
+good sibling" test; the corpus loader's three-way classification
+(loaded / partial / skipped) is verified end-to-end.
 
 Remaining work toward the original task scope:
 

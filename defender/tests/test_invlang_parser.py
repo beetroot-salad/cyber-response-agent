@@ -1,86 +1,49 @@
-"""Defender invlang parser tests.
+"""Defender invlang parser tests (strict, current-schema-aligned).
 
-Covers the three drift patterns that broke the soc-agent strict parser
-against defender-emitted investigation.md:
+The parser refuses to absorb LLM hiccups (unescaped `|` in attrs,
+extra empty cells in `:H` rows, missing `⟂` on resolutions). Instead
+it logs them as `ParseWarning`s and continues past, so a single bad
+row in a file doesn't break the rest.
 
-1. Unescaped `|` inside `attrs` (Falco flags).
-2. Extra empty cells on `:H` hypothesize rows.
-3. `:T resolutions` rows without a `⟂` separator.
+Each drift below has a positive and a negative test:
+
+  - schema-conformant version parses cleanly, no warnings
+  - non-conformant version produces a structured warning with the
+    block/row/reason; the rest of the file is unaffected
 """
 
 from __future__ import annotations
 
 from defender.scripts.invlang.parser import (
+    ParseWarning,
     parse_dense_companion,
-    _normalize_hypothesis_cells,
-    _collapse_extra_cells_into_attrs,
-    _parse_resolution_line,
+    _resolution_record,
+    RowError,
 )
 
 
 # ---------------------------------------------------------------------------
-# Cell-level normalization
+# Schema-conformant baseline — should parse fully, no warnings
 # ---------------------------------------------------------------------------
 
 
-def test_collapse_extras_into_attrs_joins_with_pipe():
-    cells = ["v-002", "process", "process:bash", "bash[pid=?]",
-             "cmdline=bash", "user=root", "flags=EXE_WRITABLE", "EXE_LOWER_LAYER"]
-    out = _collapse_extra_cells_into_attrs(cells, 5)
-    assert len(out) == 5
-    # The final attrs cell rejoins the over-cells with `|` separators,
-    # restoring the literal flags=A|B form.
-    assert out[4] == "cmdline=bash|user=root|flags=EXE_WRITABLE|EXE_LOWER_LAYER"
-
-
-def test_collapse_extras_pads_short_row():
-    out = _collapse_extra_cells_into_attrs(["v-001", "container"], 5)
-    assert out == ["v-001", "container", "", "", ""]
-
-
-def test_normalize_hypothesis_drops_extra_empty_cells():
-    cells = [
-        "h-001", "?name", "v-002", "rel", "endpoint", "monitoring-server",
-        "",   # parent_attrs
-        "p1:proposed_parent:\"...\"",
-        "",   # attr_preds
-        "r1[p1,p2]:\"...\"",
-        "",   # EXTRA empty (defender pattern)
-        "ac1:proposed:cmdb:\"...\":esc/esc",
-        "",   # integrity_waived
-        "null",
-        "active",
-    ]
-    out = _normalize_hypothesis_cells(cells, 14)
-    assert len(out) == 14
-    # Cell at position 9 (refuts) must still hold the refuts content, not
-    # have been shifted into attr_preds.
-    assert out[9].startswith("r1[")
-    assert out[10].startswith("ac1:")
-
-
-# ---------------------------------------------------------------------------
-# End-to-end parse over each defender-drift sample
-# ---------------------------------------------------------------------------
-
-
-_VERTEX_WITH_PIPE_IN_ATTRS = """\
+_CONFORMANT = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-001|container|endpoint:linux|target-endpoint|id=2a124a5fc6d9
-v-002|process|process:bash|bash[pid=?]|cmdline=bash -c whoami;user=root;flags=EXE_WRITABLE|EXE_LOWER_LAYER
+v-002|process|process:bash|bash[pid=42]|cmdline=bash;user=root
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|execve|v-002|v-001|2026-05-07T14:25:22.570Z|siem-event:wazuh-falco|rule=100001;tags=T1059,mitre
+e-001|execve|v-002|v-001|2026-05-07T14:25:22.570Z|siem-event:wazuh-falco|rule=100001
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
-h-001|?auth-exec|v-002|execve|identity|operator-or-automation||p1:proposed_parent:"workload is documented"||r1[p1]:"no auth path"|ac1:proposed:cmdb:"authorized":esc/esc||null|active
+h-001|?authorized-exec|v-002|execve|identity|operator||p1:proposed_parent:"workload documented"||r1[p1]:"no auth path"|ac1:proposed:cmdb:"authorized":esc/esc||null|active
 
 :L findings [id|loop|name|target|tests|system|template|query|window]
 l-001|1|cmdb-lookup|v-001|h-001|stub-cmdb|host-lookup|hostname=foo|n/a
 
 :T resolutions
-h-001  null → --   [l-001 r1 severe ⟂ e-001 :: r1 ⟺ ¬p1; observed pivot signal]
+h-001  null → --   [l-001 r1 severe ⟂ e-001 :: r1 ⟺ ¬p1; pivot signal observed]
 
 :T conclude
 disposition            malicious
@@ -93,50 +56,100 @@ h-001|--
 """
 
 
-def test_parse_vertex_with_pipe_inside_attrs():
-    body = parse_dense_companion(_VERTEX_WITH_PIPE_IN_ATTRS)
-    verts = body["prologue"]["vertices"]
-    assert len(verts) == 2
-    v = next(v for v in verts if v["id"] == "v-002")
-    # The unescaped `|` in flags=EXE_WRITABLE|EXE_LOWER_LAYER must round-trip
-    # as part of the flags value, not corrupt the column count.
-    assert v["attributes"]["flags"] == "EXE_WRITABLE|EXE_LOWER_LAYER"
-    assert v["attributes"]["user"] == "root"
-
-
-def test_parse_hypothesis_extracts_refuts_and_authz():
-    body = parse_dense_companion(_VERTEX_WITH_PIPE_IN_ATTRS)
-    hyps = body["hypothesize"]["hypotheses"]
-    assert len(hyps) == 1
-    h = hyps[0]
-    assert h["name"] == "?auth-exec"
-    assert h["predictions"][0]["id"] == "p1"
-    assert h["refutation_shape"][0]["id"] == "r1"
+def test_conformant_parse_produces_no_warnings():
+    body, warnings = parse_dense_companion(_CONFORMANT)
+    assert warnings == []
+    assert len(body["prologue"]["vertices"]) == 2
+    assert len(body["prologue"]["edges"]) == 1
+    h = body["hypothesize"]["hypotheses"][0]
+    assert h["name"] == "?authorized-exec"
     assert h["refutation_shape"][0]["refutes_predictions"] == ["p1"]
     assert h["authorization_contract"][0]["anchor_kind"] == "cmdb"
+    assert body["conclude"]["disposition"] == "malicious"
+    res = body["findings"][0]["resolutions"][0]
+    assert res["before"] == "null"
+    assert res["after"] == "--"
+    assert res["supporting_edges"] == ["e-001"]
 
 
-_EXTRA_CELL_HYPOTHESIS = """\
+# ---------------------------------------------------------------------------
+# Drift #1 — unescaped `|` inside attrs (vertex). Reject + log.
+# ---------------------------------------------------------------------------
+
+
+_PIPE_IN_ATTRS = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|endpoint|endpoint:linux|target
+v-001|container|endpoint:linux|target|id=abc
+v-002|process|process:bash|bash[pid=42]|flags=EXE_WRITABLE|EXE_LOWER_LAYER
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|execve|v-002|v-001|2026-05-07T00:00:00Z|siem-event:wazuh|rule=100001
+
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
+h-001|?h|v-002|execve|identity|op||p1:proposed_parent:"x"||r1[p1]:"y"|||null|active
+
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|n|v-001|h-001|s|t|q|w
+
+:T resolutions
+h-001  null → --   [l-001 r1 severe ⟂ e-001 :: x]
+
+:T conclude
+disposition            malicious
+matched_archetype      foo
+summary                "x"
+
+:T conclude.surviving [hyp_id|final_weight]
+h-001|--
+```
+"""
+
+
+def test_unescaped_pipe_in_attrs_logs_warning_and_continues():
+    body, warnings = parse_dense_companion(_PIPE_IN_ATTRS)
+    # The bad v-002 row is dropped; v-001 still lands.
+    verts = body["prologue"]["vertices"]
+    assert [v["id"] for v in verts] == ["v-001"]
+    # A single warning, with structured location and a remediation hint.
+    assert len(warnings) == 1
+    w = warnings[0]
+    assert isinstance(w, ParseWarning)
+    assert w.block == ":V prologue.vertices"
+    assert w.row_index == 1
+    assert "6 cells but 5 expected" in w.reason
+    assert "unescaped" in w.reason  # remediation hint present
+    # Rest of file still loads (the case stays usable for advisory queries).
+    assert body["conclude"]["disposition"] == "malicious"
+
+
+# ---------------------------------------------------------------------------
+# Drift #2 — `:H` row with 15 cells (extra empty between refuts and authz).
+# ---------------------------------------------------------------------------
+
+
+_EXTRA_H_CELL = """\
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|endpoint|endpoint:linux|host|
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
 e-001|attempted_auth|v-001|v-001|2026-05-07T00:00:00Z|siem-event:wazuh|rule=5710
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
-h-001|?monitoring-misconfig|v-001|attempted_auth|endpoint|monitoring-server||p1:proposed_parent:"src is documented monitor"||r1[p1]:"src has no monitor role"||ac1:proposed:cmdb:"authorized":esc/esc||null|active
+h-001|?good-row|v-001|attempted_auth|endpoint|monitor||p1:proposed_parent:"a"||r1[p1]:"b"|ac1:proposed:cmdb:"c":esc/esc||null|active
+h-002|?bad-row|v-001|attempted_auth|endpoint|monitor||p1:proposed_parent:"a"||r1[p1]:"b"||ac1:proposed:cmdb:"c":esc/esc||null|active
 
 :L findings [id|loop|name|target|tests|system|template|query|window]
-l-001|1|cmdb|v-001|h-001|stub-cmdb|host-lookup|host=foo|n/a
+l-001|1|n|v-001|h-001|s|t|q|w
 
 :T resolutions
-h-001  null → ++   [l-001 p1 strong ⟂ e-001 :: p1 ⟺ src=monitor]
+h-001  null → ++   [l-001 p1 severe ⟂ e-001 :: p1]
 
 :T conclude
 disposition            benign
-matched_archetype      monitoring-probe
-summary                "monitor"
+matched_archetype      foo
+summary                "x"
 
 :T conclude.surviving [hyp_id|final_weight]
 h-001|++
@@ -144,39 +157,52 @@ h-001|++
 """
 
 
-def test_parse_hypothesis_with_extra_empty_cell():
-    """The defender pattern: an extra `||` between refuts and authz produces
-    15 cells where the spec declares 14. Tolerant normalization collapses
-    the extra empty so refuts content stays in the refuts column.
-    """
-    body = parse_dense_companion(_EXTRA_CELL_HYPOTHESIS)
+def test_extra_cell_hypothesis_row_logs_and_keeps_good_sibling():
+    body, warnings = parse_dense_companion(_EXTRA_H_CELL)
     hyps = body["hypothesize"]["hypotheses"]
-    h = hyps[0]
-    assert h["refutation_shape"][0]["claim"].startswith("src has no monitor role")
-    assert h["authorization_contract"][0]["anchor_kind"] == "cmdb"
+    # The 15-cell row (h-002) is rejected; the 14-cell sibling (h-001) lands.
+    assert [h["id"] for h in hyps] == ["h-001"]
+    bad = next(w for w in warnings if w.block == ":H hypothesize.hypotheses")
+    assert bad.row_index == 1
+    assert "15 cells but 14 expected" in bad.reason
+
+
+# ---------------------------------------------------------------------------
+# Drift #3 — `:T resolutions` row without the `⟂` separator.
+# ---------------------------------------------------------------------------
+
+
+def test_resolution_missing_perp_raises_rowerror():
+    import pytest
+    with pytest.raises(RowError, match="`⟂`"):
+        _resolution_record(
+            "h-001  null → +    "
+            "[inline alert context: matching key from multiple corp IPs]"
+        )
 
 
 _NO_PERP_RESOLUTION = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|endpoint|endpoint:linux|target
+v-001|endpoint|endpoint:linux|host|
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
 e-001|attempted_auth|v-001|v-001|2026-05-07T00:00:00Z|siem-event:wazuh|rule=5710
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
-h-001|?inline-anchor|v-001|attempted_auth|endpoint|monitor||p1:proposed_parent:"src=monitor"||||||null|active
+h-001|?inline|v-001|attempted_auth|endpoint|monitor||p1:proposed_parent:"x"|||||null|active
 
 :L findings [id|loop|name|target|tests|system|template|query|window]
-l-001|1|inline|v-001|h-001|wazuh|alerts|n/a|n/a
+l-001|1|inline|v-001|h-001|wazuh|alerts|q|w
 
 :T resolutions
-h-001  null → +    [inline alert context: matching key from multiple corp IPs, corp-internal geoloc, INC-8821 16min prior — consistent but non-exclusive; agent-forwarding produces identical surface]
+h-001  null → +    [inline context only, no cited edges]
+h-001  null → ++   [l-001 p1 severe ⟂ e-001 :: p1 matches]
 
 :T conclude
 disposition            inconclusive
-matched_archetype      uncertain
-summary                "inline-only context"
+matched_archetype      foo
+summary                "x"
 
 :T conclude.surviving [hyp_id|final_weight]
 h-001|+
@@ -184,54 +210,52 @@ h-001|+
 """
 
 
-def test_parse_resolution_without_perp_keeps_annotation():
-    body = parse_dense_companion(_NO_PERP_RESOLUTION)
+def test_no_perp_resolution_logs_warning_and_keeps_good_sibling():
+    body, warnings = parse_dense_companion(_NO_PERP_RESOLUTION)
     leads = body["findings"]
-    assert leads, "expected at least one lead bucket"
     lead = next(l for l in leads if l["id"] == "l-001")
-    resolutions = lead.get("resolutions", [])
-    assert len(resolutions) == 1
-    r = resolutions[0]
-    assert r["hypothesis"] == "h-001"
-    assert r["before"] == "null"
-    assert r["after"] == "+"
-    assert r["supporting_edges"] == []
-    # The bracket body lands as reasoning so query code can still surface it.
-    assert "inline alert context" in r["reasoning"]
-
-
-def test_parse_resolution_line_returns_none_on_garbage():
-    assert _parse_resolution_line("not a resolution line at all") is None
+    # The good (⟂-bearing) resolution lands; the bad one is dropped.
+    assert len(lead["resolutions"]) == 1
+    assert lead["resolutions"][0]["after"] == "++"
+    bad = next(w for w in warnings if w.block == ":T resolutions")
+    assert "`⟂`" in bad.reason
 
 
 # ---------------------------------------------------------------------------
-# Corpus-level smoke test (runs against /tmp/defender-runs if available)
+# Corpus loader: per-file warnings thread through; partial loads are visible.
 # ---------------------------------------------------------------------------
 
 
-def test_corpus_loads_all_defender_runs(tmp_path):
-    """Synthetic corpus of two minimal investigations — sanity-check the
-    full load+report pipeline. /tmp/defender-runs is exercised by the
-    dev workflow but not assumed present here.
-    """
+def test_load_report_separates_skipped_files_from_partial_loads(tmp_path):
     from defender.scripts.invlang.corpus import load_corpus
 
+    # Case A: fully conformant.
     case_a = tmp_path / "case-a"
     case_a.mkdir()
-    (case_a / "investigation.md").write_text(_VERTEX_WITH_PIPE_IN_ATTRS)
+    (case_a / "investigation.md").write_text(_CONFORMANT)
     (case_a / "alert.json").write_text('{"rule": {"id": "100001"}}')
 
+    # Case B: one bad vertex row, rest conformant — should be a partial load.
     case_b = tmp_path / "case-b"
     case_b.mkdir()
-    (case_b / "investigation.md").write_text(_EXTRA_CELL_HYPOTHESIS)
-    (case_b / "alert.json").write_text('{"rule": {"id": "5710"}}')
+    (case_b / "investigation.md").write_text(_PIPE_IN_ATTRS)
+    (case_b / "alert.json").write_text('{"rule": {"id": "100001"}}')
+
+    # Case C: file has no ```invlang fences — whole-file reject.
+    case_c = tmp_path / "case-c"
+    case_c.mkdir()
+    (case_c / "investigation.md").write_text("# no fences here\n")
+    (case_c / "alert.json").write_text('{"rule": {"id": "5710"}}')
 
     companions, report = load_corpus(tmp_path)
-    assert report.scanned == 2
+    assert report.scanned == 3
     assert report.loaded == 2
-    assert report.skipped == []
-    by_id = {c.case_id: c for c in companions}
-    assert by_id["case-a"].signature_id == "wazuh-rule-100001"
-    assert by_id["case-b"].signature_id == "wazuh-rule-5710"
-    assert by_id["case-a"].conclude.get("disposition") == "malicious"
-    assert by_id["case-b"].conclude.get("matched_archetype") == "monitoring-probe"
+    # case-c is the only whole-file skip.
+    assert [p.parent.name for p, _ in report.skipped] == ["case-c"]
+    # case-b is the only partial load.
+    partial_names = [p.parent.name for p, _ in report.partial]
+    assert partial_names == ["case-b"]
+    assert report.total_warnings == 1
+    # Warning carries the file path so post-mortem debug knows where to look.
+    _, warnings = report.partial[0]
+    assert "case-b" in warnings[0].file_path

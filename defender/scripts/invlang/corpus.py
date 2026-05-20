@@ -1,8 +1,9 @@
-"""Defender-side invlang corpus loader.
+"""Defender-side invlang corpus loader (strict, aligned with current schema).
 
 Walks `**/investigation.md` under an explicit corpus root, parses each
-file with the tolerant defender parser, and exposes a list of
-`Companion` records the query layer consumes.
+file with the strict defender parser, and exposes a list of
+`Companion` records. Parse warnings (per-row skips) are threaded
+through so post-mortem debugging always has a paper trail.
 
 Signature ID: drawn from the sibling `alert.json`'s `rule.id` field
 (defender runs don't follow the `ruleNNN/` path convention).
@@ -21,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .parser import parse_dense_companion
+from .parser import ParseWarning, parse_dense_companion
 
 
 @dataclass
@@ -31,7 +32,7 @@ class Companion:
     body: dict[str, Any]
     signature_id: str | None = None
     created_at: str | None = None
-    parse_warnings: list[str] = field(default_factory=list)
+    parse_warnings: list[ParseWarning] = field(default_factory=list)
 
     @property
     def prologue(self) -> dict[str, Any]:
@@ -52,15 +53,22 @@ class Companion:
 
 @dataclass
 class LoadReport:
-    """Telemetry from one corpus scan."""
+    """Telemetry from one corpus scan. `skipped` = whole-file rejects;
+    `partial` = files that loaded but had at least one row-level
+    warning. Both lists carry enough context to diagnose.
+    """
     root: Path
     scanned: int = 0
     loaded: int = 0
     skipped: list[tuple[Path, str]] = field(default_factory=list)
+    partial: list[tuple[Path, list[ParseWarning]]] = field(default_factory=list)
+
+    @property
+    def total_warnings(self) -> int:
+        return sum(len(ws) for _, ws in self.partial)
 
 
 def _read_signature_id(alert_path: Path) -> str | None:
-    """Pull `rule.id` from a defender alert.json. Returns None on failure."""
     try:
         with alert_path.open() as f:
             data = json.load(f)
@@ -76,7 +84,6 @@ def _read_signature_id(alert_path: Path) -> str | None:
 
 
 def _read_created_at(run_dir: Path) -> str | None:
-    """Use the run directory's mtime as a coarse created_at marker."""
     try:
         st = run_dir.stat()
     except OSError:
@@ -87,22 +94,23 @@ def _read_created_at(run_dir: Path) -> str | None:
 _REQUIRED_KEYS = {"prologue", "findings", "conclude"}
 
 
-def _load_one(path: Path) -> tuple[Companion | None, str | None]:
+def _load_one(
+    path: Path,
+) -> tuple[Companion | None, str | None, list[ParseWarning]]:
     if path.suffix != ".md":
-        return None, f"not a .md file: {path.name}"
+        return None, f"not a .md file: {path.name}", []
     try:
         text = path.read_text()
     except OSError as e:
-        return None, f"read error: {e}"
-    try:
-        body = parse_dense_companion(text)
-    except Exception as e:  # noqa: BLE001
-        return None, f"parse error: {e}"
+        return None, f"read error: {e}", []
+    body, warnings = parse_dense_companion(text)
+    for w in warnings:
+        w.file_path = str(path)
     if not body:
-        return None, "no ```invlang fences found"
+        return None, "no ```invlang fences found", warnings
     missing = _REQUIRED_KEYS - body.keys()
     if missing:
-        return None, f"missing top-level keys: {sorted(missing)}"
+        return None, f"missing top-level keys: {sorted(missing)}", warnings
 
     run_dir = path.parent
     alert_path = run_dir / "alert.json"
@@ -112,12 +120,13 @@ def _load_one(path: Path) -> tuple[Companion | None, str | None]:
         body=body,
         signature_id=_read_signature_id(alert_path),
         created_at=_read_created_at(run_dir),
+        parse_warnings=warnings,
     )
-    return companion, None
+    return companion, None, warnings
 
 
 def load_corpus(root: Path | str) -> tuple[list[Companion], LoadReport]:
-    """Walk `root` for investigation.md files and return (companions, report)."""
+    """Walk `root` for investigation.md files. Returns (companions, report)."""
     root_p = Path(root)
     report = LoadReport(root=root_p)
     companions: list[Companion] = []
@@ -125,10 +134,12 @@ def load_corpus(root: Path | str) -> tuple[list[Companion], LoadReport]:
         return companions, report
     for md in sorted(root_p.rglob("investigation.md")):
         report.scanned += 1
-        comp, err = _load_one(md)
+        comp, err, warnings = _load_one(md)
         if comp is not None:
             report.loaded += 1
             companions.append(comp)
+            if warnings:
+                report.partial.append((md, warnings))
         else:
             report.skipped.append((md, err or "unknown"))
     return companions, report
@@ -140,26 +151,37 @@ def load_corpus(root: Path | str) -> tuple[list[Companion], LoadReport]:
 
 
 def _main(argv: list[str]) -> int:
+    verbose = "--verbose" in argv
+    args = [a for a in argv if not a.startswith("--")]
     root = (
-        argv[0] if argv
+        args[0] if args
         else os.environ.get("DEFENDER_INVLANG_CORPUS_ROOT", "")
     )
     if not root:
         print(
-            "usage: python -m defender.scripts.invlang.corpus <corpus-root>",
+            "usage: python -m defender.scripts.invlang.corpus <corpus-root> [--verbose]",
             file=sys.stderr,
         )
         return 2
     companions, report = load_corpus(root)
-    print(f"corpus_root: {report.root}")
-    print(f"scanned: {report.scanned}")
-    print(f"loaded:  {report.loaded}")
-    print(f"skipped: {len(report.skipped)}")
-    for path, reason in report.skipped:
-        print(f"  - {path}: {reason}")
+    print(f"corpus_root:    {report.root}")
+    print(f"scanned:        {report.scanned}")
+    print(f"loaded:         {report.loaded}")
+    print(f"skipped (file): {len(report.skipped)}")
+    print(f"partial loads:  {len(report.partial)}  ({report.total_warnings} warnings)")
+    if report.skipped:
+        print("\nSkipped files:")
+        for path, reason in report.skipped:
+            print(f"  - {path.parent.name}: {reason}")
+    if report.partial:
+        print("\nPartial loads (file-level summary):")
+        for path, warnings in report.partial:
+            print(f"  - {path.parent.name}: {len(warnings)} row(s) skipped")
+            if verbose:
+                for w in warnings:
+                    print(f"      [{w.block} row {w.row_index}] {w.reason}")
     if companions:
-        print()
-        print("loaded cases:")
+        print(f"\nLoaded {len(companions)} cases (showing first 20):")
         for c in companions[:20]:
             sig = c.signature_id or "-"
             disp = c.conclude.get("disposition") or "-"
