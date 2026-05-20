@@ -12,7 +12,6 @@ Covers:
 from __future__ import annotations
 
 from defender.scripts.invlang.parser import (
-    ParseWarning,
     RowError,
     _resolution_record,
     _split_cells,
@@ -352,7 +351,7 @@ h-001|++
 def test_authz_block_emits_canonical_field_names():
     body, warnings = parse_dense_companion(_AUTHZ_R_BLOCK)
     assert warnings == []
-    lead = next(l for l in body["findings"] if l["id"] == "l-001")
+    lead = next(f for f in body["findings"] if f["id"] == "l-001")
     authz_rows = lead["outcome"]["authorization_resolutions"]
     assert len(authz_rows) == 1
     row = authz_rows[0]
@@ -405,7 +404,7 @@ h-001|+
 
 def test_no_perp_resolution_logs_warning_and_keeps_good_sibling():
     body, warnings = parse_dense_companion(_MIXED_RESOLUTIONS)
-    lead = next(l for l in body["findings"] if l["id"] == "l-001")
+    lead = next(f for f in body["findings"] if f["id"] == "l-001")
     assert len(lead["resolutions"]) == 1
     assert lead["resolutions"][0]["after"] == "++"
     bad = next(w for w in warnings if w.block == ":T resolutions")
