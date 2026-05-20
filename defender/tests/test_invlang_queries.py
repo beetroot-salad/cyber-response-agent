@@ -251,6 +251,71 @@ def test_lead_branch_effects_pattern_filter_excludes_unrelated_hypotheses():
     assert list(row["per_hypothesis_effect"].keys()) == ["?brute-force"]
 
 
+def test_lead_branch_effects_frontier_scopes_n_and_empty_rate():
+    """Codex P2: when `hypothesis_patterns` is supplied, `n` and
+    `empty_rate` must reflect frontier-specific support only. A lead that
+    appeared 4 times but only touched the frontier once should report n=1
+    and empty_rate scoped to that single occurrence.
+    """
+    corpus = [
+        # Two cases where the lead touched the frontier (resolutions → ?spray).
+        _case(
+            f"hit-{i}",
+            hypotheses=[{"id": "h-001", "name": "?spray", "weight": "+"}],
+            leads=[
+                {"name": "L", "outcome": {"observations": {"vertices": ["v"], "edges": []}},
+                 "resolutions": [{"hypothesis": "h-001", "before": "+", "after": "++"}]},
+            ],
+        )
+        for i in range(2)
+    ] + [
+        # Three cases where the same lead ran but only touched an unrelated
+        # hypothesis. Empty observations in two — under the buggy counter
+        # these would have been reported as 2/5 empty for ?spray.
+        _case(
+            f"miss-{i}",
+            hypotheses=[{"id": "h-002", "name": "?unrelated", "weight": "+"}],
+            leads=[
+                {"name": "L", "outcome": {},
+                 "resolutions": [{"hypothesis": "h-002", "before": "+", "after": "+"}]},
+            ],
+        )
+        for i in range(3)
+    ]
+    out = lead_branch_effects(corpus, hypothesis_patterns=("?spray",))
+    row = next(r for r in out["leads"] if r["lead_name"] == "L")
+    assert row["n"] == 2
+    assert row["empty_rate"] == "0/2"
+    assert list(row["per_hypothesis_effect"].keys()) == ["?spray"]
+
+
+def test_lead_branch_effects_surfaces_tested_hypothesis_without_resolutions():
+    """Codex P2: a lead with `tests_hypotheses` for a frontier hypothesis
+    but no `resolutions[]` (e.g. empty/failed gather) must still appear
+    with the hypothesis present and all-zero buckets. The empty_rate is
+    where the "this lead bombed on ?H" signal lives, and it's worthless
+    if the row gets stripped.
+    """
+    corpus = [
+        _case(
+            f"case-{i}",
+            hypotheses=[{"id": "h-001", "name": "?spray", "weight": "+"}],
+            leads=[
+                {"name": "L",
+                 "tests_hypotheses": ["h-001"],
+                 "outcome": {"observations": {"vertices": [], "edges": []}}},
+            ],
+        )
+        for i in range(3)
+    ]
+    out = lead_branch_effects(corpus, hypothesis_patterns=("?spray",))
+    assert out["count"] == 1
+    row = out["leads"][0]
+    assert row["n"] == 3
+    assert row["empty_rate"] == "3/3"
+    assert row["per_hypothesis_effect"] == {"?spray": {"++": 0, "+": 0, "-": 0, "--": 0}}
+
+
 def test_lead_branch_effects_min_support_drops_low_n_rows():
     corpus = [
         _case("a", leads=[{"name": "rare", "outcome": {}}]),

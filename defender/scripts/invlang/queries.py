@@ -244,19 +244,51 @@ def lead_branch_effects(
                 # rather than collapsing them into a "?" bucket that the caller
                 # can't act on. Parser-side issue, not retrieval's to fix.
                 continue
+
+            # Which hypothesis names did this lead occurrence touch? Two
+            # sources: declared via `tests_hypotheses` (the lead's fork
+            # declaration, surfaces empty-gather attempts that produced no
+            # resolution) plus actual `resolutions[]` entries (rows that
+            # produced an assessment shift). Resolution-only would lose the
+            # high-empty-rate signal precisely when it matters — a lead that
+            # forked for ?H but returned nothing.
+            touched: set[str] = set()
+            for h_id in lead.get("tests_hypotheses", []) or []:
+                if (hn := h_names.get(h_id)):
+                    touched.add(hn)
+            for r in lead.get("resolutions", []) or []:
+                if (hn := h_names.get(r.get("hypothesis", ""))):
+                    touched.add(hn)
+
+            if patterns_active:
+                matching = {h for h in touched if hyp_matches(h)}
+                if not matching:
+                    # No frontier match — this occurrence is irrelevant to
+                    # the caller's question. Skip entirely so `n` and
+                    # `empty_rate` reflect frontier-specific support only.
+                    continue
+            else:
+                matching = touched
+
             counts[name] = counts.get(name, 0) + 1
             if _lead_outcome_empty(lead):
                 empties[name] = empties.get(name, 0) + 1
+
+            # Initialize a zero-bucket entry for every matching touched
+            # hypothesis. Leads that forked for ?H but never resolved still
+            # surface here with all-zero counts; combined with `empty_rate`
+            # they carry the "this lead failed on ?H" signal.
+            for hn in matching:
+                per_hyp.setdefault(name, {}).setdefault(hn, _empty_bucket())
+
             for r in lead.get("resolutions", []) or []:
-                h_id = r.get("hypothesis", "")
-                h_name = h_names.get(h_id, "")
-                if not h_name or not hyp_matches(h_name):
+                hn = h_names.get(r.get("hypothesis", ""), "")
+                if not hn or (patterns_active and not hyp_matches(hn)):
                     continue
                 shift = r.get("after")
                 if shift not in _WEIGHT_BUCKETS:
                     continue
-                bucket = per_hyp.setdefault(name, {}).setdefault(h_name, _empty_bucket())
-                bucket[shift] += 1
+                per_hyp[name][hn][shift] += 1
 
     rows: list[dict[str, Any]] = []
     for name, n in counts.items():
