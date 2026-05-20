@@ -50,26 +50,75 @@ in `attrs?`. `auth_kind:source` is observational authority; read it as
 
 `:H` topology commitments:
 
+The hypothesis header is a thin row with identity-only columns. Predictions,
+refutations, authorization contracts, and parent-vertex attributes each get
+their own named sub-block under the same `:H` tag, namespaced by the
+hypothesis id. This keeps every row short and required-only — no positional
+counting across optional fields, no packed sub-cell grammars.
+
 ```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
-h-001|?routine-admin-source|v-001|attempted_auth|endpoint|known-corp-source||p1:proposed_parent:"source has prior successful bastion auth";p2:proposed_edge:"auth timing matches prior admin pattern"||r1[p1]:"source has no prior successful bastion auth"|||null|active
-h-002|?novel-adversary-source|v-001|attempted_auth|endpoint|novel-external-source||p1:proposed_parent:"source is absent from prior auth history";p2:proposed_edge:"auth timing deviates from admin baseline"||r1[p1,p2]:"source and timing match normal admin history"|||null|active
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?routine-admin-source|v-001|attempted_auth|endpoint|known-corp-source||null|active
+h-002|?novel-adversary-source|v-001|attempted_auth|endpoint|novel-external-source||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"source has prior successful bastion auth"
+p2|proposed_edge|"auth timing matches prior admin pattern"
+
+:H h-001.refuts [id|refutes|claim]
+r1|p1|"source has no prior successful bastion auth"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_parent|"source is absent from prior auth history"
+p2|proposed_edge|"auth timing deviates from admin baseline"
+
+:H h-002.refuts [id|refutes|claim]
+r1|p1,p2|"source and timing match normal admin history"
 ```
 
 Keep commitments lean: one proposed upstream vertex plus one edge. Use 1-2
 predictions. Use `r*` refutations to name what would overturn predictions.
+The `refutes` column on a refutation row is a comma-separated list of
+prediction ids it would refute.
 
-Authz and impact are edge checks:
+Authz and impact are edge checks. Authz contracts live in
+`:H h-NNN.authz`:
 
 ```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status]
-h-003|?approved-service-read|v-010|read|identity|service-account|kind=service-account|p1:proposed_parent:"service account is configured reader"||r1[p1]:"account absent from reader policy"|ac1:proposed:iam-policy:"service account allowed to read object at event time":escalate/escalate||null|active
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-003|?approved-service-read|v-010|read|identity|service-account||null|active
+
+:H h-003.parent_attrs [key|value]
+kind|service-account
+
+:H h-003.preds [id|subject|claim]
+p1|proposed_parent|"service account is configured reader"
+
+:H h-003.refuts [id|refutes|claim]
+r1|p1|"account absent from reader policy"
+
+:H h-003.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|proposed|iam-policy|"service account allowed to read object at event time"|escalate|escalate
 ```
 
 Authorization checks ask whether an interaction edge is permitted. Impact checks
 ask whether the edge's effect crosses a threshold. Integrity is source-side
 graph work: follow session, identity, process, endpoint, and provenance rather
 than widening the authz predicate.
+
+### Quoting cell values that contain `|`
+
+Cell values that include a literal `|` (e.g. Falco bitmask flags like
+`EXE_WRITABLE|EXE_LOWER_LAYER`) must be wrapped in double quotes. The row
+tokenizer doesn't split on `|` inside a quoted span:
+
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-002|process|process:bash|bash[pid=42]|cmdline="bash -c whoami";flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root
+```
+
+For high-cardinality multi-value fields, prefer pushing them to the raw gather
+payload rather than packing them into `attrs?`.
 
 `:L` leads:
 
