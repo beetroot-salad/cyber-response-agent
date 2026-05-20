@@ -175,6 +175,9 @@ def extract_metrics(run_dir: Path, arm: str, case: dict) -> dict:
     metrics["leads_count"] = leads_count
 
     # Token + cost totals from stream-json trace.
+    # Stream-json shape: top-level events are {type: 'assistant'|'user'|'result'|...}.
+    # tool_use lives inside assistant.message.content[]; tool_result inside
+    # user.message.content[]. Token usage rolls up on the 'result' event.
     trace = run_dir / "tool_trace.jsonl"
     total_in = total_out = 0
     total_cost = 0.0
@@ -186,24 +189,30 @@ def extract_metrics(run_dir: Path, arm: str, case: dict) -> dict:
                     ev = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                # Token accounting — stream-json puts usage on "result" events
-                # (full-run total) and on intermediate "message" events.
                 if ev.get("type") == "result":
                     usage = ev.get("usage", {}) or {}
                     total_in += usage.get("input_tokens", 0) or 0
                     total_out += usage.get("output_tokens", 0) or 0
                     if "total_cost_usd" in ev:
                         total_cost += float(ev["total_cost_usd"])
-                # Count advisory invocations.
-                if ev.get("type") == "tool_use":
-                    name = ev.get("name", "")
-                    payload = ev.get("input", {}) or {}
+                if ev.get("type") != "assistant":
+                    continue
+                # Skip nested subagent events (they have parent_tool_use_id) —
+                # we want to count outer dispatches only. Otherwise arm B's
+                # Agent dispatch + the subagent's internal Bash to the CLI
+                # double-count one logical advisory call.
+                if ev.get("parent_tool_use_id"):
+                    continue
+                for c in ev.get("message", {}).get("content", []) or []:
+                    if c.get("type") != "tool_use":
+                        continue
+                    name = c.get("name", "")
+                    payload = c.get("input", {}) or {}
                     if name == "Bash" and "invlang.cli advisory" in str(payload.get("command", "")):
                         advisory_calls += 1
                     elif name in ("Task", "Agent"):
-                        subagent = str(payload.get("subagent_type", ""))
                         prompt = str(payload.get("prompt", ""))
-                        if subagent == "advisory" or "defender/skills/advisory" in prompt:
+                        if "defender/skills/advisory" in prompt:
                             advisory_calls += 1
     metrics["total_input_tokens"] = total_in
     metrics["total_output_tokens"] = total_out
