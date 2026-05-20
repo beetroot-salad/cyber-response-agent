@@ -1,5 +1,6 @@
 ---
 id: host-query.package-installed
+status: established
 ---
 
 ## Goal

@@ -133,10 +133,12 @@ def cmd_process_list(args: argparse.Namespace) -> int:
         if pattern_re.search(line)
     ]
     if not matches:
-        print("(no matching processes)")
+        output = "(no matching processes)"
+        print(output)
     else:
-        for m in matches:
-            print(m)
+        output = "\n".join(matches)
+        print(output)
+    persist_output(output, args.run_dir, args.position)
     return 0
 
 
@@ -147,6 +149,7 @@ def cmd_listening_sockets(args: argparse.Namespace) -> int:
         print(out, file=sys.stderr)
         return 1
     print(out)
+    persist_output(out, args.run_dir, args.position)
     return 0
 
 
@@ -224,6 +227,7 @@ def cmd_connection_list(args: argparse.Namespace) -> int:
         print(out, file=sys.stderr)
         return 1
     print(out)
+    persist_output(out, args.run_dir, args.position)
     return 0
 
 

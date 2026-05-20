@@ -890,8 +890,31 @@ def is_held_out(run_dir: Path) -> bool:
     return bool(gt and gt.get("held_out") is True)
 
 
+def _invoke_lead_author(run_dir: Path) -> None:
+    """Catalog/template refinement. Independent of disposition + actor/judge."""
+    _log("step=lead-author")
+    sys.path.insert(0, str(LEARNING_DIR))
+    try:
+        import lead_author as _lead_author  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    try:
+        rc = _lead_author.run(run_dir)
+        if rc != 0:
+            _log(f"lead-author returned rc={rc} (continuing — defender is experimental)")
+    except (subprocess.SubprocessError, OSError) as e:
+        # Narrow swallow: child-process / filesystem hiccups don't tank the loop.
+        # ImportError, NameError, TypeError, etc. propagate so regressions fail loudly.
+        _log(f"lead-author crashed: {e!r} (continuing)")
+
+
 def run_one(run_dir: Path) -> int:
     run_id = run_dir.name
+
+    # Lead-author runs unconditionally — catalog refinement is independent of
+    # disposition, actor SKIP, and held-out flags.
+    _invoke_lead_author(run_dir)
+
     _log(f"run_id={run_id} step=normalize")
     disposition = normalize_disposition(run_dir / "report.md")
 

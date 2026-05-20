@@ -1,5 +1,6 @@
 ---
 id: wazuh.auth-events
+status: established
 ---
 
 ## Goal

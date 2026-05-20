@@ -1,5 +1,6 @@
 ---
 id: wazuh.file-integrity-changes
+status: established
 ---
 
 ## Goal

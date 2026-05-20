@@ -83,6 +83,7 @@ def test_run_one_gate_short_circuits_before_append(
     )
 
     # Patch the loop module's network-y / claude-spawning steps.
+    monkeypatch.setattr(loop, "_invoke_lead_author", lambda *a, **kw: None)
     monkeypatch.setattr(loop, "project_actor_input", lambda *a, **kw: None)
     monkeypatch.setattr(loop, "invoke_actor", lambda *a, **kw: "story body\n")
     monkeypatch.setattr(loop, "is_skip_story", lambda *_: False)
@@ -113,3 +114,28 @@ def test_run_one_gate_short_circuits_before_append(
     rc = loop.run_one(run_dir)
     assert rc == 0
     assert calls["append"] == 0, "append_findings must not be called for held-out runs"
+
+
+def test_lead_author_runs_when_disposition_skips_actor_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lead-author is a catalog-refinement flow independent of disposition;
+    it must fire even when normalize short-circuits the actor/judge path."""
+    calls = {"lead_author": 0, "actor": 0}
+
+    monkeypatch.setattr(loop, "_invoke_lead_author",
+                        lambda *a, **kw: calls.__setitem__("lead_author", calls["lead_author"] + 1))
+    monkeypatch.setattr(loop, "invoke_actor",
+                        lambda *a, **kw: calls.__setitem__("actor", calls["actor"] + 1) or "")
+
+    run_dir = tmp_path / "case"
+    run_dir.mkdir()
+    (run_dir / "alert.json").write_text(json.dumps({"rule": {"id": "5710"}}))
+    (run_dir / "report.md").write_text(
+        "---\ncase_id: case\ndisposition: malicious\nconfidence: high\n---\nbody\n"
+    )
+
+    rc = loop.run_one(run_dir)
+    assert rc == 0
+    assert calls["lead_author"] == 1, "lead-author must run regardless of disposition"
+    assert calls["actor"] == 0, "actor must not run when disposition is malicious"

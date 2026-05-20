@@ -158,8 +158,9 @@ out of git and SIEM CLIs have writable scratch space.
   tool_trace.jsonl        # stream-json events captured by run.py
   transcript.html         # rendered transcript + artifact panel (run.py post-step)
   gather_raw/
-    {position}.lead.json  # dispatch goal + dimensions, written by extract_lead_metadata hook
-    {position}.json       # raw payload per gather call, keyed by lead_sequence position
+    {position}.lead.json          # dispatch goal + dimensions, written by extract_lead_metadata hook
+    {position}.json               # raw payload per gather call, keyed by lead_sequence position
+    {position}.observations.json  # payload_status + payload_digest sidecar, written by gather
 ```
 
 Contracts:
@@ -177,6 +178,13 @@ Contracts:
 - **`gather_raw/{position}.json`** — raw query payload per gather
   dispatch. The agent works from gather's summary and Reads raw on
   demand if the summary is too thin.
+- **`gather_raw/{position}.observations.json`** — sidecar emitted by
+  gather alongside each payload. Carries `payload_status` (`ok |
+  empty | suspect_empty | error | partial`) and a ≤200-char
+  `payload_digest`. The offline lead-author uses these so loud
+  failures (silent type mismatches, `error` payloads) reach the
+  catalog curator without forcing payload inspection. Multi-query
+  fan-outs use `{position}{a..z}.observations.json`.
 
 ## Lead-sequence schema
 
@@ -208,9 +216,13 @@ Field contracts:
   words, not a post-hoc paraphrase of what gather returned.
 - **`queries[].id`** — durable identifier
   (`{system}.{kebab-name}`), matching a template under
-  `defender/skills/gather/queries/{system}/`. If gather authored the
-  template during this run, the file is written back before the
-  sequence is emitted, so every id resolves.
+  `defender/skills/gather/queries/{system}/` or
+  `defender/skills/gather/queries/{system}/_draft/` (drafts authored by
+  gather mid-run carry `status: draft` frontmatter and live in
+  `_draft/`; the offline lead-author promotes them via `git mv` to
+  `status: established`). If gather authored the draft during this run,
+  the file is written back before the sequence is emitted, so every id
+  resolves.
 - **`queries[].params`** — *bound* values, not declarations. The
   template file declares the parameter set; the entry records what
   they resolved to.

@@ -1,5 +1,6 @@
 ---
 id: wazuh.agent-alerts-in-window
+status: established
 ---
 
 ## Goal
