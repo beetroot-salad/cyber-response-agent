@@ -160,14 +160,17 @@ def extract_metrics(run_dir: Path, arm: str, case: dict) -> dict:
     metrics["disposition_observed"] = disposition
     metrics["disposition_match"] = (disposition == case["gold"])
 
-    # Lead + loop counts from investigation.md.
+    # Lead + loop counts from investigation.md. Defender writes phase
+    # headers like "## PLAN" / "## PLAN (loop 2)". Lead rows are dense
+    # data lines under ":L findings" with id like "l-001|...".
+    import re
     inv = run_dir / "investigation.md"
     loops_count = 0
     leads_count = 0
     if inv.is_file():
         txt = inv.read_text()
-        loops_count = sum(1 for ln in txt.splitlines() if ln.strip().startswith("## PHASE: PLAN"))
-        leads_count = sum(1 for ln in txt.splitlines() if ln.strip().startswith(":L "))
+        loops_count = sum(1 for ln in txt.splitlines() if re.match(r"^## PLAN(\s|$)", ln))
+        leads_count = sum(1 for ln in txt.splitlines() if re.match(r"^l-\d+\|", ln))
     metrics["loops_count"] = loops_count
     metrics["leads_count"] = leads_count
 
