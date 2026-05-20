@@ -327,6 +327,30 @@ def test_lead_branch_effects_min_support_drops_low_n_rows():
     assert [r["lead_name"] for r in out["leads"]] == ["common"]
 
 
+def test_lead_branch_effects_capped_ordering_is_deterministic_under_ties():
+    """Codex P3: when many touched hypotheses tie on bucket sum and we cap
+    via max_hypotheses_per_lead, the retained K must be name-sorted, not
+    set-iteration-ordered (which varies with PYTHONHASHSEED).
+    """
+    # 6 hypotheses, each gets exactly one `++` shift → all tie at count=1.
+    hypotheses = [{"id": f"h-{i:03}", "name": f"?z{i}", "weight": "+"} for i in range(6)]
+    resolutions = [
+        {"hypothesis": h["id"], "before": "+", "after": "++"} for h in hypotheses
+    ]
+    corpus = [
+        _case(
+            "case-a",
+            hypotheses=hypotheses,
+            leads=[{"name": "L", "outcome": {}, "resolutions": resolutions}],
+        ),
+    ]
+    out = lead_branch_effects(corpus, max_hypotheses_per_lead=3)
+    kept = list(out["leads"][0]["per_hypothesis_effect"].keys())
+    assert kept == ["?z0", "?z1", "?z2"], (
+        f"capped output should be name-sorted under ties; got {kept}"
+    )
+
+
 def test_lead_branch_effects_caps_hypotheses_per_lead_without_patterns():
     """Without a frontier filter, runaway hypothesis tables stay terse."""
     hypotheses = [{"id": f"h-{i:03}", "name": f"?h{i}", "weight": "+"} for i in range(10)]

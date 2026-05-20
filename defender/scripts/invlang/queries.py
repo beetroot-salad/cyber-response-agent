@@ -297,10 +297,12 @@ def lead_branch_effects(
         hyp_table = per_hyp.get(name, {})
         if not patterns_active and len(hyp_table) > max_hypotheses_per_lead:
             # Keep the K hypotheses this lead most often resolved against.
+            # Name is the tiebreaker so equal-count entries stay deterministic
+            # across Python hash seeds (matching sets and dicts inherit set
+            # iteration order).
             ordered = sorted(
                 hyp_table.items(),
-                key=lambda kv: sum(kv[1].values()),
-                reverse=True,
+                key=lambda kv: (-sum(kv[1].values()), kv[0]),
             )[:max_hypotheses_per_lead]
             hyp_table = dict(ordered)
         rows.append({
