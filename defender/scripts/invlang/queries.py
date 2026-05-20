@@ -143,6 +143,7 @@ def hypothesis_name_wildcard(
     *,
     final_weight: str | None = None,
     disposition: str | None = None,
+    signature_id: str | None = None,
 ) -> dict[str, Any]:
     """Match hypothesis names against an fnmatch pattern (e.g. '?*brute-force*').
 
@@ -158,6 +159,8 @@ def hypothesis_name_wildcard(
     hits: list[dict[str, Any]] = []
     for c in corpus:
         if disposition is not None and c.conclude.get("disposition") != disposition:
+            continue
+        if signature_id is not None and c.signature_id != signature_id:
             continue
         final: dict[str, Any] = {h["id"]: h.get("weight") for h in _all_hypotheses(c) if "id" in h}
         for lead in c.leads:
