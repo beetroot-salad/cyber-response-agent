@@ -291,12 +291,7 @@ def _build_lead_discrimination(
         min_support=2,
     )
     leads = out["leads"]
-    if frontier:
-        # When the caller named a frontier, "this lead exists but never touched
-        # your hypotheses" is noise — strip rows with empty per-hypothesis
-        # tables so the loud-empty branch fires cleanly.
-        leads = [l for l in leads if l["per_hypothesis_effect"]]
-    else:
+    if not frontier:
         leads = leads[:top_k]
     note: str | None
     if not leads:
