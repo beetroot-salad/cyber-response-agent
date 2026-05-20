@@ -277,8 +277,10 @@ def lead_branch_effects(
             # Initialize a zero-bucket entry for every matching touched
             # hypothesis. Leads that forked for ?H but never resolved still
             # surface here with all-zero counts; combined with `empty_rate`
-            # they carry the "this lead failed on ?H" signal.
-            for hn in matching:
+            # they carry the "this lead failed on ?H" signal. Iterate
+            # sorted so per-lead dict insertion order is stable across
+            # PYTHONHASHSEED (matching is a set).
+            for hn in sorted(matching):
                 per_hyp.setdefault(name, {}).setdefault(hn, _empty_bucket())
 
             for r in lead.get("resolutions", []) or []:
