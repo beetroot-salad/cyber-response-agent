@@ -369,11 +369,11 @@ docker --context soc-playground exec web-1 tail -30 /var/log/nginx/access.log
 
 **Gotcha — sshpass + password auth is a playground shortcut.** Production hosts would use SSH keys from a secrets manager. We accept the password-auth shape because PR #122 already set `PasswordAuthentication yes` on the host image and the stack is behind a loopback tunnel. Attack scenarios (batch 10) can still exercise credential-abuse archetypes against this same surface — the synthetic benign side just happens to use the same auth channel.
 
-### Stub services (batch 9): CMDB, threat intel, change mgmt, ticketing
+### Stub services (batch 9): CMDB, threat intel, change mgmt, ticketing, identity
 
-Four auth-less FastAPI stubs that round out the Tier 0/1 data layer defined in `docs/playground-environment-v2.md` §Data. Each runs in its own container on the compose network, listens on 8080 internally, and is published on VPS loopback at `127.0.0.1:8001-8004` for debugging. In-cluster consumers reach them via Docker DNS: `http://cmdb:8080`, `http://threat-intel:8080`, `http://change-mgmt:8080`, `http://ticket-server:8080`.
+Five auth-less FastAPI stubs that round out the Tier 0/1 data layer defined in `docs/playground-environment-v2.md` §Data. Each runs in its own container on the compose network, listens on 8080 internally, and is published on VPS loopback at `127.0.0.1:8001-8005` for debugging. In-cluster consumers reach them via Docker DNS: `http://cmdb:8080`, `http://threat-intel:8080`, `http://change-mgmt:8080`, `http://ticket-server:8080`, `http://identity:8080`.
 
-Footprint: 4 × 256 MB ≈ 1 GB — matches the v2 design allocation for "Ticket stub, CMDB stub, proxy, TI stub".
+Footprint: 5 × 256 MB ≈ 1.25 GB — matches the v2 design allocation for "Ticket stub, CMDB stub, proxy, TI stub" plus the post-batch-9 identity stub.
 
 Shared healthcheck pattern via a `&stub-health` YAML anchor on `cmdb` (reused by the other three). Uses Python's `urllib` against `http://127.0.0.1:8080/health` — `python:3.12-slim` has no `curl` and baking one in just for liveness is wasteful (same "use what's in the image" move as Keycloak's bash+/dev/tcp probe).
 
@@ -399,6 +399,19 @@ YAML + FastAPI — the "authorized-change context" primitive from the v2 doc. Se
 - Endpoints: `GET /health`, `GET /changes[?status&host&active_at]`, `GET /changes/{id}`, `GET /changes/active?host=<h>&at=<iso>`, `POST /changes`, `POST /changes/{id}/transitions`, `POST /admin/reset`.
 - Seed windows tie to `hosts/inventory.yaml`'s `change_window` fields (e.g., `CHG-1042` covers web-1/web-2 during their Tue 02:00-04:00 UTC window). One seed CR (`CHG-1050`) intentionally spans "today" so smoke tests against `/changes/active` don't need to mint a CR.
 
+**Rolling standing CRs.** `change-mgmt/seed/standing.yaml` declares a small set of recurring change windows (`daily` and `weekly` kinds — no croniter dependency). At startup and every `STANDING_REFRESH_SECONDS` (default 300s), the app materializes occurrences covering `[now-7d, now+1d]` into STORE so `/changes/active?host=…&at=…` returns a CR whenever the current time falls inside a standing window. CR ids encode the occurrence start (`CHG-DB-BACKUP-20260520T0200Z`), so the materialization is idempotent. Today's standing set: nightly db-1 backup (covers baseline action `db-backup`) + weekly Tuesday web-tier patching window. Kept tiny on purpose — most baseline activity is *not* CR-covered, and that's realistic; the standing layer covers only the slice that legitimately has a CR backing it.
+
+**Synthetic CRs from the attack runner.** `attacks/runner.py --cr-mode {valid,stale,scope-mismatch}` POSTs a synthetic `CHG-RUNNER-…` CR before firing, exercising the agent's CR scope-check (host scope, time-window scope, identity scope) rather than just presence. The CR ends up in change-mgmt's STORE alongside the seed + standing entries. See `attacks/README.md` for the mode semantics.
+
+#### identity
+
+FastAPI over `keycloak/realm.yaml × hosts/inventory.yaml` — the realm-role × inventory-role join lifted from `hosts/base/seed-users.py:resolve_users`, but pivoted to the per-user perspective. Lets the soc-agent ask "is `dev.dana` authorized on `db-1`?" authoritatively instead of reading `/etc/passwd` on the host (which only reports what got seeded, not what the policy says).
+
+- Build context is `playground-v2/` (not `./identity`) because the image must COPY both `keycloak/realm.yaml` and `hosts/inventory.yaml` — same constraint as cmdb. The root `.dockerignore` whitelists `identity/**` alongside `cmdb/**`, `hosts/**`, and `keycloak/realm.yaml`.
+- Endpoints: `GET /health`, `GET /users[?role&enabled]`, `GET /users/{name}` (with `authorized_hosts` + `sudo_hosts` computed), `GET /users/{name}/authorized_hosts`, `GET /users/{name}/can_access?host=<h>` → `{authorized, via, role, sudo, shell}`, `GET /roles`, `POST /admin/reset`.
+- Read-only by design — no overlay/chaos endpoints yet. Defer those until a stale-IdP scenario actually needs them.
+- Cross-check at runtime: `getent passwd <user>` on a host should agree with `authorized_hosts` for that host. Any divergence is a join bug.
+
 #### ticket-server (reused from v1)
 
 Built from `../playground/ticket-server` — the existing v1 FastAPI app. Kept in place (not moved into `playground-v2/`) so v1 integrations stay working. `build:` packages the context into a tar locally before sending to the remote daemon, so the relative path resolves on the client side and works under `--context soc-playground`.
@@ -415,7 +428,9 @@ docker --context soc-playground exec web-1 bash -c '
   curl -fsS http://cmdb:8080/hosts/web-1 | jq .owner &&
   curl -fsS http://threat-intel:8080/lookup/185.220.101.45 | jq .verdict &&
   curl -fsS "http://change-mgmt:8080/changes/active?host=web-1&at=2026-04-24T12:00:00Z" | jq ".[].id" &&
-  curl -fsS http://ticket-server:8080/tickets | jq .total
+  curl -fsS http://ticket-server:8080/tickets | jq .total &&
+  curl -fsS "http://identity:8080/users/dev.dana/can_access?host=db-1" | jq . &&
+  curl -fsS "http://identity:8080/users/dev.dana/can_access?host=office-ws-1" | jq .
 '
 ```
 
