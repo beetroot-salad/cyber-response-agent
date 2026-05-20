@@ -242,9 +242,11 @@ def run_one(arm: str, case_id: str, results_dir: Path, *,
     return metrics
 
 
-def run_all(results_dir: Path, *, trials: int = 1, model: str | None = None) -> None:
+def run_all(results_dir: Path, *, trials: int = 1, model: str | None = None,
+            arms: list[str] | None = None) -> None:
     cases = load_cases()
-    for arm in cases["arms"]:
+    arms_to_run = arms if arms is not None else cases["arms"]
+    for arm in arms_to_run:
         for bucket in ("positives", "negatives"):
             for c in cases[bucket]:
                 for trial in range(1, trials + 1):
@@ -258,6 +260,7 @@ def main(argv: list[str]) -> int:
     p.add_argument("--trial", type=int, default=1, help="trial index for single-run mode (default 1)")
     p.add_argument("--trials", type=int, default=3, help="trials per (arm, case) in --all mode (default 3)")
     p.add_argument("--all", action="store_true", help="run every (arm, case, trial) sequentially")
+    p.add_argument("--arms", help="comma-separated subset for --all mode (e.g. 'b,c,d')")
     p.add_argument("--model", default=None)
     p.add_argument("--results-dir", default=None, help="override results subdir (default: results/<timestamp>)")
     ns = p.parse_args(argv)
@@ -273,7 +276,8 @@ def main(argv: list[str]) -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
 
     if ns.all:
-        run_all(results_dir, trials=ns.trials, model=ns.model)
+        arms = ns.arms.split(",") if ns.arms else None
+        run_all(results_dir, trials=ns.trials, model=ns.model, arms=arms)
     else:
         run_one(ns.arm, ns.case, results_dir, trial=ns.trial, model=ns.model)
     print(f"[advisory-ab] results in {results_dir}", file=sys.stderr)

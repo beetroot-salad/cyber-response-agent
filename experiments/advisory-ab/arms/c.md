@@ -16,17 +16,18 @@ past data for this signature — trust the response.
 Call:
 
 ```bash
-python3 -m defender.scripts.invlang.cli advisory \
-    /tmp/defender-runs \
+python3 -m defender.scripts.invlang.cli /tmp/defender-runs advisory \
     --signature wazuh-rule-NNNN \
-    --classes lead_discrimination \
-    --frontier '?hypothesis-one,?hypothesis-two' \
+    --class lead_discrimination \
+    --frontier '?hypothesis-one' \
+    --frontier '?hypothesis-two' \
     --top-k 5
 ```
 
-Pass `--signature` from `alert.rule.id` in `alert.json`. Pass
-`--frontier` as a comma-separated list of your current live `?:H`
-names. The output is a markdown block with one section ("Lead
+The CLI arg order is **corpus_root first, then `advisory`**. Pass
+`--signature` from `alert.rule.id` in `alert.json`. Each `--frontier`
+flag takes one `?hypothesis` name; repeat the flag for each live
+`:H` row. The output is a markdown block with one section ("Lead
 discrimination") summarizing how each candidate lead has historically
 shifted hypothesis weights on this signature.
 

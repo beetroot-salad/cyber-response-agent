@@ -34,18 +34,21 @@ goal: <one-sentence: what the caller wants past cases to tell them>
    `{run_dir}/investigation.md` for lines starting with `?:H` to
    extract live hypothesis names. If still empty, proceed with empty
    frontier — the CLI will fall back to top-K recurring leads.
-3. **Call the CLI:**
+3. **Call the CLI** (arg order is corpus_root first, then `advisory`):
 
    ```bash
-   python3 -m defender.scripts.invlang.cli advisory \
-       /tmp/defender-runs \
+   python3 -m defender.scripts.invlang.cli /tmp/defender-runs advisory \
        --signature <signature_id> \
-       --classes lead_discrimination \
-       --frontier '<comma-joined frontier>' \
+       --class lead_discrimination \
+       --frontier '?hypothesis-one' \
+       --frontier '?hypothesis-two' \
        --top-k 5
    ```
 
-   Pass an empty `--frontier ''` when frontier is empty.
+   `--frontier` is repeatable — one flag per hypothesis name, not
+   comma-joined. When the dispatch frontier is empty, omit the
+   `--frontier` flag entirely (the CLI will fall back to top-K
+   recurring leads).
 4. **Return the CLI stdout verbatim** as your final message. Do not
    add commentary, ranking, or recommendations. The caller decides
    how to use it.

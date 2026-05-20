@@ -5,13 +5,17 @@ At every PLAN turn **once you have authored at least one `?:H`** —
 CLI with the current frontier:
 
 ```bash
-python3 -m defender.scripts.invlang.cli advisory \
-    /tmp/defender-runs \
+python3 -m defender.scripts.invlang.cli /tmp/defender-runs advisory \
     --signature wazuh-rule-NNNN \
-    --classes lead_discrimination \
-    --frontier '?hypothesis-one,?hypothesis-two' \
+    --class lead_discrimination \
+    --frontier '?hypothesis-one' \
+    --frontier '?hypothesis-two' \
     --top-k 5
 ```
+
+CLI arg order is **corpus_root first, then `advisory`**. Each
+`--frontier` flag takes one `?hypothesis` name; repeat for each live
+`:H` row.
 
 Pass `--signature` from `alert.rule.id`. Pass `--frontier` as the
 comma-separated list of currently live `?:H` names. If you have not
