@@ -21,6 +21,10 @@ REAL_REPO = Path(__file__).resolve().parents[2]
 LEARNING_SRC = REAL_REPO / "defender" / "learning"
 
 sys.path.insert(0, str(LEARNING_SRC))
+# Allow `from defender.scripts.invlang import ...` from tests living
+# inside the defender package (the workspace root isn't on sys.path
+# by default since tests run from /workspace/defender as rootdir).
+sys.path.insert(0, str(REAL_REPO))
 
 
 @pytest.fixture
