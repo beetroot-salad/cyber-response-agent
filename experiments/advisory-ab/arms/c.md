@@ -1,13 +1,17 @@
 ## PLAN — inline advisory retrieval
 
 If you are about to author `:L` leads but are unsure which lead will
-actually discriminate between the hypotheses on the frontier — and
-this signature has past cases in the corpus — Bash the advisory CLI
-inline for a precedent read.
+actually discriminate between the hypotheses on the frontier, Bash
+the advisory CLI inline for a precedent read.
 
 When to skip: if your `:H` predictions already commit you to an
 obvious next lead, just author it. Advisory is for the cases where
 two or more hypotheses on the frontier look equally plausible.
+
+**Do not pre-check the corpus yourself** by listing run dirs, reading
+investigation.md files, or Globbing /tmp/defender-runs. The CLI does
+its own corpus scan and prints a loud-empty banner if there is no
+past data for this signature — trust the response.
 
 Call:
 

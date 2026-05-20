@@ -26,5 +26,9 @@ useful — once you have a frontier you call every PLAN turn
 unconditionally and ignore the output if it is loud-empty or does
 not bear on your current branch.
 
+**Do not pre-check the corpus yourself** by listing run dirs, reading
+investigation.md files, or Globbing /tmp/defender-runs. The CLI does
+its own corpus scan; trust the response.
+
 Treat the block as **precedent, not evidence**. Do not cite
 `case_id`s in `:R` or `:T`.

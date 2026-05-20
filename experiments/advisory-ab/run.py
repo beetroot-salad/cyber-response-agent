@@ -27,9 +27,9 @@ import sys
 import time
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-DEFENDER_DIR = HERE.parents[2]  # .../defender
-REPO_ROOT = DEFENDER_DIR.parent
+HERE = Path(__file__).resolve().parent          # .../experiments/advisory-ab
+REPO_ROOT = HERE.parents[1]                      # repo root
+DEFENDER_DIR = REPO_ROOT / "defender"
 DEFENDER_RUN_PY = DEFENDER_DIR / "run.py"
 ARMS_DIR = HERE / "arms"
 CASES_FILE = HERE / "cases.json"
