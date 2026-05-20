@@ -89,12 +89,46 @@ Maps to original §Compatibility Work items:
   loader projects it; whether it's *populated* enough for Class 14
   queries is a downstream question
 
+### Done (cont.)
+
+- **Advisory retrieval adapter** —
+  `defender/scripts/invlang/advisory.py` (placed inside the invlang
+  package, not at `defender/scripts/advisory_invlang_retrieval.py` as
+  the original task suggested — package locality wins).
+    - `advisory_recall(corpus_root, *, signature_id, frontier=(),
+      classes=VALID_CLASSES, top_k=3)` → `AdvisoryResult` with
+      `.as_markdown()` (default for prompt injection) and `.as_json()`
+      (for the harness).
+    - `@lru_cache` on the corpus load, so PLAN-time + ANALYZE-time
+      calls in the same process share one parse.
+    - Loud-empty: when `signature_id` has zero cases, markdown
+      collapses to a single banner instead of three empty sections.
+      Per-class loud-empty fires when a section yields no hits (e.g.
+      frontier doesn't match anything in the precedent — surfaces
+      as `_no leads touched frontier [...]`_ rather than rendering
+      rows with empty per-hypothesis tables).
+    - Variant mapping (load-bearing for the A/B):
+      | Variant | How `classes` + `frontier` get chosen |
+      |---|---|
+      | Floor (deterministic) | All 3 classes; frontier = current PREDICT output |
+      | Haiku NL→structured | NL intent → Haiku picks subset + frontier slice |
+      | In-defender structured | Defender main agent authors the structured call |
+      The adapter is variant-agnostic; that's the point.
+    - CLI subcommand: `python -m defender.scripts.invlang.cli <root>
+      advisory --signature SIG [--frontier ?H ...] [--class C ...]
+      [--top-k 3] [--json]`.
+- 11 adapter unit tests covering happy path, loud-empty (both
+  signature-level and section-level), top_k truncation, class
+  subsetting, output-shape stability, telemetry, empty-frontier
+  fallback.
+- Real-corpus sanity check against `/tmp/defender-runs`
+  (42 cases, 24 for wazuh-rule-5710): renders cleanly; vocab section
+  surfaces only 2 hypothesis names with n=1 each, suggesting defender
+  cases routinely don't populate `:H` rows enough for cross-case
+  vocab analysis. Not blocking — observation for the A/B oracle.
+
 ### Remaining
 
-- **Advisory retrieval adapter** — `defender/scripts/advisory_invlang_retrieval.py`.
-  Composes the three helpers above into a single compact JSON block
-  suitable for prompt injection (current prologue + intent + top-K →
-  `{class_5, class_6, class_8}` with parse telemetry + caveat).
 - **PLAN-time wiring** — inject the advisory block after ORIENT;
   mark as advisory memory; exclude from `lead_sequence.yaml`.
 - **A/B experiment** — three variants per §Subagent vs Main Agent /
