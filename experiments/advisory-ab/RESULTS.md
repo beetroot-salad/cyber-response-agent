@@ -241,6 +241,16 @@ runs the agent with broad read permissions.
 
 ## Recommendations
 
+> **Superseded — see `plan_only/RESULTS.md` (2026-05-21).** A follow-up
+> experiment ran a leaner harness that controls for long-session
+> context contamination and isolates the overlay-framing effect from
+> the advisory-call effect. Key updates: ship **D** (or C if discretion
+> matters) — not C-only; the cost reduction is **overlay framing, not
+> advisory content**; arm B's failure mode is **the dispatch never
+> happens at all**, not Haiku hallucination. Sections below preserved
+> for context; treat the recommendations as the original pilot's
+> reading, not the current call.
+
 1. **Ship arm C (Sonnet inline with discretion) as the default advisory
    wiring.** Matches accuracy, saves ~15% on cost in this fixture.
 2. **Do not ship arm B as designed.** Either replace the Haiku subagent

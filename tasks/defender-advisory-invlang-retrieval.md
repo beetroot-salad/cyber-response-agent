@@ -4,6 +4,58 @@ status: doing
 groups: defender, invlang, knowledge, retrieval
 ---
 
+## Progress (2026-05-21 — plan-only follow-up)
+
+A leaner harness ran on top of the parent A/B/C/D pilot (PR #223) to
+isolate context contamination from the substantive effect. Full
+writeup: `experiments/advisory-ab/plan_only/RESULTS.md`.
+
+### Done
+
+- **Plan-only A/B/C/D/E + bf-vs-df with fake backend.** Anchor capture
+  (arm A stops after ORIENT), replay (each arm replays from anchor
+  through PLAN only, no GATHER/REPORT). 18 runs total, ~$6.89.
+- **Hypothesis-vocabulary CLI subcommand** —
+  `defender/scripts/invlang/cli.py` § `hypothesis-vocabulary`. Returns
+  unique `?name | count | example_case_id` for one signature. Operates
+  on whatever the strict parser sees (intentional — see open items).
+
+### Headlines (superseding the parent pilot's recommendations)
+
+1. **NL translation (arm B) adds no value.** Haiku's NL→CLI produces
+   queries structurally identical to what the main agent writes
+   natively. Ship **D** (or **C** if discretion is preferred).
+2. **Most of "advisory makes runs cheaper" is overlay framing, not
+   advisory content.** Arm E (framing without the call) is cheaper
+   than C in both cases. The "two hypotheses → pick a discriminator"
+   prompt-framing is the substantive mechanism.
+3. **IAM-vs-auth-history is enrichment-vs-discrimination**, not a
+   gold violation. Both leads are valid; the question is what each
+   arm does in turn N+1 — unmeasured by the PLAN-only harness.
+4. **Advisory's thin-corpus state is by design.** Strict parser
+   stays as-is; advisory signal grows as new-schema runs accumulate.
+
+### Remaining
+
+- **Bake the discrimination framing into `defender/SKILL.md` §PLAN.**
+  One sentence in the PLAN phase guidance — what saved arm E
+  ~$0.20/run vs baseline A. Keep terse.
+- **Turn-N+1 follow-up experiment.** Run a harness that lets the
+  loop continue through GATHER → ANALYZE → PLAN-loop-2 to measure
+  whether discrimination-first arms eventually pick IAM or
+  disposition without it.
+- **Real-data BvD rerun.** Once the corpus contains enough
+  new-schema cases to give advisory non-empty responses, rerun
+  bf-vs-df with the real CLI swapped back in to confirm
+  NL-adds-no-value when responses actually vary.
+
+### Superseded items below
+
+The original "A/B/C/D experiment" in §Remaining (line 132 ff.) ran in
+PR #223 and is closed. The plan-only follow-up above refines its
+conclusions. The "N-loop subagent comparison" item below is
+superseded by the turn-N+1 follow-up above.
+
 ## Progress (2026-05-20)
 
 ### Done
