@@ -9,9 +9,15 @@ Primitive queries:
 Composed PLAN-time advisory recall:
   python -m defender.scripts.invlang.cli <corpus_root> advisory --signature SIG [--frontier ?H ...] [--class C ...] [--top-k 3] [--json]
 
+Controlled-vocabulary lookup (no corpus needed):
+  python -m defender.scripts.invlang.cli <corpus_root> enum            # list slot names
+  python -m defender.scripts.invlang.cli <corpus_root> enum <slot>      # list values for a slot (e.g. types, relations, compute.role)
+  python -m defender.scripts.invlang.cli <corpus_root> enum [<slot>] --json
+
 Primitives emit JSON; `advisory` emits rendered markdown by default with
 a `--json` toggle for the harness. `hypothesis-vocabulary` emits markdown
-by default with a `--json` toggle.
+by default with a `--json` toggle. `enum` emits plain newline-delimited
+values by default with a `--json` toggle.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from .queries import (
     lead_branch_effects,
     lead_sequence_pattern,
 )
+from . import vocab
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -66,6 +73,20 @@ def _build_parser() -> argparse.ArgumentParser:
     pv.add_argument("--json", dest="as_json", action="store_true",
                     help="Emit JSON instead of rendered markdown.")
 
+    pe = sub.add_parser(
+        "enum",
+        help="List controlled-vocabulary slots, or values for a named "
+             "slot. No corpus load. Use before authoring :V/:E/:H rows "
+             "to pick from closed catalogs.",
+    )
+    pe.add_argument(
+        "slot", nargs="?",
+        help="Slot name (e.g. types, relations, compute.role). "
+             "If omitted, lists available slot names.",
+    )
+    pe.add_argument("--json", dest="as_json", action="store_true",
+                    help="Emit JSON instead of newline-delimited values.")
+
     pa = sub.add_parser("advisory", help="Composed PLAN-time advisory recall")
     pa.add_argument("--signature", required=True)
     pa.add_argument(
@@ -86,6 +107,30 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.cmd == "enum":
+        if args.slot is None:
+            slots = vocab.list_slots()
+            if args.as_json:
+                json.dump({"slots": slots}, sys.stdout, indent=2)
+                sys.stdout.write("\n")
+            else:
+                for s in slots:
+                    print(s)
+            return 0
+        try:
+            values = vocab.get_enum(args.slot)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if args.as_json:
+            json.dump({"slot": args.slot, "values": list(values)},
+                      sys.stdout, indent=2)
+            sys.stdout.write("\n")
+        else:
+            for v in values:
+                print(v)
+        return 0
 
     if args.cmd == "advisory":
         # The adapter does its own (cached) corpus load + telemetry; skip
