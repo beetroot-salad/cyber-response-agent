@@ -1,0 +1,21 @@
+{
+  "arm": "a",
+  "case_id": "NEG-1",
+  "category": "negative",
+  "gold": "malicious",
+  "predicted_relevance": "low",
+  "trial": 2,
+  "run_dir": "/tmp/defender-runs/advisory-ab-a-neg-1-t2-20260520T211843Z",
+  "rc": 0,
+  "wall_clock_seconds": 602.3139243100013,
+  "model": "claude-sonnet-4-6",
+  "disposition_observed": "malicious",
+  "disposition_match": true,
+  "loops_count": 1,
+  "leads_count": 10,
+  "total_input_tokens": 1349,
+  "total_output_tokens": 13508,
+  "total_cost_usd": 1.5705,
+  "advisory_call_count": 0,
+  "advisory_invocation_rate": 0.0
+}

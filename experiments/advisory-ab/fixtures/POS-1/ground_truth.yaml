@@ -1,0 +1,46 @@
+# Hand-curated gold for POS-1.
+# Synthetic 5710 alert — apt-mirror from undocumented 172.22.0.42.
+case_id: POS-1
+signature_id: wazuh-rule-5710
+disposition: inconclusive  # escalate — undocumented source + unknown account
+confidence: medium
+
+predicted_relevance: high
+relevance_rationale: |
+  Two competing explanations look equally plausible from the alert content
+  alone:
+    (a) ?legacy-monitoring-misconfiguration — apt-mirror is a real Debian
+        tool; ops automation under that name plausibly exists somewhere
+        and is missing a CMDB entry. Disposition: benign-misconfigured.
+    (b) ?internal-scanner — undocumented source + uncommon-but-plausible
+        account name is consistent with adversary mimicking ops tooling.
+        Disposition: malicious.
+
+  The discriminator the corpus (/tmp/defender-runs) consistently uses is
+  the combination of three leads in parallel:
+    - cmdb-source-lookup       (is 172.22.0.42 documented?)
+    - iam-account-lookup       (is apt-mirror provisioned?)
+    - wazuh-auth-pattern       (burst-vs-periodic cadence + distinct-user-set)
+  Without the cadence check, the agent may disposition prematurely on the
+  CMDB+IAM result alone (both miss → escalate, but the cadence pattern is
+  what distinguishes (a) from (b) in the inconclusive case).
+
+  Advisory should surface `wazuh-auth-pattern` as a Class-8 high-discrimination
+  lead. Without it, the agent may skip this lead and either over-resolve to
+  benign-misconfig or under-resolve to inconclusive without enough evidence.
+
+gold_leads_minimum:
+  - cmdb-source-lookup
+  - iam-account-lookup
+gold_leads_advisory_should_add:
+  - wazuh-auth-pattern
+
+# Notes on gather behavior under live playground:
+# - CMDB lookup against /workspace/playground/cmdb/hosts.json: 172.22.0.42
+#   is not in the registry → undocumented (truthful).
+# - IAM lookup against /workspace/playground/iam/accounts.json: apt-mirror
+#   is not in the catalog → unprovisioned (truthful).
+# - Wazuh auth-events query for srcip=172.22.0.42 will return empty against
+#   the live Wazuh index because this is a synthetic source. The agent
+#   should observe "no historical pattern, single-shot probe" — which is
+#   a legitimate signal in its own right.

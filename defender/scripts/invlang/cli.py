@@ -4,12 +4,14 @@ Primitive queries:
   python -m defender.scripts.invlang.cli <corpus_root> sequence [--contains S] [--disposition D] [--signature SIG]
   python -m defender.scripts.invlang.cli <corpus_root> hypotheses <pattern> [--final-weight W] [--disposition D] [--signature SIG]
   python -m defender.scripts.invlang.cli <corpus_root> branch-effects [--hyp PATTERN ...] [--min-support N]
+  python -m defender.scripts.invlang.cli <corpus_root> hypothesis-vocabulary --signature SIG [--top-k N] [--json]
 
 Composed PLAN-time advisory recall:
   python -m defender.scripts.invlang.cli <corpus_root> advisory --signature SIG [--frontier ?H ...] [--class C ...] [--top-k 3] [--json]
 
 Primitives emit JSON; `advisory` emits rendered markdown by default with
-a `--json` toggle for the harness.
+a `--json` toggle for the harness. `hypothesis-vocabulary` emits markdown
+by default with a `--json` toggle.
 """
 
 from __future__ import annotations
@@ -49,6 +51,20 @@ def _build_parser() -> argparse.ArgumentParser:
     p8.add_argument("--hyp", action="append", default=[], help="Hypothesis fnmatch pattern (repeatable).")
     p8.add_argument("--min-support", type=int, default=1)
     p8.add_argument("--max-hypotheses-per-lead", type=int, default=5)
+
+    pv = sub.add_parser(
+        "hypothesis-vocabulary",
+        help="Unique ?hypothesis names in the corpus for one signature, "
+             "with counts + example case_ids. Use before authoring :H to "
+             "align fresh hypothesis names with corpus vocabulary so that "
+             "frontier-matched advisory recall returns precedent instead "
+             "of a loud-empty banner.",
+    )
+    pv.add_argument("--signature", required=True)
+    pv.add_argument("--top-k", type=int, default=20,
+                    help="Cap on rows shown (default 20).")
+    pv.add_argument("--json", dest="as_json", action="store_true",
+                    help="Emit JSON instead of rendered markdown.")
 
     pa = sub.add_parser("advisory", help="Composed PLAN-time advisory recall")
     pa.add_argument("--signature", required=True)
@@ -116,12 +132,82 @@ def main(argv: list[str] | None = None) -> int:
             min_support=args.min_support,
             max_hypotheses_per_lead=args.max_hypotheses_per_lead,
         )
+    elif args.cmd == "hypothesis-vocabulary":
+        out = _hypothesis_vocabulary(corpus, args.signature, args.top_k)
+        if not args.as_json:
+            sys.stdout.write(_render_vocab(out, args.signature))
+            sys.stdout.write("\n")
+            return 0
     else:
         raise AssertionError(args.cmd)
 
     json.dump(out, sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0
+
+
+def _hypothesis_vocabulary(corpus, signature_id: str, top_k: int) -> dict:
+    """Aggregate unique ?hypothesis names for one signature.
+
+    Returns {signature, n_cases, vocabulary: [{name, count, example_case_id}]}.
+    Sorted by count desc, then alphabetical.
+    """
+    from collections import Counter
+
+    counts: "Counter[str]" = Counter()
+    examples: dict[str, str] = {}
+    n_cases = 0
+    for c in corpus:
+        if signature_id and c.signature_id != signature_id:
+            continue
+        n_cases += 1
+        seen_in_case: set[str] = set()
+        for h in c.hypotheses:
+            name = (h.get("name") or "").strip()
+            if not name or name in seen_in_case:
+                continue
+            seen_in_case.add(name)
+            counts[name] += 1
+            examples.setdefault(name, c.case_id)
+        for lead in c.leads:
+            for h in lead.get("new_hypotheses", []) or []:
+                if not isinstance(h, dict):
+                    continue
+                name = (h.get("name") or "").strip()
+                if not name or name in seen_in_case:
+                    continue
+                seen_in_case.add(name)
+                counts[name] += 1
+                examples.setdefault(name, c.case_id)
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top_k]
+    return {
+        "signature": signature_id,
+        "n_cases": n_cases,
+        "vocabulary": [
+            {"name": n, "count": c, "example_case_id": examples[n]}
+            for n, c in ranked
+        ],
+    }
+
+
+def _render_vocab(out: dict, signature: str) -> str:
+    rows = out["vocabulary"]
+    header = (
+        f"## HYPOTHESIS VOCABULARY — signature {signature}\n"
+        f"Corpus: {out['n_cases']} cases for this signature\n"
+    )
+    if not rows:
+        return header + "\n_no hypotheses in corpus for this signature_\n"
+    body = ["", "| ?name | count | example case |", "|---|---:|---|"]
+    for r in rows:
+        body.append(f"| `{r['name']}` | {r['count']} | `{r['example_case_id']}` |")
+    body.append("")
+    body.append(
+        "Use these names verbatim where the semantics match. Frontier-matched "
+        "advisory recall returns precedent only when the `--frontier '?name'` "
+        "values match corpus vocabulary."
+    )
+    return header + "\n".join(body) + "\n"
 
 
 if __name__ == "__main__":

@@ -1,0 +1,21 @@
+{
+  "arm": "b",
+  "case_id": "POS-1",
+  "category": "positive",
+  "gold": "inconclusive",
+  "predicted_relevance": "high",
+  "trial": 3,
+  "run_dir": "/tmp/defender-runs/advisory-ab-b-pos-1-t3-20260521T001631Z",
+  "rc": 0,
+  "wall_clock_seconds": 542.8791404570002,
+  "model": "claude-sonnet-4-6",
+  "disposition_observed": "inconclusive",
+  "disposition_match": true,
+  "loops_count": 1,
+  "leads_count": 5,
+  "total_input_tokens": 865,
+  "total_output_tokens": 11608,
+  "total_cost_usd": 1.0824,
+  "advisory_call_count": 1,
+  "advisory_invocation_rate": 1.0
+}

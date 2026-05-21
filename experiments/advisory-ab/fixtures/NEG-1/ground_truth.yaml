@@ -1,0 +1,37 @@
+# Hand-curated gold for NEG-1.
+# Synthetic 5710 alert — exact replay of the recurring 172.22.0.10 + nagios pattern.
+case_id: NEG-1
+signature_id: wazuh-rule-5710
+disposition: malicious  # undocumented source + disauthorized account
+confidence: high
+
+predicted_relevance: low
+relevance_rationale: |
+  This alert reproduces the *most recurring* shape in the 5710 corpus —
+  srcip 172.22.0.10 (undocumented per /workspace/playground/cmdb/hosts.json:
+  the documented monitoring host is 172.22.0.20) + srcuser nagios (IAM
+  shows active:false — explicitly disauthorized legacy name).
+
+  A baseline defender agent without precedent should arrive at the right
+  two leads from first principles: any 5710 alert obviously turns on
+  source legitimacy + account provisioning. The corpus pattern matches
+  what the agent would pick anyway. Advisory's marginal value: near zero.
+
+  This is the cost-anchor case: arm D (always-fire) pays the call cost
+  on a case where the data adds no new lead suggestion. A and B/C should
+  match each other on outcome; D's cost delta is the wasted overhead.
+
+gold_leads_minimum:
+  - cmdb-source-lookup
+  - iam-account-lookup
+gold_leads_advisory_should_add: []   # no marginal lead — agent picks both already
+
+# Notes on gather behavior under live playground:
+# - CMDB lookup against /workspace/playground/cmdb/hosts.json: 172.22.0.10
+#   is not in the registry → undocumented (truthful — the documented
+#   monitoring host is 172.22.0.20).
+# - IAM lookup against /workspace/playground/iam/accounts.json: nagios has
+#   active:false → explicitly disauthorized (truthful).
+# - Wazuh auth-events query: against live index, results depend on prior
+#   runs. The disposition resolves on CMDB + IAM alone, so wazuh-empty
+#   is not blocking.

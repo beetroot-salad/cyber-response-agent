@@ -1,0 +1,30 @@
+{
+  "_comment": "Synthetic fixtures (alert.json + ground_truth.yaml) live under fixtures/<id>/. fixture_dir is resolved relative to advisory_ab/. gold is the hand-labeled disposition. predicted_relevance is our prior on whether advisory would help; we measure whether the experiment confirms it.",
+
+  "positives": [
+    {
+      "id": "POS-1",
+      "fixture_dir": "fixtures/POS-1",
+      "signature_id": "wazuh-rule-5710",
+      "gold": "inconclusive",
+      "predicted_relevance": "high",
+      "rationale": "Apt-mirror from undocumented 172.22.0.42 — two competing explanations equally plausible. Discriminator beyond CMDB+IAM is wazuh-auth-pattern (cadence); advisory should surface it."
+    }
+  ],
+
+  "negatives": [
+    {
+      "id": "NEG-1",
+      "fixture_dir": "fixtures/NEG-1",
+      "signature_id": "wazuh-rule-5710",
+      "gold": "malicious",
+      "predicted_relevance": "low",
+      "rationale": "Exact replay of the recurring 172.22.0.10 + nagios pattern — CMDB+IAM resolves cleanly on loop 1. Advisory redundant; D's cost is the measurement."
+    }
+  ],
+
+  "arms": ["a", "b", "c", "d"],
+  "corpus_root": "/tmp/defender-runs",
+  "exclude_from_corpus": [],
+  "_corpus_note": "Test alerts are synthetic (net-new entity values), so they are not in the corpus. No exclusion needed — the corpus stays intact across runs."
+}

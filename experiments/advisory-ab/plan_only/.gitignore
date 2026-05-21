@@ -1,0 +1,5 @@
+# Raw experiment artifacts — regenerate from capture.py + replay.py.
+# RESULTS.md cites these by run-dir name for traceability; the on-disk
+# JSONs and post-ORIENT anchors live locally only.
+anchors/
+results/
