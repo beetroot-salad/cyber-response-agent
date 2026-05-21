@@ -76,7 +76,7 @@ def format_case(case_id: str, arms: dict) -> str:
     # Lead-name lists per arm (so the reader can compare what was picked).
     lines.append("\n### Leads chosen\n")
     for a in arms_present:
-        names = [f"`{l['name']}`" for l in arms[a]['leads_authored']]
+        names = [f"`{lead['name']}`" for lead in arms[a]['leads_authored']]
         lines.append(f"- **arm {a}**: " + (", ".join(names) if names else "_none_"))
 
     # Advisory call detail.

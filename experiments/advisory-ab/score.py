@@ -41,8 +41,10 @@ def by_arm_cat(records: list[dict]) -> dict[tuple[str, str], list[dict]]:
 
 
 def fmt(v, n=2):
-    if v is None: return "—"
-    if isinstance(v, float): return f"{v:.{n}f}"
+    if v is None:
+        return "—"
+    if isinstance(v, float):
+        return f"{v:.{n}f}"
     return str(v)
 
 
@@ -71,7 +73,8 @@ def render_cost_table(grouped: dict) -> str:
     for arm in arms:
         for cat in cats:
             recs = grouped.get((arm, cat), [])
-            if not recs: continue
+            if not recs:
+                continue
             cost = stats.mean(r["total_cost_usd"] for r in recs)
             t_in = stats.mean(r["total_input_tokens"] for r in recs)
             t_out = stats.mean(r["total_output_tokens"] for r in recs)
@@ -95,7 +98,8 @@ def render_invocation_table(grouped: dict) -> str:
     for arm in ("b", "c"):
         for cat in ("positive", "negative"):
             recs = grouped.get((arm, cat), [])
-            if not recs: continue
+            if not recs:
+                continue
             calls = stats.mean(r["advisory_call_count"] for r in recs)
             rates = [r["advisory_invocation_rate"] for r in recs if r["advisory_invocation_rate"] is not None]
             rate = stats.mean(rates) if rates else None
@@ -122,7 +126,8 @@ def render_relevance_check(grouped: dict, records: list[dict]) -> str:
     for arm in arms:
         for cat in ("positive", "negative"):
             recs = grouped.get((arm, cat), [])
-            if not recs: continue
+            if not recs:
+                continue
             cost = stats.mean(r["total_cost_usd"] for r in recs)
             base = a_means.get(cat)
             delta = (cost - base) if base is not None else None
