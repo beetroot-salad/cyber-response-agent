@@ -12,9 +12,14 @@ Sonnet inline (discretion), Sonnet inline (always-fire).
 **Arm C (Sonnet inline with discretion) is the winning configuration.**
 Matches baseline accuracy (6/6) at ~15% lower cost (-$0.20/run on
 average). Arms B (Haiku subagent) and D (always-fire) both *hurt*
-accuracy (3/6 each) — the failure modes differ but both reduce to
-"advisory inputs perturb the agent off-baseline in directional-wrong
-ways."
+accuracy (3/6 each).
+
+Arm B's specific failure mode was directly observed in one pilot-v2
+trace (Haiku read source code and hallucinated a loud-empty banner
+without running the CLI). Whether the same mechanism drove v3 arm-B
+mismatches is **suspected but not verified** — the v3 run dirs were
+scrubbed before per-trace inspection. See §"Why arm B fails" for the
+distinction.
 
 ## Variants
 
@@ -87,7 +92,7 @@ Arm C is robust to both effects on this fixture set — the discretion
 mechanism filters out spurious dispatches that B (and necessarily D)
 include.
 
-## Why arm B fails: Haiku subagent goes off-protocol
+## Why arm B fails: at least partially Haiku going off-protocol
 
 The Haiku subagent's instructions
 (`defender/skills/advisory/SKILL.md`) say:
@@ -96,18 +101,67 @@ The Haiku subagent's instructions
 > caller's dispatch YAML into one CLI invocation, run it, and return
 > the rendered markdown block verbatim.
 
-Behavior observed in the pilot tool-traces:
-- Some trials: Haiku reads `SKILL.md`, then reads `advisory.py` source
-  code, then **fabricates a "loud-empty" response by reasoning about
-  what the CLI would return** — without ever running the Bash command.
-- Other trials: Haiku runs the CLI correctly and returns its output.
+### Directly verified (pilot v2)
 
-The hallucinated runs are accuracy disasters because the main agent
-proceeds believing it received precedent data when none was actually
-fetched. Replacing Haiku with a deterministic Python wrapper (no LLM
-in the call construction step) would eliminate this — or at minimum,
-re-prompting Haiku with explicit "do not Read any file other than the
-SKILL; only call Bash" guardrails.
+One arm-B run was inspected end-to-end via its `tool_trace.jsonl`
+before the dirs were scrubbed. The Haiku subagent's behavior in that
+run was unambiguous:
+
+1. Read `defender/skills/advisory/SKILL.md` (correct first step)
+2. Read `defender/scripts/invlang/advisory.py` source (off-protocol)
+3. Wrote a "thinking" block reasoning about what the CLI *would*
+   return given the corpus state
+4. Returned a fabricated loud-empty markdown banner
+
+The subagent never invoked `Bash`. The main agent received hallucinated
+"no past cases" output and proceeded.
+
+This was during the broken-CLI pilot v2 — but the subagent's
+hallucination is independent of the CLI bug: it had been reading
+source instead of invoking Bash all along.
+
+### Inferred but not verified (pilot v3)
+
+After fixing the CLI invocation, arm B re-ran and again landed 3/6,
+with the same directional failure pattern as arm D (POS over-commits,
+NEG under-commits). The natural assumption is that the same Haiku
+hallucination explained v3 failures. **But:**
+
+- The v3 arm-B run dirs were deleted before any of them were
+  individually inspected.
+- The surviving per-run JSON metrics (`results/*.json`) only count the
+  outer `Task` dispatch, not whether the subagent inside actually ran
+  Bash or hallucinated.
+- So the "Haiku continues to hallucinate in v3" claim is
+  **suspected, not verified**.
+
+### Alternative explanations for v3's 3/6 (if Haiku always ran the CLI)
+
+- **Dispatch framing**: in arm C the main agent owns both the call
+  and the output (Bash inline within its own reasoning chain). In arm
+  B the markdown arrives as a subagent return value — same data,
+  reframed as "what the consultant gave me." That framing shift may
+  itself push the agent toward more decisive dispositions, regardless
+  of CLI correctness.
+- **N=3 noise**: 3/6 vs 6/6 with three trials per cell is suggestive
+  but not significant.
+
+### What would resolve this
+
+A focused B-only re-run with traces preserved. Per arm-B run, count
+`Bash` calls with `invlang.cli ... advisory` *inside subagent context*
+(`parent_tool_use_id` set). If those counts are zero on mismatched
+trials, hallucination is confirmed for v3 too; if nonzero, the
+integration-framing hypothesis becomes load-bearing.
+
+### Recommendation either way
+
+Replace the Haiku subagent with a deterministic Python wrapper (no
+LLM in the call-construction step). This eliminates the hallucination
+risk if it's real, and is a strict simplification if it isn't. The
+"Haiku NL→structured" framing only earns its keep if the NL
+translation does something the agent can't do as well inline — and
+arm C empirically does it well enough.
 
 ## Invocation discipline
 
