@@ -19,6 +19,15 @@ writeup: `experiments/advisory-ab/plan_only/RESULTS.md`.
   `defender/scripts/invlang/cli.py` § `hypothesis-vocabulary`. Returns
   unique `?name | count | example_case_id` for one signature. Operates
   on whatever the strict parser sees (intentional — see open items).
+- **Arm C + discrimination framing baked into `defender/SKILL.md`
+  §PLAN.** Added a discriminator-framing paragraph (arm E delta,
+  ~$0.20/run saving) and the arm-C inline-Bash advisory call (with
+  discretion gate, "do not pre-check the corpus" guard, and
+  precedent-not-evidence handling note). Inline-Bash chosen over
+  Task→`defender/skills/advisory/` because the experiment found Task
+  dispatch reliably fails to fire on this trigger; the advisory
+  subagent stays in tree but unused from PLAN (decision on whether
+  to retire it is a separate follow-up).
 
 ### Headlines (superseding the parent pilot's recommendations)
 
@@ -37,9 +46,6 @@ writeup: `experiments/advisory-ab/plan_only/RESULTS.md`.
 
 ### Remaining
 
-- **Bake the discrimination framing into `defender/SKILL.md` §PLAN.**
-  One sentence in the PLAN phase guidance — what saved arm E
-  ~$0.20/run vs baseline A. Keep terse.
 - **Turn-N+1 follow-up experiment.** Run a harness that lets the
   loop continue through GATHER → ANALYZE → PLAN-loop-2 to measure
   whether discrimination-first arms eventually pick IAM or
@@ -48,6 +54,9 @@ writeup: `experiments/advisory-ab/plan_only/RESULTS.md`.
   new-schema cases to give advisory non-empty responses, rerun
   bf-vs-df with the real CLI swapped back in to confirm
   NL-adds-no-value when responses actually vary.
+- **Decide fate of `defender/skills/advisory/`.** Currently idle in
+  tree — keep, retire, or rewire. No urgency; revisit if a future
+  experiment wants a Task-dispatched variant.
 
 ### Superseded items below
 

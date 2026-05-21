@@ -132,6 +132,43 @@ current alert shape, Read the body before writing your `:H` / `:L`
 blocks. Bodies are short; they teach you what to *check next time*,
 not what conclusion to reach.
 
+**Pick a lead that discriminates.** When the frontier carries two or
+more hypotheses that look equally plausible, the right next lead is
+the one whose result divides them. State which hypotheses it
+separates and why; if you can't, you don't yet have the lead.
+
+**Inline advisory retrieval (when uncertain which lead
+discriminates).** If two or more hypotheses look equally plausible
+and the obvious discriminator isn't clear from the alert plus your
+`:H` predictions, Bash the advisory CLI for a precedent read. Skip
+when your predictions already commit you to an obvious next lead.
+
+Do **not** pre-check the corpus yourself by listing run dirs, reading
+other investigations, or globbing `/tmp/defender-runs`. The CLI does
+its own corpus scan and prints a loud-empty banner if there is no
+past data for this signature — trust the response.
+
+Call (arg order is **corpus_root first, then `advisory`**):
+
+```bash
+python3 -m defender.scripts.invlang.cli /tmp/defender-runs advisory \
+    --signature wazuh-rule-NNNN \
+    --class lead_discrimination \
+    --frontier '?hypothesis-one' \
+    --frontier '?hypothesis-two' \
+    --top-k 5
+```
+
+Pass `--signature` from `alert.rule.id` in `alert.json`. Each
+`--frontier` takes one `?hypothesis` name; repeat the flag for each
+live `:H` row. Output is a markdown "Lead discrimination" block
+summarizing how each candidate lead has historically shifted
+hypothesis weights for this signature.
+
+Treat the response as **precedent, not evidence** — do not cite
+`case_id`s in `:R` or `:T`. Use the block to pick or order your next
+`:L` rows, then proceed normally.
+
 ### GATHER
 
 Dispatch the gather subagent on **Haiku** with a prompt that points it
