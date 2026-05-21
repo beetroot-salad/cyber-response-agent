@@ -229,6 +229,32 @@ Adding `:V`/`:E` changes the observed graph. `:R attr_updates` records
 facts learned about existing graph objects — don't create vertices
 just for facts.
 
+Authz contract resolution:
+
+```invlang
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-002|e-001|ac1|unauthorized|approved-source-list|"172.22.0.10 absent from CMDB; documented hosts are 172.22.0.13, 172.22.0.20, 172.22.0.5"
+l-001|e-001|ac2|unauthorized|iam-policy|"nagios active:false; never provisioned in this environment"
+```
+
+When a lead resolves an authz contract declared under `:H h-NNN.authz`,
+write the outcome as a `:R authz` row — **not** as `:R attr_updates`
+keyed on the contract id. Columns:
+
+- `resolved_by` — lead id(s) that produced the outcome (comma-separated if more than one).
+- `edge` — the edge the contract attaches to (must match the declaring `ac<n>` row's `edge_ref`).
+- `fulfills` — the `ac<n>` contract id from `:H h-NNN.authz` being closed.
+- `verdict` — `authorized | unauthorized | indeterminate`.
+- `anchor_kind` — closed vocab (`enum anchor-kinds`); must match the declaring contract's `anchor_kind`.
+- `reasoning` — short citation of the supporting fact (quoted).
+
+Disposition gating: `disposition: benign` requires every authz
+contract on a surviving hypothesis to have a fulfilling `:R authz`
+row with `verdict: authorized`. `unauthorized` or `indeterminate`
+forces escalation per the contract's `on_unauth` / `on_indet`. A
+declared contract with no fulfilling row is treated as
+`indeterminate`.
+
 Belief movement:
 
 ```invlang
@@ -287,5 +313,10 @@ h-001|++
   threshold") is an assertion the platform made, not a
   graph-extending interaction. Record under `:R attr_updates` or a
   lead's `:R` resolutions.
+- **Authz outcomes are `:R authz` rows, not `:R attr_updates`.**
+  Closing a contract declared under `:H h-NNN.authz` writes one
+  `:R authz` row per contract — never `:R attr_updates` keyed on
+  `h-NNN.ac<n>`. The contract's `fulfills` column ties the resolution
+  back to the declaration; disposition gating walks that join.
 - **Keep high-cardinality details in raw gather payloads,** not in
   invlang cells.

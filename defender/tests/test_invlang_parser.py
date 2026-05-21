@@ -373,6 +373,68 @@ def test_authz_block_emits_canonical_field_names():
     assert "concerns" not in row
 
 
+_AUTHZ_R_BLOCK_SLIM = """\
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|ip-only/internal/anonymous|10.0.0.1|knowledge=partial
+v-002|compute|unknown/internal/known-corp|target-host|
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|attempted_auth|v-001|v-002|2026-05-07T00:00:00Z|siem-event:wazuh|outcome=failed
+
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?monitoring-probe|e-001|attempted_auth|compute|monitoring/internal/known-corp||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"source is documented monitoring infra"
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|approved-source-list|"source authorized to probe target"|escalate|escalate
+ac2|e-001|iam-policy|"account authorized for SSH from source"|escalate|escalate
+
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|cmdb-lookup|v-001|h-001|stub-cmdb|host-lookup|ip=10.0.0.1|n/a
+l-002|1|iam-lookup|v-001|h-001|stub-iam|account-lookup|name=probe|n/a
+
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-001|e-001|ac1|unauthorized|approved-source-list|"10.0.0.1 absent from CMDB"
+l-002|e-001|ac2|unauthorized|iam-policy|"probe account marked inactive"
+
+:T resolutions
+h-001  null → --   [l-001 r1 severe ⟂ e-001 :: ac1=unauthorized, ac2=unauthorized]
+
+:T conclude
+disposition            malicious
+matched_archetype      scan
+summary                "x"
+
+:T conclude.surviving [hyp_id|final_weight]
+```
+"""
+
+
+def test_authz_slim_column_form_round_trips():
+    """Defender's documented column subset (the form taught in
+    skills/invlang/SKILL.md) parses without warnings and both contracts
+    land as distinct authorization_resolutions rows on the right leads.
+    """
+    body, warnings = parse_dense_companion(_AUTHZ_R_BLOCK_SLIM)
+    assert warnings == []
+
+    l1 = next(f for f in body["findings"] if f["id"] == "l-001")
+    l2 = next(f for f in body["findings"] if f["id"] == "l-002")
+    rows1 = l1["outcome"]["authorization_resolutions"]
+    rows2 = l2["outcome"]["authorization_resolutions"]
+    assert len(rows1) == 1 and len(rows2) == 1
+    assert rows1[0]["fulfills_contract"] == "ac1"
+    assert rows1[0]["verdict"] == "unauthorized"
+    assert rows1[0]["anchor_kind"] == "approved-source-list"
+    assert rows1[0]["edge"] == "e-001"
+    assert rows1[0]["reasoning"] == '"10.0.0.1 absent from CMDB"'
+    assert rows2[0]["fulfills_contract"] == "ac2"
+    assert rows2[0]["verdict"] == "unauthorized"
+
+
 _MIXED_RESOLUTIONS = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]

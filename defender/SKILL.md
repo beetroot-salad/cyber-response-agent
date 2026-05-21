@@ -184,27 +184,46 @@ Treat the response as **precedent, not evidence** — do not cite
 `case_id`s in `:R` or `:T`. Use the block to pick or order your next
 `:L` rows, then proceed normally.
 
-**Hypothesis-name lookup (when topology is settled but the `?name`
-choice is open).** Frontier shapes recur across signatures — a
-service-account modifying a configuration looks the same in many
-alerts. If you've settled the `:H` topology (`parent_type`,
-`parent_class`, `rel`, `attached_to`) but aren't sure what to call the
-hypothesis, query for names used historically against the same shape:
+**Hypothesis-name lookup — call before every `:H` write.** Look up
+corpus names first; a fresh `?name` that doesn't match corpus
+vocabulary becomes a singleton, and the next case with the same shape
+gets a loud-empty banner from `advisory` instead of usable precedent.
+This is the discipline that makes cross-case retrieval pay off — fresh
+names compound the problem they were supposed to solve. Two reasons to
+call:
+
+- **(a) Survey** — when you've settled the `:H` topology
+  (`parent_type`, `parent_class`, `rel`, `attached_to`) but aren't
+  sure what `?names` the corpus has used for this kind of fork.
+- **(b) Normalize** — when you have a `?name` in mind. Check the
+  corpus for synonyms / canonical forms first; reuse the existing
+  name where the semantics match.
+
+Two verbs cover this:
 
 ```bash
+# Cross-signature, topology-scoped: names for this kind of fork, anywhere.
 python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" hypothesis-shape \
     --parent-type identity \
     --parent-class 'service-account/*' \
     --rel modified \
     --attached-to-type configuration
+
+# Signature-scoped: names this rule has historically used.
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" hypothesis-vocabulary \
+    --signature wazuh-rule-NNNN
 ```
 
-`--parent-class` accepts fnmatch globs (`bastion/*`, `*/internal/*`).
-At least one filter is required. Output is a markdown table of `?name`
-→ count, final-weight distribution, dispositions, supporting cases.
+Call both when normalizing — signature first (canonical for this
+rule), then shape (canonical for this topology). `--parent-class`
+accepts fnmatch globs (`bastion/*`, `*/internal/*`). At least one
+filter required for `hypothesis-shape`. Output is a markdown table of
+`?name` → count, final-weight distribution, dispositions, supporting
+cases.
+
 Names with a broad disposition spread (benign + malicious) are shape
-labels, not verdicts — reuse them when the semantics match; don't read
-disposition off them.
+labels, not verdicts — reuse them when the semantics match; don't
+read disposition off them.
 
 ### GATHER
 
@@ -263,13 +282,15 @@ strongly supports, `+` weakly supports, `-` weakly refutes, `--`
 strongly refutes). Then decide whether you have enough to disposition;
 if not, loop back to PLAN.
 
-If a lead resolved a legitimacy contract declared in `:H` (e.g.
-`ac1: proposed:cmdb:…`), record the resolution in `:R` as a contract
-status — `authorized | unauthorized | indeterminate` — alongside the
-prediction grading. `unauthorized` on any live-weight hypothesis's
-contract forces escalation regardless of behavioral grading; an
-`indeterminate` contract is the right trigger to loop back to PLAN
-with a follow-up lead, not to fetch inline.
+If a lead resolved a legitimacy contract declared in `:H h-NNN.authz`,
+write the outcome as a `:R authz` row — not as `:R attr_updates`. One
+row per contract closed; the `fulfills` column names the `ac<n>` from
+the declaration. Verdict ∈ `authorized | unauthorized | indeterminate`.
+`unauthorized` on any live-weight hypothesis's contract forces
+escalation regardless of behavioral grading; `indeterminate` is the
+right trigger to loop back to PLAN with a follow-up lead, not to fetch
+inline. See `defender/skills/invlang/SKILL.md` §Authz contract
+resolution for the column shape.
 
 If gather's summary feels thin, Grep `gather_raw/{position}.json`
 for the specific signal first; Read it whole only if Grep doesn't
@@ -504,9 +525,8 @@ GATHER returned:
 ANALYZE:
 
 ```invlang
-:R attr_updates [resolved_by|target|key|value]
-l-002|h-001.ac1|status|indeterminate
-l-002|h-001.ac1|rationale|"IAM lookup miss; per sparse-registry semantics, ambiguous between 'never provisioned' and 'recently rolled out, not yet in IAM' — neither IAM alone nor CMDB's account-pinned authorized_outbound resolves it"
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-002|e-001|ac1|indeterminate|iam-policy|"IAM lookup miss; per sparse-registry semantics, ambiguous between 'never provisioned' and 'recently rolled out, not yet in IAM' — neither IAM alone nor CMDB's account-pinned authorized_outbound resolves it"
 
 :T resolutions
 h-001  null → +    [l-001 p1 weak ⟂ source documented as monitoring infra; p2 unresolved without host-side evidence]
@@ -532,9 +552,8 @@ the same package + version landed on every host carrying `role:
 monitoring` in the same window.
 
 ```invlang
-:R attr_updates [resolved_by|target|key|value]
-l-003|h-001.ac1|status|authorized
-l-003|h-001.ac1|rationale|"daemon is apt-installed metrics-shipper-agent, fleet-wide on role=monitoring; IAM stale, not unauthorized. Flag to sre-iam-team for catalog update."
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-003|e-001|ac1|authorized|iam-policy|"daemon is apt-installed metrics-shipper-agent, fleet-wide on role=monitoring; IAM stale, not unauthorized. Flag to sre-iam-team for catalog update."
 
 :T resolutions
 h-001  + → ++   [l-003 p2 severe ⟂ packaged daemon, install traced to SRE config-management, fleet-wide]
