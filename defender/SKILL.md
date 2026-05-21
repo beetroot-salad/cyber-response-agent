@@ -79,6 +79,21 @@ Author this as `:V` / `:E` blocks in `investigation.md`. State the
 triage question — what behavior is being flagged and what you need to
 determine to disposition it.
 
+`:V type`, `:E rel`, and several `class` / `attrs.kind` slots draw
+from closed catalogs. When you need a value and don't already know
+it, Bash the `enum` subcommand — don't memorize the catalog:
+
+```bash
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum                # slot names
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum types          # vertex types
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum relations      # edge rels
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum compute.role   # one slot's values
+```
+
+The skill at `defender/skills/invlang/SKILL.md` documents the grammar
+(packed-triple `class` for compute/identity/application, single-token
+otherwise); the CLI returns the live enums.
+
 Leave ORIENT once you have characterized the alert: the entities
 involved, the behavior under question, and what disposition turns on.
 
@@ -144,14 +159,14 @@ and the obvious discriminator isn't clear from the alert plus your
 when your predictions already commit you to an obvious next lead.
 
 Do **not** pre-check the corpus yourself by listing run dirs, reading
-other investigations, or globbing `/tmp/defender-runs`. The CLI does
-its own corpus scan and prints a loud-empty banner if there is no
-past data for this signature — trust the response.
+other investigations, or globbing the runs base. The CLI does its own
+corpus scan and prints a loud-empty banner if there is no past data
+for this signature — trust the response.
 
 Call (arg order is **corpus_root first, then `advisory`**):
 
 ```bash
-python3 -m defender.scripts.invlang.cli /tmp/defender-runs advisory \
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" advisory \
     --signature wazuh-rule-NNNN \
     --class lead_discrimination \
     --frontier '?hypothesis-one' \
@@ -169,6 +184,28 @@ Treat the response as **precedent, not evidence** — do not cite
 `case_id`s in `:R` or `:T`. Use the block to pick or order your next
 `:L` rows, then proceed normally.
 
+**Hypothesis-name lookup (when topology is settled but the `?name`
+choice is open).** Frontier shapes recur across signatures — a
+service-account modifying a configuration looks the same in many
+alerts. If you've settled the `:H` topology (`parent_type`,
+`parent_class`, `rel`, `attached_to`) but aren't sure what to call the
+hypothesis, query for names used historically against the same shape:
+
+```bash
+python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" hypothesis-shape \
+    --parent-type identity \
+    --parent-class 'service-account/*' \
+    --rel modified \
+    --attached-to-type configuration
+```
+
+`--parent-class` accepts fnmatch globs (`bastion/*`, `*/internal/*`).
+At least one filter is required. Output is a markdown table of `?name`
+→ count, final-weight distribution, dispositions, supporting cases.
+Names with a broad disposition spread (benign + malicious) are shape
+labels, not verdicts — reuse them when the semantics match; don't read
+disposition off them.
+
 ### GATHER
 
 Dispatch the gather subagent on **Haiku** with a prompt that points it
@@ -182,7 +219,7 @@ Task(
   prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
          "## Dispatch\n"
          "```yaml\n"
-         "run_dir: /tmp/defender-runs/{run_id}\n"
+         "run_dir: {run_dir}\n"
          "position: N\n"
          "goal: <one-sentence measurement contract>\n"
          "what_to_characterize:\n"
@@ -273,7 +310,7 @@ log is the bug, not the schema.
 
 Loaded on demand:
 
-- `defender/skills/dense-language/SKILL.md` — invlang block surface;
+- `defender/skills/invlang/SKILL.md` — invlang block surface;
   load when authoring `investigation.md`.
 - `defender/skills/gather/SKILL.md` — the gather subagent reads this
   itself when dispatched; you do not need to load it.
@@ -291,7 +328,7 @@ vertices; the goal here is to carry the *shape* — what each phase
 writes, what gather returns, how the sequence projects. The block
 schemas shown use the leaner column set from the spec's reference
 example (`docs/dense-investigation-format.md`); the longer form in
-`defender/skills/dense-language/SKILL.md` is available when a case
+`defender/skills/invlang/SKILL.md` is available when a case
 needs it.
 
 ### Example A — FIM checksum change after apt upgrade
@@ -342,7 +379,7 @@ Task(model="haiku",
      prompt="Read defender/skills/gather/SKILL.md and follow it.\n\n"
             "## Dispatch\n"
             "```yaml\n"
-            "run_dir: /tmp/defender-runs/2026-05-05-A\n"
+            "run_dir: {run_dir}\n"
             "position: 0\n"
             "goal: Did the file modification at 02:14:01Z trace to a managed apt upgrade?\n"
             "what_to_characterize:\n"

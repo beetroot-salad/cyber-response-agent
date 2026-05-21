@@ -9,8 +9,11 @@ to the defender parser's canonical companion dict shape:
   did they terminate?
 - `lead_branch_effects` (Class 8)    — per-lead, per-hypothesis effect
   distribution + empty-rate; the discussion-anchor query for PLAN.
+- `hypothesis_shape_match`           — topology-shape → ?names used,
+  with weight + disposition distributions. Cross-signature: the answer
+  to "what have we called this kind of fork before?"
 
-All three operate on `list[Companion]` from `defender.scripts.invlang.corpus`
+All three operate on `list[Companion]` from `defender.skills.invlang.corpus`
 and return dicts safe to dump as JSON. Investigation-scoped ids
 (`hypothesis_id`, `lead_id`) are deliberately stripped from outputs —
 cross-case retrieval ranks on observable attributes, not record handles.
@@ -322,4 +325,124 @@ def lead_branch_effects(
         "leads": rows,
         "count": len(rows),
         "frontier": list(hypothesis_patterns) if patterns_active else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Topology-shape -> ?hypothesis-names (PLAN: "what have we called this fork?")
+# ---------------------------------------------------------------------------
+
+def hypothesis_shape_match(
+    corpus: list[Companion],
+    *,
+    parent_type: str | None = None,
+    parent_class: str | None = None,
+    rel: str | None = None,
+    attached_to_type: str | None = None,
+) -> dict[str, Any]:
+    """Group ?hypothesis-names by topology shape across the corpus.
+
+    Filters (all optional, AND-ed):
+      - `parent_type`        exact match on :H parent_type (closed vocab).
+      - `parent_class`       fnmatch pattern on :H parent_class
+                             (`bastion/*`, `*/internal/*`, exact string).
+      - `rel`                exact match on the proposed-edge relation.
+      - `attached_to_type`   exact match on the type of the vertex named
+                             by the hypothesis's `attached_to` field
+                             (resolved through the case's prologue).
+
+    At least one filter is required — a wide-open query returns the whole
+    catalog with no actionable signal. Cross-signature by design: same
+    topology shape recurs across signatures, and the caller is asking
+    "what have we called this kind of fork before?", not "what did we
+    call it for this rule?".
+
+    For each matching ?name, emit per-occurrence aggregates: total `n`,
+    final-weight histogram (using the last assessment seen in any lead's
+    resolutions, or the initial weight if never assessed), disposition
+    histogram, and supporting `case_ids`. Investigation-scoped ids
+    (`hypothesis_id`) are intentionally omitted.
+    """
+    if not (parent_type or parent_class or rel or attached_to_type):
+        raise ValueError(
+            "at least one of parent_type, parent_class, rel, "
+            "attached_to_type required"
+        )
+
+    agg: dict[str, dict[str, Any]] = {}
+
+    for c in corpus:
+        # vertex id -> type for attached_to_type resolution
+        v_type: dict[str, str] = {}
+        for v in c.prologue.get("vertices", []) or []:
+            if isinstance(v, dict) and v.get("id"):
+                v_type[v["id"]] = v.get("type", "")
+
+        # Final weight per hypothesis id (mirror hypothesis_name_wildcard).
+        final: dict[str, Any] = {
+            h["id"]: h.get("weight") for h in _all_hypotheses(c) if "id" in h
+        }
+        for lead in c.leads:
+            for r in lead.get("resolutions", []) or []:
+                h_id = r.get("hypothesis")
+                if h_id:
+                    final[h_id] = r.get("after")
+
+        for h in _all_hypotheses(c):
+            pe = h.get("proposed_edge") or {}
+            pv = pe.get("parent_vertex") or {}
+
+            h_parent_type = pv.get("type", "")
+            h_parent_class = pv.get("classification", "")
+            h_rel = pe.get("relation", "")
+            h_attached_to_type = v_type.get(h.get("attached_to_vertex", ""), "")
+
+            if parent_type and h_parent_type != parent_type:
+                continue
+            if parent_class and not fnmatch.fnmatchcase(
+                h_parent_class, parent_class
+            ):
+                continue
+            if rel and h_rel != rel:
+                continue
+            if attached_to_type and h_attached_to_type != attached_to_type:
+                continue
+
+            name = _hypothesis_name(h)
+            if not name:
+                continue
+
+            entry = agg.setdefault(name, {
+                "n": 0,
+                "weights": {**{b: 0 for b in _WEIGHT_BUCKETS}, "null": 0},
+                "dispositions": {},
+                "cases": set(),
+            })
+            entry["n"] += 1
+            w = final.get(h.get("id"))
+            bucket = w if w in _WEIGHT_BUCKETS else "null"
+            entry["weights"][bucket] += 1
+            disp = c.conclude.get("disposition") or "unknown"
+            entry["dispositions"][disp] = entry["dispositions"].get(disp, 0) + 1
+            entry["cases"].add(c.case_id)
+
+    hits: list[dict[str, Any]] = []
+    for name, data in sorted(agg.items(), key=lambda kv: (-kv[1]["n"], kv[0])):
+        hits.append({
+            "name": name,
+            "n": data["n"],
+            "final_weight_distribution": data["weights"],
+            "dispositions": dict(sorted(data["dispositions"].items())),
+            "cases": sorted(data["cases"]),
+        })
+
+    return {
+        "hits": hits,
+        "count": len(hits),
+        "shape": {
+            "parent_type": parent_type,
+            "parent_class": parent_class,
+            "rel": rel,
+            "attached_to_type": attached_to_type,
+        },
     }

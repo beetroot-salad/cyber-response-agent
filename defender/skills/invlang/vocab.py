@@ -1,10 +1,11 @@
 """Single-source-of-truth for defender invlang controlled vocabularies.
 
-These enums back the closed catalogs declared in
-`defender/skills/dense-language/SKILL.md`. The CLI's `enum` subcommand
-reads from here, and a future validator will import from the same
-module — keeping the human-facing spec and the machine-enforced
-catalog from drifting.
+These enums are the single source of truth for defender invlang
+controlled vocabularies. The CLI's `enum` subcommand reads from here;
+`defender/skills/invlang/SKILL.md` documents the grammar and points
+authors at the CLI for value lookups rather than repeating the lists
+in prose. A future validator imports the same module — one place to
+edit, one place to break.
 
 Slot naming uses dot-separated namespacing:
     types                          — vertex types

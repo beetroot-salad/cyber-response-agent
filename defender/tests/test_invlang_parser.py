@@ -11,7 +11,7 @@ Covers:
 
 from __future__ import annotations
 
-from defender.scripts.invlang.parser import (
+from defender.skills.invlang.parser import (
     RowError,
     _resolution_record,
     _split_cells,
@@ -460,7 +460,7 @@ def test_subblock_with_unknown_parent_logs_warning():
 
 
 def test_load_report_separates_skipped_files_from_partial_loads(tmp_path):
-    from defender.scripts.invlang.corpus import load_corpus
+    from defender.skills.invlang.corpus import load_corpus
 
     case_a = tmp_path / "case-a"
     case_a.mkdir()

@@ -1,6 +1,6 @@
 """Strict ```invlang parser aligned with the current defender schema.
 
-Source of truth: `defender/skills/dense-language/SKILL.md`.
+Source of truth: `defender/skills/invlang/SKILL.md`.
 
 Schema highlights
 -----------------

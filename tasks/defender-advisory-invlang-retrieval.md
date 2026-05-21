@@ -46,6 +46,73 @@ writeup: `experiments/advisory-ab/plan_only/RESULTS.md`.
 
 ### Remaining
 
+- **Retrieval verbs are deferred behind two prerequisites.**
+  Started drafting a structural-slicing design (multi-verb advisory
+  CLI keyed on `:H parent_class`, prologue chain shape, etc., auto-
+  reading from `investigation.md`). Measurement against the rule-5710
+  corpus (n=29) killed it: the design optimizes a lookup over a
+  vocabulary that doesn't exist yet.
+
+  **What the measurement said:**
+
+  - **Chain shape ≈ signature.** All 29 cases share
+    `attempted_auth (endpoint:ipv4 → endpoint:linux, siem-event)` at
+    the edge level. The only varying axis at the prologue level is
+    `identity:*` classification, with 4 conceptual buckets but 6
+    string variants (`identity:account` n=12, `identity:service`
+    n=10, then `:unix` / `:ghost` / `:local-user` / `:user`
+    n=1-2 — clear drift, no controlled vocab).
+  - **`:H parent_class` is mostly inaccessible.** 23/29 cases (79%)
+    have their `:H` rows rejected by the strict parser — they were
+    authored under the old 6-col schema. Of the 6 parseable cases,
+    12 `:H` rows carry **10 distinct `parent_class` strings**.
+    Only `monitoring-infrastructure` reaches n≥3; near-synonyms
+    (`monitoring-agent`, `known-monitoring-source`) sit at n=1
+    unmerged. Effectively one unique value per row.
+  - **Hypothesis name vocab same shape.** 10 distinct names across
+    12 rows, no cluster reaches n≥3. The PR #224 smoke run's
+    loud-empty (zero hits across 27 rule-5710 cases for
+    `?misconfigured-service-probe` + `?adversary-controlled-
+    internal-host`) is the predictable consequence.
+
+  **Real blockers (must land before any retrieval verb is worth
+  building):**
+
+  - **P1 — Controlled-vocab catalogs.** Define enums for
+    `:V classification` (with controlled `identity:*` subtypes),
+    `:E relation`, and `:H parent_class` (and probably more) in
+    `defender/skills/dense-language/SKILL.md`. Parser/validator
+    rejects out-of-vocab values at write time. Tracked as
+    [tasks/defender-controlled-vocab-catalog.md](defender-controlled-vocab-catalog.md).
+  - **P2 — Migrate historical `:H` rows.** 23/29 of the rule-5710
+    corpus is invisible to retrieval. Either backfill the old 6-col
+    rows to the new 9-col schema (one-shot script over
+    `/tmp/defender-runs/*/investigation.md`) or relax the parser to
+    accept both shapes during the migration window. Without this,
+    advisory returns loud-empty regardless of verb cleverness.
+
+  **Revisit retrieval verbs when:**
+
+  - P1 + P2 are done, and
+  - cases-per-signature with parseable `:H` rows crosses ~50.
+
+  The verb design itself (one verb per dimension, auto-read from
+  `investigation.md`, leads-tried explicitly **not** in the search
+  key) is probably still right at that point — but it should be
+  built against a stabilized corpus, not designed against the
+  current drift.
+
+  **Lesson retrieval is the same problem.** Lessons authored from
+  heterogeneous investigations inherit heterogeneous vocab. P1
+  unblocks lesson retrieval the same way it unblocks advisory.
+  No separate authoring-side change needed beyond P1.
+
+  **Side note:** the guard text on PR #224 §PLAN ("do not pre-check
+  the corpus... globbing `/tmp/defender-runs`") is slightly
+  miscalibrated — arm-A NEG-1 wandered into the worktree's
+  `experiments/advisory-ab/` anchors, not `/tmp/defender-runs/`.
+  Generalize wording in a small follow-up after PR #224 lands.
+
 - **Turn-N+1 follow-up experiment.** Run a harness that lets the
   loop continue through GATHER → ANALYZE → PLAN-loop-2 to measure
   whether discrimination-first arms eventually pick IAM or
@@ -55,8 +122,9 @@ writeup: `experiments/advisory-ab/plan_only/RESULTS.md`.
   bf-vs-df with the real CLI swapped back in to confirm
   NL-adds-no-value when responses actually vary.
 - **Decide fate of `defender/skills/advisory/`.** Currently idle in
-  tree — keep, retire, or rewire. No urgency; revisit if a future
-  experiment wants a Task-dispatched variant.
+  tree — keep, retire, or rewire. Likely answer falls out of the
+  structural-verbs work above: if the verbs become the canonical
+  surface, the subagent wrapper either adopts them or retires.
 
 ### Superseded items below
 

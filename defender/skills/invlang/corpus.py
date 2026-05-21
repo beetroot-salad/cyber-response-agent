@@ -159,7 +159,7 @@ def _main(argv: list[str]) -> int:
     )
     if not root:
         print(
-            "usage: python -m defender.scripts.invlang.corpus <corpus-root> [--verbose]",
+            "usage: python -m defender.skills.invlang.corpus <corpus-root> [--verbose]",
             file=sys.stderr,
         )
         return 2
