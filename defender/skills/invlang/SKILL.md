@@ -79,59 +79,6 @@ When the observation is just an IP with no role/zone context, use
 still carry signal (where in the topology the IP appears; how known
 it is).
 
-Slots that aren't yet settled mark themselves as **open** with `??`,
-or upgrade to **enumerated candidates** with `{a, b, c}`. See
-§Open questions below.
-
-## Open questions
-
-When the alert leaves a vertex partially classified, mark the open
-slots inline rather than guessing or authoring a hypothesis row whose
-lead choice is mechanical.
-
-- **`??`** — open class slot or attribute value. Marks "we don't know
-  yet, and it gates disposition." Use it on the whole triple
-  (`endpoint:??/??/??`), a single slot
-  (`endpoint:monitoring-agent/??/known-corp`), or an attribute value
-  (`attrs.signing=??`).
-- **`{a, b, c}`** — enumerated candidate set. Optional upgrade from
-  `??`. Primary form is full-triple enumeration
-  (`endpoint:{monitoring-agent/internal/known-corp,
-  ip-only/internet/novel}`) because per-slot enumeration on multiple
-  axes produces Cartesian-product nonsense. Per-slot enumeration is
-  fine when only one axis is open.
-- **Resolution.** A lead closes the slot by writing a `:R attr_updates`
-  row with `key=class` (for class refinements) or `key=attrs.<name>`
-  (for attribute refinements) and the concrete value. Three-state
-  progression: `??` → `{a, b, c}` → concrete value.
-
-**Worked example.** A rule-5710 failed-auth alert names a source IP
-with no role/zone context. The defender doesn't yet know whether
-v-001 is a monitoring agent, an unknown internet probe, or a
-compromised pivot — but the discriminating lead is the same in every
-case: ask CMDB whether the IP is documented, then check egress policy
-and behavior. The lead is mechanical, so framing this as competing
-hypotheses earns nothing. Mark the slot open and let the lead close it:
-
-```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|endpoint:??/??/??|10.42.7.183|knowledge=partial
-
-:L findings [id|loop|name|target|tests|system|template|query|window]
-l-001|1|cmdb-lookup|v-001||stub-cmdb|host-lookup|ip=10.42.7.183|n/a
-
-:R attr_updates [resolved_by|target|key|value]
-l-001|v-001|class|monitoring-agent/internal/known-corp
-```
-
-Reserve `:H` (see §Discovery hypotheses) for cases where the
-how-to-answer is genuinely non-obvious — multiple competing upstreams
-where the lead choice itself depends on which story you're testing.
-
-**Disposition gate.** An unresolved `??` on any vertex blocks
-`disposition: benign`. Resolve via `:R attr_updates` before
-concluding, or escalate.
-
 ### Process — baseline schema
 
 `process` vertices have a locked baseline. Fill when known:
@@ -150,6 +97,261 @@ concluding, or escalate.
 
 Parent is recorded via the `spawned` edge from parent to child, not as
 a process attribute.
+
+Slots that aren't yet settled mark themselves as **open** with `??`,
+or upgrade to **enumerated candidates** with `{a, b, c}`. See
+§Open questions below.
+
+## Open questions
+
+When the alert leaves a vertex partially classified, mark the open
+slots inline rather than guessing or authoring a hypothesis row whose
+lead choice is mechanical.
+
+- **`??`** — open class slot or attribute value. Marks "we don't know
+  yet, and it gates disposition." Use it on the whole triple
+  (`class=??/??/??` for a `compute` vertex), a single slot
+  (`class=monitoring-agent/??/known-corp`), or an attribute value
+  (`attrs.signing=??`). The `class` cell carries the slash-tuple
+  only — no type prefix.
+- **`{a, b, c}`** — enumerated candidate set. Optional upgrade from
+  `??`. Primary form is full-triple enumeration
+  (`class={monitoring-agent/internal/known-corp,
+  ip-only/internet/novel}`) because per-slot enumeration on multiple
+  axes produces Cartesian-product nonsense. Per-slot enumeration is
+  fine when only one axis is open.
+- **Resolution.** A lead closes the slot by writing a `:R attr_updates`
+  row with `key=class` (for class refinements) or `key=attrs.<name>`
+  (for attribute refinements) and the concrete value. Three-state
+  progression: `??` → `{a, b, c}` → concrete value.
+
+**Worked example.** A rule-5710 failed-auth alert names a source IP
+with no role/zone context. The defender doesn't yet know whether
+v-001 is a monitoring agent, an unknown internet probe, or a
+compromised pivot — but the discriminating lead is the same in every
+case: ask CMDB whether the IP is documented, then check egress policy
+and behavior. The lead is mechanical, so framing this as competing
+hypotheses earns nothing. Mark the slot open and let the lead close it:
+
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|??/??/??|10.42.7.183|knowledge=partial
+
+:L findings [id|loop|name|target|tests|system|template|query|window]
+l-001|1|cmdb-lookup|v-001||stub-cmdb|host-lookup|ip=10.42.7.183|n/a
+
+:R attr_updates [resolved_by|target|key|value]
+l-001|v-001|class|monitoring-agent/internal/known-corp
+```
+
+Reserve `:H` (see §Discovery hypotheses) for cases where the
+how-to-answer is genuinely non-obvious — multiple competing upstreams
+where the lead choice itself depends on which story you're testing.
+
+**Disposition gate.** An unresolved `??` on any vertex blocks
+`disposition: benign`. Resolve via `:R attr_updates` before
+concluding, or escalate.
+
+## Core blocks
+
+`:V` vertices:
+
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical;os=linux
+v-002|identity|user/known-corp|jsmith|
+v-003|compute|ip-only/internet/anonymous|10.42.7.183|kind=physical;knowledge=partial
+```
+
+`:E` edges:
+
+```invlang
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|attempted_auth|v-003|v-001|2026-05-05T03:47:12Z|siem-event:wazuh|outcome=failed
+```
+
+State edges (`runs_on`, `member_of`, `authenticated_as`, `contained_in`)
+have no meaningful `when` — leave it empty. Event interactions
+(`read`, `wrote`, `created`, `deleted`, `attempted_auth`,
+`assumed_role`, `granted_consent`) take a timestamp.
+
+`auth_kind:source` is observational authority. Read it as
+`obs_kind:source`. Only `siem-event`, `runtime-audit`, and
+`authoritative-source` support `++`/`--` resolutions; `client-asserted`
+and `inferred-structural` are weaker and do not.
+
+### Quoting cell values with `|`
+
+Cell values that include a literal `|` must be double-quoted; the row
+tokenizer doesn't split on `|` inside a quoted span:
+
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-002|process|bash|bash[pid=42]|cmdline="bash -c whoami";flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root
+```
+
+For high-cardinality multi-value fields, push them to the raw gather
+payload rather than packing into `attrs?`.
+
+### `:L` leads
+
+```invlang
+:L findings [id|loop|name|target|mode?|tests|system|template|query|window]
+l-001|1|auth-history-jsmith-bastion|v-001||h-001,h-002|wazuh|auth-history|user=jsmith host=bastion-01|90d
+```
+
+A lead is a procedure: what was run, against what target, for which
+commitments. Route plans go in `:L l-001.lead_preds` — routing rules,
+not world-state predictions.
+
+### `:R` observations and learned facts
+
+```invlang
+:E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-002|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success;user=jsmith;count=142
+
+:R attr_updates [resolved_by|target|key|value]
+l-001|v-003|class|bastion/internal/known-corp
+```
+
+Adding `:V`/`:E` changes the observed graph. `:R attr_updates` records
+facts learned about existing graph objects — don't create vertices
+just for facts. This is also the surface for closing `??` slots
+(`key=class` for class refinements; `key=attrs.<name>` for attribute
+refinements) — see §Open questions.
+
+### `:R authz` (authz contract resolution)
+
+```invlang
+:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
+l-002|e-001|ac1|unauthorized|approved-source-list|"172.22.0.10 absent from CMDB; documented hosts are 172.22.0.13, 172.22.0.20, 172.22.0.5"
+l-001|e-001|ac2|unauthorized|iam-policy|"nagios active:false; never provisioned in this environment"
+```
+
+When a lead resolves an authz contract declared under `:H h-NNN.authz`,
+write the outcome as a `:R authz` row — **not** as `:R attr_updates`
+keyed on the contract id. Columns:
+
+- `resolved_by` — lead id(s) that produced the outcome (comma-separated if more than one).
+- `edge` — the edge the contract attaches to (must match the declaring `ac<n>` row's `edge_ref`).
+- `fulfills` — the `ac<n>` contract id from `:H h-NNN.authz` being closed.
+- `verdict` — `authorized | unauthorized | indeterminate`.
+- `anchor_kind` — closed vocab (`enum anchor-kinds`); must match the declaring contract's `anchor_kind`.
+- `reasoning` — short citation of the supporting fact (quoted).
+
+Disposition gating: `disposition: benign` requires every authz
+contract on a surviving hypothesis to have a fulfilling `:R authz`
+row with `verdict: authorized`. `unauthorized` or `indeterminate`
+forces escalation per the contract's `on_unauth` / `on_indet`. A
+declared contract with no fulfilling row is treated as
+`indeterminate`.
+
+### `:T resolutions` (belief movement)
+
+```invlang
+:T resolutions
+h-001  null → ++    [l-001 p1,p2 severe ⟂ e-002 :: prior successful bastion auth and timing match]
+h-002  null → --    [l-001 r1 severe ⟂ e-002 :: normal source history refutes novelty]
+```
+
+`:T resolutions` says how a lead changed a commitment's weight. Cite
+prediction/refutation IDs and supporting edges.
+
+### `:T conclude` (REPORT)
+
+```invlang
+:T conclude
+termination.category   adversarial-refuted
+disposition            benign
+impact_verdict         none
+confidence             high
+matched_archetype      routine-admin-login
+summary                "Login matched established bastion usage"
+
+:T conclude.surviving [hyp_id|final_weight]
+h-001|++
+```
+
+## Discovery hypotheses
+
+`:H` proposes a new parent vertex plus an edge anchoring it to an
+existing `v-*` vertex. Use it when the alert points at an interaction
+whose upstream cause is genuinely non-obvious — competing candidate
+upstream stories that imply *different next leads*. (For "what kind of
+entity is v-N?" with a mechanical discriminator, use `??` notation on
+the prologue entry — see §Open questions.)
+
+The `attached_to` cell is the **anchor**: the `v-*` vertex the
+proposed parent attaches to. Edge ids (`e-*`) are rejected at parse
+time. For an interaction alert (`attempted_auth`, `queried_dns`,
+`read`, …) the natural anchor is *the source vertex of the
+interaction* — the entity the proposed upstream parent operates on or
+through. Read it as: "what's upstream of v-N?", not "what produced
+edge e-N?".
+
+**Worked example: process-discovery behind a DNS interaction.** A DNS
+alert names host `target-endpoint` (v-001) querying a domain
+(v-002). The alert lights up a single edge — but the discovery
+question isn't about the edge, it's about *what process on v-001
+issued the query*. The answer space forks meaningfully:
+
+- **Tracking-SDK story.** An analytics SDK uses DNS for telemetry.
+  Implies leads: package manifest scan, SDK signature lookup.
+- **Beacon-implant story.** A DGA implant beacons via DNS A-records.
+  Implies leads: full process tree + signature checking, sandbox
+  detonation, egress audit.
+
+Different stories, different leads — genuine `:H` territory. Anchor
+on **v-001 (the host the process runs on)**, propose competing
+`process` parents via `runs_on`:
+
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|server/internal/known-corp|target-endpoint|os=linux
+v-002|socket|dns-name|beacon.example.com|protocol=dns;queried_subdomain=2obsn5wmcw6lyp
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|connected_to|v-001|v-002|2026-04-18T08:04:42Z|siem-event:wazuh|subdomain=2obsn5wmcw6lyp;query_type=A
+
+:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?tracking-sdk-process|v-001|runs_on|process|unclassified-process||null|active
+h-002|?adversary-implant|v-001|runs_on|process|unclassified-process||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_parent|"subdomain is a stable device fingerprint, reused across all queries to this domain"
+p2|proposed_parent|"queries are paced to an SDK heartbeat (session start / N-minute interval)"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_parent|"subdomain rotates per query — DGA pattern, not a stable identifier"
+p2|proposed_parent|"queries cluster in rapid-fire bursts (multiple distinct subdomains within seconds) — the beacon-loop signature"
+```
+
+Both rows anchor on `v-001` (a vertex), not `e-001` (the edge). The
+discovery question is "what process upstream of v-001" — the host
+is where the upstream process lives. `parent_class` is
+`unclassified-process` because the basename isn't known yet; the
+hypotheses fork on the *named story* (the `?name`) and its
+predictions, not on `parent_class`. (If predictions could be expressed
+as `parent_class` alternatives that fit the closed catalog, prefer
+that; otherwise carry the discriminator in the `?name` + predictions.)
+
+Keep commitments lean: one proposed upstream vertex plus one edge.
+1–2 predictions per hypothesis. `refutes` is a comma-separated list of
+prediction ids the refutation would overturn.
+
+### Authz contracts
+
+Authz contracts live in `:H h-NNN.authz`:
+
+```invlang
+:H h-NNN.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|proposed|iam-policy|"service account allowed to read object at event time"|escalate|escalate
+```
+
+Authz checks ask whether an interaction edge is permitted; impact
+checks whether the edge's effect crosses a threshold. Integrity is
+source-side graph work — follow session/identity/process/compute
+provenance rather than widening the authz predicate.
 
 ## Sibling-fork uniqueness
 
@@ -186,169 +388,6 @@ ac2|e-002|change-mgmt|"approved change ticket exists for this GPO edit at this t
 
 One hypothesis names the observed topology. Two authz contracts encode
 the legitimacy question. Resolution drives disposition.
-
-## Core blocks
-
-`:V` vertices:
-
-```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical;os=linux
-v-002|identity|user/known-corp|jsmith|
-v-003|compute|ip-only/internet/anonymous|10.42.7.183|kind=physical;knowledge=partial
-```
-
-`:E` edges:
-
-```invlang
-:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|attempted_auth|v-003|v-001|2026-05-05T03:47:12Z|siem-event:wazuh|outcome=failed
-```
-
-State edges (`runs_on`, `member_of`, `authenticated_as`, `contained_in`)
-have no meaningful `when` — leave it empty. Event interactions
-(`read`, `wrote`, `created`, `deleted`, `attempted_auth`,
-`assumed_role`, `granted_consent`) take a timestamp.
-
-`auth_kind:source` is observational authority. Read it as
-`obs_kind:source`. Only `siem-event`, `runtime-audit`, and
-`authoritative-source` support `++`/`--` resolutions; `client-asserted`
-and `inferred-structural` are weaker and do not.
-
-### Discovery hypotheses
-
-`:H` proposes a new parent vertex plus an edge anchoring it to a
-known v-* vertex. Use it when the alert points at an interaction or
-state whose upstream cause is genuinely non-obvious — multiple
-candidate stories that imply different next leads. (For
-"what kind of entity is v-N?" with a mechanical lead, use `??`
-notation on the prologue entry — see §Open questions.)
-
-The `attached_to` cell is the **anchor**: the existing `v-*` vertex
-the proposed parent attaches to. Edge ids (`e-*`) are rejected at
-parse time. Thin header plus namespaced sub-blocks (`{id}.preds`,
-`{id}.refuts`, `{id}.authz`):
-
-```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-001|?routine-admin-source|v-001|attempted_auth|compute|bastion/internal/known-corp||null|active
-h-002|?novel-adversary-source|v-001|attempted_auth|compute|ip-only/internet/novel||null|active
-
-:H h-001.preds [id|subject|claim]
-p1|proposed_parent|"source has prior successful bastion auth"
-p2|proposed_edge|"auth timing matches prior admin pattern"
-
-:H h-001.refuts [id|refutes|claim]
-r1|p1|"source has no prior successful bastion auth"
-```
-
-Keep commitments lean: one proposed upstream vertex plus one edge.
-1–2 predictions. `refutes` is a comma-separated list of prediction ids
-the refutation would overturn.
-
-Authz contracts live in `:H h-NNN.authz`:
-
-```invlang
-:H h-NNN.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
-ac1|proposed|iam-policy|"service account allowed to read object at event time"|escalate|escalate
-```
-
-Authz checks ask whether an interaction edge is permitted; impact
-checks whether the edge's effect crosses a threshold. Integrity is
-source-side graph work — follow session/identity/process/compute
-provenance rather than widening the authz predicate.
-
-### Quoting cell values with `|`
-
-Cell values that include a literal `|` must be double-quoted; the row
-tokenizer doesn't split on `|` inside a quoted span:
-
-```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-002|process|bash|bash[pid=42]|cmdline="bash -c whoami";flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root
-```
-
-For high-cardinality multi-value fields, push them to the raw gather
-payload rather than packing into `attrs?`.
-
-`:L` leads:
-
-```invlang
-:L findings [id|loop|name|target|mode?|tests|system|template|query|window]
-l-001|1|auth-history-jsmith-bastion|v-001||h-001,h-002|wazuh|auth-history|user=jsmith host=bastion-01|90d
-```
-
-A lead is a procedure: what was run, against what target, for which
-commitments. Route plans go in `:L l-001.lead_preds` — routing rules,
-not world-state predictions.
-
-Observations and learned facts:
-
-```invlang
-:E l-001.observations.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-002|attempted_auth|v-003|v-001|2026-05-01T10:11:00Z|siem-event:wazuh|outcome=success;user=jsmith;count=142
-
-:R attr_updates [resolved_by|target|key|value]
-l-001|v-003|class|bastion/internal/known-corp
-```
-
-Adding `:V`/`:E` changes the observed graph. `:R attr_updates` records
-facts learned about existing graph objects — don't create vertices
-just for facts. This is also the surface for closing `??` slots
-(`key=class` for class refinements; `key=attrs.<name>` for attribute
-refinements) — see §Open questions.
-
-Authz contract resolution:
-
-```invlang
-:R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]
-l-002|e-001|ac1|unauthorized|approved-source-list|"172.22.0.10 absent from CMDB; documented hosts are 172.22.0.13, 172.22.0.20, 172.22.0.5"
-l-001|e-001|ac2|unauthorized|iam-policy|"nagios active:false; never provisioned in this environment"
-```
-
-When a lead resolves an authz contract declared under `:H h-NNN.authz`,
-write the outcome as a `:R authz` row — **not** as `:R attr_updates`
-keyed on the contract id. Columns:
-
-- `resolved_by` — lead id(s) that produced the outcome (comma-separated if more than one).
-- `edge` — the edge the contract attaches to (must match the declaring `ac<n>` row's `edge_ref`).
-- `fulfills` — the `ac<n>` contract id from `:H h-NNN.authz` being closed.
-- `verdict` — `authorized | unauthorized | indeterminate`.
-- `anchor_kind` — closed vocab (`enum anchor-kinds`); must match the declaring contract's `anchor_kind`.
-- `reasoning` — short citation of the supporting fact (quoted).
-
-Disposition gating: `disposition: benign` requires every authz
-contract on a surviving hypothesis to have a fulfilling `:R authz`
-row with `verdict: authorized`. `unauthorized` or `indeterminate`
-forces escalation per the contract's `on_unauth` / `on_indet`. A
-declared contract with no fulfilling row is treated as
-`indeterminate`.
-
-Belief movement:
-
-```invlang
-:T resolutions
-h-001  null → ++    [l-001 p1,p2 severe ⟂ e-002 :: prior successful bastion auth and timing match]
-h-002  null → --    [l-001 r1 severe ⟂ e-002 :: normal source history refutes novelty]
-```
-
-`:T resolutions` says how a lead changed a commitment's weight. Cite
-prediction/refutation IDs and supporting edges.
-
-REPORT:
-
-```invlang
-:T conclude
-termination.category   adversarial-refuted
-disposition            benign
-impact_verdict         none
-confidence             high
-matched_archetype      routine-admin-login
-summary                "Login matched established bastion usage"
-
-:T conclude.surviving [hyp_id|final_weight]
-h-001|++
-```
 
 ## Authoring discipline
 
